@@ -1,0 +1,91 @@
+# ECS Kernel Guidance
+
+This document is the ECS-specific engineering guide for `Kernels/ECS`.
+
+It is derived from the old `_OLD/AGENTS.md`, but adapted for this new kernel port.
+
+## Mission
+
+Build an engine-agnostic ECS kernel that is:
+
+- correct,
+- explicit,
+- testable,
+- portable,
+- scalable where it matters.
+
+## Priority Order
+
+Do not violate this order without a clear reason:
+
+1. Correctness
+2. Security and safety
+3. Simplicity
+4. Maintainability
+5. Performance
+
+Performance matters in the ECS, but only after correctness and clarity are secure.
+
+## Kernel Rules
+
+- Keep the kernel engine-agnostic.
+- Do not couple ECS core to UI, Godot nodes, file formats, or transport details.
+- Do not use process-global mutable registries in the kernel.
+- Prefer sealed schema/runtime objects over ambient static state.
+- Keep public mutation APIs explicit.
+- Do not expose public write paths that can bypass dirty tracking.
+- If ordering is required, use `Stage` or explicit dependencies, not hidden heuristics.
+- Do not carry dead API forward.
+
+## Architecture Guidance
+
+- Prefer explicit bootstrap and ownership.
+- Keep hot-path structures array-based and allocation-aware.
+- Avoid speculative abstractions.
+- Minimize public surface area.
+- Keep persistence and prefabs outside the core until needed, but preserve clean seams.
+- Keep framework and IO concerns at the edges.
+
+## Port-Specific Rules
+
+- Do not blindly copy `_OLD/UltraSim/ECS`.
+- Preserve proven runtime behavior where it is still sound.
+- Intentionally change architecture where the old design had debt:
+  - global static registries,
+  - dead scheduler priority,
+  - implicit mutable write paths,
+  - tightly coupled second-wave subsystems.
+- Make structural progress in small testable slices.
+
+## Performance Guidance
+
+- Default to clear code first.
+- Treat schema lookup, archetype iteration, structural apply, dirty tracking, and scheduler execution as likely hot paths.
+- Do not introduce heavy immutable collection libraries on the hot path.
+- Use immutable snapshots built from arrays and tables, not allocation-heavy immutable containers.
+- When a low-level optimization makes code harder to read, justify it with actual need.
+
+## Testing Guidance
+
+- Add executable coverage as the kernel grows.
+- Test isolation explicitly: schemas and worlds must not leak state across instances.
+- Test serial correctness first, then parallel parity.
+- Every new public mutation surface should have a test proving dirty tracking cannot be bypassed.
+
+## Scope Guidance
+
+- Make the smallest useful kernel change that keeps the port moving.
+- Do not drag prefabs or persistence into the core early.
+- Add extension seams before subsystem imports.
+- Keep scaffolding honest: placeholders are acceptable, fake completeness is not.
+
+## Current Port Position
+
+This scaffold is Phase 1A of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`:
+
+- schema builder,
+- sealed schema,
+- component contracts and ids,
+- world bootstrap placeholder,
+- prefab/persistence seams,
+- executable tests.
