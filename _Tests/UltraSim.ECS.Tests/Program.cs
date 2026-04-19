@@ -31,6 +31,8 @@ internal static class TestRunner
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
+        Run(nameof(SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely), SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely);
+        Run(nameof(SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks), SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
@@ -702,6 +704,115 @@ internal static class TestRunner
         Assert.Equal(1, velocityRuns);
     }
 
+    private static void SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely()
+    {
+        const int entityCount = 256;
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+        world.SetSystemExecutionMode(SystemExecutionMode.ParallelBatches);
+
+        var emptySignature = new ArchetypeSignature(ReadOnlySpan<ComponentId>.Empty);
+        var positionTargets = new Entity[entityCount];
+        var velocityTargets = new Entity[entityCount];
+        for (int i = 0; i < entityCount; i++)
+        {
+            positionTargets[i] = world.CreateDefault(emptySignature);
+            velocityTargets[i] = world.CreateDefault(emptySignature);
+        }
+
+        world.RegisterSystems(
+            new ContextActionSystem<ParallelStructuralPositionTag>(
+                new SystemDescriptor(
+                    "ParallelStructuralPosition",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.Empty,
+                    ComponentMask.FromIds([positionId])),
+                (in SystemContext ctx) =>
+                {
+                    for (int i = 0; i < positionTargets.Length; i++)
+                    {
+                        ctx.Commands.EnqueueAdd(positionTargets[i], new Position(i + 1));
+                        if ((i & 31) == 0)
+                            Thread.Yield();
+                    }
+                }),
+            new ContextActionSystem<ParallelStructuralVelocityTag>(
+                new SystemDescriptor(
+                    "ParallelStructuralVelocity",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.Empty,
+                    ComponentMask.FromIds([velocityId])),
+                (in SystemContext ctx) =>
+                {
+                    for (int i = 0; i < velocityTargets.Length; i++)
+                    {
+                        ctx.Commands.EnqueueAdd(velocityTargets[i], new Velocity((i + 1) * 10));
+                        if ((i & 31) == 0)
+                            Thread.Yield();
+                    }
+                }));
+
+        world.SealSystems();
+        world.Tick(0.016f);
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.Equal(new Position(i + 1), world.GetComponent<Position>(positionTargets[i]));
+            Assert.Equal(new Velocity((i + 1) * 10), world.GetComponent<Velocity>(velocityTargets[i]));
+        }
+
+        var dirtyPositions = new Entity[entityCount];
+        var dirtyVelocities = new Entity[entityCount];
+        Assert.Equal(entityCount, world.DrainDirtyTo<Position>(dirtyPositions));
+        Assert.Equal(entityCount, world.DrainDirtyTo<Velocity>(dirtyVelocities));
+    }
+
+    private static void SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks()
+    {
+        const int entityCount = 128;
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        EcsSchema schema = builder.Build();
+
+        World serialWorld = CreateSeededDualComponentWorld(schema, entityCount, out Entity[] serialEntities);
+        World parallelWorld = CreateSeededDualComponentWorld(schema, entityCount, out Entity[] parallelEntities);
+        parallelWorld.SetSystemExecutionMode(SystemExecutionMode.ParallelBatches);
+
+        RegisterExplicitWriteParitySystems(serialWorld, serialEntities, positionId, velocityId);
+        RegisterExplicitWriteParitySystems(parallelWorld, parallelEntities, positionId, velocityId);
+
+        serialWorld.SealSystems();
+        parallelWorld.SealSystems();
+
+        serialWorld.Tick(0.016f);
+        parallelWorld.Tick(0.016f);
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.Equal(serialWorld.GetComponent<Position>(serialEntities[i]), parallelWorld.GetComponent<Position>(parallelEntities[i]));
+            Assert.Equal(serialWorld.GetComponent<Velocity>(serialEntities[i]), parallelWorld.GetComponent<Velocity>(parallelEntities[i]));
+        }
+
+        var serialDirty = new Entity[entityCount];
+        var parallelDirty = new Entity[entityCount];
+
+        Assert.Equal(entityCount, serialWorld.DrainDirtyTo<Position>(serialDirty));
+        Assert.Equal(entityCount, parallelWorld.DrainDirtyTo<Position>(parallelDirty));
+        Assert.Equal(entityCount, serialWorld.DrainDirtyTo<Velocity>(serialDirty));
+        Assert.Equal(entityCount, parallelWorld.DrainDirtyTo<Velocity>(parallelDirty));
+        Assert.Equal(entityCount, serialWorld.DrainDirtyTo(serialDirty));
+        Assert.Equal(entityCount, parallelWorld.DrainDirtyTo(parallelDirty));
+    }
+
     private static void World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse()
     {
         var world = new World(new EcsSchemaBuilder().Build());
@@ -818,6 +929,78 @@ internal static class TestRunner
         Assert.Equal(2, withEmpty.EntityCount);
     }
 
+    private static World CreateSeededDualComponentWorld(EcsSchema schema, int entityCount, out Entity[] entities)
+    {
+        var world = new World(schema);
+        ComponentId positionId = schema.GetComponentId<Position>();
+        ComponentId velocityId = schema.GetComponentId<Velocity>();
+        var signature = new ArchetypeSignature([positionId, velocityId]);
+        entities = new Entity[entityCount];
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            world.SetComponent(entity, new Position(i));
+            world.SetComponent(entity, new Velocity(i * 10));
+            entities[i] = entity;
+        }
+
+        var drain = new Entity[Math.Max(1, entityCount)];
+        world.DrainDirtyTo(drain);
+        world.DrainDirtyTo<Position>(drain);
+        world.DrainDirtyTo<Velocity>(drain);
+        return world;
+    }
+
+    private static void RegisterExplicitWriteParitySystems(
+        World world,
+        Entity[] entities,
+        ComponentId positionId,
+        ComponentId velocityId)
+    {
+        world.RegisterSystems(
+            new ContextActionSystem<ParallelExplicitPositionTag>(
+                new SystemDescriptor(
+                    "ParallelExplicitPosition",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.Empty,
+                    ComponentMask.FromIds([positionId])),
+                (in SystemContext ctx) =>
+                {
+                    for (int i = 0; i < entities.Length; i++)
+                    {
+                        ctx.World.PatchComponent<Position>(entities[i], static (ref Position position) =>
+                        {
+                            position = new Position(position.X + 3);
+                        });
+
+                        if ((i & 31) == 0)
+                            Thread.Yield();
+                    }
+                }),
+            new ContextActionSystem<ParallelExplicitVelocityTag>(
+                new SystemDescriptor(
+                    "ParallelExplicitVelocity",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.FromIds([velocityId]),
+                    ComponentMask.FromIds([velocityId])),
+                (in SystemContext ctx) =>
+                {
+                    for (int i = 0; i < entities.Length; i++)
+                    {
+                        Velocity velocity = ctx.World.GetComponent<Velocity>(entities[i]);
+                        Assert.True(ctx.World.SetComponent(entities[i], new Velocity(velocity.X + 7)));
+
+                        if ((i & 31) == 0)
+                            Thread.Yield();
+                    }
+                }));
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -848,6 +1031,8 @@ internal static class TestRunner
     private readonly record struct Acceleration(int X) : IComponent<Acceleration>
     {
     }
+
+    private delegate void SystemContextAction(in SystemContext ctx);
 
     private sealed class PeriodOverrideSettings : SystemSettings
     {
@@ -1064,6 +1249,40 @@ internal static class TestRunner
         public CountingSystemTwo(SystemDescriptor descriptor, Action action) : base(descriptor, action)
         {
         }
+    }
+
+    private sealed class ContextActionSystem<TTag> : SystemBase
+    {
+        private readonly SystemContextAction _action;
+
+        public ContextActionSystem(SystemDescriptor descriptor, SystemContextAction action)
+        {
+            Descriptor = descriptor;
+            _action = action;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            _action(in ctx);
+        }
+    }
+
+    private sealed class ParallelStructuralPositionTag
+    {
+    }
+
+    private sealed class ParallelStructuralVelocityTag
+    {
+    }
+
+    private sealed class ParallelExplicitPositionTag
+    {
+    }
+
+    private sealed class ParallelExplicitVelocityTag
+    {
     }
 
     private sealed class LifecycleTrackingSystem : SystemBase

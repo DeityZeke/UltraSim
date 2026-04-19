@@ -81,7 +81,7 @@ Performance matters in the ECS, but only after correctness and clarity are secur
 
 ## Current Port Position
 
-The kernel is now partway through Phase 1D of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`.
+The kernel is now in Phase 1E validation and hardening of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`.
 
 Implemented so far:
 
@@ -93,9 +93,11 @@ Implemented so far:
 - batched structural enqueue APIs for create-default, destroy, add, and remove,
 - mixed structural barriers keep deterministic phase order: destroy, create-default, remove, add,
 - scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,
+- shared deferred structural command capture is safe under parallel batch execution,
 - read-only query and chunk iteration surfaces,
 - read-only archetype traversal and persistence adapter hooks,
 - lightweight persistence snapshot views in `Extensions/Persistence`,
+- serial vs parallel parity coverage for explicit writes and deferred structural commands,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
 
