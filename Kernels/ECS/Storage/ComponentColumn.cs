@@ -23,4 +23,32 @@ internal sealed class ComponentColumn<T> : IComponentColumn
 
         Array.Resize(ref _data, newCapacity);
     }
+
+    public void SetDefaultAt(int slot)
+    {
+        _data[slot] = default;
+    }
+
+    public void SwapLastIntoSlot(int slot, int last)
+    {
+        if (slot != last)
+            _data[slot] = _data[last];
+    }
+
+    public void CopySlot(int source, int destination)
+    {
+        _data[destination] = _data[source];
+    }
+
+    public void CopySlotRange(int source, int destinationStart, int count)
+    {
+        _data.AsSpan(destinationStart, count).Fill(_data[source]);
+    }
+
+    public void CopyFrom(IComponentColumn source, int sourceSlot, int destinationSlot)
+    {
+        _data[destinationSlot] = ((ComponentColumn<T>)source)._data[sourceSlot];
+    }
+
+    public Span<T> AsSpan(int count) => _data.AsSpan(0, count);
 }
