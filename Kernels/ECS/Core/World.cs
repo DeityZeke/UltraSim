@@ -167,6 +167,26 @@ public sealed partial class World
         _systems.LoadAllSystems(reader);
     }
 
+    public void Save(IDataWriter writer)
+    {
+        EnsureNotShutdown();
+
+        IEcsPersistenceAdapter adapter = Services.PersistenceAdapter
+            ?? throw new InvalidOperationException("No persistence adapter is configured for this world.");
+
+        adapter.Save(this, writer);
+    }
+
+    public void Load(IDataReader reader)
+    {
+        EnsureNotShutdown();
+
+        IEcsPersistenceAdapter adapter = Services.PersistenceAdapter
+            ?? throw new InvalidOperationException("No persistence adapter is configured for this world.");
+
+        adapter.Load(this, reader);
+    }
+
     public void ProcessStructuralQueues(StructuralBarrierPhase phase = StructuralBarrierPhase.Manual)
     {
         EnsureNotShutdown();
@@ -188,6 +208,20 @@ public sealed partial class World
     {
         ComponentId id = Schema.GetComponentId<T>();
         return EntityStore.TryGetLocation(entity, out Archetype archetype, out _) && archetype.HasComponent(id);
+    }
+
+    public T GetComponent<T>(Entity entity) where T : unmanaged, IComponent<T>
+    {
+        EnsureNotShutdown();
+
+        ComponentId id = Schema.GetComponentId<T>();
+        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
+            throw new InvalidOperationException($"Entity not alive: {entity}");
+
+        if (!archetype.HasComponent(id))
+            throw new InvalidOperationException($"Entity {entity} does not contain component {typeof(T).Name}.");
+
+        return archetype.GetComponentSpan<T>(id)[slot];
     }
 
     public bool TryGetComponent<T>(Entity entity, out T value) where T : unmanaged, IComponent<T>

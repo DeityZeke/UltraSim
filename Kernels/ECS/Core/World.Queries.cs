@@ -4,6 +4,12 @@ namespace UltraSim.ECS;
 
 public sealed partial class World
 {
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ArchetypeManager.ArchetypeEnumerator QueryArchetypes(ReadOnlySpan<ComponentId> required)
+    {
+        return Archetypes.EnumerateWith(required);
+    }
+
     public int Query<T>(ReadOnlyQueryAction<T> action)
         where T : unmanaged, IComponent<T>
     {

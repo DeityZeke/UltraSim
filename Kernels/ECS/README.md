@@ -92,6 +92,7 @@ Implemented so far:
 - batched structural enqueue APIs for create-default, destroy, add, and remove,
 - scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,
 - read-only query and chunk iteration surfaces,
+- read-only archetype traversal and persistence adapter hooks,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
 

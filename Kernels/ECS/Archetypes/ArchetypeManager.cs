@@ -112,6 +112,9 @@ public sealed class ArchetypeManager
 
     public ReadOnlySpan<Archetype> AsSpan() => CollectionsMarshal.AsSpan(_archetypes);
 
+    public ArchetypeEnumerator EnumerateWith(ReadOnlySpan<ComponentId> required)
+        => new(this, required);
+
     private Archetype GetOrCreateWithBuffer(ReadOnlySpan<ComponentId> componentIds, Span<ComponentId> workBuffer)
     {
         componentIds.CopyTo(workBuffer);
@@ -211,5 +214,45 @@ public sealed class ArchetypeManager
         }
 
         return (int)hash;
+    }
+
+    public ref struct ArchetypeEnumerator
+    {
+        private readonly ReadOnlySpan<Archetype> _archetypes;
+        private readonly ReadOnlySpan<ComponentId> _required;
+        private int _index;
+        private Archetype? _current;
+
+        internal ArchetypeEnumerator(ArchetypeManager manager, ReadOnlySpan<ComponentId> required)
+        {
+            _archetypes = CollectionsMarshal.AsSpan(manager._archetypes);
+            _required = required;
+            _index = -1;
+            _current = null;
+        }
+
+        public Archetype Current
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _current!;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public ArchetypeEnumerator GetEnumerator() => this;
+
+        public bool MoveNext()
+        {
+            while (++_index < _archetypes.Length)
+            {
+                Archetype archetype = _archetypes[_index];
+                if (!archetype.Signature.HasAll(_required))
+                    continue;
+
+                _current = archetype;
+                return true;
+            }
+
+            return false;
+        }
     }
 }

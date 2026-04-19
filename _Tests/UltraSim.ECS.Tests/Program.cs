@@ -21,12 +21,14 @@ internal static class TestRunner
         Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
         Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
+        Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
+        Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
 
         Console.WriteLine("All ECS scaffold tests passed.");
@@ -322,6 +324,45 @@ internal static class TestRunner
             Assert.False(world.Entities.IsAlive(targets[i]));
     }
 
+    private static void QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity withPosition = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity withBoth = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        world.CreateDefault(new ArchetypeSignature([]));
+
+        Assert.True(world.SetComponent(withPosition, new Position(5)));
+        Assert.True(world.SetComponent(withBoth, new Position(7)));
+        Assert.True(world.SetComponent(withBoth, new Velocity(9)));
+
+        Assert.Equal(new Position(5), world.GetComponent<Position>(withPosition));
+        Assert.Equal(new Velocity(9), world.GetComponent<Velocity>(withBoth));
+        Assert.Throws<InvalidOperationException>(() => world.GetComponent<Velocity>(withPosition));
+        Assert.Throws<InvalidOperationException>(() => world.GetComponent<Position>(Entity.Null));
+
+        int archetypesWithPosition = 0;
+        int entitiesSeen = 0;
+        foreach (Archetype archetype in world.QueryArchetypes([positionId]))
+        {
+            archetypesWithPosition++;
+            entitiesSeen += archetype.Count;
+            Assert.True(archetype.HasComponent(positionId));
+        }
+
+        Assert.Equal(2, archetypesWithPosition);
+        Assert.Equal(2, entitiesSeen);
+
+        int allArchetypes = 0;
+        foreach (Archetype _ in world.QueryArchetypes([]))
+            allArchetypes++;
+
+        Assert.Equal(3, allArchetypes);
+    }
+
     private static void ReadOnlyQuery_AndChunkIteration_FilterByArchetype()
     {
         var builder = new EcsSchemaBuilder();
@@ -598,6 +639,43 @@ internal static class TestRunner
         Assert.Throws<InvalidOperationException>(() => world.SetComponent(Entity.Null, new Position(1)));
     }
 
+    private static void World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks()
+    {
+        var recorder = new List<string>();
+        var services = new EcsWorldServices
+        {
+            PersistenceAdapter = new RecordingPersistenceAdapter(recorder),
+        };
+
+        var world = new World(new EcsSchemaBuilder().Build(), services);
+        world.RegisterSystems(
+            new SerializableSystem("First", recorder),
+            new SerializableSystemTwo("Second", recorder));
+
+        var writer = new TestDataWriter();
+        var reader = new TestDataReader();
+
+        world.SaveAll(writer);
+        world.LoadAll(reader);
+        world.Save(writer);
+        world.Load(reader);
+
+        Assert.SequenceEqual(
+            [
+                "Serialize:First",
+                "Serialize:Second",
+                "Deserialize:First",
+                "Deserialize:Second",
+                "Adapter:Save",
+                "Adapter:Load",
+            ],
+            recorder);
+
+        var noAdapterWorld = new World(new EcsSchemaBuilder().Build());
+        Assert.Throws<InvalidOperationException>(() => noAdapterWorld.Save(writer));
+        Assert.Throws<InvalidOperationException>(() => noAdapterWorld.Load(reader));
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -663,6 +741,34 @@ internal static class TestRunner
         public void Load(World world, IDataReader reader)
         {
         }
+    }
+
+    private sealed class RecordingPersistenceAdapter : IEcsPersistenceAdapter
+    {
+        private readonly List<string> _log;
+
+        public RecordingPersistenceAdapter(List<string> log)
+        {
+            _log = log;
+        }
+
+        public void Save(World world, IDataWriter writer)
+        {
+            _log.Add("Adapter:Save");
+        }
+
+        public void Load(World world, IDataReader reader)
+        {
+            _log.Add("Adapter:Load");
+        }
+    }
+
+    private sealed class TestDataWriter : IDataWriter
+    {
+    }
+
+    private sealed class TestDataReader : IDataReader
+    {
     }
 
     private abstract class LoggingSystem : SystemBase
@@ -844,6 +950,49 @@ internal static class TestRunner
         public override void OnShutdown(World world)
         {
             ShutdownCalls++;
+        }
+    }
+
+    private abstract class SerializableSystemBase : SystemBase
+    {
+        private readonly string _label;
+        private readonly List<string> _log;
+
+        protected SerializableSystemBase(string label, List<string> log)
+        {
+            _label = label;
+            _log = log;
+        }
+
+        public override SystemDescriptor Descriptor =>
+            new(_label, SystemStage.AI, 1, 0, ComponentMask.Empty, ComponentMask.Empty);
+
+        public override void Update(in SystemContext ctx)
+        {
+        }
+
+        public override void Serialize(IDataWriter writer)
+        {
+            _log.Add($"Serialize:{_label}");
+        }
+
+        public override void Deserialize(IDataReader reader)
+        {
+            _log.Add($"Deserialize:{_label}");
+        }
+    }
+
+    private sealed class SerializableSystem : SerializableSystemBase
+    {
+        public SerializableSystem(string label, List<string> log) : base(label, log)
+        {
+        }
+    }
+
+    private sealed class SerializableSystemTwo : SerializableSystemBase
+    {
+        public SerializableSystemTwo(string label, List<string> log) : base(label, log)
+        {
         }
     }
 }
