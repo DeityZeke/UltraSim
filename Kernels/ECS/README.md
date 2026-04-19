@@ -88,6 +88,7 @@ Implemented so far:
 - sealed schema/bootstrap flow with no process-global registries,
 - entity/archetype storage bound to schema-owned column factories,
 - explicit dirty-aware mutation paths through `World` and the structural queue,
+- explicit patch/update mutation path without public mutable refs,
 - explicit world lifecycle with seal/initialize/run/shutdown state,
 - batched structural enqueue APIs for create-default, destroy, add, and remove,
 - scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,

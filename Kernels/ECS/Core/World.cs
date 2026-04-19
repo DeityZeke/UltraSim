@@ -237,6 +237,21 @@ public sealed partial class World
         return true;
     }
 
+    public bool PatchComponent<T>(Entity entity, ComponentUpdater<T> updater) where T : unmanaged, IComponent<T>
+    {
+        EnsureNotShutdown();
+        ArgumentNullException.ThrowIfNull(updater);
+
+        ComponentId id = Schema.GetComponentId<T>();
+        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot) || !archetype.HasComponent(id))
+            return false;
+
+        Span<T> values = archetype.GetComponentSpan<T>(id);
+        updater(ref values[slot]);
+        _dirty.Mark(id, entity);
+        return true;
+    }
+
     public bool SetComponent<T>(Entity entity, in T value) where T : unmanaged, IComponent<T>
     {
         EnsureNotShutdown();
@@ -247,6 +262,24 @@ public sealed partial class World
         archetype.GetComponentSpan<T>(id)[slot] = value;
         _dirty.Mark(id, entity);
         return true;
+    }
+
+    public void SetOrAddComponent<T>(Entity entity, in T value) where T : unmanaged, IComponent<T>
+    {
+        EnsureNotShutdown();
+
+        if (!SetComponent(entity, value))
+            EnqueueAdd(entity, value);
+    }
+
+    public void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent<T>
+    {
+        EnqueueRemove<T>(entity);
+    }
+
+    public void RemoveComponent<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T>
+    {
+        EnqueueRemove<T>(entities);
     }
 
     public int CopyDirtyTo(Span<Entity> destination) => _dirty.CopyAllTo(destination);

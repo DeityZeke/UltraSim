@@ -19,6 +19,7 @@ internal static class TestRunner
         Run(nameof(ComponentMask_IntersectionsAndSupersetsWork), ComponentMask_IntersectionsAndSupersetsWork);
         Run(nameof(SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField), SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField);
         Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
+        Run(nameof(PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware), PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
         Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
@@ -233,6 +234,51 @@ internal static class TestRunner
         Assert.Equal(1, world.DrainDirtyTo(dirty));
         Assert.Equal(entity, dirty[0]);
         Assert.Equal(0, world.DrainDirtyTo(dirty));
+    }
+
+    private static void PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+        Entity entity = world.CreateDefault(new ArchetypeSignature([positionId]));
+
+        Assert.True(world.SetComponent(entity, new Position(10)));
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+
+        bool patched = world.PatchComponent<Position>(entity, static (ref Position position) =>
+        {
+            position = new Position(position.X + 5);
+        });
+
+        Assert.True(patched);
+        Assert.Equal(new Position(15), world.GetComponent<Position>(entity));
+        Assert.Equal(1, world.DrainDirtyTo<Position>(dirty));
+        Assert.Equal(entity, dirty[0]);
+
+        bool missingPatch = world.PatchComponent<Velocity>(entity, static (ref Velocity velocity) =>
+        {
+            velocity = new Velocity(velocity.X + 1);
+        });
+
+        Assert.False(missingPatch);
+        Assert.Equal(0, world.DrainDirtyTo<Velocity>(dirty));
+
+        world.SetOrAddComponent(entity, new Velocity(33));
+        world.ProcessStructuralQueues();
+        Assert.Equal(new Velocity(33), world.GetComponent<Velocity>(entity));
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+
+        world.SetOrAddComponent(entity, new Velocity(44));
+        Assert.Equal(new Velocity(44), world.GetComponent<Velocity>(entity));
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+
+        world.RemoveComponent<Velocity>(entity);
+        world.ProcessStructuralQueues();
+        Assert.False(world.HasComponent<Velocity>(entity));
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
     }
 
     private static void StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty()
