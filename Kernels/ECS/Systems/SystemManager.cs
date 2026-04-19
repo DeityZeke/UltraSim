@@ -146,6 +146,22 @@ internal sealed class SystemManager
         _workerPool = null;
     }
 
+    public void SaveAllSystems(IDataWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+
+        for (int i = 0; i < _systems.Count; i++)
+            _systems[i].Serialize(writer);
+    }
+
+    public void LoadAllSystems(IDataReader reader)
+    {
+        ArgumentNullException.ThrowIfNull(reader);
+
+        for (int i = 0; i < _systems.Count; i++)
+            _systems[i].Deserialize(reader);
+    }
+
     public void ApplySettings(SystemBase system)
     {
         int index = system.Id.Value;

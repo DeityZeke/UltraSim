@@ -33,8 +33,29 @@ internal sealed class StructuralQueue
     public void EnqueueAdd<T>(Entity entity, T value) where T : unmanaged, IComponent<T>
         => _adds.Add(new StructuralAddOperation<T>(entity, value));
 
+    public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values) where T : unmanaged, IComponent<T>
+    {
+        if (entities.Length != values.Length)
+            throw new ArgumentException("Entities and values length must match.");
+
+        for (int i = 0; i < entities.Length; i++)
+            _adds.Add(new StructuralAddOperation<T>(entities[i], values[i]));
+    }
+
+    public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, in T value) where T : unmanaged, IComponent<T>
+    {
+        for (int i = 0; i < entities.Length; i++)
+            _adds.Add(new StructuralAddOperation<T>(entities[i], value));
+    }
+
     public void EnqueueRemove<T>(Entity entity) where T : unmanaged, IComponent<T>
         => _removes.Add(new StructuralRemoveOperation<T>(entity));
+
+    public void EnqueueRemove<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T>
+    {
+        for (int i = 0; i < entities.Length; i++)
+            _removes.Add(new StructuralRemoveOperation<T>(entities[i]));
+    }
 
     public void Apply(World world)
     {

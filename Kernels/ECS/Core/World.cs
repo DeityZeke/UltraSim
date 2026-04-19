@@ -16,7 +16,10 @@ public sealed partial class World
         public void EnqueueDestroy(Entity entity) => _world.EnqueueDestroy(entity);
         public void EnqueueDestroy(ReadOnlySpan<Entity> entities) => _world.EnqueueDestroy(entities);
         public void EnqueueAdd<T>(Entity entity, T value) where T : unmanaged, IComponent<T> => _world.EnqueueAdd(entity, value);
+        public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values) where T : unmanaged, IComponent<T> => _world.EnqueueAdd(entities, values);
+        public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, in T value) where T : unmanaged, IComponent<T> => _world.EnqueueAdd(entities, value);
         public void EnqueueRemove<T>(Entity entity) where T : unmanaged, IComponent<T> => _world.EnqueueRemove<T>(entity);
+        public void EnqueueRemove<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T> => _world.EnqueueRemove<T>(entities);
     }
 
     private readonly StructuralQueue _structural;
@@ -24,6 +27,7 @@ public sealed partial class World
     private readonly IStructuralCommands _commands;
     private readonly SystemManager _systems;
     private uint _worldTick;
+    private WorldLifecycleState _state;
 
     public World(EcsSchema schema, EcsWorldServices? services = null)
     {
@@ -35,6 +39,7 @@ public sealed partial class World
         _dirty = new DirtyTracker();
         _commands = new WorldStructuralCommands(this);
         _systems = new SystemManager();
+        _state = WorldLifecycleState.Created;
     }
 
     public EcsSchema Schema { get; }
@@ -42,8 +47,11 @@ public sealed partial class World
     public IEntityReadOnly Entities => EntityStore;
     public IStructuralCommands Commands => _commands;
     public uint WorldTick => _worldTick;
+    public WorldLifecycleState State => _state;
     public int SystemCount => _systems.Count;
     public SystemExecutionMode SystemExecutionMode => _systems.ExecutionMode;
+    public bool IsSealed => _state >= WorldLifecycleState.Sealed;
+    public bool IsInitialized => _state >= WorldLifecycleState.Initialized && _state < WorldLifecycleState.Shutdown;
 
     internal EntityManager EntityStore { get; }
     internal ArchetypeManager Archetypes { get; }
@@ -52,24 +60,116 @@ public sealed partial class World
         => Schema.GetComponentId<T>();
 
     public Entity CreateDefault(ArchetypeSignature signature)
-        => CreateDefaultImmediate(signature);
+    {
+        EnsureNotShutdown();
+        return CreateDefaultImmediate(signature);
+    }
 
-    public void EnqueueCreateDefault(ArchetypeSignature signature) => _structural.EnqueueCreateDefault(signature);
+    public void EnqueueCreateDefault(ArchetypeSignature signature)
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueCreateDefault(signature);
+    }
 
-    public void EnqueueCreateDefault(ReadOnlySpan<ArchetypeSignature> signatures) => _structural.EnqueueCreateDefault(signatures);
+    public void EnqueueCreateDefault(ReadOnlySpan<ArchetypeSignature> signatures)
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueCreateDefault(signatures);
+    }
 
-    public void EnqueueDestroy(Entity entity) => _structural.EnqueueDestroy(entity);
+    public void EnqueueDestroy(Entity entity)
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueDestroy(entity);
+    }
 
-    public void EnqueueDestroy(ReadOnlySpan<Entity> entities) => _structural.EnqueueDestroy(entities);
+    public void EnqueueDestroy(ReadOnlySpan<Entity> entities)
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueDestroy(entities);
+    }
 
     public void EnqueueAdd<T>(Entity entity, T value) where T : unmanaged, IComponent<T>
-        => _structural.EnqueueAdd(entity, value);
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueAdd(entity, value);
+    }
+
+    public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values) where T : unmanaged, IComponent<T>
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueAdd(entities, values);
+    }
+
+    public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, in T value) where T : unmanaged, IComponent<T>
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueAdd(entities, value);
+    }
 
     public void EnqueueRemove<T>(Entity entity) where T : unmanaged, IComponent<T>
-        => _structural.EnqueueRemove<T>(entity);
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueRemove<T>(entity);
+    }
+
+    public void EnqueueRemove<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T>
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueRemove<T>(entities);
+    }
+
+    public void Seal()
+    {
+        EnsureNotShutdown();
+
+        if (_state >= WorldLifecycleState.Sealed)
+            return;
+
+        _systems.Seal();
+        _state = WorldLifecycleState.Sealed;
+    }
+
+    public void Initialize()
+    {
+        EnsureNotShutdown();
+
+        if (_state < WorldLifecycleState.Sealed)
+            Seal();
+
+        if (_state >= WorldLifecycleState.Initialized)
+            return;
+
+        _systems.Initialize(this);
+        _state = WorldLifecycleState.Initialized;
+    }
+
+    public void Shutdown()
+    {
+        if (_state == WorldLifecycleState.Shutdown)
+            return;
+
+        if (_state >= WorldLifecycleState.Initialized)
+            _systems.Shutdown(this);
+
+        _state = WorldLifecycleState.Shutdown;
+    }
+
+    public void SaveAll(IDataWriter writer)
+    {
+        EnsureNotShutdown();
+        _systems.SaveAllSystems(writer);
+    }
+
+    public void LoadAll(IDataReader reader)
+    {
+        EnsureNotShutdown();
+        _systems.LoadAllSystems(reader);
+    }
 
     public void ProcessStructuralQueues(StructuralBarrierPhase phase = StructuralBarrierPhase.Manual)
     {
+        EnsureNotShutdown();
         _ = phase;
 
         if (!_structural.HasPending)
@@ -78,7 +178,11 @@ public sealed partial class World
         _structural.Apply(this);
     }
 
-    public void Destroy(Entity entity) => DestroyImmediate(entity);
+    public void Destroy(Entity entity)
+    {
+        EnsureNotShutdown();
+        DestroyImmediate(entity);
+    }
 
     public bool HasComponent<T>(Entity entity) where T : unmanaged, IComponent<T>
     {
@@ -101,6 +205,7 @@ public sealed partial class World
 
     public bool SetComponent<T>(Entity entity, in T value) where T : unmanaged, IComponent<T>
     {
+        EnsureNotShutdown();
         ComponentId id = Schema.GetComponentId<T>();
         if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot) || !archetype.HasComponent(id))
             return false;
@@ -120,22 +225,38 @@ public sealed partial class World
     public int DrainDirtyTo<T>(Span<Entity> destination) where T : unmanaged, IComponent<T>
         => _dirty.CopyAndClearComponentTo(Schema.GetComponentId<T>(), destination);
 
-    public void RegisterSystem(SystemBase system) => _systems.Register(system);
+    public void RegisterSystem(SystemBase system)
+    {
+        EnsureCanMutateConfiguration();
+        _systems.Register(system);
+    }
 
-    public void RegisterSystems(params SystemBase[] systems) => _systems.RegisterAll(systems);
+    public void RegisterSystems(params SystemBase[] systems)
+    {
+        EnsureCanMutateConfiguration();
+        _systems.RegisterAll(systems);
+    }
 
-    public void SealSystems() => _systems.Seal();
+    public void SealSystems() => Seal();
 
-    public void SetSystemExecutionMode(SystemExecutionMode mode) => _systems.SetExecutionMode(mode);
+    public void SetSystemExecutionMode(SystemExecutionMode mode)
+    {
+        EnsureCanMutateConfiguration();
+        _systems.SetExecutionMode(mode);
+    }
 
     public void ConfigurePhaseStaggering(bool enabled, int maxNonCriticalStagger = 10)
-        => _systems.ConfigurePhaseStaggering(enabled, maxNonCriticalStagger);
+    {
+        EnsureCanMutateConfiguration();
+        _systems.ConfigurePhaseStaggering(enabled, maxNonCriticalStagger);
+    }
 
     public TSystem? GetSystem<TSystem>() where TSystem : SystemBase
         => (TSystem?)_systems.GetSystem<TSystem>();
 
     public void Tick(float deltaSeconds)
     {
+        EnsureReadyForExecution();
         ProcessStructuralQueues(StructuralBarrierPhase.PreSystems);
         _systems.Tick(this, _worldTick, deltaSeconds, _commands);
         ProcessStructuralQueues(StructuralBarrierPhase.PostSystems);
@@ -143,10 +264,16 @@ public sealed partial class World
     }
 
     public void RunManualSystem(SystemId id, float deltaSeconds)
-        => _systems.RunManual(id, this, _worldTick, deltaSeconds, _commands);
+    {
+        EnsureReadyForExecution();
+        _systems.RunManual(id, this, _worldTick, deltaSeconds, _commands);
+    }
 
     public void RunManualSystem<TSystem>(float deltaSeconds) where TSystem : SystemBase
-        => _systems.RunManual<TSystem>(this, _worldTick, deltaSeconds, _commands);
+    {
+        EnsureReadyForExecution();
+        _systems.RunManual<TSystem>(this, _worldTick, deltaSeconds, _commands);
+    }
 
     public int[] GetSystemStartOffsetsSnapshot()
     {
@@ -273,5 +400,30 @@ public sealed partial class World
             int sourceIndex = source.GetColumnIndex(id);
             destination.GetColumnAt(destinationIndex).CopyFrom(source.GetColumnAt(sourceIndex), sourceSlot, destinationSlot);
         }
+    }
+
+    private void EnsureCanMutateConfiguration()
+    {
+        EnsureNotShutdown();
+
+        if (_state >= WorldLifecycleState.Sealed)
+            throw new InvalidOperationException("World configuration is sealed.");
+    }
+
+    private void EnsureReadyForExecution()
+    {
+        EnsureNotShutdown();
+
+        if (_state < WorldLifecycleState.Initialized)
+            Initialize();
+
+        if (_state == WorldLifecycleState.Initialized)
+            _state = WorldLifecycleState.Running;
+    }
+
+    private void EnsureNotShutdown()
+    {
+        if (_state == WorldLifecycleState.Shutdown)
+            throw new InvalidOperationException("World is shutdown.");
     }
 }

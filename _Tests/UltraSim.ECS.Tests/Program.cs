@@ -20,12 +20,14 @@ internal static class TestRunner
         Run(nameof(SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField), SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField);
         Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
+        Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
+        Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
 
         Console.WriteLine("All ECS scaffold tests passed.");
     }
@@ -273,6 +275,53 @@ internal static class TestRunner
         Assert.Equal(entity, dirty[0]);
     }
 
+    private static void StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity first = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity second = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity third = world.CreateDefault(new ArchetypeSignature([positionId]));
+
+        Assert.True(world.SetComponent(first, new Position(1)));
+        Assert.True(world.SetComponent(second, new Position(2)));
+        Assert.True(world.SetComponent(third, new Position(3)));
+
+        Span<Entity> dirty = stackalloc Entity[16];
+        world.DrainDirtyTo(dirty);
+
+        Entity[] targets = [first, second, third];
+        Velocity[] values = [new Velocity(11), new Velocity(12), new Velocity(13)];
+
+        world.EnqueueAdd<Velocity>(targets, values);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < targets.Length; i++)
+        {
+            Assert.True(world.TryGetComponent(targets[i], out Velocity velocity));
+            Assert.Equal(values[i], velocity);
+        }
+
+        Assert.Equal(3, world.DrainDirtyTo<Velocity>(dirty));
+
+        world.EnqueueRemove<Velocity>(targets);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < targets.Length; i++)
+            Assert.False(world.HasComponent<Velocity>(targets[i]));
+
+        Assert.Equal(3, world.DrainDirtyTo<Velocity>(dirty));
+
+        world.EnqueueDestroy(targets);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < targets.Length; i++)
+            Assert.False(world.Entities.IsAlive(targets[i]));
+    }
+
     private static void ReadOnlyQuery_AndChunkIteration_FilterByArchetype()
     {
         var builder = new EcsSchemaBuilder();
@@ -511,6 +560,44 @@ internal static class TestRunner
         Assert.Equal(1, velocityRuns);
     }
 
+    private static void World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var system = new LifecycleTrackingSystem(new SystemDescriptor(
+            "Lifecycle",
+            SystemStage.AI,
+            1,
+            0,
+            ComponentMask.Empty,
+            ComponentMask.Empty));
+
+        world.RegisterSystem(system);
+        Assert.Equal(WorldLifecycleState.Created, world.State);
+
+        world.Tick(0.016f);
+
+        Assert.Equal(1, system.InitializeCalls);
+        Assert.Equal(1, system.UpdateCalls);
+        Assert.Equal(WorldLifecycleState.Running, world.State);
+        Assert.True(world.IsSealed);
+        Assert.True(world.IsInitialized);
+
+        Assert.Throws<InvalidOperationException>(() => world.RegisterSystem(
+            new MovementLoggingSystem(
+                "Late",
+                new SystemDescriptor("Late", SystemStage.AI, 1, 0, ComponentMask.Empty, ComponentMask.Empty),
+                new List<string>())));
+
+        world.Shutdown();
+
+        Assert.Equal(1, system.ShutdownCalls);
+        Assert.Equal(WorldLifecycleState.Shutdown, world.State);
+        Assert.False(world.IsInitialized);
+        Assert.Throws<InvalidOperationException>(() => world.Tick(0.016f));
+        Assert.Throws<InvalidOperationException>(() => world.EnqueueDestroy(Entity.Null));
+        Assert.Throws<InvalidOperationException>(() => world.SetComponent(Entity.Null, new Position(1)));
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -728,6 +815,35 @@ internal static class TestRunner
     {
         public CountingSystemTwo(SystemDescriptor descriptor, Action action) : base(descriptor, action)
         {
+        }
+    }
+
+    private sealed class LifecycleTrackingSystem : SystemBase
+    {
+        public LifecycleTrackingSystem(SystemDescriptor descriptor)
+        {
+            Descriptor = descriptor;
+        }
+
+        public int InitializeCalls { get; private set; }
+        public int UpdateCalls { get; private set; }
+        public int ShutdownCalls { get; private set; }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void OnInitialize(World world)
+        {
+            InitializeCalls++;
+        }
+
+        public override void Update(in SystemContext ctx)
+        {
+            UpdateCalls++;
+        }
+
+        public override void OnShutdown(World world)
+        {
+            ShutdownCalls++;
         }
     }
 }
