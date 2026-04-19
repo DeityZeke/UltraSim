@@ -17,6 +17,9 @@ internal static class TestRunner
         Run(nameof(EntityManager_TracksEntityLifecycleAcrossArchetypes), EntityManager_TracksEntityLifecycleAcrossArchetypes);
         Run(nameof(ComponentMask_IntersectionsAndSupersetsWork), ComponentMask_IntersectionsAndSupersetsWork);
         Run(nameof(SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField), SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField);
+        Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
+        Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
+        Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
 
         Console.WriteLine("All ECS scaffold tests passed.");
     }
@@ -201,6 +204,105 @@ internal static class TestRunner
         Assert.Equal(SystemStage.WorldSim, schedule.Stage);
     }
 
+    private static void ExplicitSetComponent_MarksDirty()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var world = new World(builder.Build());
+        Entity entity = world.CreateDefault(new ArchetypeSignature([positionId]));
+
+        bool updated = world.SetComponent(entity, new Position(42));
+
+        Assert.True(updated);
+        Assert.True(world.TryGetComponent(entity, out Position value));
+        Assert.Equal(new Position(42), value);
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        Assert.Equal(1, world.CopyDirtyTo<Position>(dirty));
+        Assert.Equal(entity, dirty[0]);
+        Assert.Equal(1, world.DrainDirtyTo(dirty));
+        Assert.Equal(entity, dirty[0]);
+        Assert.Equal(0, world.DrainDirtyTo(dirty));
+    }
+
+    private static void StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity entity = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Assert.True(world.SetComponent(entity, new Position(7)));
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+
+        world.EnqueueAdd(entity, new Velocity(9));
+        world.ProcessStructuralQueues();
+
+        Assert.True(world.HasComponent<Position>(entity));
+        Assert.True(world.HasComponent<Velocity>(entity));
+        Assert.True(world.TryGetComponent(entity, out Position positionAfterAdd));
+        Assert.True(world.TryGetComponent(entity, out Velocity velocityAfterAdd));
+        Assert.Equal(new Position(7), positionAfterAdd);
+        Assert.Equal(new Velocity(9), velocityAfterAdd);
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+        Assert.Equal(entity, dirty[0]);
+
+        world.EnqueueRemove<Velocity>(entity);
+        world.ProcessStructuralQueues();
+
+        Assert.True(world.HasComponent<Position>(entity));
+        Assert.False(world.HasComponent<Velocity>(entity));
+        Assert.True(world.TryGetComponent(entity, out Position positionAfterRemove));
+        Assert.Equal(new Position(7), positionAfterRemove);
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+        Assert.Equal(entity, dirty[0]);
+
+        world.EnqueueDestroy(entity);
+        world.ProcessStructuralQueues();
+
+        Assert.False(world.Entities.IsAlive(entity));
+        Assert.Equal(1, world.DrainDirtyTo(dirty));
+        Assert.Equal(entity, dirty[0]);
+    }
+
+    private static void SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var log = new List<string>();
+
+        var movement = new MovementLoggingSystem(
+            "Movement",
+            new SystemDescriptor("Movement", SystemStage.Movement, 1, 0, ComponentMask.Empty, ComponentMask.Empty),
+            log);
+
+        var ai = new AiLoggingSystem(
+            "AI",
+            new SystemDescriptor("AI", SystemStage.AI, 2, 1, ComponentMask.Empty, ComponentMask.Empty),
+            log);
+
+        var manual = new ManualLoggingSystem(
+            "Manual",
+            new SystemDescriptor("Manual", SystemStage.Input, 1, 0, ComponentMask.Empty, ComponentMask.Empty, manual: true),
+            log);
+
+        world.RegisterSystems(ai, movement, manual);
+        world.SealSystems();
+
+        world.Tick(0.016f);
+        Assert.SequenceEqual(["Movement@0"], log);
+
+        world.Tick(0.016f);
+        Assert.SequenceEqual(["Movement@0", "Movement@1", "AI@1"], log);
+
+        world.RunManualSystem<MovementLoggingSystem>(0.016f);
+        Assert.SequenceEqual(["Movement@0", "Movement@1", "AI@1"], log);
+
+        world.RunManualSystem(manual.Id, 0.016f);
+        Assert.SequenceEqual(["Movement@0", "Movement@1", "AI@1", "Manual@2"], log);
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -216,11 +318,11 @@ internal static class TestRunner
         }
     }
 
-    private struct Position : IComponent<Position>
+    private readonly record struct Position(int X) : IComponent<Position>
     {
     }
 
-    private struct Velocity : IComponent<Velocity>
+    private readonly record struct Velocity(int X) : IComponent<Velocity>
     {
     }
 
@@ -267,6 +369,50 @@ internal static class TestRunner
         {
         }
     }
+
+    private abstract class LoggingSystem : SystemBase
+    {
+        private readonly string _label;
+        private readonly List<string> _log;
+
+        public LoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+        {
+            _label = label;
+            Descriptor = descriptor;
+            _log = log;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            _log.Add($"{_label}@{ctx.Tick}");
+        }
+    }
+
+    private sealed class MovementLoggingSystem : LoggingSystem
+    {
+        public MovementLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class AiLoggingSystem : LoggingSystem
+    {
+        public AiLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class ManualLoggingSystem : LoggingSystem
+    {
+        public ManualLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
 }
 
 internal static class Assert
@@ -309,5 +455,17 @@ internal static class Assert
         }
 
         throw new InvalidOperationException($"Expected exception of type {typeof(TException).Name}.");
+    }
+
+    public static void SequenceEqual<T>(IReadOnlyList<T> expected, IReadOnlyList<T> actual)
+    {
+        if (expected.Count != actual.Count)
+            throw new InvalidOperationException($"Expected sequence count {expected.Count}, got {actual.Count}.");
+
+        for (int i = 0; i < expected.Count; i++)
+        {
+            if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
+                throw new InvalidOperationException($"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
+        }
     }
 }

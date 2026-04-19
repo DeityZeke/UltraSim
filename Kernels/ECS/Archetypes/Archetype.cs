@@ -157,6 +157,8 @@ public sealed class Archetype
         throw new InvalidOperationException($"Component column not found for id {id}.");
     }
 
+    internal IComponentColumn GetColumnAt(int columnIndex) => _columns[columnIndex];
+
     private void EnsureEntityCapacity(int needed)
     {
         if (needed <= _entities.Length)
