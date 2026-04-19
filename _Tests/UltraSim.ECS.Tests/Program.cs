@@ -22,6 +22,7 @@ internal static class TestRunner
         Run(nameof(PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware), PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
         Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
+        Run(nameof(StructuralQueue_MixedOperations_UseDeterministicPhaseOrder), StructuralQueue_MixedOperations_UseDeterministicPhaseOrder);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
@@ -368,6 +369,58 @@ internal static class TestRunner
 
         for (int i = 0; i < targets.Length; i++)
             Assert.False(world.Entities.IsAlive(targets[i]));
+    }
+
+    private static void StructuralQueue_MixedOperations_UseDeterministicPhaseOrder()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity destroyAndAdd = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity removeThenAdd = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity untouched = world.CreateDefault(new ArchetypeSignature([positionId]));
+
+        Assert.True(world.SetComponent(destroyAndAdd, new Position(1)));
+        Assert.True(world.SetComponent(removeThenAdd, new Position(2)));
+        Assert.True(world.SetComponent(removeThenAdd, new Velocity(3)));
+        Assert.True(world.SetComponent(untouched, new Position(4)));
+
+        Span<Entity> dirty = stackalloc Entity[16];
+        world.DrainDirtyTo(dirty);
+
+        world.EnqueueAdd(destroyAndAdd, new Velocity(50));
+        world.EnqueueRemove<Velocity>(removeThenAdd);
+        world.EnqueueAdd(removeThenAdd, new Velocity(60));
+        world.EnqueueDestroy(destroyAndAdd);
+        world.CreateDefault([new ArchetypeSignature([positionId])]);
+
+        world.ProcessStructuralQueues();
+
+        Assert.False(world.Entities.IsAlive(destroyAndAdd));
+        Assert.True(world.Entities.IsAlive(removeThenAdd));
+        Assert.True(world.Entities.IsAlive(untouched));
+        Assert.Equal(3, world.Entities.AliveCount);
+
+        Assert.True(world.TryGetComponent(removeThenAdd, out Velocity velocityAfterBarrier));
+        Assert.Equal(new Velocity(60), velocityAfterBarrier);
+
+        int positionOnlyArchetypeCount = 0;
+        int positionOnlyEntities = 0;
+        foreach (Archetype archetype in world.QueryArchetypes([positionId]))
+        {
+            if (!archetype.HasComponent(velocityId))
+            {
+                positionOnlyArchetypeCount++;
+                positionOnlyEntities += archetype.Count;
+            }
+        }
+
+        Assert.True(positionOnlyArchetypeCount >= 1);
+        Assert.Equal(2, positionOnlyEntities);
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+        Assert.Equal(removeThenAdd, dirty[0]);
     }
 
     private static void QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal()

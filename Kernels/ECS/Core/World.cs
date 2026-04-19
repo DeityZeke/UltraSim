@@ -65,6 +65,11 @@ public sealed partial class World
         return CreateDefaultImmediate(signature);
     }
 
+    public void CreateDefault(ReadOnlySpan<ArchetypeSignature> signatures)
+    {
+        EnqueueCreateDefault(signatures);
+    }
+
     public void EnqueueCreateDefault(ArchetypeSignature signature)
     {
         EnsureNotShutdown();
@@ -202,6 +207,11 @@ public sealed partial class World
     {
         EnsureNotShutdown();
         DestroyImmediate(entity);
+    }
+
+    public void Destroy(ReadOnlySpan<Entity> entities)
+    {
+        EnqueueDestroy(entities);
     }
 
     public bool HasComponent<T>(Entity entity) where T : unmanaged, IComponent<T>

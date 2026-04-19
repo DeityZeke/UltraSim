@@ -91,6 +91,7 @@ Implemented so far:
 - explicit patch/update mutation path without public mutable refs,
 - explicit world lifecycle with seal/initialize/run/shutdown state,
 - batched structural enqueue APIs for create-default, destroy, add, and remove,
+- mixed structural barriers keep deterministic phase order: destroy, create-default, remove, add,
 - scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,
 - read-only query and chunk iteration surfaces,
 - read-only archetype traversal and persistence adapter hooks,
