@@ -1,6 +1,6 @@
 namespace UltraSim.ECS;
 
-public sealed class World
+public sealed partial class World
 {
     private sealed class WorldStructuralCommands : IStructuralCommands
     {
@@ -43,6 +43,7 @@ public sealed class World
     public IStructuralCommands Commands => _commands;
     public uint WorldTick => _worldTick;
     public int SystemCount => _systems.Count;
+    public SystemExecutionMode SystemExecutionMode => _systems.ExecutionMode;
 
     internal EntityManager EntityStore { get; }
     internal ArchetypeManager Archetypes { get; }
@@ -125,6 +126,11 @@ public sealed class World
 
     public void SealSystems() => _systems.Seal();
 
+    public void SetSystemExecutionMode(SystemExecutionMode mode) => _systems.SetExecutionMode(mode);
+
+    public void ConfigurePhaseStaggering(bool enabled, int maxNonCriticalStagger = 10)
+        => _systems.ConfigurePhaseStaggering(enabled, maxNonCriticalStagger);
+
     public TSystem? GetSystem<TSystem>() where TSystem : SystemBase
         => (TSystem?)_systems.GetSystem<TSystem>();
 
@@ -141,6 +147,15 @@ public sealed class World
 
     public void RunManualSystem<TSystem>(float deltaSeconds) where TSystem : SystemBase
         => _systems.RunManual<TSystem>(this, _worldTick, deltaSeconds, _commands);
+
+    public int[] GetSystemStartOffsetsSnapshot()
+    {
+        var offsets = new int[_systems.Count];
+        _systems.CopyStartOffsets(offsets);
+        return offsets;
+    }
+
+    internal SystemId[][] GetStageBatchesSnapshot(SystemStage stage) => _systems.GetStageBatchesSnapshot(stage);
 
     internal Entity CreateDefaultImmediate(ArchetypeSignature signature)
     {

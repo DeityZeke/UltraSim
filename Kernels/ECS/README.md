@@ -81,11 +81,20 @@ Performance matters in the ECS, but only after correctness and clarity are secur
 
 ## Current Port Position
 
-This scaffold is Phase 1A of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`:
+The kernel is now partway through Phase 1D of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`.
 
-- schema builder,
-- sealed schema,
-- component contracts and ids,
-- world bootstrap placeholder,
-- prefab/persistence seams,
-- executable tests.
+Implemented so far:
+
+- sealed schema/bootstrap flow with no process-global registries,
+- entity/archetype storage bound to schema-owned column factories,
+- explicit dirty-aware mutation paths through `World` and the structural queue,
+- scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,
+- read-only query and chunk iteration surfaces,
+- prefab/persistence seams held for second-wave import,
+- executable incremental tests.
+
+Still intentionally deferred:
+
+- prefab runtime port,
+- persistence/runtime save-load port,
+- broader integration helpers and higher-level tooling.

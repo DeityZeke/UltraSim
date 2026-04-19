@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using System.Threading;
 
 TestRunner.Run();
 
@@ -19,7 +20,12 @@ internal static class TestRunner
         Run(nameof(SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField), SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField);
         Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
+        Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
+        Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
+        Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
+        Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
+        Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
 
         Console.WriteLine("All ECS scaffold tests passed.");
     }
@@ -267,6 +273,61 @@ internal static class TestRunner
         Assert.Equal(entity, dirty[0]);
     }
 
+    private static void ReadOnlyQuery_AndChunkIteration_FilterByArchetype()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        ComponentId accelerationId = builder.RegisterComponent<Acceleration>();
+        var world = new World(builder.Build());
+
+        Entity moving = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity accelerating = world.CreateDefault(new ArchetypeSignature([positionId, accelerationId]));
+        Entity staticOnly = world.CreateDefault(new ArchetypeSignature([positionId]));
+
+        Assert.True(world.SetComponent(moving, new Position(10)));
+        Assert.True(world.SetComponent(moving, new Velocity(4)));
+        Assert.True(world.SetComponent(accelerating, new Position(20)));
+        Assert.True(world.SetComponent(accelerating, new Acceleration(3)));
+        Assert.True(world.SetComponent(staticOnly, new Position(30)));
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+
+        int positionSum = 0;
+        int velocityPairCount = world.Query<Position, Velocity>((Entity entity, in Position position, in Velocity velocity) =>
+        {
+            Assert.Equal(moving, entity);
+            positionSum += position.X + velocity.X;
+        });
+
+        Assert.Equal(1, velocityPairCount);
+        Assert.Equal(14, positionSum);
+
+        int visitedPositions = 0;
+        int totalPositionX = 0;
+        int chunkCount = 0;
+        foreach (World.QueryChunk<Position> chunk in world.QueryChunks<Position>())
+        {
+            chunkCount++;
+            for (int i = 0; i < chunk.Entities.Length; i++)
+            {
+                visitedPositions++;
+                totalPositionX += chunk.Component1[i].X;
+            }
+        }
+
+        Assert.Equal(3, visitedPositions);
+        Assert.Equal(60, totalPositionX);
+        Assert.Equal(3, chunkCount);
+
+        int tripleCount = world.Query<Position, Velocity, Acceleration>((Entity _, in Position _, in Velocity _, in Acceleration _) =>
+        {
+            throw new InvalidOperationException("No entity should match all three components.");
+        });
+
+        Assert.Equal(0, tripleCount);
+    }
+
     private static void SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags()
     {
         var world = new World(new EcsSchemaBuilder().Build());
@@ -303,6 +364,153 @@ internal static class TestRunner
         Assert.SequenceEqual(["Movement@0", "Movement@1", "AI@1", "Manual@2"], log);
     }
 
+    private static void SystemManager_RequiresOverridesRegistrationOrderWithinStage()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var log = new List<string>();
+
+        var dependent = new DependentLoggingSystem(
+            "Dependent",
+            new SystemDescriptor(
+                "Dependent",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.Empty,
+                requires: [DependencyLoggingSystemType]),
+            log);
+
+        var dependency = new DependencyLoggingSystem(
+            "Dependency",
+            new SystemDescriptor("Dependency", SystemStage.AI, 1, 0, ComponentMask.Empty, ComponentMask.Empty),
+            log);
+
+        world.RegisterSystems(dependent, dependency);
+        world.SealSystems();
+        world.Tick(0.016f);
+
+        Assert.SequenceEqual(["Dependency@0", "Dependent@0"], log);
+    }
+
+    private static void SystemManager_BatchesNonConflictingSystemsTogether()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        world.RegisterSystems(
+            new PositionWriterSystem(new SystemDescriptor(
+                "PositionWriter",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.FromIds([positionId]))),
+            new PositionReaderSystem(new SystemDescriptor(
+                "PositionReader",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId]),
+                ComponentMask.Empty)),
+            new VelocityWriterSystem(new SystemDescriptor(
+                "VelocityWriter",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.FromIds([velocityId]))));
+
+        world.SealSystems();
+
+        SystemId[][] batches = world.GetStageBatchesSnapshot(SystemStage.AI);
+
+        Assert.Equal(2, batches.Length);
+        Assert.Equal(2, batches[0].Length);
+        Assert.Equal(1, batches[1].Length);
+        Assert.Equal(0, batches[0][0].Value);
+        Assert.Equal(2, batches[0][1].Value);
+        Assert.Equal(1, batches[1][0].Value);
+    }
+
+    private static void SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        world.ConfigurePhaseStaggering(enabled: true, maxNonCriticalStagger: 3);
+
+        world.RegisterSystems(
+            new MovementLoggingSystem(
+                "MovementA",
+                new SystemDescriptor("MovementA", SystemStage.Movement, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                new List<string>()),
+            new AiLoggingSystem(
+                "AiA",
+                new SystemDescriptor("AiA", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                new List<string>()),
+            new AiLoggingSystemTwo(
+                "AiB",
+                new SystemDescriptor("AiB", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                new List<string>()),
+            new AiLoggingSystemThree(
+                "AiC",
+                new SystemDescriptor("AiC", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                new List<string>()),
+            new WorldSimLoggingSystem(
+                "WorldSimA",
+                new SystemDescriptor("WorldSimA", SystemStage.WorldSim, 4, 2, ComponentMask.Empty, ComponentMask.Empty),
+                new List<string>()));
+
+        world.SealSystems();
+
+        int[] offsets = world.GetSystemStartOffsetsSnapshot();
+
+        Assert.Equal(0, offsets[0]);
+        Assert.Equal(0, offsets[1]);
+        Assert.Equal(1, offsets[2]);
+        Assert.Equal(2, offsets[3]);
+        Assert.Equal(2, offsets[4]);
+    }
+
+    private static void SystemManager_ParallelMode_RunsNonConflictingBatchMembers()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+        world.SetSystemExecutionMode(SystemExecutionMode.ParallelBatches);
+
+        int positionRuns = 0;
+        int velocityRuns = 0;
+
+        world.RegisterSystems(
+            new CountingSystem(
+                new SystemDescriptor(
+                    "ParallelPosition",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.Empty,
+                    ComponentMask.FromIds([positionId])),
+                () => Interlocked.Increment(ref positionRuns)),
+            new CountingSystemTwo(
+                new SystemDescriptor(
+                    "ParallelVelocity",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.Empty,
+                    ComponentMask.FromIds([velocityId])),
+                () => Interlocked.Increment(ref velocityRuns)));
+
+        world.SealSystems();
+        world.Tick(0.016f);
+
+        Assert.Equal(1, positionRuns);
+        Assert.Equal(1, velocityRuns);
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -330,7 +538,7 @@ internal static class TestRunner
     {
     }
 
-    private struct Acceleration : IComponent<Acceleration>
+    private readonly record struct Acceleration(int X) : IComponent<Acceleration>
     {
     }
 
@@ -406,10 +614,119 @@ internal static class TestRunner
         }
     }
 
+    private sealed class AiLoggingSystemTwo : LoggingSystem
+    {
+        public AiLoggingSystemTwo(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class AiLoggingSystemThree : LoggingSystem
+    {
+        public AiLoggingSystemThree(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
     private sealed class ManualLoggingSystem : LoggingSystem
     {
         public ManualLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
             : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class WorldSimLoggingSystem : LoggingSystem
+    {
+        public WorldSimLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private static readonly Type DependencyLoggingSystemType = typeof(DependencyLoggingSystem);
+
+    private sealed class DependencyLoggingSystem : LoggingSystem
+    {
+        public DependencyLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class DependentLoggingSystem : LoggingSystem
+    {
+        public DependentLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private abstract class DescriptorOnlySystem : SystemBase
+    {
+        protected DescriptorOnlySystem(SystemDescriptor descriptor)
+        {
+            Descriptor = descriptor;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+        }
+    }
+
+    private sealed class PositionWriterSystem : DescriptorOnlySystem
+    {
+        public PositionWriterSystem(SystemDescriptor descriptor) : base(descriptor)
+        {
+        }
+    }
+
+    private sealed class PositionReaderSystem : DescriptorOnlySystem
+    {
+        public PositionReaderSystem(SystemDescriptor descriptor) : base(descriptor)
+        {
+        }
+    }
+
+    private sealed class VelocityWriterSystem : DescriptorOnlySystem
+    {
+        public VelocityWriterSystem(SystemDescriptor descriptor) : base(descriptor)
+        {
+        }
+    }
+
+    private abstract class CountingSystemBase : SystemBase
+    {
+        private readonly Action _action;
+
+        protected CountingSystemBase(SystemDescriptor descriptor, Action action)
+        {
+            Descriptor = descriptor;
+            _action = action;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            _action();
+        }
+    }
+
+    private sealed class CountingSystem : CountingSystemBase
+    {
+        public CountingSystem(SystemDescriptor descriptor, Action action) : base(descriptor, action)
+        {
+        }
+    }
+
+    private sealed class CountingSystemTwo : CountingSystemBase
+    {
+        public CountingSystemTwo(SystemDescriptor descriptor, Action action) : base(descriptor, action)
         {
         }
     }
