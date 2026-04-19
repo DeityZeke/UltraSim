@@ -1,0 +1,15 @@
+# Godot 4+ specific ignores
+.godot/
+_OLD/
+/android/
+.output/
+_temp/
+_tmp/
+_tmp_perf_probe/
+*.uid
+*.db
+*.db-shm
+*.db-wal
+**/bin/
+**/obj/
+.codex-temp/
