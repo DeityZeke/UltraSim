@@ -95,6 +95,7 @@ Implemented so far:
 - scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,
 - read-only query and chunk iteration surfaces,
 - read-only archetype traversal and persistence adapter hooks,
+- lightweight persistence snapshot views in `Extensions/Persistence`,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
 

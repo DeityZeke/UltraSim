@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using UltraSim.ECS.Persistence;
 using System.Threading;
 
 TestRunner.Run();
@@ -31,6 +32,7 @@ internal static class TestRunner
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
+        Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
 
         Console.WriteLine("All ECS scaffold tests passed.");
@@ -773,6 +775,47 @@ internal static class TestRunner
         var noAdapterWorld = new World(new EcsSchemaBuilder().Build());
         Assert.Throws<InvalidOperationException>(() => noAdapterWorld.Save(writer));
         Assert.Throws<InvalidOperationException>(() => noAdapterWorld.Load(reader));
+    }
+
+    private static void WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity positionOnly = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity positionAndVelocity = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity velocityOnly = world.CreateDefault(new ArchetypeSignature([velocityId]));
+
+        Assert.True(world.SetComponent(positionOnly, new Position(10)));
+        Assert.True(world.SetComponent(positionAndVelocity, new Position(20)));
+        Assert.True(world.SetComponent(positionAndVelocity, new Velocity(30)));
+        Assert.True(world.SetComponent(velocityOnly, new Velocity(40)));
+
+        world.Destroy(velocityOnly);
+
+        var filtered = new WorldPersistenceView(world, [positionId]);
+
+        Assert.Equal(2, filtered.ArchetypeCount);
+        Assert.Equal(2, filtered.EntityCount);
+
+        int totalPosition = 0;
+        for (int i = 0; i < filtered.Archetypes.Count; i++)
+        {
+            PersistenceArchetypeView archetype = filtered.Archetypes[i];
+            Assert.True(archetype.HasComponent(positionId));
+
+            ReadOnlySpan<Position> positions = archetype.GetComponentSpan<Position>(positionId);
+            for (int j = 0; j < positions.Length; j++)
+                totalPosition += positions[j].X;
+        }
+
+        Assert.Equal(30, totalPosition);
+
+        var withEmpty = new WorldPersistenceView(world, ReadOnlySpan<ComponentId>.Empty, excludeEmpty: false);
+        Assert.Equal(3, withEmpty.ArchetypeCount);
+        Assert.Equal(2, withEmpty.EntityCount);
     }
 
     private static void Run(string name, Action test)
