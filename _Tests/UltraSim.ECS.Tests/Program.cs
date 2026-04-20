@@ -31,6 +31,7 @@ internal static class TestRunner
         Run(nameof(QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes), QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes);
         Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
         Run(nameof(PatchChunks_UpdatesChunkRowsAndMarksDirty), PatchChunks_UpdatesChunkRowsAndMarksDirty);
+        Run(nameof(SystemContext_ParallelFor_KeepsChunkWritesDeterministic), SystemContext_ParallelFor_KeepsChunkWritesDeterministic);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
@@ -752,6 +753,68 @@ internal static class TestRunner
         Assert.Equal(1, world.DrainDirtyTo(dirty));
         Assert.Equal(0, world.DrainDirtyTo<Position>(dirty));
         Assert.Equal(0, world.DrainDirtyTo<Velocity>(dirty));
+    }
+
+    private static void SystemContext_ParallelFor_KeepsChunkWritesDeterministic()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        EcsSchema schema = builder.Build();
+
+        World serialWorld = CreateParallelChunkTestWorld(schema, positionId, velocityId, SystemExecutionMode.Serial);
+        World parallelWorld = CreateParallelChunkTestWorld(schema, positionId, velocityId, SystemExecutionMode.ParallelBatches);
+
+        serialWorld.Tick(0.016f);
+        parallelWorld.Tick(0.016f);
+
+        for (int i = 0; i < 1024; i++)
+        {
+            Entity entity = new((uint)i, 1u);
+            Assert.Equal(serialWorld.GetComponent<Position>(entity), parallelWorld.GetComponent<Position>(entity));
+        }
+
+        var serialDirty = new Entity[2048];
+        var parallelDirty = new Entity[2048];
+        AssertEntitySetsEqual(
+            Enumerable.Range(0, 1024).Select(i => new Entity((uint)i, 1u)).ToArray(),
+            serialWorld.DrainDirtyTo<Position>(serialDirty),
+            serialDirty);
+        AssertEntitySetsEqual(
+            Enumerable.Range(0, 1024).Select(i => new Entity((uint)i, 1u)).ToArray(),
+            parallelWorld.DrainDirtyTo<Position>(parallelDirty),
+            parallelDirty);
+        Assert.Equal(1024, serialWorld.DrainDirtyTo(serialDirty));
+        Assert.Equal(1024, parallelWorld.DrainDirtyTo(parallelDirty));
+    }
+
+    private static World CreateParallelChunkTestWorld(EcsSchema schema, ComponentId positionId, ComponentId velocityId, SystemExecutionMode mode)
+    {
+        var world = new World(schema);
+        var signature = new ArchetypeSignature([positionId, velocityId]);
+        for (int i = 0; i < 1024; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            world.SetComponent(entity, new Position(i));
+            world.SetComponent(entity, new Velocity(i + 1));
+        }
+
+        Span<Entity> drain = stackalloc Entity[2048];
+        world.DrainDirtyTo(drain);
+        world.DrainDirtyTo<Position>(drain);
+        world.DrainDirtyTo<Velocity>(drain);
+
+        world.SetSystemExecutionMode(mode);
+        world.RegisterSystems(new ParallelChunkPositionSystem(
+            new SystemDescriptor(
+                "ParallelChunkPosition",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId, velocityId]),
+                ComponentMask.FromIds([positionId]))));
+        world.SealSystems();
+        return world;
     }
 
     private static void SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags()
@@ -2037,6 +2100,29 @@ internal static class TestRunner
         public override void Update(in SystemContext ctx)
         {
             _action(in ctx);
+        }
+    }
+
+    private sealed class ParallelChunkPositionSystem : SystemBase
+    {
+        private const int BlockSize = 128;
+
+        public ParallelChunkPositionSystem(SystemDescriptor descriptor)
+        {
+            Descriptor = descriptor;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            ctx.PatchChunksParallel<Velocity, Position>(BlockSize, (ReadOnlySpan<Entity> _, ReadOnlySpan<Velocity> velocities, Span<Position> writes) =>
+            {
+                for (int i = 0; i < writes.Length; i++)
+                {
+                    writes[i] = new Position(writes[i].X + velocities[i].X);
+                }
+            });
         }
     }
 

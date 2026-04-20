@@ -25,6 +25,7 @@ The benchmark matrix currently covers:
 - oscillating/pulsating sine-wave movement tick cost in serial and parallel modes
 - oscillating/pulsating sine-wave movement tick cost at `100k` entities over `200` ticks
 - dedicated older-old `v1`-style `pulse -> velocity -> movement` pipeline benchmarks at `100k` entities over `50` ticks
+- activity-shaped movement benchmarks with a deterministic `35%` moving subset reshuffled every `10` ticks at `100k / 200 ticks`
 - persistence-view capture cost
 
 It also includes kernel-specific scenarios:

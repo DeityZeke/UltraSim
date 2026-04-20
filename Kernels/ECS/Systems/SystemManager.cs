@@ -194,7 +194,7 @@ internal sealed class SystemManager
 
     public void Tick(World world, uint worldTick, float deltaSeconds, IStructuralCommands commands)
     {
-        var context = new SystemContext(world, worldTick, deltaSeconds, commands);
+        var context = new SystemContext(world, worldTick, deltaSeconds, commands, ExecuteParallelFor);
 
         for (int stage = 0; stage < _stageBatches.Length; stage++)
         {
@@ -230,7 +230,7 @@ internal sealed class SystemManager
         if (!_manual[index])
             return;
 
-        var context = new SystemContext(world, worldTick, deltaSeconds, commands);
+        var context = new SystemContext(world, worldTick, deltaSeconds, commands, ExecuteParallelFor);
         _systems[index].Update(in context);
     }
 
@@ -500,9 +500,25 @@ internal sealed class SystemManager
             if (!schedule.Enabled || !IsDue(index, worldTick, in schedule))
                 return;
 
-            var context = new SystemContext(world, worldTick, deltaSeconds, commands);
+            var context = new SystemContext(world, worldTick, deltaSeconds, commands, ExecuteParallelFor);
             _systems[index].Update(in context);
         });
+    }
+
+    private void ExecuteParallelFor(int count, Action<int> action)
+    {
+        if (count <= 0)
+            return;
+
+        if (count == 1 || WorkerThreadContext.TryGetWorkerIndex(out _))
+        {
+            for (int i = 0; i < count; i++)
+                action(i);
+
+            return;
+        }
+
+        EnsureWorkerPool().ParallelFor(count, action);
     }
 
     private ManualWorkerPool EnsureWorkerPool()

@@ -62,8 +62,12 @@ internal static class OldKernelBenchmarks
         scenarios.Add(MakeScenario("TickParallel_OscillatingMovement_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallelOscillatingMovement(10_000, 200)));
         scenarios.Add(MakeScenario("TickSerial_OscillatingMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickSerialOscillatingMovement(100_000, 200)));
         scenarios.Add(MakeScenario("TickParallel_OscillatingMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickParallelOscillatingMovement(100_000, 200)));
+        scenarios.Add(MakeScenario("TickSerial_Active35_Shuffle10_OscillatingMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickSerialOscillatingMovement(100_000, 200, activeSubsetOnly: true)));
+        scenarios.Add(MakeScenario("TickParallel_Active35_Shuffle10_OscillatingMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickParallelOscillatingMovement(100_000, 200, activeSubsetOnly: true)));
         scenarios.Add(MakeScenario("TickSerial_V1PulseMovement_100k_50Ticks", "Scheduler", true, 100_000, () => BenchmarkTickSerialV1PulseMovement(100_000, 50)));
         scenarios.Add(MakeScenario("TickParallel_V1PulseMovement_100k_50Ticks", "Scheduler", true, 100_000, () => BenchmarkTickParallelV1PulseMovement(100_000, 50)));
+        scenarios.Add(MakeScenario("TickSerial_Active35_Shuffle10_V1PulseMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickSerialV1PulseMovement(100_000, 200, activeSubsetOnly: true)));
+        scenarios.Add(MakeScenario("TickParallel_Active35_Shuffle10_V1PulseMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickParallelV1PulseMovement(100_000, 200, activeSubsetOnly: true)));
         scenarios.Add(CreateHotQuery1Scenario(50_000));
         scenarios.Add(CreateHotSetComponentScenario(50_000));
         scenarios.Add(CreateHotTryGetScenario(50_000));
@@ -613,36 +617,36 @@ internal static class OldKernelBenchmarks
         return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
     }
 
-    private static ScenarioMeasurement BenchmarkTickSerialOscillatingMovement(int entityCount, int ticks)
+    private static ScenarioMeasurement BenchmarkTickSerialOscillatingMovement(int entityCount, int ticks, bool activeSubsetOnly = false)
     {
-        World world = CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.Serial);
+        World world = CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.Serial, activeSubsetOnly);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
         return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
     }
 
-    private static ScenarioMeasurement BenchmarkTickParallelOscillatingMovement(int entityCount, int ticks)
+    private static ScenarioMeasurement BenchmarkTickParallelOscillatingMovement(int entityCount, int ticks, bool activeSubsetOnly = false)
     {
-        World world = CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.ParallelBatches);
+        World world = CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.ParallelBatches, activeSubsetOnly);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
         return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
     }
 
-    private static ScenarioMeasurement BenchmarkTickSerialV1PulseMovement(int entityCount, int ticks)
+    private static ScenarioMeasurement BenchmarkTickSerialV1PulseMovement(int entityCount, int ticks, bool activeSubsetOnly = false)
     {
-        World world = CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.Serial);
+        World world = CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.Serial, activeSubsetOnly);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
         return new ScenarioMeasurement((long)entityCount * 3 * ticks, SchedulerBenchmarkState.Checksum);
     }
 
-    private static ScenarioMeasurement BenchmarkTickParallelV1PulseMovement(int entityCount, int ticks)
+    private static ScenarioMeasurement BenchmarkTickParallelV1PulseMovement(int entityCount, int ticks, bool activeSubsetOnly = false)
     {
-        World world = CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.ParallelBatches);
+        World world = CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.ParallelBatches, activeSubsetOnly);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
@@ -700,7 +704,7 @@ internal static class OldKernelBenchmarks
         return world;
     }
 
-    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode)
+    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false)
     {
         SchedulerBenchmarkState.Reset();
         World world = SeedOscillatingWorld(entityCount, new EcsOptions(
@@ -709,15 +713,15 @@ internal static class OldKernelBenchmarks
             enableDirtyTracking: true,
             systemExecutionMode: mode));
         world.RegisterSystems(
-            new OscillatingReadSystem<OscReadTagA>("OscReadA"),
-            new OscillatingReadSystem<OscReadTagB>("OscReadB"),
-            new OscillatingWriteSystem<OscWriteTagA>("OscWriteA", writePosition: true),
-            new OscillatingWriteSystem<OscWriteTagB>("OscWriteB", writePosition: false));
+            new OscillatingReadSystem<OscReadTagA>("OscReadA", activeSubsetOnly),
+            new OscillatingReadSystem<OscReadTagB>("OscReadB", activeSubsetOnly),
+            new OscillatingWriteSystem<OscWriteTagA>("OscWriteA", writePosition: true, activeSubsetOnly),
+            new OscillatingWriteSystem<OscWriteTagB>("OscWriteB", writePosition: false, activeSubsetOnly));
         world.Seal();
         return world;
     }
 
-    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode)
+    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false)
     {
         SchedulerBenchmarkState.Reset();
         World world = SeedV1PulseWorld(entityCount, new EcsOptions(
@@ -726,9 +730,9 @@ internal static class OldKernelBenchmarks
             enableDirtyTracking: true,
             systemExecutionMode: mode));
         world.RegisterSystems(
-            new V1PulsePhaseAdvanceSystem("V1PulsePhase"),
-            new V1PulseVelocitySystem("V1PulseVelocity"),
-            new V1MovementSystem("V1Movement"));
+            new V1PulsePhaseAdvanceSystem("V1PulsePhase", activeSubsetOnly),
+            new V1PulseVelocitySystem("V1PulseVelocity", activeSubsetOnly),
+            new V1MovementSystem("V1Movement", activeSubsetOnly));
         world.Seal();
         return world;
     }
@@ -1174,8 +1178,11 @@ internal static class OldKernelBenchmarks
 
     private sealed class OscillatingReadSystem<TTag> : SystemBase
     {
-        public OscillatingReadSystem(string name)
+        private readonly bool _activeSubsetOnly;
+
+        public OscillatingReadSystem(string name, bool activeSubsetOnly)
         {
+            _activeSubsetOnly = activeSubsetOnly;
             Descriptor = new SystemDescriptor(
                 name,
                 SystemStage.AI,
@@ -1190,8 +1197,12 @@ internal static class OldKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             float time = ctx.Tick * ctx.DeltaSeconds;
+            uint tick = ctx.Tick;
             ctx.World.Query<Position, Velocity, Oscillator>((Entity entity, ref Position position, ref Velocity velocity, ref Oscillator oscillator) =>
             {
+                if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
+                    return;
+
                 float phase = (time * oscillator.Frequency) + oscillator.Phase;
                 float sample = MathF.Sin(phase + (position.X * 0.001f))
                     + MathF.Cos((phase * 0.5f) + (velocity.Y * 0.001f))
@@ -1204,10 +1215,12 @@ internal static class OldKernelBenchmarks
 
     private sealed class OscillatingWriteSystem<TTag> : SystemBase
     {
+        private readonly bool _activeSubsetOnly;
         private readonly bool _writePosition;
 
-        public OscillatingWriteSystem(string name, bool writePosition)
+        public OscillatingWriteSystem(string name, bool writePosition, bool activeSubsetOnly)
         {
+            _activeSubsetOnly = activeSubsetOnly;
             _writePosition = writePosition;
             Descriptor = new SystemDescriptor(
                 name,
@@ -1223,9 +1236,13 @@ internal static class OldKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             float time = ctx.Tick * ctx.DeltaSeconds;
+            uint tick = ctx.Tick;
             World world = ctx.World;
             ctx.World.Query<Position, Velocity, Oscillator>((Entity entity, ref Position position, ref Velocity velocity, ref Oscillator oscillator) =>
             {
+                if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
+                    return;
+
                 if (_writePosition)
                 {
                     float phase = (time * oscillator.Frequency) + oscillator.Phase;
@@ -1256,8 +1273,11 @@ internal static class OldKernelBenchmarks
 
     private sealed class V1PulsePhaseAdvanceSystem : SystemBase
     {
-        public V1PulsePhaseAdvanceSystem(string name)
+        private readonly bool _activeSubsetOnly;
+
+        public V1PulsePhaseAdvanceSystem(string name, bool activeSubsetOnly)
         {
+            _activeSubsetOnly = activeSubsetOnly;
             Descriptor = new SystemDescriptor(
                 name,
                 SystemStage.AI,
@@ -1272,8 +1292,12 @@ internal static class OldKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             float delta = ctx.DeltaSeconds;
+            uint tick = ctx.Tick;
             ctx.World.Query<PulseMotion>((Entity entity, ref PulseMotion motion) =>
             {
+                if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
+                    return;
+
                 motion.Phase += motion.Frequency * delta;
                 if (motion.Phase > PulseMath.TwoPi)
                     motion.Phase -= PulseMath.TwoPi;
@@ -1285,8 +1309,11 @@ internal static class OldKernelBenchmarks
 
     private sealed class V1PulseVelocitySystem : SystemBase
     {
-        public V1PulseVelocitySystem(string name)
+        private readonly bool _activeSubsetOnly;
+
+        public V1PulseVelocitySystem(string name, bool activeSubsetOnly)
         {
+            _activeSubsetOnly = activeSubsetOnly;
             Descriptor = new SystemDescriptor(
                 name,
                 SystemStage.AI,
@@ -1300,8 +1327,12 @@ internal static class OldKernelBenchmarks
 
         public override void Update(in SystemContext ctx)
         {
-            ctx.World.Query<PulsePosition, PulseVelocity, PulseMotion>((Entity _, ref PulsePosition position, ref PulseVelocity velocity, ref PulseMotion motion) =>
+            uint tick = ctx.Tick;
+            ctx.World.Query<PulsePosition, PulseVelocity, PulseMotion>((Entity entity, ref PulsePosition position, ref PulseVelocity velocity, ref PulseMotion motion) =>
             {
+                if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
+                    return;
+
                 float pulseDirection = PulseMath.FastSin(motion.Phase);
                 float distSq = (position.X * position.X) + (position.Y * position.Y) + (position.Z * position.Z);
 
@@ -1328,8 +1359,11 @@ internal static class OldKernelBenchmarks
 
     private sealed class V1MovementSystem : SystemBase
     {
-        public V1MovementSystem(string name)
+        private readonly bool _activeSubsetOnly;
+
+        public V1MovementSystem(string name, bool activeSubsetOnly)
         {
+            _activeSubsetOnly = activeSubsetOnly;
             Descriptor = new SystemDescriptor(
                 name,
                 SystemStage.AI,
@@ -1344,8 +1378,12 @@ internal static class OldKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             float delta = ctx.DeltaSeconds;
-            ctx.World.Query<PulsePosition, PulseVelocity>((Entity _, ref PulsePosition position, ref PulseVelocity velocity) =>
+            uint tick = ctx.Tick;
+            ctx.World.Query<PulsePosition, PulseVelocity>((Entity entity, ref PulsePosition position, ref PulseVelocity velocity) =>
             {
+                if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
+                    return;
+
                 position.X += velocity.X * delta;
                 position.Y += velocity.Y * delta;
                 position.Z += velocity.Z * delta;
@@ -1394,6 +1432,30 @@ internal static class OldKernelBenchmarks
                 values[i] = MathF.Sin((i / (float)LookupSize) * TwoPi);
 
             return values;
+        }
+    }
+
+    private static class MovementActivity
+    {
+        private const uint ActiveThresholdPermille = 350;
+        private const uint ReshufflePeriodTicks = 10;
+
+        public static bool IsActive(Entity entity, uint tick)
+        {
+            uint epoch = tick / ReshufflePeriodTicks;
+            uint seed = unchecked((uint)entity.Index) ^ (epoch * 0x9E3779B9u);
+            uint mixed = Mix(seed);
+            return (mixed % 1000u) < ActiveThresholdPermille;
+        }
+
+        private static uint Mix(uint value)
+        {
+            value ^= value >> 16;
+            value *= 0x7FEB352Du;
+            value ^= value >> 15;
+            value *= 0x846CA68Bu;
+            value ^= value >> 16;
+            return value;
         }
     }
 

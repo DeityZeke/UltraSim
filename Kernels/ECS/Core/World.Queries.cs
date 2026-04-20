@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace UltraSim.ECS;
@@ -247,6 +248,190 @@ public sealed partial class World
         return matched;
     }
 
+    internal int PatchChunksParallel<TWrite>(Action<int, Action<int>>? parallelFor, int blockSize, PatchChunkAction<TWrite> action)
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(writeId);
+        int matched = 0;
+        int resolvedBlockSize = Math.Max(1, blockSize);
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan1 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            if (entities.Length == 0)
+                continue;
+
+            if (parallelFor is null || entities.Length <= resolvedBlockSize)
+            {
+                action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1));
+            }
+            else
+            {
+                int blockCount = (entities.Length + resolvedBlockSize - 1) / resolvedBlockSize;
+                QueryBlock1[] blocks = ArrayPool<QueryBlock1>.Shared.Rent(blockCount);
+                try
+                {
+                    for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+                    {
+                        int start = blockIndex * resolvedBlockSize;
+                        int length = Math.Min(resolvedBlockSize, entities.Length - start);
+                        blocks[blockIndex] = new QueryBlock1(archetype, plan.Column1, start, length);
+                    }
+
+                    parallelFor(blockCount, index =>
+                    {
+                        QueryBlock1 block = blocks[index];
+                        action(
+                            block.Archetype.GetEntitySpan().Slice(block.Start, block.Length),
+                            block.Archetype.GetComponentSpanAt<TWrite>(block.Column1).Slice(block.Start, block.Length));
+                    });
+                }
+                finally
+                {
+                    ArrayPool<QueryBlock1>.Shared.Return(blocks, clearArray: false);
+                }
+            }
+
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    internal int PatchChunksParallel<TRead, TWrite>(Action<int, Action<int>>? parallelFor, int blockSize, PatchChunkAction<TRead, TWrite> action)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId = Schema.GetComponentId<TRead>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(readId, writeId);
+        int matched = 0;
+        int resolvedBlockSize = Math.Max(1, blockSize);
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan2 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            if (entities.Length == 0)
+                continue;
+
+            if (parallelFor is null || entities.Length <= resolvedBlockSize)
+            {
+                action(
+                    entities,
+                    archetype.GetComponentSpanAt<TRead>(plan.Column1),
+                    archetype.GetComponentSpanAt<TWrite>(plan.Column2));
+            }
+            else
+            {
+                int blockCount = (entities.Length + resolvedBlockSize - 1) / resolvedBlockSize;
+                QueryBlock2[] blocks = ArrayPool<QueryBlock2>.Shared.Rent(blockCount);
+                try
+                {
+                    for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+                    {
+                        int start = blockIndex * resolvedBlockSize;
+                        int length = Math.Min(resolvedBlockSize, entities.Length - start);
+                        blocks[blockIndex] = new QueryBlock2(archetype, plan.Column1, plan.Column2, start, length);
+                    }
+
+                    parallelFor(blockCount, index =>
+                    {
+                        QueryBlock2 block = blocks[index];
+                        action(
+                            block.Archetype.GetEntitySpan().Slice(block.Start, block.Length),
+                            block.Archetype.GetComponentSpanAt<TRead>(block.Column1).Slice(block.Start, block.Length),
+                            block.Archetype.GetComponentSpanAt<TWrite>(block.Column2).Slice(block.Start, block.Length));
+                    });
+                }
+                finally
+                {
+                    ArrayPool<QueryBlock2>.Shared.Return(blocks, clearArray: false);
+                }
+            }
+
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    internal int PatchChunksParallel<TRead1, TRead2, TWrite>(Action<int, Action<int>>? parallelFor, int blockSize, PatchChunkAction<TRead1, TRead2, TWrite> action)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId1 = Schema.GetComponentId<TRead1>();
+        ComponentId readId2 = Schema.GetComponentId<TRead2>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(readId1, readId2, writeId);
+        int matched = 0;
+        int resolvedBlockSize = Math.Max(1, blockSize);
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan3 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            if (entities.Length == 0)
+                continue;
+
+            if (parallelFor is null || entities.Length <= resolvedBlockSize)
+            {
+                action(
+                    entities,
+                    archetype.GetComponentSpanAt<TRead1>(plan.Column1),
+                    archetype.GetComponentSpanAt<TRead2>(plan.Column2),
+                    archetype.GetComponentSpanAt<TWrite>(plan.Column3));
+            }
+            else
+            {
+                int blockCount = (entities.Length + resolvedBlockSize - 1) / resolvedBlockSize;
+                QueryBlock3[] blocks = ArrayPool<QueryBlock3>.Shared.Rent(blockCount);
+                try
+                {
+                    for (int blockIndex = 0; blockIndex < blockCount; blockIndex++)
+                    {
+                        int start = blockIndex * resolvedBlockSize;
+                        int length = Math.Min(resolvedBlockSize, entities.Length - start);
+                        blocks[blockIndex] = new QueryBlock3(archetype, plan.Column1, plan.Column2, plan.Column3, start, length);
+                    }
+
+                    parallelFor(blockCount, index =>
+                    {
+                        QueryBlock3 block = blocks[index];
+                        action(
+                            block.Archetype.GetEntitySpan().Slice(block.Start, block.Length),
+                            block.Archetype.GetComponentSpanAt<TRead1>(block.Column1).Slice(block.Start, block.Length),
+                            block.Archetype.GetComponentSpanAt<TRead2>(block.Column2).Slice(block.Start, block.Length),
+                            block.Archetype.GetComponentSpanAt<TWrite>(block.Column3).Slice(block.Start, block.Length));
+                    });
+                }
+                finally
+                {
+                    ArrayPool<QueryBlock3>.Shared.Return(blocks, clearArray: false);
+                }
+            }
+
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
     public QueryChunkEnumerator<T> QueryChunks<T>()
         where T : unmanaged, IComponent<T>
     {
@@ -455,4 +640,8 @@ public sealed partial class World
             return false;
         }
     }
+
+    private readonly record struct QueryBlock1(Archetype Archetype, int Column1, int Start, int Length);
+    private readonly record struct QueryBlock2(Archetype Archetype, int Column1, int Column2, int Start, int Length);
+    private readonly record struct QueryBlock3(Archetype Archetype, int Column1, int Column2, int Column3, int Start, int Length);
 }
