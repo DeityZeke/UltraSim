@@ -437,6 +437,38 @@ public sealed partial class World
         _dirty.Mark(entity);
     }
 
+    internal int DestroyImmediateBatch(ReadOnlySpan<Entity> entities)
+    {
+        if (entities.Length == 0)
+            return 0;
+
+        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
+        int destroyed = 0;
+
+        try
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Entity entity = entities[i];
+                if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
+                    continue;
+
+                if (archetype.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+                    EntityStore.SetLocation(moved, archetype, movedSlot);
+
+                EntityStore.Free(entity);
+                dirtyRented[destroyed++] = entity;
+            }
+
+            _dirty.Mark(dirtyRented.AsSpan(0, destroyed));
+            return destroyed;
+        }
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
+        }
+    }
+
     internal bool AddComponentImmediate<T>(Entity entity, in T value) where T : unmanaged, IComponent<T>
     {
         ComponentId id = Schema.GetComponentId<T>();
@@ -489,48 +521,60 @@ public sealed partial class World
         bool cachedHasComponent = false;
         bool cachedPlanReady = false;
         TransitionPlan cachedPlan = default;
+        Span<T> cachedSourceValues = default;
+        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
+        int dirtyCount = 0;
 
-        for (int i = 0; i < entities.Length; i++)
+        try
         {
-            Entity entity = entities[i];
-            if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot))
-                continue;
-
-            if (!ReferenceEquals(source, cachedSource))
+            for (int i = 0; i < entities.Length; i++)
             {
-                cachedSource = source;
-                cachedHasComponent = source.HasComponent(id);
-                cachedPlanReady = false;
-            }
+                Entity entity = entities[i];
+                if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot))
+                    continue;
 
-            if (cachedHasComponent)
-            {
-                source.GetComponentSpan<T>(id)[slot] = values[i];
-                _dirty.Mark(id, entity);
+                if (!ReferenceEquals(source, cachedSource))
+                {
+                    cachedSource = source;
+                    cachedHasComponent = source.HasComponent(id);
+                    cachedPlanReady = false;
+                    cachedSourceValues = cachedHasComponent ? source.GetComponentSpan<T>(id) : default;
+                }
+
+                if (cachedHasComponent)
+                {
+                    cachedSourceValues[slot] = values[i];
+                    dirtyRented[dirtyCount++] = entity;
+                    applied++;
+                    continue;
+                }
+
+                if (!cachedPlanReady)
+                {
+                    cachedPlan = GetAddTransition(source, id);
+                    cachedPlanReady = true;
+                }
+
+                Archetype destination = cachedPlan.Destination;
+                int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
+                cachedPlan.Copy(slot, newSlot);
+                destination.GetComponentSpan<T>(id)[newSlot] = values[i];
+
+                if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+                    EntityStore.SetLocation(moved, source, movedSlot);
+
+                EntityStore.SetLocation(entity, destination, newSlot);
+                dirtyRented[dirtyCount++] = entity;
                 applied++;
-                continue;
             }
 
-            if (!cachedPlanReady)
-            {
-                cachedPlan = GetAddTransition(source, id);
-                cachedPlanReady = true;
-            }
-
-            Archetype destination = cachedPlan.Destination;
-            int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
-            cachedPlan.Copy(slot, newSlot);
-            destination.GetComponentSpan<T>(id)[newSlot] = values[i];
-
-            if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
-                EntityStore.SetLocation(moved, source, movedSlot);
-
-            EntityStore.SetLocation(entity, destination, newSlot);
-            _dirty.Mark(id, entity);
-            applied++;
+            _dirty.Mark(id, dirtyRented.AsSpan(0, dirtyCount));
+            return applied;
         }
-
-        return applied;
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
+        }
     }
 
     internal bool RemoveComponentImmediate<T>(Entity entity) where T : unmanaged, IComponent<T>
@@ -574,42 +618,52 @@ public sealed partial class World
         bool cachedHasComponent = false;
         bool cachedPlanReady = false;
         TransitionPlan cachedPlan = default;
+        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
+        int dirtyCount = 0;
 
-        for (int i = 0; i < entities.Length; i++)
+        try
         {
-            Entity entity = entities[i];
-            if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot))
-                continue;
-
-            if (!ReferenceEquals(source, cachedSource))
+            for (int i = 0; i < entities.Length; i++)
             {
-                cachedSource = source;
-                cachedHasComponent = source.HasComponent(id);
-                cachedPlanReady = false;
+                Entity entity = entities[i];
+                if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot))
+                    continue;
+
+                if (!ReferenceEquals(source, cachedSource))
+                {
+                    cachedSource = source;
+                    cachedHasComponent = source.HasComponent(id);
+                    cachedPlanReady = false;
+                }
+
+                if (!cachedHasComponent)
+                    continue;
+
+                if (!cachedPlanReady)
+                {
+                    cachedPlan = GetRemoveTransition(source, id);
+                    cachedPlanReady = true;
+                }
+
+                Archetype destination = cachedPlan.Destination;
+                int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
+                cachedPlan.Copy(slot, newSlot);
+
+                if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+                    EntityStore.SetLocation(moved, source, movedSlot);
+
+                EntityStore.SetLocation(entity, destination, newSlot);
+                dirtyRented[dirtyCount++] = entity;
+                applied++;
             }
 
-            if (!cachedHasComponent)
-                continue;
-
-            if (!cachedPlanReady)
-            {
-                cachedPlan = GetRemoveTransition(source, id);
-                cachedPlanReady = true;
-            }
-
-            Archetype destination = cachedPlan.Destination;
-            int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
-            cachedPlan.Copy(slot, newSlot);
-
-            if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
-                EntityStore.SetLocation(moved, source, movedSlot);
-
-            EntityStore.SetLocation(entity, destination, newSlot);
-            _dirty.Mark(id, entity);
-            applied++;
+            _dirty.Mark(id, dirtyRented.AsSpan(0, dirtyCount));
+            return applied;
         }
-
-        return applied;
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
+        }
     }
 
     private TransitionPlan GetAddTransition(Archetype source, ComponentId componentId)

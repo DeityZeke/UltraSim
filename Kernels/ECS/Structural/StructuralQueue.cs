@@ -128,8 +128,7 @@ internal sealed class StructuralQueue
             _removeCount = 0;
         }
 
-        foreach (Entity entity in destroys)
-            world.DestroyImmediate(entity);
+        _ = world.DestroyImmediateBatch(destroys);
 
         _ = world.CreateDefaultImmediateBatch(createDefaults);
 

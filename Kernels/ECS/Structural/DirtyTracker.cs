@@ -32,6 +32,18 @@ internal sealed class DirtyTracker
             MarkNoLock(componentId, entity);
     }
 
+    public void Mark(ReadOnlySpan<Entity> entities)
+    {
+        if (entities.Length == 0)
+            return;
+
+        lock (_sync)
+        {
+            for (int i = 0; i < entities.Length; i++)
+                _all.Mark(entities[i]);
+        }
+    }
+
     public void MarkUnique(ReadOnlySpan<Entity> entities)
     {
         if (entities.Length == 0)
