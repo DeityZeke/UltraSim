@@ -593,8 +593,7 @@ public sealed partial class World
                 return false;
         }
 
-        for (int i = 0; i < entities.Length; i++)
-            EntityStore.FreeAssumeAlive(entities[i]);
+        EntityStore.FreeBulkAssumeAlive(entities);
 
         source.ClearEntities();
         _dirty.MarkUnique(entities);

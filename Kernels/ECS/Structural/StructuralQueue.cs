@@ -42,10 +42,9 @@ internal sealed class StructuralQueue
         lock (_sync)
         {
             for (int i = 0; i < signatures.Length; i++)
-            {
                 ArgumentNullException.ThrowIfNull(signatures[i]);
-                _createDefaultsWrite.Add(signatures[i]);
-            }
+
+            AppendRange(_createDefaultsWrite, signatures);
         }
     }
 
@@ -58,10 +57,7 @@ internal sealed class StructuralQueue
     public void EnqueueDestroy(ReadOnlySpan<Entity> entities)
     {
         lock (_sync)
-        {
-            for (int i = 0; i < entities.Length; i++)
-                _destroysWrite.Add(entities[i]);
-        }
+            AppendRange(_destroysWrite, entities);
     }
 
     public void EnqueueAdd<T>(Entity entity, T value) where T : unmanaged, IComponent<T>
@@ -253,6 +249,18 @@ internal sealed class StructuralQueue
         _removeByType.Add(type, created);
         _removeBuffers.Add(created);
         return created;
+    }
+
+    private static void AppendRange<T>(List<T> list, ReadOnlySpan<T> values)
+    {
+        if (values.Length == 0)
+            return;
+
+        int start = list.Count;
+        int newCount = start + values.Length;
+        list.EnsureCapacity(newCount);
+        CollectionsMarshal.SetCount(list, newCount);
+        values.CopyTo(CollectionsMarshal.AsSpan(list)[start..newCount]);
     }
 
     private interface IStructuralAddBuffer
