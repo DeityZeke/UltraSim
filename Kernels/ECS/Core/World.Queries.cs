@@ -122,7 +122,7 @@ public sealed partial class World
                 action(entities[i], in read, ref writes[i]);
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -157,7 +157,7 @@ public sealed partial class World
                 action(entities[i], in read1, in read2, ref writes[i]);
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -183,7 +183,7 @@ public sealed partial class World
 
             Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column1);
             action(entities, writes);
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -246,7 +246,7 @@ public sealed partial class World
 
             Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column1);
             action(entities, writes);
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -275,7 +275,7 @@ public sealed partial class World
             ReadOnlySpan<TRead> reads = archetype.GetComponentSpanAt<TRead>(plan.Column1);
             Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column2);
             action(entities, reads, writes);
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -346,7 +346,7 @@ public sealed partial class World
             ReadOnlySpan<TRead> reads = archetype.GetComponentSpanAt<TRead>(plan.Column1);
             Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column2);
             action(entities, reads, writes);
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -378,7 +378,7 @@ public sealed partial class World
             ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpanAt<TRead2>(plan.Column2);
             Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column3);
             action(entities, reads1, reads2, writes);
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -454,7 +454,7 @@ public sealed partial class World
             ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpanAt<TRead2>(plan.Column2);
             Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column3);
             action(entities, reads1, reads2, writes);
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -497,7 +497,7 @@ public sealed partial class World
                 });
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -605,7 +605,7 @@ public sealed partial class World
                 });
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entityCount;
         }
 
@@ -654,7 +654,7 @@ public sealed partial class World
                 });
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 
@@ -774,7 +774,7 @@ public sealed partial class World
                 });
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entityCount;
         }
 
@@ -827,7 +827,7 @@ public sealed partial class World
                 });
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entities.Length;
         }
 

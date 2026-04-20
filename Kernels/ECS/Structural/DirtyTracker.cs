@@ -694,6 +694,9 @@ internal sealed class DirtyTracker
                 EnsureIndexCapacity(index + 1);
 
                 ref DirtyEntry entry = ref _entriesByIndex[index];
+                if (entry.Epoch == _epoch && entry.Packed == entity.Packed)
+                    continue;
+
                 entry.Epoch = _epoch;
                 entry.Packed = entity.Packed;
                 _entities[_count++] = entity;

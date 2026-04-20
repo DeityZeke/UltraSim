@@ -33,6 +33,7 @@ internal static class TestRunner
         Run(nameof(PatchChunks_UpdatesChunkRowsAndMarksDirty), PatchChunks_UpdatesChunkRowsAndMarksDirty);
         Run(nameof(PatchChunksSparse_MarksOnlyTouchedRowsDirty), PatchChunksSparse_MarksOnlyTouchedRowsDirty);
         Run(nameof(PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges), PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges);
+        Run(nameof(PatchChunks_RepeatedUniqueChunkMarks_DoNotDuplicateDirtyEntities), PatchChunks_RepeatedUniqueChunkMarks_DoNotDuplicateDirtyEntities);
         Run(nameof(SystemContext_ParallelFor_KeepsChunkWritesDeterministic), SystemContext_ParallelFor_KeepsChunkWritesDeterministic);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
@@ -801,6 +802,43 @@ internal static class TestRunner
         Assert.Equal(new Velocity(17), world.GetComponent<Velocity>(first));
         Assert.Equal(new Velocity(27), world.GetComponent<Velocity>(second));
         Assert.Equal(2, world.DrainDirtyTo<Velocity>(dirty));
+    }
+
+    private static void PatchChunks_RepeatedUniqueChunkMarks_DoNotDuplicateDirtyEntities()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity first = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity second = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Assert.True(world.SetComponent(first, new Position(1)));
+        Assert.True(world.SetComponent(second, new Position(2)));
+        Assert.True(world.SetComponent(first, new Velocity(10)));
+        Assert.True(world.SetComponent(second, new Velocity(20)));
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+        world.DrainDirtyTo<Position>(dirty);
+        world.DrainDirtyTo<Velocity>(dirty);
+
+        world.PatchChunks<Velocity>((ReadOnlySpan<Entity> _, Span<Velocity> writes) =>
+        {
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Velocity(writes[i].X + 1);
+        });
+
+        world.PatchChunks<Velocity>((ReadOnlySpan<Entity> _, Span<Velocity> writes) =>
+        {
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Velocity(writes[i].X + 1);
+        });
+
+        int dirtyCount = world.DrainDirtyTo<Velocity>(dirty);
+        Assert.Equal(2, dirtyCount);
+        Assert.True(dirty[..dirtyCount].Contains(first));
+        Assert.True(dirty[..dirtyCount].Contains(second));
     }
 
     private static void PatchChunksSparse_MarksOnlyTouchedRowsDirty()
