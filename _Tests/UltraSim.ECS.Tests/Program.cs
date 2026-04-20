@@ -25,6 +25,7 @@ internal static class TestRunner
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
         Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
         Run(nameof(StructuralQueue_MixedOperations_UseDeterministicPhaseOrder), StructuralQueue_MixedOperations_UseDeterministicPhaseOrder);
+        Run(nameof(StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty), StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes), QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes);
@@ -460,6 +461,50 @@ internal static class TestRunner
         Assert.Equal(2, positionOnlyEntities);
         Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
         Assert.Equal(removeThenAdd, dirty[0]);
+    }
+
+    private static void StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var world = new World(builder.Build());
+        var signature = new ArchetypeSignature([positionId]);
+        var entities = new Entity[32];
+        var dirty = new Entity[64];
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            entities[i] = world.CreateDefault(signature);
+            Assert.True(world.SetComponent(entities[i], new Position(1000 + i)));
+        }
+
+        world.DrainDirtyTo(dirty);
+
+        Entity[] victims = new Entity[entities.Length / 2];
+        int write = 0;
+        for (int i = entities.Length - 2; i >= 0; i -= 2)
+            victims[write++] = entities[i];
+
+        world.EnqueueDestroy(victims);
+        world.ProcessStructuralQueues();
+
+        Assert.Equal(victims.Length, world.DrainDirtyTo(dirty));
+        AssertEntitySetsEqual(victims, victims.Length, dirty);
+
+        for (int i = 0; i < victims.Length; i++)
+        {
+            Assert.False(world.Entities.IsAlive(victims[i]));
+            Assert.False(world.Entities.IsValid(victims[i]));
+            Assert.False(world.TryGetComponent(victims[i], out Position _));
+        }
+
+        for (int i = 1; i < entities.Length; i += 2)
+        {
+            Entity survivor = entities[i];
+            Assert.True(world.Entities.IsAlive(survivor));
+            Assert.True(world.TryGetComponent(survivor, out Position position));
+            Assert.Equal(new Position(1000 + i), position);
+        }
     }
 
     private static void QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal()

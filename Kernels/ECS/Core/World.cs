@@ -519,6 +519,9 @@ public sealed partial class World
         if (entities.Length == 0)
             return 0;
 
+        if (TryDestroySingleSourceFast(entities, out int fastDestroyed))
+            return fastDestroyed;
+
         Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
         int destroyed = 0;
 
@@ -542,6 +545,72 @@ public sealed partial class World
         }
         finally
         {
+            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
+        }
+    }
+
+    private bool TryDestroySingleSourceFast(ReadOnlySpan<Entity> entities, out int destroyed)
+    {
+        destroyed = 0;
+        if (entities.Length == 0)
+            return true;
+
+        int[] rentedSlots = ArrayPool<int>.Shared.Rent(entities.Length);
+        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
+        try
+        {
+            Archetype? source = null;
+            bool increasing = true;
+            bool decreasing = true;
+            int previousSlot = -1;
+
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Entity entity = entities[i];
+                if (!EntityStore.TryGetLocation(entity, out Archetype currentSource, out int slot))
+                    return false;
+
+                if (source is null)
+                {
+                    source = currentSource;
+                }
+                else if (!ReferenceEquals(source, currentSource))
+                {
+                    return false;
+                }
+
+                rentedSlots[i] = slot;
+                if (i > 0)
+                {
+                    if (slot <= previousSlot)
+                        increasing = false;
+                    if (slot >= previousSlot)
+                        decreasing = false;
+                }
+
+                previousSlot = slot;
+            }
+
+            if (!increasing && !decreasing)
+                return false;
+
+            if (increasing)
+            {
+                for (int i = entities.Length - 1; i >= 0; i--)
+                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, dirtyRented, ref destroyed);
+            }
+            else
+            {
+                for (int i = 0; i < entities.Length; i++)
+                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, dirtyRented, ref destroyed);
+            }
+
+            _dirty.Mark(dirtyRented.AsSpan(0, destroyed));
+            return true;
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(rentedSlots, clearArray: false);
             ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
         }
     }
@@ -920,6 +989,20 @@ public sealed partial class World
 
         EntityStore.SetLocation(entity, destination, newSlot);
         dirtyBuffer[applied++] = entity;
+    }
+
+    private void ApplyDestroyFastEntry(
+        Entity entity,
+        int slot,
+        Archetype source,
+        Entity[] dirtyBuffer,
+        ref int destroyed)
+    {
+        if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+            EntityStore.SetLocation(moved, source, movedSlot);
+
+        EntityStore.Free(entity);
+        dirtyBuffer[destroyed++] = entity;
     }
 
     private bool TryRemoveComponentSingleSourceFast<T>(ReadOnlySpan<Entity> entities, ComponentId id, out int applied)
