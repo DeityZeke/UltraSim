@@ -168,6 +168,14 @@ public sealed class Archetype
         throw new InvalidOperationException($"Component column not found for id {id}.");
     }
 
+    internal Span<T> GetComponentSpanAt<T>(int columnIndex) where T : unmanaged, IComponent<T>
+    {
+        if ((uint)columnIndex < (uint)_columns.Length && _columns[columnIndex] is ComponentColumn<T> typed)
+            return typed.AsSpan(_entityCount);
+
+        throw new InvalidOperationException($"Component column not found for index {columnIndex}.");
+    }
+
     internal IComponentColumn GetColumnAt(int columnIndex) => _columns[columnIndex];
 
     private void EnsureEntityCapacity(int needed)

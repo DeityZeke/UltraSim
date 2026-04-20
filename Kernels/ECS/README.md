@@ -106,6 +106,7 @@ Implemented so far:
 - bound transition copy steps to reduce per-entity structural copy dispatch,
 - caller-participating parallel worker execution to reduce small-batch scheduler overhead,
 - touched-component tracking in local dirty capture state to reduce merge scanning,
+- column-bound query plans for `Query`, `PatchQuery`, and `QueryChunks`,
 - targeted benchmark coverage against the old ECS, including read-only vs write-heavy scheduler scenarios,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.

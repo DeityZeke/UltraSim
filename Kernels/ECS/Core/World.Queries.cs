@@ -16,17 +16,15 @@ public sealed partial class World
         ArgumentNullException.ThrowIfNull(action);
 
         ComponentId id = Schema.GetComponentId<T>();
-        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(id);
+        ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(id);
         int matched = 0;
 
-        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
         {
-            Archetype archetype = archetypes[archetypeIndex];
-            if (!archetype.HasComponent(id))
-                continue;
-
+            QueryPlan1 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
-            ReadOnlySpan<T> values = archetype.GetComponentSpan<T>(id);
+            ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(plan.Column1);
             for (int i = 0; i < entities.Length; i++)
             {
                 action(entities[i], in values[i]);
@@ -45,18 +43,16 @@ public sealed partial class World
 
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
-        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(id1, id2);
+        ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(id1, id2);
         int matched = 0;
 
-        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
         {
-            Archetype archetype = archetypes[archetypeIndex];
-            if (!archetype.HasComponent(id1) || !archetype.HasComponent(id2))
-                continue;
-
+            QueryPlan2 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
-            ReadOnlySpan<T1> values1 = archetype.GetComponentSpan<T1>(id1);
-            ReadOnlySpan<T2> values2 = archetype.GetComponentSpan<T2>(id2);
+            ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(plan.Column1);
+            ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(plan.Column2);
             for (int i = 0; i < entities.Length; i++)
             {
                 action(entities[i], in values1[i], in values2[i]);
@@ -77,19 +73,17 @@ public sealed partial class World
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
         ComponentId id3 = Schema.GetComponentId<T3>();
-        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(id1, id2, id3);
+        ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(id1, id2, id3);
         int matched = 0;
 
-        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
         {
-            Archetype archetype = archetypes[archetypeIndex];
-            if (!archetype.HasComponent(id1) || !archetype.HasComponent(id2) || !archetype.HasComponent(id3))
-                continue;
-
+            QueryPlan3 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
-            ReadOnlySpan<T1> values1 = archetype.GetComponentSpan<T1>(id1);
-            ReadOnlySpan<T2> values2 = archetype.GetComponentSpan<T2>(id2);
-            ReadOnlySpan<T3> values3 = archetype.GetComponentSpan<T3>(id3);
+            ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(plan.Column1);
+            ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(plan.Column2);
+            ReadOnlySpan<T3> values3 = archetype.GetComponentSpanAt<T3>(plan.Column3);
             for (int i = 0; i < entities.Length; i++)
             {
                 action(entities[i], in values1[i], in values2[i], in values3[i]);
@@ -108,18 +102,16 @@ public sealed partial class World
 
         ComponentId readId = Schema.GetComponentId<TRead>();
         ComponentId writeId = Schema.GetComponentId<TWrite>();
-        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(readId, writeId);
+        ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(readId, writeId);
         int matched = 0;
 
-        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
         {
-            Archetype archetype = archetypes[archetypeIndex];
-            if (!archetype.HasComponent(readId) || !archetype.HasComponent(writeId))
-                continue;
-
+            QueryPlan2 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
-            ReadOnlySpan<TRead> reads = archetype.GetComponentSpan<TRead>(readId);
-            Span<TWrite> writes = archetype.GetComponentSpan<TWrite>(writeId);
+            ReadOnlySpan<TRead> reads = archetype.GetComponentSpanAt<TRead>(plan.Column1);
+            Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column2);
             for (int i = 0; i < entities.Length; i++)
             {
                 TRead read = reads[i];
@@ -143,19 +135,17 @@ public sealed partial class World
         ComponentId readId1 = Schema.GetComponentId<TRead1>();
         ComponentId readId2 = Schema.GetComponentId<TRead2>();
         ComponentId writeId = Schema.GetComponentId<TWrite>();
-        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(readId1, readId2, writeId);
+        ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(readId1, readId2, writeId);
         int matched = 0;
 
-        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
         {
-            Archetype archetype = archetypes[archetypeIndex];
-            if (!archetype.HasComponent(readId1) || !archetype.HasComponent(readId2) || !archetype.HasComponent(writeId))
-                continue;
-
+            QueryPlan3 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
-            ReadOnlySpan<TRead1> reads1 = archetype.GetComponentSpan<TRead1>(readId1);
-            ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpan<TRead2>(readId2);
-            Span<TWrite> writes = archetype.GetComponentSpan<TWrite>(writeId);
+            ReadOnlySpan<TRead1> reads1 = archetype.GetComponentSpanAt<TRead1>(plan.Column1);
+            ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpanAt<TRead2>(plan.Column2);
+            Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column3);
             for (int i = 0; i < entities.Length; i++)
             {
                 TRead1 read1 = reads1[i];
@@ -174,7 +164,7 @@ public sealed partial class World
         where T : unmanaged, IComponent<T>
     {
         ComponentId id = Schema.GetComponentId<T>();
-        return new QueryChunkEnumerator<T>(GetCachedQueryArchetypes(id), id);
+        return new QueryChunkEnumerator<T>(GetCachedQueryPlan(id));
     }
 
     public QueryChunkEnumerator<T1, T2> QueryChunks<T1, T2>()
@@ -183,7 +173,7 @@ public sealed partial class World
     {
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
-        return new QueryChunkEnumerator<T1, T2>(GetCachedQueryArchetypes(id1, id2), id1, id2);
+        return new QueryChunkEnumerator<T1, T2>(GetCachedQueryPlan(id1, id2));
     }
 
     public QueryChunkEnumerator<T1, T2, T3> QueryChunks<T1, T2, T3>()
@@ -194,11 +184,7 @@ public sealed partial class World
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
         ComponentId id3 = Schema.GetComponentId<T3>();
-        return new QueryChunkEnumerator<T1, T2, T3>(
-            GetCachedQueryArchetypes(id1, id2, id3),
-            id1,
-            id2,
-            id3);
+        return new QueryChunkEnumerator<T1, T2, T3>(GetCachedQueryPlan(id1, id2, id3));
     }
 
     public readonly ref struct QueryChunk<T>
@@ -256,15 +242,13 @@ public sealed partial class World
     public ref struct QueryChunkEnumerator<T>
         where T : unmanaged, IComponent<T>
     {
-        private readonly ReadOnlySpan<Archetype> _archetypes;
-        private readonly ComponentId _id;
+        private readonly ReadOnlySpan<QueryPlan1> _plans;
         private int _index;
         private QueryChunk<T> _current;
 
-        internal QueryChunkEnumerator(ReadOnlySpan<Archetype> archetypes, ComponentId id)
+        internal QueryChunkEnumerator(ReadOnlySpan<QueryPlan1> plans)
         {
-            _archetypes = archetypes;
-            _id = id;
+            _plans = plans;
             _index = -1;
             _current = default;
         }
@@ -280,13 +264,14 @@ public sealed partial class World
 
         public bool MoveNext()
         {
-            while (++_index < _archetypes.Length)
+            while (++_index < _plans.Length)
             {
-                Archetype archetype = _archetypes[_index];
-                if (!archetype.HasComponent(_id) || archetype.Count == 0)
+                QueryPlan1 plan = _plans[_index];
+                Archetype archetype = plan.Archetype;
+                if (archetype.Count == 0)
                     continue;
 
-                _current = new QueryChunk<T>(archetype.GetEntitySpan(), archetype.GetComponentSpan<T>(_id));
+                _current = new QueryChunk<T>(archetype.GetEntitySpan(), archetype.GetComponentSpanAt<T>(plan.Column1));
                 return true;
             }
 
@@ -298,17 +283,13 @@ public sealed partial class World
         where T1 : unmanaged, IComponent<T1>
         where T2 : unmanaged, IComponent<T2>
     {
-        private readonly ReadOnlySpan<Archetype> _archetypes;
-        private readonly ComponentId _id1;
-        private readonly ComponentId _id2;
+        private readonly ReadOnlySpan<QueryPlan2> _plans;
         private int _index;
         private QueryChunk<T1, T2> _current;
 
-        internal QueryChunkEnumerator(ReadOnlySpan<Archetype> archetypes, ComponentId id1, ComponentId id2)
+        internal QueryChunkEnumerator(ReadOnlySpan<QueryPlan2> plans)
         {
-            _archetypes = archetypes;
-            _id1 = id1;
-            _id2 = id2;
+            _plans = plans;
             _index = -1;
             _current = default;
         }
@@ -324,16 +305,17 @@ public sealed partial class World
 
         public bool MoveNext()
         {
-            while (++_index < _archetypes.Length)
+            while (++_index < _plans.Length)
             {
-                Archetype archetype = _archetypes[_index];
-                if (!archetype.HasComponent(_id1) || !archetype.HasComponent(_id2) || archetype.Count == 0)
+                QueryPlan2 plan = _plans[_index];
+                Archetype archetype = plan.Archetype;
+                if (archetype.Count == 0)
                     continue;
 
                 _current = new QueryChunk<T1, T2>(
                     archetype.GetEntitySpan(),
-                    archetype.GetComponentSpan<T1>(_id1),
-                    archetype.GetComponentSpan<T2>(_id2));
+                    archetype.GetComponentSpanAt<T1>(plan.Column1),
+                    archetype.GetComponentSpanAt<T2>(plan.Column2));
                 return true;
             }
 
@@ -346,19 +328,13 @@ public sealed partial class World
         where T2 : unmanaged, IComponent<T2>
         where T3 : unmanaged, IComponent<T3>
     {
-        private readonly ReadOnlySpan<Archetype> _archetypes;
-        private readonly ComponentId _id1;
-        private readonly ComponentId _id2;
-        private readonly ComponentId _id3;
+        private readonly ReadOnlySpan<QueryPlan3> _plans;
         private int _index;
         private QueryChunk<T1, T2, T3> _current;
 
-        internal QueryChunkEnumerator(ReadOnlySpan<Archetype> archetypes, ComponentId id1, ComponentId id2, ComponentId id3)
+        internal QueryChunkEnumerator(ReadOnlySpan<QueryPlan3> plans)
         {
-            _archetypes = archetypes;
-            _id1 = id1;
-            _id2 = id2;
-            _id3 = id3;
+            _plans = plans;
             _index = -1;
             _current = default;
         }
@@ -374,17 +350,18 @@ public sealed partial class World
 
         public bool MoveNext()
         {
-            while (++_index < _archetypes.Length)
+            while (++_index < _plans.Length)
             {
-                Archetype archetype = _archetypes[_index];
-                if (!archetype.HasComponent(_id1) || !archetype.HasComponent(_id2) || !archetype.HasComponent(_id3) || archetype.Count == 0)
+                QueryPlan3 plan = _plans[_index];
+                Archetype archetype = plan.Archetype;
+                if (archetype.Count == 0)
                     continue;
 
                 _current = new QueryChunk<T1, T2, T3>(
                     archetype.GetEntitySpan(),
-                    archetype.GetComponentSpan<T1>(_id1),
-                    archetype.GetComponentSpan<T2>(_id2),
-                    archetype.GetComponentSpan<T3>(_id3));
+                    archetype.GetComponentSpanAt<T1>(plan.Column1),
+                    archetype.GetComponentSpanAt<T2>(plan.Column2),
+                    archetype.GetComponentSpanAt<T3>(plan.Column3));
                 return true;
             }
 

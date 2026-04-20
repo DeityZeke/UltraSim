@@ -6,44 +6,44 @@ namespace UltraSim.ECS;
 public sealed partial class World
 {
     private readonly object _queryCacheSync = new();
-    private ConcurrentDictionary<int, Archetype[]> _queryCache1 = new();
-    private ConcurrentDictionary<QueryKey2, Archetype[]> _queryCache2 = new();
-    private ConcurrentDictionary<QueryKey3, Archetype[]> _queryCache3 = new();
+    private ConcurrentDictionary<int, QueryPlan1[]> _queryCache1 = new();
+    private ConcurrentDictionary<QueryKey2, QueryPlan2[]> _queryCache2 = new();
+    private ConcurrentDictionary<QueryKey3, QueryPlan3[]> _queryCache3 = new();
     private ConcurrentDictionary<ArchetypeSignature, Archetype[]> _queryCacheN = new();
     private int _queryCacheVersion;
 
-    private Archetype[] GetCachedQueryArchetypes(ComponentId id)
+    private QueryPlan1[] GetCachedQueryPlan(ComponentId id)
     {
         EnsureQueryCachesFresh();
 
-        if (_queryCache1.TryGetValue(id.Value, out Archetype[]? matches))
+        if (_queryCache1.TryGetValue(id.Value, out QueryPlan1[]? matches))
             return matches;
 
-        matches = BuildMatchingArchetypes(id);
+        matches = BuildQueryPlan(id);
         return _queryCache1.GetOrAdd(id.Value, matches);
     }
 
-    private Archetype[] GetCachedQueryArchetypes(ComponentId id1, ComponentId id2)
+    private QueryPlan2[] GetCachedQueryPlan(ComponentId id1, ComponentId id2)
     {
         EnsureQueryCachesFresh();
 
         var key = new QueryKey2(id1, id2);
-        if (_queryCache2.TryGetValue(key, out Archetype[]? matches))
+        if (_queryCache2.TryGetValue(key, out QueryPlan2[]? matches))
             return matches;
 
-        matches = BuildMatchingArchetypes(id1, id2);
+        matches = BuildQueryPlan(id1, id2);
         return _queryCache2.GetOrAdd(key, matches);
     }
 
-    private Archetype[] GetCachedQueryArchetypes(ComponentId id1, ComponentId id2, ComponentId id3)
+    private QueryPlan3[] GetCachedQueryPlan(ComponentId id1, ComponentId id2, ComponentId id3)
     {
         EnsureQueryCachesFresh();
 
         var key = new QueryKey3(id1, id2, id3);
-        if (_queryCache3.TryGetValue(key, out Archetype[]? matches))
+        if (_queryCache3.TryGetValue(key, out QueryPlan3[]? matches))
             return matches;
 
-        matches = BuildMatchingArchetypes(id1, id2, id3);
+        matches = BuildQueryPlan(id1, id2, id3);
         return _queryCache3.GetOrAdd(key, matches);
     }
 
@@ -71,27 +71,28 @@ public sealed partial class World
             if (currentVersion == _queryCacheVersion)
                 return;
 
-            _queryCache1 = new ConcurrentDictionary<int, Archetype[]>();
-            _queryCache2 = new ConcurrentDictionary<QueryKey2, Archetype[]>();
-            _queryCache3 = new ConcurrentDictionary<QueryKey3, Archetype[]>();
+            _queryCache1 = new ConcurrentDictionary<int, QueryPlan1[]>();
+            _queryCache2 = new ConcurrentDictionary<QueryKey2, QueryPlan2[]>();
+            _queryCache3 = new ConcurrentDictionary<QueryKey3, QueryPlan3[]>();
             _queryCacheN = new ConcurrentDictionary<ArchetypeSignature, Archetype[]>();
             _queryCacheVersion = currentVersion;
         }
     }
 
-    private Archetype[] BuildMatchingArchetypes(ComponentId id)
+    private QueryPlan1[] BuildQueryPlan(ComponentId id)
     {
         ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
-        var matches = new Archetype[archetypes.Length];
+        var matches = new QueryPlan1[archetypes.Length];
         int count = 0;
 
         for (int i = 0; i < archetypes.Length; i++)
         {
             Archetype archetype = archetypes[i];
-            if (!archetype.HasComponent(id))
+            int column1 = archetype.GetColumnIndex(id);
+            if (column1 < 0)
                 continue;
 
-            matches[count++] = archetype;
+            matches[count++] = new QueryPlan1(archetype, column1);
         }
 
         if (count != matches.Length)
@@ -100,19 +101,24 @@ public sealed partial class World
         return matches;
     }
 
-    private Archetype[] BuildMatchingArchetypes(ComponentId id1, ComponentId id2)
+    private QueryPlan2[] BuildQueryPlan(ComponentId id1, ComponentId id2)
     {
         ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
-        var matches = new Archetype[archetypes.Length];
+        var matches = new QueryPlan2[archetypes.Length];
         int count = 0;
 
         for (int i = 0; i < archetypes.Length; i++)
         {
             Archetype archetype = archetypes[i];
-            if (!archetype.HasComponent(id1) || !archetype.HasComponent(id2))
+            int column1 = archetype.GetColumnIndex(id1);
+            if (column1 < 0)
                 continue;
 
-            matches[count++] = archetype;
+            int column2 = archetype.GetColumnIndex(id2);
+            if (column2 < 0)
+                continue;
+
+            matches[count++] = new QueryPlan2(archetype, column1, column2);
         }
 
         if (count != matches.Length)
@@ -121,19 +127,28 @@ public sealed partial class World
         return matches;
     }
 
-    private Archetype[] BuildMatchingArchetypes(ComponentId id1, ComponentId id2, ComponentId id3)
+    private QueryPlan3[] BuildQueryPlan(ComponentId id1, ComponentId id2, ComponentId id3)
     {
         ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
-        var matches = new Archetype[archetypes.Length];
+        var matches = new QueryPlan3[archetypes.Length];
         int count = 0;
 
         for (int i = 0; i < archetypes.Length; i++)
         {
             Archetype archetype = archetypes[i];
-            if (!archetype.HasComponent(id1) || !archetype.HasComponent(id2) || !archetype.HasComponent(id3))
+            int column1 = archetype.GetColumnIndex(id1);
+            if (column1 < 0)
                 continue;
 
-            matches[count++] = archetype;
+            int column2 = archetype.GetColumnIndex(id2);
+            if (column2 < 0)
+                continue;
+
+            int column3 = archetype.GetColumnIndex(id3);
+            if (column3 < 0)
+                continue;
+
+            matches[count++] = new QueryPlan3(archetype, column1, column2, column3);
         }
 
         if (count != matches.Length)
@@ -216,17 +231,8 @@ public sealed partial class World
     {
         public QueryKey2(ComponentId id1, ComponentId id2)
         {
-            int first = id1.Value;
-            int second = id2.Value;
-
-            if (second < first)
-                (first, second) = (second, first);
-
-            if (second == first)
-                second = -1;
-
-            First = first;
-            Second = second;
+            First = id1.Value;
+            Second = id2.Value;
         }
 
         public int First { get; }
@@ -237,34 +243,55 @@ public sealed partial class World
         public override int GetHashCode() => HashCode.Combine(First, Second);
     }
 
+    internal readonly struct QueryPlan1
+    {
+        public QueryPlan1(Archetype archetype, int column1)
+        {
+            Archetype = archetype;
+            Column1 = column1;
+        }
+
+        public Archetype Archetype { get; }
+        public int Column1 { get; }
+    }
+
+    internal readonly struct QueryPlan2
+    {
+        public QueryPlan2(Archetype archetype, int column1, int column2)
+        {
+            Archetype = archetype;
+            Column1 = column1;
+            Column2 = column2;
+        }
+
+        public Archetype Archetype { get; }
+        public int Column1 { get; }
+        public int Column2 { get; }
+    }
+
+    internal readonly struct QueryPlan3
+    {
+        public QueryPlan3(Archetype archetype, int column1, int column2, int column3)
+        {
+            Archetype = archetype;
+            Column1 = column1;
+            Column2 = column2;
+            Column3 = column3;
+        }
+
+        public Archetype Archetype { get; }
+        public int Column1 { get; }
+        public int Column2 { get; }
+        public int Column3 { get; }
+    }
+
     private readonly struct QueryKey3 : IEquatable<QueryKey3>
     {
         public QueryKey3(ComponentId id1, ComponentId id2, ComponentId id3)
         {
-            int first = id1.Value;
-            int second = id2.Value;
-            int third = id3.Value;
-
-            if (second < first)
-                (first, second) = (second, first);
-            if (third < second)
-                (second, third) = (third, second);
-            if (second < first)
-                (first, second) = (second, first);
-
-            if (second == first)
-            {
-                second = third;
-                third = -1;
-            }
-            else if (third == second)
-            {
-                third = -1;
-            }
-
-            First = first;
-            Second = second;
-            Third = third;
+            First = id1.Value;
+            Second = id2.Value;
+            Third = id3.Value;
         }
 
         public int First { get; }
