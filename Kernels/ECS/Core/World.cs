@@ -535,6 +535,9 @@ public sealed partial class World
         if (entities.Length == 0)
             return 0;
 
+        if (TryDestroyWholeArchetypeFast(entities, out int fullDestroyed))
+            return fullDestroyed;
+
         if (TryDestroySingleSourceFast(entities, out int fastDestroyed))
             return fastDestroyed;
 
@@ -563,6 +566,34 @@ public sealed partial class World
         {
             ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
         }
+    }
+
+    private bool TryDestroyWholeArchetypeFast(ReadOnlySpan<Entity> entities, out int destroyed)
+    {
+        destroyed = 0;
+        if (entities.Length == 0)
+            return true;
+
+        if (!EntityStore.TryGetLocation(entities[0], out Archetype source, out int slot) || slot != 0)
+            return false;
+
+        ReadOnlySpan<Entity> current = source.GetEntitySpan();
+        if (current.Length != entities.Length)
+            return false;
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            if (current[i] != entities[i])
+                return false;
+        }
+
+        for (int i = 0; i < entities.Length; i++)
+            EntityStore.FreeAssumeAlive(entities[i]);
+
+        source.ClearEntities();
+        _dirty.MarkUnique(entities);
+        destroyed = entities.Length;
+        return true;
     }
 
     private bool TryDestroySingleSourceFast(ReadOnlySpan<Entity> entities, out int destroyed)

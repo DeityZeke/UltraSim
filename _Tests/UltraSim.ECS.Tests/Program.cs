@@ -25,6 +25,7 @@ internal static class TestRunner
         Run(nameof(PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware), PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
         Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
+        Run(nameof(StructuralQueue_DestroyWholeArchetypeBatch_KeepsDirtyAndClearsAllRows), StructuralQueue_DestroyWholeArchetypeBatch_KeepsDirtyAndClearsAllRows);
         Run(nameof(StructuralQueue_MixedOperations_UseDeterministicPhaseOrder), StructuralQueue_MixedOperations_UseDeterministicPhaseOrder);
         Run(nameof(StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty), StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
@@ -444,6 +445,36 @@ internal static class TestRunner
 
         for (int i = 0; i < targets.Length; i++)
             Assert.False(world.Entities.IsAlive(targets[i]));
+    }
+
+    private static void StructuralQueue_DestroyWholeArchetypeBatch_KeepsDirtyAndClearsAllRows()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var world = new World(builder.Build());
+
+        Entity first = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity second = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Entity third = world.CreateDefault(new ArchetypeSignature([positionId]));
+
+        Assert.True(world.SetComponent(first, new Position(1)));
+        Assert.True(world.SetComponent(second, new Position(2)));
+        Assert.True(world.SetComponent(third, new Position(3)));
+
+        Span<Entity> dirty = stackalloc Entity[16];
+        world.DrainDirtyTo(dirty);
+        world.DrainDirtyTo<Position>(dirty);
+
+        Entity[] all = [first, second, third];
+        world.EnqueueDestroy(all);
+        world.ProcessStructuralQueues();
+
+        Assert.Equal(0, world.Entities.AliveCount);
+        Assert.False(world.Entities.IsAlive(first));
+        Assert.False(world.Entities.IsAlive(second));
+        Assert.False(world.Entities.IsAlive(third));
+        Assert.Equal(3, world.DrainDirtyTo(dirty));
+        AssertEntitySetsEqual(all, 3, dirty);
     }
 
     private static void StructuralQueue_MixedOperations_UseDeterministicPhaseOrder()

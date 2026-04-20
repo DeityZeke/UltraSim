@@ -936,6 +936,8 @@ internal static class NewKernelBenchmarks
 
     private sealed class SchedulerQueryWriteSystem<TTag> : SystemBase
     {
+        private readonly World.PatchChunkPlanCache<Position, Velocity, Position> _positionPlan = new();
+        private readonly World.PatchChunkPlanCache<Position, Velocity, Velocity> _velocityPlan = new();
         private readonly bool _writePosition;
 
         public SchedulerQueryWriteSystem(string name, ComponentId positionId, ComponentId velocityId, bool writePosition)
@@ -954,21 +956,36 @@ internal static class NewKernelBenchmarks
 
         public override void Update(in SystemContext ctx)
         {
-            World world = ctx.World;
             if (_writePosition)
             {
-                world.PatchQuery<Position, Velocity, Position>((Entity _, in Position position, in Velocity velocity, ref Position write) =>
+                ctx.PatchChunks(_positionPlan, (ReadOnlySpan<Entity> _, ReadOnlySpan<Position> positions, ReadOnlySpan<Velocity> velocities, Span<Position> writes) =>
                 {
-                    write = new Position(position.X + 1, position.Y + 1);
-                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, position.X + velocity.X);
+                    long local = 0;
+                    for (int i = 0; i < writes.Length; i++)
+                    {
+                        Position position = positions[i];
+                        Velocity velocity = velocities[i];
+                        writes[i] = new Position(position.X + 1, position.Y + 1);
+                        local += position.X + velocity.X;
+                    }
+
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
                 });
                 return;
             }
 
-            world.PatchQuery<Position, Velocity, Velocity>((Entity _, in Position position, in Velocity velocity, ref Velocity write) =>
+            ctx.PatchChunks(_velocityPlan, (ReadOnlySpan<Entity> _, ReadOnlySpan<Position> positions, ReadOnlySpan<Velocity> velocities, Span<Velocity> writes) =>
             {
-                write = new Velocity(velocity.X + 1, velocity.Y + 1);
-                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, position.X + velocity.X);
+                long local = 0;
+                for (int i = 0; i < writes.Length; i++)
+                {
+                    Position position = positions[i];
+                    Velocity velocity = velocities[i];
+                    writes[i] = new Velocity(velocity.X + 1, velocity.Y + 1);
+                    local += position.X + velocity.X;
+                }
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
             });
         }
     }

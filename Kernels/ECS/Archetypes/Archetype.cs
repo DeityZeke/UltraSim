@@ -133,6 +133,11 @@ public sealed class Archetype
         return true;
     }
 
+    internal void ClearEntities()
+    {
+        _entityCount = 0;
+    }
+
     public Span<Entity> GetEntitySpan() => _entities.AsSpan(0, _entityCount);
 
     public ref Entity GetEntityRef(int slot)
