@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace UltraSim.ECS;
 
 internal sealed class StructuralQueue
@@ -269,8 +271,7 @@ internal sealed class StructuralQueue
 
         public void Apply(World world)
         {
-            for (int i = 0; i < _readEntities.Count; i++)
-                world.AddComponentImmediate(_readEntities[i], _readValues[i]);
+            _ = world.AddComponentImmediateBatch<T>(CollectionsMarshal.AsSpan(_readEntities), CollectionsMarshal.AsSpan(_readValues));
 
             _readEntities.Clear();
             _readValues.Clear();
@@ -312,8 +313,7 @@ internal sealed class StructuralQueue
 
         public void Apply(World world)
         {
-            for (int i = 0; i < _readEntities.Count; i++)
-                world.RemoveComponentImmediate<T>(_readEntities[i]);
+            _ = world.RemoveComponentImmediateBatch<T>(CollectionsMarshal.AsSpan(_readEntities));
 
             _readEntities.Clear();
         }

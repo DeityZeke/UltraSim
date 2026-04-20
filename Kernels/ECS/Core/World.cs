@@ -428,6 +428,75 @@ public sealed partial class World
         return true;
     }
 
+    internal int AddComponentImmediateBatch<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values) where T : unmanaged, IComponent<T>
+    {
+        if (entities.Length != values.Length)
+            throw new ArgumentException("Entities and values length must match.");
+
+        ComponentId id = Schema.GetComponentId<T>();
+        var reserveCounts = new Dictionary<Archetype, int>(8);
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            if (!EntityStore.TryGetLocation(entities[i], out Archetype source, out _) || source.HasComponent(id))
+                continue;
+
+            Archetype destination = GetAddTransition(source, id).Destination;
+            reserveCounts[destination] = reserveCounts.TryGetValue(destination, out int count) ? count + 1 : 1;
+        }
+
+        foreach ((Archetype archetype, int count) in reserveCounts)
+            archetype.Reserve(count);
+
+        int applied = 0;
+        Archetype? cachedSource = null;
+        bool cachedHasComponent = false;
+        bool cachedPlanReady = false;
+        TransitionPlan cachedPlan = default;
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            Entity entity = entities[i];
+            if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot))
+                continue;
+
+            if (!ReferenceEquals(source, cachedSource))
+            {
+                cachedSource = source;
+                cachedHasComponent = source.HasComponent(id);
+                cachedPlanReady = false;
+            }
+
+            if (cachedHasComponent)
+            {
+                source.GetComponentSpan<T>(id)[slot] = values[i];
+                _dirty.Mark(id, entity);
+                applied++;
+                continue;
+            }
+
+            if (!cachedPlanReady)
+            {
+                cachedPlan = GetAddTransition(source, id);
+                cachedPlanReady = true;
+            }
+
+            Archetype destination = cachedPlan.Destination;
+            int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
+            cachedPlan.Copy(slot, newSlot);
+            destination.GetComponentSpan<T>(id)[newSlot] = values[i];
+
+            if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+                EntityStore.SetLocation(moved, source, movedSlot);
+
+            EntityStore.SetLocation(entity, destination, newSlot);
+            _dirty.Mark(id, entity);
+            applied++;
+        }
+
+        return applied;
+    }
+
     internal bool RemoveComponentImmediate<T>(Entity entity) where T : unmanaged, IComponent<T>
     {
         ComponentId id = Schema.GetComponentId<T>();
@@ -445,6 +514,66 @@ public sealed partial class World
         EntityStore.SetLocation(entity, destination, newSlot);
         _dirty.Mark(id, entity);
         return true;
+    }
+
+    internal int RemoveComponentImmediateBatch<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T>
+    {
+        ComponentId id = Schema.GetComponentId<T>();
+        var reserveCounts = new Dictionary<Archetype, int>(8);
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            if (!EntityStore.TryGetLocation(entities[i], out Archetype source, out _) || !source.HasComponent(id))
+                continue;
+
+            Archetype destination = GetRemoveTransition(source, id).Destination;
+            reserveCounts[destination] = reserveCounts.TryGetValue(destination, out int count) ? count + 1 : 1;
+        }
+
+        foreach ((Archetype archetype, int count) in reserveCounts)
+            archetype.Reserve(count);
+
+        int applied = 0;
+        Archetype? cachedSource = null;
+        bool cachedHasComponent = false;
+        bool cachedPlanReady = false;
+        TransitionPlan cachedPlan = default;
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            Entity entity = entities[i];
+            if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot))
+                continue;
+
+            if (!ReferenceEquals(source, cachedSource))
+            {
+                cachedSource = source;
+                cachedHasComponent = source.HasComponent(id);
+                cachedPlanReady = false;
+            }
+
+            if (!cachedHasComponent)
+                continue;
+
+            if (!cachedPlanReady)
+            {
+                cachedPlan = GetRemoveTransition(source, id);
+                cachedPlanReady = true;
+            }
+
+            Archetype destination = cachedPlan.Destination;
+            int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
+            cachedPlan.Copy(slot, newSlot);
+
+            if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+                EntityStore.SetLocation(moved, source, movedSlot);
+
+            EntityStore.SetLocation(entity, destination, newSlot);
+            _dirty.Mark(id, entity);
+            applied++;
+        }
+
+        return applied;
     }
 
     private TransitionPlan GetAddTransition(Archetype source, ComponentId componentId)

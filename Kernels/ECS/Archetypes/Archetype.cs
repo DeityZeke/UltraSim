@@ -70,6 +70,17 @@ public sealed class Archetype
         return slot;
     }
 
+    internal int AddEntityUninitializedAssumeCapacity(Entity entity)
+    {
+        int slot = _entityCount;
+        if (slot >= _entities.Length)
+            throw new InvalidOperationException("Archetype capacity must be reserved before uninitialized add.");
+
+        _entities[slot] = entity;
+        _entityCount = slot + 1;
+        return slot;
+    }
+
     internal int AddEntitiesUninitialized(ReadOnlySpan<Entity> entities)
     {
         int count = entities.Length;
