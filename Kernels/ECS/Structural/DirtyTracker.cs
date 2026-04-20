@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Diagnostics.CodeAnalysis;
 
 namespace UltraSim.ECS;
 
@@ -248,25 +249,10 @@ internal sealed class DirtyTracker
         if (!_captureEnabled)
             return false;
 
-        if (_captureWorkerCount <= 0)
-        {
-            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
-            {
-                MarkNoLock(entity);
-                return true;
-            }
-
-            return false;
-        }
-
-        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        if (!TryGetCaptureState(out LocalDirtyState? state))
             return false;
 
-        LocalDirtyState[] states = _localStates;
-        if ((uint)workerIndex >= (uint)states.Length)
-            return false;
-
-        states[workerIndex].Mark(entity);
+        state.Mark(entity);
         return true;
     }
 
@@ -276,25 +262,10 @@ internal sealed class DirtyTracker
         if (!_captureEnabled)
             return false;
 
-        if (_captureWorkerCount <= 0)
-        {
-            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
-            {
-                MarkUniqueNoLock(entities);
-                return true;
-            }
-
-            return false;
-        }
-
-        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        if (!TryGetCaptureState(out LocalDirtyState? state))
             return false;
 
-        LocalDirtyState[] states = _localStates;
-        if ((uint)workerIndex >= (uint)states.Length)
-            return false;
-
-        states[workerIndex].MarkUnique(entities);
+        state.MarkUnique(entities);
         return true;
     }
 
@@ -304,25 +275,10 @@ internal sealed class DirtyTracker
         if (!_captureEnabled)
             return false;
 
-        if (_captureWorkerCount <= 0)
-        {
-            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
-            {
-                MarkNoLock(componentId, entity);
-                return true;
-            }
-
-            return false;
-        }
-
-        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        if (!TryGetCaptureState(out LocalDirtyState? state))
             return false;
 
-        LocalDirtyState[] states = _localStates;
-        if ((uint)workerIndex >= (uint)states.Length)
-            return false;
-
-        states[workerIndex].Mark(componentId, entity);
+        state.Mark(componentId, entity);
         return true;
     }
 
@@ -332,25 +288,10 @@ internal sealed class DirtyTracker
         if (!_captureEnabled)
             return false;
 
-        if (_captureWorkerCount <= 0)
-        {
-            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
-            {
-                MarkNoLock(componentId, entities);
-                return true;
-            }
-
-            return false;
-        }
-
-        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        if (!TryGetCaptureState(out LocalDirtyState? state))
             return false;
 
-        LocalDirtyState[] states = _localStates;
-        if ((uint)workerIndex >= (uint)states.Length)
-            return false;
-
-        states[workerIndex].Mark(componentId, entities);
+        state.Mark(componentId, entities);
         return true;
     }
 
@@ -360,25 +301,10 @@ internal sealed class DirtyTracker
         if (!_captureEnabled)
             return false;
 
-        if (_captureWorkerCount <= 0)
-        {
-            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
-            {
-                MarkUniqueNoLock(componentId, entities);
-                return true;
-            }
-
-            return false;
-        }
-
-        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        if (!TryGetCaptureState(out LocalDirtyState? state))
             return false;
 
-        LocalDirtyState[] states = _localStates;
-        if ((uint)workerIndex >= (uint)states.Length)
-            return false;
-
-        states[workerIndex].MarkUnique(componentId, entities);
+        state.MarkUnique(componentId, entities);
         return true;
     }
 
@@ -388,26 +314,38 @@ internal sealed class DirtyTracker
         if (!_captureEnabled)
             return false;
 
-        if (_captureWorkerCount <= 0)
-        {
-            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
-            {
-                MarkNoLock(componentId, entities, dirtyIndices);
-                return true;
-            }
-
+        if (!TryGetCaptureState(out LocalDirtyState? state))
             return false;
-        }
 
-        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        state.Mark(componentId, entities, dirtyIndices);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryGetCaptureState([NotNullWhen(true)] out LocalDirtyState? state)
+    {
+        state = null;
+        if (_captureWorkerCount <= 0)
             return false;
 
         LocalDirtyState[] states = _localStates;
-        if ((uint)workerIndex >= (uint)states.Length)
-            return false;
+        if (WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+        {
+            if ((uint)workerIndex < (uint)states.Length)
+            {
+                state = states[workerIndex];
+                return true;
+            }
+        }
 
-        states[workerIndex].Mark(componentId, entities, dirtyIndices);
-        return true;
+        if (Environment.CurrentManagedThreadId == _serialCaptureThreadId && states.Length > 0)
+        {
+            int serialStateIndex = Math.Min(_captureWorkerCount - 1, states.Length - 1);
+            state = states[serialStateIndex];
+            return true;
+        }
+
+        return false;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

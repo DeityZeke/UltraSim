@@ -172,6 +172,19 @@ public sealed class EntityManager : IEntityReadOnly
         if ((uint)index >= (uint)_nextIndex || entity.Version == 0 || _versions[index] != entity.Version)
             return;
 
+        FreeAtValidatedIndex(index);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void FreeAssumeAlive(Entity entity)
+    {
+        FreeAtValidatedIndex((int)entity.Index);
+    }
+
+    private void FreeAtValidatedIndex(int index)
+    {
+        // Callers guarantee the index/version pair is already validated against the current store state.
+
         if (_locations[index].Archetype is not null)
             _aliveCount--;
 

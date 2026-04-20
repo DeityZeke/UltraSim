@@ -63,7 +63,7 @@ internal sealed class SystemManager
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _executionMode == SystemExecutionMode.ParallelBatches
             ? EnsureWorkerPool().WorkerCount + 1
-            : 0;
+            : DefaultWorkerCount + 1;
     }
 
     public void SetExecutionMode(SystemExecutionMode mode)

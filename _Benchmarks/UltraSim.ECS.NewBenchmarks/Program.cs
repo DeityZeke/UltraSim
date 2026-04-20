@@ -775,11 +775,15 @@ internal static class NewKernelBenchmarks
 
         var signature = new ArchetypeSignature(componentIds);
         for (int i = 0; i < count; i++)
+            world.EnqueueCreateDefault(signature);
+
+        world.ProcessStructuralQueues();
+        Entity[] entities = CaptureEntities(world, count);
+        for (int i = 0; i < entities.Length; i++)
         {
-            Entity entity = world.CreateDefault(signature);
-            world.SetComponent(entity, new Position(i, i + 1));
-            world.SetComponent(entity, new Velocity((i % 97) + 2, (i % 89) + 3));
-            world.SetComponent(entity, new Oscillator(
+            world.SetComponent(entities[i], new Position(i, i + 1));
+            world.SetComponent(entities[i], new Velocity((i % 97) + 2, (i % 89) + 3));
+            world.SetComponent(entities[i], new Oscillator(
                 Phase: i * 0.0131f,
                 Frequency: 0.75f + ((i % 7) * 0.11f),
                 Amplitude: 1.5f + ((i % 5) * 0.25f),
@@ -806,14 +810,18 @@ internal static class NewKernelBenchmarks
 
         var signature = new ArchetypeSignature(componentIds);
         for (int i = 0; i < count; i++)
+            world.EnqueueCreateDefault(signature);
+
+        world.ProcessStructuralQueues();
+        Entity[] entities = CaptureEntities(world, count);
+        for (int i = 0; i < entities.Length; i++)
         {
-            Entity entity = world.CreateDefault(signature);
-            world.SetComponent(entity, new PulsePosition(
+            world.SetComponent(entities[i], new PulsePosition(
                 X: (i % 1024) - 512f,
                 Y: ((i / 1024) % 1024) - 512f,
                 Z: (i % 257) - 128f));
-            world.SetComponent(entity, new PulseVelocity(0f, 0f, 0f));
-            world.SetComponent(entity, new PulseMotion(
+            world.SetComponent(entities[i], new PulseVelocity(0f, 0f, 0f));
+            world.SetComponent(entities[i], new PulseMotion(
                 Speed: 2f + ((i % 5) * 0.1f),
                 Frequency: 0.5f + ((i % 7) * 0.05f),
                 Phase: (i % 360) * (MathF.PI / 180f)));
@@ -841,13 +849,17 @@ internal static class NewKernelBenchmarks
 
         var signature = new ArchetypeSignature(componentIds);
         for (int i = 0; i < count; i++)
+            world.EnqueueCreateDefault(signature);
+
+        world.ProcessStructuralQueues();
+        Entity[] entities = CaptureEntities(world, count);
+        for (int i = 0; i < entities.Length; i++)
         {
-            Entity entity = world.CreateDefault(signature);
-            world.SetComponent(entity, new Position(i, i + 1));
+            world.SetComponent(entities[i], new Position(i, i + 1));
             if (includeVelocity)
-                world.SetComponent(entity, new Velocity(i + 2, i + 3));
+                world.SetComponent(entities[i], new Velocity(i + 2, i + 3));
             if (includeHealth)
-                world.SetComponent(entity, new Health(i + 4));
+                world.SetComponent(entities[i], new Health(i + 4));
         }
 
         Span<Entity> drain = stackalloc Entity[Math.Min(count, 256)];

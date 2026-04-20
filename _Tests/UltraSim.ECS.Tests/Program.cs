@@ -39,6 +39,7 @@ internal static class TestRunner
         Run(nameof(ManualWorkerPool_RejectsReentrantParallelFor), ManualWorkerPool_RejectsReentrantParallelFor);
         Run(nameof(ComponentColumnCopier_RejectsMismatchedColumns), ComponentColumnCopier_RejectsMismatchedColumns);
         Run(nameof(SystemContext_ParallelFor_KeepsChunkWritesDeterministic), SystemContext_ParallelFor_KeepsChunkWritesDeterministic);
+        Run(nameof(SystemContext_ParallelSparseChunkWrites_AreSafeInSerialMode), SystemContext_ParallelSparseChunkWrites_AreSafeInSerialMode);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_DueTicks_WrapAcrossUintBoundary), SystemManager_DueTicks_WrapAcrossUintBoundary);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
@@ -1012,6 +1013,53 @@ internal static class TestRunner
             parallelDirty);
         Assert.Equal(1024, serialWorld.DrainDirtyTo(serialDirty));
         Assert.Equal(1024, parallelWorld.DrainDirtyTo(parallelDirty));
+    }
+
+    private static void SystemContext_ParallelSparseChunkWrites_AreSafeInSerialMode()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        EcsSchema schema = builder.Build();
+
+        var world = new World(schema);
+        var signature = new ArchetypeSignature([positionId, velocityId]);
+        for (int i = 0; i < 1024; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            world.SetComponent(entity, new Position(i));
+            world.SetComponent(entity, new Velocity(i + 1));
+        }
+
+        Span<Entity> drain = stackalloc Entity[2048];
+        world.DrainDirtyTo(drain);
+        world.DrainDirtyTo<Position>(drain);
+        world.DrainDirtyTo<Velocity>(drain);
+
+        world.SetSystemExecutionMode(SystemExecutionMode.Serial);
+        world.RegisterSystems(new ParallelSparsePositionSystem(
+            new SystemDescriptor(
+                "ParallelSparsePosition",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId, velocityId]),
+                ComponentMask.FromIds([positionId]))));
+        world.SealSystems();
+
+        world.Tick(0.016f);
+
+        for (int i = 0; i < 1024; i++)
+        {
+            Entity entity = new((uint)i, 1u);
+            Position position = world.GetComponent<Position>(entity);
+            int expected = (i & 1) == 0 ? i + (i + 1) : i;
+            Assert.Equal(new Position(expected), position);
+        }
+
+        var dirty = new Entity[1024];
+        Assert.Equal(512, world.DrainDirtyTo<Position>(dirty));
+        Assert.Equal(512, world.DrainDirtyTo(dirty));
     }
 
     private static World CreateParallelChunkTestWorld(EcsSchema schema, ComponentId positionId, ComponentId velocityId, SystemExecutionMode mode)
@@ -2370,6 +2418,36 @@ internal static class TestRunner
                 {
                     writes[i] = new Position(writes[i].X + velocities[i].X);
                 }
+            });
+        }
+    }
+
+    private sealed class ParallelSparsePositionSystem : SystemBase
+    {
+        private const int BlockSize = 128;
+
+        public ParallelSparsePositionSystem(SystemDescriptor descriptor)
+        {
+            Descriptor = descriptor;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            ctx.PatchChunksParallelSparse<Velocity, Position>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Velocity> velocities, Span<Position> writes, Span<int> dirtyIndices) =>
+            {
+                int dirtyCount = 0;
+                for (int i = 0; i < writes.Length; i++)
+                {
+                    if (((int)entities[i].Index & 1) != 0)
+                        continue;
+
+                    writes[i] = new Position(writes[i].X + velocities[i].X);
+                    dirtyIndices[dirtyCount++] = i;
+                }
+
+                return dirtyCount;
             });
         }
     }

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 
 namespace UltraSim.ECS;
 
@@ -35,11 +36,15 @@ public sealed partial class World
 
                 ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
                 ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(column);
-                for (int i = 0; i < entities.Length; i++)
+                int count = entities.Length;
+                ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
+                ref T valueRef = ref MemoryMarshal.GetReference(values);
+                for (int i = 0; i < count; i++)
                 {
-                    action(entities[i], in values[i]);
-                    directMatched++;
+                    action(Unsafe.Add(ref entityRef, i), in Unsafe.Add(ref valueRef, i));
                 }
+
+                directMatched += count;
             }
 
             return directMatched;
@@ -54,11 +59,15 @@ public sealed partial class World
             Archetype archetype = plan.Archetype;
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
             ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(plan.Column1);
-            for (int i = 0; i < entities.Length; i++)
+            int count = entities.Length;
+            ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
+            ref T valueRef = ref MemoryMarshal.GetReference(values);
+            for (int i = 0; i < count; i++)
             {
-                action(entities[i], in values[i]);
-                matched++;
+                action(Unsafe.Add(ref entityRef, i), in Unsafe.Add(ref valueRef, i));
             }
+
+            matched += count;
         }
 
         return matched;
@@ -90,11 +99,19 @@ public sealed partial class World
                 ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
                 ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(column1);
                 ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(column2);
-                for (int i = 0; i < entities.Length; i++)
+                int count = entities.Length;
+                ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
+                ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
+                ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
+                for (int i = 0; i < count; i++)
                 {
-                    action(entities[i], in values1[i], in values2[i]);
-                    directMatched++;
+                    action(
+                        Unsafe.Add(ref entityRef, i),
+                        in Unsafe.Add(ref value1Ref, i),
+                        in Unsafe.Add(ref value2Ref, i));
                 }
+
+                directMatched += count;
             }
 
             return directMatched;
@@ -110,11 +127,19 @@ public sealed partial class World
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
             ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(plan.Column1);
             ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(plan.Column2);
-            for (int i = 0; i < entities.Length; i++)
+            int count = entities.Length;
+            ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
+            ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
+            ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
+            for (int i = 0; i < count; i++)
             {
-                action(entities[i], in values1[i], in values2[i]);
-                matched++;
+                action(
+                    Unsafe.Add(ref entityRef, i),
+                    in Unsafe.Add(ref value1Ref, i),
+                    in Unsafe.Add(ref value2Ref, i));
             }
+
+            matched += count;
         }
 
         return matched;
@@ -153,11 +178,21 @@ public sealed partial class World
                 ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(column1);
                 ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(column2);
                 ReadOnlySpan<T3> values3 = archetype.GetComponentSpanAt<T3>(column3);
-                for (int i = 0; i < entities.Length; i++)
+                int count = entities.Length;
+                ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
+                ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
+                ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
+                ref T3 value3Ref = ref MemoryMarshal.GetReference(values3);
+                for (int i = 0; i < count; i++)
                 {
-                    action(entities[i], in values1[i], in values2[i], in values3[i]);
-                    directMatched++;
+                    action(
+                        Unsafe.Add(ref entityRef, i),
+                        in Unsafe.Add(ref value1Ref, i),
+                        in Unsafe.Add(ref value2Ref, i),
+                        in Unsafe.Add(ref value3Ref, i));
                 }
+
+                directMatched += count;
             }
 
             return directMatched;
@@ -174,11 +209,21 @@ public sealed partial class World
             ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(plan.Column1);
             ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(plan.Column2);
             ReadOnlySpan<T3> values3 = archetype.GetComponentSpanAt<T3>(plan.Column3);
-            for (int i = 0; i < entities.Length; i++)
+            int count = entities.Length;
+            ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
+            ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
+            ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
+            ref T3 value3Ref = ref MemoryMarshal.GetReference(values3);
+            for (int i = 0; i < count; i++)
             {
-                action(entities[i], in values1[i], in values2[i], in values3[i]);
-                matched++;
+                action(
+                    Unsafe.Add(ref entityRef, i),
+                    in Unsafe.Add(ref value1Ref, i),
+                    in Unsafe.Add(ref value2Ref, i),
+                    in Unsafe.Add(ref value3Ref, i));
             }
+
+            matched += count;
         }
 
         return matched;

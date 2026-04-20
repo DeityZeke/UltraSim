@@ -526,7 +526,7 @@ public sealed partial class World
         if (archetype.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
             EntityStore.SetLocation(moved, archetype, movedSlot);
 
-        EntityStore.Free(entity);
+        EntityStore.FreeAssumeAlive(entity);
         _dirty.Mark(entity);
     }
 
@@ -552,7 +552,7 @@ public sealed partial class World
                 if (archetype.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
                     EntityStore.SetLocation(moved, archetype, movedSlot);
 
-                EntityStore.Free(entity);
+                EntityStore.FreeAssumeAlive(entity);
                 dirtyRented[destroyed++] = entity;
             }
 
@@ -1011,7 +1011,7 @@ public sealed partial class World
         if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
             EntityStore.SetLocation(moved, source, movedSlot);
 
-        EntityStore.Free(entity);
+        EntityStore.FreeAssumeAlive(entity);
         destroyed++;
     }
 
