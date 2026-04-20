@@ -103,6 +103,9 @@ Implemented so far:
 - multi-tick serial vs parallel determinism soak coverage,
 - opt-in tick profiling snapshots for pre-systems, systems, and post-systems phases,
 - versioned query-plan caching for read-only query, patch-query, chunk, and archetype traversal entry points,
+- bound transition copy steps to reduce per-entity structural copy dispatch,
+- caller-participating parallel worker execution to reduce small-batch scheduler overhead,
+- touched-component tracking in local dirty capture state to reduce merge scanning,
 - targeted benchmark coverage against the old ECS, including read-only vs write-heavy scheduler scenarios,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.

@@ -978,7 +978,7 @@ public sealed partial class World
         dirtyBuffer[applied++] = entity;
     }
 
-    private static TransitionPlan BuildTransitionPlan(Archetype source, Archetype destination, ComponentId skip)
+    private TransitionPlan BuildTransitionPlan(Archetype source, Archetype destination, ComponentId skip)
     {
         ReadOnlySpan<ComponentId> sourceIds = source.ComponentIds;
         int count = 0;
@@ -996,8 +996,7 @@ public sealed partial class World
         if (count == 0)
             return TransitionPlan.Empty(destination);
 
-        var sourceColumns = new IComponentColumn[count];
-        var destinationColumns = new IComponentColumn[count];
+        var steps = new TransitionCopyStep[count];
         int write = 0;
 
         for (int i = 0; i < sourceIds.Length; i++)
@@ -1011,12 +1010,15 @@ public sealed partial class World
                 continue;
 
             int sourceIndex = source.GetColumnIndex(id);
-            sourceColumns[write] = source.GetColumnAt(sourceIndex);
-            destinationColumns[write] = destination.GetColumnAt(destinationIndex);
+            ComponentTypeInfo info = Schema.GetComponentInfo(id);
+            steps[write] = new TransitionCopyStep(
+                source.GetColumnAt(sourceIndex),
+                destination.GetColumnAt(destinationIndex),
+                info.ColumnCopier);
             write++;
         }
 
-        return new TransitionPlan(destination, sourceColumns, destinationColumns, write);
+        return new TransitionPlan(destination, steps, write);
     }
 
     private readonly struct TransitionKey : IEquatable<TransitionKey>
@@ -1042,28 +1044,43 @@ public sealed partial class World
 
     private readonly struct TransitionPlan
     {
-        private readonly IComponentColumn[] _sourceColumns;
-        private readonly IComponentColumn[] _destinationColumns;
+        private readonly TransitionCopyStep[] _steps;
         private readonly int _count;
 
-        public TransitionPlan(Archetype destination, IComponentColumn[] sourceColumns, IComponentColumn[] destinationColumns, int count)
+        public TransitionPlan(Archetype destination, TransitionCopyStep[] steps, int count)
         {
             Destination = destination;
-            _sourceColumns = sourceColumns;
-            _destinationColumns = destinationColumns;
+            _steps = steps;
             _count = count;
         }
 
         public Archetype Destination { get; }
 
         public static TransitionPlan Empty(Archetype destination)
-            => new(destination, Array.Empty<IComponentColumn>(), Array.Empty<IComponentColumn>(), 0);
+            => new(destination, Array.Empty<TransitionCopyStep>(), 0);
 
         public void Copy(int sourceSlot, int destinationSlot)
         {
             for (int i = 0; i < _count; i++)
-                _destinationColumns[i].CopyFrom(_sourceColumns[i], sourceSlot, destinationSlot);
+                _steps[i].Copy(sourceSlot, destinationSlot);
         }
+    }
+
+    private readonly struct TransitionCopyStep
+    {
+        private readonly IComponentColumn _source;
+        private readonly IComponentColumn _destination;
+        private readonly ComponentColumnCopier _copier;
+
+        public TransitionCopyStep(IComponentColumn source, IComponentColumn destination, ComponentColumnCopier copier)
+        {
+            _source = source;
+            _destination = destination;
+            _copier = copier;
+        }
+
+        public void Copy(int sourceSlot, int destinationSlot)
+            => _copier(_source, _destination, sourceSlot, destinationSlot);
     }
 
     private void EnsureCanMutateConfiguration()

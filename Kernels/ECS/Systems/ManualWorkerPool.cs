@@ -59,12 +59,27 @@ internal sealed class ManualWorkerPool : IDisposable
             _workCount = count;
             _workIndex = 0;
             _completedWorkers = 0;
-            _activeWorkers = Math.Min(count, _workEvents.Length);
+            _activeWorkers = Math.Min(count - 1, _workEvents.Length);
 
             for (int i = 0; i < _activeWorkers; i++)
                 _workEvents[i].Set();
 
-            _completeEvent.WaitOne();
+            try
+            {
+                WorkerThreadContext.SetWorkerIndex(_threads.Length);
+                ExecuteAvailableWork();
+            }
+            catch (Exception ex)
+            {
+                Interlocked.CompareExchange(ref _capturedException, ex, null);
+            }
+            finally
+            {
+                WorkerThreadContext.ClearWorkerIndex();
+            }
+
+            if (_activeWorkers > 0)
+                _completeEvent.WaitOne();
 
             if (_capturedException is not null)
                 throw new AggregateException("ManualWorkerPool worker failed.", _capturedException);
@@ -82,14 +97,7 @@ internal sealed class ManualWorkerPool : IDisposable
 
             try
             {
-                while (true)
-                {
-                    int index = Interlocked.Increment(ref _workIndex) - 1;
-                    if (index >= _workCount)
-                        break;
-
-                    _workAction!(index);
-                }
+                ExecuteAvailableWork();
             }
             catch (Exception ex)
             {
@@ -103,6 +111,18 @@ internal sealed class ManualWorkerPool : IDisposable
         }
 
         WorkerThreadContext.ClearWorkerIndex();
+    }
+
+    private void ExecuteAvailableWork()
+    {
+        while (true)
+        {
+            int index = Interlocked.Increment(ref _workIndex) - 1;
+            if (index >= _workCount)
+                break;
+
+            _workAction!(index);
+        }
     }
 
     public void Dispose()

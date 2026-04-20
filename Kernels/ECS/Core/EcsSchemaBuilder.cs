@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Reflection;
 
 namespace UltraSim.ECS;
 
@@ -11,13 +12,13 @@ public sealed class EcsSchemaBuilder
     public int ComponentCount => _components.Count;
 
     public ComponentId RegisterComponent<T>() where T : unmanaged, IComponent<T>
-        => RegisterComponent(typeof(T), static capacity => new ComponentColumn<T>(capacity));
+        => RegisterComponent(typeof(T), static capacity => new ComponentColumn<T>(capacity), ComponentColumnCopierCache<T>.Copy);
 
     public ComponentId RegisterComponent(Type componentType)
     {
         ArgumentNullException.ThrowIfNull(componentType);
 
-        return RegisterComponent(componentType, CreateFactory(componentType));
+        return RegisterComponent(componentType, CreateFactory(componentType), CreateCopier(componentType));
     }
 
     public bool TryGetComponentId(Type componentType, out ComponentId id)
@@ -36,7 +37,10 @@ public sealed class EcsSchemaBuilder
         return new EcsSchema(components, typeToId);
     }
 
-    private ComponentId RegisterComponent(Type componentType, Func<int, IComponentColumn> columnFactory)
+    private ComponentId RegisterComponent(
+        Type componentType,
+        Func<int, IComponentColumn> columnFactory,
+        ComponentColumnCopier columnCopier)
     {
         EnsureMutable();
         ValidateComponentType(componentType);
@@ -46,7 +50,7 @@ public sealed class EcsSchemaBuilder
 
         var id = new ComponentId(_components.Count);
         _typeToId.Add(componentType, id);
-        _components.Add(new ComponentTypeInfo(id, componentType, columnFactory));
+        _components.Add(new ComponentTypeInfo(id, componentType, columnFactory, columnCopier));
         return id;
     }
 
@@ -65,6 +69,18 @@ public sealed class EcsSchemaBuilder
             ?? throw new InvalidOperationException($"Missing component column constructor for {componentType.FullName}.");
 
         return capacity => (IComponentColumn)ctor.Invoke(new object[] { capacity });
+    }
+
+    private static ComponentColumnCopier CreateCopier(Type componentType)
+    {
+        ValidateComponentType(componentType);
+
+        Type cacheType = typeof(ComponentColumnCopierCache<>).MakeGenericType(componentType);
+        FieldInfo field = cacheType.GetField("Copy", BindingFlags.Public | BindingFlags.Static)
+            ?? throw new InvalidOperationException($"Missing component column copier for {componentType.FullName}.");
+
+        return (ComponentColumnCopier)(field.GetValue(null)
+            ?? throw new InvalidOperationException($"Null component column copier for {componentType.FullName}."));
     }
 
     private static void ValidateComponentType(Type componentType)

@@ -383,16 +383,18 @@ internal sealed class DirtyTracker
             for (int e = 0; e < allEntities.Length; e++)
                 _all.Mark(allEntities[e]);
 
+            ReadOnlySpan<int> touched = state.TouchedComponents;
             DirtySet?[] byComponent = state.ByComponent;
-            for (int c = 0; c < byComponent.Length; c++)
+            for (int c = 0; c < touched.Length; c++)
             {
-                DirtySet? localSet = byComponent[c];
+                int componentIndex = touched[c];
+                DirtySet? localSet = byComponent[componentIndex];
                 if (localSet is null || localSet.Count == 0)
                     continue;
 
-                EnsureComponentCapacity(c + 1);
-                _byComponent[c] ??= new DirtySet(DefaultEntityCapacity);
-                DirtySet globalSet = _byComponent[c]!;
+                EnsureComponentCapacity(componentIndex + 1);
+                _byComponent[componentIndex] ??= new DirtySet(DefaultEntityCapacity);
+                DirtySet globalSet = _byComponent[componentIndex]!;
                 ReadOnlySpan<Entity> localEntities = localSet.EntitiesSpan;
                 for (int e = 0; e < localEntities.Length; e++)
                     globalSet.Mark(localEntities[e]);
@@ -406,38 +408,42 @@ internal sealed class DirtyTracker
     {
         public readonly DirtySet All;
         public DirtySet?[] ByComponent;
+        private int[] _touchedComponents;
+        private int _touchedCount;
+        private bool _hasPending;
 
         public LocalDirtyState(int capacity)
         {
             All = new DirtySet(capacity);
             ByComponent = new DirtySet?[32];
+            _touchedComponents = new int[8];
+            _touchedCount = 0;
+            _hasPending = false;
         }
 
         public bool HasPending
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                if (All.Count > 0)
-                    return true;
+            get => _hasPending;
+        }
 
-                for (int i = 0; i < ByComponent.Length; i++)
-                {
-                    DirtySet? set = ByComponent[i];
-                    if (set is not null && set.Count > 0)
-                        return true;
-                }
-
-                return false;
-            }
+        public ReadOnlySpan<int> TouchedComponents
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _touchedComponents.AsSpan(0, _touchedCount);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Mark(Entity entity) => All.Mark(entity);
+        public void Mark(Entity entity)
+        {
+            All.Mark(entity);
+            _hasPending = true;
+        }
 
         public void MarkUnique(ReadOnlySpan<Entity> entities)
         {
             All.MarkKnownUniqueRange(entities);
+            _hasPending = true;
         }
 
         public void Mark(ComponentId componentId, Entity entity)
@@ -448,8 +454,18 @@ internal sealed class DirtyTracker
 
             All.Mark(entity);
             EnsureComponentCapacity(index + 1);
-            ByComponent[index] ??= new DirtySet(DefaultEntityCapacity);
-            ByComponent[index]!.Mark(entity);
+            DirtySet? set = ByComponent[index];
+            if (set is null)
+            {
+                set = new DirtySet(DefaultEntityCapacity);
+                ByComponent[index] = set;
+            }
+
+            if (set.Count == 0)
+                TrackTouchedComponent(index);
+
+            set.Mark(entity);
+            _hasPending = true;
         }
 
         public void Mark(ComponentId componentId, ReadOnlySpan<Entity> entities)
@@ -459,8 +475,15 @@ internal sealed class DirtyTracker
                 throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
 
             EnsureComponentCapacity(index + 1);
-            ByComponent[index] ??= new DirtySet(DefaultEntityCapacity);
-            DirtySet componentSet = ByComponent[index]!;
+            DirtySet? componentSet = ByComponent[index];
+            if (componentSet is null)
+            {
+                componentSet = new DirtySet(DefaultEntityCapacity);
+                ByComponent[index] = componentSet;
+            }
+
+            if (componentSet.Count == 0)
+                TrackTouchedComponent(index);
 
             for (int i = 0; i < entities.Length; i++)
             {
@@ -468,6 +491,8 @@ internal sealed class DirtyTracker
                 All.Mark(entity);
                 componentSet.Mark(entity);
             }
+
+            _hasPending = true;
         }
 
         public void MarkUnique(ComponentId componentId, ReadOnlySpan<Entity> entities)
@@ -477,17 +502,29 @@ internal sealed class DirtyTracker
                 throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
 
             EnsureComponentCapacity(index + 1);
-            ByComponent[index] ??= new DirtySet(DefaultEntityCapacity);
-            DirtySet componentSet = ByComponent[index]!;
+            DirtySet? componentSet = ByComponent[index];
+            if (componentSet is null)
+            {
+                componentSet = new DirtySet(DefaultEntityCapacity);
+                ByComponent[index] = componentSet;
+            }
+
+            if (componentSet.Count == 0)
+                TrackTouchedComponent(index);
+
             All.MarkKnownUniqueRange(entities);
             componentSet.MarkKnownUniqueRange(entities);
+            _hasPending = true;
         }
 
         public void Clear()
         {
             All.Clear();
-            for (int i = 0; i < ByComponent.Length; i++)
-                ByComponent[i]?.Clear();
+            for (int i = 0; i < _touchedCount; i++)
+                ByComponent[_touchedComponents[i]]?.Clear();
+
+            _touchedCount = 0;
+            _hasPending = false;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -498,6 +535,15 @@ internal sealed class DirtyTracker
 
             int newSize = Math.Max(ByComponent.Length * 2, needed);
             Array.Resize(ref ByComponent, newSize);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void TrackTouchedComponent(int index)
+        {
+            if (_touchedCount == _touchedComponents.Length)
+                Array.Resize(ref _touchedComponents, _touchedComponents.Length * 2);
+
+            _touchedComponents[_touchedCount++] = index;
         }
     }
 

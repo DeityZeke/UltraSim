@@ -47,8 +47,13 @@ internal sealed class ComponentColumn<T> : IComponentColumn
 
     public void CopyFrom(IComponentColumn source, int sourceSlot, int destinationSlot)
     {
-        _data[destinationSlot] = ((ComponentColumn<T>)source)._data[sourceSlot];
+        CopyFromTyped((ComponentColumn<T>)source, sourceSlot, destinationSlot);
     }
 
     public Span<T> AsSpan(int count) => _data.AsSpan(0, count);
+
+    internal void CopyFromTyped(ComponentColumn<T> source, int sourceSlot, int destinationSlot)
+    {
+        _data[destinationSlot] = source._data[sourceSlot];
+    }
 }
