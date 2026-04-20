@@ -143,18 +143,21 @@ public sealed class Archetype
         return ref _entities[slot];
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool HasComponent(ComponentId id)
     {
         int value = id.Value;
         return (uint)value < (uint)_componentToColumn.Length && _componentToColumn[value] >= 0;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int GetColumnIndex(ComponentId id)
     {
         int value = id.Value;
         return (uint)value < (uint)_componentToColumn.Length ? _componentToColumn[value] : -1;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Span<T> GetComponentSpan<T>(ComponentId id) where T : unmanaged, IComponent<T>
     {
         int idValue = id.Value;
@@ -168,6 +171,7 @@ public sealed class Archetype
         throw new InvalidOperationException($"Component column not found for id {id}.");
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal Span<T> GetComponentSpanAt<T>(int columnIndex) where T : unmanaged, IComponent<T>
     {
         if ((uint)columnIndex < (uint)_columns.Length && _columns[columnIndex] is ComponentColumn<T> typed)

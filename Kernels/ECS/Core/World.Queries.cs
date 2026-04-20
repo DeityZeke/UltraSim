@@ -5,6 +5,8 @@ namespace UltraSim.ECS;
 
 public sealed partial class World
 {
+    private const int DirectQueryArchetypeThreshold = 4;
+
     private static int[] RentDirtyIndexBuffer(int entityCount)
         => ArrayPool<int>.Shared.Rent(Math.Max(1, entityCount));
 
@@ -20,6 +22,29 @@ public sealed partial class World
         ArgumentNullException.ThrowIfNull(action);
 
         ComponentId id = Schema.GetComponentId<T>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        if (archetypes.Length <= DirectQueryArchetypeThreshold)
+        {
+            int directMatched = 0;
+            for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+            {
+                Archetype archetype = archetypes[archetypeIndex];
+                int column = archetype.GetColumnIndex(id);
+                if (column < 0)
+                    continue;
+
+                ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+                ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(column);
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    action(entities[i], in values[i]);
+                    directMatched++;
+                }
+            }
+
+            return directMatched;
+        }
+
         ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(id);
         int matched = 0;
 
@@ -47,6 +72,34 @@ public sealed partial class World
 
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        if (archetypes.Length <= DirectQueryArchetypeThreshold)
+        {
+            int directMatched = 0;
+            for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+            {
+                Archetype archetype = archetypes[archetypeIndex];
+                int column1 = archetype.GetColumnIndex(id1);
+                if (column1 < 0)
+                    continue;
+
+                int column2 = archetype.GetColumnIndex(id2);
+                if (column2 < 0)
+                    continue;
+
+                ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+                ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(column1);
+                ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(column2);
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    action(entities[i], in values1[i], in values2[i]);
+                    directMatched++;
+                }
+            }
+
+            return directMatched;
+        }
+
         ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(id1, id2);
         int matched = 0;
 
@@ -77,6 +130,39 @@ public sealed partial class World
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
         ComponentId id3 = Schema.GetComponentId<T3>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        if (archetypes.Length <= DirectQueryArchetypeThreshold)
+        {
+            int directMatched = 0;
+            for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+            {
+                Archetype archetype = archetypes[archetypeIndex];
+                int column1 = archetype.GetColumnIndex(id1);
+                if (column1 < 0)
+                    continue;
+
+                int column2 = archetype.GetColumnIndex(id2);
+                if (column2 < 0)
+                    continue;
+
+                int column3 = archetype.GetColumnIndex(id3);
+                if (column3 < 0)
+                    continue;
+
+                ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+                ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(column1);
+                ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(column2);
+                ReadOnlySpan<T3> values3 = archetype.GetComponentSpanAt<T3>(column3);
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    action(entities[i], in values1[i], in values2[i], in values3[i]);
+                    directMatched++;
+                }
+            }
+
+            return directMatched;
+        }
+
         ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(id1, id2, id3);
         int matched = 0;
 
@@ -106,6 +192,37 @@ public sealed partial class World
 
         ComponentId readId = Schema.GetComponentId<TRead>();
         ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        if (archetypes.Length <= DirectQueryArchetypeThreshold)
+        {
+            int directMatched = 0;
+            for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+            {
+                Archetype archetype = archetypes[archetypeIndex];
+                int readColumn = archetype.GetColumnIndex(readId);
+                if (readColumn < 0)
+                    continue;
+
+                int writeColumn = archetype.GetColumnIndex(writeId);
+                if (writeColumn < 0)
+                    continue;
+
+                ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+                ReadOnlySpan<TRead> reads = archetype.GetComponentSpanAt<TRead>(readColumn);
+                Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(writeColumn);
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    TRead read = reads[i];
+                    action(entities[i], in read, ref writes[i]);
+                }
+
+                _dirty.MarkUnique(writeId, entities);
+                directMatched += entities.Length;
+            }
+
+            return directMatched;
+        }
+
         ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(readId, writeId);
         int matched = 0;
 
@@ -139,6 +256,43 @@ public sealed partial class World
         ComponentId readId1 = Schema.GetComponentId<TRead1>();
         ComponentId readId2 = Schema.GetComponentId<TRead2>();
         ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        if (archetypes.Length <= DirectQueryArchetypeThreshold)
+        {
+            int directMatched = 0;
+            for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+            {
+                Archetype archetype = archetypes[archetypeIndex];
+                int readColumn1 = archetype.GetColumnIndex(readId1);
+                if (readColumn1 < 0)
+                    continue;
+
+                int readColumn2 = archetype.GetColumnIndex(readId2);
+                if (readColumn2 < 0)
+                    continue;
+
+                int writeColumn = archetype.GetColumnIndex(writeId);
+                if (writeColumn < 0)
+                    continue;
+
+                ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+                ReadOnlySpan<TRead1> reads1 = archetype.GetComponentSpanAt<TRead1>(readColumn1);
+                ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpanAt<TRead2>(readColumn2);
+                Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(writeColumn);
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    TRead1 read1 = reads1[i];
+                    TRead2 read2 = reads2[i];
+                    action(entities[i], in read1, in read2, ref writes[i]);
+                }
+
+                _dirty.MarkUnique(writeId, entities);
+                directMatched += entities.Length;
+            }
+
+            return directMatched;
+        }
+
         ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(readId1, readId2, writeId);
         int matched = 0;
 

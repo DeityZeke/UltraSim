@@ -19,20 +19,44 @@ public sealed class WorldPersistenceView
         ArgumentNullException.ThrowIfNull(world);
 
         World = world;
-
-        var views = new List<PersistenceArchetypeView>();
+        ReadOnlySpan<Archetype> archetypes = world.Archetypes.AsSpan();
+        int archetypeCount = 0;
         int entityCount = 0;
 
-        foreach (Archetype archetype in world.QueryArchetypes(required))
+        for (int i = 0; i < archetypes.Length; i++)
         {
+            Archetype archetype = archetypes[i];
+            if (required.Length != 0 && !archetype.Signature.HasAll(required))
+                continue;
+
             if (excludeEmpty && archetype.Count == 0)
                 continue;
 
-            views.Add(new PersistenceArchetypeView(archetype));
+            archetypeCount++;
             entityCount += archetype.Count;
         }
 
-        _archetypes = views.ToArray();
+        if (archetypeCount == 0)
+        {
+            _archetypes = Array.Empty<PersistenceArchetypeView>();
+            EntityCount = 0;
+            return;
+        }
+
+        _archetypes = new PersistenceArchetypeView[archetypeCount];
+        int write = 0;
+        for (int i = 0; i < archetypes.Length; i++)
+        {
+            Archetype archetype = archetypes[i];
+            if (required.Length != 0 && !archetype.Signature.HasAll(required))
+                continue;
+
+            if (excludeEmpty && archetype.Count == 0)
+                continue;
+
+            _archetypes[write++] = new PersistenceArchetypeView(archetype);
+        }
+
         EntityCount = entityCount;
     }
 

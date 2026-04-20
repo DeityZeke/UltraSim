@@ -239,22 +239,30 @@ public sealed partial class World
         if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
             throw new InvalidOperationException($"Entity not alive: {entity}");
 
-        if (!archetype.HasComponent(id))
+        int columnIndex = archetype.GetColumnIndex(id);
+        if (columnIndex < 0)
             throw new InvalidOperationException($"Entity {entity} does not contain component {typeof(T).Name}.");
 
-        return archetype.GetComponentSpan<T>(id)[slot];
+        return archetype.GetComponentSpanAt<T>(columnIndex)[slot];
     }
 
     public bool TryGetComponent<T>(Entity entity, out T value) where T : unmanaged, IComponent<T>
     {
         ComponentId id = Schema.GetComponentId<T>();
-        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot) || !archetype.HasComponent(id))
+        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
         {
             value = default;
             return false;
         }
 
-        value = archetype.GetComponentSpan<T>(id)[slot];
+        int columnIndex = archetype.GetColumnIndex(id);
+        if (columnIndex < 0)
+        {
+            value = default;
+            return false;
+        }
+
+        value = archetype.GetComponentSpanAt<T>(columnIndex)[slot];
         return true;
     }
 
@@ -264,10 +272,14 @@ public sealed partial class World
         ArgumentNullException.ThrowIfNull(updater);
 
         ComponentId id = Schema.GetComponentId<T>();
-        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot) || !archetype.HasComponent(id))
+        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
             return false;
 
-        Span<T> values = archetype.GetComponentSpan<T>(id);
+        int columnIndex = archetype.GetColumnIndex(id);
+        if (columnIndex < 0)
+            return false;
+
+        Span<T> values = archetype.GetComponentSpanAt<T>(columnIndex);
         updater(ref values[slot]);
         _dirty.Mark(id, entity);
         return true;
@@ -277,10 +289,14 @@ public sealed partial class World
     {
         EnsureNotShutdown();
         ComponentId id = Schema.GetComponentId<T>();
-        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot) || !archetype.HasComponent(id))
+        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
             return false;
 
-        archetype.GetComponentSpan<T>(id)[slot] = value;
+        int columnIndex = archetype.GetColumnIndex(id);
+        if (columnIndex < 0)
+            return false;
+
+        archetype.GetComponentSpanAt<T>(columnIndex)[slot] = value;
         _dirty.Mark(id, entity);
         return true;
     }
@@ -540,7 +556,7 @@ public sealed partial class World
                 dirtyRented[destroyed++] = entity;
             }
 
-            _dirty.Mark(dirtyRented.AsSpan(0, destroyed));
+            _dirty.MarkUnique(dirtyRented.AsSpan(0, destroyed));
             return destroyed;
         }
         finally
@@ -556,7 +572,6 @@ public sealed partial class World
             return true;
 
         int[] rentedSlots = ArrayPool<int>.Shared.Rent(entities.Length);
-        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
         try
         {
             Archetype? source = null;
@@ -597,21 +612,20 @@ public sealed partial class World
             if (increasing)
             {
                 for (int i = entities.Length - 1; i >= 0; i--)
-                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, dirtyRented, ref destroyed);
+                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, ref destroyed);
             }
             else
             {
                 for (int i = 0; i < entities.Length; i++)
-                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, dirtyRented, ref destroyed);
+                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, ref destroyed);
             }
 
-            _dirty.Mark(dirtyRented.AsSpan(0, destroyed));
+            _dirty.MarkUnique(entities);
             return true;
         }
         finally
         {
             ArrayPool<int>.Shared.Return(rentedSlots, clearArray: false);
-            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
         }
     }
 
@@ -717,7 +731,7 @@ public sealed partial class World
                 applied++;
             }
 
-            _dirty.Mark(id, dirtyRented.AsSpan(0, dirtyCount));
+            _dirty.MarkUnique(id, dirtyRented.AsSpan(0, dirtyCount));
             return applied;
         }
         finally
@@ -809,7 +823,7 @@ public sealed partial class World
                 applied++;
             }
 
-            _dirty.Mark(id, dirtyRented.AsSpan(0, dirtyCount));
+            _dirty.MarkUnique(id, dirtyRented.AsSpan(0, dirtyCount));
             return applied;
         }
         finally
@@ -903,7 +917,6 @@ public sealed partial class World
             return true;
 
         int[] rentedSlots = ArrayPool<int>.Shared.Rent(entities.Length);
-        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
         try
         {
             Archetype? source = null;
@@ -951,21 +964,20 @@ public sealed partial class World
             if (increasing)
             {
                 for (int i = entities.Length - 1; i >= 0; i--)
-                    ApplyAddFastEntry(entities[i], values[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+                    ApplyAddFastEntry(entities[i], values[i], rentedSlots[i], source!, destination, plan, ref applied);
             }
             else
             {
                 for (int i = 0; i < entities.Length; i++)
-                    ApplyAddFastEntry(entities[i], values[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+                    ApplyAddFastEntry(entities[i], values[i], rentedSlots[i], source!, destination, plan, ref applied);
             }
 
-            _dirty.Mark(id, dirtyRented.AsSpan(0, applied));
+            _dirty.MarkUnique(id, entities);
             return true;
         }
         finally
         {
             ArrayPool<int>.Shared.Return(rentedSlots, clearArray: false);
-            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
         }
     }
 
@@ -976,7 +988,6 @@ public sealed partial class World
         Archetype source,
         Archetype destination,
         TransitionPlan plan,
-        Entity[] dirtyBuffer,
         ref int applied)
         where T : unmanaged, IComponent<T>
     {
@@ -988,21 +999,20 @@ public sealed partial class World
             EntityStore.SetLocation(moved, source, movedSlot);
 
         EntityStore.SetLocation(entity, destination, newSlot);
-        dirtyBuffer[applied++] = entity;
+        applied++;
     }
 
     private void ApplyDestroyFastEntry(
         Entity entity,
         int slot,
         Archetype source,
-        Entity[] dirtyBuffer,
         ref int destroyed)
     {
         if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
             EntityStore.SetLocation(moved, source, movedSlot);
 
         EntityStore.Free(entity);
-        dirtyBuffer[destroyed++] = entity;
+        destroyed++;
     }
 
     private bool TryRemoveComponentSingleSourceFast<T>(ReadOnlySpan<Entity> entities, ComponentId id, out int applied)
@@ -1013,7 +1023,6 @@ public sealed partial class World
             return true;
 
         int[] rentedSlots = ArrayPool<int>.Shared.Rent(entities.Length);
-        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
         try
         {
             Archetype? source = null;
@@ -1061,21 +1070,20 @@ public sealed partial class World
             if (increasing)
             {
                 for (int i = entities.Length - 1; i >= 0; i--)
-                    ApplyRemoveFastEntry(entities[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+                    ApplyRemoveFastEntry(entities[i], rentedSlots[i], source!, destination, plan, ref applied);
             }
             else
             {
                 for (int i = 0; i < entities.Length; i++)
-                    ApplyRemoveFastEntry(entities[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+                    ApplyRemoveFastEntry(entities[i], rentedSlots[i], source!, destination, plan, ref applied);
             }
 
-            _dirty.Mark(id, dirtyRented.AsSpan(0, applied));
+            _dirty.MarkUnique(id, entities);
             return true;
         }
         finally
         {
             ArrayPool<int>.Shared.Return(rentedSlots, clearArray: false);
-            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
         }
     }
 
@@ -1085,7 +1093,6 @@ public sealed partial class World
         Archetype source,
         Archetype destination,
         TransitionPlan plan,
-        Entity[] dirtyBuffer,
         ref int applied)
     {
         int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
@@ -1095,7 +1102,7 @@ public sealed partial class World
             EntityStore.SetLocation(moved, source, movedSlot);
 
         EntityStore.SetLocation(entity, destination, newSlot);
-        dirtyBuffer[applied++] = entity;
+        applied++;
     }
 
     private TransitionPlan BuildTransitionPlan(Archetype source, Archetype destination, ComponentId skip)
