@@ -26,6 +26,7 @@ internal static class TestRunner
         Run(nameof(StructuralQueue_MixedOperations_UseDeterministicPhaseOrder), StructuralQueue_MixedOperations_UseDeterministicPhaseOrder);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
+        Run(nameof(QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes), QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes);
         Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
@@ -523,6 +524,51 @@ internal static class TestRunner
         });
 
         Assert.Equal(0, tripleCount);
+    }
+
+    private static void QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity entity = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Assert.True(world.SetComponent(entity, new Position(10)));
+
+        int initialMatched = world.Query<Position, Velocity>((Entity _, in Position _, in Velocity _) =>
+        {
+            throw new InvalidOperationException("No entity should match before velocity is added.");
+        });
+
+        Assert.Equal(0, initialMatched);
+
+        int initialArchetypes = 0;
+        foreach (Archetype _ in world.QueryArchetypes([positionId, velocityId]))
+            initialArchetypes++;
+
+        Assert.Equal(0, initialArchetypes);
+
+        world.EnqueueAdd(entity, new Velocity(5));
+        world.ProcessStructuralQueues();
+
+        int matchedAfterAdd = 0;
+        int checksum = 0;
+        world.Query<Position, Velocity>((Entity seen, in Position position, in Velocity velocity) =>
+        {
+            matchedAfterAdd++;
+            Assert.Equal(entity, seen);
+            checksum += position.X + velocity.X;
+        });
+
+        Assert.Equal(1, matchedAfterAdd);
+        Assert.Equal(15, checksum);
+
+        int archetypesAfterAdd = 0;
+        foreach (Archetype _ in world.QueryArchetypes([positionId, velocityId]))
+            archetypesAfterAdd++;
+
+        Assert.Equal(1, archetypesAfterAdd);
     }
 
     private static void PatchQuery_UpdatesMatchedRowsAndMarksDirty()

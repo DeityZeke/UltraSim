@@ -47,6 +47,7 @@ public sealed partial class World
         _systems = new SystemManager();
         _addTransitions = new Dictionary<TransitionKey, TransitionPlan>(16);
         _removeTransitions = new Dictionary<TransitionKey, TransitionPlan>(16);
+        _queryCacheVersion = Archetypes.Version;
         _state = WorldLifecycleState.Created;
     }
 

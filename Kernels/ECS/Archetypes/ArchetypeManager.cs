@@ -14,6 +14,7 @@ public sealed class ArchetypeManager
     private readonly List<Archetype> _archetypes;
     private readonly Dictionary<ArchetypeSignature, Archetype> _bySignature;
     private Archetype? _emptyArchetype;
+    private int _version;
 
     internal ArchetypeManager(EcsSchema schema)
     {
@@ -26,6 +27,12 @@ public sealed class ArchetypeManager
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _archetypes.Count;
+    }
+
+    public int Version
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _version;
     }
 
     public IReadOnlyList<Archetype> Archetypes => new ReadOnlyCollection<Archetype>(_archetypes);
@@ -51,6 +58,7 @@ public sealed class ArchetypeManager
         _bySignature.Add(emptySignature, archetype);
         _archetypes.Add(archetype);
         _emptyArchetype = archetype;
+        _version++;
         return archetype;
     }
 
@@ -137,6 +145,7 @@ public sealed class ArchetypeManager
         var archetype = new Archetype(signature, componentIds, columns);
         _bySignature.Add(signature, archetype);
         _archetypes.Add(archetype);
+        _version++;
         return archetype;
     }
 
@@ -219,14 +228,19 @@ public sealed class ArchetypeManager
     public ref struct ArchetypeEnumerator
     {
         private readonly ReadOnlySpan<Archetype> _archetypes;
-        private readonly ReadOnlySpan<ComponentId> _required;
         private int _index;
         private Archetype? _current;
 
         internal ArchetypeEnumerator(ArchetypeManager manager, ReadOnlySpan<ComponentId> required)
         {
             _archetypes = CollectionsMarshal.AsSpan(manager._archetypes);
-            _required = required;
+            _index = -1;
+            _current = null;
+        }
+
+        internal ArchetypeEnumerator(ReadOnlySpan<Archetype> archetypes)
+        {
+            _archetypes = archetypes;
             _index = -1;
             _current = null;
         }
@@ -242,17 +256,11 @@ public sealed class ArchetypeManager
 
         public bool MoveNext()
         {
-            while (++_index < _archetypes.Length)
-            {
-                Archetype archetype = _archetypes[_index];
-                if (!archetype.Signature.HasAll(_required))
-                    continue;
+            if (++_index >= _archetypes.Length)
+                return false;
 
-                _current = archetype;
-                return true;
-            }
-
-            return false;
+            _current = _archetypes[_index];
+            return true;
         }
     }
 }

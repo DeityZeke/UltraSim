@@ -7,7 +7,7 @@ public sealed partial class World
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ArchetypeManager.ArchetypeEnumerator QueryArchetypes(ReadOnlySpan<ComponentId> required)
     {
-        return Archetypes.EnumerateWith(required);
+        return new ArchetypeManager.ArchetypeEnumerator(GetCachedQueryArchetypes(required));
     }
 
     public int Query<T>(ReadOnlyQueryAction<T> action)
@@ -16,7 +16,7 @@ public sealed partial class World
         ArgumentNullException.ThrowIfNull(action);
 
         ComponentId id = Schema.GetComponentId<T>();
-        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(id);
         int matched = 0;
 
         for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
@@ -45,7 +45,7 @@ public sealed partial class World
 
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
-        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(id1, id2);
         int matched = 0;
 
         for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
@@ -77,7 +77,7 @@ public sealed partial class World
         ComponentId id1 = Schema.GetComponentId<T1>();
         ComponentId id2 = Schema.GetComponentId<T2>();
         ComponentId id3 = Schema.GetComponentId<T3>();
-        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(id1, id2, id3);
         int matched = 0;
 
         for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
@@ -108,7 +108,7 @@ public sealed partial class World
 
         ComponentId readId = Schema.GetComponentId<TRead>();
         ComponentId writeId = Schema.GetComponentId<TWrite>();
-        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(readId, writeId);
         int matched = 0;
 
         for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
@@ -143,7 +143,7 @@ public sealed partial class World
         ComponentId readId1 = Schema.GetComponentId<TRead1>();
         ComponentId readId2 = Schema.GetComponentId<TRead2>();
         ComponentId writeId = Schema.GetComponentId<TWrite>();
-        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        ReadOnlySpan<Archetype> archetypes = GetCachedQueryArchetypes(readId1, readId2, writeId);
         int matched = 0;
 
         for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
@@ -173,14 +173,17 @@ public sealed partial class World
     public QueryChunkEnumerator<T> QueryChunks<T>()
         where T : unmanaged, IComponent<T>
     {
-        return new QueryChunkEnumerator<T>(Archetypes.AsSpan(), Schema.GetComponentId<T>());
+        ComponentId id = Schema.GetComponentId<T>();
+        return new QueryChunkEnumerator<T>(GetCachedQueryArchetypes(id), id);
     }
 
     public QueryChunkEnumerator<T1, T2> QueryChunks<T1, T2>()
         where T1 : unmanaged, IComponent<T1>
         where T2 : unmanaged, IComponent<T2>
     {
-        return new QueryChunkEnumerator<T1, T2>(Archetypes.AsSpan(), Schema.GetComponentId<T1>(), Schema.GetComponentId<T2>());
+        ComponentId id1 = Schema.GetComponentId<T1>();
+        ComponentId id2 = Schema.GetComponentId<T2>();
+        return new QueryChunkEnumerator<T1, T2>(GetCachedQueryArchetypes(id1, id2), id1, id2);
     }
 
     public QueryChunkEnumerator<T1, T2, T3> QueryChunks<T1, T2, T3>()
@@ -188,11 +191,14 @@ public sealed partial class World
         where T2 : unmanaged, IComponent<T2>
         where T3 : unmanaged, IComponent<T3>
     {
+        ComponentId id1 = Schema.GetComponentId<T1>();
+        ComponentId id2 = Schema.GetComponentId<T2>();
+        ComponentId id3 = Schema.GetComponentId<T3>();
         return new QueryChunkEnumerator<T1, T2, T3>(
-            Archetypes.AsSpan(),
-            Schema.GetComponentId<T1>(),
-            Schema.GetComponentId<T2>(),
-            Schema.GetComponentId<T3>());
+            GetCachedQueryArchetypes(id1, id2, id3),
+            id1,
+            id2,
+            id3);
     }
 
     public readonly ref struct QueryChunk<T>

@@ -102,6 +102,7 @@ Implemented so far:
 - randomized model-based mutation fuzz coverage,
 - multi-tick serial vs parallel determinism soak coverage,
 - opt-in tick profiling snapshots for pre-systems, systems, and post-systems phases,
+- versioned query-plan caching for read-only query, patch-query, chunk, and archetype traversal entry points,
 - targeted benchmark coverage against the old ECS, including read-only vs write-heavy scheduler scenarios,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
