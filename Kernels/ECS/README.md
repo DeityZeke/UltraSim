@@ -89,6 +89,7 @@ Implemented so far:
 - entity/archetype storage bound to schema-owned column factories,
 - explicit dirty-aware mutation paths through `World` and the structural queue,
 - explicit patch/update mutation path without public mutable refs,
+- explicit chunk-level read helpers for hot read-only systems without exposing mutable refs,
 - chunk-level bulk patch APIs for hot-path systems without public mutable refs,
 - reusable prepared chunk-plan caches for hot-path systems that revisit the same query shape every tick,
 - `SystemContext` parallel chunk patch helpers for hot-path systems,
@@ -112,6 +113,7 @@ Implemented so far:
 - create/destroy churn coverage with stale-handle checks,
 - multi-tick serial vs parallel determinism soak coverage,
 - opt-in tick profiling snapshots for pre-systems, systems, and post-systems phases,
+- recent correctness hardening on archetype enumeration, due-tick wrap behavior, sparse dirty-index validation, manual worker-pool reentrancy, and component-column copier type checks,
 - versioned query-plan caching for read-only query, patch-query, chunk, and archetype traversal entry points,
 - bound transition copy steps to reduce per-entity structural copy dispatch,
 - caller-participating parallel worker execution to reduce small-batch scheduler overhead,
@@ -127,6 +129,13 @@ Implemented so far:
 - comparative entity-heavy benchmarks for reuse churn, sparse-victim destroy, and migration cycles,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
+
+Current practical status:
+
+- movement-oriented hot paths are now materially ahead of the older-old and old ECS benchmarks,
+- dirty-aware write-heavy scheduler paths are strong,
+- prefabs and persistence remain intentionally deferred behind working seams,
+- the main remaining competitive gaps are now concentrated in raw small/medium query-read throughput, read-only scheduler shapes, and a narrower destroy path set rather than in core architecture.
 
 Still intentionally deferred:
 

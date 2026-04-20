@@ -627,6 +627,19 @@ internal static class TestRunner
         Assert.Equal(60, totalPositionX);
         Assert.Equal(3, chunkCount);
 
+        int readChunkCount = 0;
+        long readChunkSum = 0;
+        int matchedByReadChunks = world.ReadChunks<Position, Velocity>((ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions, ReadOnlySpan<Velocity> velocities) =>
+        {
+            readChunkCount++;
+            for (int i = 0; i < entities.Length; i++)
+                readChunkSum += entities[i].Index + positions[i].X + velocities[i].X;
+        });
+
+        Assert.Equal(1, readChunkCount);
+        Assert.Equal(1, matchedByReadChunks);
+        Assert.Equal((long)moving.Index + 14L, readChunkSum);
+
         int tripleCount = world.Query<Position, Velocity, Acceleration>((Entity _, in Position _, in Velocity _, in Acceleration _) =>
         {
             throw new InvalidOperationException("No entity should match all three components.");
@@ -938,12 +951,11 @@ internal static class TestRunner
     private static void ManualWorkerPool_RejectsReentrantParallelFor()
     {
         using var pool = new ManualWorkerPool(1);
-        int callerThreadId = Environment.CurrentManagedThreadId;
         try
         {
             pool.ParallelFor(2, i =>
             {
-                if (i == 0 && Environment.CurrentManagedThreadId == callerThreadId)
+                if (i == 0)
                     pool.ParallelFor(2, static _ => { });
             });
             throw new InvalidOperationException("Expected reentrant ParallelFor to fail.");

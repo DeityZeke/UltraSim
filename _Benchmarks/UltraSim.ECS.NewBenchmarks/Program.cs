@@ -911,9 +911,13 @@ internal static class NewKernelBenchmarks
 
         public override void Update(in SystemContext ctx)
         {
-            ctx.World.Query<Position>((Entity _, in Position position) =>
+            ctx.World.ReadChunks<Position>((ReadOnlySpan<Entity> _, ReadOnlySpan<Position> positions) =>
             {
-                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, position.X);
+                long local = 0;
+                for (int i = 0; i < positions.Length; i++)
+                    local += positions[i].X;
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
             });
         }
     }
@@ -974,9 +978,13 @@ internal static class NewKernelBenchmarks
 
         public override void Update(in SystemContext ctx)
         {
-            ctx.World.Query<Position, Velocity>((Entity entity, in Position position, in Velocity velocity) =>
+            ctx.World.ReadChunks<Position, Velocity>((ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions, ReadOnlySpan<Velocity> velocities) =>
             {
-                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, entity.Index + position.X + velocity.X);
+                long local = 0;
+                for (int i = 0; i < entities.Length; i++)
+                    local += entities[i].Index + positions[i].X + velocities[i].X;
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
             });
         }
     }
@@ -1003,17 +1011,27 @@ internal static class NewKernelBenchmarks
         {
             float time = ctx.Tick * ctx.DeltaSeconds;
             uint tick = ctx.Tick;
-            ctx.World.Query<Position, Velocity, Oscillator>((Entity entity, in Position position, in Velocity velocity, in Oscillator oscillator) =>
+            ctx.World.ReadChunks<Position, Velocity, Oscillator>((ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions, ReadOnlySpan<Velocity> velocities, ReadOnlySpan<Oscillator> oscillators) =>
             {
-                if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
-                    return;
+                long local = 0;
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    Entity entity = entities[i];
+                    if (_activeSubsetOnly && !MovementActivity.IsActive(entity, tick))
+                        continue;
 
-                float phase = (time * oscillator.Frequency) + oscillator.Phase;
-                float sample = MathF.Sin(phase + (position.X * 0.001f))
-                    + MathF.Cos((phase * 0.5f) + (velocity.Y * 0.001f))
-                    + (MathF.Sin((phase * 1.7f) - oscillator.Bias) * oscillator.Amplitude);
-                int value = (int)MathF.Round((sample * 512f) + (oscillator.Amplitude * 32f) + (oscillator.Bias * 16f));
-                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, entity.Index + value);
+                    Position position = positions[i];
+                    Velocity velocity = velocities[i];
+                    Oscillator oscillator = oscillators[i];
+                    float phase = (time * oscillator.Frequency) + oscillator.Phase;
+                    float sample = MathF.Sin(phase + (position.X * 0.001f))
+                        + MathF.Cos((phase * 0.5f) + (velocity.Y * 0.001f))
+                        + (MathF.Sin((phase * 1.7f) - oscillator.Bias) * oscillator.Amplitude);
+                    int value = (int)MathF.Round((sample * 512f) + (oscillator.Amplitude * 32f) + (oscillator.Bias * 16f));
+                    local += entity.Index + value;
+                }
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
             });
         }
     }

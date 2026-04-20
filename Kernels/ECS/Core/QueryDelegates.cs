@@ -12,6 +12,18 @@ public delegate void ReadOnlyQueryAction<T1, T2, T3>(Entity entity, in T1 compon
     where T2 : unmanaged, IComponent<T2>
     where T3 : unmanaged, IComponent<T3>;
 
+public delegate void ReadOnlyChunkAction<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> component1)
+    where T : unmanaged, IComponent<T>;
+
+public delegate void ReadOnlyChunkAction<T1, T2>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T1> component1, ReadOnlySpan<T2> component2)
+    where T1 : unmanaged, IComponent<T1>
+    where T2 : unmanaged, IComponent<T2>;
+
+public delegate void ReadOnlyChunkAction<T1, T2, T3>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T1> component1, ReadOnlySpan<T2> component2, ReadOnlySpan<T3> component3)
+    where T1 : unmanaged, IComponent<T1>
+    where T2 : unmanaged, IComponent<T2>
+    where T3 : unmanaged, IComponent<T3>;
+
 public delegate void PatchQueryAction<TRead, TWrite>(Entity entity, in TRead read, ref TWrite write)
     where TRead : unmanaged, IComponent<TRead>
     where TWrite : unmanaged, IComponent<TWrite>;

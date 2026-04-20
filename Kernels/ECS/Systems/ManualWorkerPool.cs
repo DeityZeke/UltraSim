@@ -47,6 +47,9 @@ internal sealed class ManualWorkerPool : IDisposable
         if (count <= 0)
             return;
 
+        if (Volatile.Read(ref _dispatching) != 0)
+            throw new InvalidOperationException("ManualWorkerPool.ParallelFor is not reentrant.");
+
         if (count == 1)
         {
             action(0);
