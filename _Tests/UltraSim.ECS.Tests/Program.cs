@@ -16,6 +16,7 @@ internal static class TestRunner
         Run(nameof(World_UsesSuppliedSchemaAndServices), World_UsesSuppliedSchemaAndServices);
         Run(nameof(Schema_CreatesColumnsFromRegisteredFactories), Schema_CreatesColumnsFromRegisteredFactories);
         Run(nameof(ArchetypeManager_NormalizesAndCachesSignatures), ArchetypeManager_NormalizesAndCachesSignatures);
+        Run(nameof(ArchetypeManager_EnumerateWith_FiltersAndSnapshots), ArchetypeManager_EnumerateWith_FiltersAndSnapshots);
         Run(nameof(EntityManager_TracksEntityLifecycleAcrossArchetypes), EntityManager_TracksEntityLifecycleAcrossArchetypes);
         Run(nameof(Entity_ReusedSlotsIncrementVersion_AndOldHandlesStayDead), Entity_ReusedSlotsIncrementVersion_AndOldHandlesStayDead);
         Run(nameof(ComponentMask_IntersectionsAndSupersetsWork), ComponentMask_IntersectionsAndSupersetsWork);
@@ -32,10 +33,14 @@ internal static class TestRunner
         Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
         Run(nameof(PatchChunks_UpdatesChunkRowsAndMarksDirty), PatchChunks_UpdatesChunkRowsAndMarksDirty);
         Run(nameof(PatchChunksSparse_MarksOnlyTouchedRowsDirty), PatchChunksSparse_MarksOnlyTouchedRowsDirty);
+        Run(nameof(PatchChunksSparse_InvalidDirtyIndex_ThrowsArgumentException), PatchChunksSparse_InvalidDirtyIndex_ThrowsArgumentException);
         Run(nameof(PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges), PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges);
         Run(nameof(PatchChunks_RepeatedUniqueChunkMarks_DoNotDuplicateDirtyEntities), PatchChunks_RepeatedUniqueChunkMarks_DoNotDuplicateDirtyEntities);
+        Run(nameof(ManualWorkerPool_RejectsReentrantParallelFor), ManualWorkerPool_RejectsReentrantParallelFor);
+        Run(nameof(ComponentColumnCopier_RejectsMismatchedColumns), ComponentColumnCopier_RejectsMismatchedColumns);
         Run(nameof(SystemContext_ParallelFor_KeepsChunkWritesDeterministic), SystemContext_ParallelFor_KeepsChunkWritesDeterministic);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
+        Run(nameof(SystemManager_DueTicks_WrapAcrossUintBoundary), SystemManager_DueTicks_WrapAcrossUintBoundary);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
@@ -164,6 +169,30 @@ internal static class TestRunner
         Assert.True(first.HasComponent(positionId));
         Assert.True(first.HasComponent(velocityId));
         Assert.Equal(1, world.Archetypes.Count);
+    }
+
+    private static void ArchetypeManager_EnumerateWith_FiltersAndSnapshots()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        ComponentId accelerationId = builder.RegisterComponent<Acceleration>();
+        var world = new World(builder.Build());
+
+        Archetype positionOnly = world.Archetypes.GetOrCreate([positionId]);
+        Archetype velocityArchetype = world.Archetypes.GetOrCreate([positionId, velocityId]);
+        ArchetypeManager.ArchetypeEnumerator enumerator = world.Archetypes.EnumerateWith([velocityId]);
+
+        Archetype lateMatching = world.Archetypes.GetOrCreate([velocityId, accelerationId]);
+
+        var matches = new List<Archetype>();
+        while (enumerator.MoveNext())
+            matches.Add(enumerator.Current);
+
+        Assert.Equal(1, matches.Count);
+        Assert.Same(velocityArchetype, matches[0]);
+        Assert.False(matches.Contains(positionOnly));
+        Assert.False(matches.Contains(lateMatching));
     }
 
     private static void EntityManager_TracksEntityLifecycleAcrossArchetypes()
@@ -890,6 +919,56 @@ internal static class TestRunner
         Assert.False(dirty[..dirtyCount].Contains(second));
     }
 
+    private static void PatchChunksSparse_InvalidDirtyIndex_ThrowsArgumentException()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([positionId]);
+        world.CreateDefault(signature);
+
+        Assert.Throws<ArgumentException>(() =>
+            world.PatchChunksSparse<Position>((ReadOnlySpan<Entity> entities, Span<Position> writes, Span<int> dirtyIndices) =>
+            {
+                dirtyIndices[0] = entities.Length;
+                return 1;
+            }));
+    }
+
+    private static void ManualWorkerPool_RejectsReentrantParallelFor()
+    {
+        using var pool = new ManualWorkerPool(1);
+        int callerThreadId = Environment.CurrentManagedThreadId;
+        try
+        {
+            pool.ParallelFor(2, i =>
+            {
+                if (i == 0 && Environment.CurrentManagedThreadId == callerThreadId)
+                    pool.ParallelFor(2, static _ => { });
+            });
+            throw new InvalidOperationException("Expected reentrant ParallelFor to fail.");
+        }
+        catch (InvalidOperationException ex)
+        {
+            Assert.Equal("ManualWorkerPool.ParallelFor is not reentrant.", ex.Message);
+        }
+        catch (AggregateException ex)
+        {
+            Assert.True(ex.InnerExceptions.Count > 0);
+            Assert.True(ex.InnerExceptions[0] is InvalidOperationException invalid
+                && invalid.Message == "ManualWorkerPool.ParallelFor is not reentrant.");
+        }
+    }
+
+    private static void ComponentColumnCopier_RejectsMismatchedColumns()
+    {
+        var source = new ComponentColumn<Position>(1);
+        var destination = new ComponentColumn<Velocity>(1);
+
+        Assert.Throws<InvalidCastException>(() =>
+            ComponentColumnCopierCache<Position>.Copy(source, destination, 0, 0));
+    }
+
     private static void SystemContext_ParallelFor_KeepsChunkWritesDeterministic()
     {
         var builder = new EcsSchemaBuilder();
@@ -986,6 +1065,28 @@ internal static class TestRunner
 
         world.RunManualSystem(manual.Id, 0.016f);
         Assert.SequenceEqual(["Movement@0", "Movement@1", "AI@1", "Manual@2"], log);
+    }
+
+    private static void SystemManager_DueTicks_WrapAcrossUintBoundary()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var manager = new SystemManager();
+        int ticksRun = 0;
+
+        manager.Register(new CountingSystem(
+            new SystemDescriptor("WrapCounter", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+            () => ticksRun++));
+        manager.Seal();
+
+        manager.Tick(world, uint.MaxValue - 1, 0.016f, world.Commands);
+        manager.Tick(world, uint.MaxValue, 0.016f, world.Commands);
+        manager.Tick(world, 0, 0.016f, world.Commands);
+        manager.Tick(world, 1, 0.016f, world.Commands);
+        manager.Tick(world, 2, 0.016f, world.Commands);
+        manager.Tick(world, 3, 0.016f, world.Commands);
+        manager.Tick(world, 4, 0.016f, world.Commands);
+
+        Assert.Equal(2, ticksRun);
     }
 
     private static void SystemManager_RequiresOverridesRegistrationOrderWithinStage()

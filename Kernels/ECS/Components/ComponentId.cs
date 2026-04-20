@@ -4,6 +4,7 @@ namespace UltraSim.ECS;
 
 public readonly struct ComponentId : IEquatable<ComponentId>
 {
+    // Sentinel used for transition-plan construction and "not a real component id" states.
     public static readonly ComponentId Invalid = new(-1);
 
     public int Value { get; }

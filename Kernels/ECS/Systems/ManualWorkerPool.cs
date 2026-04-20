@@ -14,6 +14,7 @@ internal sealed class ManualWorkerPool : IDisposable
     private int _workIndex;
     private int _completedWorkers;
     private int _activeWorkers;
+    private int _dispatching;
     private volatile bool _shutdown;
     private Exception? _capturedException;
 
@@ -54,6 +55,9 @@ internal sealed class ManualWorkerPool : IDisposable
 
         lock (_dispatchLock)
         {
+            if (Interlocked.CompareExchange(ref _dispatching, 1, 0) != 0)
+                throw new InvalidOperationException("ManualWorkerPool.ParallelFor is not reentrant.");
+
             _capturedException = null;
             _workAction = action;
             _workCount = count;
@@ -78,11 +82,18 @@ internal sealed class ManualWorkerPool : IDisposable
                 WorkerThreadContext.ClearWorkerIndex();
             }
 
-            if (_activeWorkers > 0)
-                _completeEvent.WaitOne();
+            try
+            {
+                if (_activeWorkers > 0)
+                    _completeEvent.WaitOne();
 
-            if (_capturedException is not null)
-                throw new AggregateException("ManualWorkerPool worker failed.", _capturedException);
+                if (_capturedException is not null)
+                    throw new AggregateException("ManualWorkerPool worker failed.", _capturedException);
+            }
+            finally
+            {
+                Volatile.Write(ref _dispatching, 0);
+            }
         }
     }
 

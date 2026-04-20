@@ -232,7 +232,11 @@ internal sealed class DirtyTracker
 
         for (int i = 0; i < dirtyIndices.Length; i++)
         {
-            Entity entity = entities[dirtyIndices[i]];
+            int dirtyIndex = dirtyIndices[i];
+            if ((uint)dirtyIndex >= (uint)entities.Length)
+                throw new ArgumentException("Dirty index is outside the entity span.", nameof(dirtyIndices));
+
+            Entity entity = entities[dirtyIndex];
             _all.Mark(entity);
             componentSet.Mark(entity);
         }
@@ -594,7 +598,11 @@ internal sealed class DirtyTracker
 
             for (int i = 0; i < dirtyIndices.Length; i++)
             {
-                Entity entity = entities[dirtyIndices[i]];
+                int dirtyIndex = dirtyIndices[i];
+                if ((uint)dirtyIndex >= (uint)entities.Length)
+                    throw new ArgumentException("Dirty index is outside the entity span.", nameof(dirtyIndices));
+
+                Entity entity = entities[dirtyIndex];
                 All.Mark(entity);
                 componentSet.Mark(entity);
             }

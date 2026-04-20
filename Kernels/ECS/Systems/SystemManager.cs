@@ -588,22 +588,21 @@ internal sealed class SystemManager
         if (periodTicks <= 0)
             return uint.MaxValue;
 
-        long period = periodTicks;
-        long offset = Math.Max(0, startOffset);
-        long tick = worldTick;
-        if (tick <= offset)
-            return (uint)Math.Min(offset, uint.MaxValue);
+        uint period = (uint)periodTicks;
+        uint offset = (uint)Math.Max(0, startOffset);
+        if (worldTick <= offset)
+            return offset;
 
-        long delta = tick - offset;
-        long remainder = delta % period;
-        long due = remainder == 0 ? tick : tick + (period - remainder);
-        return due <= uint.MaxValue ? (uint)due : uint.MaxValue;
+        uint delta = unchecked(worldTick - offset);
+        uint remainder = delta % period;
+        return remainder == 0
+            ? worldTick
+            : unchecked(worldTick + (period - remainder));
     }
 
     private void AdvanceNextDue(int index, uint currentDue, int periodTicks)
     {
-        ulong next = (ulong)currentDue + (uint)periodTicks;
-        _nextDueTick[index] = next <= uint.MaxValue ? (uint)next : uint.MaxValue;
+        _nextDueTick[index] = unchecked(currentDue + (uint)periodTicks);
     }
 
     private static SystemId[][] CreateEmptyStageSystems(int stageCount)
