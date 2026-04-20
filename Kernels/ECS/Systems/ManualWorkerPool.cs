@@ -13,6 +13,7 @@ internal sealed class ManualWorkerPool : IDisposable
     private int _workCount;
     private int _workIndex;
     private int _completedWorkers;
+    private int _activeWorkers;
     private volatile bool _shutdown;
     private Exception? _capturedException;
 
@@ -58,8 +59,9 @@ internal sealed class ManualWorkerPool : IDisposable
             _workCount = count;
             _workIndex = 0;
             _completedWorkers = 0;
+            _activeWorkers = Math.Min(count, _workEvents.Length);
 
-            for (int i = 0; i < _workEvents.Length; i++)
+            for (int i = 0; i < _activeWorkers; i++)
                 _workEvents[i].Set();
 
             _completeEvent.WaitOne();
@@ -95,7 +97,7 @@ internal sealed class ManualWorkerPool : IDisposable
             }
             finally
             {
-                if (Interlocked.Increment(ref _completedWorkers) == _threads.Length)
+                if (Interlocked.Increment(ref _completedWorkers) == _activeWorkers)
                     _completeEvent.Set();
             }
         }

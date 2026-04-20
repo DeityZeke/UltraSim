@@ -55,6 +55,8 @@ internal static class NewKernelBenchmarks
         scenarios.Add(MakeScenario("TickParallel_QuerySystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallel(10_000, 200)));
         scenarios.Add(MakeScenario("TickSerial_ReadOnlySystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickSerialReadOnly(10_000, 200)));
         scenarios.Add(MakeScenario("TickParallel_ReadOnlySystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallelReadOnly(10_000, 200)));
+        scenarios.Add(MakeScenario("TickSerial_DirtyAwareWriteSystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickSerialDirtyAware(10_000, 200)));
+        scenarios.Add(MakeScenario("TickParallel_DirtyAwareWriteSystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallelDirtyAware(10_000, 200)));
         scenarios.Add(CreateHotQuery1Scenario(50_000));
         scenarios.Add(CreateHotSetComponentScenario(50_000));
         scenarios.Add(CreateHotTryGetScenario(50_000));
@@ -64,6 +66,8 @@ internal static class NewKernelBenchmarks
         scenarios.Add(CreateHotTickParallelScenario(10_000, 200));
         scenarios.Add(CreateHotTickSerialReadOnlyScenario(10_000, 200));
         scenarios.Add(CreateHotTickParallelReadOnlyScenario(10_000, 200));
+        scenarios.Add(CreateHotTickSerialDirtyAwareScenario(10_000, 200));
+        scenarios.Add(CreateHotTickParallelDirtyAwareScenario(10_000, 200));
         return scenarios;
     }
 
@@ -238,6 +242,34 @@ internal static class NewKernelBenchmarks
         return MakeScenario($"HotLoop_TickParallel_ReadOnlySystems", "HotLoop", true, entityCount, () =>
         {
             world ??= CreateReadOnlySchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
+            SchedulerBenchmarkState.Reset();
+            for (int i = 0; i < ticks; i++)
+                world.Tick(0.016f);
+
+            return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+        });
+    }
+
+    private static BenchmarkScenario CreateHotTickSerialDirtyAwareScenario(int entityCount, int ticks)
+    {
+        World? world = null;
+        return MakeScenario($"HotLoop_TickSerial_DirtyAwareWriteSystems", "HotLoop", true, entityCount, () =>
+        {
+            world ??= CreateSchedulerWorld(entityCount, SystemExecutionMode.Serial);
+            SchedulerBenchmarkState.Reset();
+            for (int i = 0; i < ticks; i++)
+                world.Tick(0.016f);
+
+            return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+        });
+    }
+
+    private static BenchmarkScenario CreateHotTickParallelDirtyAwareScenario(int entityCount, int ticks)
+    {
+        World? world = null;
+        return MakeScenario($"HotLoop_TickParallel_DirtyAwareWriteSystems", "HotLoop", true, entityCount, () =>
+        {
+            world ??= CreateSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
             SchedulerBenchmarkState.Reset();
             for (int i = 0; i < ticks; i++)
                 world.Tick(0.016f);
@@ -473,6 +505,24 @@ internal static class NewKernelBenchmarks
     private static ScenarioMeasurement BenchmarkTickParallelReadOnly(int entityCount, int ticks)
     {
         World world = CreateReadOnlySchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
+        for (int i = 0; i < ticks; i++)
+            world.Tick(0.016f);
+
+        return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+    }
+
+    private static ScenarioMeasurement BenchmarkTickSerialDirtyAware(int entityCount, int ticks)
+    {
+        World world = CreateSchedulerWorld(entityCount, SystemExecutionMode.Serial);
+        for (int i = 0; i < ticks; i++)
+            world.Tick(0.016f);
+
+        return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+    }
+
+    private static ScenarioMeasurement BenchmarkTickParallelDirtyAware(int entityCount, int ticks)
+    {
+        World world = CreateSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
