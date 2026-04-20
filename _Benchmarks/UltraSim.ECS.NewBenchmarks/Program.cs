@@ -45,6 +45,9 @@ internal static class NewKernelBenchmarks
             scenarios.Add(MakeScenario("DeferredAdd_Velocity", "Structural", true, capturedScale, () => BenchmarkDeferredAdd(capturedScale)));
             scenarios.Add(MakeScenario("DeferredRemove_Velocity", "Structural", true, capturedScale, () => BenchmarkDeferredRemove(capturedScale)));
             scenarios.Add(MakeScenario("DeferredDestroy", "Structural", true, capturedScale, () => BenchmarkDeferredDestroy(capturedScale)));
+            scenarios.Add(MakeScenario("DeferredDestroy_SparseVictims", "Structural", true, capturedScale, () => BenchmarkDeferredDestroySparseVictims(capturedScale)));
+            scenarios.Add(MakeScenario("MigrationCycle_AddRemoveVelocity", "Structural", true, capturedScale, () => BenchmarkMigrationCycleVelocity(capturedScale)));
+            scenarios.Add(MakeScenario("CreateDestroyReuseChurn_Position", "Structural", true, capturedScale, () => BenchmarkCreateDestroyReuseChurn(capturedScale)));
             scenarios.Add(MakeScenario("DirtyDrain_Position", "DirtyTracking", true, capturedScale, () => BenchmarkDirtyDrain(capturedScale)));
             scenarios.Add(MakeScenario("PersistenceView_Filtered_Position", "PersistenceSeam", true, capturedScale, () => BenchmarkPersistenceView(capturedScale)));
             scenarios.Add(MakeScenario("CreateDefaultImmediate_Position", "Structural", false, capturedScale, () => BenchmarkCreateImmediate(capturedScale)));
@@ -440,6 +443,76 @@ internal static class NewKernelBenchmarks
         return new ScenarioMeasurement(entities.Length, world.Entities.AliveCount);
     }
 
+    private static ScenarioMeasurement BenchmarkDeferredDestroySparseVictims(int scale)
+    {
+        World world = SeedWorld(scale, includeVelocity: false, includeHealth: false);
+        Entity[] entities = CaptureEntities(world, scale);
+        Entity[] victims = BuildSparseVictimSet(entities);
+        world.EnqueueDestroy(victims);
+        world.ProcessStructuralQueues();
+        return new ScenarioMeasurement(victims.Length, world.Entities.AliveCount);
+    }
+
+    private static ScenarioMeasurement BenchmarkMigrationCycleVelocity(int scale)
+    {
+        World world = SeedWorld(scale, includeVelocity: false, includeHealth: false);
+        Entity[] entities = CaptureEntities(world, scale);
+        var velocities = new Velocity[entities.Length];
+        for (int i = 0; i < velocities.Length; i++)
+            velocities[i] = new Velocity(i + 100, i + 101);
+
+        world.EnqueueAdd<Velocity>((ReadOnlySpan<Entity>)entities, (ReadOnlySpan<Velocity>)velocities);
+        world.ProcessStructuralQueues();
+        world.EnqueueRemove<Velocity>(entities);
+        world.ProcessStructuralQueues();
+
+        long checksum = 0;
+        for (int i = 0; i < entities.Length; i++)
+            checksum += world.HasComponent<Velocity>(entities[i]) ? 1 : 0;
+
+        return new ScenarioMeasurement(entities.Length * 2L, checksum);
+    }
+
+    private static ScenarioMeasurement BenchmarkCreateDestroyReuseChurn(int scale)
+    {
+        World world = CreateWorld(includeVelocity: false, includeHealth: false);
+        ComponentId positionId = world.GetComponentId<Position>();
+        var signature = new ArchetypeSignature([positionId]);
+        int batchSize = Math.Clamp(scale / 10, 32, 512);
+        int rounds = Math.Max(1, scale / batchSize);
+        long checksum = 0;
+        int reusedIndexMatches = 0;
+        Entity? previousBatchFirst = null;
+
+        for (int round = 0; round < rounds; round++)
+        {
+            for (int i = 0; i < batchSize; i++)
+                world.EnqueueCreateDefault(signature);
+
+            world.ProcessStructuralQueues();
+            Entity[] created = CaptureEntities(world, batchSize);
+
+            if (previousBatchFirst.HasValue && created.Length > 0)
+            {
+                if (created[0].Index == previousBatchFirst.Value.Index && created[0].Version > previousBatchFirst.Value.Version)
+                    reusedIndexMatches++;
+            }
+
+            previousBatchFirst = created.Length > 0 ? created[0] : null;
+
+            for (int i = 0; i < created.Length; i++)
+            {
+                world.SetComponent(created[i], new Position(round + i, round + i + 1));
+                checksum += created[i].Index + created[i].Version;
+            }
+
+            world.EnqueueDestroy(created);
+            world.ProcessStructuralQueues();
+        }
+
+        return new ScenarioMeasurement((long)rounds * batchSize * 2, checksum ^ reusedIndexMatches ^ world.Entities.AliveCount);
+    }
+
     private static ScenarioMeasurement BenchmarkDirtyDrain(int scale)
     {
         World world = SeedWorld(scale, includeVelocity: false, includeHealth: false);
@@ -624,6 +697,17 @@ internal static class NewKernelBenchmarks
             Array.Resize(ref entities, write);
 
         return entities;
+    }
+
+    private static Entity[] BuildSparseVictimSet(Entity[] entities)
+    {
+        int victimCount = entities.Length / 2;
+        var victims = new Entity[victimCount];
+        int write = 0;
+        for (int i = entities.Length - 2; i >= 0 && write < victimCount; i -= 2)
+            victims[write++] = entities[i];
+
+        return victims;
     }
 
     private readonly record struct Position(int X, int Y) : IComponent<Position>;

@@ -100,6 +100,10 @@ Implemented so far:
 - lightweight persistence snapshot views in `Extensions/Persistence`,
 - serial vs parallel parity coverage for explicit writes and deferred structural commands,
 - randomized model-based mutation fuzz coverage,
+- entity slot reuse/version invalidation coverage,
+- swap-remove relocation stress coverage,
+- heavy multi-hop archetype migration coverage,
+- create/destroy churn coverage with stale-handle checks,
 - multi-tick serial vs parallel determinism soak coverage,
 - opt-in tick profiling snapshots for pre-systems, systems, and post-systems phases,
 - versioned query-plan caching for read-only query, patch-query, chunk, and archetype traversal entry points,
@@ -108,6 +112,7 @@ Implemented so far:
 - touched-component tracking in local dirty capture state to reduce merge scanning,
 - column-bound query plans for `Query`, `PatchQuery`, and `QueryChunks`,
 - targeted benchmark coverage against the old ECS, including read-only vs write-heavy scheduler scenarios,
+- comparative entity-heavy benchmarks for reuse churn, sparse-victim destroy, and migration cycles,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
 

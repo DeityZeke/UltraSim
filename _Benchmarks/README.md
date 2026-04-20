@@ -17,6 +17,9 @@ The benchmark matrix currently covers:
 - safe component reads
 - 1/2/3-component queries
 - deferred add/remove/destroy
+- sparse-victim destroy / swap-remove pressure
+- add/remove migration cycles
+- create/destroy reuse churn
 - dirty drain cost
 - scheduler tick cost in serial and parallel modes
 - persistence-view capture cost

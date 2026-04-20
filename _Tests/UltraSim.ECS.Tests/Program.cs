@@ -17,6 +17,7 @@ internal static class TestRunner
         Run(nameof(Schema_CreatesColumnsFromRegisteredFactories), Schema_CreatesColumnsFromRegisteredFactories);
         Run(nameof(ArchetypeManager_NormalizesAndCachesSignatures), ArchetypeManager_NormalizesAndCachesSignatures);
         Run(nameof(EntityManager_TracksEntityLifecycleAcrossArchetypes), EntityManager_TracksEntityLifecycleAcrossArchetypes);
+        Run(nameof(Entity_ReusedSlotsIncrementVersion_AndOldHandlesStayDead), Entity_ReusedSlotsIncrementVersion_AndOldHandlesStayDead);
         Run(nameof(ComponentMask_IntersectionsAndSupersetsWork), ComponentMask_IntersectionsAndSupersetsWork);
         Run(nameof(SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField), SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField);
         Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
@@ -36,6 +37,9 @@ internal static class TestRunner
         Run(nameof(SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely), SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely);
         Run(nameof(SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks), SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks);
         Run(nameof(World_RandomizedMutationFuzz_MatchesReferenceModel), World_RandomizedMutationFuzz_MatchesReferenceModel);
+        Run(nameof(World_SwapRemoveStress_UpdatesMovedEntityLocationsCorrectly), World_SwapRemoveStress_UpdatesMovedEntityLocationsCorrectly);
+        Run(nameof(World_HeavyArchetypeMove_PreservesAllComponentData), World_HeavyArchetypeMove_PreservesAllComponentData);
+        Run(nameof(World_CreateDestroyChurn_DoesNotResurrectStaleEntities), World_CreateDestroyChurn_DoesNotResurrectStaleEntities);
         Run(nameof(SystemManager_SerialAndParallel_MatchAcrossManyTicks), SystemManager_SerialAndParallel_MatchAcrossManyTicks);
         Run(nameof(World_ProfilingSnapshot_CapturesTickPhaseCounts), World_ProfilingSnapshot_CapturesTickPhaseCounts);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
@@ -184,6 +188,32 @@ internal static class TestRunner
         Assert.False(world.Entities.IsAlive(entity));
         Assert.False(world.Entities.IsValid(entity));
         Assert.Equal(0, world.Entities.AliveCount);
+    }
+
+    private static void Entity_ReusedSlotsIncrementVersion_AndOldHandlesStayDead()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var world = new World(builder.Build());
+        var signature = new ArchetypeSignature([positionId]);
+
+        Entity first = world.CreateDefault(signature);
+        Assert.True(world.SetComponent(first, new Position(10)));
+        world.Destroy(first);
+
+        Assert.False(world.Entities.IsAlive(first));
+        Assert.False(world.Entities.IsValid(first));
+        Assert.False(world.SetComponent(first, new Position(99)));
+        Assert.False(world.TryGetComponent(first, out Position _));
+
+        Entity second = world.CreateDefault(signature);
+        Assert.Equal(first.Index, second.Index);
+        Assert.True(second.Version > first.Version);
+        Assert.True(first != second);
+        Assert.True(world.Entities.IsAlive(second));
+        Assert.True(world.Entities.IsValid(second));
+        Assert.False(world.Entities.IsAlive(first));
+        Assert.False(world.Entities.IsValid(first));
     }
 
     private static void ComponentMask_IntersectionsAndSupersetsWork()
@@ -1024,6 +1054,178 @@ internal static class TestRunner
             model.ProcessStructuralQueues();
             AssertWorldMatchesModel(world, model, entities);
             AssertDirtySetsMatchAndClear(world, model);
+        }
+    }
+
+    private static void World_SwapRemoveStress_UpdatesMovedEntityLocationsCorrectly()
+    {
+        const int entityCount = 96;
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+        var signature = new ArchetypeSignature([positionId, velocityId]);
+        var live = new List<Entity>(entityCount);
+        var expected = new Dictionary<Entity, (Position Position, Velocity Velocity)>(entityCount);
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            Position position = new(i + 10);
+            Velocity velocity = new((i + 1) * 7);
+            Assert.True(world.SetComponent(entity, position));
+            Assert.True(world.SetComponent(entity, velocity));
+            live.Add(entity);
+            expected[entity] = (position, velocity);
+        }
+
+        for (int round = 0; round < entityCount / 2; round++)
+        {
+            int removeIndex = live.Count / 2;
+            Entity victim = live[removeIndex];
+            world.Destroy(victim);
+            live.RemoveAt(removeIndex);
+            expected.Remove(victim);
+
+            Assert.False(world.Entities.IsAlive(victim));
+            Assert.False(world.Entities.IsValid(victim));
+            Assert.False(world.TryGetComponent(victim, out Position _));
+            Assert.False(world.TryGetComponent(victim, out Velocity _));
+
+            for (int i = 0; i < live.Count; i++)
+            {
+                Entity survivor = live[i];
+                Assert.True(world.Entities.IsAlive(survivor));
+                Assert.True(world.TryGetComponent(survivor, out Position position));
+                Assert.True(world.TryGetComponent(survivor, out Velocity velocity));
+                Assert.Equal(expected[survivor].Position, position);
+                Assert.Equal(expected[survivor].Velocity, velocity);
+            }
+        }
+
+        Assert.Equal(live.Count, world.Entities.AliveCount);
+    }
+
+    private static void World_HeavyArchetypeMove_PreservesAllComponentData()
+    {
+        const int entityCount = 256;
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        builder.RegisterComponent<Acceleration>();
+        var world = new World(builder.Build());
+        var positionOnly = new ArchetypeSignature([positionId]);
+        var entities = new Entity[entityCount];
+        var velocityValues = new Velocity[entityCount];
+        var accelerationValues = new Acceleration[entityCount];
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Entity entity = world.CreateDefault(positionOnly);
+            entities[i] = entity;
+            Assert.True(world.SetComponent(entity, new Position(1_000 + i)));
+            velocityValues[i] = new Velocity(2_000 + i);
+            accelerationValues[i] = new Acceleration(3_000 + i);
+        }
+
+        world.EnqueueAdd<Velocity>((ReadOnlySpan<Entity>)entities, (ReadOnlySpan<Velocity>)velocityValues);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.Equal(new Position(1_000 + i), world.GetComponent<Position>(entities[i]));
+            Assert.Equal(velocityValues[i], world.GetComponent<Velocity>(entities[i]));
+            Assert.False(world.HasComponent<Acceleration>(entities[i]));
+        }
+
+        world.EnqueueAdd<Acceleration>((ReadOnlySpan<Entity>)entities, (ReadOnlySpan<Acceleration>)accelerationValues);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.Equal(new Position(1_000 + i), world.GetComponent<Position>(entities[i]));
+            Assert.Equal(velocityValues[i], world.GetComponent<Velocity>(entities[i]));
+            Assert.Equal(accelerationValues[i], world.GetComponent<Acceleration>(entities[i]));
+        }
+
+        world.EnqueueRemove<Velocity>(entities);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.Equal(new Position(1_000 + i), world.GetComponent<Position>(entities[i]));
+            Assert.False(world.HasComponent<Velocity>(entities[i]));
+            Assert.Equal(accelerationValues[i], world.GetComponent<Acceleration>(entities[i]));
+        }
+
+        world.EnqueueRemove<Acceleration>(entities);
+        world.ProcessStructuralQueues();
+
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.Equal(new Position(1_000 + i), world.GetComponent<Position>(entities[i]));
+            Assert.False(world.HasComponent<Velocity>(entities[i]));
+            Assert.False(world.HasComponent<Acceleration>(entities[i]));
+        }
+    }
+
+    private static void World_CreateDestroyChurn_DoesNotResurrectStaleEntities()
+    {
+        const int rounds = 24;
+        const int batchSize = 48;
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var world = new World(builder.Build());
+        var signature = new ArchetypeSignature([positionId]);
+        var live = new List<Entity>(batchSize * 2);
+        var stale = new List<Entity>(rounds * batchSize);
+
+        for (int round = 0; round < rounds; round++)
+        {
+            for (int i = 0; i < batchSize; i++)
+            {
+                Entity entity = world.CreateDefault(signature);
+                Assert.True(world.SetComponent(entity, new Position(round * 1_000 + i)));
+                live.Add(entity);
+            }
+
+            for (int i = live.Count - 1; i >= 0; i -= 2)
+            {
+                Entity entity = live[i];
+                world.Destroy(entity);
+                stale.Add(entity);
+                live.RemoveAt(i);
+            }
+
+            foreach (Entity staleEntity in stale)
+            {
+                Assert.False(world.Entities.IsAlive(staleEntity));
+                Assert.False(world.Entities.IsValid(staleEntity));
+                Assert.False(world.TryGetComponent(staleEntity, out Position _));
+            }
+
+            foreach (Entity entity in live)
+            {
+                Assert.True(world.Entities.IsAlive(entity));
+                Assert.True(world.Entities.IsValid(entity));
+                Assert.True(world.TryGetComponent(entity, out Position _));
+            }
+        }
+
+        for (int i = 0; i < batchSize * 3; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            Assert.True(world.SetComponent(entity, new Position(50_000 + i)));
+            live.Add(entity);
+        }
+
+        foreach (Entity staleEntity in stale)
+        {
+            Assert.False(world.Entities.IsAlive(staleEntity));
+            Assert.False(world.Entities.IsValid(staleEntity));
         }
     }
 
