@@ -272,7 +272,7 @@ internal static class NewKernelBenchmarks
         World? world = null;
         return MakeScenario($"HotLoop_TickSerial_DirtyAwareWriteSystems", "HotLoop", true, entityCount, () =>
         {
-            world ??= CreateSchedulerWorld(entityCount, SystemExecutionMode.Serial);
+            world ??= CreateDirtyAwareSchedulerWorld(entityCount, SystemExecutionMode.Serial);
             SchedulerBenchmarkState.Reset();
             for (int i = 0; i < ticks; i++)
                 world.Tick(0.016f);
@@ -286,7 +286,7 @@ internal static class NewKernelBenchmarks
         World? world = null;
         return MakeScenario($"HotLoop_TickParallel_DirtyAwareWriteSystems", "HotLoop", true, entityCount, () =>
         {
-            world ??= CreateSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
+            world ??= CreateDirtyAwareSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
             SchedulerBenchmarkState.Reset();
             for (int i = 0; i < ticks; i++)
                 world.Tick(0.016f);
@@ -628,7 +628,7 @@ internal static class NewKernelBenchmarks
 
     private static ScenarioMeasurement BenchmarkTickSerialDirtyAware(int entityCount, int ticks)
     {
-        World world = CreateSchedulerWorld(entityCount, SystemExecutionMode.Serial);
+        World world = CreateDirtyAwareSchedulerWorld(entityCount, SystemExecutionMode.Serial);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
@@ -637,7 +637,7 @@ internal static class NewKernelBenchmarks
 
     private static ScenarioMeasurement BenchmarkTickParallelDirtyAware(int entityCount, int ticks)
     {
-        World world = CreateSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
+        World world = CreateDirtyAwareSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
         for (int i = 0; i < ticks; i++)
             world.Tick(0.016f);
 
@@ -710,6 +710,23 @@ internal static class NewKernelBenchmarks
             new SchedulerReadOnlySystem<ReadOnlyTagB>("ReadOnlyB", positionId, velocityId),
             new SchedulerReadOnlySystem<ReadOnlyTagC>("ReadOnlyC", positionId, velocityId),
             new SchedulerReadOnlySystem<ReadOnlyTagD>("ReadOnlyD", positionId, velocityId));
+        world.SealSystems();
+        return world;
+    }
+
+    private static World CreateDirtyAwareSchedulerWorld(int entityCount, SystemExecutionMode mode)
+    {
+        SchedulerBenchmarkState.Reset();
+
+        World world = SeedWorld(entityCount, includeVelocity: true, includeHealth: false);
+        ComponentId positionId = world.GetComponentId<Position>();
+        ComponentId velocityId = world.GetComponentId<Velocity>();
+        world.SetSystemExecutionMode(mode);
+        world.RegisterSystems(
+            new SchedulerQueryReadSystem<ReadTagA>("ReadA", positionId),
+            new SchedulerQueryReadSystem<ReadTagB>("ReadB", positionId),
+            new SchedulerExplicitWriteSystem<WriteTagA>("WriteA", positionId, velocityId, writePosition: true),
+            new SchedulerExplicitWriteSystem<WriteTagB>("WriteB", positionId, velocityId, writePosition: false));
         world.SealSystems();
         return world;
     }
@@ -1018,6 +1035,39 @@ internal static class NewKernelBenchmarks
                     local += entities[i].Index + positions[i].X + velocities[i].X;
 
                 Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
+            });
+        }
+    }
+
+    private sealed class SchedulerExplicitWriteSystem<TTag> : SystemBase
+    {
+        private readonly bool _writePosition;
+
+        public SchedulerExplicitWriteSystem(string name, ComponentId positionId, ComponentId velocityId, bool writePosition)
+        {
+            _writePosition = writePosition;
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId, velocityId]),
+                ComponentMask.FromIds([writePosition ? positionId : velocityId]));
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            World world = ctx.World;
+            world.Query<Position, Velocity>((Entity entity, in Position position, in Velocity velocity) =>
+            {
+                if (_writePosition)
+                    world.SetComponent(entity, new Position(position.X + 1, position.Y + 1));
+                else
+                    world.SetComponent(entity, new Velocity(velocity.X + 1, velocity.Y + 1));
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, position.X + velocity.X);
             });
         }
     }
