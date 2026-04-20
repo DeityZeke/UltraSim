@@ -31,6 +31,7 @@ internal static class TestRunner
         Run(nameof(QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes), QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes);
         Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
         Run(nameof(PatchChunks_UpdatesChunkRowsAndMarksDirty), PatchChunks_UpdatesChunkRowsAndMarksDirty);
+        Run(nameof(PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges), PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges);
         Run(nameof(SystemContext_ParallelFor_KeepsChunkWritesDeterministic), SystemContext_ParallelFor_KeepsChunkWritesDeterministic);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
@@ -753,6 +754,52 @@ internal static class TestRunner
         Assert.Equal(1, world.DrainDirtyTo(dirty));
         Assert.Equal(0, world.DrainDirtyTo<Position>(dirty));
         Assert.Equal(0, world.DrainDirtyTo<Velocity>(dirty));
+    }
+
+    private static void PatchChunks_PreparedPlanCache_RefreshesAfterStructuralChanges()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+        var cache = new World.PatchChunkPlanCache<Position, Velocity>();
+
+        Entity first = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Assert.True(world.SetComponent(first, new Position(10)));
+        Assert.True(world.SetComponent(first, new Velocity(1)));
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+        world.DrainDirtyTo<Position>(dirty);
+        world.DrainDirtyTo<Velocity>(dirty);
+
+        int firstPass = world.PatchChunks(cache, (ReadOnlySpan<Entity> _, ReadOnlySpan<Position> reads, Span<Velocity> writes) =>
+        {
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Velocity(reads[i].X + 5);
+        });
+
+        Assert.Equal(1, firstPass);
+        Assert.Equal(new Velocity(15), world.GetComponent<Velocity>(first));
+        Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+
+        Entity second = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Assert.True(world.SetComponent(second, new Position(20)));
+        Assert.True(world.SetComponent(second, new Velocity(2)));
+        world.DrainDirtyTo(dirty);
+        world.DrainDirtyTo<Position>(dirty);
+        world.DrainDirtyTo<Velocity>(dirty);
+
+        int secondPass = world.PatchChunks(cache, (ReadOnlySpan<Entity> _, ReadOnlySpan<Position> reads, Span<Velocity> writes) =>
+        {
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Velocity(reads[i].X + 7);
+        });
+
+        Assert.Equal(2, secondPass);
+        Assert.Equal(new Velocity(17), world.GetComponent<Velocity>(first));
+        Assert.Equal(new Velocity(27), world.GetComponent<Velocity>(second));
+        Assert.Equal(2, world.DrainDirtyTo<Velocity>(dirty));
     }
 
     private static void SystemContext_ParallelFor_KeepsChunkWritesDeterministic()

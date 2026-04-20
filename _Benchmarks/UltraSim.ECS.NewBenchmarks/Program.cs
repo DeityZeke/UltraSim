@@ -1021,6 +1021,8 @@ internal static class NewKernelBenchmarks
     private sealed class OscillatingWriteSystem<TTag> : SystemBase
     {
         private const int BlockSize = 4096;
+        private readonly World.PatchChunkPlanCache<Velocity, Oscillator, Position> _positionPlan = new();
+        private readonly World.PatchChunkPlanCache<Position, Oscillator, Velocity> _velocityPlan = new();
         private readonly bool _activeSubsetOnly;
         private readonly bool _writePosition;
 
@@ -1046,7 +1048,7 @@ internal static class NewKernelBenchmarks
 
             if (_writePosition)
             {
-                ctx.PatchChunksParallel<Velocity, Oscillator, Position>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Velocity> velocities, ReadOnlySpan<Oscillator> oscillators, Span<Position> writes) =>
+                ctx.PatchChunksParallel(_positionPlan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Velocity> velocities, ReadOnlySpan<Oscillator> oscillators, Span<Position> writes) =>
                 {
                     long checksum = 0;
                     for (int i = 0; i < writes.Length; i++)
@@ -1073,7 +1075,7 @@ internal static class NewKernelBenchmarks
                 return;
             }
 
-            ctx.PatchChunksParallel<Position, Oscillator, Velocity>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions, ReadOnlySpan<Oscillator> oscillators, Span<Velocity> writes) =>
+            ctx.PatchChunksParallel(_velocityPlan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions, ReadOnlySpan<Oscillator> oscillators, Span<Velocity> writes) =>
             {
                 long checksum = 0;
                 for (int i = 0; i < writes.Length; i++)
@@ -1102,6 +1104,7 @@ internal static class NewKernelBenchmarks
     private sealed class V1PulsePhaseAdvanceSystem : SystemBase
     {
         private const int BlockSize = 4096;
+        private readonly World.PatchChunkPlanCache<PulseMotion> _plan = new();
         private readonly bool _activeSubsetOnly;
 
         public V1PulsePhaseAdvanceSystem(string name, ComponentId motionId, bool activeSubsetOnly)
@@ -1122,7 +1125,7 @@ internal static class NewKernelBenchmarks
         {
             float delta = ctx.DeltaSeconds;
             uint tick = ctx.Tick;
-            ctx.PatchChunksParallel<PulseMotion>(BlockSize, (ReadOnlySpan<Entity> entities, Span<PulseMotion> writes) =>
+            ctx.PatchChunksParallel(_plan, BlockSize, (ReadOnlySpan<Entity> entities, Span<PulseMotion> writes) =>
             {
                 long checksum = 0;
                 for (int i = 0; i < writes.Length; i++)
@@ -1147,6 +1150,7 @@ internal static class NewKernelBenchmarks
     private sealed class V1PulseVelocitySystem : SystemBase
     {
         private const int BlockSize = 4096;
+        private readonly World.PatchChunkPlanCache<PulsePosition, PulseMotion, PulseVelocity> _plan = new();
         private readonly bool _activeSubsetOnly;
 
         public V1PulseVelocitySystem(string name, ComponentId positionId, ComponentId motionId, ComponentId velocityId, bool activeSubsetOnly)
@@ -1166,7 +1170,7 @@ internal static class NewKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             uint tick = ctx.Tick;
-            ctx.PatchChunksParallel<PulsePosition, PulseMotion, PulseVelocity>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulsePosition> positions, ReadOnlySpan<PulseMotion> motions, Span<PulseVelocity> writes) =>
+            ctx.PatchChunksParallel(_plan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulsePosition> positions, ReadOnlySpan<PulseMotion> motions, Span<PulseVelocity> writes) =>
             {
                 long checksum = 0;
                 for (int i = 0; i < writes.Length; i++)
@@ -1206,6 +1210,7 @@ internal static class NewKernelBenchmarks
     private sealed class V1MovementSystem : SystemBase
     {
         private const int BlockSize = 4096;
+        private readonly World.PatchChunkPlanCache<PulseVelocity, PulsePosition> _plan = new();
         private readonly bool _activeSubsetOnly;
 
         public V1MovementSystem(string name, ComponentId positionId, ComponentId velocityId, bool activeSubsetOnly)
@@ -1226,7 +1231,7 @@ internal static class NewKernelBenchmarks
         {
             float delta = ctx.DeltaSeconds;
             uint tick = ctx.Tick;
-            ctx.PatchChunksParallel<PulseVelocity, PulsePosition>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulseVelocity> velocities, Span<PulsePosition> writes) =>
+            ctx.PatchChunksParallel(_plan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulseVelocity> velocities, Span<PulsePosition> writes) =>
             {
                 long checksum = 0;
                 for (int i = 0; i < writes.Length; i++)

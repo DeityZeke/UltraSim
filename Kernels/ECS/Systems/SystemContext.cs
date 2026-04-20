@@ -42,11 +42,24 @@ public readonly ref struct SystemContext
         return World.PatchChunksParallel(_parallelFor, blockSize, action);
     }
 
+    public int PatchChunksParallel<TWrite>(World.PatchChunkPlanCache<TWrite> cache, int blockSize, PatchChunkAction<TWrite> action)
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        return World.PatchChunksParallel(cache, _parallelFor, blockSize, action);
+    }
+
     public int PatchChunksParallel<TRead, TWrite>(int blockSize, PatchChunkAction<TRead, TWrite> action)
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
     {
         return World.PatchChunksParallel(_parallelFor, blockSize, action);
+    }
+
+    public int PatchChunksParallel<TRead, TWrite>(World.PatchChunkPlanCache<TRead, TWrite> cache, int blockSize, PatchChunkAction<TRead, TWrite> action)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        return World.PatchChunksParallel(cache, _parallelFor, blockSize, action);
     }
 
     public int PatchChunksParallel<TRead1, TRead2, TWrite>(int blockSize, PatchChunkAction<TRead1, TRead2, TWrite> action)
@@ -55,5 +68,13 @@ public readonly ref struct SystemContext
         where TWrite : unmanaged, IComponent<TWrite>
     {
         return World.PatchChunksParallel(_parallelFor, blockSize, action);
+    }
+
+    public int PatchChunksParallel<TRead1, TRead2, TWrite>(World.PatchChunkPlanCache<TRead1, TRead2, TWrite> cache, int blockSize, PatchChunkAction<TRead1, TRead2, TWrite> action)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        return World.PatchChunksParallel(cache, _parallelFor, blockSize, action);
     }
 }

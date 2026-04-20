@@ -5,6 +5,39 @@ namespace UltraSim.ECS;
 
 public sealed partial class World
 {
+    public sealed class PatchChunkPlanCache<TWrite>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        internal EcsSchema? Schema;
+        internal int Version = -1;
+        internal ComponentId WriteId;
+        internal QueryPlan1[] Plans = Array.Empty<QueryPlan1>();
+    }
+
+    public sealed class PatchChunkPlanCache<TRead, TWrite>
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        internal EcsSchema? Schema;
+        internal int Version = -1;
+        internal ComponentId ReadId;
+        internal ComponentId WriteId;
+        internal QueryPlan2[] Plans = Array.Empty<QueryPlan2>();
+    }
+
+    public sealed class PatchChunkPlanCache<TRead1, TRead2, TWrite>
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        internal EcsSchema? Schema;
+        internal int Version = -1;
+        internal ComponentId ReadId1;
+        internal ComponentId ReadId2;
+        internal ComponentId WriteId;
+        internal QueryPlan3[] Plans = Array.Empty<QueryPlan3>();
+    }
+
     private readonly object _queryCacheSync = new();
     private ConcurrentDictionary<int, QueryPlan1[]> _queryCache1 = new();
     private ConcurrentDictionary<QueryKey2, QueryPlan2[]> _queryCache2 = new();
@@ -77,6 +110,81 @@ public sealed partial class World
             _queryCacheN = new ConcurrentDictionary<ArchetypeSignature, Archetype[]>();
             _queryCacheVersion = currentVersion;
         }
+    }
+
+    private ReadOnlySpan<QueryPlan1> GetCachedQueryPlan<TWrite>(PatchChunkPlanCache<TWrite> cache)
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        EnsureQueryCachesFresh();
+
+        if (!ReferenceEquals(cache.Schema, Schema))
+        {
+            cache.Schema = Schema;
+            cache.WriteId = Schema.GetComponentId<TWrite>();
+            cache.Version = -1;
+            cache.Plans = Array.Empty<QueryPlan1>();
+        }
+
+        if (cache.Version != _queryCacheVersion)
+        {
+            cache.Plans = GetCachedQueryPlan(cache.WriteId);
+            cache.Version = _queryCacheVersion;
+        }
+
+        return cache.Plans;
+    }
+
+    private ReadOnlySpan<QueryPlan2> GetCachedQueryPlan<TRead, TWrite>(PatchChunkPlanCache<TRead, TWrite> cache)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        EnsureQueryCachesFresh();
+
+        if (!ReferenceEquals(cache.Schema, Schema))
+        {
+            cache.Schema = Schema;
+            cache.ReadId = Schema.GetComponentId<TRead>();
+            cache.WriteId = Schema.GetComponentId<TWrite>();
+            cache.Version = -1;
+            cache.Plans = Array.Empty<QueryPlan2>();
+        }
+
+        if (cache.Version != _queryCacheVersion)
+        {
+            cache.Plans = GetCachedQueryPlan(cache.ReadId, cache.WriteId);
+            cache.Version = _queryCacheVersion;
+        }
+
+        return cache.Plans;
+    }
+
+    private ReadOnlySpan<QueryPlan3> GetCachedQueryPlan<TRead1, TRead2, TWrite>(PatchChunkPlanCache<TRead1, TRead2, TWrite> cache)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(cache);
+        EnsureQueryCachesFresh();
+
+        if (!ReferenceEquals(cache.Schema, Schema))
+        {
+            cache.Schema = Schema;
+            cache.ReadId1 = Schema.GetComponentId<TRead1>();
+            cache.ReadId2 = Schema.GetComponentId<TRead2>();
+            cache.WriteId = Schema.GetComponentId<TWrite>();
+            cache.Version = -1;
+            cache.Plans = Array.Empty<QueryPlan3>();
+        }
+
+        if (cache.Version != _queryCacheVersion)
+        {
+            cache.Plans = GetCachedQueryPlan(cache.ReadId1, cache.ReadId2, cache.WriteId);
+            cache.Version = _queryCacheVersion;
+        }
+
+        return cache.Plans;
     }
 
     private QueryPlan1[] BuildQueryPlan(ComponentId id)

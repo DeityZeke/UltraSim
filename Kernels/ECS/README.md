@@ -90,6 +90,7 @@ Implemented so far:
 - explicit dirty-aware mutation paths through `World` and the structural queue,
 - explicit patch/update mutation path without public mutable refs,
 - chunk-level bulk patch APIs for hot-path systems without public mutable refs,
+- reusable prepared chunk-plan caches for hot-path systems that revisit the same query shape every tick,
 - `SystemContext` parallel chunk patch helpers for hot-path systems,
 - hot movement benchmarks now exercise the parallel chunk patch path,
 - explicit world lifecycle with seal/initialize/run/shutdown state,
