@@ -131,8 +131,7 @@ internal sealed class StructuralQueue
         foreach (Entity entity in destroys)
             world.DestroyImmediate(entity);
 
-        foreach (ArchetypeSignature signature in createDefaults)
-            world.CreateDefaultImmediate(signature);
+        _ = world.CreateDefaultImmediateBatch(createDefaults);
 
         for (int i = 0; i < removeBuffers.Length; i++)
             removeBuffers[i].Apply(world);

@@ -389,6 +389,42 @@ public sealed partial class World
         return entity;
     }
 
+    internal int CreateDefaultImmediateBatch(ReadOnlySpan<ArchetypeSignature> signatures)
+    {
+        if (signatures.Length == 0)
+            return 0;
+
+        var reserveCounts = new Dictionary<Archetype, int>(8);
+        for (int i = 0; i < signatures.Length; i++)
+        {
+            ArgumentNullException.ThrowIfNull(signatures[i]);
+            Archetype archetype = Archetypes.GetOrCreate(signatures[i]);
+            reserveCounts[archetype] = reserveCounts.TryGetValue(archetype, out int count) ? count + 1 : 1;
+        }
+
+        foreach ((Archetype archetype, int count) in reserveCounts)
+            archetype.Reserve(count);
+
+        foreach ((Archetype archetype, int count) in reserveCounts)
+        {
+            Entity[] rented = ArrayPool<Entity>.Shared.Rent(count);
+            try
+            {
+                Span<Entity> entities = rented.AsSpan(0, count);
+                int allocated = EntityStore.AllocateBulk(entities);
+                int startSlot = archetype.AddEntitiesUninitialized(entities[..allocated]);
+                EntityStore.SetLocationsBulkAssumeValid(entities[..allocated], archetype, startSlot);
+                _dirty.MarkUnique(entities[..allocated]);
+            }
+            finally
+            {
+                ArrayPool<Entity>.Shared.Return(rented, clearArray: false);
+            }
+        }
+
+        return signatures.Length;
+    }
+
     internal void DestroyImmediate(Entity entity)
     {
         if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
@@ -713,6 +749,7 @@ public sealed partial class World
 
         public override int GetHashCode() => HashCode.Combine(_source, _componentId);
     }
+
 
     private readonly struct TransitionPlan
     {

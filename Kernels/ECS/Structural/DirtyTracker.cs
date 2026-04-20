@@ -32,6 +32,18 @@ internal sealed class DirtyTracker
             MarkNoLock(componentId, entity);
     }
 
+    public void MarkUnique(ReadOnlySpan<Entity> entities)
+    {
+        if (entities.Length == 0)
+            return;
+
+        if (TryMarkCapturedUnique(entities))
+            return;
+
+        lock (_sync)
+            MarkUniqueNoLock(entities);
+    }
+
     public void Mark(ComponentId componentId, ReadOnlySpan<Entity> entities)
     {
         if (entities.Length == 0)
@@ -136,6 +148,11 @@ internal sealed class DirtyTracker
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void MarkNoLock(Entity entity) => _all.Mark(entity);
 
+    private void MarkUniqueNoLock(ReadOnlySpan<Entity> entities)
+    {
+        _all.MarkKnownUniqueRange(entities);
+    }
+
     private void MarkNoLock(ComponentId componentId, Entity entity)
     {
         int index = componentId.Value;
@@ -204,6 +221,34 @@ internal sealed class DirtyTracker
             return false;
 
         states[workerIndex].Mark(entity);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryMarkCapturedUnique(ReadOnlySpan<Entity> entities)
+    {
+        if (!_captureEnabled)
+            return false;
+
+        if (_captureWorkerCount <= 0)
+        {
+            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
+            {
+                MarkUniqueNoLock(entities);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+            return false;
+
+        LocalDirtyState[] states = _localStates;
+        if ((uint)workerIndex >= (uint)states.Length)
+            return false;
+
+        states[workerIndex].MarkUnique(entities);
         return true;
     }
 
@@ -377,6 +422,11 @@ internal sealed class DirtyTracker
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Mark(Entity entity) => All.Mark(entity);
+
+        public void MarkUnique(ReadOnlySpan<Entity> entities)
+        {
+            All.MarkKnownUniqueRange(entities);
+        }
 
         public void Mark(ComponentId componentId, Entity entity)
         {
