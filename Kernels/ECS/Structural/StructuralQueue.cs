@@ -5,15 +5,19 @@ internal sealed class StructuralQueue
     private readonly object _sync = new();
     private readonly List<ArchetypeSignature> _createDefaults = new();
     private readonly List<Entity> _destroys = new();
-    private readonly List<IStructuralAddOperation> _adds = new();
-    private readonly List<IStructuralRemoveOperation> _removes = new();
+    private readonly List<IStructuralAddBuffer> _addBuffers = new();
+    private readonly Dictionary<Type, IStructuralAddBuffer> _addByType = new();
+    private readonly List<IStructuralRemoveBuffer> _removeBuffers = new();
+    private readonly Dictionary<Type, IStructuralRemoveBuffer> _removeByType = new();
+    private int _addCount;
+    private int _removeCount;
 
     public bool HasPending
     {
         get
         {
             lock (_sync)
-                return _createDefaults.Count > 0 || _destroys.Count > 0 || _adds.Count > 0 || _removes.Count > 0;
+                return _createDefaults.Count > 0 || _destroys.Count > 0 || _addCount > 0 || _removeCount > 0;
         }
     }
 
@@ -54,7 +58,10 @@ internal sealed class StructuralQueue
     public void EnqueueAdd<T>(Entity entity, T value) where T : unmanaged, IComponent<T>
     {
         lock (_sync)
-            _adds.Add(new StructuralAddOperation<T>(entity, value));
+        {
+            GetAddBuffer<T>().Add(entity, value);
+            _addCount++;
+        }
     }
 
     public void EnqueueAdd<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values) where T : unmanaged, IComponent<T>
@@ -64,8 +71,8 @@ internal sealed class StructuralQueue
 
         lock (_sync)
         {
-            for (int i = 0; i < entities.Length; i++)
-                _adds.Add(new StructuralAddOperation<T>(entities[i], values[i]));
+            GetAddBuffer<T>().AddRange(entities, values);
+            _addCount += entities.Length;
         }
     }
 
@@ -73,23 +80,26 @@ internal sealed class StructuralQueue
     {
         lock (_sync)
         {
-            for (int i = 0; i < entities.Length; i++)
-                _adds.Add(new StructuralAddOperation<T>(entities[i], value));
+            GetAddBuffer<T>().AddRepeated(entities, value);
+            _addCount += entities.Length;
         }
     }
 
     public void EnqueueRemove<T>(Entity entity) where T : unmanaged, IComponent<T>
     {
         lock (_sync)
-            _removes.Add(new StructuralRemoveOperation<T>(entity));
+        {
+            GetRemoveBuffer<T>().Add(entity);
+            _removeCount++;
+        }
     }
 
     public void EnqueueRemove<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T>
     {
         lock (_sync)
         {
-            for (int i = 0; i < entities.Length; i++)
-                _removes.Add(new StructuralRemoveOperation<T>(entities[i]));
+            GetRemoveBuffer<T>().AddRange(entities);
+            _removeCount += entities.Length;
         }
     }
 
@@ -97,23 +107,23 @@ internal sealed class StructuralQueue
     {
         ArchetypeSignature[] createDefaults;
         Entity[] destroys;
-        IStructuralAddOperation[] adds;
-        IStructuralRemoveOperation[] removes;
+        IStructuralAddBuffer[] addBuffers;
+        IStructuralRemoveBuffer[] removeBuffers;
 
         lock (_sync)
         {
-            if (_createDefaults.Count == 0 && _destroys.Count == 0 && _adds.Count == 0 && _removes.Count == 0)
+            if (_createDefaults.Count == 0 && _destroys.Count == 0 && _addCount == 0 && _removeCount == 0)
                 return;
 
             createDefaults = _createDefaults.ToArray();
             destroys = _destroys.ToArray();
-            adds = _adds.ToArray();
-            removes = _removes.ToArray();
+            addBuffers = SnapshotAddBuffers();
+            removeBuffers = SnapshotRemoveBuffers();
 
             _createDefaults.Clear();
             _destroys.Clear();
-            _adds.Clear();
-            _removes.Clear();
+            _addCount = 0;
+            _removeCount = 0;
         }
 
         foreach (Entity entity in destroys)
@@ -122,11 +132,11 @@ internal sealed class StructuralQueue
         foreach (ArchetypeSignature signature in createDefaults)
             world.CreateDefaultImmediate(signature);
 
-        foreach (IStructuralRemoveOperation operation in removes)
-            operation.Apply(world);
+        for (int i = 0; i < removeBuffers.Length; i++)
+            removeBuffers[i].Apply(world);
 
-        foreach (IStructuralAddOperation operation in adds)
-            operation.Apply(world);
+        for (int i = 0; i < addBuffers.Length; i++)
+            addBuffers[i].Apply(world);
     }
 
     public void Clear()
@@ -135,46 +145,183 @@ internal sealed class StructuralQueue
         {
             _createDefaults.Clear();
             _destroys.Clear();
-            _adds.Clear();
-            _removes.Clear();
+            _addCount = 0;
+            _removeCount = 0;
+
+            for (int i = 0; i < _addBuffers.Count; i++)
+                _addBuffers[i].ClearAll();
+
+            for (int i = 0; i < _removeBuffers.Count; i++)
+                _removeBuffers[i].ClearAll();
         }
     }
 
-    private interface IStructuralAddOperation
+    private IStructuralAddBuffer[] SnapshotAddBuffers()
     {
-        void Apply(World world);
-    }
+        if (_addCount == 0)
+            return Array.Empty<IStructuralAddBuffer>();
 
-    private interface IStructuralRemoveOperation
-    {
-        void Apply(World world);
-    }
-
-    private sealed class StructuralAddOperation<T> : IStructuralAddOperation
-        where T : unmanaged, IComponent<T>
-    {
-        private readonly Entity _entity;
-        private readonly T _value;
-
-        public StructuralAddOperation(Entity entity, T value)
+        var buffers = new List<IStructuralAddBuffer>(_addBuffers.Count);
+        for (int i = 0; i < _addBuffers.Count; i++)
         {
-            _entity = entity;
-            _value = value;
+            IStructuralAddBuffer buffer = _addBuffers[i];
+            if (buffer.SwapForApply())
+                buffers.Add(buffer);
         }
 
-        public void Apply(World world) => world.AddComponentImmediate(_entity, _value);
+        return buffers.Count == 0 ? Array.Empty<IStructuralAddBuffer>() : buffers.ToArray();
     }
 
-    private sealed class StructuralRemoveOperation<T> : IStructuralRemoveOperation
-        where T : unmanaged, IComponent<T>
+    private IStructuralRemoveBuffer[] SnapshotRemoveBuffers()
     {
-        private readonly Entity _entity;
+        if (_removeCount == 0)
+            return Array.Empty<IStructuralRemoveBuffer>();
 
-        public StructuralRemoveOperation(Entity entity)
+        var buffers = new List<IStructuralRemoveBuffer>(_removeBuffers.Count);
+        for (int i = 0; i < _removeBuffers.Count; i++)
         {
-            _entity = entity;
+            IStructuralRemoveBuffer buffer = _removeBuffers[i];
+            if (buffer.SwapForApply())
+                buffers.Add(buffer);
         }
 
-        public void Apply(World world) => world.RemoveComponentImmediate<T>(_entity);
+        return buffers.Count == 0 ? Array.Empty<IStructuralRemoveBuffer>() : buffers.ToArray();
+    }
+
+    private StructuralAddBuffer<T> GetAddBuffer<T>() where T : unmanaged, IComponent<T>
+    {
+        Type type = typeof(T);
+        if (_addByType.TryGetValue(type, out IStructuralAddBuffer? existing))
+            return (StructuralAddBuffer<T>)existing;
+
+        var created = new StructuralAddBuffer<T>();
+        _addByType.Add(type, created);
+        _addBuffers.Add(created);
+        return created;
+    }
+
+    private StructuralRemoveBuffer<T> GetRemoveBuffer<T>() where T : unmanaged, IComponent<T>
+    {
+        Type type = typeof(T);
+        if (_removeByType.TryGetValue(type, out IStructuralRemoveBuffer? existing))
+            return (StructuralRemoveBuffer<T>)existing;
+
+        var created = new StructuralRemoveBuffer<T>();
+        _removeByType.Add(type, created);
+        _removeBuffers.Add(created);
+        return created;
+    }
+
+    private interface IStructuralAddBuffer
+    {
+        bool SwapForApply();
+        void Apply(World world);
+        void ClearAll();
+    }
+
+    private interface IStructuralRemoveBuffer
+    {
+        bool SwapForApply();
+        void Apply(World world);
+        void ClearAll();
+    }
+
+    private sealed class StructuralAddBuffer<T> : IStructuralAddBuffer where T : unmanaged, IComponent<T>
+    {
+        private List<Entity> _writeEntities = new();
+        private List<T> _writeValues = new();
+        private List<Entity> _readEntities = new();
+        private List<T> _readValues = new();
+
+        public void Add(Entity entity, T value)
+        {
+            _writeEntities.Add(entity);
+            _writeValues.Add(value);
+        }
+
+        public void AddRange(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values)
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                _writeEntities.Add(entities[i]);
+                _writeValues.Add(values[i]);
+            }
+        }
+
+        public void AddRepeated(ReadOnlySpan<Entity> entities, in T value)
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                _writeEntities.Add(entities[i]);
+                _writeValues.Add(value);
+            }
+        }
+
+        public bool SwapForApply()
+        {
+            if (_writeEntities.Count == 0)
+                return false;
+
+            (_writeEntities, _readEntities) = (_readEntities, _writeEntities);
+            (_writeValues, _readValues) = (_readValues, _writeValues);
+            return _readEntities.Count > 0;
+        }
+
+        public void Apply(World world)
+        {
+            for (int i = 0; i < _readEntities.Count; i++)
+                world.AddComponentImmediate(_readEntities[i], _readValues[i]);
+
+            _readEntities.Clear();
+            _readValues.Clear();
+        }
+
+        public void ClearAll()
+        {
+            _writeEntities.Clear();
+            _writeValues.Clear();
+            _readEntities.Clear();
+            _readValues.Clear();
+        }
+    }
+
+    private sealed class StructuralRemoveBuffer<T> : IStructuralRemoveBuffer where T : unmanaged, IComponent<T>
+    {
+        private List<Entity> _writeEntities = new();
+        private List<Entity> _readEntities = new();
+
+        public void Add(Entity entity)
+        {
+            _writeEntities.Add(entity);
+        }
+
+        public void AddRange(ReadOnlySpan<Entity> entities)
+        {
+            for (int i = 0; i < entities.Length; i++)
+                _writeEntities.Add(entities[i]);
+        }
+
+        public bool SwapForApply()
+        {
+            if (_writeEntities.Count == 0)
+                return false;
+
+            (_writeEntities, _readEntities) = (_readEntities, _writeEntities);
+            return _readEntities.Count > 0;
+        }
+
+        public void Apply(World world)
+        {
+            for (int i = 0; i < _readEntities.Count; i++)
+                world.RemoveComponentImmediate<T>(_readEntities[i]);
+
+            _readEntities.Clear();
+        }
+
+        public void ClearAll()
+        {
+            _writeEntities.Clear();
+            _readEntities.Clear();
+        }
     }
 }

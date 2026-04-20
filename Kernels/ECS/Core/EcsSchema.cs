@@ -1,9 +1,16 @@
 using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace UltraSim.ECS;
 
 public sealed class EcsSchema
 {
+    private static class ComponentIdCache<T> where T : unmanaged, IComponent<T>
+    {
+        public static EcsSchema? Schema;
+        public static ComponentId Id;
+    }
+
     private readonly ComponentTypeInfo[] _components;
     private readonly Dictionary<Type, ComponentId> _typeToId;
 
@@ -23,7 +30,16 @@ public sealed class EcsSchema
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ComponentId GetComponentId<T>() where T : unmanaged, IComponent<T>
-        => GetComponentId(typeof(T));
+    {
+        EcsSchema? cachedSchema = Volatile.Read(ref ComponentIdCache<T>.Schema);
+        if (ReferenceEquals(cachedSchema, this))
+            return ComponentIdCache<T>.Id;
+
+        ComponentId id = GetComponentId(typeof(T));
+        ComponentIdCache<T>.Id = id;
+        Volatile.Write(ref ComponentIdCache<T>.Schema, this);
+        return id;
+    }
 
     public ComponentId GetComponentId(Type componentType)
     {

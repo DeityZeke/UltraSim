@@ -1,5 +1,7 @@
 namespace UltraSim.ECS;
 
+using System.Buffers;
+
 public sealed partial class World
 {
     private sealed class WorldStructuralCommands : IStructuralCommands
@@ -26,6 +28,8 @@ public sealed partial class World
     private readonly DirtyTracker _dirty;
     private readonly IStructuralCommands _commands;
     private readonly SystemManager _systems;
+    private readonly Dictionary<TransitionKey, TransitionPlan> _addTransitions;
+    private readonly Dictionary<TransitionKey, TransitionPlan> _removeTransitions;
     private uint _worldTick;
     private WorldLifecycleState _state;
 
@@ -39,6 +43,8 @@ public sealed partial class World
         _dirty = new DirtyTracker();
         _commands = new WorldStructuralCommands(this);
         _systems = new SystemManager();
+        _addTransitions = new Dictionary<TransitionKey, TransitionPlan>(16);
+        _removeTransitions = new Dictionary<TransitionKey, TransitionPlan>(16);
         _state = WorldLifecycleState.Created;
     }
 
@@ -398,9 +404,10 @@ public sealed partial class World
             return true;
         }
 
-        Archetype destination = Archetypes.GetOrCreate(CreateTransitionSignature(source.ComponentIds, id, remove: false));
+        TransitionPlan plan = GetAddTransition(source, id);
+        Archetype destination = plan.Destination;
         int newSlot = destination.AddEntity(entity);
-        CopySharedComponents(source, slot, destination, newSlot, skip: ComponentId.Invalid);
+        plan.Copy(sourceSlot: slot, destinationSlot: newSlot);
         destination.GetComponentSpan<T>(id)[newSlot] = value;
 
         if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
@@ -417,9 +424,10 @@ public sealed partial class World
         if (!EntityStore.TryGetLocation(entity, out Archetype source, out int slot) || !source.HasComponent(id))
             return false;
 
-        Archetype destination = Archetypes.GetOrCreate(CreateTransitionSignature(source.ComponentIds, id, remove: true));
+        TransitionPlan plan = GetRemoveTransition(source, id);
+        Archetype destination = plan.Destination;
         int newSlot = destination.AddEntity(entity);
-        CopySharedComponents(source, slot, destination, newSlot, skip: id);
+        plan.Copy(sourceSlot: slot, destinationSlot: newSlot);
 
         if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
             EntityStore.SetLocation(moved, source, movedSlot);
@@ -429,10 +437,58 @@ public sealed partial class World
         return true;
     }
 
-    private static ComponentId[] CreateTransitionSignature(ReadOnlySpan<ComponentId> source, ComponentId target, bool remove)
+    private TransitionPlan GetAddTransition(Archetype source, ComponentId componentId)
     {
-        int delta = remove ? -1 : 1;
-        var buffer = new ComponentId[source.Length + delta];
+        var key = new TransitionKey(source, componentId);
+        if (_addTransitions.TryGetValue(key, out TransitionPlan plan))
+            return plan;
+
+        Archetype destination = GetOrCreateTransitionArchetype(source.ComponentIds, componentId, remove: false);
+        plan = BuildTransitionPlan(source, destination, ComponentId.Invalid);
+        _addTransitions.Add(key, plan);
+        return plan;
+    }
+
+    private TransitionPlan GetRemoveTransition(Archetype source, ComponentId componentId)
+    {
+        var key = new TransitionKey(source, componentId);
+        if (_removeTransitions.TryGetValue(key, out TransitionPlan plan))
+            return plan;
+
+        Archetype destination = GetOrCreateTransitionArchetype(source.ComponentIds, componentId, remove: true);
+        plan = BuildTransitionPlan(source, destination, componentId);
+        _removeTransitions.Add(key, plan);
+        return plan;
+    }
+
+    private Archetype GetOrCreateTransitionArchetype(ReadOnlySpan<ComponentId> source, ComponentId target, bool remove)
+    {
+        int needed = source.Length + (remove ? -1 : 1);
+        if (needed <= 0)
+            return Archetypes.GetOrCreateEmpty();
+
+        const int stackThreshold = 32;
+        if (needed <= stackThreshold)
+        {
+            Span<ComponentId> buffer = stackalloc ComponentId[stackThreshold];
+            int write = WriteTransitionSignature(source, target, remove, buffer);
+            return Archetypes.GetOrCreate(buffer[..write]);
+        }
+
+        ComponentId[] rented = ArrayPool<ComponentId>.Shared.Rent(needed);
+        try
+        {
+            int write = WriteTransitionSignature(source, target, remove, rented);
+            return Archetypes.GetOrCreate(rented.AsSpan(0, write));
+        }
+        finally
+        {
+            ArrayPool<ComponentId>.Shared.Return(rented);
+        }
+    }
+
+    private static int WriteTransitionSignature(ReadOnlySpan<ComponentId> source, ComponentId target, bool remove, Span<ComponentId> destination)
+    {
         int write = 0;
         bool inserted = false;
 
@@ -445,25 +501,41 @@ public sealed partial class World
 
             if (!remove && !inserted && target.Value < current.Value)
             {
-                buffer[write++] = target;
+                destination[write++] = target;
                 inserted = true;
             }
 
-            buffer[write++] = current;
+            destination[write++] = current;
         }
 
         if (!remove && !inserted)
-            buffer[write++] = target;
+            destination[write++] = target;
 
-        if (write != buffer.Length)
-            Array.Resize(ref buffer, write);
-
-        return buffer;
+        return write;
     }
 
-    private static void CopySharedComponents(Archetype source, int sourceSlot, Archetype destination, int destinationSlot, ComponentId skip)
+    private static TransitionPlan BuildTransitionPlan(Archetype source, Archetype destination, ComponentId skip)
     {
         ReadOnlySpan<ComponentId> sourceIds = source.ComponentIds;
+        int count = 0;
+
+        for (int i = 0; i < sourceIds.Length; i++)
+        {
+            ComponentId id = sourceIds[i];
+            if (id == skip)
+                continue;
+
+            if (destination.GetColumnIndex(id) >= 0)
+                count++;
+        }
+
+        if (count == 0)
+            return TransitionPlan.Empty(destination);
+
+        var sourceColumns = new IComponentColumn[count];
+        var destinationColumns = new IComponentColumn[count];
+        int write = 0;
+
         for (int i = 0; i < sourceIds.Length; i++)
         {
             ComponentId id = sourceIds[i];
@@ -475,7 +547,57 @@ public sealed partial class World
                 continue;
 
             int sourceIndex = source.GetColumnIndex(id);
-            destination.GetColumnAt(destinationIndex).CopyFrom(source.GetColumnAt(sourceIndex), sourceSlot, destinationSlot);
+            sourceColumns[write] = source.GetColumnAt(sourceIndex);
+            destinationColumns[write] = destination.GetColumnAt(destinationIndex);
+            write++;
+        }
+
+        return new TransitionPlan(destination, sourceColumns, destinationColumns, write);
+    }
+
+    private readonly struct TransitionKey : IEquatable<TransitionKey>
+    {
+        private readonly Archetype _source;
+        private readonly int _componentId;
+
+        public TransitionKey(Archetype source, ComponentId componentId)
+        {
+            _source = source;
+            _componentId = componentId.Value;
+        }
+
+        public bool Equals(TransitionKey other)
+            => ReferenceEquals(_source, other._source) && _componentId == other._componentId;
+
+        public override bool Equals(object? obj)
+            => obj is TransitionKey other && Equals(other);
+
+        public override int GetHashCode() => HashCode.Combine(_source, _componentId);
+    }
+
+    private readonly struct TransitionPlan
+    {
+        private readonly IComponentColumn[] _sourceColumns;
+        private readonly IComponentColumn[] _destinationColumns;
+        private readonly int _count;
+
+        public TransitionPlan(Archetype destination, IComponentColumn[] sourceColumns, IComponentColumn[] destinationColumns, int count)
+        {
+            Destination = destination;
+            _sourceColumns = sourceColumns;
+            _destinationColumns = destinationColumns;
+            _count = count;
+        }
+
+        public Archetype Destination { get; }
+
+        public static TransitionPlan Empty(Archetype destination)
+            => new(destination, Array.Empty<IComponentColumn>(), Array.Empty<IComponentColumn>(), 0);
+
+        public void Copy(int sourceSlot, int destinationSlot)
+        {
+            for (int i = 0; i < _count; i++)
+                _destinationColumns[i].CopyFrom(_sourceColumns[i], sourceSlot, destinationSlot);
         }
     }
 
