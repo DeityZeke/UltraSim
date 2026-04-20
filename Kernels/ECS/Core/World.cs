@@ -541,6 +541,9 @@ public sealed partial class World
             throw new ArgumentException("Entities and values length must match.");
 
         ComponentId id = Schema.GetComponentId<T>();
+        if (TryAddComponentSingleSourceFast(entities, values, id, out int fastApplied))
+            return fastApplied;
+
         var reserveCounts = new Dictionary<Archetype, int>(8);
 
         for (int i = 0; i < entities.Length; i++)
@@ -638,6 +641,9 @@ public sealed partial class World
     internal int RemoveComponentImmediateBatch<T>(ReadOnlySpan<Entity> entities) where T : unmanaged, IComponent<T>
     {
         ComponentId id = Schema.GetComponentId<T>();
+        if (TryRemoveComponentSingleSourceFast<T>(entities, id, out int fastApplied))
+            return fastApplied;
+
         var reserveCounts = new Dictionary<Archetype, int>(8);
 
         for (int i = 0; i < entities.Length; i++)
@@ -780,6 +786,195 @@ public sealed partial class World
             destination[write++] = target;
 
         return write;
+    }
+
+    private bool TryAddComponentSingleSourceFast<T>(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values, ComponentId id, out int applied)
+        where T : unmanaged, IComponent<T>
+    {
+        applied = 0;
+        if (entities.Length == 0)
+            return true;
+
+        int[] rentedSlots = ArrayPool<int>.Shared.Rent(entities.Length);
+        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
+        try
+        {
+            Archetype? source = null;
+            bool increasing = true;
+            bool decreasing = true;
+            int previousSlot = -1;
+
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Entity entity = entities[i];
+                if (!EntityStore.TryGetLocation(entity, out Archetype currentSource, out int slot))
+                    return false;
+
+                if (currentSource.HasComponent(id))
+                    return false;
+
+                if (source is null)
+                {
+                    source = currentSource;
+                }
+                else if (!ReferenceEquals(source, currentSource))
+                {
+                    return false;
+                }
+
+                rentedSlots[i] = slot;
+                if (i > 0)
+                {
+                    if (slot <= previousSlot)
+                        increasing = false;
+                    if (slot >= previousSlot)
+                        decreasing = false;
+                }
+
+                previousSlot = slot;
+            }
+
+            if (!increasing && !decreasing)
+                return false;
+
+            TransitionPlan plan = GetAddTransition(source!, id);
+            Archetype destination = plan.Destination;
+            destination.Reserve(entities.Length);
+
+            if (increasing)
+            {
+                for (int i = entities.Length - 1; i >= 0; i--)
+                    ApplyAddFastEntry(entities[i], values[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+            }
+            else
+            {
+                for (int i = 0; i < entities.Length; i++)
+                    ApplyAddFastEntry(entities[i], values[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+            }
+
+            _dirty.Mark(id, dirtyRented.AsSpan(0, applied));
+            return true;
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(rentedSlots, clearArray: false);
+            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
+        }
+    }
+
+    private void ApplyAddFastEntry<T>(
+        Entity entity,
+        T value,
+        int slot,
+        Archetype source,
+        Archetype destination,
+        TransitionPlan plan,
+        Entity[] dirtyBuffer,
+        ref int applied)
+        where T : unmanaged, IComponent<T>
+    {
+        int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
+        plan.Copy(slot, newSlot);
+        destination.GetComponentSpan<T>(Schema.GetComponentId<T>())[newSlot] = value;
+
+        if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+            EntityStore.SetLocation(moved, source, movedSlot);
+
+        EntityStore.SetLocation(entity, destination, newSlot);
+        dirtyBuffer[applied++] = entity;
+    }
+
+    private bool TryRemoveComponentSingleSourceFast<T>(ReadOnlySpan<Entity> entities, ComponentId id, out int applied)
+        where T : unmanaged, IComponent<T>
+    {
+        applied = 0;
+        if (entities.Length == 0)
+            return true;
+
+        int[] rentedSlots = ArrayPool<int>.Shared.Rent(entities.Length);
+        Entity[] dirtyRented = ArrayPool<Entity>.Shared.Rent(entities.Length);
+        try
+        {
+            Archetype? source = null;
+            bool increasing = true;
+            bool decreasing = true;
+            int previousSlot = -1;
+
+            for (int i = 0; i < entities.Length; i++)
+            {
+                Entity entity = entities[i];
+                if (!EntityStore.TryGetLocation(entity, out Archetype currentSource, out int slot))
+                    return false;
+
+                if (!currentSource.HasComponent(id))
+                    return false;
+
+                if (source is null)
+                {
+                    source = currentSource;
+                }
+                else if (!ReferenceEquals(source, currentSource))
+                {
+                    return false;
+                }
+
+                rentedSlots[i] = slot;
+                if (i > 0)
+                {
+                    if (slot <= previousSlot)
+                        increasing = false;
+                    if (slot >= previousSlot)
+                        decreasing = false;
+                }
+
+                previousSlot = slot;
+            }
+
+            if (!increasing && !decreasing)
+                return false;
+
+            TransitionPlan plan = GetRemoveTransition(source!, id);
+            Archetype destination = plan.Destination;
+            destination.Reserve(entities.Length);
+
+            if (increasing)
+            {
+                for (int i = entities.Length - 1; i >= 0; i--)
+                    ApplyRemoveFastEntry(entities[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+            }
+            else
+            {
+                for (int i = 0; i < entities.Length; i++)
+                    ApplyRemoveFastEntry(entities[i], rentedSlots[i], source!, destination, plan, dirtyRented, ref applied);
+            }
+
+            _dirty.Mark(id, dirtyRented.AsSpan(0, applied));
+            return true;
+        }
+        finally
+        {
+            ArrayPool<int>.Shared.Return(rentedSlots, clearArray: false);
+            ArrayPool<Entity>.Shared.Return(dirtyRented, clearArray: false);
+        }
+    }
+
+    private void ApplyRemoveFastEntry(
+        Entity entity,
+        int slot,
+        Archetype source,
+        Archetype destination,
+        TransitionPlan plan,
+        Entity[] dirtyBuffer,
+        ref int applied)
+    {
+        int newSlot = destination.AddEntityUninitializedAssumeCapacity(entity);
+        plan.Copy(slot, newSlot);
+
+        if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
+            EntityStore.SetLocation(moved, source, movedSlot);
+
+        EntityStore.SetLocation(entity, destination, newSlot);
+        dirtyBuffer[applied++] = entity;
     }
 
     private static TransitionPlan BuildTransitionPlan(Archetype source, Archetype destination, ComponentId skip)
