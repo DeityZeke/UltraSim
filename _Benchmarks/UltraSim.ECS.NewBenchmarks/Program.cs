@@ -60,6 +60,12 @@ internal static class NewKernelBenchmarks
         scenarios.Add(MakeScenario("TickParallel_ReadOnlySystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallelReadOnly(10_000, 200)));
         scenarios.Add(MakeScenario("TickSerial_DirtyAwareWriteSystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickSerialDirtyAware(10_000, 200)));
         scenarios.Add(MakeScenario("TickParallel_DirtyAwareWriteSystems_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallelDirtyAware(10_000, 200)));
+        scenarios.Add(MakeScenario("TickSerial_OscillatingMovement_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickSerialOscillatingMovement(10_000, 200)));
+        scenarios.Add(MakeScenario("TickParallel_OscillatingMovement_10k_200Ticks", "Scheduler", true, 10_000, () => BenchmarkTickParallelOscillatingMovement(10_000, 200)));
+        scenarios.Add(MakeScenario("TickSerial_OscillatingMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickSerialOscillatingMovement(100_000, 200)));
+        scenarios.Add(MakeScenario("TickParallel_OscillatingMovement_100k_200Ticks", "Scheduler", true, 100_000, () => BenchmarkTickParallelOscillatingMovement(100_000, 200)));
+        scenarios.Add(MakeScenario("TickSerial_V1PulseMovement_100k_50Ticks", "Scheduler", true, 100_000, () => BenchmarkTickSerialV1PulseMovement(100_000, 50)));
+        scenarios.Add(MakeScenario("TickParallel_V1PulseMovement_100k_50Ticks", "Scheduler", true, 100_000, () => BenchmarkTickParallelV1PulseMovement(100_000, 50)));
         scenarios.Add(CreateHotQuery1Scenario(50_000));
         scenarios.Add(CreateHotSetComponentScenario(50_000));
         scenarios.Add(CreateHotTryGetScenario(50_000));
@@ -71,6 +77,10 @@ internal static class NewKernelBenchmarks
         scenarios.Add(CreateHotTickParallelReadOnlyScenario(10_000, 200));
         scenarios.Add(CreateHotTickSerialDirtyAwareScenario(10_000, 200));
         scenarios.Add(CreateHotTickParallelDirtyAwareScenario(10_000, 200));
+        scenarios.Add(CreateHotTickSerialOscillatingMovementScenario(10_000, 200));
+        scenarios.Add(CreateHotTickParallelOscillatingMovementScenario(10_000, 200));
+        scenarios.Add(CreateHotTickSerialOscillatingMovementScenario(100_000, 200));
+        scenarios.Add(CreateHotTickParallelOscillatingMovementScenario(100_000, 200));
         return scenarios;
     }
 
@@ -273,6 +283,34 @@ internal static class NewKernelBenchmarks
         return MakeScenario($"HotLoop_TickParallel_DirtyAwareWriteSystems", "HotLoop", true, entityCount, () =>
         {
             world ??= CreateSchedulerWorld(entityCount, SystemExecutionMode.ParallelBatches);
+            SchedulerBenchmarkState.Reset();
+            for (int i = 0; i < ticks; i++)
+                world.Tick(0.016f);
+
+            return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+        });
+    }
+
+    private static BenchmarkScenario CreateHotTickSerialOscillatingMovementScenario(int entityCount, int ticks)
+    {
+        World? world = null;
+        return MakeScenario($"HotLoop_TickSerial_OscillatingMovement", "HotLoop", true, entityCount, () =>
+        {
+            world ??= CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.Serial);
+            SchedulerBenchmarkState.Reset();
+            for (int i = 0; i < ticks; i++)
+                world.Tick(0.016f);
+
+            return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+        });
+    }
+
+    private static BenchmarkScenario CreateHotTickParallelOscillatingMovementScenario(int entityCount, int ticks)
+    {
+        World? world = null;
+        return MakeScenario($"HotLoop_TickParallel_OscillatingMovement", "HotLoop", true, entityCount, () =>
+        {
+            world ??= CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.ParallelBatches);
             SchedulerBenchmarkState.Reset();
             for (int i = 0; i < ticks; i++)
                 world.Tick(0.016f);
@@ -602,6 +640,42 @@ internal static class NewKernelBenchmarks
         return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
     }
 
+    private static ScenarioMeasurement BenchmarkTickSerialOscillatingMovement(int entityCount, int ticks)
+    {
+        World world = CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.Serial);
+        for (int i = 0; i < ticks; i++)
+            world.Tick(0.016f);
+
+        return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+    }
+
+    private static ScenarioMeasurement BenchmarkTickParallelOscillatingMovement(int entityCount, int ticks)
+    {
+        World world = CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.ParallelBatches);
+        for (int i = 0; i < ticks; i++)
+            world.Tick(0.016f);
+
+        return new ScenarioMeasurement((long)entityCount * 4 * ticks, SchedulerBenchmarkState.Checksum);
+    }
+
+    private static ScenarioMeasurement BenchmarkTickSerialV1PulseMovement(int entityCount, int ticks)
+    {
+        World world = CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.Serial);
+        for (int i = 0; i < ticks; i++)
+            world.Tick(0.016f);
+
+        return new ScenarioMeasurement((long)entityCount * 3 * ticks, SchedulerBenchmarkState.Checksum);
+    }
+
+    private static ScenarioMeasurement BenchmarkTickParallelV1PulseMovement(int entityCount, int ticks)
+    {
+        World world = CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.ParallelBatches);
+        for (int i = 0; i < ticks; i++)
+            world.Tick(0.016f);
+
+        return new ScenarioMeasurement((long)entityCount * 3 * ticks, SchedulerBenchmarkState.Checksum);
+    }
+
     private static World CreateSchedulerWorld(int entityCount, SystemExecutionMode mode)
     {
         SchedulerBenchmarkState.Reset();
@@ -636,6 +710,41 @@ internal static class NewKernelBenchmarks
         return world;
     }
 
+    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode)
+    {
+        SchedulerBenchmarkState.Reset();
+
+        World world = SeedOscillatingWorld(entityCount);
+        ComponentId positionId = world.GetComponentId<Position>();
+        ComponentId velocityId = world.GetComponentId<Velocity>();
+        ComponentId oscillatorId = world.GetComponentId<Oscillator>();
+        world.SetSystemExecutionMode(mode);
+        world.RegisterSystems(
+            new OscillatingReadSystem<OscReadTagA>("OscReadA", positionId, velocityId, oscillatorId),
+            new OscillatingReadSystem<OscReadTagB>("OscReadB", positionId, velocityId, oscillatorId),
+            new OscillatingWriteSystem<OscWriteTagA>("OscWriteA", velocityId, oscillatorId, positionId, writePosition: true),
+            new OscillatingWriteSystem<OscWriteTagB>("OscWriteB", positionId, oscillatorId, velocityId, writePosition: false));
+        world.SealSystems();
+        return world;
+    }
+
+    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode)
+    {
+        SchedulerBenchmarkState.Reset();
+
+        World world = SeedV1PulseWorld(entityCount);
+        ComponentId positionId = world.GetComponentId<PulsePosition>();
+        ComponentId velocityId = world.GetComponentId<PulseVelocity>();
+        ComponentId motionId = world.GetComponentId<PulseMotion>();
+        world.SetSystemExecutionMode(mode);
+        world.RegisterSystems(
+            new V1PulsePhaseAdvanceSystem("V1PulsePhase", motionId),
+            new V1PulseVelocitySystem("V1PulseVelocity", positionId, motionId, velocityId),
+            new V1MovementSystem("V1Movement", positionId, velocityId));
+        world.SealSystems();
+        return world;
+    }
+
     private static World CreateWorld(bool includeVelocity, bool includeHealth)
     {
         var builder = new EcsSchemaBuilder();
@@ -643,7 +752,75 @@ internal static class NewKernelBenchmarks
         builder.RegisterComponent<Velocity>();
         builder.RegisterComponent<Health>();
         builder.RegisterComponent<Active>();
+        builder.RegisterComponent<Oscillator>();
+        builder.RegisterComponent<PulsePosition>();
+        builder.RegisterComponent<PulseVelocity>();
+        builder.RegisterComponent<PulseMotion>();
         return new World(builder.Build());
+    }
+
+    private static World SeedOscillatingWorld(int count)
+    {
+        World world = CreateWorld(includeVelocity: true, includeHealth: false);
+        ComponentId[] componentIds =
+        [
+            world.GetComponentId<Position>(),
+            world.GetComponentId<Velocity>(),
+            world.GetComponentId<Oscillator>(),
+        ];
+
+        var signature = new ArchetypeSignature(componentIds);
+        for (int i = 0; i < count; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            world.SetComponent(entity, new Position(i, i + 1));
+            world.SetComponent(entity, new Velocity((i % 97) + 2, (i % 89) + 3));
+            world.SetComponent(entity, new Oscillator(
+                Phase: i * 0.0131f,
+                Frequency: 0.75f + ((i % 7) * 0.11f),
+                Amplitude: 1.5f + ((i % 5) * 0.25f),
+                Bias: (i % 13) * 0.1f));
+        }
+
+        Span<Entity> drain = stackalloc Entity[Math.Min(count, 256)];
+        while (world.DrainDirtyTo(drain) > 0) { }
+        while (world.DrainDirtyTo<Position>(drain) > 0) { }
+        while (world.DrainDirtyTo<Velocity>(drain) > 0) { }
+        while (world.DrainDirtyTo<Oscillator>(drain) > 0) { }
+        return world;
+    }
+
+    private static World SeedV1PulseWorld(int count)
+    {
+        World world = CreateWorld(includeVelocity: true, includeHealth: false);
+        ComponentId[] componentIds =
+        [
+            world.GetComponentId<PulsePosition>(),
+            world.GetComponentId<PulseVelocity>(),
+            world.GetComponentId<PulseMotion>(),
+        ];
+
+        var signature = new ArchetypeSignature(componentIds);
+        for (int i = 0; i < count; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            world.SetComponent(entity, new PulsePosition(
+                X: (i % 1024) - 512f,
+                Y: ((i / 1024) % 1024) - 512f,
+                Z: (i % 257) - 128f));
+            world.SetComponent(entity, new PulseVelocity(0f, 0f, 0f));
+            world.SetComponent(entity, new PulseMotion(
+                Speed: 2f + ((i % 5) * 0.1f),
+                Frequency: 0.5f + ((i % 7) * 0.05f),
+                Phase: (i % 360) * (MathF.PI / 180f)));
+        }
+
+        Span<Entity> drain = stackalloc Entity[Math.Min(count, 256)];
+        while (world.DrainDirtyTo(drain) > 0) { }
+        while (world.DrainDirtyTo<PulsePosition>(drain) > 0) { }
+        while (world.DrainDirtyTo<PulseVelocity>(drain) > 0) { }
+        while (world.DrainDirtyTo<PulseMotion>(drain) > 0) { }
+        return world;
     }
 
     private static World SeedWorld(int count, bool includeVelocity, bool includeHealth)
@@ -714,6 +891,10 @@ internal static class NewKernelBenchmarks
     private readonly record struct Velocity(int X, int Y) : IComponent<Velocity>;
     private readonly record struct Health(int Value) : IComponent<Health>;
     private readonly record struct Active(byte Value) : IComponent<Active>;
+    private readonly record struct Oscillator(float Phase, float Frequency, float Amplitude, float Bias) : IComponent<Oscillator>;
+    private readonly record struct PulsePosition(float X, float Y, float Z) : IComponent<PulsePosition>;
+    private readonly record struct PulseVelocity(float X, float Y, float Z) : IComponent<PulseVelocity>;
+    private readonly record struct PulseMotion(float Speed, float Frequency, float Phase) : IComponent<PulseMotion>;
 
     private sealed class SchedulerQueryReadSystem<TTag> : SystemBase
     {
@@ -796,16 +977,256 @@ internal static class NewKernelBenchmarks
         }
     }
 
+    private sealed class OscillatingReadSystem<TTag> : SystemBase
+    {
+        public OscillatingReadSystem(string name, ComponentId positionId, ComponentId velocityId, ComponentId oscillatorId)
+        {
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId, velocityId, oscillatorId]),
+                ComponentMask.Empty);
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            float time = ctx.Tick * ctx.DeltaSeconds;
+            ctx.World.Query<Position, Velocity, Oscillator>((Entity entity, in Position position, in Velocity velocity, in Oscillator oscillator) =>
+            {
+                float phase = (time * oscillator.Frequency) + oscillator.Phase;
+                float sample = MathF.Sin(phase + (position.X * 0.001f))
+                    + MathF.Cos((phase * 0.5f) + (velocity.Y * 0.001f))
+                    + (MathF.Sin((phase * 1.7f) - oscillator.Bias) * oscillator.Amplitude);
+                int value = (int)MathF.Round((sample * 512f) + (oscillator.Amplitude * 32f) + (oscillator.Bias * 16f));
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, entity.Index + value);
+            });
+        }
+    }
+
+    private sealed class OscillatingWriteSystem<TTag> : SystemBase
+    {
+        private readonly bool _writePosition;
+
+        public OscillatingWriteSystem(string name, ComponentId readId1, ComponentId readId2, ComponentId writeId, bool writePosition)
+        {
+            _writePosition = writePosition;
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([readId1, readId2, writeId]),
+                ComponentMask.FromIds([writeId]));
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            float time = ctx.Tick * ctx.DeltaSeconds;
+            World world = ctx.World;
+
+            if (_writePosition)
+            {
+                world.PatchQuery<Velocity, Oscillator, Position>((Entity _, in Velocity velocity, in Oscillator oscillator, ref Position write) =>
+                {
+                    float phase = (time * oscillator.Frequency) + oscillator.Phase;
+                    float waveA = MathF.Sin(phase);
+                    float waveB = MathF.Cos((phase * 0.5f) + oscillator.Bias);
+                    float pulse = MathF.Sin((phase * 2.3f) - oscillator.Bias) * oscillator.Amplitude;
+                    int dx = (int)MathF.Round(((waveA + waveB) * oscillator.Amplitude * 8f) + pulse + (velocity.X * 0.125f));
+                    int dy = (int)MathF.Round(((MathF.Cos(phase * 1.7f) - MathF.Sin(phase * 0.33f)) * oscillator.Amplitude * 6f) + (velocity.Y * 0.125f));
+                    write = new Position(write.X + dx, write.Y + dy);
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, write.X + write.Y + dx + dy);
+                });
+                return;
+            }
+
+            world.PatchQuery<Position, Oscillator, Velocity>((Entity _, in Position position, in Oscillator oscillator, ref Velocity write) =>
+            {
+                float phase = (time * (oscillator.Frequency * 1.13f)) + oscillator.Phase + (position.X * 0.0005f);
+                float waveA = MathF.Sin(phase);
+                float waveB = MathF.Cos((phase * 0.75f) - oscillator.Bias);
+                float waveC = MathF.Sin((phase * 1.91f) + oscillator.Amplitude);
+                int vx = (int)MathF.Round(((waveA + waveB) * oscillator.Amplitude * 4f) + (position.X & 7));
+                int vy = (int)MathF.Round(((waveC - waveA) * oscillator.Amplitude * 4f) + (position.Y & 7));
+                write = new Velocity(vx, vy);
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, write.X + write.Y + vx + vy);
+            });
+        }
+    }
+
+    private sealed class V1PulsePhaseAdvanceSystem : SystemBase
+    {
+        public V1PulsePhaseAdvanceSystem(string name, ComponentId motionId)
+        {
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([motionId]),
+                ComponentMask.FromIds([motionId]));
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            float delta = ctx.DeltaSeconds;
+            ctx.World.PatchChunks<PulseMotion>((ReadOnlySpan<Entity> _, Span<PulseMotion> writes) =>
+            {
+                long checksum = 0;
+                for (int i = 0; i < writes.Length; i++)
+                {
+                    PulseMotion motion = writes[i];
+                    float phase = motion.Phase + (motion.Frequency * delta);
+                    if (phase > PulseMath.TwoPi)
+                        phase -= PulseMath.TwoPi;
+
+                    writes[i] = new PulseMotion(motion.Speed, motion.Frequency, phase);
+                    checksum += (long)(phase * 1024f);
+                }
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+            });
+        }
+    }
+
+    private sealed class V1PulseVelocitySystem : SystemBase
+    {
+        public V1PulseVelocitySystem(string name, ComponentId positionId, ComponentId motionId, ComponentId velocityId)
+        {
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId, motionId, velocityId]),
+                ComponentMask.FromIds([velocityId]));
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            ctx.World.PatchChunks<PulsePosition, PulseMotion, PulseVelocity>((ReadOnlySpan<Entity> _, ReadOnlySpan<PulsePosition> positions, ReadOnlySpan<PulseMotion> motions, Span<PulseVelocity> writes) =>
+            {
+                long checksum = 0;
+                for (int i = 0; i < writes.Length; i++)
+                {
+                    PulsePosition position = positions[i];
+                    PulseMotion motion = motions[i];
+                    float pulseDirection = PulseMath.FastSin(motion.Phase);
+                    float distSq = (position.X * position.X) + (position.Y * position.Y) + (position.Z * position.Z);
+
+                    if (distSq > 0.0001f)
+                    {
+                        float invDist = 1f / MathF.Sqrt(distSq);
+                        float speedFactor = pulseDirection * motion.Speed;
+                        writes[i] = new PulseVelocity(
+                            position.X * invDist * speedFactor,
+                            position.Y * invDist * speedFactor,
+                            position.Z * invDist * speedFactor);
+                    }
+                    else
+                    {
+                        float fallback = motion.Speed * 0.35355338f;
+                        writes[i] = new PulseVelocity(fallback, -fallback, fallback);
+                    }
+
+                    PulseVelocity velocity = writes[i];
+                    checksum += (long)((velocity.X + velocity.Y + velocity.Z) * 256f);
+                }
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+            });
+        }
+    }
+
+    private sealed class V1MovementSystem : SystemBase
+    {
+        public V1MovementSystem(string name, ComponentId positionId, ComponentId velocityId)
+        {
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId, velocityId]),
+                ComponentMask.FromIds([positionId]));
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            float delta = ctx.DeltaSeconds;
+            ctx.World.PatchChunks<PulseVelocity, PulsePosition>((ReadOnlySpan<Entity> _, ReadOnlySpan<PulseVelocity> velocities, Span<PulsePosition> writes) =>
+            {
+                long checksum = 0;
+                for (int i = 0; i < writes.Length; i++)
+                {
+                    PulsePosition position = writes[i];
+                    PulseVelocity velocity = velocities[i];
+                    position = new PulsePosition(
+                        position.X + (velocity.X * delta),
+                        position.Y + (velocity.Y * delta),
+                        position.Z + (velocity.Z * delta));
+                    writes[i] = position;
+                    checksum += (long)((position.X + position.Y + position.Z) * 128f);
+                }
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+            });
+        }
+    }
+
     private sealed class ReadOnlyTagA;
     private sealed class ReadOnlyTagB;
     private sealed class ReadOnlyTagC;
     private sealed class ReadOnlyTagD;
+    private sealed class OscReadTagA;
+    private sealed class OscReadTagB;
+    private sealed class OscWriteTagA;
+    private sealed class OscWriteTagB;
 
     private static class SchedulerBenchmarkState
     {
         public static long Checksum;
 
         public static void Reset() => Checksum = 0;
+    }
+
+    private static class PulseMath
+    {
+        private const int LookupSize = 1024;
+        private const float LookupScale = LookupSize / TwoPi;
+        public const float TwoPi = MathF.PI * 2f;
+        private static readonly float[] SinLookup = BuildLookup();
+
+        public static float FastSin(float angle)
+        {
+            float wrapped = angle % TwoPi;
+            if (wrapped < 0f)
+                wrapped += TwoPi;
+
+            int index = (int)(wrapped * LookupScale) & (LookupSize - 1);
+            return SinLookup[index];
+        }
+
+        private static float[] BuildLookup()
+        {
+            var values = new float[LookupSize];
+            for (int i = 0; i < LookupSize; i++)
+                values[i] = MathF.Sin((i / (float)LookupSize) * TwoPi);
+
+            return values;
+        }
     }
 
     private sealed class HotReadFixture

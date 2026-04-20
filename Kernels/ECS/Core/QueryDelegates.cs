@@ -20,3 +20,15 @@ public delegate void PatchQueryAction<TRead1, TRead2, TWrite>(Entity entity, in 
     where TRead1 : unmanaged, IComponent<TRead1>
     where TRead2 : unmanaged, IComponent<TRead2>
     where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate void PatchChunkAction<TWrite>(ReadOnlySpan<Entity> entities, Span<TWrite> writes)
+    where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate void PatchChunkAction<TRead, TWrite>(ReadOnlySpan<Entity> entities, ReadOnlySpan<TRead> reads, Span<TWrite> writes)
+    where TRead : unmanaged, IComponent<TRead>
+    where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate void PatchChunkAction<TRead1, TRead2, TWrite>(ReadOnlySpan<Entity> entities, ReadOnlySpan<TRead1> reads1, ReadOnlySpan<TRead2> reads2, Span<TWrite> writes)
+    where TRead1 : unmanaged, IComponent<TRead1>
+    where TRead2 : unmanaged, IComponent<TRead2>
+    where TWrite : unmanaged, IComponent<TWrite>;

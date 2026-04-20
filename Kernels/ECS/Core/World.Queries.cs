@@ -160,6 +160,93 @@ public sealed partial class World
         return matched;
     }
 
+    public int PatchChunks<TWrite>(PatchChunkAction<TWrite> action)
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(writeId);
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan1 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            if (entities.Length == 0)
+                continue;
+
+            Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column1);
+            action(entities, writes);
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    public int PatchChunks<TRead, TWrite>(PatchChunkAction<TRead, TWrite> action)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId = Schema.GetComponentId<TRead>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(readId, writeId);
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan2 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            if (entities.Length == 0)
+                continue;
+
+            ReadOnlySpan<TRead> reads = archetype.GetComponentSpanAt<TRead>(plan.Column1);
+            Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column2);
+            action(entities, reads, writes);
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    public int PatchChunks<TRead1, TRead2, TWrite>(PatchChunkAction<TRead1, TRead2, TWrite> action)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId1 = Schema.GetComponentId<TRead1>();
+        ComponentId readId2 = Schema.GetComponentId<TRead2>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(readId1, readId2, writeId);
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan3 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            if (entities.Length == 0)
+                continue;
+
+            ReadOnlySpan<TRead1> reads1 = archetype.GetComponentSpanAt<TRead1>(plan.Column1);
+            ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpanAt<TRead2>(plan.Column2);
+            Span<TWrite> writes = archetype.GetComponentSpanAt<TWrite>(plan.Column3);
+            action(entities, reads1, reads2, writes);
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
     public QueryChunkEnumerator<T> QueryChunks<T>()
         where T : unmanaged, IComponent<T>
     {

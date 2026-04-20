@@ -30,6 +30,7 @@ internal static class TestRunner
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes), QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes);
         Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
+        Run(nameof(PatchChunks_UpdatesChunkRowsAndMarksDirty), PatchChunks_UpdatesChunkRowsAndMarksDirty);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
@@ -675,6 +676,81 @@ internal static class TestRunner
         Assert.Equal(new Position(22), world.GetComponent<Position>(second));
         Assert.Equal(2, world.DrainDirtyTo<Position>(dirty));
         Assert.Equal(2, world.DrainDirtyTo(dirty));
+        Assert.Equal(0, world.DrainDirtyTo<Velocity>(dirty));
+    }
+
+    private static void PatchChunks_UpdatesChunkRowsAndMarksDirty()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        ComponentId accelerationId = builder.RegisterComponent<Acceleration>();
+        var world = new World(builder.Build());
+
+        Entity first = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity second = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity third = world.CreateDefault(new ArchetypeSignature([positionId, velocityId, accelerationId]));
+
+        Assert.True(world.SetComponent(first, new Position(10)));
+        Assert.True(world.SetComponent(first, new Velocity(1)));
+        Assert.True(world.SetComponent(second, new Position(20)));
+        Assert.True(world.SetComponent(second, new Velocity(2)));
+        Assert.True(world.SetComponent(third, new Position(30)));
+        Assert.True(world.SetComponent(third, new Velocity(3)));
+        Assert.True(world.SetComponent(third, new Acceleration(4)));
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+        world.DrainDirtyTo<Position>(dirty);
+        world.DrainDirtyTo<Velocity>(dirty);
+        world.DrainDirtyTo<Acceleration>(dirty);
+
+        int writeOnlyChunks = 0;
+        int writeOnlyMatched = world.PatchChunks<Position>((ReadOnlySpan<Entity> entities, Span<Position> writes) =>
+        {
+            writeOnlyChunks++;
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Position(writes[i].X + (int)entities[i].Index);
+        });
+
+        Assert.Equal(3, writeOnlyMatched);
+        Assert.Equal(2, writeOnlyChunks);
+        Assert.Equal(new Position(10 + (int)first.Index), world.GetComponent<Position>(first));
+        Assert.Equal(new Position(20 + (int)second.Index), world.GetComponent<Position>(second));
+        Assert.Equal(new Position(30 + (int)third.Index), world.GetComponent<Position>(third));
+        Assert.Equal(3, world.DrainDirtyTo<Position>(dirty));
+        Assert.Equal(3, world.DrainDirtyTo(dirty));
+
+        int readWriteChunks = 0;
+        int readWriteMatched = world.PatchChunks<Position, Velocity>((ReadOnlySpan<Entity> _, ReadOnlySpan<Position> reads, Span<Velocity> writes) =>
+        {
+            readWriteChunks++;
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Velocity(reads[i].X + writes[i].X);
+        });
+
+        Assert.Equal(3, readWriteMatched);
+        Assert.Equal(2, readWriteChunks);
+        Assert.Equal(new Velocity(world.GetComponent<Position>(first).X + 1), world.GetComponent<Velocity>(first));
+        Assert.Equal(new Velocity(world.GetComponent<Position>(second).X + 2), world.GetComponent<Velocity>(second));
+        Assert.Equal(new Velocity(world.GetComponent<Position>(third).X + 3), world.GetComponent<Velocity>(third));
+        Assert.Equal(3, world.DrainDirtyTo<Velocity>(dirty));
+        Assert.Equal(3, world.DrainDirtyTo(dirty));
+
+        int readReadWriteChunks = 0;
+        int readReadWriteMatched = world.PatchChunks<Position, Velocity, Acceleration>((ReadOnlySpan<Entity> _, ReadOnlySpan<Position> positions, ReadOnlySpan<Velocity> velocities, Span<Acceleration> writes) =>
+        {
+            readReadWriteChunks++;
+            for (int i = 0; i < writes.Length; i++)
+                writes[i] = new Acceleration(positions[i].X + velocities[i].X);
+        });
+
+        Assert.Equal(1, readReadWriteMatched);
+        Assert.Equal(1, readReadWriteChunks);
+        Assert.Equal(new Acceleration(world.GetComponent<Position>(third).X + world.GetComponent<Velocity>(third).X), world.GetComponent<Acceleration>(third));
+        Assert.Equal(1, world.DrainDirtyTo<Acceleration>(dirty));
+        Assert.Equal(1, world.DrainDirtyTo(dirty));
+        Assert.Equal(0, world.DrainDirtyTo<Position>(dirty));
         Assert.Equal(0, world.DrainDirtyTo<Velocity>(dirty));
     }
 

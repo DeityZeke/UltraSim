@@ -22,6 +22,9 @@ The benchmark matrix currently covers:
 - create/destroy reuse churn
 - dirty drain cost
 - scheduler tick cost in serial and parallel modes
+- oscillating/pulsating sine-wave movement tick cost in serial and parallel modes
+- oscillating/pulsating sine-wave movement tick cost at `100k` entities over `200` ticks
+- dedicated older-old `v1`-style `pulse -> velocity -> movement` pipeline benchmarks at `100k` entities over `50` ticks
 - persistence-view capture cost
 
 It also includes kernel-specific scenarios:
