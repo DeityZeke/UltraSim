@@ -723,6 +723,8 @@ internal static class NewKernelBenchmarks
         ComponentId velocityId = world.GetComponentId<Velocity>();
         ComponentId oscillatorId = world.GetComponentId<Oscillator>();
         world.SetSystemExecutionMode(mode);
+        if (mode == SystemExecutionMode.Serial)
+            world.ConfigureIntraSystemParallelInSerialMode(true);
         world.RegisterSystems(
             new OscillatingReadSystem<OscReadTagA>("OscReadA", positionId, velocityId, oscillatorId, activeSubsetOnly),
             new OscillatingReadSystem<OscReadTagB>("OscReadB", positionId, velocityId, oscillatorId, activeSubsetOnly),
@@ -741,6 +743,8 @@ internal static class NewKernelBenchmarks
         ComponentId velocityId = world.GetComponentId<PulseVelocity>();
         ComponentId motionId = world.GetComponentId<PulseMotion>();
         world.SetSystemExecutionMode(mode);
+        if (mode == SystemExecutionMode.Serial)
+            world.ConfigureIntraSystemParallelInSerialMode(true);
         world.RegisterSystems(
             new V1PulsePhaseAdvanceSystem("V1PulsePhase", motionId, activeSubsetOnly),
             new V1PulseVelocitySystem("V1PulseVelocity", positionId, motionId, velocityId, activeSubsetOnly),

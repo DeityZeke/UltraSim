@@ -474,7 +474,7 @@ internal static class TestRunner
         Assert.False(world.Entities.IsAlive(second));
         Assert.False(world.Entities.IsAlive(third));
         Assert.Equal(3, world.DrainDirtyTo(dirty));
-        AssertEntitySetsEqual(all, 3, dirty);
+        AssertEntitySetsEqual(all, 3, dirty.ToArray());
     }
 
     private static void StructuralQueue_MixedOperations_UseDeterministicPhaseOrder()

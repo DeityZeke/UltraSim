@@ -23,6 +23,7 @@ internal sealed class SystemManager
     private int _scheduleVersion;
     private bool _sealed;
     private SystemExecutionMode _executionMode;
+    private bool _allowIntraSystemParallelInSerialMode;
     private bool _phaseStaggeringEnabled;
     private int _maxNonCriticalStagger;
     private ManualWorkerPool? _workerPool;
@@ -36,6 +37,7 @@ internal sealed class SystemManager
         _dueScheduleVersion = Array.Empty<int>();
         _scheduleVersion = 1;
         _executionMode = SystemExecutionMode.Serial;
+        _allowIntraSystemParallelInSerialMode = false;
         _phaseStaggeringEnabled = false;
         _maxNonCriticalStagger = 10;
     }
@@ -58,12 +60,18 @@ internal sealed class SystemManager
         get => _executionMode;
     }
 
+    public bool AllowIntraSystemParallelInSerialMode
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _allowIntraSystemParallelInSerialMode;
+    }
+
     internal int DirtyCaptureWorkerCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _executionMode == SystemExecutionMode.ParallelBatches
+        get => (_executionMode == SystemExecutionMode.ParallelBatches || _allowIntraSystemParallelInSerialMode)
             ? EnsureWorkerPool().WorkerCount + 1
-            : DefaultWorkerCount + 1;
+            : 0;
     }
 
     public void SetExecutionMode(SystemExecutionMode mode)
@@ -83,6 +91,16 @@ internal sealed class SystemManager
 
         _phaseStaggeringEnabled = enabled;
         _maxNonCriticalStagger = Math.Max(0, maxNonCriticalStagger);
+    }
+
+    public void ConfigureIntraSystemParallelInSerialMode(bool enabled)
+    {
+        if (_sealed && enabled != _allowIntraSystemParallelInSerialMode)
+            throw new InvalidOperationException("System manager is sealed.");
+
+        _allowIntraSystemParallelInSerialMode = enabled;
+        if (enabled)
+            EnsureWorkerPool();
     }
 
     public void Register(SystemBase system)
@@ -194,7 +212,10 @@ internal sealed class SystemManager
 
     public void Tick(World world, uint worldTick, float deltaSeconds, IStructuralCommands commands)
     {
-        var context = new SystemContext(world, worldTick, deltaSeconds, commands, ExecuteParallelFor);
+        Action<int, Action<int>>? parallelFor = _executionMode == SystemExecutionMode.ParallelBatches || _allowIntraSystemParallelInSerialMode
+            ? ExecuteParallelFor
+            : null;
+        var context = new SystemContext(world, worldTick, deltaSeconds, commands, parallelFor);
 
         for (int stage = 0; stage < _stageBatches.Length; stage++)
         {
@@ -230,7 +251,10 @@ internal sealed class SystemManager
         if (!_manual[index])
             return;
 
-        var context = new SystemContext(world, worldTick, deltaSeconds, commands, ExecuteParallelFor);
+        Action<int, Action<int>>? parallelFor = _executionMode == SystemExecutionMode.ParallelBatches || _allowIntraSystemParallelInSerialMode
+            ? ExecuteParallelFor
+            : null;
+        var context = new SystemContext(world, worldTick, deltaSeconds, commands, parallelFor);
         _systems[index].Update(in context);
     }
 

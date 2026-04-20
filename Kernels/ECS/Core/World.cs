@@ -355,6 +355,12 @@ public sealed partial class World
         _systems.ConfigurePhaseStaggering(enabled, maxNonCriticalStagger);
     }
 
+    public void ConfigureIntraSystemParallelInSerialMode(bool enabled)
+    {
+        EnsureCanMutateConfiguration();
+        _systems.ConfigureIntraSystemParallelInSerialMode(enabled);
+    }
+
     public TSystem? GetSystem<TSystem>() where TSystem : SystemBase
         => (TSystem?)_systems.GetSystem<TSystem>();
 
