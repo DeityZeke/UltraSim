@@ -1048,6 +1048,38 @@ internal static class NewKernelBenchmarks
 
             if (_writePosition)
             {
+                if (_activeSubsetOnly)
+                {
+                    ctx.PatchChunksParallelSparse<Velocity, Oscillator, Position>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Velocity> velocities, ReadOnlySpan<Oscillator> oscillators, Span<Position> writes, Span<int> dirtyIndices) =>
+                    {
+                        long checksum = 0;
+                        int dirtyCount = 0;
+                        for (int i = 0; i < writes.Length; i++)
+                        {
+                            if (!MovementActivity.IsActive(entities[i], tick))
+                                continue;
+
+                            Velocity velocity = velocities[i];
+                            Oscillator oscillator = oscillators[i];
+                            Position write = writes[i];
+                            float phase = (time * oscillator.Frequency) + oscillator.Phase;
+                            float waveA = MathF.Sin(phase);
+                            float waveB = MathF.Cos((phase * 0.5f) + oscillator.Bias);
+                            float pulse = MathF.Sin((phase * 2.3f) - oscillator.Bias) * oscillator.Amplitude;
+                            int dx = (int)MathF.Round(((waveA + waveB) * oscillator.Amplitude * 8f) + pulse + (velocity.X * 0.125f));
+                            int dy = (int)MathF.Round(((MathF.Cos(phase * 1.7f) - MathF.Sin(phase * 0.33f)) * oscillator.Amplitude * 6f) + (velocity.Y * 0.125f));
+                            write = new Position(write.X + dx, write.Y + dy);
+                            writes[i] = write;
+                            dirtyIndices[dirtyCount++] = i;
+                            checksum += write.X + write.Y + dx + dy;
+                        }
+
+                        Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+                        return dirtyCount;
+                    });
+                    return;
+                }
+
                 ctx.PatchChunksParallel(_positionPlan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Velocity> velocities, ReadOnlySpan<Oscillator> oscillators, Span<Position> writes) =>
                 {
                     long checksum = 0;
@@ -1071,6 +1103,37 @@ internal static class NewKernelBenchmarks
                     }
 
                     Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+                });
+                return;
+            }
+
+            if (_activeSubsetOnly)
+            {
+                ctx.PatchChunksParallelSparse<Position, Oscillator, Velocity>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions, ReadOnlySpan<Oscillator> oscillators, Span<Velocity> writes, Span<int> dirtyIndices) =>
+                {
+                    long checksum = 0;
+                    int dirtyCount = 0;
+                    for (int i = 0; i < writes.Length; i++)
+                    {
+                        if (!MovementActivity.IsActive(entities[i], tick))
+                            continue;
+
+                        Position position = positions[i];
+                        Oscillator oscillator = oscillators[i];
+                        float phase = (time * (oscillator.Frequency * 1.13f)) + oscillator.Phase + (position.X * 0.0005f);
+                        float waveA = MathF.Sin(phase);
+                        float waveB = MathF.Cos((phase * 0.75f) - oscillator.Bias);
+                        float waveC = MathF.Sin((phase * 1.91f) + oscillator.Amplitude);
+                        int vx = (int)MathF.Round(((waveA + waveB) * oscillator.Amplitude * 4f) + (position.X & 7));
+                        int vy = (int)MathF.Round(((waveC - waveA) * oscillator.Amplitude * 4f) + (position.Y & 7));
+                        Velocity write = new(vx, vy);
+                        writes[i] = write;
+                        dirtyIndices[dirtyCount++] = i;
+                        checksum += write.X + write.Y + vx + vy;
+                    }
+
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+                    return dirtyCount;
                 });
                 return;
             }
@@ -1125,6 +1188,33 @@ internal static class NewKernelBenchmarks
         {
             float delta = ctx.DeltaSeconds;
             uint tick = ctx.Tick;
+            if (_activeSubsetOnly)
+            {
+                ctx.PatchChunksParallelSparse<PulseMotion>(BlockSize, (ReadOnlySpan<Entity> entities, Span<PulseMotion> writes, Span<int> dirtyIndices) =>
+                {
+                    long checksum = 0;
+                    int dirtyCount = 0;
+                    for (int i = 0; i < writes.Length; i++)
+                    {
+                        if (!MovementActivity.IsActive(entities[i], tick))
+                            continue;
+
+                        PulseMotion motion = writes[i];
+                        float phase = motion.Phase + (motion.Frequency * delta);
+                        if (phase > PulseMath.TwoPi)
+                            phase -= PulseMath.TwoPi;
+
+                        writes[i] = new PulseMotion(motion.Speed, motion.Frequency, phase);
+                        dirtyIndices[dirtyCount++] = i;
+                        checksum += (long)(phase * 1024f);
+                    }
+
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+                    return dirtyCount;
+                });
+                return;
+            }
+
             ctx.PatchChunksParallel(_plan, BlockSize, (ReadOnlySpan<Entity> entities, Span<PulseMotion> writes) =>
             {
                 long checksum = 0;
@@ -1170,6 +1260,48 @@ internal static class NewKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             uint tick = ctx.Tick;
+            if (_activeSubsetOnly)
+            {
+                ctx.PatchChunksParallelSparse<PulsePosition, PulseMotion, PulseVelocity>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulsePosition> positions, ReadOnlySpan<PulseMotion> motions, Span<PulseVelocity> writes, Span<int> dirtyIndices) =>
+                {
+                    long checksum = 0;
+                    int dirtyCount = 0;
+                    for (int i = 0; i < writes.Length; i++)
+                    {
+                        if (!MovementActivity.IsActive(entities[i], tick))
+                            continue;
+
+                        PulsePosition position = positions[i];
+                        PulseMotion motion = motions[i];
+                        float pulseDirection = PulseMath.FastSin(motion.Phase);
+                        float distSq = (position.X * position.X) + (position.Y * position.Y) + (position.Z * position.Z);
+
+                        if (distSq > 0.0001f)
+                        {
+                            float invDist = 1f / MathF.Sqrt(distSq);
+                            float speedFactor = pulseDirection * motion.Speed;
+                            writes[i] = new PulseVelocity(
+                                position.X * invDist * speedFactor,
+                                position.Y * invDist * speedFactor,
+                                position.Z * invDist * speedFactor);
+                        }
+                        else
+                        {
+                            float fallback = motion.Speed * 0.35355338f;
+                            writes[i] = new PulseVelocity(fallback, -fallback, fallback);
+                        }
+
+                        dirtyIndices[dirtyCount++] = i;
+                        PulseVelocity velocity = writes[i];
+                        checksum += (long)((velocity.X + velocity.Y + velocity.Z) * 256f);
+                    }
+
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+                    return dirtyCount;
+                });
+                return;
+            }
+
             ctx.PatchChunksParallel(_plan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulsePosition> positions, ReadOnlySpan<PulseMotion> motions, Span<PulseVelocity> writes) =>
             {
                 long checksum = 0;
@@ -1231,6 +1363,34 @@ internal static class NewKernelBenchmarks
         {
             float delta = ctx.DeltaSeconds;
             uint tick = ctx.Tick;
+            if (_activeSubsetOnly)
+            {
+                ctx.PatchChunksParallelSparse<PulseVelocity, PulsePosition>(BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulseVelocity> velocities, Span<PulsePosition> writes, Span<int> dirtyIndices) =>
+                {
+                    long checksum = 0;
+                    int dirtyCount = 0;
+                    for (int i = 0; i < writes.Length; i++)
+                    {
+                        if (!MovementActivity.IsActive(entities[i], tick))
+                            continue;
+
+                        PulsePosition position = writes[i];
+                        PulseVelocity velocity = velocities[i];
+                        position = new PulsePosition(
+                            position.X + (velocity.X * delta),
+                            position.Y + (velocity.Y * delta),
+                            position.Z + (velocity.Z * delta));
+                        writes[i] = position;
+                        dirtyIndices[dirtyCount++] = i;
+                        checksum += (long)((position.X + position.Y + position.Z) * 128f);
+                    }
+
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, checksum);
+                    return dirtyCount;
+                });
+                return;
+            }
+
             ctx.PatchChunksParallel(_plan, BlockSize, (ReadOnlySpan<Entity> entities, ReadOnlySpan<PulseVelocity> velocities, Span<PulsePosition> writes) =>
             {
                 long checksum = 0;

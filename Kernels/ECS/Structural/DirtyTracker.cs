@@ -68,6 +68,18 @@ internal sealed class DirtyTracker
             MarkNoLock(componentId, entities);
     }
 
+    public void Mark(ComponentId componentId, ReadOnlySpan<Entity> entities, ReadOnlySpan<int> dirtyIndices)
+    {
+        if (dirtyIndices.Length == 0)
+            return;
+
+        if (TryMarkCaptured(componentId, entities, dirtyIndices))
+            return;
+
+        lock (_sync)
+            MarkNoLock(componentId, entities, dirtyIndices);
+    }
+
     public void MarkUnique(ComponentId componentId, ReadOnlySpan<Entity> entities)
     {
         if (entities.Length == 0)
@@ -208,6 +220,24 @@ internal sealed class DirtyTracker
         componentSet.MarkKnownUniqueRange(entities);
     }
 
+    private void MarkNoLock(ComponentId componentId, ReadOnlySpan<Entity> entities, ReadOnlySpan<int> dirtyIndices)
+    {
+        int index = componentId.Value;
+        if (index < 0)
+            throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
+
+        EnsureComponentCapacity(index + 1);
+        _byComponent[index] ??= new DirtySet(DefaultEntityCapacity);
+        DirtySet componentSet = _byComponent[index]!;
+
+        for (int i = 0; i < dirtyIndices.Length; i++)
+        {
+            Entity entity = entities[dirtyIndices[i]];
+            _all.Mark(entity);
+            componentSet.Mark(entity);
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryMarkCaptured(Entity entity)
     {
@@ -345,6 +375,34 @@ internal sealed class DirtyTracker
             return false;
 
         states[workerIndex].MarkUnique(componentId, entities);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryMarkCaptured(ComponentId componentId, ReadOnlySpan<Entity> entities, ReadOnlySpan<int> dirtyIndices)
+    {
+        if (!_captureEnabled)
+            return false;
+
+        if (_captureWorkerCount <= 0)
+        {
+            if (Environment.CurrentManagedThreadId == _serialCaptureThreadId)
+            {
+                MarkNoLock(componentId, entities, dirtyIndices);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (!WorkerThreadContext.TryGetWorkerIndex(out int workerIndex))
+            return false;
+
+        LocalDirtyState[] states = _localStates;
+        if ((uint)workerIndex >= (uint)states.Length)
+            return false;
+
+        states[workerIndex].Mark(componentId, entities, dirtyIndices);
         return true;
     }
 
@@ -514,6 +572,33 @@ internal sealed class DirtyTracker
 
             All.MarkKnownUniqueRange(entities);
             componentSet.MarkKnownUniqueRange(entities);
+            _hasPending = true;
+        }
+
+        public void Mark(ComponentId componentId, ReadOnlySpan<Entity> entities, ReadOnlySpan<int> dirtyIndices)
+        {
+            int index = componentId.Value;
+            if (index < 0)
+                throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
+
+            EnsureComponentCapacity(index + 1);
+            DirtySet? componentSet = ByComponent[index];
+            if (componentSet is null)
+            {
+                componentSet = new DirtySet(DefaultEntityCapacity);
+                ByComponent[index] = componentSet;
+            }
+
+            if (componentSet.Count == 0)
+                TrackTouchedComponent(index);
+
+            for (int i = 0; i < dirtyIndices.Length; i++)
+            {
+                Entity entity = entities[dirtyIndices[i]];
+                All.Mark(entity);
+                componentSet.Mark(entity);
+            }
+
             _hasPending = true;
         }
 

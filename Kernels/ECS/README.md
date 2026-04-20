@@ -92,6 +92,7 @@ Implemented so far:
 - chunk-level bulk patch APIs for hot-path systems without public mutable refs,
 - reusable prepared chunk-plan caches for hot-path systems that revisit the same query shape every tick,
 - `SystemContext` parallel chunk patch helpers for hot-path systems,
+- sparse chunk patch APIs for conditionally-mutating systems so dirty tracking can mark only touched rows,
 - hot movement benchmarks now exercise the parallel chunk patch path,
 - explicit world lifecycle with seal/initialize/run/shutdown state,
 - batched structural enqueue APIs for create-default, destroy, add, and remove,

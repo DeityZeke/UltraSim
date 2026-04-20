@@ -32,3 +32,15 @@ public delegate void PatchChunkAction<TRead1, TRead2, TWrite>(ReadOnlySpan<Entit
     where TRead1 : unmanaged, IComponent<TRead1>
     where TRead2 : unmanaged, IComponent<TRead2>
     where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate int SparsePatchChunkAction<TWrite>(ReadOnlySpan<Entity> entities, Span<TWrite> writes, Span<int> dirtyIndices)
+    where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate int SparsePatchChunkAction<TRead, TWrite>(ReadOnlySpan<Entity> entities, ReadOnlySpan<TRead> reads, Span<TWrite> writes, Span<int> dirtyIndices)
+    where TRead : unmanaged, IComponent<TRead>
+    where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate int SparsePatchChunkAction<TRead1, TRead2, TWrite>(ReadOnlySpan<Entity> entities, ReadOnlySpan<TRead1> reads1, ReadOnlySpan<TRead2> reads2, Span<TWrite> writes, Span<int> dirtyIndices)
+    where TRead1 : unmanaged, IComponent<TRead1>
+    where TRead2 : unmanaged, IComponent<TRead2>
+    where TWrite : unmanaged, IComponent<TWrite>;

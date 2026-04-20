@@ -1,9 +1,13 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace UltraSim.ECS;
 
 public sealed partial class World
 {
+    private static int[] RentDirtyIndexBuffer(int entityCount)
+        => ArrayPool<int>.Shared.Rent(Math.Max(1, entityCount));
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ArchetypeManager.ArchetypeEnumerator QueryArchetypes(ReadOnlySpan<ComponentId> required)
     {
@@ -186,6 +190,43 @@ public sealed partial class World
         return matched;
     }
 
+    public int PatchChunksSparse<TWrite>(SparsePatchChunkAction<TWrite> action)
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(writeId);
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan1 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            int entityCount = entities.Length;
+            if (entityCount == 0)
+                continue;
+
+            int[] rented = RentDirtyIndexBuffer(entityCount);
+            try
+            {
+                int dirtyCount = action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1), rented.AsSpan(0, entityCount));
+                if (dirtyCount > 0)
+                {
+                    _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                    matched += dirtyCount;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(rented, clearArray: false);
+            }
+        }
+
+        return matched;
+    }
+
     public int PatchChunks<TWrite>(PatchChunkPlanCache<TWrite> cache, PatchChunkAction<TWrite> action)
         where TWrite : unmanaged, IComponent<TWrite>
     {
@@ -236,6 +277,49 @@ public sealed partial class World
             action(entities, reads, writes);
             _dirty.Mark(writeId, entities);
             matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    public int PatchChunksSparse<TRead, TWrite>(SparsePatchChunkAction<TRead, TWrite> action)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId = Schema.GetComponentId<TRead>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(readId, writeId);
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan2 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            int entityCount = entities.Length;
+            if (entityCount == 0)
+                continue;
+
+            int[] rented = RentDirtyIndexBuffer(entityCount);
+            try
+            {
+                int dirtyCount = action(
+                    entities,
+                    archetype.GetComponentSpanAt<TRead>(plan.Column1),
+                    archetype.GetComponentSpanAt<TWrite>(plan.Column2),
+                    rented.AsSpan(0, entityCount));
+                if (dirtyCount > 0)
+                {
+                    _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                    matched += dirtyCount;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(rented, clearArray: false);
+            }
         }
 
         return matched;
@@ -296,6 +380,52 @@ public sealed partial class World
             action(entities, reads1, reads2, writes);
             _dirty.Mark(writeId, entities);
             matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    public int PatchChunksSparse<TRead1, TRead2, TWrite>(SparsePatchChunkAction<TRead1, TRead2, TWrite> action)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId1 = Schema.GetComponentId<TRead1>();
+        ComponentId readId2 = Schema.GetComponentId<TRead2>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(readId1, readId2, writeId);
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan3 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            int entityCount = entities.Length;
+            if (entityCount == 0)
+                continue;
+
+            int[] rented = RentDirtyIndexBuffer(entityCount);
+            try
+            {
+                int dirtyCount = action(
+                    entities,
+                    archetype.GetComponentSpanAt<TRead1>(plan.Column1),
+                    archetype.GetComponentSpanAt<TRead2>(plan.Column2),
+                    archetype.GetComponentSpanAt<TWrite>(plan.Column3),
+                    rented.AsSpan(0, entityCount));
+                if (dirtyCount > 0)
+                {
+                    _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                    matched += dirtyCount;
+                }
+            }
+            finally
+            {
+                ArrayPool<int>.Shared.Return(rented, clearArray: false);
+            }
         }
 
         return matched;
@@ -369,6 +499,72 @@ public sealed partial class World
 
             _dirty.Mark(writeId, entities);
             matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    internal int PatchChunksParallelSparse<TWrite>(Action<int, Action<int>>? parallelFor, int blockSize, SparsePatchChunkAction<TWrite> action)
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(writeId);
+        int matched = 0;
+        int resolvedBlockSize = Math.Max(1, blockSize);
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan1 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            int entityCount = entities.Length;
+            if (entityCount == 0)
+                continue;
+
+            if (parallelFor is null || entityCount <= resolvedBlockSize)
+            {
+                int[] rented = RentDirtyIndexBuffer(entityCount);
+                try
+                {
+                    int dirtyCount = action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1), rented.AsSpan(0, entityCount));
+                    if (dirtyCount > 0)
+                    {
+                        _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                        matched += dirtyCount;
+                    }
+                }
+                finally
+                {
+                    ArrayPool<int>.Shared.Return(rented, clearArray: false);
+                }
+            }
+            else
+            {
+                parallelFor((entityCount + resolvedBlockSize - 1) / resolvedBlockSize, index =>
+                {
+                    int start = index * resolvedBlockSize;
+                    int length = Math.Min(resolvedBlockSize, entityCount - start);
+                    int[] rented = RentDirtyIndexBuffer(length);
+                    try
+                    {
+                        int dirtyCount = action(
+                            archetype.GetEntitySpan().Slice(start, length),
+                            archetype.GetComponentSpanAt<TWrite>(plan.Column1).Slice(start, length),
+                            rented.AsSpan(0, length));
+                        if (dirtyCount > 0)
+                        {
+                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), rented.AsSpan(0, dirtyCount));
+                            Interlocked.Add(ref matched, dirtyCount);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<int>.Shared.Return(rented, clearArray: false);
+                    }
+                });
+            }
         }
 
         return matched;
@@ -460,6 +656,79 @@ public sealed partial class World
 
             _dirty.Mark(writeId, entities);
             matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    internal int PatchChunksParallelSparse<TRead, TWrite>(Action<int, Action<int>>? parallelFor, int blockSize, SparsePatchChunkAction<TRead, TWrite> action)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId = Schema.GetComponentId<TRead>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan2> plans = GetCachedQueryPlan(readId, writeId);
+        int matched = 0;
+        int resolvedBlockSize = Math.Max(1, blockSize);
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan2 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            int entityCount = entities.Length;
+            if (entityCount == 0)
+                continue;
+
+            if (parallelFor is null || entityCount <= resolvedBlockSize)
+            {
+                int[] rented = RentDirtyIndexBuffer(entityCount);
+                try
+                {
+                    int dirtyCount = action(
+                        entities,
+                        archetype.GetComponentSpanAt<TRead>(plan.Column1),
+                        archetype.GetComponentSpanAt<TWrite>(plan.Column2),
+                        rented.AsSpan(0, entityCount));
+                    if (dirtyCount > 0)
+                    {
+                        _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                        matched += dirtyCount;
+                    }
+                }
+                finally
+                {
+                    ArrayPool<int>.Shared.Return(rented, clearArray: false);
+                }
+            }
+            else
+            {
+                parallelFor((entityCount + resolvedBlockSize - 1) / resolvedBlockSize, index =>
+                {
+                    int start = index * resolvedBlockSize;
+                    int length = Math.Min(resolvedBlockSize, entityCount - start);
+                    int[] rented = RentDirtyIndexBuffer(length);
+                    try
+                    {
+                        int dirtyCount = action(
+                            archetype.GetEntitySpan().Slice(start, length),
+                            archetype.GetComponentSpanAt<TRead>(plan.Column1).Slice(start, length),
+                            archetype.GetComponentSpanAt<TWrite>(plan.Column2).Slice(start, length),
+                            rented.AsSpan(0, length));
+                        if (dirtyCount > 0)
+                        {
+                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), rented.AsSpan(0, dirtyCount));
+                            Interlocked.Add(ref matched, dirtyCount);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<int>.Shared.Return(rented, clearArray: false);
+                    }
+                });
+            }
         }
 
         return matched;
@@ -560,6 +829,83 @@ public sealed partial class World
 
             _dirty.Mark(writeId, entities);
             matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    internal int PatchChunksParallelSparse<TRead1, TRead2, TWrite>(Action<int, Action<int>>? parallelFor, int blockSize, SparsePatchChunkAction<TRead1, TRead2, TWrite> action)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId1 = Schema.GetComponentId<TRead1>();
+        ComponentId readId2 = Schema.GetComponentId<TRead2>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<QueryPlan3> plans = GetCachedQueryPlan(readId1, readId2, writeId);
+        int matched = 0;
+        int resolvedBlockSize = Math.Max(1, blockSize);
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan3 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            int entityCount = entities.Length;
+            if (entityCount == 0)
+                continue;
+
+            if (parallelFor is null || entityCount <= resolvedBlockSize)
+            {
+                int[] rented = RentDirtyIndexBuffer(entityCount);
+                try
+                {
+                    int dirtyCount = action(
+                        entities,
+                        archetype.GetComponentSpanAt<TRead1>(plan.Column1),
+                        archetype.GetComponentSpanAt<TRead2>(plan.Column2),
+                        archetype.GetComponentSpanAt<TWrite>(plan.Column3),
+                        rented.AsSpan(0, entityCount));
+                    if (dirtyCount > 0)
+                    {
+                        _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                        matched += dirtyCount;
+                    }
+                }
+                finally
+                {
+                    ArrayPool<int>.Shared.Return(rented, clearArray: false);
+                }
+            }
+            else
+            {
+                parallelFor((entityCount + resolvedBlockSize - 1) / resolvedBlockSize, index =>
+                {
+                    int start = index * resolvedBlockSize;
+                    int length = Math.Min(resolvedBlockSize, entityCount - start);
+                    int[] rented = RentDirtyIndexBuffer(length);
+                    try
+                    {
+                        int dirtyCount = action(
+                            archetype.GetEntitySpan().Slice(start, length),
+                            archetype.GetComponentSpanAt<TRead1>(plan.Column1).Slice(start, length),
+                            archetype.GetComponentSpanAt<TRead2>(plan.Column2).Slice(start, length),
+                            archetype.GetComponentSpanAt<TWrite>(plan.Column3).Slice(start, length),
+                            rented.AsSpan(0, length));
+                        if (dirtyCount > 0)
+                        {
+                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), rented.AsSpan(0, dirtyCount));
+                            Interlocked.Add(ref matched, dirtyCount);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<int>.Shared.Return(rented, clearArray: false);
+                    }
+                });
+            }
         }
 
         return matched;
