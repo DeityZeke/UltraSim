@@ -620,12 +620,19 @@ internal static class NewKernelBenchmarks
         public override void Update(in SystemContext ctx)
         {
             World world = ctx.World;
-            world.Query<Position, Velocity>((Entity entity, in Position position, in Velocity velocity) =>
+            if (_writePosition)
             {
-                if (_writePosition)
-                    world.SetComponent(entity, new Position(position.X + 1, position.Y + 1));
-                else
-                    world.SetComponent(entity, new Velocity(velocity.X + 1, velocity.Y + 1));
+                world.PatchQuery<Position, Velocity, Position>((Entity _, in Position position, in Velocity velocity, ref Position write) =>
+                {
+                    write = new Position(position.X + 1, position.Y + 1);
+                    Interlocked.Add(ref SchedulerBenchmarkState.Checksum, position.X + velocity.X);
+                });
+                return;
+            }
+
+            world.PatchQuery<Position, Velocity, Velocity>((Entity _, in Position position, in Velocity velocity, ref Velocity write) =>
+            {
+                write = new Velocity(velocity.X + 1, velocity.Y + 1);
                 Interlocked.Add(ref SchedulerBenchmarkState.Checksum, position.X + velocity.X);
             });
         }

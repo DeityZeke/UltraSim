@@ -11,3 +11,12 @@ public delegate void ReadOnlyQueryAction<T1, T2, T3>(Entity entity, in T1 compon
     where T1 : unmanaged, IComponent<T1>
     where T2 : unmanaged, IComponent<T2>
     where T3 : unmanaged, IComponent<T3>;
+
+public delegate void PatchQueryAction<TRead, TWrite>(Entity entity, in TRead read, ref TWrite write)
+    where TRead : unmanaged, IComponent<TRead>
+    where TWrite : unmanaged, IComponent<TWrite>;
+
+public delegate void PatchQueryAction<TRead1, TRead2, TWrite>(Entity entity, in TRead1 read1, in TRead2 read2, ref TWrite write)
+    where TRead1 : unmanaged, IComponent<TRead1>
+    where TRead2 : unmanaged, IComponent<TRead2>
+    where TWrite : unmanaged, IComponent<TWrite>;

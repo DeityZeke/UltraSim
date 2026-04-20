@@ -58,6 +58,14 @@ internal sealed class SystemManager
         get => _executionMode;
     }
 
+    internal int DirtyCaptureWorkerCount
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _executionMode == SystemExecutionMode.ParallelBatches
+            ? EnsureWorkerPool().WorkerCount
+            : 0;
+    }
+
     public void SetExecutionMode(SystemExecutionMode mode)
     {
         if (_sealed && mode != _executionMode)

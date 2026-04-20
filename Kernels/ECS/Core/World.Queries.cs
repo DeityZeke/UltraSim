@@ -100,6 +100,76 @@ public sealed partial class World
         return matched;
     }
 
+    public int PatchQuery<TRead, TWrite>(PatchQueryAction<TRead, TWrite> action)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId = Schema.GetComponentId<TRead>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        {
+            Archetype archetype = archetypes[archetypeIndex];
+            if (!archetype.HasComponent(readId) || !archetype.HasComponent(writeId))
+                continue;
+
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            ReadOnlySpan<TRead> reads = archetype.GetComponentSpan<TRead>(readId);
+            Span<TWrite> writes = archetype.GetComponentSpan<TWrite>(writeId);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                TRead read = reads[i];
+                action(entities[i], in read, ref writes[i]);
+            }
+
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
+    public int PatchQuery<TRead1, TRead2, TWrite>(PatchQueryAction<TRead1, TRead2, TWrite> action)
+        where TRead1 : unmanaged, IComponent<TRead1>
+        where TRead2 : unmanaged, IComponent<TRead2>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        ComponentId readId1 = Schema.GetComponentId<TRead1>();
+        ComponentId readId2 = Schema.GetComponentId<TRead2>();
+        ComponentId writeId = Schema.GetComponentId<TWrite>();
+        ReadOnlySpan<Archetype> archetypes = Archetypes.AsSpan();
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < archetypes.Length; archetypeIndex++)
+        {
+            Archetype archetype = archetypes[archetypeIndex];
+            if (!archetype.HasComponent(readId1) || !archetype.HasComponent(readId2) || !archetype.HasComponent(writeId))
+                continue;
+
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            ReadOnlySpan<TRead1> reads1 = archetype.GetComponentSpan<TRead1>(readId1);
+            ReadOnlySpan<TRead2> reads2 = archetype.GetComponentSpan<TRead2>(readId2);
+            Span<TWrite> writes = archetype.GetComponentSpan<TWrite>(writeId);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                TRead1 read1 = reads1[i];
+                TRead2 read2 = reads2[i];
+                action(entities[i], in read1, in read2, ref writes[i]);
+            }
+
+            _dirty.Mark(writeId, entities);
+            matched += entities.Length;
+        }
+
+        return matched;
+    }
+
     public QueryChunkEnumerator<T> QueryChunks<T>()
         where T : unmanaged, IComponent<T>
     {

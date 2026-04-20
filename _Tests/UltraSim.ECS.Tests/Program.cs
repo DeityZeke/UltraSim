@@ -26,6 +26,7 @@ internal static class TestRunner
         Run(nameof(StructuralQueue_MixedOperations_UseDeterministicPhaseOrder), StructuralQueue_MixedOperations_UseDeterministicPhaseOrder);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
+        Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
@@ -519,6 +520,38 @@ internal static class TestRunner
         });
 
         Assert.Equal(0, tripleCount);
+    }
+
+    private static void PatchQuery_UpdatesMatchedRowsAndMarksDirty()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity first = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Entity second = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+        Assert.True(world.SetComponent(first, new Position(10)));
+        Assert.True(world.SetComponent(first, new Velocity(1)));
+        Assert.True(world.SetComponent(second, new Position(20)));
+        Assert.True(world.SetComponent(second, new Velocity(2)));
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+        world.DrainDirtyTo<Position>(dirty);
+        world.DrainDirtyTo<Velocity>(dirty);
+
+        int matched = world.PatchQuery<Position, Velocity, Position>((Entity _, in Position position, in Velocity velocity, ref Position write) =>
+        {
+            write = new Position(position.X + velocity.X);
+        });
+
+        Assert.Equal(2, matched);
+        Assert.Equal(new Position(11), world.GetComponent<Position>(first));
+        Assert.Equal(new Position(22), world.GetComponent<Position>(second));
+        Assert.Equal(2, world.DrainDirtyTo<Position>(dirty));
+        Assert.Equal(2, world.DrainDirtyTo(dirty));
+        Assert.Equal(0, world.DrainDirtyTo<Velocity>(dirty));
     }
 
     private static void SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags()

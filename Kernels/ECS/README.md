@@ -95,9 +95,11 @@ Implemented so far:
 - scheduler primitives with `Requires`, stage batching, manual systems, execution modes, and phase staggering,
 - shared deferred structural command capture is safe under parallel batch execution,
 - read-only query and chunk iteration surfaces,
+- explicit in-query patch surfaces for dirty-aware write-heavy systems without public mutable refs,
 - read-only archetype traversal and persistence adapter hooks,
 - lightweight persistence snapshot views in `Extensions/Persistence`,
 - serial vs parallel parity coverage for explicit writes and deferred structural commands,
+- targeted benchmark coverage against the old ECS, including read-only vs write-heavy scheduler scenarios,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
 

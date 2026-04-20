@@ -341,7 +341,17 @@ public sealed partial class World
     {
         EnsureReadyForExecution();
         ProcessStructuralQueues(StructuralBarrierPhase.PreSystems);
-        _systems.Tick(this, _worldTick, deltaSeconds, _commands);
+        int dirtyCaptureWorkers = _systems.DirtyCaptureWorkerCount;
+        _dirty.BeginCapture(dirtyCaptureWorkers);
+        try
+        {
+            _systems.Tick(this, _worldTick, deltaSeconds, _commands);
+        }
+        finally
+        {
+            _dirty.EndCapture();
+        }
+
         ProcessStructuralQueues(StructuralBarrierPhase.PostSystems);
         _worldTick++;
     }
