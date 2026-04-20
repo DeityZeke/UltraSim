@@ -1,6 +1,7 @@
 namespace UltraSim.ECS;
 
 using System.Buffers;
+using System.Diagnostics;
 
 public sealed partial class World
 {
@@ -32,6 +33,7 @@ public sealed partial class World
     private readonly Dictionary<TransitionKey, TransitionPlan> _removeTransitions;
     private uint _worldTick;
     private WorldLifecycleState _state;
+    private WorldProfileSnapshot _lastProfile;
 
     public World(EcsSchema schema, EcsWorldServices? services = null)
     {
@@ -58,6 +60,8 @@ public sealed partial class World
     public SystemExecutionMode SystemExecutionMode => _systems.ExecutionMode;
     public bool IsSealed => _state >= WorldLifecycleState.Sealed;
     public bool IsInitialized => _state >= WorldLifecycleState.Initialized && _state < WorldLifecycleState.Shutdown;
+    public bool ProfilingEnabled { get; set; }
+    public WorldProfileSnapshot LastProfile => _lastProfile;
 
     internal EntityManager EntityStore { get; }
     internal ArchetypeManager Archetypes { get; }
@@ -206,7 +210,7 @@ public sealed partial class World
         if (!_structural.HasPending)
             return;
 
-        _structural.Apply(this);
+        _ = _structural.Apply(this);
     }
 
     public void Destroy(Entity entity)
@@ -340,19 +344,54 @@ public sealed partial class World
     public void Tick(float deltaSeconds)
     {
         EnsureReadyForExecution();
-        ProcessStructuralQueues(StructuralBarrierPhase.PreSystems);
-        int dirtyCaptureWorkers = _systems.DirtyCaptureWorkerCount;
-        _dirty.BeginCapture(dirtyCaptureWorkers);
-        try
+        StructuralApplyStats preSystems = default;
+        StructuralApplyStats postSystems = default;
+        long preTicks = 0;
+        long systemTicks = 0;
+        long postTicks = 0;
+
+        if (ProfilingEnabled)
         {
-            _systems.Tick(this, _worldTick, deltaSeconds, _commands);
+            long start = Stopwatch.GetTimestamp();
+            preSystems = _structural.Apply(this);
+            preTicks = Stopwatch.GetTimestamp() - start;
+
+            int dirtyCaptureWorkers = _systems.DirtyCaptureWorkerCount;
+            _dirty.BeginCapture(dirtyCaptureWorkers);
+            try
+            {
+                start = Stopwatch.GetTimestamp();
+                _systems.Tick(this, _worldTick, deltaSeconds, _commands);
+                systemTicks = Stopwatch.GetTimestamp() - start;
+            }
+            finally
+            {
+                _dirty.EndCapture();
+            }
+
+            start = Stopwatch.GetTimestamp();
+            postSystems = _structural.Apply(this);
+            postTicks = Stopwatch.GetTimestamp() - start;
+
+            _lastProfile = new WorldProfileSnapshot(_worldTick, preSystems, postSystems, preTicks, systemTicks, postTicks);
         }
-        finally
+        else
         {
-            _dirty.EndCapture();
+            ProcessStructuralQueues(StructuralBarrierPhase.PreSystems);
+            int dirtyCaptureWorkers = _systems.DirtyCaptureWorkerCount;
+            _dirty.BeginCapture(dirtyCaptureWorkers);
+            try
+            {
+                _systems.Tick(this, _worldTick, deltaSeconds, _commands);
+            }
+            finally
+            {
+                _dirty.EndCapture();
+            }
+
+            ProcessStructuralQueues(StructuralBarrierPhase.PostSystems);
         }
 
-        ProcessStructuralQueues(StructuralBarrierPhase.PostSystems);
         _worldTick++;
     }
 

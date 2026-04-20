@@ -34,6 +34,9 @@ internal static class TestRunner
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
         Run(nameof(SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely), SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely);
         Run(nameof(SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks), SystemManager_ParallelMode_ExplicitWrites_MatchSerialOutcomeForDisjointMasks);
+        Run(nameof(World_RandomizedMutationFuzz_MatchesReferenceModel), World_RandomizedMutationFuzz_MatchesReferenceModel);
+        Run(nameof(SystemManager_SerialAndParallel_MatchAcrossManyTicks), SystemManager_SerialAndParallel_MatchAcrossManyTicks);
+        Run(nameof(World_ProfilingSnapshot_CapturesTickPhaseCounts), World_ProfilingSnapshot_CapturesTickPhaseCounts);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
@@ -846,6 +849,233 @@ internal static class TestRunner
         Assert.Equal(entityCount, parallelWorld.DrainDirtyTo(parallelDirty));
     }
 
+    private static void World_RandomizedMutationFuzz_MatchesReferenceModel()
+    {
+        const int initialEntities = 32;
+        const int stepsPerSeed = 300;
+
+        for (int seed = 1; seed <= 4; seed++)
+        {
+            var builder = new EcsSchemaBuilder();
+            ComponentId positionId = builder.RegisterComponent<Position>();
+            builder.RegisterComponent<Velocity>();
+            var world = new World(builder.Build());
+            var model = new ReferenceWorldModel();
+            var random = new Random(seed);
+            var entities = new List<Entity>(initialEntities * 2);
+
+            var positionSignature = new ArchetypeSignature([positionId]);
+            for (int i = 0; i < initialEntities; i++)
+            {
+                Entity entity = world.CreateDefault(positionSignature);
+                int position = seed * 1_000 + i;
+                Assert.True(world.SetComponent(entity, new Position(position)));
+
+                bool startWithVelocity = (i & 1) == 0;
+                if (startWithVelocity)
+                    world.EnqueueAdd(entity, new Velocity(position / 2));
+
+                model.Create(entity, position);
+                if (startWithVelocity)
+                    model.EnqueueAddVelocity(entity, position / 2);
+
+                entities.Add(entity);
+            }
+
+            world.ProcessStructuralQueues();
+            model.ProcessStructuralQueues();
+            AssertWorldMatchesModel(world, model, entities);
+            AssertDirtySetsMatchAndClear(world, model);
+
+            for (int step = 0; step < stepsPerSeed; step++)
+            {
+                int operation = random.Next(8);
+                Entity? target = TryPickRandomLiveEntity(model, random);
+
+                switch (operation)
+                {
+                    case 0:
+                    {
+                        Entity entity = world.CreateDefault(positionSignature);
+                        int position = random.Next(10_000);
+                        Assert.True(world.SetComponent(entity, new Position(position)));
+                        model.Create(entity, position);
+                        entities.Add(entity);
+                        break;
+                    }
+
+                    case 1 when target.HasValue:
+                    {
+                        int position = random.Next(10_000);
+                        Assert.True(world.SetComponent(target.Value, new Position(position)));
+                        model.SetPosition(target.Value, position);
+                        break;
+                    }
+
+                    case 2 when target.HasValue:
+                    {
+                        int delta = random.Next(1, 17);
+                        Assert.True(world.PatchComponent<Position>(target.Value, (ref Position value) =>
+                        {
+                            value = new Position(value.X + delta);
+                        }));
+                        model.PatchPosition(target.Value, delta);
+                        break;
+                    }
+
+                    case 3 when target.HasValue:
+                    {
+                        int velocity = random.Next(10_000);
+                        world.EnqueueAdd(target.Value, new Velocity(velocity));
+                        model.EnqueueAddVelocity(target.Value, velocity);
+                        break;
+                    }
+
+                    case 4 when target.HasValue:
+                    {
+                        world.EnqueueRemove<Velocity>(target.Value);
+                        model.EnqueueRemoveVelocity(target.Value);
+                        break;
+                    }
+
+                    case 5 when target.HasValue:
+                    {
+                        world.EnqueueDestroy(target.Value);
+                        model.EnqueueDestroy(target.Value);
+                        break;
+                    }
+
+                    case 6:
+                    {
+                        world.ProcessStructuralQueues();
+                        model.ProcessStructuralQueues();
+                        AssertWorldMatchesModel(world, model, entities);
+                        AssertDirtySetsMatchAndClear(world, model);
+                        break;
+                    }
+
+                    default:
+                    {
+                        AssertWorldMatchesModel(world, model, entities);
+                        break;
+                    }
+                }
+
+                if ((step % 19) == 0)
+                {
+                    world.ProcessStructuralQueues();
+                    model.ProcessStructuralQueues();
+                    AssertWorldMatchesModel(world, model, entities);
+                    AssertDirtySetsMatchAndClear(world, model);
+                }
+                else if ((step % 23) == 0)
+                {
+                    AssertWorldMatchesModel(world, model, entities);
+                }
+            }
+
+            world.ProcessStructuralQueues();
+            model.ProcessStructuralQueues();
+            AssertWorldMatchesModel(world, model, entities);
+            AssertDirtySetsMatchAndClear(world, model);
+        }
+    }
+
+    private static void SystemManager_SerialAndParallel_MatchAcrossManyTicks()
+    {
+        const int entityCount = 128;
+        const int ticks = 180;
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        EcsSchema schema = builder.Build();
+
+        World serialWorld = CreateSeededDualComponentWorld(schema, entityCount, out Entity[] serialEntities);
+        World parallelWorld = CreateSeededDualComponentWorld(schema, entityCount, out Entity[] parallelEntities);
+        parallelWorld.SetSystemExecutionMode(SystemExecutionMode.ParallelBatches);
+
+        RegisterDeterminismSoakSystems(serialWorld, positionId, velocityId);
+        RegisterDeterminismSoakSystems(parallelWorld, positionId, velocityId);
+
+        serialWorld.SealSystems();
+        parallelWorld.SealSystems();
+
+        var serialDirty = new Entity[entityCount];
+        var parallelDirty = new Entity[entityCount];
+
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            serialWorld.Tick(0.016f);
+            parallelWorld.Tick(0.016f);
+
+            for (int i = 0; i < entityCount; i++)
+            {
+                Assert.Equal(serialWorld.GetComponent<Position>(serialEntities[i]), parallelWorld.GetComponent<Position>(parallelEntities[i]));
+                Assert.Equal(serialWorld.GetComponent<Velocity>(serialEntities[i]), parallelWorld.GetComponent<Velocity>(parallelEntities[i]));
+            }
+
+            AssertEntitySetsEqual(
+                serialWorld.DrainDirtyTo<Position>(serialDirty),
+                serialDirty,
+                parallelWorld.DrainDirtyTo<Position>(parallelDirty),
+                parallelDirty);
+
+            AssertEntitySetsEqual(
+                serialWorld.DrainDirtyTo<Velocity>(serialDirty),
+                serialDirty,
+                parallelWorld.DrainDirtyTo<Velocity>(parallelDirty),
+                parallelDirty);
+
+            AssertEntitySetsEqual(
+                serialWorld.DrainDirtyTo(serialDirty),
+                serialDirty,
+                parallelWorld.DrainDirtyTo(parallelDirty),
+                parallelDirty);
+        }
+    }
+
+    private static void World_ProfilingSnapshot_CapturesTickPhaseCounts()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build())
+        {
+            ProfilingEnabled = true,
+        };
+
+        Entity target = world.CreateDefault(new ArchetypeSignature([positionId]));
+        Span<Entity> dirty = stackalloc Entity[8];
+        world.DrainDirtyTo(dirty);
+
+        world.EnqueueCreateDefault(new ArchetypeSignature([positionId]));
+        world.RegisterSystem(new ContextActionSystem<DeterminismVelocityTag>(
+            new SystemDescriptor(
+                "ProfileAdd",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.FromIds([positionId]),
+                ComponentMask.Empty),
+            (in SystemContext ctx) =>
+            {
+                ctx.Commands.EnqueueAdd(target, new Velocity(77));
+            }));
+
+        world.SealSystems();
+        world.Tick(0.016f);
+
+        WorldProfileSnapshot profile = world.LastProfile;
+        Assert.Equal((uint)0, profile.Tick);
+        Assert.Equal(1, profile.PreSystems.CreateDefaultCount);
+        Assert.Equal(0, profile.PreSystems.AddCount);
+        Assert.Equal(1, profile.PostSystems.AddCount);
+        Assert.Equal(0, profile.PostSystems.DestroyCount);
+        Assert.True(world.HasComponent<Velocity>(target));
+        Assert.Equal(new Velocity(77), world.GetComponent<Velocity>(target));
+    }
+
     private static void World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse()
     {
         var world = new World(new EcsSchemaBuilder().Build());
@@ -1032,6 +1262,145 @@ internal static class TestRunner
                             Thread.Yield();
                     }
                 }));
+    }
+
+    private static void RegisterDeterminismSoakSystems(World world, ComponentId positionId, ComponentId velocityId)
+    {
+        world.RegisterSystems(
+            new ContextActionSystem<DeterminismPositionTag>(
+                new SystemDescriptor(
+                    "DeterminismPosition",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.FromIds([positionId, velocityId]),
+                    ComponentMask.FromIds([positionId])),
+                (in SystemContext ctx) =>
+                {
+                    ctx.World.PatchQuery<Position, Velocity, Position>((Entity _, in Position position, in Velocity velocity, ref Position write) =>
+                    {
+                        write = new Position(position.X + velocity.X + 1);
+                    });
+                }),
+            new ContextActionSystem<DeterminismVelocityTag>(
+                new SystemDescriptor(
+                    "DeterminismVelocity",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.FromIds([positionId, velocityId]),
+                    ComponentMask.FromIds([velocityId])),
+                (in SystemContext ctx) =>
+                {
+                    int delta = (int)(ctx.Tick % 5) + 2;
+                    ctx.World.PatchQuery<Position, Velocity, Velocity>((Entity _, in Position position, in Velocity velocity, ref Velocity write) =>
+                    {
+                        write = new Velocity(velocity.X + delta + (position.X & 1));
+                    });
+                }),
+            new ContextActionSystem<DeterminismReadTag>(
+                new SystemDescriptor(
+                    "DeterminismRead",
+                    SystemStage.AI,
+                    1,
+                    0,
+                    ComponentMask.FromIds([positionId, velocityId]),
+                    ComponentMask.Empty),
+                (in SystemContext ctx) =>
+                {
+                    int checksum = 0;
+                    ctx.World.Query<Position, Velocity>((Entity _, in Position position, in Velocity velocity) =>
+                    {
+                        checksum ^= position.X + velocity.X;
+                    });
+
+                    _ = checksum;
+                }));
+    }
+
+    private static Entity? TryPickRandomLiveEntity(ReferenceWorldModel model, Random random)
+    {
+        IReadOnlyList<Entity> live = model.LiveEntities;
+        if (live.Count == 0)
+            return null;
+
+        return live[random.Next(live.Count)];
+    }
+
+    private static void AssertWorldMatchesModel(World world, ReferenceWorldModel model, IReadOnlyList<Entity> entities)
+    {
+        Assert.Equal(model.LiveCount, world.Entities.AliveCount);
+
+        for (int i = 0; i < entities.Count; i++)
+        {
+            Entity entity = entities[i];
+            if (!model.TryGet(entity, out ModelEntityState state))
+            {
+                Assert.False(world.Entities.IsAlive(entity));
+                continue;
+            }
+
+            Assert.True(world.Entities.IsAlive(entity));
+            Assert.True(world.TryGetComponent(entity, out Position position));
+            Assert.Equal(new Position(state.PositionX), position);
+
+            bool hasVelocity = world.TryGetComponent(entity, out Velocity velocity);
+            Assert.Equal(state.HasVelocity, hasVelocity);
+            if (state.HasVelocity)
+                Assert.Equal(new Velocity(state.VelocityX), velocity);
+        }
+    }
+
+    private static void AssertDirtySetsMatchAndClear(World world, ReferenceWorldModel model)
+    {
+        var allDirty = new Entity[Math.Max(1, model.KnownEntityCount + 8)];
+        var positionDirty = new Entity[Math.Max(1, model.KnownEntityCount + 8)];
+        var velocityDirty = new Entity[Math.Max(1, model.KnownEntityCount + 8)];
+
+        AssertEntitySetsEqual(model.DirtyAll, world.DrainDirtyTo(allDirty), allDirty);
+        AssertEntitySetsEqual(model.DirtyPosition, world.DrainDirtyTo<Position>(positionDirty), positionDirty);
+        AssertEntitySetsEqual(model.DirtyVelocity, world.DrainDirtyTo<Velocity>(velocityDirty), velocityDirty);
+        model.ClearDirty();
+    }
+
+    private static void AssertEntitySetsEqual(IReadOnlyCollection<Entity> expected, int actualCount, Entity[] actualBuffer)
+    {
+        var expectedOrdered = expected
+            .Select(static entity => entity.Packed)
+            .OrderBy(static packed => packed)
+            .ToArray();
+
+        ulong[] actualOrdered = actualBuffer
+            .AsSpan(0, actualCount)
+            .ToArray()
+            .Select(static entity => entity.Packed)
+            .OrderBy(static packed => packed)
+            .ToArray();
+
+        Assert.Equal(expectedOrdered.Length, actualOrdered.Length);
+        for (int i = 0; i < expectedOrdered.Length; i++)
+            Assert.Equal(expectedOrdered[i], actualOrdered[i]);
+    }
+
+    private static void AssertEntitySetsEqual(int leftCount, Entity[] leftBuffer, int rightCount, Entity[] rightBuffer)
+    {
+        ulong[] leftOrdered = leftBuffer
+            .AsSpan(0, leftCount)
+            .ToArray()
+            .Select(static entity => entity.Packed)
+            .OrderBy(static packed => packed)
+            .ToArray();
+
+        ulong[] rightOrdered = rightBuffer
+            .AsSpan(0, rightCount)
+            .ToArray()
+            .Select(static entity => entity.Packed)
+            .OrderBy(static packed => packed)
+            .ToArray();
+
+        Assert.Equal(leftOrdered.Length, rightOrdered.Length);
+        for (int i = 0; i < leftOrdered.Length; i++)
+            Assert.Equal(leftOrdered[i], rightOrdered[i]);
     }
 
     private static void Run(string name, Action test)
@@ -1318,6 +1687,18 @@ internal static class TestRunner
     {
     }
 
+    private sealed class DeterminismPositionTag
+    {
+    }
+
+    private sealed class DeterminismVelocityTag
+    {
+    }
+
+    private sealed class DeterminismReadTag
+    {
+    }
+
     private sealed class LifecycleTrackingSystem : SystemBase
     {
         public LifecycleTrackingSystem(SystemDescriptor descriptor)
@@ -1389,7 +1770,127 @@ internal static class TestRunner
         {
         }
     }
+
+    private sealed class ReferenceWorldModel
+    {
+        private readonly Dictionary<Entity, ModelEntityState> _entities = new();
+        private readonly List<Entity> _liveEntities = new();
+        private readonly List<(Entity Entity, int VelocityX)> _pendingVelocityAdds = new();
+        private readonly List<Entity> _pendingVelocityRemoves = new();
+        private readonly List<Entity> _pendingDestroys = new();
+
+        public IReadOnlyList<Entity> LiveEntities => _liveEntities;
+        public int LiveCount => _liveEntities.Count;
+        public int KnownEntityCount => _entities.Count;
+        public HashSet<Entity> DirtyAll { get; } = new();
+        public HashSet<Entity> DirtyPosition { get; } = new();
+        public HashSet<Entity> DirtyVelocity { get; } = new();
+
+        public void Create(Entity entity, int positionX)
+        {
+            _entities[entity] = new ModelEntityState(positionX, HasVelocity: false, VelocityX: 0);
+            _liveEntities.Add(entity);
+            DirtyAll.Add(entity);
+            DirtyPosition.Add(entity);
+        }
+
+        public bool TryGet(Entity entity, out ModelEntityState state)
+        {
+            if (_entities.TryGetValue(entity, out state))
+                return true;
+
+            state = default;
+            return false;
+        }
+
+        public void SetPosition(Entity entity, int positionX)
+        {
+            if (!_entities.TryGetValue(entity, out ModelEntityState state))
+                return;
+
+            state = state with { PositionX = positionX };
+            _entities[entity] = state;
+            DirtyAll.Add(entity);
+            DirtyPosition.Add(entity);
+        }
+
+        public void PatchPosition(Entity entity, int delta)
+        {
+            if (!_entities.TryGetValue(entity, out ModelEntityState state))
+                return;
+
+            state = state with { PositionX = state.PositionX + delta };
+            _entities[entity] = state;
+            DirtyAll.Add(entity);
+            DirtyPosition.Add(entity);
+        }
+
+        public void EnqueueAddVelocity(Entity entity, int velocityX)
+        {
+            _pendingVelocityAdds.Add((entity, velocityX));
+        }
+
+        public void EnqueueRemoveVelocity(Entity entity)
+        {
+            _pendingVelocityRemoves.Add(entity);
+        }
+
+        public void EnqueueDestroy(Entity entity)
+        {
+            _pendingDestroys.Add(entity);
+        }
+
+        public void ProcessStructuralQueues()
+        {
+            for (int i = 0; i < _pendingDestroys.Count; i++)
+            {
+                Entity entity = _pendingDestroys[i];
+                if (!_entities.Remove(entity))
+                    continue;
+
+                _liveEntities.Remove(entity);
+                DirtyAll.Add(entity);
+            }
+
+            for (int i = 0; i < _pendingVelocityRemoves.Count; i++)
+            {
+                Entity entity = _pendingVelocityRemoves[i];
+                if (!_entities.TryGetValue(entity, out ModelEntityState state) || !state.HasVelocity)
+                    continue;
+
+                state = state with { HasVelocity = false, VelocityX = 0 };
+                _entities[entity] = state;
+                DirtyAll.Add(entity);
+                DirtyVelocity.Add(entity);
+            }
+
+            for (int i = 0; i < _pendingVelocityAdds.Count; i++)
+            {
+                (Entity entity, int velocityX) = _pendingVelocityAdds[i];
+                if (!_entities.TryGetValue(entity, out ModelEntityState state))
+                    continue;
+
+                state = state with { HasVelocity = true, VelocityX = velocityX };
+                _entities[entity] = state;
+                DirtyAll.Add(entity);
+                DirtyVelocity.Add(entity);
+            }
+
+            _pendingDestroys.Clear();
+            _pendingVelocityRemoves.Clear();
+            _pendingVelocityAdds.Clear();
+        }
+
+        public void ClearDirty()
+        {
+            DirtyAll.Clear();
+            DirtyPosition.Clear();
+            DirtyVelocity.Clear();
+        }
+    }
 }
+
+internal readonly record struct ModelEntityState(int PositionX, bool HasVelocity, int VelocityX);
 
 internal static class Assert
 {

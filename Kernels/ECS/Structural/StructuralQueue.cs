@@ -105,22 +105,26 @@ internal sealed class StructuralQueue
         }
     }
 
-    public void Apply(World world)
+    public StructuralApplyStats Apply(World world)
     {
         ArchetypeSignature[] createDefaults;
         Entity[] destroys;
         IStructuralAddBuffer[] addBuffers;
         IStructuralRemoveBuffer[] removeBuffers;
+        int addCount;
+        int removeCount;
 
         lock (_sync)
         {
             if (_createDefaults.Count == 0 && _destroys.Count == 0 && _addCount == 0 && _removeCount == 0)
-                return;
+                return default;
 
             createDefaults = _createDefaults.ToArray();
             destroys = _destroys.ToArray();
             addBuffers = SnapshotAddBuffers();
             removeBuffers = SnapshotRemoveBuffers();
+            addCount = _addCount;
+            removeCount = _removeCount;
 
             _createDefaults.Clear();
             _destroys.Clear();
@@ -137,6 +141,12 @@ internal sealed class StructuralQueue
 
         for (int i = 0; i < addBuffers.Length; i++)
             addBuffers[i].Apply(world);
+
+        return new StructuralApplyStats(
+            CreateDefaultCount: createDefaults.Length,
+            DestroyCount: destroys.Length,
+            AddCount: addCount,
+            RemoveCount: removeCount);
     }
 
     public void Clear()
