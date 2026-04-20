@@ -434,6 +434,9 @@ public sealed partial class World
         if (signatures.Length == 0)
             return 0;
 
+        if (TryCreateDefaultSingleSignatureFast(signatures, out int createdFast))
+            return createdFast;
+
         var reserveCounts = new Dictionary<Archetype, int>(8);
         for (int i = 0; i < signatures.Length; i++)
         {
@@ -463,6 +466,40 @@ public sealed partial class World
         }
 
         return signatures.Length;
+    }
+
+    private bool TryCreateDefaultSingleSignatureFast(ReadOnlySpan<ArchetypeSignature> signatures, out int created)
+    {
+        created = 0;
+        if (signatures.Length == 0)
+            return true;
+
+        ArchetypeSignature first = signatures[0] ?? throw new ArgumentNullException(nameof(signatures));
+        for (int i = 1; i < signatures.Length; i++)
+        {
+            ArchetypeSignature current = signatures[i] ?? throw new ArgumentNullException(nameof(signatures));
+            if (!ReferenceEquals(current, first) && current != first)
+                return false;
+        }
+
+        Archetype archetype = Archetypes.GetOrCreate(first);
+        archetype.Reserve(signatures.Length);
+
+        Entity[] rented = ArrayPool<Entity>.Shared.Rent(signatures.Length);
+        try
+        {
+            Span<Entity> entities = rented.AsSpan(0, signatures.Length);
+            int allocated = EntityStore.AllocateBulk(entities);
+            int startSlot = archetype.AddEntitiesUninitialized(entities[..allocated]);
+            EntityStore.SetLocationsBulkAssumeValid(entities[..allocated], archetype, startSlot);
+            _dirty.MarkUnique(entities[..allocated]);
+            created = allocated;
+            return true;
+        }
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(rented, clearArray: false);
+        }
     }
 
     internal void DestroyImmediate(Entity entity)

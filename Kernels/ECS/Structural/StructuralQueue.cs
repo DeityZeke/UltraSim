@@ -5,8 +5,10 @@ namespace UltraSim.ECS;
 internal sealed class StructuralQueue
 {
     private readonly object _sync = new();
-    private readonly List<ArchetypeSignature> _createDefaults = new();
-    private readonly List<Entity> _destroys = new();
+    private List<ArchetypeSignature> _createDefaultsWrite = new();
+    private List<ArchetypeSignature> _createDefaultsRead = new();
+    private List<Entity> _destroysWrite = new();
+    private List<Entity> _destroysRead = new();
     private readonly List<IStructuralAddBuffer> _addBuffers = new();
     private readonly Dictionary<Type, IStructuralAddBuffer> _addByType = new();
     private readonly List<IStructuralRemoveBuffer> _removeBuffers = new();
@@ -19,7 +21,12 @@ internal sealed class StructuralQueue
         get
         {
             lock (_sync)
-                return _createDefaults.Count > 0 || _destroys.Count > 0 || _addCount > 0 || _removeCount > 0;
+                return _createDefaultsWrite.Count > 0
+                    || _createDefaultsRead.Count > 0
+                    || _destroysWrite.Count > 0
+                    || _destroysRead.Count > 0
+                    || _addCount > 0
+                    || _removeCount > 0;
         }
     }
 
@@ -27,7 +34,7 @@ internal sealed class StructuralQueue
     {
         ArgumentNullException.ThrowIfNull(signature);
         lock (_sync)
-            _createDefaults.Add(signature);
+            _createDefaultsWrite.Add(signature);
     }
 
     public void EnqueueCreateDefault(ReadOnlySpan<ArchetypeSignature> signatures)
@@ -37,7 +44,7 @@ internal sealed class StructuralQueue
             for (int i = 0; i < signatures.Length; i++)
             {
                 ArgumentNullException.ThrowIfNull(signatures[i]);
-                _createDefaults.Add(signatures[i]);
+                _createDefaultsWrite.Add(signatures[i]);
             }
         }
     }
@@ -45,7 +52,7 @@ internal sealed class StructuralQueue
     public void EnqueueDestroy(Entity entity)
     {
         lock (_sync)
-            _destroys.Add(entity);
+            _destroysWrite.Add(entity);
     }
 
     public void EnqueueDestroy(ReadOnlySpan<Entity> entities)
@@ -53,7 +60,7 @@ internal sealed class StructuralQueue
         lock (_sync)
         {
             for (int i = 0; i < entities.Length; i++)
-                _destroys.Add(entities[i]);
+                _destroysWrite.Add(entities[i]);
         }
     }
 
@@ -107,8 +114,6 @@ internal sealed class StructuralQueue
 
     public StructuralApplyStats Apply(World world)
     {
-        ArchetypeSignature[] createDefaults;
-        Entity[] destroys;
         IStructuralAddBuffer[] addBuffers;
         IStructuralRemoveBuffer[] removeBuffers;
         int addCount;
@@ -116,25 +121,30 @@ internal sealed class StructuralQueue
 
         lock (_sync)
         {
-            if (_createDefaults.Count == 0 && _destroys.Count == 0 && _addCount == 0 && _removeCount == 0)
+            if (_createDefaultsWrite.Count == 0
+                && _createDefaultsRead.Count == 0
+                && _destroysWrite.Count == 0
+                && _destroysRead.Count == 0
+                && _addCount == 0
+                && _removeCount == 0)
+            {
                 return default;
+            }
 
-            createDefaults = _createDefaults.ToArray();
-            destroys = _destroys.ToArray();
+            SwapCreateDefaultsForApply();
+            SwapDestroysForApply();
             addBuffers = SnapshotAddBuffers();
             removeBuffers = SnapshotRemoveBuffers();
             addCount = _addCount;
             removeCount = _removeCount;
 
-            _createDefaults.Clear();
-            _destroys.Clear();
             _addCount = 0;
             _removeCount = 0;
         }
 
-        _ = world.DestroyImmediateBatch(destroys);
+        _ = world.DestroyImmediateBatch(CollectionsMarshal.AsSpan(_destroysRead));
 
-        _ = world.CreateDefaultImmediateBatch(createDefaults);
+        _ = world.CreateDefaultImmediateBatch(CollectionsMarshal.AsSpan(_createDefaultsRead));
 
         for (int i = 0; i < removeBuffers.Length; i++)
             removeBuffers[i].Apply(world);
@@ -142,9 +152,14 @@ internal sealed class StructuralQueue
         for (int i = 0; i < addBuffers.Length; i++)
             addBuffers[i].Apply(world);
 
+        int createDefaultCount = _createDefaultsRead.Count;
+        int destroyCount = _destroysRead.Count;
+        _createDefaultsRead.Clear();
+        _destroysRead.Clear();
+
         return new StructuralApplyStats(
-            CreateDefaultCount: createDefaults.Length,
-            DestroyCount: destroys.Length,
+            CreateDefaultCount: createDefaultCount,
+            DestroyCount: destroyCount,
             AddCount: addCount,
             RemoveCount: removeCount);
     }
@@ -153,8 +168,10 @@ internal sealed class StructuralQueue
     {
         lock (_sync)
         {
-            _createDefaults.Clear();
-            _destroys.Clear();
+            _createDefaultsWrite.Clear();
+            _createDefaultsRead.Clear();
+            _destroysWrite.Clear();
+            _destroysRead.Clear();
             _addCount = 0;
             _removeCount = 0;
 
@@ -164,6 +181,22 @@ internal sealed class StructuralQueue
             for (int i = 0; i < _removeBuffers.Count; i++)
                 _removeBuffers[i].ClearAll();
         }
+    }
+
+    private void SwapCreateDefaultsForApply()
+    {
+        if (_createDefaultsWrite.Count == 0)
+            return;
+
+        (_createDefaultsWrite, _createDefaultsRead) = (_createDefaultsRead, _createDefaultsWrite);
+    }
+
+    private void SwapDestroysForApply()
+    {
+        if (_destroysWrite.Count == 0)
+            return;
+
+        (_destroysWrite, _destroysRead) = (_destroysRead, _destroysWrite);
     }
 
     private IStructuralAddBuffer[] SnapshotAddBuffers()
