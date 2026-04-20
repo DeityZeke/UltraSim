@@ -2,6 +2,7 @@ namespace UltraSim.ECS;
 
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 public sealed partial class World
 {
@@ -587,11 +588,8 @@ public sealed partial class World
         if (current.Length != entities.Length)
             return false;
 
-        for (int i = 0; i < entities.Length; i++)
-        {
-            if (current[i] != entities[i])
-                return false;
-        }
+        if (!MemoryMarshal.AsBytes(current).SequenceEqual(MemoryMarshal.AsBytes(entities)))
+            return false;
 
         EntityStore.FreeBulkAssumeAlive(entities);
 

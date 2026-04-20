@@ -615,12 +615,12 @@ internal sealed class DirtyTracker
         {
             int index = (int)entity.Index;
             EnsureIndexCapacity(index + 1);
+            EnsureEntityCapacity(_count + 1);
 
             ref DirtyEntry entry = ref _entriesByIndex[index];
             if (entry.Epoch == _epoch && entry.Packed == entity.Packed)
                 return;
 
-            EnsureEntityCapacity(_count + 1);
             entry.Epoch = _epoch;
             entry.Packed = entity.Packed;
             _entities[_count++] = entity;
@@ -631,22 +631,37 @@ internal sealed class DirtyTracker
             if (entities.Length == 0)
                 return;
 
+            int maxIndex = -1;
+            for (int i = 0; i < entities.Length; i++)
+            {
+                int index = (int)entities[i].Index;
+                if (index > maxIndex)
+                    maxIndex = index;
+            }
+
             EnsureEntityCapacity(_count + entities.Length);
+            EnsureIndexCapacity(maxIndex + 1);
+
+            DirtyEntry[] entriesByIndex = _entriesByIndex;
+            Entity[] dirtyEntities = _entities;
+            int epoch = _epoch;
+            int count = _count;
 
             for (int i = 0; i < entities.Length; i++)
             {
                 Entity entity = entities[i];
                 int index = (int)entity.Index;
-                EnsureIndexCapacity(index + 1);
 
-                ref DirtyEntry entry = ref _entriesByIndex[index];
-                if (entry.Epoch == _epoch && entry.Packed == entity.Packed)
+                ref DirtyEntry entry = ref entriesByIndex[index];
+                if (entry.Epoch == epoch && entry.Packed == entity.Packed)
                     continue;
 
-                entry.Epoch = _epoch;
+                entry.Epoch = epoch;
                 entry.Packed = entity.Packed;
-                _entities[_count++] = entity;
+                dirtyEntities[count++] = entity;
             }
+
+            _count = count;
         }
 
         public int CopyTo(Span<Entity> destination)

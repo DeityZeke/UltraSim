@@ -5,25 +5,36 @@ namespace UltraSim.ECS;
 public readonly struct Entity : IEquatable<Entity>
 {
     public static readonly Entity Null = default;
+    private readonly ulong _packed;
 
-    public uint Index { get; }
-    public uint Version { get; }
-    public ulong Packed { get; }
+    public ulong Packed
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _packed;
+    }
+
+    public uint Index
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (uint)Packed;
+    }
+
+    public uint Version
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => (uint)(Packed >> 32);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity(uint index, uint version)
     {
-        Index = index;
-        Version = version;
-        Packed = ((ulong)version << 32) | index;
+        _packed = ((ulong)version << 32) | index;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Entity(ulong packed)
     {
-        Packed = packed;
-        Index = (uint)packed;
-        Version = (uint)(packed >> 32);
+        _packed = packed;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
