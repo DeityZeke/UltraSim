@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace UltraSim.ECS;
 
-internal sealed class DirtyTracker
+internal sealed partial class DirtyTracker
 {
     private const int DefaultEntityCapacity = 1024;
 
@@ -609,6 +609,18 @@ internal sealed class DirtyTracker
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             get => _entities.AsSpan(0, _count);
+        }
+
+        internal int EntityCapacity
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _entities.Length;
+        }
+
+        internal int IndexCapacity
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _entriesByIndex.Length;
         }
 
         public void Mark(Entity entity)

@@ -44,3 +44,40 @@ Results are written to:
 - `_Benchmarks/results/new-ecs-benchmarks.json`
 - `_Benchmarks/results/old-ecs-benchmarks.json`
 - `_Benchmarks/results/ecs-benchmark-summary.md`
+
+## GC Soak Mode
+
+The new-kernel runner also supports a sustained soak mode for checking allocation and GC behavior
+without the forced full collections used by the microbenchmark harness.
+
+Example:
+
+```powershell
+dotnet run --project .\_Benchmarks\UltraSim.ECS.NewBenchmarks\UltraSim.ECS.NewBenchmarks.csproj -c Release -- --soak --seconds 60 --interval 10
+```
+
+Useful options:
+
+- `--seconds <n>`: wall-clock duration per scenario
+- `--interval <n>`: sample interval in seconds
+- `--warmup-ticks <n>`: ticks to run before measurement
+- `--workers <n>`: override ECS worker thread count for the soak run
+- `--scenario <id>`: repeat to limit the run to specific scenarios
+- `--output <path>`: override the JSON output path
+
+Default soak scenarios:
+
+- `serial-v1-active`
+- `parallel-v1-active`
+- `serial-osc-active`
+- `parallel-osc-active`
+
+Soak results are written to `_Benchmarks/results/new-ecs-soak-report.json` by default and include:
+
+- mean / p50 / p95 / p99 / max tick time
+- total allocated bytes during the run
+- managed heap delta before final collection
+- retained managed bytes after a final full GC
+- working set delta
+- Gen0 / Gen1 / Gen2 collection counts
+- interval samples for trend inspection

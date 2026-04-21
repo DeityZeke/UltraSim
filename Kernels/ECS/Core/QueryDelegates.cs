@@ -1,5 +1,11 @@
 namespace UltraSim.ECS;
 
+public interface IReadOnlyEntityVisitor<T>
+    where T : unmanaged, IComponent<T>
+{
+    void Visit(Entity entity, in T component);
+}
+
 public delegate void ReadOnlyQueryAction<T>(Entity entity, in T component)
     where T : unmanaged, IComponent<T>;
 

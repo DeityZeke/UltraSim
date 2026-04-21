@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -9,6 +10,7 @@ public sealed partial class World
     private const int DirectQueryArchetypeThreshold = 0;
     [ThreadStatic] private static int[]? s_threadDirtyIndexBuffer;
     [ThreadStatic] private static bool s_threadDirtyIndexBufferInUse;
+    private static readonly ConcurrentDictionary<int, int> s_threadDirtyIndexBufferLengths = new();
 
     private static DirtyIndexBufferLease RentDirtyIndexBuffer(int entityCount)
     {
@@ -20,6 +22,7 @@ public sealed partial class World
             {
                 buffer = new int[minimumLength];
                 s_threadDirtyIndexBuffer = buffer;
+                s_threadDirtyIndexBufferLengths[Environment.CurrentManagedThreadId] = buffer.Length;
             }
 
             s_threadDirtyIndexBufferInUse = true;
@@ -101,6 +104,29 @@ public sealed partial class World
             int count = entities.Length;
             for (int i = 0; i < count; i++)
                 action(entities[i], in values[i]);
+
+            matched += count;
+        }
+
+        return matched;
+    }
+
+    public int Query<T, TVisitor>(ref TVisitor visitor)
+        where T : unmanaged, IComponent<T>
+        where TVisitor : struct, IReadOnlyEntityVisitor<T>
+    {
+        ReadOnlySpan<QueryPlan1> plans = GetCachedQueryPlan(Schema.GetComponentId<T>());
+        int matched = 0;
+
+        for (int archetypeIndex = 0; archetypeIndex < plans.Length; archetypeIndex++)
+        {
+            QueryPlan1 plan = plans[archetypeIndex];
+            Archetype archetype = plan.Archetype;
+            ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
+            ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(plan.Column1);
+            int count = entities.Length;
+            for (int i = 0; i < count; i++)
+                visitor.Visit(entities[i], in values[i]);
 
             matched += count;
         }

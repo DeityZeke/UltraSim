@@ -1,7 +1,22 @@
+using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using UltraSim.ECS;
 using UltraSim.ECS.Benchmarks.Core;
 using UltraSim.ECS.Persistence;
+
+if (args.Any(static arg => string.Equals(arg, "--soak", StringComparison.OrdinalIgnoreCase)))
+{
+    SoakOptions soakOptions = SoakOptions.Parse(args);
+    SoakRunReport soakReport = NewKernelBenchmarks.RunSoakSuite(soakOptions);
+    string soakOutputPath = string.IsNullOrWhiteSpace(soakOptions.OutputPath)
+        ? Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "results", "new-ecs-soak-report.json")
+        : soakOptions.OutputPath;
+
+    NewKernelBenchmarks.WriteSoakReport(soakReport, Path.GetFullPath(soakOutputPath));
+    Console.WriteLine(NewKernelBenchmarks.FormatSoakSummary(soakReport, soakOutputPath));
+    return;
+}
 
 BenchmarkRunReport report = MicroBenchmark.RunSuite(
     suiteName: "ECS Kernel Performance Suite",
@@ -19,6 +34,13 @@ internal static class NewKernelBenchmarks
 {
     private static readonly int[] CommonScales = [1_000, 10_000, 50_000];
     private static readonly ArchetypeSignature EmptySignature = new([]);
+    private static readonly string[] DefaultSoakScenarioIds =
+    [
+        "serial-v1-active",
+        "parallel-v1-active",
+        "serial-osc-active",
+        "parallel-osc-active",
+    ];
 
     public static IReadOnlyList<BenchmarkScenario> CreateScenarios()
     {
@@ -88,6 +110,30 @@ internal static class NewKernelBenchmarks
         return scenarios;
     }
 
+    public static SoakRunReport RunSoakSuite(SoakOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        IReadOnlyList<SoakScenarioDefinition> scenarios = CreateSoakScenarios(options.ScenarioIds);
+        var results = new List<SoakScenarioResult>(scenarios.Count);
+        foreach (SoakScenarioDefinition scenario in scenarios)
+            results.Add(RunSoakScenario(scenario, options));
+
+        return new SoakRunReport
+        {
+            SuiteName = "ECS Kernel GC Soak Suite",
+            KernelName = "new",
+            RuntimeVersion = Environment.Version.ToString(),
+            Configuration = GetConfiguration(),
+            ProcessorCount = Environment.ProcessorCount,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            DurationSeconds = options.DurationSeconds,
+            SampleIntervalSeconds = options.SampleIntervalSeconds,
+            WarmupTicks = options.WarmupTicks,
+            Results = results,
+        };
+    }
+
     public static string FormatSummary(BenchmarkRunReport report, string outputPath)
     {
         var sb = new StringBuilder();
@@ -101,6 +147,41 @@ internal static class NewKernelBenchmarks
         return sb.ToString();
     }
 
+    public static void WriteSoakReport(SoakRunReport report, string path)
+    {
+        string? directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        };
+
+        File.WriteAllText(path, JsonSerializer.Serialize(report, options));
+    }
+
+    public static string FormatSoakSummary(SoakRunReport report, string outputPath)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Kernel: {report.KernelName}");
+        sb.AppendLine($"Configuration: {report.Configuration}");
+        sb.AppendLine($"ProcessorCount: {report.ProcessorCount}");
+        sb.AppendLine($"DurationSeconds: {report.DurationSeconds}");
+        sb.AppendLine($"SampleIntervalSeconds: {report.SampleIntervalSeconds}");
+        sb.AppendLine($"WarmupTicks: {report.WarmupTicks}");
+        sb.AppendLine($"Results: {Path.GetFullPath(outputPath)}");
+
+        foreach (SoakScenarioResult result in report.Results)
+        {
+            sb.AppendLine($"{result.Name}: ticks={result.TotalTicks} mean={result.MeanTickMilliseconds:F3} ms p95={result.P95TickMilliseconds:F3} ms p99={result.P99TickMilliseconds:F3} ms max={result.MaxTickMilliseconds:F3} ms");
+            sb.AppendLine($"  allocDelta={result.AllocatedBytesDelta} retainedManagedDelta={result.PostGcManagedBytesDelta} workingSetDelta={result.WorkingSetBytesDelta} gc=({result.Gen0Collections},{result.Gen1Collections},{result.Gen2Collections})");
+            sb.AppendLine($"  retainedDetail dirtyLocalIndexBytes={result.Retention.Dirty.LocalStateAllIndexBytes + result.Retention.Dirty.LocalComponentIndexBytes} dirtyLocalEntityBytes={result.Retention.Dirty.LocalStateAllEntityBytes + result.Retention.Dirty.LocalComponentEntityBytes} threadDirtyIndexBytes={result.Retention.ThreadDirtyIndexBufferBytes}");
+        }
+
+        return sb.ToString();
+    }
+
     private static BenchmarkScenario MakeScenario(string name, string category, bool comparable, int scale, Func<ScenarioMeasurement> execute)
         => new()
         {
@@ -111,19 +192,248 @@ internal static class NewKernelBenchmarks
             Execute = execute,
         };
 
+    private static IReadOnlyList<SoakScenarioDefinition> CreateSoakScenarios(IReadOnlyList<string> requestedIds)
+    {
+        string[] ids = requestedIds.Count == 0
+            ? DefaultSoakScenarioIds
+            : requestedIds.Select(static value => value.Trim()).Where(static value => value.Length > 0).ToArray();
+        var scenarios = new List<SoakScenarioDefinition>(ids.Length);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string id in ids)
+        {
+            if (!seen.Add(id))
+                continue;
+
+            scenarios.Add(id.ToLowerInvariant() switch
+            {
+                "serial-v1-active" => new SoakScenarioDefinition(
+                    "serial-v1-active",
+                    "TickSerial_Active35_Shuffle10_V1PulseMovement_100k",
+                    soak => CreateV1PulseMovementWorld(100_000, SystemExecutionMode.Serial, activeSubsetOnly: true, soak.WorkerCount)),
+                "parallel-v1-active" => new SoakScenarioDefinition(
+                    "parallel-v1-active",
+                    "TickParallel_Active35_Shuffle10_V1PulseMovement_100k",
+                    soak => CreateV1PulseMovementWorld(100_000, SystemExecutionMode.ParallelBatches, activeSubsetOnly: true, soak.WorkerCount)),
+                "serial-osc-active" => new SoakScenarioDefinition(
+                    "serial-osc-active",
+                    "TickSerial_Active35_Shuffle10_OscillatingMovement_100k",
+                    soak => CreateOscillatingMovementWorld(100_000, SystemExecutionMode.Serial, activeSubsetOnly: true, soak.WorkerCount)),
+                "parallel-osc-active" => new SoakScenarioDefinition(
+                    "parallel-osc-active",
+                    "TickParallel_Active35_Shuffle10_OscillatingMovement_100k",
+                    soak => CreateOscillatingMovementWorld(100_000, SystemExecutionMode.ParallelBatches, activeSubsetOnly: true, soak.WorkerCount)),
+                _ => throw new ArgumentException($"Unknown soak scenario id '{id}'. Valid ids: {string.Join(", ", DefaultSoakScenarioIds)}", nameof(requestedIds)),
+            });
+        }
+
+        return scenarios;
+    }
+
+    private static SoakScenarioResult RunSoakScenario(SoakScenarioDefinition scenario, SoakOptions options)
+    {
+        World world = scenario.CreateWorld(options);
+        for (int i = 0; i < options.WarmupTicks; i++)
+            world.Tick(0.016f);
+
+        SchedulerBenchmarkState.Reset();
+        ForceFullCollection();
+
+        Process process = Process.GetCurrentProcess();
+        process.Refresh();
+        long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        long managedBefore = GC.GetTotalMemory(forceFullCollection: false);
+        long workingSetBefore = process.WorkingSet64;
+        int gen0Before = GC.CollectionCount(0);
+        int gen1Before = GC.CollectionCount(1);
+        int gen2Before = GC.CollectionCount(2);
+
+        var tickDurationsMs = new List<double>(capacity: Math.Max(1024, options.DurationSeconds * 256));
+        var samples = new List<SoakSample>(capacity: Math.Max(1, (options.DurationSeconds / Math.Max(1, options.SampleIntervalSeconds)) + 1));
+        double intervalTickTotalMs = 0d;
+        double intervalMaxTickMs = 0d;
+        long intervalTicks = 0;
+        long totalTicks = 0;
+
+        long startTimestamp = Stopwatch.GetTimestamp();
+        long nextSampleTimestamp = startTimestamp + (long)(options.SampleIntervalSeconds * Stopwatch.Frequency);
+        long stopTimestamp = startTimestamp + (long)(options.DurationSeconds * Stopwatch.Frequency);
+
+        while (Stopwatch.GetTimestamp() < stopTimestamp)
+        {
+            long tickStart = Stopwatch.GetTimestamp();
+            world.Tick(0.016f);
+            long tickEnd = Stopwatch.GetTimestamp();
+
+            double tickMs = Stopwatch.GetElapsedTime(tickStart, tickEnd).TotalMilliseconds;
+            tickDurationsMs.Add(tickMs);
+            intervalTickTotalMs += tickMs;
+            intervalMaxTickMs = Math.Max(intervalMaxTickMs, tickMs);
+            intervalTicks++;
+            totalTicks++;
+
+            if (tickEnd < nextSampleTimestamp)
+                continue;
+
+            samples.Add(CreateSoakSample(
+                startTimestamp,
+                tickEnd,
+                totalTicks,
+                intervalTicks,
+                intervalTickTotalMs,
+                intervalMaxTickMs,
+                allocatedBefore,
+                managedBefore,
+                workingSetBefore,
+                gen0Before,
+                gen1Before,
+                gen2Before,
+                process));
+            intervalTickTotalMs = 0d;
+            intervalMaxTickMs = 0d;
+            intervalTicks = 0;
+            nextSampleTimestamp += (long)(options.SampleIntervalSeconds * Stopwatch.Frequency);
+        }
+
+        long endTimestamp = Stopwatch.GetTimestamp();
+        if (intervalTicks > 0 || samples.Count == 0)
+        {
+            samples.Add(CreateSoakSample(
+                startTimestamp,
+                endTimestamp,
+                totalTicks,
+                intervalTicks,
+                intervalTickTotalMs,
+                intervalMaxTickMs,
+                allocatedBefore,
+                managedBefore,
+                workingSetBefore,
+                gen0Before,
+                gen1Before,
+                gen2Before,
+                process));
+        }
+
+        long allocatedAfter = GC.GetTotalAllocatedBytes(precise: true);
+        long managedAfter = GC.GetTotalMemory(forceFullCollection: false);
+        process.Refresh();
+        long workingSetAfter = process.WorkingSet64;
+        int gen0After = GC.CollectionCount(0);
+        int gen1After = GC.CollectionCount(1);
+        int gen2After = GC.CollectionCount(2);
+
+        ForceFullCollection();
+        long postGcManaged = GC.GetTotalMemory(forceFullCollection: false);
+        EcsRetentionSnapshot retention = world.CaptureRetentionSnapshot();
+
+        double[] sortedTickDurations = tickDurationsMs.ToArray();
+        Array.Sort(sortedTickDurations);
+
+        double elapsedSeconds = Stopwatch.GetElapsedTime(startTimestamp, endTimestamp).TotalSeconds;
+        double totalTickMs = tickDurationsMs.Sum();
+        double meanTickMs = totalTicks > 0 ? totalTickMs / totalTicks : 0d;
+
+        return new SoakScenarioResult
+        {
+            Id = scenario.Id,
+            Name = scenario.Name,
+            DurationSeconds = elapsedSeconds,
+            TotalTicks = totalTicks,
+            MeanTickMilliseconds = meanTickMs,
+            P50TickMilliseconds = ComputePercentile(sortedTickDurations, 0.50),
+            P95TickMilliseconds = ComputePercentile(sortedTickDurations, 0.95),
+            P99TickMilliseconds = ComputePercentile(sortedTickDurations, 0.99),
+            MaxTickMilliseconds = sortedTickDurations.Length > 0 ? sortedTickDurations[^1] : 0d,
+            AllocatedBytesDelta = allocatedAfter - allocatedBefore,
+            ManagedBytesDelta = managedAfter - managedBefore,
+            PostGcManagedBytesDelta = postGcManaged - managedBefore,
+            WorkingSetBytesDelta = workingSetAfter - workingSetBefore,
+            Gen0Collections = gen0After - gen0Before,
+            Gen1Collections = gen1After - gen1Before,
+            Gen2Collections = gen2After - gen2Before,
+            Checksum = SchedulerBenchmarkState.Checksum,
+            Retention = retention,
+            Samples = samples,
+        };
+    }
+
+    private static SoakSample CreateSoakSample(
+        long startTimestamp,
+        long currentTimestamp,
+        long totalTicks,
+        long intervalTicks,
+        double intervalTickTotalMs,
+        double intervalMaxTickMs,
+        long allocatedBefore,
+        long managedBefore,
+        long workingSetBefore,
+        int gen0Before,
+        int gen1Before,
+        int gen2Before,
+        Process process)
+    {
+        process.Refresh();
+        return new SoakSample
+        {
+            ElapsedSeconds = Stopwatch.GetElapsedTime(startTimestamp, currentTimestamp).TotalSeconds,
+            TotalTicks = totalTicks,
+            IntervalTicks = intervalTicks,
+            IntervalMeanTickMilliseconds = intervalTicks > 0 ? intervalTickTotalMs / intervalTicks : 0d,
+            IntervalMaxTickMilliseconds = intervalMaxTickMs,
+            AllocatedBytesDelta = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore,
+            ManagedBytesDelta = GC.GetTotalMemory(forceFullCollection: false) - managedBefore,
+            WorkingSetBytesDelta = process.WorkingSet64 - workingSetBefore,
+            Gen0Collections = GC.CollectionCount(0) - gen0Before,
+            Gen1Collections = GC.CollectionCount(1) - gen1Before,
+            Gen2Collections = GC.CollectionCount(2) - gen2Before,
+            Checksum = SchedulerBenchmarkState.Checksum,
+        };
+    }
+
+    private static double ComputePercentile(double[] sortedValues, double percentile)
+    {
+        if (sortedValues.Length == 0)
+            return 0d;
+
+        if (sortedValues.Length == 1)
+            return sortedValues[0];
+
+        double index = percentile * (sortedValues.Length - 1);
+        int lower = (int)Math.Floor(index);
+        int upper = (int)Math.Ceiling(index);
+        if (lower == upper)
+            return sortedValues[lower];
+
+        double weight = index - lower;
+        return sortedValues[lower] + ((sortedValues[upper] - sortedValues[lower]) * weight);
+    }
+
+    private static void ForceFullCollection()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+    }
+
+    private static string GetConfiguration()
+    {
+#if DEBUG
+        return "Debug";
+#else
+        return "Release";
+#endif
+    }
+
     private static BenchmarkScenario CreateHotQuery1Scenario(int scale)
     {
         HotReadFixture? fixture = null;
         return MakeScenario($"HotLoop_Query1_Read_Position", "HotLoop", true, scale, () =>
         {
             fixture ??= HotReadFixture.Create(scale);
-            long checksum = 0;
-            fixture.World.Query<Position>((Entity entity, in Position position) =>
-            {
-                checksum += entity.Index + position.X + position.Y;
-            });
+            var visitor = new HotReadPositionVisitor();
+            fixture.World.Query<Position, HotReadPositionVisitor>(ref visitor);
 
-            return new ScenarioMeasurement(scale, checksum);
+            return new ScenarioMeasurement(scale, visitor.Checksum);
         });
     }
 
@@ -731,11 +1041,13 @@ internal static class NewKernelBenchmarks
         return world;
     }
 
-    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false)
+    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false, int workerCountOverride = 0)
     {
         SchedulerBenchmarkState.Reset();
 
         World world = SeedOscillatingWorld(entityCount);
+        if (workerCountOverride > 0)
+            world.ConfigureWorkerCountOverride(workerCountOverride);
         ComponentId positionId = world.GetComponentId<Position>();
         ComponentId velocityId = world.GetComponentId<Velocity>();
         ComponentId oscillatorId = world.GetComponentId<Oscillator>();
@@ -751,11 +1063,13 @@ internal static class NewKernelBenchmarks
         return world;
     }
 
-    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false)
+    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false, int workerCountOverride = 0)
     {
         SchedulerBenchmarkState.Reset();
 
         World world = SeedV1PulseWorld(entityCount);
+        if (workerCountOverride > 0)
+            world.ConfigureWorkerCountOverride(workerCountOverride);
         ComponentId positionId = world.GetComponentId<PulsePosition>();
         ComponentId velocityId = world.GetComponentId<PulseVelocity>();
         ComponentId motionId = world.GetComponentId<PulseMotion>();
@@ -1598,6 +1912,16 @@ internal static class NewKernelBenchmarks
         }
     }
 
+    private struct HotReadPositionVisitor : IReadOnlyEntityVisitor<Position>
+    {
+        public long Checksum;
+
+        public void Visit(Entity entity, in Position component)
+        {
+            Checksum += entity.Index + component.X + component.Y;
+        }
+    }
+
     private sealed class HotMutationFixture
     {
         public required World World { get; init; }
@@ -1653,4 +1977,312 @@ internal static class NewKernelBenchmarks
     private sealed class ReadTagB { }
     private sealed class WriteTagA { }
     private sealed class WriteTagB { }
+}
+
+namespace UltraSim.ECS
+{
+    public sealed partial class World
+    {
+        internal global::EcsRetentionSnapshot CaptureRetentionSnapshot()
+        {
+            return new global::EcsRetentionSnapshot
+            {
+                Dirty = _dirty.CaptureRetentionSnapshot(),
+                Worker = _systems.CaptureRetentionSnapshot(),
+                ThreadDirtyIndexBufferBytes = CaptureThreadDirtyIndexBufferBytes(),
+                ThreadDirtyIndexBufferThreads = CaptureThreadDirtyIndexBufferThreadCount(),
+            };
+        }
+
+        internal void ConfigureWorkerCountOverride(int workerCount)
+        {
+            _systems.ConfigureWorkerCountOverride(workerCount);
+        }
+
+        private static long CaptureThreadDirtyIndexBufferBytes()
+        {
+            long bytes = 0;
+            foreach (KeyValuePair<int, int> pair in s_threadDirtyIndexBufferLengths)
+                bytes += pair.Value * sizeof(int);
+
+            return bytes;
+        }
+
+        private static int CaptureThreadDirtyIndexBufferThreadCount() => s_threadDirtyIndexBufferLengths.Count;
+    }
+
+    internal sealed partial class SystemManager
+    {
+        internal global::SystemManagerRetentionSnapshot CaptureRetentionSnapshot()
+        {
+            return new global::SystemManagerRetentionSnapshot
+            {
+                ExecutionMode = _executionMode.ToString(),
+                AllowIntraSystemParallelInSerialMode = _allowIntraSystemParallelInSerialMode,
+                DirtyCaptureWorkerCount = DirtyCaptureWorkerCount,
+                WorkerCount = _workerPool?.WorkerCount ?? 0,
+            };
+        }
+    }
+
+    internal sealed partial class DirtyTracker
+    {
+        internal global::DirtyTrackerRetentionSnapshot CaptureRetentionSnapshot()
+        {
+            long globalComponentEntityBytes = 0;
+            long globalComponentIndexBytes = 0;
+            int globalComponentSetCount = 0;
+            for (int i = 0; i < _byComponent.Length; i++)
+            {
+                DirtySet? set = _byComponent[i];
+                if (set is null)
+                    continue;
+
+                globalComponentSetCount++;
+                globalComponentEntityBytes += set.EntityCapacity * 8L;
+                globalComponentIndexBytes += set.IndexCapacity * 16L;
+            }
+
+            long localAllEntityBytes = 0;
+            long localAllIndexBytes = 0;
+            long localComponentEntityBytes = 0;
+            long localComponentIndexBytes = 0;
+            int localStateCount = 0;
+            int localComponentSetCount = 0;
+
+            for (int i = 0; i < _localStates.Length; i++)
+            {
+                LocalDirtyState? state = _localStates[i];
+                if (state is null)
+                    continue;
+
+                localStateCount++;
+                localAllEntityBytes += state.All.EntityCapacity * 8L;
+                localAllIndexBytes += state.All.IndexCapacity * 16L;
+
+                DirtySet?[] byComponent = state.ByComponent;
+                for (int c = 0; c < byComponent.Length; c++)
+                {
+                    DirtySet? set = byComponent[c];
+                    if (set is null)
+                        continue;
+
+                    localComponentSetCount++;
+                    localComponentEntityBytes += set.EntityCapacity * 8L;
+                    localComponentIndexBytes += set.IndexCapacity * 16L;
+                }
+            }
+
+            return new global::DirtyTrackerRetentionSnapshot
+            {
+                CaptureEnabled = _captureEnabled,
+                CaptureWorkerCount = _captureWorkerCount,
+                LocalStateCount = localStateCount,
+                GlobalAllEntityBytes = _all.EntityCapacity * 8L,
+                GlobalAllIndexBytes = _all.IndexCapacity * 16L,
+                GlobalComponentSetCount = globalComponentSetCount,
+                GlobalComponentEntityBytes = globalComponentEntityBytes,
+                GlobalComponentIndexBytes = globalComponentIndexBytes,
+                LocalStateAllEntityBytes = localAllEntityBytes,
+                LocalStateAllIndexBytes = localAllIndexBytes,
+                LocalComponentSetCount = localComponentSetCount,
+                LocalComponentEntityBytes = localComponentEntityBytes,
+                LocalComponentIndexBytes = localComponentIndexBytes,
+            };
+        }
+    }
+}
+
+internal sealed record SoakOptions
+{
+    public int DurationSeconds { get; init; } = 60;
+    public int SampleIntervalSeconds { get; init; } = 5;
+    public int WarmupTicks { get; init; } = 120;
+    public int WorkerCount { get; init; }
+    public string? OutputPath { get; init; }
+    public IReadOnlyList<string> ScenarioIds { get; init; } = Array.Empty<string>();
+
+    public static SoakOptions Parse(string[] args)
+    {
+        int durationSeconds = 60;
+        int sampleIntervalSeconds = 5;
+        int warmupTicks = 120;
+        int workerCount = 0;
+        string? outputPath = null;
+        var scenarioIds = new List<string>();
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            string arg = args[i];
+            if (string.Equals(arg, "--soak", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (string.Equals(arg, "--seconds", StringComparison.OrdinalIgnoreCase))
+            {
+                durationSeconds = ParsePositiveInt(args, ref i, "--seconds");
+                continue;
+            }
+
+            if (string.Equals(arg, "--interval", StringComparison.OrdinalIgnoreCase))
+            {
+                sampleIntervalSeconds = ParsePositiveInt(args, ref i, "--interval");
+                continue;
+            }
+
+            if (string.Equals(arg, "--warmup-ticks", StringComparison.OrdinalIgnoreCase))
+            {
+                warmupTicks = ParseNonNegativeInt(args, ref i, "--warmup-ticks");
+                continue;
+            }
+
+            if (string.Equals(arg, "--workers", StringComparison.OrdinalIgnoreCase))
+            {
+                workerCount = ParsePositiveInt(args, ref i, "--workers");
+                continue;
+            }
+
+            if (string.Equals(arg, "--output", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 >= args.Length)
+                    throw new ArgumentException("Missing value for --output.", nameof(args));
+
+                outputPath = args[++i];
+                continue;
+            }
+
+            if (string.Equals(arg, "--scenario", StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 >= args.Length)
+                    throw new ArgumentException("Missing value for --scenario.", nameof(args));
+
+                scenarioIds.Add(args[++i]);
+                continue;
+            }
+
+            throw new ArgumentException($"Unknown argument '{arg}'.", nameof(args));
+        }
+
+        sampleIntervalSeconds = Math.Min(sampleIntervalSeconds, durationSeconds);
+
+        return new SoakOptions
+        {
+            DurationSeconds = durationSeconds,
+            SampleIntervalSeconds = sampleIntervalSeconds,
+            WarmupTicks = warmupTicks,
+            WorkerCount = workerCount,
+            OutputPath = outputPath,
+            ScenarioIds = scenarioIds,
+        };
+    }
+
+    private static int ParsePositiveInt(string[] args, ref int index, string optionName)
+    {
+        int value = ParseNonNegativeInt(args, ref index, optionName);
+        if (value <= 0)
+            throw new ArgumentOutOfRangeException(optionName, "Value must be greater than zero.");
+
+        return value;
+    }
+
+    private static int ParseNonNegativeInt(string[] args, ref int index, string optionName)
+    {
+        if (index + 1 >= args.Length)
+            throw new ArgumentException($"Missing value for {optionName}.", nameof(args));
+
+        if (!int.TryParse(args[++index], out int value) || value < 0)
+            throw new ArgumentOutOfRangeException(optionName, $"Invalid integer value '{args[index]}'.");
+
+        return value;
+    }
+}
+
+internal sealed record SoakRunReport
+{
+    public required string SuiteName { get; init; }
+    public required string KernelName { get; init; }
+    public required string RuntimeVersion { get; init; }
+    public required string Configuration { get; init; }
+    public required int ProcessorCount { get; init; }
+    public required DateTimeOffset TimestampUtc { get; init; }
+    public required int DurationSeconds { get; init; }
+    public required int SampleIntervalSeconds { get; init; }
+    public required int WarmupTicks { get; init; }
+    public required IReadOnlyList<SoakScenarioResult> Results { get; init; }
+}
+
+internal sealed record EcsRetentionSnapshot
+{
+    public required DirtyTrackerRetentionSnapshot Dirty { get; init; }
+    public required SystemManagerRetentionSnapshot Worker { get; init; }
+    public required long ThreadDirtyIndexBufferBytes { get; init; }
+    public required int ThreadDirtyIndexBufferThreads { get; init; }
+}
+
+internal sealed record DirtyTrackerRetentionSnapshot
+{
+    public required bool CaptureEnabled { get; init; }
+    public required int CaptureWorkerCount { get; init; }
+    public required int LocalStateCount { get; init; }
+    public required long GlobalAllEntityBytes { get; init; }
+    public required long GlobalAllIndexBytes { get; init; }
+    public required int GlobalComponentSetCount { get; init; }
+    public required long GlobalComponentEntityBytes { get; init; }
+    public required long GlobalComponentIndexBytes { get; init; }
+    public required int LocalComponentSetCount { get; init; }
+    public required long LocalStateAllEntityBytes { get; init; }
+    public required long LocalStateAllIndexBytes { get; init; }
+    public required long LocalComponentEntityBytes { get; init; }
+    public required long LocalComponentIndexBytes { get; init; }
+}
+
+internal sealed record SystemManagerRetentionSnapshot
+{
+    public required string ExecutionMode { get; init; }
+    public required bool AllowIntraSystemParallelInSerialMode { get; init; }
+    public required int DirtyCaptureWorkerCount { get; init; }
+    public required int WorkerCount { get; init; }
+}
+
+internal sealed record SoakScenarioDefinition(
+    string Id,
+    string Name,
+    Func<SoakOptions, World> CreateWorld);
+
+internal sealed record SoakScenarioResult
+{
+    public required string Id { get; init; }
+    public required string Name { get; init; }
+    public required double DurationSeconds { get; init; }
+    public required long TotalTicks { get; init; }
+    public required double MeanTickMilliseconds { get; init; }
+    public required double P50TickMilliseconds { get; init; }
+    public required double P95TickMilliseconds { get; init; }
+    public required double P99TickMilliseconds { get; init; }
+    public required double MaxTickMilliseconds { get; init; }
+    public required long AllocatedBytesDelta { get; init; }
+    public required long ManagedBytesDelta { get; init; }
+    public required long PostGcManagedBytesDelta { get; init; }
+    public required long WorkingSetBytesDelta { get; init; }
+    public required int Gen0Collections { get; init; }
+    public required int Gen1Collections { get; init; }
+    public required int Gen2Collections { get; init; }
+    public required long Checksum { get; init; }
+    public required EcsRetentionSnapshot Retention { get; init; }
+    public required IReadOnlyList<SoakSample> Samples { get; init; }
+}
+
+internal sealed record SoakSample
+{
+    public required double ElapsedSeconds { get; init; }
+    public required long TotalTicks { get; init; }
+    public required long IntervalTicks { get; init; }
+    public required double IntervalMeanTickMilliseconds { get; init; }
+    public required double IntervalMaxTickMilliseconds { get; init; }
+    public required long AllocatedBytesDelta { get; init; }
+    public required long ManagedBytesDelta { get; init; }
+    public required long WorkingSetBytesDelta { get; init; }
+    public required int Gen0Collections { get; init; }
+    public required int Gen1Collections { get; init; }
+    public required int Gen2Collections { get; init; }
+    public required long Checksum { get; init; }
 }

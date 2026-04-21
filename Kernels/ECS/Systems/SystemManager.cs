@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace UltraSim.ECS;
 
-internal sealed class SystemManager
+internal sealed partial class SystemManager
 {
     private static readonly int DefaultWorkerCount = Math.Max(1, Environment.ProcessorCount);
 
@@ -26,6 +26,7 @@ internal sealed class SystemManager
     private bool _allowIntraSystemParallelInSerialMode;
     private bool _phaseStaggeringEnabled;
     private int _maxNonCriticalStagger;
+    private int _workerCountOverride;
     private ManualWorkerPool? _workerPool;
 
     internal SystemManager()
@@ -40,6 +41,7 @@ internal sealed class SystemManager
         _allowIntraSystemParallelInSerialMode = false;
         _phaseStaggeringEnabled = false;
         _maxNonCriticalStagger = 10;
+        _workerCountOverride = 0;
     }
 
     public int Count
@@ -101,6 +103,17 @@ internal sealed class SystemManager
         _allowIntraSystemParallelInSerialMode = enabled;
         if (enabled)
             EnsureWorkerPool();
+    }
+
+    internal void ConfigureWorkerCountOverride(int workerCount)
+    {
+        if (workerCount < 1)
+            throw new ArgumentOutOfRangeException(nameof(workerCount), "Worker count must be at least 1.");
+
+        if (_workerPool is not null && _workerPool.WorkerCount != workerCount)
+            throw new InvalidOperationException("Worker pool has already been created.");
+
+        _workerCountOverride = workerCount;
     }
 
     public void Register(SystemBase system)
@@ -547,7 +560,7 @@ internal sealed class SystemManager
 
     private ManualWorkerPool EnsureWorkerPool()
     {
-        _workerPool ??= new ManualWorkerPool(DefaultWorkerCount);
+        _workerPool ??= new ManualWorkerPool(_workerCountOverride > 0 ? _workerCountOverride : DefaultWorkerCount);
         return _workerPool;
     }
 
