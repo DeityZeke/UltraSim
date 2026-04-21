@@ -1,6 +1,7 @@
 using System.Reflection;
 using UltraSim.Server;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Headless;
 
 TestRunner.Run();
 
@@ -28,6 +29,9 @@ internal static class TestRunner
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
         Run(nameof(ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks), ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks);
         Run(nameof(ServerHostLoop_ForwardsApplicationEventsToSinks), ServerHostLoop_ForwardsApplicationEventsToSinks);
+        Run(nameof(HeadlessServerArgumentParser_ParsesExpectedOptions), HeadlessServerArgumentParser_ParsesExpectedOptions);
+        Run(nameof(HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly), HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly);
+        Run(nameof(HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults), HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -448,6 +452,81 @@ internal static class TestRunner
         Assert.Equal(ServerApplicationEventKind.CommandHandled, sink.Events[^1].Kind);
     }
 
+    private static void HeadlessServerArgumentParser_ParsesExpectedOptions()
+    {
+        string[] args =
+        {
+            "--profile=test-headless",
+            "--tick-ms=16",
+            "--max-catchup=4",
+            "--run-for-seconds=0.25",
+            "--idle-delay-ms=2",
+            "--no-auto-start",
+            "--save-on-stop",
+            "--quiet",
+        };
+
+        bool parsed = HeadlessServerArgumentParser.TryParse(args, out HeadlessServerShellOptions options, out string? error, out bool showHelp);
+
+        Assert.True(parsed);
+        Assert.Equal<string?>(null, error);
+        Assert.False(showHelp);
+        Assert.Equal("test-headless", options.ProfileName);
+        Assert.Equal(16, options.TickMilliseconds);
+        Assert.Equal(4, options.MaxCatchUpTicksPerPump);
+        Assert.False(options.AutoStart);
+        Assert.True(options.SaveOnStop);
+        Assert.True(options.Quiet);
+        Assert.Equal(TimeSpan.FromSeconds(0.25), options.RunFor);
+        Assert.Equal(TimeSpan.FromMilliseconds(2), options.IdleDelay);
+    }
+
+    private static void HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new HeadlessServerShellOptions(
+            "test-headless",
+            TickMilliseconds: 10,
+            RunFor: TimeSpan.FromMilliseconds(30),
+            IdleDelay: TimeSpan.Zero);
+        var shell = new HeadlessServerShell(options, stdout, stderr);
+
+        int exitCode = shell.RunAsync().GetAwaiter().GetResult();
+        string output = stdout.ToString();
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("state changed: Running", output);
+        Assert.Contains("state changed: Stopped", output);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    private static void HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults()
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new HeadlessServerShellOptions(
+            "faulted-headless",
+            TickMilliseconds: 10,
+            RunFor: TimeSpan.FromMilliseconds(30),
+            IdleDelay: TimeSpan.Zero);
+        var shell = new HeadlessServerShell(
+            options,
+            stdout,
+            stderr,
+            _ => new ServerApplication(
+                new ServerApplicationOptions("faulted-headless"),
+                new ServerApplicationHooks
+                {
+                    Tick = static (_, _) => throw new InvalidOperationException("headless-boom"),
+                }));
+
+        int exitCode = shell.RunAsync().GetAwaiter().GetResult();
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("headless-boom", stderr.ToString());
+    }
+
     private static void AssertMethod(Type contract, string name, Type returnType, params Type[] parameterTypes)
     {
         MethodInfo? method = contract.GetMethod(name, parameterTypes);
@@ -522,6 +601,12 @@ internal static class Assert
             if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
                 throw new InvalidOperationException($"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
         }
+    }
+
+    public static void Contains(string expectedSubstring, string actual)
+    {
+        if (actual is null || !actual.Contains(expectedSubstring, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Expected substring '{expectedSubstring}' was not found.");
     }
 }
 
