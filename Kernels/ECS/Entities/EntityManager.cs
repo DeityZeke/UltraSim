@@ -190,22 +190,24 @@ public sealed class EntityManager : IEntityReadOnly
         if (neededFreeCapacity > _freeList.Length)
             Array.Resize(ref _freeList, Math.Max(_freeList.Length * 2, neededFreeCapacity));
 
+        _aliveCount -= entities.Length;
+
+        Location[] locations = _locations;
+        uint[] versions = _versions;
+        int[] freeList = _freeList;
         int freeWrite = _freeCount;
         for (int i = 0; i < entities.Length; i++)
         {
             int index = (int)entities[i].Index;
-            if (_locations[index].Archetype is not null)
-                _aliveCount--;
+            locations[index] = default;
+            locations[index].Slot = -1;
 
-            _locations[index] = default;
-            _locations[index].Slot = -1;
-
-            uint nextVersion = _versions[index] + 1;
+            uint nextVersion = versions[index] + 1;
             if (nextVersion == 0)
                 nextVersion = 1;
 
-            _versions[index] = nextVersion;
-            _freeList[freeWrite++] = index;
+            versions[index] = nextVersion;
+            freeList[freeWrite++] = index;
         }
 
         _freeCount = freeWrite;

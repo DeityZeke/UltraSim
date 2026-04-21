@@ -81,3 +81,9 @@ Soak results are written to `_Benchmarks/results/new-ecs-soak-report.json` by de
 - working set delta
 - Gen0 / Gen1 / Gen2 collection counts
 - interval samples for trend inspection
+
+Current interpretation guidance:
+
+- use soak mode to catch allocation drift, GC pressure, and retained-memory cliffs that the microbenchmark harness intentionally hides by forcing full collections between scenarios
+- current heavy-scheduler soak runs were used to validate the active movement `100k` cases, including worker-count retention diagnostics for parallel dirty-capture behavior
+- the present soak coverage is strong enough to flag obvious GC/retention regressions, but it is still not a replacement for longer mixed-host runtime validation once wrapper fronts exist

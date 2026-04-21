@@ -646,13 +646,15 @@ public sealed partial class World
             if (increasing)
             {
                 for (int i = entities.Length - 1; i >= 0; i--)
-                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, ref destroyed);
+                    ApplyDestroyFastEntry(rentedSlots[i], source!, ref destroyed);
             }
             else
             {
                 for (int i = 0; i < entities.Length; i++)
-                    ApplyDestroyFastEntry(entities[i], rentedSlots[i], source!, ref destroyed);
+                    ApplyDestroyFastEntry(rentedSlots[i], source!, ref destroyed);
             }
+
+            EntityStore.FreeBulkAssumeAlive(entities);
 
             _dirty.MarkUnique(entities);
             return true;
@@ -1037,7 +1039,6 @@ public sealed partial class World
     }
 
     private void ApplyDestroyFastEntry(
-        Entity entity,
         int slot,
         Archetype source,
         ref int destroyed)
@@ -1045,7 +1046,6 @@ public sealed partial class World
         if (source.RemoveAtSwap(slot, out Entity moved, out int movedSlot) && movedSlot >= 0)
             EntityStore.SetLocation(moved, source, movedSlot);
 
-        EntityStore.FreeAssumeAlive(entity);
         destroyed++;
     }
 

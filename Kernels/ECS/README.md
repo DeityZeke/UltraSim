@@ -81,7 +81,7 @@ Performance matters in the ECS, but only after correctness and clarity are secur
 
 ## Current Port Position
 
-The kernel is now in Phase 1E validation and hardening of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`.
+The kernel has completed Phase 1E validation and hardening of the port plan in `_TMP/ECS_PORT_IMPLEMENTATION_PLAN.md`.
 
 Implemented so far:
 
@@ -127,15 +127,28 @@ Implemented so far:
 - comparative older-old `v1`-style pulse-to-velocity-to-movement scheduler benchmarks,
 - comparative activity-shaped `35% moving / reshuffle every 10 ticks` movement benchmarks for both oscillating and v1-style pulse pipelines,
 - comparative entity-heavy benchmarks for reuse churn, sparse-victim destroy, and migration cycles,
+- dedicated hot read struct-visitor path for ultra-tight read-only per-entity loops,
+- sustained GC soak coverage for heavy serial and parallel scheduler scenarios without forced per-scenario collections,
+- worker-count retention diagnostics for dirty-capture and thread-local scratch state,
+- worker-local dirty capture redesigned around bounded append-only entity buffers instead of large per-worker index dedupe tables,
 - prefab/persistence seams held for second-wave import,
 - executable incremental tests.
 
 Current practical status:
 
-- movement-oriented hot paths are now materially ahead of the older-old and old ECS benchmarks,
+- current comparable benchmark snapshot is `70 / 73` wins against the old kernel,
+- movement-oriented hot paths are materially ahead of the older-old and old ECS benchmarks,
 - dirty-aware write-heavy scheduler paths are strong,
+- read-only scheduler and hot-query paths are now decisively competitive after the dedicated hot read path,
+- current soak runs show bounded retained memory and stable tick latency in the heaviest active movement scenarios,
 - prefabs and persistence remain intentionally deferred behind working seams,
-- the main remaining competitive gaps are now concentrated in raw small/medium query-read throughput, read-only scheduler shapes, and a narrower destroy path set rather than in core architecture.
+- the main remaining competitive gaps are now concentrated in a narrow destroy/dirty-drain path set rather than in core architecture.
+
+Accepted current tradeoffs:
+
+- `DeferredDestroy [10000]` and `DeferredDestroy_SparseVictims [10000]` are still slightly behind the old kernel in a narrow structural case,
+- `DirtyDrain_Position [10000]` remains a small measured loss in the current summary,
+- current soak validation is strong enough to rule out the previous silent retention concern, but it is not yet a substitute for longer mixed-workload runtime validation once host wrappers exist.
 
 Still intentionally deferred:
 
