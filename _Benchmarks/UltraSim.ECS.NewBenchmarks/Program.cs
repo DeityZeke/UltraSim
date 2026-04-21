@@ -5,6 +5,18 @@ using UltraSim.ECS;
 using UltraSim.ECS.Benchmarks.Core;
 using UltraSim.ECS.Persistence;
 
+if (args.Any(static arg => string.Equals(arg, "--phase-stagger-report", StringComparison.OrdinalIgnoreCase)))
+{
+    string phaseOutputPath = args.FirstOrDefault(static arg => arg.StartsWith("--phase-stagger-output=", StringComparison.OrdinalIgnoreCase)) is string outputArg
+        ? outputArg["--phase-stagger-output=".Length..]
+        : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "results", "new-ecs-phase-stagger-report.json");
+
+    PhaseStaggeringBenchmarkReport phaseReport = NewKernelBenchmarks.RunPhaseStaggeringReport();
+    NewKernelBenchmarks.WritePhaseStaggeringReport(phaseReport, Path.GetFullPath(phaseOutputPath));
+    Console.WriteLine(NewKernelBenchmarks.FormatPhaseStaggeringSummary(phaseReport, phaseOutputPath));
+    return;
+}
+
 if (args.Any(static arg => string.Equals(arg, "--soak", StringComparison.OrdinalIgnoreCase)))
 {
     SoakOptions soakOptions = SoakOptions.Parse(args);
@@ -134,6 +146,35 @@ internal static class NewKernelBenchmarks
         };
     }
 
+    public static PhaseStaggeringBenchmarkReport RunPhaseStaggeringReport()
+    {
+        const int entityCount = 20_000;
+        const int tickCount = 96;
+        const int periodTicks = 4;
+        const int systemCount = 4;
+
+        return new PhaseStaggeringBenchmarkReport
+        {
+            SuiteName = "ECS Phase Staggering Smoothing Report",
+            KernelName = "new",
+            RuntimeVersion = Environment.Version.ToString(),
+            Configuration = GetConfiguration(),
+            ProcessorCount = Environment.ProcessorCount,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            EntityCount = entityCount,
+            TickCount = tickCount,
+            PeriodTicks = periodTicks,
+            SystemCount = systemCount,
+            Results =
+            [
+                RunPhaseStaggeringScenario("TickSerial_Period4Burst_20k_96Ticks_StaggerOff", entityCount, tickCount, periodTicks, systemCount, SystemExecutionMode.Serial, phaseStaggeringEnabled: false),
+                RunPhaseStaggeringScenario("TickSerial_Period4Burst_20k_96Ticks_StaggerOn", entityCount, tickCount, periodTicks, systemCount, SystemExecutionMode.Serial, phaseStaggeringEnabled: true),
+                RunPhaseStaggeringScenario("TickParallel_Period4Burst_20k_96Ticks_StaggerOff", entityCount, tickCount, periodTicks, systemCount, SystemExecutionMode.ParallelBatches, phaseStaggeringEnabled: false),
+                RunPhaseStaggeringScenario("TickParallel_Period4Burst_20k_96Ticks_StaggerOn", entityCount, tickCount, periodTicks, systemCount, SystemExecutionMode.ParallelBatches, phaseStaggeringEnabled: true),
+            ],
+        };
+    }
+
     public static string FormatSummary(BenchmarkRunReport report, string outputPath)
     {
         var sb = new StringBuilder();
@@ -145,6 +186,20 @@ internal static class NewKernelBenchmarks
         foreach (BenchmarkResult result in report.Results.Take(8))
             sb.AppendLine($"{result.Name} [{result.Scale}] mean={result.MeanMilliseconds:F3} ms ns/op={result.MeanNanosecondsPerOperation:F1} alloc={result.MeanAllocatedBytes}");
         return sb.ToString();
+    }
+
+    public static void WritePhaseStaggeringReport(PhaseStaggeringBenchmarkReport report, string path)
+    {
+        string? directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        };
+
+        File.WriteAllText(path, JsonSerializer.Serialize(report, options));
     }
 
     public static void WriteSoakReport(SoakRunReport report, string path)
@@ -178,6 +233,24 @@ internal static class NewKernelBenchmarks
             sb.AppendLine($"  allocDelta={result.AllocatedBytesDelta} retainedManagedDelta={result.PostGcManagedBytesDelta} workingSetDelta={result.WorkingSetBytesDelta} gc=({result.Gen0Collections},{result.Gen1Collections},{result.Gen2Collections})");
             sb.AppendLine($"  retainedDetail dirtyLocalIndexBytes={result.Retention.Dirty.LocalStateAllIndexBytes + result.Retention.Dirty.LocalComponentIndexBytes} dirtyLocalEntityBytes={result.Retention.Dirty.LocalStateAllEntityBytes + result.Retention.Dirty.LocalComponentEntityBytes} threadDirtyIndexBytes={result.Retention.ThreadDirtyIndexBufferBytes}");
         }
+
+        return sb.ToString();
+    }
+
+    public static string FormatPhaseStaggeringSummary(PhaseStaggeringBenchmarkReport report, string outputPath)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Kernel: {report.KernelName}");
+        sb.AppendLine($"Configuration: {report.Configuration}");
+        sb.AppendLine($"ProcessorCount: {report.ProcessorCount}");
+        sb.AppendLine($"EntityCount: {report.EntityCount}");
+        sb.AppendLine($"TickCount: {report.TickCount}");
+        sb.AppendLine($"PeriodTicks: {report.PeriodTicks}");
+        sb.AppendLine($"SystemCount: {report.SystemCount}");
+        sb.AppendLine($"Results: {Path.GetFullPath(outputPath)}");
+
+        foreach (PhaseStaggeringScenarioResult result in report.Results)
+            sb.AppendLine($"{result.Name}: mean={result.MeanTickMilliseconds:F3} ms p50={result.P50TickMilliseconds:F3} ms p95={result.P95TickMilliseconds:F3} ms max={result.MaxTickMilliseconds:F3} ms stddev={result.StandardDeviationMilliseconds:F3} ms ratio={result.MaxToMeanRatio:F2} offsets=[{string.Join(", ", result.StartOffsets)}]");
 
         return sb.ToString();
     }
@@ -354,6 +427,56 @@ internal static class NewKernelBenchmarks
             Checksum = SchedulerBenchmarkState.Checksum,
             Retention = retention,
             Samples = samples,
+        };
+    }
+
+    private static PhaseStaggeringScenarioResult RunPhaseStaggeringScenario(
+        string name,
+        int entityCount,
+        int tickCount,
+        int periodTicks,
+        int systemCount,
+        SystemExecutionMode mode,
+        bool phaseStaggeringEnabled)
+    {
+        World world = CreatePeriodicCadenceBurstWorld(entityCount, mode, phaseStaggeringEnabled, periodTicks, systemCount);
+        SchedulerBenchmarkState.Reset();
+
+        var tickDurations = new double[tickCount];
+        for (int i = 0; i < tickCount; i++)
+        {
+            long start = Stopwatch.GetTimestamp();
+            world.Tick(0.016f);
+            tickDurations[i] = Stopwatch.GetElapsedTime(start, Stopwatch.GetTimestamp()).TotalMilliseconds;
+        }
+
+        double[] sorted = tickDurations.ToArray();
+        Array.Sort(sorted);
+        double mean = tickDurations.Average();
+        double variance = 0d;
+        for (int i = 0; i < tickDurations.Length; i++)
+        {
+            double delta = tickDurations[i] - mean;
+            variance += delta * delta;
+        }
+
+        variance /= tickDurations.Length;
+
+        return new PhaseStaggeringScenarioResult
+        {
+            Name = name,
+            ExecutionMode = mode.ToString(),
+            PhaseStaggeringEnabled = phaseStaggeringEnabled,
+            TickCount = tickCount,
+            MeanTickMilliseconds = mean,
+            MinTickMilliseconds = sorted[0],
+            P50TickMilliseconds = ComputePercentile(sorted, 0.50),
+            P95TickMilliseconds = ComputePercentile(sorted, 0.95),
+            MaxTickMilliseconds = sorted[^1],
+            StandardDeviationMilliseconds = Math.Sqrt(variance),
+            MaxToMeanRatio = mean <= 0d ? 0d : sorted[^1] / mean,
+            StartOffsets = world.GetSystemStartOffsetsSnapshot(),
+            Checksum = SchedulerBenchmarkState.Checksum,
         };
     }
 
@@ -1084,6 +1207,30 @@ internal static class NewKernelBenchmarks
         return world;
     }
 
+    private static World CreatePeriodicCadenceBurstWorld(int entityCount, SystemExecutionMode mode, bool phaseStaggeringEnabled, int periodTicks, int systemCount)
+    {
+        SchedulerBenchmarkState.Reset();
+
+        World world = SeedWorld(entityCount, includeVelocity: false, includeHealth: false);
+        ComponentId positionId = world.GetComponentId<Position>();
+        world.ConfigurePhaseStaggering(phaseStaggeringEnabled);
+        world.SetSystemExecutionMode(mode);
+
+        if (systemCount >= 1)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagA>("Burst0", positionId, periodTicks));
+        if (systemCount >= 2)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagB>("Burst1", positionId, periodTicks));
+        if (systemCount >= 3)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagC>("Burst2", positionId, periodTicks));
+        if (systemCount >= 4)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagD>("Burst3", positionId, periodTicks));
+        if (systemCount > 4)
+            throw new ArgumentOutOfRangeException(nameof(systemCount), "Burst benchmark currently supports up to 4 systems.");
+
+        world.SealSystems();
+        return world;
+    }
+
     private static World CreateWorld(bool includeVelocity, bool includeHealth)
     {
         var builder = new EcsSchemaBuilder();
@@ -1347,6 +1494,39 @@ internal static class NewKernelBenchmarks
                 long local = 0;
                 for (int i = 0; i < entities.Length; i++)
                     local += entities[i].Index + positions[i].X + velocities[i].X;
+
+                Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
+            });
+        }
+    }
+
+    private sealed class PeriodicCadenceBurstReadSystem<TTag> : SystemBase
+    {
+        public PeriodicCadenceBurstReadSystem(string name, ComponentId positionId, int periodTicks)
+        {
+            Descriptor = new SystemDescriptor(
+                name,
+                SystemStage.AI,
+                periodTicks,
+                0,
+                ComponentMask.FromIds([positionId]),
+                ComponentMask.Empty);
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+
+        public override void Update(in SystemContext ctx)
+        {
+            ctx.World.ReadChunks<Position>((ReadOnlySpan<Entity> entities, ReadOnlySpan<Position> positions) =>
+            {
+                long local = 0;
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    int entityIndex = unchecked((int)entities[i].Index);
+                    int mixed = (positions[i].X * 31) ^ (positions[i].Y * 17) ^ (entityIndex * 13);
+                    mixed = (mixed << 3) ^ (mixed >> 2) ^ (positions[i].X * 7);
+                    local += mixed;
+                }
 
                 Interlocked.Add(ref SchedulerBenchmarkState.Checksum, local);
             });
@@ -1833,6 +2013,10 @@ internal static class NewKernelBenchmarks
     private sealed class ReadOnlyTagB;
     private sealed class ReadOnlyTagC;
     private sealed class ReadOnlyTagD;
+    private sealed class BurstTagA;
+    private sealed class BurstTagB;
+    private sealed class BurstTagC;
+    private sealed class BurstTagD;
     private sealed class OscReadTagA;
     private sealed class OscReadTagB;
     private sealed class OscWriteTagA;
@@ -2089,6 +2273,38 @@ namespace UltraSim.ECS
             };
         }
     }
+}
+
+internal sealed record PhaseStaggeringBenchmarkReport
+{
+    public required string SuiteName { get; init; }
+    public required string KernelName { get; init; }
+    public required string RuntimeVersion { get; init; }
+    public required string Configuration { get; init; }
+    public required int ProcessorCount { get; init; }
+    public required DateTimeOffset TimestampUtc { get; init; }
+    public required int EntityCount { get; init; }
+    public required int TickCount { get; init; }
+    public required int PeriodTicks { get; init; }
+    public required int SystemCount { get; init; }
+    public required IReadOnlyList<PhaseStaggeringScenarioResult> Results { get; init; }
+}
+
+internal sealed record PhaseStaggeringScenarioResult
+{
+    public required string Name { get; init; }
+    public required string ExecutionMode { get; init; }
+    public required bool PhaseStaggeringEnabled { get; init; }
+    public required int TickCount { get; init; }
+    public required double MeanTickMilliseconds { get; init; }
+    public required double MinTickMilliseconds { get; init; }
+    public required double P50TickMilliseconds { get; init; }
+    public required double P95TickMilliseconds { get; init; }
+    public required double MaxTickMilliseconds { get; init; }
+    public required double StandardDeviationMilliseconds { get; init; }
+    public required double MaxToMeanRatio { get; init; }
+    public required int[] StartOffsets { get; init; }
+    public required long Checksum { get; init; }
 }
 
 internal sealed record SoakOptions

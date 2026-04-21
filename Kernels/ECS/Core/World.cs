@@ -6,6 +6,8 @@ using System.Runtime.InteropServices;
 
 public sealed partial class World
 {
+    private const int DefaultMaxNonCriticalStagger = 10;
+
     private sealed class WorldStructuralCommands : IStructuralCommands
     {
         private readonly World _world;
@@ -46,6 +48,7 @@ public sealed partial class World
         _dirty = new DirtyTracker();
         _commands = new WorldStructuralCommands(this);
         _systems = new SystemManager();
+        _systems.ConfigurePhaseStaggering(enabled: true, maxNonCriticalStagger: DefaultMaxNonCriticalStagger);
         _addTransitions = new Dictionary<TransitionKey, TransitionPlan>(16);
         _removeTransitions = new Dictionary<TransitionKey, TransitionPlan>(16);
         _queryCacheVersion = Archetypes.Version;

@@ -1,0 +1,94 @@
+{
+  "SuiteName": "ECS Phase Staggering Smoothing Report",
+  "KernelName": "new",
+  "RuntimeVersion": "8.0.11",
+  "Configuration": "Release",
+  "ProcessorCount": 16,
+  "TimestampUtc": "2026-04-21T20:27:12.6565422+00:00",
+  "EntityCount": 20000,
+  "TickCount": 96,
+  "PeriodTicks": 4,
+  "SystemCount": 4,
+  "Results": [
+    {
+      "Name": "TickSerial_Period4Burst_20k_96Ticks_StaggerOff",
+      "ExecutionMode": "Serial",
+      "PhaseStaggeringEnabled": false,
+      "TickCount": 96,
+      "MeanTickMilliseconds": 0.048920833333333386,
+      "MinTickMilliseconds": 0.0001,
+      "P50TickMilliseconds": 0.0002,
+      "P95TickMilliseconds": 0.125925,
+      "MaxTickMilliseconds": 1.8763,
+      "StandardDeviationMilliseconds": 0.19456060426673974,
+      "MaxToMeanRatio": 38.35380291286939,
+      "StartOffsets": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "Checksum": 5585747014656
+    },
+    {
+      "Name": "TickSerial_Period4Burst_20k_96Ticks_StaggerOn",
+      "ExecutionMode": "Serial",
+      "PhaseStaggeringEnabled": true,
+      "TickCount": 96,
+      "MeanTickMilliseconds": 0.030431249999999965,
+      "MinTickMilliseconds": 0.0296,
+      "P50TickMilliseconds": 0.0301,
+      "P95TickMilliseconds": 0.032424999999999995,
+      "MaxTickMilliseconds": 0.0389,
+      "StandardDeviationMilliseconds": 0.0012642778324007732,
+      "MaxToMeanRatio": 1.278291230232082,
+      "StartOffsets": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "Checksum": 5585747014656
+    },
+    {
+      "Name": "TickParallel_Period4Burst_20k_96Ticks_StaggerOff",
+      "ExecutionMode": "ParallelBatches",
+      "PhaseStaggeringEnabled": false,
+      "TickCount": 96,
+      "MeanTickMilliseconds": 0.02789791666666669,
+      "MinTickMilliseconds": 0.0091,
+      "P50TickMilliseconds": 0.0094,
+      "P95TickMilliseconds": 0.0464,
+      "MaxTickMilliseconds": 0.9222,
+      "StandardDeviationMilliseconds": 0.09308018718105222,
+      "MaxToMeanRatio": 33.05623179747589,
+      "StartOffsets": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "Checksum": 5585747014656
+    },
+    {
+      "Name": "TickParallel_Period4Burst_20k_96Ticks_StaggerOn",
+      "ExecutionMode": "ParallelBatches",
+      "PhaseStaggeringEnabled": true,
+      "TickCount": 96,
+      "MeanTickMilliseconds": 0.03349791666666666,
+      "MinTickMilliseconds": 0.0324,
+      "P50TickMilliseconds": 0.0329,
+      "P95TickMilliseconds": 0.0393,
+      "MaxTickMilliseconds": 0.0451,
+      "StandardDeviationMilliseconds": 0.002304704390239426,
+      "MaxToMeanRatio": 1.346352385098576,
+      "StartOffsets": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "Checksum": 5585747014656
+    }
+  ]
+}

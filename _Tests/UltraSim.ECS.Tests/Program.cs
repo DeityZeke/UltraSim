@@ -45,6 +45,8 @@ internal static class TestRunner
         Run(nameof(SystemManager_DueTicks_WrapAcrossUintBoundary), SystemManager_DueTicks_WrapAcrossUintBoundary);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
+        Run(nameof(World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems), World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems);
+        Run(nameof(World_ConfigurePhaseStaggeringFalse_KeepsSamePeriodSystemsAligned), World_ConfigurePhaseStaggeringFalse_KeepsSamePeriodSystemsAligned);
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
         Run(nameof(SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely), SystemManager_ParallelMode_DeferredStructuralCommands_AreCollectedSafely);
@@ -1249,6 +1251,71 @@ internal static class TestRunner
         Assert.Equal(0, batches[0][0].Value);
         Assert.Equal(2, batches[0][1].Value);
         Assert.Equal(1, batches[1][0].Value);
+    }
+
+    private static void World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var log = new List<string>();
+
+        world.RegisterSystems(
+            new AiLoggingSystem(
+                "AiA",
+                new SystemDescriptor("AiA", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log),
+            new AiLoggingSystemTwo(
+                "AiB",
+                new SystemDescriptor("AiB", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log),
+            new AiLoggingSystemThree(
+                "AiC",
+                new SystemDescriptor("AiC", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log));
+
+        world.SealSystems();
+
+        int[] offsets = world.GetSystemStartOffsetsSnapshot();
+        Assert.Equal(0, offsets[0]);
+        Assert.Equal(1, offsets[1]);
+        Assert.Equal(2, offsets[2]);
+
+        for (int i = 0; i < 4; i++)
+            world.Tick(0.016f);
+
+        Assert.SequenceEqual(["AiA@0", "AiB@1", "AiC@2"], log);
+    }
+
+    private static void World_ConfigurePhaseStaggeringFalse_KeepsSamePeriodSystemsAligned()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        world.ConfigurePhaseStaggering(enabled: false);
+        var log = new List<string>();
+
+        world.RegisterSystems(
+            new AiLoggingSystem(
+                "AiA",
+                new SystemDescriptor("AiA", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log),
+            new AiLoggingSystemTwo(
+                "AiB",
+                new SystemDescriptor("AiB", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log),
+            new AiLoggingSystemThree(
+                "AiC",
+                new SystemDescriptor("AiC", SystemStage.AI, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log));
+
+        world.SealSystems();
+
+        int[] offsets = world.GetSystemStartOffsetsSnapshot();
+        Assert.Equal(0, offsets[0]);
+        Assert.Equal(0, offsets[1]);
+        Assert.Equal(0, offsets[2]);
+
+        for (int i = 0; i < 4; i++)
+            world.Tick(0.016f);
+
+        Assert.SequenceEqual(["AiA@0", "AiB@0", "AiC@0"], log);
     }
 
     private static void SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages()
