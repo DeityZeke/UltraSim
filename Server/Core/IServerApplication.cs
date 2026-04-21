@@ -1,0 +1,22 @@
+namespace UltraSim.Server;
+
+public interface IServerApplication
+{
+    ServerApplicationState State { get; }
+    bool IsInitialized { get; }
+    bool IsRunning { get; }
+
+    void Initialize();
+    void Start();
+    void Tick(float deltaSeconds);
+    void RequestSave();
+    bool Save();
+    void Stop();
+    void Restart();
+
+    ServerStatusSnapshot GetStatusSnapshot();
+    ServerMetricsSnapshot GetMetricsSnapshot();
+    bool TryExecuteCommand(ServerControlCommand command, out ServerCommandResult result);
+
+    event Action<ServerApplicationEvent>? EventRaised;
+}
