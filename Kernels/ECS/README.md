@@ -129,6 +129,7 @@ Implemented so far:
 - comparative entity-heavy benchmarks for reuse churn, sparse-victim destroy, and migration cycles,
 - dedicated hot read struct-visitor path for ultra-tight read-only per-entity loops,
 - sustained GC soak coverage for heavy serial and parallel scheduler scenarios without forced per-scenario collections,
+- dedicated scheduler feature report coverage for profiling overhead, execution-mode crossover, and cadence spreading,
 - worker-count retention diagnostics for dirty-capture and thread-local scratch state,
 - worker-local dirty capture redesigned around bounded append-only entity buffers instead of large per-worker index dedupe tables,
 - prefab/persistence seams held for second-wave import,
@@ -141,6 +142,12 @@ Current practical status:
 - dirty-aware write-heavy scheduler paths are strong,
 - read-only scheduler and hot-query paths are now decisively competitive after the dedicated hot read path,
 - current soak runs show bounded retained memory and stable tick latency in the heaviest active movement scenarios,
+- profiling snapshots currently measure as effectively negligible overhead in scheduler-heavy runs,
+- execution-mode crossover is now clearer:
+  - `ParallelBatches` is the best fit for the heavier oscillating movement workloads,
+  - `Serial` plus intra-system parallelism is the best fit for the current `v1` pulse movement shape,
+- automatic cadence spreading is now enabled by default for non-critical stages, with a default cap of `10` distinct offsets per period bucket,
+- automatic cadence spreading is still intentionally not applied to `Movement` and `Combat`, because current measurements show that benefit is workload-dependent rather than universally positive there,
 - prefabs and persistence remain intentionally deferred behind working seams,
 - the main remaining competitive gaps are now concentrated in a narrow destroy/dirty-drain path set rather than in core architecture.
 
@@ -155,3 +162,24 @@ Still intentionally deferred:
 - prefab runtime port,
 - persistence/runtime save-load port,
 - broader integration helpers and higher-level tooling.
+
+## Scheduler Guidance
+
+Current scheduler policy is:
+
+- keep automatic phase staggering enabled by default for non-critical stages,
+- keep the default non-critical stagger cap at `10`,
+- keep the cap configurable through `ConfigurePhaseStaggering(enabled, maxNonCriticalStagger)`,
+- keep automatic staggering off for `Movement` and `Combat` unless a concrete workload proves it should be widened.
+
+Why `10` remains the right default for now:
+
+- it is large enough to smooth the common low-frequency cadence groups without exploding phase fragmentation,
+- it bounds offset growth for very long cadence systems where spreading every possible phase adds little practical value,
+- it keeps scheduler behavior predictable and close to the older runtime unless a caller explicitly asks for more.
+
+Current measured guidance:
+
+- profiling overhead is small enough that it is not a practical scheduler concern right now,
+- scheduler mode choice matters more than the profiling toggle,
+- movement/combat cadence spreading should stay opt-in or manually offset for now rather than becoming a broader automatic rule.

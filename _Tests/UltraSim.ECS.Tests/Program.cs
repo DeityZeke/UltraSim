@@ -46,6 +46,7 @@ internal static class TestRunner
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
         Run(nameof(World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems), World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems);
+        Run(nameof(World_DefaultPhaseStaggering_KeepsMovementSamePeriodSystemsAligned), World_DefaultPhaseStaggering_KeepsMovementSamePeriodSystemsAligned);
         Run(nameof(World_ConfigurePhaseStaggeringFalse_KeepsSamePeriodSystemsAligned), World_ConfigurePhaseStaggeringFalse_KeepsSamePeriodSystemsAligned);
         Run(nameof(SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages), SystemManager_PhaseStaggering_AssignsOffsetsOnlyToNonCriticalStages);
         Run(nameof(SystemManager_ParallelMode_RunsNonConflictingBatchMembers), SystemManager_ParallelMode_RunsNonConflictingBatchMembers);
@@ -1285,6 +1286,38 @@ internal static class TestRunner
         Assert.SequenceEqual(["AiA@0", "AiB@1", "AiC@2"], log);
     }
 
+    private static void World_DefaultPhaseStaggering_KeepsMovementSamePeriodSystemsAligned()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var log = new List<string>();
+
+        world.RegisterSystems(
+            new MovementLoggingSystem(
+                "MovementA",
+                new SystemDescriptor("MovementA", SystemStage.Movement, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log),
+            new MovementLoggingSystemTwo(
+                "MovementB",
+                new SystemDescriptor("MovementB", SystemStage.Movement, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log),
+            new MovementLoggingSystemThree(
+                "MovementC",
+                new SystemDescriptor("MovementC", SystemStage.Movement, 4, 0, ComponentMask.Empty, ComponentMask.Empty),
+                log));
+
+        world.SealSystems();
+
+        int[] offsets = world.GetSystemStartOffsetsSnapshot();
+        Assert.Equal(0, offsets[0]);
+        Assert.Equal(0, offsets[1]);
+        Assert.Equal(0, offsets[2]);
+
+        for (int i = 0; i < 4; i++)
+            world.Tick(0.016f);
+
+        Assert.SequenceEqual(["MovementA@0", "MovementB@0", "MovementC@0"], log);
+    }
+
     private static void World_ConfigurePhaseStaggeringFalse_KeepsSamePeriodSystemsAligned()
     {
         var world = new World(new EcsSchemaBuilder().Build());
@@ -2349,6 +2382,22 @@ internal static class TestRunner
     private sealed class MovementLoggingSystem : LoggingSystem
     {
         public MovementLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class MovementLoggingSystemTwo : LoggingSystem
+    {
+        public MovementLoggingSystemTwo(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class MovementLoggingSystemThree : LoggingSystem
+    {
+        public MovementLoggingSystemThree(string label, SystemDescriptor descriptor, List<string> log)
             : base(label, descriptor, log)
         {
         }

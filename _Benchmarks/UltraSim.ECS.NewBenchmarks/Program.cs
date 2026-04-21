@@ -17,6 +17,18 @@ if (args.Any(static arg => string.Equals(arg, "--phase-stagger-report", StringCo
     return;
 }
 
+if (args.Any(static arg => string.Equals(arg, "--scheduler-feature-report", StringComparison.OrdinalIgnoreCase)))
+{
+    string featureOutputPath = args.FirstOrDefault(static arg => arg.StartsWith("--scheduler-feature-output=", StringComparison.OrdinalIgnoreCase)) is string outputArg
+        ? outputArg["--scheduler-feature-output=".Length..]
+        : Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "results", "new-ecs-scheduler-feature-report.json");
+
+    SchedulerFeatureBenchmarkReport featureReport = NewKernelBenchmarks.RunSchedulerFeatureReport();
+    NewKernelBenchmarks.WriteSchedulerFeatureReport(featureReport, Path.GetFullPath(featureOutputPath));
+    Console.WriteLine(NewKernelBenchmarks.FormatSchedulerFeatureSummary(featureReport, featureOutputPath));
+    return;
+}
+
 if (args.Any(static arg => string.Equals(arg, "--soak", StringComparison.OrdinalIgnoreCase)))
 {
     SoakOptions soakOptions = SoakOptions.Parse(args);
@@ -175,6 +187,46 @@ internal static class NewKernelBenchmarks
         };
     }
 
+    public static SchedulerFeatureBenchmarkReport RunSchedulerFeatureReport()
+    {
+        const int profilingEntityCount = 100_000;
+        const int profilingTicks = 480;
+        const int cadenceEntityCount = 20_000;
+        const int cadenceTicks = 96;
+        const int cadencePeriod = 4;
+        const int cadenceSystems = 4;
+
+        return new SchedulerFeatureBenchmarkReport
+        {
+            SuiteName = "ECS Scheduler Feature Report",
+            KernelName = "new",
+            RuntimeVersion = Environment.Version.ToString(),
+            Configuration = GetConfiguration(),
+            ProcessorCount = Environment.ProcessorCount,
+            TimestampUtc = DateTimeOffset.UtcNow,
+            ProfilingResults =
+            [
+                RunProfilingOverheadScenario("QuerySerial_100k_480Ticks", profilingEntityCount, profilingTicks, SystemExecutionMode.Serial),
+                RunProfilingOverheadScenario("QueryParallel_100k_480Ticks", profilingEntityCount, profilingTicks, SystemExecutionMode.ParallelBatches),
+                RunProfilingOverheadScenario("ReadOnlySerial_100k_480Ticks", profilingEntityCount, profilingTicks, SystemExecutionMode.Serial, readOnly: true),
+                RunProfilingOverheadScenario("ReadOnlyParallel_100k_480Ticks", profilingEntityCount, profilingTicks, SystemExecutionMode.ParallelBatches, readOnly: true),
+            ],
+            ExecutionModeResults =
+            [
+                RunExecutionModeScenario("OscillatingMovement_10k_240Ticks", 10_000, 240, activeSubsetOnly: false),
+                RunExecutionModeScenario("OscillatingMovement_100k_120Ticks", 100_000, 120, activeSubsetOnly: false),
+                RunExecutionModeScenario("OscillatingMovement_Active35_100k_120Ticks", 100_000, 120, activeSubsetOnly: true),
+                RunExecutionModeScenario("V1PulseMovement_100k_120Ticks", 100_000, 120, activeSubsetOnly: false, v1: true),
+                RunExecutionModeScenario("V1PulseMovement_Active35_100k_120Ticks", 100_000, 120, activeSubsetOnly: true, v1: true),
+            ],
+            MovementCadenceResults =
+            [
+                RunMovementCadenceScenario("MovementCadence_Serial_20k_96Ticks", cadenceEntityCount, cadenceTicks, cadencePeriod, cadenceSystems, SystemExecutionMode.Serial),
+                RunMovementCadenceScenario("MovementCadence_Parallel_20k_96Ticks", cadenceEntityCount, cadenceTicks, cadencePeriod, cadenceSystems, SystemExecutionMode.ParallelBatches),
+            ],
+        };
+    }
+
     public static string FormatSummary(BenchmarkRunReport report, string outputPath)
     {
         var sb = new StringBuilder();
@@ -189,6 +241,20 @@ internal static class NewKernelBenchmarks
     }
 
     public static void WritePhaseStaggeringReport(PhaseStaggeringBenchmarkReport report, string path)
+    {
+        string? directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+            Directory.CreateDirectory(directory);
+
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+        };
+
+        File.WriteAllText(path, JsonSerializer.Serialize(report, options));
+    }
+
+    public static void WriteSchedulerFeatureReport(SchedulerFeatureBenchmarkReport report, string path)
     {
         string? directory = Path.GetDirectoryName(path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -251,6 +317,29 @@ internal static class NewKernelBenchmarks
 
         foreach (PhaseStaggeringScenarioResult result in report.Results)
             sb.AppendLine($"{result.Name}: mean={result.MeanTickMilliseconds:F3} ms p50={result.P50TickMilliseconds:F3} ms p95={result.P95TickMilliseconds:F3} ms max={result.MaxTickMilliseconds:F3} ms stddev={result.StandardDeviationMilliseconds:F3} ms ratio={result.MaxToMeanRatio:F2} offsets=[{string.Join(", ", result.StartOffsets)}]");
+
+        return sb.ToString();
+    }
+
+    public static string FormatSchedulerFeatureSummary(SchedulerFeatureBenchmarkReport report, string outputPath)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Kernel: {report.KernelName}");
+        sb.AppendLine($"Configuration: {report.Configuration}");
+        sb.AppendLine($"ProcessorCount: {report.ProcessorCount}");
+        sb.AppendLine($"Results: {Path.GetFullPath(outputPath)}");
+
+        sb.AppendLine("Profiling:");
+        foreach (ProfilingOverheadResult result in report.ProfilingResults)
+            sb.AppendLine($"  {result.Name}: base={result.BaseMeanTickMilliseconds:F3} ms profiled={result.ProfiledMeanTickMilliseconds:F3} ms overhead={result.OverheadPercent:F1}%");
+
+        sb.AppendLine("ExecutionModes:");
+        foreach (ExecutionModeComparisonResult result in report.ExecutionModeResults)
+            sb.AppendLine($"  {result.Name}: serial={result.SerialMeanTickMilliseconds:F3} ms serial+intra={result.SerialIntraMeanTickMilliseconds:F3} ms parallel={result.ParallelMeanTickMilliseconds:F3} ms best={result.BestMode}");
+
+        sb.AppendLine("MovementCadence:");
+        foreach (MovementCadenceResult result in report.MovementCadenceResults)
+            sb.AppendLine($"  {result.Name}: aligned max={result.AlignedMaxTickMilliseconds:F3} ms staggered max={result.StaggeredMaxTickMilliseconds:F3} ms alignedOffsets=[{string.Join(", ", result.AlignedOffsets)}] staggeredOffsets=[{string.Join(", ", result.StaggeredOffsets)}]");
 
         return sb.ToString();
     }
@@ -478,6 +567,181 @@ internal static class NewKernelBenchmarks
             StartOffsets = world.GetSystemStartOffsetsSnapshot(),
             Checksum = SchedulerBenchmarkState.Checksum,
         };
+    }
+
+    private static ProfilingOverheadResult RunProfilingOverheadScenario(
+        string name,
+        int entityCount,
+        int tickCount,
+        SystemExecutionMode mode,
+        bool readOnly = false)
+    {
+        const int repeatCount = 3;
+
+        TickTimingMeasurement baseMeasurement = RepeatMeasurement(repeatCount, () =>
+        {
+            World world = readOnly
+                ? CreateReadOnlySchedulerWorld(entityCount, mode)
+                : CreateSchedulerWorld(entityCount, mode);
+            return MeasureTicks(world, tickCount);
+        });
+
+        TickTimingMeasurement profiledMeasurement = RepeatMeasurement(repeatCount, () =>
+        {
+            World world = readOnly
+                ? CreateReadOnlySchedulerWorld(entityCount, mode)
+                : CreateSchedulerWorld(entityCount, mode);
+            world.ProfilingEnabled = true;
+            return MeasureTicks(world, tickCount);
+        });
+
+        return new ProfilingOverheadResult
+        {
+            Name = name,
+            ExecutionMode = mode.ToString(),
+            ReadOnly = readOnly,
+            EntityCount = entityCount,
+            TickCount = tickCount,
+            BaseMeanTickMilliseconds = baseMeasurement.MeanMilliseconds,
+            BaseP95TickMilliseconds = baseMeasurement.P95Milliseconds,
+            BaseMaxTickMilliseconds = baseMeasurement.MaxMilliseconds,
+            ProfiledMeanTickMilliseconds = profiledMeasurement.MeanMilliseconds,
+            ProfiledP95TickMilliseconds = profiledMeasurement.P95Milliseconds,
+            ProfiledMaxTickMilliseconds = profiledMeasurement.MaxMilliseconds,
+            OverheadPercent = baseMeasurement.MeanMilliseconds <= 0d
+                ? 0d
+                : ((profiledMeasurement.MeanMilliseconds - baseMeasurement.MeanMilliseconds) / baseMeasurement.MeanMilliseconds) * 100d,
+            BaseChecksum = baseMeasurement.Checksum,
+            ProfiledChecksum = profiledMeasurement.Checksum,
+        };
+    }
+
+    private static ExecutionModeComparisonResult RunExecutionModeScenario(string name, int entityCount, int tickCount, bool activeSubsetOnly, bool v1 = false)
+    {
+        World serialWorld = v1
+            ? CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.Serial, activeSubsetOnly, workerCountOverride: 0, enableIntraSystemParallelInSerialMode: false)
+            : CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.Serial, activeSubsetOnly, workerCountOverride: 0, enableIntraSystemParallelInSerialMode: false);
+        TickTimingMeasurement serialMeasurement = MeasureTicks(serialWorld, tickCount);
+
+        World serialIntraWorld = v1
+            ? CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.Serial, activeSubsetOnly, workerCountOverride: 0, enableIntraSystemParallelInSerialMode: true)
+            : CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.Serial, activeSubsetOnly, workerCountOverride: 0, enableIntraSystemParallelInSerialMode: true);
+        TickTimingMeasurement serialIntraMeasurement = MeasureTicks(serialIntraWorld, tickCount);
+
+        World parallelWorld = v1
+            ? CreateV1PulseMovementWorld(entityCount, SystemExecutionMode.ParallelBatches, activeSubsetOnly)
+            : CreateOscillatingMovementWorld(entityCount, SystemExecutionMode.ParallelBatches, activeSubsetOnly);
+        TickTimingMeasurement parallelMeasurement = MeasureTicks(parallelWorld, tickCount);
+
+        double best = Math.Min(serialMeasurement.MeanMilliseconds, Math.Min(serialIntraMeasurement.MeanMilliseconds, parallelMeasurement.MeanMilliseconds));
+        string bestMode = best == serialMeasurement.MeanMilliseconds
+            ? "Serial"
+            : best == serialIntraMeasurement.MeanMilliseconds
+                ? "SerialIntra"
+                : "ParallelBatches";
+
+        return new ExecutionModeComparisonResult
+        {
+            Name = name,
+            EntityCount = entityCount,
+            TickCount = tickCount,
+            ActiveSubsetOnly = activeSubsetOnly,
+            ScenarioKind = v1 ? "V1PulseMovement" : "OscillatingMovement",
+            SerialMeanTickMilliseconds = serialMeasurement.MeanMilliseconds,
+            SerialIntraMeanTickMilliseconds = serialIntraMeasurement.MeanMilliseconds,
+            ParallelMeanTickMilliseconds = parallelMeasurement.MeanMilliseconds,
+            SerialP95TickMilliseconds = serialMeasurement.P95Milliseconds,
+            SerialIntraP95TickMilliseconds = serialIntraMeasurement.P95Milliseconds,
+            ParallelP95TickMilliseconds = parallelMeasurement.P95Milliseconds,
+            BestMode = bestMode,
+            SerialChecksum = serialMeasurement.Checksum,
+            SerialIntraChecksum = serialIntraMeasurement.Checksum,
+            ParallelChecksum = parallelMeasurement.Checksum,
+        };
+    }
+
+    private static MovementCadenceResult RunMovementCadenceScenario(
+        string name,
+        int entityCount,
+        int tickCount,
+        int periodTicks,
+        int systemCount,
+        SystemExecutionMode mode)
+    {
+        World alignedWorld = CreateStageCadenceBurstWorld(entityCount, mode, SystemStage.Movement, periodTicks, systemCount, staggered: false);
+        TickTimingMeasurement aligned = MeasureTicks(alignedWorld, tickCount);
+
+        World staggeredWorld = CreateStageCadenceBurstWorld(entityCount, mode, SystemStage.Movement, periodTicks, systemCount, staggered: true);
+        TickTimingMeasurement staggered = MeasureTicks(staggeredWorld, tickCount);
+
+        return new MovementCadenceResult
+        {
+            Name = name,
+            ExecutionMode = mode.ToString(),
+            EntityCount = entityCount,
+            TickCount = tickCount,
+            PeriodTicks = periodTicks,
+            SystemCount = systemCount,
+            AlignedMeanTickMilliseconds = aligned.MeanMilliseconds,
+            AlignedP95TickMilliseconds = aligned.P95Milliseconds,
+            AlignedMaxTickMilliseconds = aligned.MaxMilliseconds,
+            StaggeredMeanTickMilliseconds = staggered.MeanMilliseconds,
+            StaggeredP95TickMilliseconds = staggered.P95Milliseconds,
+            StaggeredMaxTickMilliseconds = staggered.MaxMilliseconds,
+            AlignedOffsets = alignedWorld.GetSystemStartOffsetsSnapshot(),
+            StaggeredOffsets = staggeredWorld.GetSystemStartOffsetsSnapshot(),
+            AlignedChecksum = aligned.Checksum,
+            StaggeredChecksum = staggered.Checksum,
+        };
+    }
+
+    private static TickTimingMeasurement MeasureTicks(World world, int tickCount)
+    {
+        SchedulerBenchmarkState.Reset();
+        var tickDurations = new double[tickCount];
+        for (int i = 0; i < tickCount; i++)
+        {
+            long start = Stopwatch.GetTimestamp();
+            world.Tick(0.016f);
+            tickDurations[i] = Stopwatch.GetElapsedTime(start, Stopwatch.GetTimestamp()).TotalMilliseconds;
+        }
+
+        double[] sorted = tickDurations.ToArray();
+        Array.Sort(sorted);
+        double mean = tickDurations.Average();
+        double variance = 0d;
+        for (int i = 0; i < tickDurations.Length; i++)
+        {
+            double delta = tickDurations[i] - mean;
+            variance += delta * delta;
+        }
+
+        variance /= tickDurations.Length;
+
+        return new TickTimingMeasurement(
+            MeanMilliseconds: mean,
+            MinMilliseconds: sorted[0],
+            P50Milliseconds: ComputePercentile(sorted, 0.50),
+            P95Milliseconds: ComputePercentile(sorted, 0.95),
+            MaxMilliseconds: sorted[^1],
+            StandardDeviationMilliseconds: Math.Sqrt(variance),
+            Checksum: SchedulerBenchmarkState.Checksum);
+    }
+
+    private static TickTimingMeasurement RepeatMeasurement(int repeatCount, Func<TickTimingMeasurement> measure)
+    {
+        var results = new TickTimingMeasurement[repeatCount];
+        for (int i = 0; i < repeatCount; i++)
+            results[i] = measure();
+
+        return new TickTimingMeasurement(
+            MeanMilliseconds: results.Average(static value => value.MeanMilliseconds),
+            MinMilliseconds: results.Average(static value => value.MinMilliseconds),
+            P50Milliseconds: results.Average(static value => value.P50Milliseconds),
+            P95Milliseconds: results.Average(static value => value.P95Milliseconds),
+            MaxMilliseconds: results.Average(static value => value.MaxMilliseconds),
+            StandardDeviationMilliseconds: results.Average(static value => value.StandardDeviationMilliseconds),
+            Checksum: results.Aggregate(0L, static (current, value) => current ^ value.Checksum));
     }
 
     private static SoakSample CreateSoakSample(
@@ -1164,7 +1428,7 @@ internal static class NewKernelBenchmarks
         return world;
     }
 
-    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false, int workerCountOverride = 0)
+    private static World CreateOscillatingMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false, int workerCountOverride = 0, bool enableIntraSystemParallelInSerialMode = true)
     {
         SchedulerBenchmarkState.Reset();
 
@@ -1175,7 +1439,7 @@ internal static class NewKernelBenchmarks
         ComponentId velocityId = world.GetComponentId<Velocity>();
         ComponentId oscillatorId = world.GetComponentId<Oscillator>();
         world.SetSystemExecutionMode(mode);
-        if (mode == SystemExecutionMode.Serial)
+        if (mode == SystemExecutionMode.Serial && enableIntraSystemParallelInSerialMode)
             world.ConfigureIntraSystemParallelInSerialMode(true);
         world.RegisterSystems(
             new OscillatingReadSystem<OscReadTagA>("OscReadA", positionId, velocityId, oscillatorId, activeSubsetOnly),
@@ -1186,7 +1450,7 @@ internal static class NewKernelBenchmarks
         return world;
     }
 
-    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false, int workerCountOverride = 0)
+    private static World CreateV1PulseMovementWorld(int entityCount, SystemExecutionMode mode, bool activeSubsetOnly = false, int workerCountOverride = 0, bool enableIntraSystemParallelInSerialMode = true)
     {
         SchedulerBenchmarkState.Reset();
 
@@ -1197,12 +1461,40 @@ internal static class NewKernelBenchmarks
         ComponentId velocityId = world.GetComponentId<PulseVelocity>();
         ComponentId motionId = world.GetComponentId<PulseMotion>();
         world.SetSystemExecutionMode(mode);
-        if (mode == SystemExecutionMode.Serial)
+        if (mode == SystemExecutionMode.Serial && enableIntraSystemParallelInSerialMode)
             world.ConfigureIntraSystemParallelInSerialMode(true);
         world.RegisterSystems(
             new V1PulsePhaseAdvanceSystem("V1PulsePhase", motionId, activeSubsetOnly),
             new V1PulseVelocitySystem("V1PulseVelocity", positionId, motionId, velocityId, activeSubsetOnly),
             new V1MovementSystem("V1Movement", positionId, velocityId, activeSubsetOnly));
+        world.SealSystems();
+        return world;
+    }
+
+    private static World CreateStageCadenceBurstWorld(int entityCount, SystemExecutionMode mode, SystemStage stage, int periodTicks, int systemCount, bool staggered)
+    {
+        SchedulerBenchmarkState.Reset();
+
+        World world = SeedWorld(entityCount, includeVelocity: false, includeHealth: false);
+        ComponentId positionId = world.GetComponentId<Position>();
+        world.SetSystemExecutionMode(mode);
+
+        int offsetA = 0;
+        int offsetB = staggered ? 1 : 0;
+        int offsetC = staggered ? 2 : 0;
+        int offsetD = staggered ? 3 : 0;
+
+        if (systemCount >= 1)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagA>("Burst0", positionId, stage, periodTicks, offsetA));
+        if (systemCount >= 2)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagB>("Burst1", positionId, stage, periodTicks, offsetB));
+        if (systemCount >= 3)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagC>("Burst2", positionId, stage, periodTicks, offsetC));
+        if (systemCount >= 4)
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagD>("Burst3", positionId, stage, periodTicks, offsetD));
+        if (systemCount > 4)
+            throw new ArgumentOutOfRangeException(nameof(systemCount), "Burst benchmark currently supports up to 4 systems.");
+
         world.SealSystems();
         return world;
     }
@@ -1217,13 +1509,13 @@ internal static class NewKernelBenchmarks
         world.SetSystemExecutionMode(mode);
 
         if (systemCount >= 1)
-            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagA>("Burst0", positionId, periodTicks));
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagA>("Burst0", positionId, SystemStage.AI, periodTicks, 0));
         if (systemCount >= 2)
-            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagB>("Burst1", positionId, periodTicks));
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagB>("Burst1", positionId, SystemStage.AI, periodTicks, 0));
         if (systemCount >= 3)
-            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagC>("Burst2", positionId, periodTicks));
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagC>("Burst2", positionId, SystemStage.AI, periodTicks, 0));
         if (systemCount >= 4)
-            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagD>("Burst3", positionId, periodTicks));
+            world.RegisterSystem(new PeriodicCadenceBurstReadSystem<BurstTagD>("Burst3", positionId, SystemStage.AI, periodTicks, 0));
         if (systemCount > 4)
             throw new ArgumentOutOfRangeException(nameof(systemCount), "Burst benchmark currently supports up to 4 systems.");
 
@@ -1502,13 +1794,13 @@ internal static class NewKernelBenchmarks
 
     private sealed class PeriodicCadenceBurstReadSystem<TTag> : SystemBase
     {
-        public PeriodicCadenceBurstReadSystem(string name, ComponentId positionId, int periodTicks)
+        public PeriodicCadenceBurstReadSystem(string name, ComponentId positionId, SystemStage stage, int periodTicks, int startOffset)
         {
             Descriptor = new SystemDescriptor(
                 name,
-                SystemStage.AI,
+                stage,
                 periodTicks,
-                0,
+                startOffset,
                 ComponentMask.FromIds([positionId]),
                 ComponentMask.Empty);
         }
@@ -2306,6 +2598,85 @@ internal sealed record PhaseStaggeringScenarioResult
     public required int[] StartOffsets { get; init; }
     public required long Checksum { get; init; }
 }
+
+internal sealed record SchedulerFeatureBenchmarkReport
+{
+    public required string SuiteName { get; init; }
+    public required string KernelName { get; init; }
+    public required string RuntimeVersion { get; init; }
+    public required string Configuration { get; init; }
+    public required int ProcessorCount { get; init; }
+    public required DateTimeOffset TimestampUtc { get; init; }
+    public required IReadOnlyList<ProfilingOverheadResult> ProfilingResults { get; init; }
+    public required IReadOnlyList<ExecutionModeComparisonResult> ExecutionModeResults { get; init; }
+    public required IReadOnlyList<MovementCadenceResult> MovementCadenceResults { get; init; }
+}
+
+internal sealed record ProfilingOverheadResult
+{
+    public required string Name { get; init; }
+    public required string ExecutionMode { get; init; }
+    public required bool ReadOnly { get; init; }
+    public required int EntityCount { get; init; }
+    public required int TickCount { get; init; }
+    public required double BaseMeanTickMilliseconds { get; init; }
+    public required double BaseP95TickMilliseconds { get; init; }
+    public required double BaseMaxTickMilliseconds { get; init; }
+    public required double ProfiledMeanTickMilliseconds { get; init; }
+    public required double ProfiledP95TickMilliseconds { get; init; }
+    public required double ProfiledMaxTickMilliseconds { get; init; }
+    public required double OverheadPercent { get; init; }
+    public required long BaseChecksum { get; init; }
+    public required long ProfiledChecksum { get; init; }
+}
+
+internal sealed record ExecutionModeComparisonResult
+{
+    public required string Name { get; init; }
+    public required string ScenarioKind { get; init; }
+    public required int EntityCount { get; init; }
+    public required int TickCount { get; init; }
+    public required bool ActiveSubsetOnly { get; init; }
+    public required double SerialMeanTickMilliseconds { get; init; }
+    public required double SerialIntraMeanTickMilliseconds { get; init; }
+    public required double ParallelMeanTickMilliseconds { get; init; }
+    public required double SerialP95TickMilliseconds { get; init; }
+    public required double SerialIntraP95TickMilliseconds { get; init; }
+    public required double ParallelP95TickMilliseconds { get; init; }
+    public required string BestMode { get; init; }
+    public required long SerialChecksum { get; init; }
+    public required long SerialIntraChecksum { get; init; }
+    public required long ParallelChecksum { get; init; }
+}
+
+internal sealed record MovementCadenceResult
+{
+    public required string Name { get; init; }
+    public required string ExecutionMode { get; init; }
+    public required int EntityCount { get; init; }
+    public required int TickCount { get; init; }
+    public required int PeriodTicks { get; init; }
+    public required int SystemCount { get; init; }
+    public required double AlignedMeanTickMilliseconds { get; init; }
+    public required double AlignedP95TickMilliseconds { get; init; }
+    public required double AlignedMaxTickMilliseconds { get; init; }
+    public required double StaggeredMeanTickMilliseconds { get; init; }
+    public required double StaggeredP95TickMilliseconds { get; init; }
+    public required double StaggeredMaxTickMilliseconds { get; init; }
+    public required int[] AlignedOffsets { get; init; }
+    public required int[] StaggeredOffsets { get; init; }
+    public required long AlignedChecksum { get; init; }
+    public required long StaggeredChecksum { get; init; }
+}
+
+internal readonly record struct TickTimingMeasurement(
+    double MeanMilliseconds,
+    double MinMilliseconds,
+    double P50Milliseconds,
+    double P95Milliseconds,
+    double MaxMilliseconds,
+    double StandardDeviationMilliseconds,
+    long Checksum);
 
 internal sealed record SoakOptions
 {
