@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text;
 using Godot;
 
@@ -5,6 +6,10 @@ namespace UltraSim.Server.Godot;
 
 public partial class ServerShellRoot : Control
 {
+    private const int MaxOutputLines = 400;
+
+    private readonly Queue<string> _outputLines = new();
+
     private GodotServerShellController? _controller;
     private RichTextLabel? _outputLog;
     private LineEdit? _commandLine;
@@ -12,6 +17,15 @@ public partial class ServerShellRoot : Control
     private Label? _ticksValue;
     private Label? _sessionsValue;
     private Label? _profileValue;
+    private Label? _playersSummaryValue;
+    private Label? _accountsSummaryValue;
+    private Button? _startButton;
+    private Button? _stopButton;
+    private Button? _saveButton;
+    private Button? _restartButton;
+    private Button? _shutdownButton;
+    private Button? _statusButton;
+    private Button? _runButton;
 
     public override void _Ready()
     {
@@ -21,8 +35,8 @@ public partial class ServerShellRoot : Control
         _controller = new GodotServerShellController(new GodotServerShellOptions("godot"));
         _controller.EventRaised += HandleServerEvent;
 
-        AppendOutput("Godot operator shell ready.");
-        AppendOutput("Use the buttons on the right or the command field below the output pane.");
+        AppendOutput("INFO", "Godot operator shell ready.");
+        AppendOutput("INFO", "Use the right-side controls or the command field below the output pane.");
         RefreshStatus();
     }
 
@@ -57,6 +71,7 @@ public partial class ServerShellRoot : Control
         Color panel = new(0.12f, 0.13f, 0.16f);
         Color panelSoft = new(0.15f, 0.16f, 0.20f);
         Color accent = new(0.86f, 0.55f, 0.27f);
+        Color accentSoft = new(0.31f, 0.45f, 0.57f);
         Color text = new(0.90f, 0.92f, 0.95f);
         Color muted = new(0.62f, 0.67f, 0.74f);
 
@@ -70,6 +85,8 @@ public partial class ServerShellRoot : Control
 
         var tabs = new TabContainer();
         tabs.SetAnchorsPreset(LayoutPreset.FullRect);
+        tabs.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        tabs.SizeFlagsVertical = SizeFlags.ExpandFill;
         tabs.AddThemeColorOverride("font_selected_color", text);
         tabs.AddThemeColorOverride("font_unselected_color", muted);
         tabs.AddThemeStyleboxOverride("panel", CreatePanelStyle(background, 0));
@@ -81,15 +98,22 @@ public partial class ServerShellRoot : Control
         outputTab.Name = "Output";
         tabs.AddChild(outputTab);
 
-        tabs.AddChild(CreatePlaceholderTab("Players", panel, muted));
-        tabs.AddChild(CreatePlaceholderTab("Accounts", panel, muted));
-        tabs.AddChild(CreatePlaceholderTab("NPCs", panel, muted));
-        tabs.AddChild(CreatePlaceholderTab("Items", panel, muted));
+        Control playersTab = BuildPlayersTab(panel, panelSoft, accentSoft, text, muted);
+        playersTab.Name = "Players";
+        tabs.AddChild(playersTab);
+
+        Control accountsTab = BuildAccountsTab(panel, panelSoft, accentSoft, text, muted);
+        accountsTab.Name = "Accounts";
+        tabs.AddChild(accountsTab);
+
+        tabs.AddChild(CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted));
+        tabs.AddChild(CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted));
     }
 
     private Control BuildOutputTab(Color panel, Color panelSoft, Color accent, Color text, Color muted)
     {
         var shellLayout = new HBoxContainer();
+        shellLayout.SetAnchorsPreset(LayoutPreset.FullRect);
         shellLayout.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         shellLayout.SizeFlagsVertical = SizeFlags.ExpandFill;
         shellLayout.AddThemeConstantOverride("separation", 10);
@@ -113,16 +137,19 @@ public partial class ServerShellRoot : Control
         _outputLog.ScrollFollowing = true;
         _outputLog.BbcodeEnabled = false;
         _outputLog.FitContent = false;
+        _outputLog.ContextMenuEnabled = true;
         _outputLog.AddThemeColorOverride("default_color", text);
         _outputLog.AddThemeConstantOverride("line_separation", 2);
         outputFrame.AddChild(_outputLog);
 
         var commandFrame = new PanelContainer();
         commandFrame.CustomMinimumSize = new Vector2(0, 44);
+        commandFrame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         commandFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
         leftColumn.AddChild(commandFrame);
 
         var commandRow = new HBoxContainer();
+        commandRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         commandRow.AddThemeConstantOverride("separation", 8);
         commandFrame.AddChild(commandRow);
 
@@ -136,13 +163,13 @@ public partial class ServerShellRoot : Control
         _commandLine.TextSubmitted += HandleCommandSubmitted;
         commandRow.AddChild(_commandLine);
 
-        var executeButton = CreateActionButton("Run", accent, text);
-        executeButton.Pressed += () =>
+        _runButton = CreateActionButton("Run", accent, text);
+        _runButton.Pressed += () =>
         {
             if (_commandLine is not null)
                 HandleCommandSubmitted(_commandLine.Text);
         };
-        commandRow.AddChild(executeButton);
+        commandRow.AddChild(_runButton);
 
         var rightPanel = new PanelContainer();
         rightPanel.CustomMinimumSize = new Vector2(180, 0);
@@ -150,17 +177,33 @@ public partial class ServerShellRoot : Control
         rightPanel.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
         shellLayout.AddChild(rightPanel);
 
+        var rightScroll = new ScrollContainer();
+        rightScroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        rightScroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+        rightScroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+        rightScroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+        rightPanel.AddChild(rightScroll);
+
         var rightColumn = new VBoxContainer();
-        rightColumn.AddThemeConstantOverride("separation", 8);
-        rightPanel.AddChild(rightColumn);
+        rightColumn.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        rightColumn.AddThemeConstantOverride("separation", 6);
+        rightScroll.AddChild(rightColumn);
 
         rightColumn.AddChild(CreateSectionLabel("Controls", text));
-        rightColumn.AddChild(CreateCommandButton("Start", ServerControlCommand.Start(), accent, text));
-        rightColumn.AddChild(CreateCommandButton("Stop", ServerControlCommand.Stop(), panelSoft, text));
-        rightColumn.AddChild(CreateCommandButton("Save", ServerControlCommand.Save(), panelSoft, text));
-        rightColumn.AddChild(CreateCommandButton("Restart", ServerControlCommand.Restart(), panelSoft, text));
-        rightColumn.AddChild(CreateCommandButton("Shutdown", ServerControlCommand.Shutdown(), panelSoft, text));
-        rightColumn.AddChild(CreateStatusButton(panelSoft, text));
+
+        _startButton = CreateCommandButton("Start", ServerControlCommand.Start(), accent, text);
+        _stopButton = CreateCommandButton("Stop", ServerControlCommand.Stop(), panelSoft, text);
+        _saveButton = CreateCommandButton("Save", ServerControlCommand.Save(), panelSoft, text);
+        _restartButton = CreateCommandButton("Restart", ServerControlCommand.Restart(), panelSoft, text);
+        _shutdownButton = CreateCommandButton("Shutdown", ServerControlCommand.Shutdown(), panelSoft, text);
+        _statusButton = CreateStatusButton(panelSoft, text);
+
+        rightColumn.AddChild(_startButton);
+        rightColumn.AddChild(_stopButton);
+        rightColumn.AddChild(_saveButton);
+        rightColumn.AddChild(_restartButton);
+        rightColumn.AddChild(_shutdownButton);
+        rightColumn.AddChild(_statusButton);
 
         var separator = new HSeparator();
         rightColumn.AddChild(separator);
@@ -179,14 +222,112 @@ public partial class ServerShellRoot : Control
         return shellLayout;
     }
 
-    private Control CreatePlaceholderTab(string title, Color panel, Color muted)
+    private Control BuildPlayersTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+    {
+        var frame = new PanelContainer();
+        frame.SetAnchorsPreset(LayoutPreset.FullRect);
+        frame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        frame.SizeFlagsVertical = SizeFlags.ExpandFill;
+        frame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
+
+        var column = new VBoxContainer();
+        column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        column.SizeFlagsVertical = SizeFlags.ExpandFill;
+        column.AddThemeConstantOverride("separation", 10);
+        frame.AddChild(column);
+
+        column.AddChild(CreateSectionLabel("Players Online", text));
+
+        _playersSummaryValue = new Label();
+        _playersSummaryValue.AddThemeColorOverride("font_color", muted);
+        column.AddChild(_playersSummaryValue);
+
+        var listFrame = new PanelContainer();
+        listFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
+        listFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
+        column.AddChild(listFrame);
+
+        var listText = new RichTextLabel();
+        listText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        listText.SizeFlagsVertical = SizeFlags.ExpandFill;
+        listText.SelectionEnabled = true;
+        listText.ScrollActive = true;
+        listText.AddThemeColorOverride("default_color", text);
+        listText.Text =
+            "Active player rows will appear here once session roster plumbing is wired.\n\n" +
+            "Planned first fields:\n" +
+            "- player name\n" +
+            "- account id\n" +
+            "- session state\n" +
+            "- kick / inspect actions";
+        listFrame.AddChild(listText);
+
+        return frame;
+    }
+
+    private Control BuildAccountsTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+    {
+        var frame = new PanelContainer();
+        frame.SetAnchorsPreset(LayoutPreset.FullRect);
+        frame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        frame.SizeFlagsVertical = SizeFlags.ExpandFill;
+        frame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
+
+        var column = new VBoxContainer();
+        column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        column.SizeFlagsVertical = SizeFlags.ExpandFill;
+        column.AddThemeConstantOverride("separation", 10);
+        frame.AddChild(column);
+
+        column.AddChild(CreateSectionLabel("Accounts", text));
+
+        _accountsSummaryValue = new Label();
+        _accountsSummaryValue.AddThemeColorOverride("font_color", muted);
+        column.AddChild(_accountsSummaryValue);
+
+        var actionRow = new HBoxContainer();
+        actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        actionRow.AddThemeConstantOverride("separation", 8);
+        column.AddChild(actionRow);
+
+        actionRow.AddChild(CreateDisabledButton("Add", accentSoft, text));
+        actionRow.AddChild(CreateDisabledButton("Remove", panelSoft, text));
+        actionRow.AddChild(CreateDisabledButton("Ban", panelSoft, text));
+
+        var detailsFrame = new PanelContainer();
+        detailsFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
+        detailsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
+        column.AddChild(detailsFrame);
+
+        var detailsText = new RichTextLabel();
+        detailsText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        detailsText.SizeFlagsVertical = SizeFlags.ExpandFill;
+        detailsText.SelectionEnabled = true;
+        detailsText.ScrollActive = true;
+        detailsText.AddThemeColorOverride("default_color", text);
+        detailsText.Text =
+            "Account directory and moderation tools are intentionally not wired yet.\n\n" +
+            "This tab will become the thin operator view for:\n" +
+            "- account lookup\n" +
+            "- add / remove / ban actions\n" +
+            "- audit notes and current flags";
+        detailsFrame.AddChild(detailsText);
+
+        return frame;
+    }
+
+    private Control CreatePlaceholderTab(string title, string message, Color panel, Color muted)
     {
         var frame = new PanelContainer();
         frame.Name = title;
+        frame.SetAnchorsPreset(LayoutPreset.FullRect);
+        frame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        frame.SizeFlagsVertical = SizeFlags.ExpandFill;
         frame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
 
         var label = new Label();
-        label.Text = $"{title} tab coming later.";
+        label.Text = message;
+        label.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         label.HorizontalAlignment = HorizontalAlignment.Center;
         label.VerticalAlignment = VerticalAlignment.Center;
         label.SetAnchorsPreset(LayoutPreset.FullRect);
@@ -206,6 +347,13 @@ public partial class ServerShellRoot : Control
     {
         var button = CreateActionButton("Status", fill, text);
         button.Pressed += PrintStatusSnapshot;
+        return button;
+    }
+
+    private static Button CreateDisabledButton(string text, Color fill, Color fontColor)
+    {
+        var button = CreateActionButton(text, fill, fontColor);
+        button.Disabled = true;
         return button;
     }
 
@@ -264,7 +412,7 @@ public partial class ServerShellRoot : Control
         if (string.Equals(raw, "help", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(raw, "?", StringComparison.OrdinalIgnoreCase))
         {
-            AppendOutput("Commands: start, status, save, restart, stop, shutdown, quit, exit, help");
+            AppendOutput("HELP", "Commands: start, status, save, restart, stop, shutdown, quit, exit, help");
             return;
         }
 
@@ -287,7 +435,7 @@ public partial class ServerShellRoot : Control
             return;
         }
 
-        AppendOutput($"Unknown command '{raw}'.");
+        AppendOutput("ERROR", $"Unknown command '{raw}'.");
     }
 
     private void ExecuteCommand(ServerControlCommand command)
@@ -296,7 +444,7 @@ public partial class ServerShellRoot : Control
             return;
 
         ServerCommandResult result = _controller.Execute(command);
-        AppendOutput($"> {command.Kind}: {result.Kind} - {result.Message}");
+        AppendOutput("RESULT", $"{command.Kind}: {result.Kind} - {result.Message}");
         RefreshStatus();
     }
 
@@ -309,19 +457,43 @@ public partial class ServerShellRoot : Control
         ServerMetricsSnapshot metrics = _controller.GetMetricsSnapshot();
 
         var builder = new StringBuilder();
-        builder.Append("status ");
         builder.Append($"profile={status.ProfileName} ");
         builder.Append($"state={status.State} ");
         builder.Append($"ticks={status.TickCount} ");
         builder.Append($"sessions={status.ActiveSessions}/{status.PeakSessions} ");
         builder.Append($"meanTickMs={metrics.MeanTickMilliseconds:0.###} ");
         builder.Append($"maxTickMs={metrics.MaxTickMilliseconds:0.###}");
-        AppendOutput(builder.ToString());
+        AppendOutput("STATUS", builder.ToString());
     }
 
     private void HandleServerEvent(ServerApplicationEvent evt)
     {
-        AppendOutput($"[{evt.TimestampUtc:HH:mm:ss}] {evt.Kind}: {evt.Message}");
+        switch (evt.Kind)
+        {
+            case ServerApplicationEventKind.StateChanged:
+                AppendOutput("STATE", evt.Message, evt.TimestampUtc);
+                break;
+
+            case ServerApplicationEventKind.SaveRequested:
+                AppendOutput("SAVE", evt.Message, evt.TimestampUtc);
+                break;
+
+            case ServerApplicationEventKind.SaveCompleted:
+                AppendOutput("SAVE", evt.Message, evt.TimestampUtc);
+                break;
+
+            case ServerApplicationEventKind.Faulted:
+                AppendOutput("FAULT", evt.Message, evt.TimestampUtc);
+                break;
+
+            case ServerApplicationEventKind.Log:
+                AppendOutput("LOG", evt.Message, evt.TimestampUtc);
+                break;
+
+            case ServerApplicationEventKind.CommandHandled:
+                break;
+        }
+
         RefreshStatus();
     }
 
@@ -343,11 +515,79 @@ public partial class ServerShellRoot : Control
 
         if (_sessionsValue is not null)
             _sessionsValue.Text = $"{status.ActiveSessions}/{status.PeakSessions}";
+
+        if (_playersSummaryValue is not null)
+            _playersSummaryValue.Text = $"{status.ActiveSessions} online now, peak {status.PeakSessions}.";
+
+        if (_accountsSummaryValue is not null)
+            _accountsSummaryValue.Text = "Account directory actions are placeholders until account storage is wired.";
+
+        RefreshControls(status.State);
     }
 
-    private void AppendOutput(string line)
+    private void RefreshControls(ServerApplicationState state)
     {
-        _outputLog?.AppendText(line + "\n");
+        bool hasController = _controller is not null;
+        bool canStart = hasController && state is ServerApplicationState.Created or ServerApplicationState.Initialized or ServerApplicationState.Stopped;
+        bool canStop = hasController && state != ServerApplicationState.Created && state != ServerApplicationState.Stopped;
+        bool canSave = hasController && state is ServerApplicationState.Initialized or ServerApplicationState.Running or ServerApplicationState.Faulted;
+        bool canRestart = hasController && state != ServerApplicationState.Created;
+        bool canShutdown = hasController && state != ServerApplicationState.Stopped;
+
+        if (_startButton is not null)
+            _startButton.Disabled = !canStart;
+
+        if (_stopButton is not null)
+            _stopButton.Disabled = !canStop;
+
+        if (_saveButton is not null)
+            _saveButton.Disabled = !canSave;
+
+        if (_restartButton is not null)
+            _restartButton.Disabled = !canRestart;
+
+        if (_shutdownButton is not null)
+            _shutdownButton.Disabled = !canShutdown;
+
+        if (_statusButton is not null)
+            _statusButton.Disabled = !hasController;
+
+        if (_runButton is not null)
+            _runButton.Disabled = !hasController;
+
+        if (_commandLine is not null)
+            _commandLine.Editable = hasController;
+    }
+
+    private void AppendOutput(string category, string message, DateTimeOffset? timestamp = null)
+    {
+        string line = $"{(timestamp ?? DateTimeOffset.Now):HH:mm:ss}  {category.PadRight(6)}  {message}";
+        _outputLines.Enqueue(line);
+
+        while (_outputLines.Count > MaxOutputLines)
+            _outputLines.Dequeue();
+
+        RebuildOutputLog();
+    }
+
+    private void RebuildOutputLog()
+    {
+        if (_outputLog is null)
+            return;
+
+        _outputLog.Clear();
+        foreach (string line in _outputLines)
+            _outputLog.AppendText(line + "\n");
+
+        CallDeferred(nameof(ScrollOutputToBottom));
+    }
+
+    private void ScrollOutputToBottom()
+    {
+        if (_outputLog is null)
+            return;
+
+        _outputLog.ScrollToLine(Math.Max(0, _outputLines.Count - 1));
     }
 
     private static StyleBoxFlat CreatePanelStyle(Color color, int radius, Color? borderColor = null)
