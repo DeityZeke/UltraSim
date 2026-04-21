@@ -1,5 +1,6 @@
 using System.Reflection;
 using UltraSim.Server;
+using UltraSim.Server.Console;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
 
@@ -32,6 +33,9 @@ internal static class TestRunner
         Run(nameof(HeadlessServerArgumentParser_ParsesExpectedOptions), HeadlessServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly), HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly);
         Run(nameof(HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults), HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults);
+        Run(nameof(ConsoleServerArgumentParser_ParsesExpectedOptions), ConsoleServerArgumentParser_ParsesExpectedOptions);
+        Run(nameof(ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases), ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases);
+        Run(nameof(ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly), ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -525,6 +529,69 @@ internal static class TestRunner
 
         Assert.Equal(1, exitCode);
         Assert.Contains("headless-boom", stderr.ToString());
+    }
+
+    private static void ConsoleServerArgumentParser_ParsesExpectedOptions()
+    {
+        string[] args =
+        {
+            "--profile=test-console",
+            "--tick-ms=20",
+            "--max-catchup=5",
+            "--run-for-seconds=0.5",
+            "--idle-delay-ms=3",
+            "--no-auto-start",
+            "--save-on-stop",
+            "--no-input",
+        };
+
+        bool parsed = ConsoleServerArgumentParser.TryParse(args, out ConsoleServerShellOptions options, out string? error, out bool showHelp);
+
+        Assert.True(parsed);
+        Assert.Equal<string?>(null, error);
+        Assert.False(showHelp);
+        Assert.Equal("test-console", options.ProfileName);
+        Assert.Equal(20, options.TickMilliseconds);
+        Assert.Equal(5, options.MaxCatchUpTicksPerPump);
+        Assert.False(options.AutoStart);
+        Assert.True(options.SaveOnStop);
+        Assert.False(options.EnableInput);
+        Assert.Equal(TimeSpan.FromSeconds(0.5), options.RunFor);
+        Assert.Equal(TimeSpan.FromMilliseconds(3), options.IdleDelay);
+    }
+
+    private static void ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases()
+    {
+        Assert.Equal(ConsoleShellDirectiveKind.Help, ConsoleShellCommandParser.Parse("help").Kind);
+        Assert.Equal(ConsoleShellDirectiveKind.None, ConsoleShellCommandParser.Parse(" ").Kind);
+        Assert.Equal(ServerControlCommandKind.Status, ConsoleShellCommandParser.Parse("status").Command.Kind);
+        Assert.Equal(ServerControlCommandKind.Save, ConsoleShellCommandParser.Parse("save").Command.Kind);
+        Assert.Equal(ServerControlCommandKind.Restart, ConsoleShellCommandParser.Parse("restart").Command.Kind);
+        Assert.Equal(ServerControlCommandKind.Shutdown, ConsoleShellCommandParser.Parse("quit").Command.Kind);
+        Assert.Equal(ConsoleShellDirectiveKind.Invalid, ConsoleShellCommandParser.Parse("bogus").Kind);
+    }
+
+    private static void ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly()
+    {
+        var stdin = new StringReader("status\nsave\nshutdown\n");
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new ConsoleServerShellOptions(
+            "test-console",
+            TickMilliseconds: 10,
+            IdleDelay: TimeSpan.Zero);
+        var shell = new ConsoleServerShell(options, stdin, stdout, stderr);
+
+        int exitCode = shell.RunAsync().GetAwaiter().GetResult();
+        string output = stdout.ToString();
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("StateChanged: state changed: Running", output);
+        Assert.Contains("> Status: Accepted", output);
+        Assert.Contains("> Save: Accepted", output);
+        Assert.Contains("> Shutdown: Accepted", output);
+        Assert.Contains("StateChanged: state changed: Stopped", output);
+        Assert.Equal(string.Empty, stderr.ToString());
     }
 
     private static void AssertMethod(Type contract, string name, Type returnType, params Type[] parameterTypes)

@@ -21,11 +21,15 @@
       <HintPath>..\..\Server\_Headless\bin\$(Configuration)\net8.0\UltraSim.Server.Headless.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.Server.Console">
+      <HintPath>..\..\Server\_Console\bin\$(Configuration)\net8.0\UltraSim.Server.Console.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <Target Name="BuildServerDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj"
+      Projects="..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>
