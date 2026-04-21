@@ -60,6 +60,7 @@ internal static class TestRunner
         Run(nameof(World_ProfilingSnapshot_CapturesTickPhaseCounts), World_ProfilingSnapshot_CapturesTickPhaseCounts);
         Run(nameof(World_SystemRuntimeSnapshots_ExposeScheduleControlAndTimingMetadata), World_SystemRuntimeSnapshots_ExposeScheduleControlAndTimingMetadata);
         Run(nameof(World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns), World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns);
+        Run(nameof(World_TickAndManualExecution_RejectInvalidDeltaSeconds), World_TickAndManualExecution_RejectInvalidDeltaSeconds);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
@@ -2009,6 +2010,32 @@ internal static class TestRunner
         snapshot = world.GetSystemRuntimeSnapshots()[0];
         Assert.Equal(1L, snapshot.UpdateCount);
         Assert.Equal((uint)1, snapshot.LastRunTick);
+    }
+
+    private static void World_TickAndManualExecution_RejectInvalidDeltaSeconds()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var manual = new ManualLoggingSystem(
+            "Manual",
+            new SystemDescriptor(
+                "Manual",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.Empty,
+                manual: true),
+            new List<string>());
+
+        world.RegisterSystem(manual);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.Tick(-0.016f));
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.Tick(float.NaN));
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.Tick(float.PositiveInfinity));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.RunManualSystem(manual.Id, -0.016f));
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.RunManualSystem<ManualLoggingSystem>(float.NaN));
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.RunManualSystem(manual.Id, float.NegativeInfinity));
     }
 
     private static void World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse()

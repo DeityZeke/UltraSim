@@ -2,23 +2,35 @@ using System.Runtime.CompilerServices;
 
 namespace UltraSim.ECS;
 
+/// <summary>
+/// Stable entity handle composed of an index and version.
+/// </summary>
 public readonly struct Entity : IEquatable<Entity>
 {
     public static readonly Entity Null = default;
     private readonly ulong _packed;
 
+    /// <summary>
+    /// Gets the packed 64-bit representation of this entity handle.
+    /// </summary>
     public ulong Packed
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _packed;
     }
 
+    /// <summary>
+    /// Gets the entity slot index.
+    /// </summary>
     public uint Index
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => (uint)Packed;
     }
 
+    /// <summary>
+    /// Gets the entity version used to invalidate stale handles after slot reuse.
+    /// </summary>
     public uint Version
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -37,6 +49,9 @@ public readonly struct Entity : IEquatable<Entity>
         _packed = packed;
     }
 
+    /// <summary>
+    /// Returns <see langword="true"/> when this handle contains a non-zero version.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsValid() => Version != 0;
 

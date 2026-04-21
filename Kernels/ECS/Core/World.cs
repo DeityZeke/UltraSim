@@ -38,6 +38,9 @@ public sealed partial class World
     private WorldLifecycleState _state;
     private WorldProfileSnapshot _lastProfile;
 
+    /// <summary>
+    /// Central ECS runtime instance that owns entities, archetypes, systems, and structural queues for one schema.
+    /// </summary>
     public World(EcsSchema schema, EcsWorldServices? services = null)
     {
         Schema = schema ?? throw new ArgumentNullException(nameof(schema));
@@ -65,7 +68,14 @@ public sealed partial class World
     public SystemExecutionMode SystemExecutionMode => _systems.ExecutionMode;
     public bool IsSealed => _state >= WorldLifecycleState.Sealed;
     public bool IsInitialized => _state >= WorldLifecycleState.Initialized && _state < WorldLifecycleState.Shutdown;
+    /// <summary>
+    /// Gets or sets whether tick profiling and per-system timing capture are enabled.
+    /// </summary>
     public bool ProfilingEnabled { get; set; }
+
+    /// <summary>
+    /// Gets the most recent tick profile captured while <see cref="ProfilingEnabled"/> was enabled.
+    /// </summary>
     public WorldProfileSnapshot LastProfile => _lastProfile;
 
     internal EntityManager EntityStore { get; }
@@ -207,6 +217,13 @@ public sealed partial class World
         adapter.Load(this, reader);
     }
 
+    /// <summary>
+    /// Drains pending structural operations at an explicit barrier.
+    /// </summary>
+    /// <remarks>
+    /// The current kernel preserves the two-phase barrier shape for callers and profiling, but the
+    /// <paramref name="phase"/> value is currently informational rather than behavior-changing.
+    /// </remarks>
     public void ProcessStructuralQueues(StructuralBarrierPhase phase = StructuralBarrierPhase.Manual)
     {
         EnsureNotShutdown();
@@ -333,12 +350,18 @@ public sealed partial class World
     public int DrainDirtyTo<T>(Span<Entity> destination) where T : unmanaged, IComponent<T>
         => _dirty.CopyAndClearComponentTo(Schema.GetComponentId<T>(), destination);
 
+    /// <summary>
+    /// Registers a single system before the world is sealed.
+    /// </summary>
     public void RegisterSystem(SystemBase system)
     {
         EnsureCanMutateConfiguration();
         _systems.Register(system);
     }
 
+    /// <summary>
+    /// Registers several systems before the world is sealed.
+    /// </summary>
     public void RegisterSystems(params SystemBase[] systems)
     {
         EnsureCanMutateConfiguration();
@@ -353,6 +376,9 @@ public sealed partial class World
         _systems.SetExecutionMode(mode);
     }
 
+    /// <summary>
+    /// Configures automatic phase staggering for same-period non-manual systems.
+    /// </summary>
     public void ConfigurePhaseStaggering(bool enabled, int maxNonCriticalStagger = 10)
     {
         EnsureCanMutateConfiguration();
@@ -368,9 +394,13 @@ public sealed partial class World
     public TSystem? GetSystem<TSystem>() where TSystem : SystemBase
         => (TSystem?)_systems.GetSystem<TSystem>();
 
+    /// <summary>
+    /// Advances the world by one tick.
+    /// </summary>
     public void Tick(float deltaSeconds)
     {
         EnsureReadyForExecution();
+        EnsureValidDeltaSeconds(deltaSeconds);
         StructuralApplyStats preSystems = default;
         StructuralApplyStats postSystems = default;
         long preTicks = 0;
@@ -422,15 +452,23 @@ public sealed partial class World
         _worldTick++;
     }
 
+    /// <summary>
+    /// Runs a single manual system by id against the current world state.
+    /// </summary>
     public void RunManualSystem(SystemId id, float deltaSeconds)
     {
         EnsureReadyForExecution();
+        EnsureValidDeltaSeconds(deltaSeconds);
         _systems.RunManual(id, this, _worldTick, deltaSeconds, _commands, captureTimings: ProfilingEnabled);
     }
 
+    /// <summary>
+    /// Runs a single manual system by type against the current world state.
+    /// </summary>
     public void RunManualSystem<TSystem>(float deltaSeconds) where TSystem : SystemBase
     {
         EnsureReadyForExecution();
+        EnsureValidDeltaSeconds(deltaSeconds);
         _systems.RunManual<TSystem>(this, _worldTick, deltaSeconds, _commands, captureTimings: ProfilingEnabled);
     }
 
@@ -441,6 +479,9 @@ public sealed partial class World
         return offsets;
     }
 
+    /// <summary>
+    /// Captures immutable per-system runtime snapshots for inspection or host tooling.
+    /// </summary>
     public SystemRuntimeSnapshot[] GetSystemRuntimeSnapshots()
     {
         EnsureNotShutdown();
@@ -1276,5 +1317,11 @@ public sealed partial class World
     {
         if (_state == WorldLifecycleState.Shutdown)
             throw new InvalidOperationException("World is shutdown.");
+    }
+
+    private static void EnsureValidDeltaSeconds(float deltaSeconds)
+    {
+        if (float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds) || deltaSeconds < 0f)
+            throw new ArgumentOutOfRangeException(nameof(deltaSeconds), "Tick delta must be finite and non-negative.");
     }
 }

@@ -1,5 +1,8 @@
 namespace UltraSim.ECS;
 
+/// <summary>
+/// Immutable inspection snapshot for a registered system, including optional live timing data.
+/// </summary>
 public readonly record struct SystemRuntimeSnapshot(
     SystemId Id,
     string Name,
