@@ -9,7 +9,21 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\Server\Core\UltraSim.Server.Core.csproj" />
+    <Reference Include="UltraSim.Server.Core">
+      <HintPath>..\..\Server\Core\bin\$(Configuration)\net8.0\UltraSim.Server.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Hosting">
+      <HintPath>..\..\Server\Hosting\bin\$(Configuration)\net8.0\UltraSim.Server.Hosting.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
+
+  <Target Name="BuildServerDependencies" BeforeTargets="ResolveReferences">
+    <MSBuild
+      Projects="..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
 
 </Project>

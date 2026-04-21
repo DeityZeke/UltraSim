@@ -1,5 +1,6 @@
 using System.Reflection;
 using UltraSim.Server;
+using UltraSim.Server.Hosting;
 
 TestRunner.Run();
 
@@ -14,6 +15,19 @@ internal static class TestRunner
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerApplicationEvent_PreservesSuppliedValues), ServerApplicationEvent_PreservesSuppliedValues);
         Run(nameof(IServerApplication_ExposesExpectedControlSurface), IServerApplication_ExposesExpectedControlSurface);
+        Run(nameof(ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder), ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder);
+        Run(nameof(ServerApplication_Start_AutoInitializesFromCreated), ServerApplication_Start_AutoInitializesFromCreated);
+        Run(nameof(ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick), ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick);
+        Run(nameof(ServerApplication_Save_ExecutesImmediately), ServerApplication_Save_ExecutesImmediately);
+        Run(nameof(ServerApplication_Stop_FromCreated_MovesDirectlyToStopped), ServerApplication_Stop_FromCreated_MovesDirectlyToStopped);
+        Run(nameof(ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook), ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook);
+        Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
+        Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
+        Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
+        Run(nameof(ServerHostLoop_Pump_TicksAtFixedStepCadence), ServerHostLoop_Pump_TicksAtFixedStepCadence);
+        Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
+        Run(nameof(ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks), ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks);
+        Run(nameof(ServerHostLoop_ForwardsApplicationEventsToSinks), ServerHostLoop_ForwardsApplicationEventsToSinks);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -146,6 +160,294 @@ internal static class TestRunner
         Assert.Equal(typeof(Action<ServerApplicationEvent>), eventInfo!.EventHandlerType);
     }
 
+    private static void ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder()
+    {
+        var log = new List<string>();
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Initialize = _ => log.Add("Initialize"),
+                Start = _ => log.Add("Start"),
+                Load = _ => log.Add("Load"),
+                Tick = (_, dt) => log.Add($"Tick:{dt:0.000}"),
+                Stop = _ => log.Add("Stop"),
+            });
+
+        app.Initialize();
+        app.Start();
+        app.Tick(0.25f);
+        app.Stop();
+
+        Assert.Equal(ServerApplicationState.Stopped, app.State);
+        Assert.SequenceEqual(
+            new[] { "Initialize", "Start", "Load", "Tick:0.250", "Stop" },
+            log);
+    }
+
+    private static void ServerApplication_Start_AutoInitializesFromCreated()
+    {
+        var log = new List<string>();
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Initialize = _ => log.Add("Initialize"),
+                Start = _ => log.Add("Start"),
+                Load = _ => log.Add("Load"),
+            });
+
+        app.Start();
+
+        Assert.True(app.IsInitialized);
+        Assert.True(app.IsRunning);
+        Assert.Equal(ServerApplicationState.Running, app.State);
+        Assert.SequenceEqual(new[] { "Initialize", "Start", "Load" }, log);
+    }
+
+    private static void ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick()
+    {
+        var log = new List<string>();
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Tick = (_, _) => log.Add("Tick"),
+                Save = _ => log.Add("Save"),
+            });
+
+        app.Start();
+        app.RequestSave();
+
+        Assert.SequenceEqual(Array.Empty<string>(), log);
+
+        app.Tick(0.016f);
+        Assert.SequenceEqual(new[] { "Tick", "Save" }, log);
+
+        app.Tick(0.016f);
+        Assert.SequenceEqual(new[] { "Tick", "Save", "Tick" }, log);
+    }
+
+    private static void ServerApplication_Save_ExecutesImmediately()
+    {
+        int saves = 0;
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Save = _ => saves++,
+            });
+
+        app.Start();
+        bool result = app.Save();
+
+        Assert.True(result);
+        Assert.Equal(1, saves);
+        Assert.Equal(ServerApplicationState.Running, app.State);
+    }
+
+    private static void ServerApplication_Stop_FromCreated_MovesDirectlyToStopped()
+    {
+        var app = new ServerApplication(new ServerApplicationOptions("test"));
+
+        app.Stop();
+
+        Assert.Equal(ServerApplicationState.Stopped, app.State);
+        Assert.False(app.IsInitialized);
+        Assert.False(app.IsRunning);
+    }
+
+    private static void ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook()
+    {
+        var log = new List<string>();
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test", SaveOnStop: true),
+            new ServerApplicationHooks
+            {
+                Save = _ => log.Add("Save"),
+                Stop = _ => log.Add("Stop"),
+            });
+
+        app.Start();
+        app.Stop();
+
+        Assert.SequenceEqual(new[] { "Save", "Stop" }, log);
+        Assert.Equal(ServerApplicationState.Stopped, app.State);
+    }
+
+    private static void ServerApplication_CommandDispatch_UsesSharedLifecycleSurface()
+    {
+        int saves = 0;
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Save = _ => saves++,
+            });
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Start(), out ServerCommandResult startResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, startResult.Kind);
+        Assert.Equal(ServerApplicationState.Running, app.State);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Status(), out ServerCommandResult statusResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, statusResult.Kind);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Save(), out ServerCommandResult saveResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, saveResult.Kind);
+        Assert.Equal(1, saves);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Stop(), out ServerCommandResult stopResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, stopResult.Kind);
+        Assert.Equal(ServerApplicationState.Stopped, app.State);
+    }
+
+    private static void ServerApplication_Faults_WhenHookThrows()
+    {
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Tick = static (_, _) => throw new InvalidOperationException("boom"),
+            });
+
+        app.Start();
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => app.Tick(0.016f));
+        Assert.Equal("boom", ex.Message);
+        Assert.Equal(ServerApplicationState.Faulted, app.State);
+        Assert.NotNull(app.LastFault);
+        Assert.Equal("Tick", app.LastFault!.Operation);
+        Assert.Equal("boom", app.LastFault.Message);
+    }
+
+    private static void ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity()
+    {
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                IsAcceptingConnections = _ => true,
+                GetActiveSessions = _ => 3,
+            });
+
+        app.Start();
+        app.RequestSave();
+        app.Tick(0.016f);
+        app.TryExecuteCommand(ServerControlCommand.Status(), out _);
+
+        ServerStatusSnapshot status = app.GetStatusSnapshot();
+        ServerMetricsSnapshot metrics = app.GetMetricsSnapshot();
+
+        Assert.Equal("test", status.ProfileName);
+        Assert.Equal(ServerApplicationState.Running, status.State);
+        Assert.True(status.IsInitialized);
+        Assert.True(status.IsRunning);
+        Assert.True(status.IsAcceptingConnections);
+        Assert.Equal(1L, status.TickCount);
+        Assert.Equal(3, status.ActiveSessions);
+        Assert.Equal(3, status.PeakSessions);
+        Assert.True(status.StartedAtUtc.HasValue);
+        Assert.True(status.Uptime >= TimeSpan.Zero);
+
+        Assert.Equal(1L, metrics.TotalTicks);
+        Assert.Equal(1L, metrics.TotalCommands);
+        Assert.Equal(1L, metrics.TotalSaveRequests);
+        Assert.Equal(1L, metrics.TotalCompletedSaves);
+        Assert.Equal(0L, metrics.TotalFaults);
+        Assert.True(metrics.MeanTickMilliseconds >= 0d);
+        Assert.True(metrics.MaxTickMilliseconds >= 0d);
+    }
+
+    private static void ServerHostLoop_Pump_TicksAtFixedStepCadence()
+    {
+        int ticks = 0;
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Tick = (_, _) => ticks++,
+            });
+        app.Start();
+
+        using var host = new ServerHostLoop(
+            app,
+            new ServerHostLoopOptions(TimeSpan.FromMilliseconds(50), MaxCatchUpTicksPerPump: 8));
+
+        ServerHostPumpResult first = host.Pump(TimeSpan.FromMilliseconds(20));
+        Assert.Equal(0, first.TicksProcessed);
+        Assert.Equal(0, ticks);
+
+        ServerHostPumpResult second = host.Pump(TimeSpan.FromMilliseconds(40));
+        Assert.Equal(1, second.TicksProcessed);
+        Assert.Equal(1, ticks);
+
+        ServerHostPumpResult third = host.Pump(TimeSpan.FromMilliseconds(100));
+        Assert.Equal(2, third.TicksProcessed);
+        Assert.Equal(3, ticks);
+    }
+
+    private static void ServerHostLoop_Pump_RespectsCatchUpCap()
+    {
+        int ticks = 0;
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Tick = (_, _) => ticks++,
+            });
+        app.Start();
+
+        using var host = new ServerHostLoop(
+            app,
+            new ServerHostLoopOptions(TimeSpan.FromMilliseconds(50), MaxCatchUpTicksPerPump: 2));
+
+        ServerHostPumpResult result = host.Pump(TimeSpan.FromMilliseconds(260));
+
+        Assert.Equal(2, result.TicksProcessed);
+        Assert.Equal(3, result.DroppedCatchUpTicks);
+        Assert.Equal(2, ticks);
+    }
+
+    private static void ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks()
+    {
+        var log = new List<string>();
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Start = _ => log.Add("Start"),
+                Load = _ => log.Add("Load"),
+                Save = _ => log.Add("Save"),
+                Tick = (_, _) => log.Add("Tick"),
+            });
+
+        using var host = new ServerHostLoop(
+            app,
+            new ServerHostLoopOptions(TimeSpan.FromMilliseconds(50), MaxCatchUpTicksPerPump: 8));
+
+        host.EnqueueCommand(ServerControlCommand.Start());
+        host.EnqueueCommand(ServerControlCommand.Save());
+
+        ServerHostPumpResult result = host.Pump(TimeSpan.FromMilliseconds(50));
+
+        Assert.Equal(2, result.CommandsHandled);
+        Assert.Equal(1, result.TicksProcessed);
+        Assert.SequenceEqual(new[] { "Start", "Load", "Save", "Tick" }, log);
+    }
+
+    private static void ServerHostLoop_ForwardsApplicationEventsToSinks()
+    {
+        var sink = new RecordingHostSink();
+        var app = new ServerApplication(new ServerApplicationOptions("test"));
+
+        using var host = new ServerHostLoop(app, sinks: new[] { sink });
+        host.EnqueueCommand(ServerControlCommand.Start());
+        host.Pump(TimeSpan.Zero);
+
+        Assert.True(sink.Events.Count > 0);
+        Assert.Equal(ServerApplicationEventKind.CommandHandled, sink.Events[^1].Kind);
+    }
+
     private static void AssertMethod(Type contract, string name, Type returnType, params Type[] parameterTypes)
     {
         MethodInfo? method = contract.GetMethod(name, parameterTypes);
@@ -187,5 +489,48 @@ internal static class Assert
     {
         if (value is null)
             throw new InvalidOperationException("Expected value to be non-null.");
+    }
+
+    public static void False(bool value)
+    {
+        if (value)
+            throw new InvalidOperationException("Expected condition to be false.");
+    }
+
+    public static TException Throws<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException ex)
+        {
+            return ex;
+        }
+
+        throw new InvalidOperationException($"Expected exception of type {typeof(TException).Name}.");
+    }
+
+    public static void SequenceEqual<T>(IReadOnlyList<T> expected, IReadOnlyList<T> actual)
+    {
+        if (expected.Count != actual.Count)
+            throw new InvalidOperationException($"Expected sequence count {expected.Count}, got {actual.Count}.");
+
+        for (int i = 0; i < expected.Count; i++)
+        {
+            if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
+                throw new InvalidOperationException($"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
+        }
+    }
+}
+
+internal sealed class RecordingHostSink : IServerHostEventSink
+{
+    public List<ServerApplicationEvent> Events { get; } = new();
+
+    public void OnEvent(ServerApplicationEvent evt)
+    {
+        Events.Add(evt);
     }
 }
