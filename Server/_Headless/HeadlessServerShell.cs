@@ -30,7 +30,7 @@ public sealed class HeadlessServerShell
             ? Array.Empty<IServerHostEventSink>()
             : new IServerHostEventSink[] { new HeadlessServerEventSink(_stdout, _stderr) };
 
-        using var host = new ServerHostLoop(
+        using var runtime = new HostedServerRuntime(
             application,
             new ServerHostLoopOptions(
                 TimeSpan.FromMilliseconds(Options.TickMilliseconds),
@@ -38,7 +38,7 @@ public sealed class HeadlessServerShell
             sinks);
 
         if (Options.AutoStart)
-            host.EnqueueCommand(ServerControlCommand.Start());
+            runtime.StartImmediately();
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         TimeSpan previousElapsed = stopwatch.Elapsed;
@@ -51,12 +51,12 @@ public sealed class HeadlessServerShell
                 TimeSpan delta = currentElapsed - previousElapsed;
                 previousElapsed = currentElapsed;
 
-                host.Pump(delta);
+                runtime.Pump(delta);
 
                 if (Options.RunFor.HasValue && currentElapsed >= Options.RunFor.Value)
                     break;
 
-                if (Options.AutoStart && application.State == ServerApplicationState.Stopped)
+                if (Options.AutoStart && runtime.State == ServerApplicationState.Stopped)
                     break;
 
                 if (Options.IdleDelay > TimeSpan.Zero)
@@ -72,34 +72,16 @@ public sealed class HeadlessServerShell
         {
             _stderr.WriteLine(ex);
             _stderr.Flush();
-            TryStop(application);
+            runtime.StopSafely();
             return 1;
         }
 
-        TryStop(application);
-        return application.State == ServerApplicationState.Faulted ? 1 : 0;
+        runtime.StopSafely();
+        return runtime.State == ServerApplicationState.Faulted ? 1 : 0;
     }
 
     private static IServerApplication CreateDefaultApplication(HeadlessServerShellOptions options) =>
         new ServerApplication(new ServerApplicationOptions(
             options.ProfileName,
             SaveOnStop: options.SaveOnStop));
-
-    private static void TryStop(IServerApplication application)
-    {
-        if (application.State == ServerApplicationState.Stopped ||
-            application.State == ServerApplicationState.Created)
-        {
-            application.Stop();
-            return;
-        }
-
-        try
-        {
-            application.Stop();
-        }
-        catch
-        {
-        }
-    }
 }

@@ -25,11 +25,15 @@
       <HintPath>..\..\Server\_Console\bin\$(Configuration)\net8.0\UltraSim.Server.Console.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.Server.Godot">
+      <HintPath>..\..\Server\_Godot\bin\$(Configuration)\net8.0\UltraSim.Server.Godot.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <Target Name="BuildServerDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj"
+      Projects="..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj;..\..\Server\_Godot\UltraSim.Server.Godot.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>

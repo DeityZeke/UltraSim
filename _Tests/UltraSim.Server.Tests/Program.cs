@@ -1,6 +1,7 @@
 using System.Reflection;
 using UltraSim.Server;
 using UltraSim.Server.Console;
+using UltraSim.Server.Godot;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
 
@@ -30,12 +31,14 @@ internal static class TestRunner
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
         Run(nameof(ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks), ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks);
         Run(nameof(ServerHostLoop_ForwardsApplicationEventsToSinks), ServerHostLoop_ForwardsApplicationEventsToSinks);
+        Run(nameof(HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface), HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface);
         Run(nameof(HeadlessServerArgumentParser_ParsesExpectedOptions), HeadlessServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly), HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly);
         Run(nameof(HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults), HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults);
         Run(nameof(ConsoleServerArgumentParser_ParsesExpectedOptions), ConsoleServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases), ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases);
         Run(nameof(ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly), ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly);
+        Run(nameof(GodotServerShellController_ExposesSharedControlSurface), GodotServerShellController_ExposesSharedControlSurface);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -456,6 +459,22 @@ internal static class TestRunner
         Assert.Equal(ServerApplicationEventKind.CommandHandled, sink.Events[^1].Kind);
     }
 
+    private static void HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface()
+    {
+        using var runtime = new HostedServerRuntime(
+            new ServerApplication(new ServerApplicationOptions("test")),
+            new ServerHostLoopOptions(TimeSpan.FromMilliseconds(10), MaxCatchUpTicksPerPump: 4));
+
+        runtime.StartImmediately();
+        Assert.Equal(ServerApplicationState.Running, runtime.State);
+
+        ServerHostPumpResult result = runtime.Pump(TimeSpan.FromMilliseconds(35));
+        Assert.Equal(3, result.TicksProcessed);
+
+        runtime.StopSafely();
+        Assert.Equal(ServerApplicationState.Stopped, runtime.State);
+    }
+
     private static void HeadlessServerArgumentParser_ParsesExpectedOptions()
     {
         string[] args =
@@ -592,6 +611,23 @@ internal static class TestRunner
         Assert.Contains("> Shutdown: Accepted", output);
         Assert.Contains("StateChanged: state changed: Stopped", output);
         Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    private static void GodotServerShellController_ExposesSharedControlSurface()
+    {
+        var observed = new List<ServerApplicationEvent>();
+        using var controller = new GodotServerShellController(new GodotServerShellOptions("test-godot", TickMilliseconds: 10));
+        controller.EventRaised += observed.Add;
+
+        controller.Start();
+        controller.TickFrame(0.03d);
+        ServerCommandResult status = controller.Execute(ServerControlCommand.Status());
+        controller.Shutdown();
+
+        Assert.Equal(ServerApplicationState.Stopped, controller.State);
+        Assert.Equal(ServerCommandResultKind.Accepted, status.Kind);
+        Assert.True(observed.Count > 0);
+        Assert.Equal(ServerApplicationEventKind.StateChanged, observed[0].Kind);
     }
 
     private static void AssertMethod(Type contract, string name, Type returnType, params Type[] parameterTypes)

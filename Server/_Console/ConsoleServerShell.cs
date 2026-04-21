@@ -32,7 +32,7 @@ public sealed class ConsoleServerShell
     {
         IServerApplication application = _applicationFactory(Options);
 
-        using var host = new ServerHostLoop(
+        using var runtime = new HostedServerRuntime(
             application,
             new ServerHostLoopOptions(
                 TimeSpan.FromMilliseconds(Options.TickMilliseconds),
@@ -40,10 +40,7 @@ public sealed class ConsoleServerShell
             new IServerHostEventSink[] { new ConsoleServerEventSink(_stdout, _stderr) });
 
         if (Options.AutoStart)
-        {
-            host.EnqueueCommand(ServerControlCommand.Start());
-            host.Pump(TimeSpan.Zero);
-        }
+            runtime.StartImmediately();
 
         Task? inputTask = null;
         if (Options.EnableInput)
@@ -51,7 +48,7 @@ public sealed class ConsoleServerShell
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         TimeSpan previousElapsed = stopwatch.Elapsed;
-        bool observedRunning = application.State == ServerApplicationState.Running;
+        bool observedRunning = runtime.State == ServerApplicationState.Running;
 
         try
         {
@@ -61,22 +58,22 @@ public sealed class ConsoleServerShell
                 TimeSpan delta = currentElapsed - previousElapsed;
                 previousElapsed = currentElapsed;
 
-                DrainPendingDirectives(application);
-                host.Pump(delta);
+                DrainPendingDirectives(runtime);
+                runtime.Pump(delta);
 
-                if (application.State == ServerApplicationState.Running)
+                if (runtime.State == ServerApplicationState.Running)
                     observedRunning = true;
 
-                if (application.State == ServerApplicationState.Faulted)
+                if (runtime.State == ServerApplicationState.Faulted)
                     break;
 
                 if (Options.RunFor.HasValue && currentElapsed >= Options.RunFor.Value)
                     break;
 
-                if (observedRunning && application.State == ServerApplicationState.Stopped)
+                if (observedRunning && runtime.State == ServerApplicationState.Stopped)
                     break;
 
-                if (!Options.EnableInput && Options.AutoStart && application.State == ServerApplicationState.Stopped)
+                if (!Options.EnableInput && Options.AutoStart && runtime.State == ServerApplicationState.Stopped)
                     break;
 
                 if (Options.IdleDelay > TimeSpan.Zero)
@@ -92,16 +89,16 @@ public sealed class ConsoleServerShell
         {
             _stderr.WriteLine(ex);
             _stderr.Flush();
-            TryStop(application);
+            runtime.StopSafely();
             return 1;
         }
 
-        TryStop(application);
+        runtime.StopSafely();
 
         if (inputTask is not null && inputTask.IsCompleted)
             await inputTask.ConfigureAwait(false);
 
-        return application.State == ServerApplicationState.Faulted ? 1 : 0;
+        return runtime.State == ServerApplicationState.Faulted ? 1 : 0;
     }
 
     private void ReadInputLoop()
@@ -116,7 +113,7 @@ public sealed class ConsoleServerShell
         }
     }
 
-    private void DrainPendingDirectives(IServerApplication application)
+    private void DrainPendingDirectives(HostedServerRuntime runtime)
     {
         while (_pendingDirectives.TryDequeue(out ConsoleShellDirective directive))
         {
@@ -136,7 +133,7 @@ public sealed class ConsoleServerShell
                     break;
 
                 case ConsoleShellDirectiveKind.ServerCommand:
-                    application.TryExecuteCommand(directive.Command, out ServerCommandResult result);
+                    runtime.TryExecuteCommand(directive.Command, out ServerCommandResult result);
                     _stdout.WriteLine($"> {directive.Command.Kind}: {result.Kind} - {result.Message}");
                     _stdout.Flush();
                     break;
@@ -148,22 +145,4 @@ public sealed class ConsoleServerShell
         new ServerApplication(new ServerApplicationOptions(
             options.ProfileName,
             SaveOnStop: options.SaveOnStop));
-
-    private static void TryStop(IServerApplication application)
-    {
-        if (application.State == ServerApplicationState.Stopped ||
-            application.State == ServerApplicationState.Created)
-        {
-            application.Stop();
-            return;
-        }
-
-        try
-        {
-            application.Stop();
-        }
-        catch
-        {
-        }
-    }
 }
