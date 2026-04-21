@@ -113,6 +113,8 @@ Implemented so far:
 - create/destroy churn coverage with stale-handle checks,
 - multi-tick serial vs parallel determinism soak coverage,
 - opt-in tick profiling snapshots for pre-systems, systems, and post-systems phases,
+- opt-in per-system runtime snapshots with live timing data when profiling is enabled,
+- minimal typed system control-descriptor seam for future operator/control-plane integration without coupling UI into the kernel,
 - recent correctness hardening on archetype enumeration, due-tick wrap behavior, sparse dirty-index validation, manual worker-pool reentrancy, and component-column copier type checks,
 - versioned query-plan caching for read-only query, patch-query, chunk, and archetype traversal entry points,
 - bound transition copy steps to reduce per-entity structural copy dispatch,
@@ -143,6 +145,7 @@ Current practical status:
 - read-only scheduler and hot-query paths are now decisively competitive after the dedicated hot read path,
 - current soak runs show bounded retained memory and stable tick latency in the heaviest active movement scenarios,
 - profiling snapshots currently measure as effectively negligible overhead in scheduler-heavy runs,
+- per-system live timing data is now consumable through runtime snapshots for future performance-panel views without reviving the old control-panel UI directly inside the kernel,
 - execution-mode crossover is now clearer:
   - `ParallelBatches` is the best fit for the heavier oscillating movement workloads,
   - `Serial` plus intra-system parallelism is the best fit for the current `v1` pulse movement shape,
@@ -183,3 +186,35 @@ Current measured guidance:
 - profiling overhead is small enough that it is not a practical scheduler concern right now,
 - scheduler mode choice matters more than the profiling toggle,
 - movement/combat cadence spreading should stay opt-in or manually offset for now rather than becoming a broader automatic rule.
+
+## Control Seams
+
+The old older-old client control panel mixed three concerns together:
+
+- system inspection,
+- live performance display,
+- operator-editable settings UI.
+
+The new kernel intentionally does not reproduce that whole stack inside `Kernels/ECS`.
+
+Current kernel policy is:
+
+- keep `SystemSettings` as a small low-level schedule/config hook,
+- do not turn `SystemSettings` into a generic UI/settings framework,
+- expose typed inspection data from the kernel,
+- leave richer operator tuning, permissions, persistence of overrides, and UI/schema generation to higher layers later.
+
+What exists now:
+
+- `SystemSettings` can still adjust schedule-level concerns such as cadence, offset, and stage,
+- `SystemRuntimeSnapshot` exposes system name, schedule metadata, enabled/manual state, live timing data, and optional control descriptors,
+- `SystemBase.ControlDescriptors` is an empty-by-default seam for future control-plane integration,
+- timing values populate when `ProfilingEnabled` is on, so future performance panels can consume live per-system metrics without forcing a full settings subsystem now.
+
+What is intentionally deferred:
+
+- generic editable settings persistence,
+- permissions/authority for changing tunables,
+- network transport for remote operator control,
+- UI schema generation for editable controls,
+- host-specific control panel implementations beyond thin shells.

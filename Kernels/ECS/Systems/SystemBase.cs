@@ -5,6 +5,7 @@ public abstract class SystemBase
     public SystemId Id { get; internal set; } = SystemId.Invalid;
     public abstract SystemDescriptor Descriptor { get; }
     public virtual SystemSettings? Settings => null;
+    public virtual IReadOnlyList<SystemControlDescriptor> ControlDescriptors => Array.Empty<SystemControlDescriptor>();
     public bool Enabled { get; internal set; } = true;
 
     public virtual void OnInitialize(World world)

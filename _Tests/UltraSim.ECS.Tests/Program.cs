@@ -58,6 +58,8 @@ internal static class TestRunner
         Run(nameof(World_CreateDestroyChurn_DoesNotResurrectStaleEntities), World_CreateDestroyChurn_DoesNotResurrectStaleEntities);
         Run(nameof(SystemManager_SerialAndParallel_MatchAcrossManyTicks), SystemManager_SerialAndParallel_MatchAcrossManyTicks);
         Run(nameof(World_ProfilingSnapshot_CapturesTickPhaseCounts), World_ProfilingSnapshot_CapturesTickPhaseCounts);
+        Run(nameof(World_SystemRuntimeSnapshots_ExposeScheduleControlAndTimingMetadata), World_SystemRuntimeSnapshots_ExposeScheduleControlAndTimingMetadata);
+        Run(nameof(World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns), World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
@@ -1935,6 +1937,80 @@ internal static class TestRunner
         Assert.Equal(new Velocity(77), world.GetComponent<Velocity>(target));
     }
 
+    private static void World_SystemRuntimeSnapshots_ExposeScheduleControlAndTimingMetadata()
+    {
+        var world = new World(new EcsSchemaBuilder().Build())
+        {
+            ProfilingEnabled = true,
+        };
+
+        world.RegisterSystem(new InstrumentedControlSystem(
+            new SystemDescriptor(
+                "Instrumented",
+                SystemStage.WorldSim,
+                3,
+                2,
+                ComponentMask.Empty,
+                ComponentMask.Empty)));
+
+        world.SealSystems();
+        world.Tick(0.016f);
+
+        SystemRuntimeSnapshot[] snapshots = world.GetSystemRuntimeSnapshots();
+        Assert.Equal(1, snapshots.Length);
+
+        SystemRuntimeSnapshot snapshot = snapshots[0];
+        Assert.Equal("Instrumented", snapshot.Name);
+        Assert.Equal(SystemStage.WorldSim, snapshot.Stage);
+        Assert.True(snapshot.Enabled);
+        Assert.False(snapshot.Manual);
+        Assert.Equal(3, snapshot.PeriodTicks);
+        Assert.Equal(2, snapshot.StartOffset);
+        Assert.Equal(0L, snapshot.UpdateCount);
+        Assert.Equal(0d, snapshot.LastUpdateMilliseconds);
+        Assert.Equal(1, snapshot.Controls.Count);
+        Assert.Equal("show_debug", snapshot.Controls[0].Key);
+        Assert.Equal(SystemControlKind.Toggle, snapshot.Controls[0].Kind);
+
+        world.Tick(0.016f);
+        world.Tick(0.016f);
+
+        snapshots = world.GetSystemRuntimeSnapshots();
+        snapshot = snapshots[0];
+        Assert.Equal((uint)2, snapshot.LastRunTick);
+        Assert.Equal(1L, snapshot.UpdateCount);
+        Assert.True(snapshot.LastUpdateMilliseconds >= 0d);
+        Assert.True(snapshot.AverageUpdateMilliseconds >= 0d);
+        Assert.True(snapshot.PeakUpdateMilliseconds >= snapshot.LastUpdateMilliseconds);
+    }
+
+    private static void World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        world.RegisterSystem(new InstrumentedControlSystem(
+            new SystemDescriptor(
+                "Instrumented",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.Empty)));
+
+        world.SealSystems();
+        world.Tick(0.016f);
+
+        SystemRuntimeSnapshot snapshot = world.GetSystemRuntimeSnapshots()[0];
+        Assert.Equal(0L, snapshot.UpdateCount);
+        Assert.Equal(0d, snapshot.LastUpdateMilliseconds);
+
+        world.ProfilingEnabled = true;
+        world.Tick(0.016f);
+
+        snapshot = world.GetSystemRuntimeSnapshots()[0];
+        Assert.Equal(1L, snapshot.UpdateCount);
+        Assert.Equal((uint)1, snapshot.LastRunTick);
+    }
+
     private static void World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse()
     {
         var world = new World(new EcsSchemaBuilder().Build());
@@ -2440,6 +2516,32 @@ internal static class TestRunner
         public WorldSimLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
             : base(label, descriptor, log)
         {
+        }
+    }
+
+    private sealed class InstrumentedControlSystem : SystemBase
+    {
+        private static readonly SystemControlDescriptor[] Controls =
+        [
+            new("show_debug", "Show Debug", SystemControlKind.Toggle, Description: "Future operator-facing debug toggle.")
+        ];
+
+        public InstrumentedControlSystem(SystemDescriptor descriptor)
+        {
+            Descriptor = descriptor;
+        }
+
+        public override SystemDescriptor Descriptor { get; }
+        public override IReadOnlyList<SystemControlDescriptor> ControlDescriptors => Controls;
+
+        public override void Update(in SystemContext ctx)
+        {
+            long value = 0;
+            for (int i = 0; i < 512; i++)
+                value += (ctx.Tick + (uint)i) * 3u;
+
+            if (value == long.MinValue)
+                throw new InvalidOperationException("Unreachable.");
         }
     }
 

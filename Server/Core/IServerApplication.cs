@@ -16,6 +16,7 @@ public interface IServerApplication
 
     ServerStatusSnapshot GetStatusSnapshot();
     ServerMetricsSnapshot GetMetricsSnapshot();
+    IReadOnlyList<ServerSystemRuntimeSnapshot> GetSystemRuntimeSnapshots();
     IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot();
     IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot();
     bool TryExecuteCommand(ServerControlCommand command, out ServerCommandResult result);

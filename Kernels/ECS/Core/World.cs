@@ -388,7 +388,7 @@ public sealed partial class World
             try
             {
                 start = Stopwatch.GetTimestamp();
-                _systems.Tick(this, _worldTick, deltaSeconds, _commands);
+                _systems.Tick(this, _worldTick, deltaSeconds, _commands, captureTimings: true);
                 systemTicks = Stopwatch.GetTimestamp() - start;
             }
             finally
@@ -425,13 +425,13 @@ public sealed partial class World
     public void RunManualSystem(SystemId id, float deltaSeconds)
     {
         EnsureReadyForExecution();
-        _systems.RunManual(id, this, _worldTick, deltaSeconds, _commands);
+        _systems.RunManual(id, this, _worldTick, deltaSeconds, _commands, captureTimings: ProfilingEnabled);
     }
 
     public void RunManualSystem<TSystem>(float deltaSeconds) where TSystem : SystemBase
     {
         EnsureReadyForExecution();
-        _systems.RunManual<TSystem>(this, _worldTick, deltaSeconds, _commands);
+        _systems.RunManual<TSystem>(this, _worldTick, deltaSeconds, _commands, captureTimings: ProfilingEnabled);
     }
 
     public int[] GetSystemStartOffsetsSnapshot()
@@ -439,6 +439,12 @@ public sealed partial class World
         var offsets = new int[_systems.Count];
         _systems.CopyStartOffsets(offsets);
         return offsets;
+    }
+
+    public SystemRuntimeSnapshot[] GetSystemRuntimeSnapshots()
+    {
+        EnsureNotShutdown();
+        return _systems.CaptureRuntimeSnapshots();
     }
 
     internal SystemId[][] GetStageBatchesSnapshot(SystemStage stage) => _systems.GetStageBatchesSnapshot(stage);

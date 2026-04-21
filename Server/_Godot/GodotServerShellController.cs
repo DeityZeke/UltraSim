@@ -58,6 +58,11 @@ public sealed class GodotServerShellController : IDisposable
         return _runtime.GetMetricsSnapshot();
     }
 
+    public IReadOnlyList<ServerSystemRuntimeSnapshot> GetSystemRuntimeSnapshots()
+    {
+        return _runtime.Application.GetSystemRuntimeSnapshots();
+    }
+
     public IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot()
     {
         return _runtime.Application.GetPlayerSessionsSnapshot();

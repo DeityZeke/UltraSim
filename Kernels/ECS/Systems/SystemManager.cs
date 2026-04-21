@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -20,6 +21,7 @@ internal sealed partial class SystemManager
     private SystemId[][][] _stageBatches;
     private uint[] _nextDueTick;
     private int[] _dueScheduleVersion;
+    private SystemTimingStats[] _timingStats;
     private int _scheduleVersion;
     private bool _sealed;
     private SystemExecutionMode _executionMode;
@@ -36,6 +38,7 @@ internal sealed partial class SystemManager
         _stageBatches = CreateEmptyStageBatches(stageCount);
         _nextDueTick = Array.Empty<uint>();
         _dueScheduleVersion = Array.Empty<int>();
+        _timingStats = Array.Empty<SystemTimingStats>();
         _scheduleVersion = 1;
         _executionMode = SystemExecutionMode.Serial;
         _allowIntraSystemParallelInSerialMode = false;
@@ -223,7 +226,7 @@ internal sealed partial class SystemManager
         BuildStageBatches();
     }
 
-    public void Tick(World world, uint worldTick, float deltaSeconds, IStructuralCommands commands)
+    public void Tick(World world, uint worldTick, float deltaSeconds, IStructuralCommands commands, bool captureTimings = false)
     {
         Action<int, Action<int>>? parallelFor = _executionMode == SystemExecutionMode.ParallelBatches || _allowIntraSystemParallelInSerialMode
             ? ExecuteParallelFor
@@ -238,7 +241,7 @@ internal sealed partial class SystemManager
                 SystemId[] batch = batches[batchIndex];
                 if (_executionMode == SystemExecutionMode.ParallelBatches && batch.Length > 1)
                 {
-                    RunBatchParallel(batch, world, worldTick, deltaSeconds, commands);
+                    RunBatchParallel(batch, world, worldTick, deltaSeconds, commands, captureTimings);
                     continue;
                 }
 
@@ -249,13 +252,21 @@ internal sealed partial class SystemManager
                     if (!schedule.Enabled || !IsDue(index, worldTick, in schedule))
                         continue;
 
+                    if (!captureTimings)
+                    {
+                        _systems[index].Update(in context);
+                        continue;
+                    }
+
+                    long start = Stopwatch.GetTimestamp();
                     _systems[index].Update(in context);
+                    RecordTiming(index, worldTick, Stopwatch.GetTimestamp() - start);
                 }
             }
         }
     }
 
-    public void RunManual(SystemId id, World world, uint worldTick, float deltaSeconds, IStructuralCommands commands)
+    public void RunManual(SystemId id, World world, uint worldTick, float deltaSeconds, IStructuralCommands commands, bool captureTimings = false)
     {
         int index = id.Value;
         if ((uint)index >= (uint)_systems.Count)
@@ -268,16 +279,24 @@ internal sealed partial class SystemManager
             ? ExecuteParallelFor
             : null;
         var context = new SystemContext(world, worldTick, deltaSeconds, commands, parallelFor);
+        if (!captureTimings)
+        {
+            _systems[index].Update(in context);
+            return;
+        }
+
+        long start = Stopwatch.GetTimestamp();
         _systems[index].Update(in context);
+        RecordTiming(index, worldTick, Stopwatch.GetTimestamp() - start);
     }
 
-    public void RunManual<T>(World world, uint worldTick, float deltaSeconds, IStructuralCommands commands)
+    public void RunManual<T>(World world, uint worldTick, float deltaSeconds, IStructuralCommands commands, bool captureTimings = false)
         where T : SystemBase
     {
         if (!_typeToId.TryGetValue(typeof(T), out SystemId id))
             return;
 
-        RunManual(id, world, worldTick, deltaSeconds, commands);
+        RunManual(id, world, worldTick, deltaSeconds, commands, captureTimings);
     }
 
     public SystemBase? GetSystem<T>() where T : SystemBase
@@ -294,6 +313,34 @@ internal sealed partial class SystemManager
         int count = Math.Min(destination.Length, _schedules.Count);
         for (int i = 0; i < count; i++)
             destination[i] = _schedules[i].StartOffset;
+    }
+
+    internal SystemRuntimeSnapshot[] CaptureRuntimeSnapshots()
+    {
+        var snapshots = new SystemRuntimeSnapshot[_systems.Count];
+        for (int i = 0; i < snapshots.Length; i++)
+        {
+            SystemDescriptor descriptor = _descriptors[i];
+            SystemSchedule schedule = _schedules[i];
+            SystemTimingStats timing = _timingStats[i];
+            snapshots[i] = new SystemRuntimeSnapshot(
+                new SystemId(i),
+                descriptor.Name,
+                schedule.Stage,
+                schedule.Enabled,
+                descriptor.Manual,
+                schedule.PeriodTicks,
+                schedule.StartOffset,
+                timing.LastRunTick,
+                timing.UpdateCount,
+                Stopwatch.GetElapsedTime(0, timing.LastElapsedTicks).TotalMilliseconds,
+                timing.AverageElapsedMilliseconds,
+                Stopwatch.GetElapsedTime(0, timing.PeakElapsedTicks).TotalMilliseconds,
+                timing.MinElapsedTicks == long.MaxValue ? 0d : Stopwatch.GetElapsedTime(0, timing.MinElapsedTicks).TotalMilliseconds,
+                _systems[i].ControlDescriptors);
+        }
+
+        return snapshots;
     }
 
     internal SystemId[][] GetStageBatchesSnapshot(SystemStage stage)
@@ -527,7 +574,7 @@ internal sealed partial class SystemManager
         return false;
     }
 
-    private void RunBatchParallel(SystemId[] batch, World world, uint worldTick, float deltaSeconds, IStructuralCommands commands)
+    private void RunBatchParallel(SystemId[] batch, World world, uint worldTick, float deltaSeconds, IStructuralCommands commands, bool captureTimings)
     {
         ManualWorkerPool pool = EnsureWorkerPool();
         pool.ParallelFor(batch.Length, i =>
@@ -538,7 +585,15 @@ internal sealed partial class SystemManager
                 return;
 
             var context = new SystemContext(world, worldTick, deltaSeconds, commands, ExecuteParallelFor);
+            if (!captureTimings)
+            {
+                _systems[index].Update(in context);
+                return;
+            }
+
+            long start = Stopwatch.GetTimestamp();
             _systems[index].Update(in context);
+            RecordTiming(index, worldTick, Stopwatch.GetTimestamp() - start);
         });
     }
 
@@ -573,7 +628,25 @@ internal sealed partial class SystemManager
         int newLength = Math.Max(oldLength == 0 ? 4 : oldLength * 2, needed);
         Array.Resize(ref _nextDueTick, newLength);
         Array.Resize(ref _dueScheduleVersion, newLength);
+        Array.Resize(ref _timingStats, newLength);
         Array.Fill(_dueScheduleVersion, -1, oldLength, newLength - oldLength);
+        for (int i = oldLength; i < newLength; i++)
+            _timingStats[i].MinElapsedTicks = long.MaxValue;
+    }
+
+    private void RecordTiming(int index, uint worldTick, long elapsedTicks)
+    {
+        ref SystemTimingStats stats = ref _timingStats[index];
+        double elapsedMs = Stopwatch.GetElapsedTime(0, elapsedTicks).TotalMilliseconds;
+
+        stats.LastRunTick = worldTick;
+        stats.LastElapsedTicks = elapsedTicks;
+        stats.PeakElapsedTicks = Math.Max(stats.PeakElapsedTicks, elapsedTicks);
+        stats.MinElapsedTicks = Math.Min(stats.MinElapsedTicks == 0 ? long.MaxValue : stats.MinElapsedTicks, elapsedTicks);
+        stats.AverageElapsedMilliseconds = stats.UpdateCount == 0
+            ? elapsedMs
+            : (TimingEmaAlpha * elapsedMs) + ((1d - TimingEmaAlpha) * stats.AverageElapsedMilliseconds);
+        stats.UpdateCount++;
     }
 
     private bool IsDue(int index, uint worldTick, in SystemSchedule schedule)
@@ -640,6 +713,18 @@ internal sealed partial class SystemManager
     private void AdvanceNextDue(int index, uint currentDue, int periodTicks)
     {
         _nextDueTick[index] = unchecked(currentDue + (uint)periodTicks);
+    }
+
+    private const double TimingEmaAlpha = 0.1d;
+
+    private struct SystemTimingStats
+    {
+        public uint LastRunTick;
+        public long UpdateCount;
+        public long LastElapsedTicks;
+        public double AverageElapsedMilliseconds;
+        public long PeakElapsedTicks;
+        public long MinElapsedTicks;
     }
 
     private static SystemId[][] CreateEmptyStageSystems(int stageCount)

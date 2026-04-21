@@ -19,6 +19,8 @@ public partial class ServerShellRoot : Control
     private Label? _profileValue;
     private Label? _playersSummaryValue;
     private Label? _accountsSummaryValue;
+    private Label? _performanceSummaryValue;
+    private RichTextLabel? _performanceLog;
     private Button? _startButton;
     private Button? _stopButton;
     private Button? _saveButton;
@@ -105,6 +107,10 @@ public partial class ServerShellRoot : Control
         Control accountsTab = BuildAccountsTab(panel, panelSoft, accentSoft, text, muted);
         accountsTab.Name = "Accounts";
         tabs.AddChild(accountsTab);
+
+        Control performanceTab = BuildPerformanceTab(panel, panelSoft, accentSoft, text, muted);
+        performanceTab.Name = "Performance";
+        tabs.AddChild(performanceTab);
 
         tabs.AddChild(CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted));
         tabs.AddChild(CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted));
@@ -316,6 +322,49 @@ public partial class ServerShellRoot : Control
         return frame;
     }
 
+    private Control BuildPerformanceTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+    {
+        var frame = new PanelContainer();
+        frame.SetAnchorsPreset(LayoutPreset.FullRect);
+        frame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        frame.SizeFlagsVertical = SizeFlags.ExpandFill;
+        frame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
+
+        var column = new VBoxContainer();
+        column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        column.SizeFlagsVertical = SizeFlags.ExpandFill;
+        column.AddThemeConstantOverride("separation", 10);
+        frame.AddChild(column);
+
+        column.AddChild(CreateSectionLabel("Performance", text));
+
+        _performanceSummaryValue = new Label();
+        _performanceSummaryValue.AddThemeColorOverride("font_color", muted);
+        _performanceSummaryValue.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        column.AddChild(_performanceSummaryValue);
+
+        var logFrame = new PanelContainer();
+        logFrame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        logFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
+        logFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
+        column.AddChild(logFrame);
+
+        _performanceLog = new RichTextLabel();
+        _performanceLog.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _performanceLog.SizeFlagsVertical = SizeFlags.ExpandFill;
+        _performanceLog.SelectionEnabled = true;
+        _performanceLog.ScrollActive = true;
+        _performanceLog.BbcodeEnabled = false;
+        _performanceLog.FitContent = false;
+        _performanceLog.ContextMenuEnabled = true;
+        _performanceLog.AddThemeColorOverride("default_color", text);
+        _performanceLog.Text =
+            "Per-system runtime metrics will appear here once the server runtime is backed by a real ECS world.";
+        logFrame.AddChild(_performanceLog);
+
+        return frame;
+    }
+
     private Control CreatePlaceholderTab(string title, string message, Color panel, Color muted)
     {
         var frame = new PanelContainer();
@@ -503,6 +552,8 @@ public partial class ServerShellRoot : Control
             return;
 
         ServerStatusSnapshot status = _controller.GetStatusSnapshot();
+        ServerMetricsSnapshot metrics = _controller.GetMetricsSnapshot();
+        IReadOnlyList<ServerSystemRuntimeSnapshot> systems = _controller.GetSystemRuntimeSnapshots();
         IReadOnlyList<ServerPlayerSessionSnapshot> players = _controller.GetPlayerSessionsSnapshot();
         IReadOnlyList<ServerAccountSummarySnapshot> accounts = _controller.GetAccountSummariesSnapshot();
 
@@ -528,7 +579,62 @@ public partial class ServerShellRoot : Control
                 ? "Account directory actions are placeholders until account storage is wired."
                 : $"{accounts.Count} account rows available for operator view.";
 
+        RefreshPerformance(metrics, systems);
         RefreshControls(status.State);
+    }
+
+    private void RefreshPerformance(ServerMetricsSnapshot metrics, IReadOnlyList<ServerSystemRuntimeSnapshot> systems)
+    {
+        if (_performanceSummaryValue is not null)
+        {
+            _performanceSummaryValue.Text =
+                $"ticks={metrics.TotalTicks}  mean={metrics.MeanTickMilliseconds:0.###} ms  " +
+                $"max={metrics.MaxTickMilliseconds:0.###} ms  systems={systems.Count}";
+        }
+
+        if (_performanceLog is null)
+            return;
+
+        if (systems.Count == 0)
+        {
+            _performanceLog.Text =
+                "Per-system runtime metrics will appear here once the server runtime is backed by a real ECS world.\n\n" +
+                "The shell contract is already in place, so future runtimes can expose live scheduler/system timings here.";
+            return;
+        }
+
+        var builder = new StringBuilder();
+        builder.AppendLine("Name | Stage | Mode | Period | Last | Avg | Peak | Min | Runs | Controls");
+        builder.AppendLine(new string('-', 96));
+
+        for (int i = 0; i < systems.Count; i++)
+        {
+            ServerSystemRuntimeSnapshot system = systems[i];
+            string mode = system.Manual ? "manual" : (system.Enabled ? "enabled" : "disabled");
+            string period = $"{system.PeriodTicks}/{system.StartOffset}";
+            builder.Append(system.Name);
+            builder.Append(" | ");
+            builder.Append(system.Stage);
+            builder.Append(" | ");
+            builder.Append(mode);
+            builder.Append(" | ");
+            builder.Append(period);
+            builder.Append(" | ");
+            builder.Append(system.LastUpdateMilliseconds.ToString("0.###"));
+            builder.Append(" | ");
+            builder.Append(system.AverageUpdateMilliseconds.ToString("0.###"));
+            builder.Append(" | ");
+            builder.Append(system.PeakUpdateMilliseconds.ToString("0.###"));
+            builder.Append(" | ");
+            builder.Append(system.MinUpdateMilliseconds.ToString("0.###"));
+            builder.Append(" | ");
+            builder.Append(system.UpdateCount);
+            builder.Append(" | ");
+            builder.Append(system.ControlCount);
+            builder.AppendLine();
+        }
+
+        _performanceLog.Text = builder.ToString();
     }
 
     private void RefreshControls(ServerApplicationState state)

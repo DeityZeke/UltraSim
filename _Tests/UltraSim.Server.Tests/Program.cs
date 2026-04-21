@@ -16,6 +16,7 @@ internal static class TestRunner
         Run(nameof(ServerCommandResult_FactoryHelpers_ProduceExpectedKinds), ServerCommandResult_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerStatusSnapshot_PreservesSuppliedValues), ServerStatusSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
+        Run(nameof(ServerSystemRuntimeSnapshot_PreservesSuppliedValues), ServerSystemRuntimeSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerPlayerSessionSnapshot_PreservesSuppliedValues), ServerPlayerSessionSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerAccountSummarySnapshot_PreservesSuppliedValues), ServerAccountSummarySnapshot_PreservesSuppliedValues);
         Run(nameof(ServerApplicationEvent_PreservesSuppliedValues), ServerApplicationEvent_PreservesSuppliedValues);
@@ -29,6 +30,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
+        Run(nameof(ServerApplication_SystemRuntimeSnapshots_ReflectHookData), ServerApplication_SystemRuntimeSnapshots_ReflectHookData);
         Run(nameof(ServerApplication_PlayerAndAccountSnapshots_ReflectHookData), ServerApplication_PlayerAndAccountSnapshots_ReflectHookData);
         Run(nameof(ServerHostLoop_Pump_TicksAtFixedStepCadence), ServerHostLoop_Pump_TicksAtFixedStepCadence);
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
@@ -130,6 +132,38 @@ internal static class TestRunner
         Assert.Equal(4.5, snapshot.MaxTickMilliseconds);
     }
 
+    private static void ServerSystemRuntimeSnapshot_PreservesSuppliedValues()
+    {
+        var snapshot = new ServerSystemRuntimeSnapshot(
+            Name: "Movement",
+            Stage: "Movement",
+            Enabled: true,
+            Manual: false,
+            PeriodTicks: 4,
+            StartOffset: 1,
+            LastRunTick: 77,
+            UpdateCount: 11,
+            LastUpdateMilliseconds: 0.25,
+            AverageUpdateMilliseconds: 0.5,
+            PeakUpdateMilliseconds: 1.5,
+            MinUpdateMilliseconds: 0.1,
+            ControlCount: 2);
+
+        Assert.Equal("Movement", snapshot.Name);
+        Assert.Equal("Movement", snapshot.Stage);
+        Assert.True(snapshot.Enabled);
+        Assert.False(snapshot.Manual);
+        Assert.Equal(4, snapshot.PeriodTicks);
+        Assert.Equal(1, snapshot.StartOffset);
+        Assert.Equal((uint)77, snapshot.LastRunTick);
+        Assert.Equal(11L, snapshot.UpdateCount);
+        Assert.Equal(0.25, snapshot.LastUpdateMilliseconds);
+        Assert.Equal(0.5, snapshot.AverageUpdateMilliseconds);
+        Assert.Equal(1.5, snapshot.PeakUpdateMilliseconds);
+        Assert.Equal(0.1, snapshot.MinUpdateMilliseconds);
+        Assert.Equal(2, snapshot.ControlCount);
+    }
+
     private static void ServerPlayerSessionSnapshot_PreservesSuppliedValues()
     {
         var snapshot = new ServerPlayerSessionSnapshot(
@@ -191,6 +225,7 @@ internal static class TestRunner
         AssertMethod(contract, nameof(IServerApplication.Restart), typeof(void));
         AssertMethod(contract, nameof(IServerApplication.GetStatusSnapshot), typeof(ServerStatusSnapshot));
         AssertMethod(contract, nameof(IServerApplication.GetMetricsSnapshot), typeof(ServerMetricsSnapshot));
+        AssertMethod(contract, nameof(IServerApplication.GetSystemRuntimeSnapshots), typeof(IReadOnlyList<ServerSystemRuntimeSnapshot>));
         AssertMethod(contract, nameof(IServerApplication.GetPlayerSessionsSnapshot), typeof(IReadOnlyList<ServerPlayerSessionSnapshot>));
         AssertMethod(contract, nameof(IServerApplication.GetAccountSummariesSnapshot), typeof(IReadOnlyList<ServerAccountSummarySnapshot>));
 
@@ -429,6 +464,38 @@ internal static class TestRunner
         Assert.Equal("Aster", players[0].PlayerName);
         Assert.Equal(1, accounts.Count);
         Assert.Equal("acct-7", accounts[0].AccountId);
+    }
+
+    private static void ServerApplication_SystemRuntimeSnapshots_ReflectHookData()
+    {
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                GetSystemRuntimeSnapshots = _ => new[]
+                {
+                    new ServerSystemRuntimeSnapshot(
+                        "Movement",
+                        "Movement",
+                        Enabled: true,
+                        Manual: false,
+                        PeriodTicks: 4,
+                        StartOffset: 1,
+                        LastRunTick: 77,
+                        UpdateCount: 11,
+                        LastUpdateMilliseconds: 0.25,
+                        AverageUpdateMilliseconds: 0.5,
+                        PeakUpdateMilliseconds: 1.5,
+                        MinUpdateMilliseconds: 0.1,
+                        ControlCount: 2),
+                },
+            });
+
+        IReadOnlyList<ServerSystemRuntimeSnapshot> snapshots = app.GetSystemRuntimeSnapshots();
+
+        Assert.Equal(1, snapshots.Count);
+        Assert.Equal("Movement", snapshots[0].Name);
+        Assert.Equal(2, snapshots[0].ControlCount);
     }
 
     private static void ServerHostLoop_Pump_TicksAtFixedStepCadence()
@@ -684,6 +751,23 @@ internal static class TestRunner
                 new ServerApplicationOptions("test-godot"),
                 new ServerApplicationHooks
                 {
+                    GetSystemRuntimeSnapshots = _ => new[]
+                    {
+                        new ServerSystemRuntimeSnapshot(
+                            "Movement",
+                            "Movement",
+                            Enabled: true,
+                            Manual: false,
+                            PeriodTicks: 4,
+                            StartOffset: 1,
+                            LastRunTick: 77,
+                            UpdateCount: 11,
+                            LastUpdateMilliseconds: 0.25,
+                            AverageUpdateMilliseconds: 0.5,
+                            PeakUpdateMilliseconds: 1.5,
+                            MinUpdateMilliseconds: 0.1,
+                            ControlCount: 2),
+                    },
                     GetPlayerSessions = _ => new[]
                     {
                         new ServerPlayerSessionSnapshot("session-1", "Aster", "acct-7", "Authenticated"),
@@ -698,12 +782,14 @@ internal static class TestRunner
         controller.Start();
         controller.TickFrame(0.03d);
         ServerCommandResult status = controller.Execute(ServerControlCommand.Status());
+        IReadOnlyList<ServerSystemRuntimeSnapshot> systems = controller.GetSystemRuntimeSnapshots();
         IReadOnlyList<ServerPlayerSessionSnapshot> players = controller.GetPlayerSessionsSnapshot();
         IReadOnlyList<ServerAccountSummarySnapshot> accounts = controller.GetAccountSummariesSnapshot();
         controller.Shutdown();
 
         Assert.Equal(ServerApplicationState.Stopped, controller.State);
         Assert.Equal(ServerCommandResultKind.Accepted, status.Kind);
+        Assert.Equal(1, systems.Count);
         Assert.Equal(1, players.Count);
         Assert.Equal(1, accounts.Count);
         Assert.True(observed.Count > 0);

@@ -185,6 +185,11 @@ public sealed class ServerApplication : IServerApplication
             _maxTickMilliseconds);
     }
 
+    public IReadOnlyList<ServerSystemRuntimeSnapshot> GetSystemRuntimeSnapshots()
+    {
+        return _hooks.GetSystemRuntimeSnapshots?.Invoke(this) ?? Array.Empty<ServerSystemRuntimeSnapshot>();
+    }
+
     public IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot()
     {
         return _hooks.GetPlayerSessions?.Invoke(this) ?? Array.Empty<ServerPlayerSessionSnapshot>();
