@@ -6,10 +6,53 @@ namespace UltraSim.ECS;
 
 public sealed partial class World
 {
-    private const int DirectQueryArchetypeThreshold = 4;
+    private const int DirectQueryArchetypeThreshold = 0;
+    [ThreadStatic] private static int[]? s_threadDirtyIndexBuffer;
+    [ThreadStatic] private static bool s_threadDirtyIndexBufferInUse;
 
-    private static int[] RentDirtyIndexBuffer(int entityCount)
-        => ArrayPool<int>.Shared.Rent(Math.Max(1, entityCount));
+    private static DirtyIndexBufferLease RentDirtyIndexBuffer(int entityCount)
+    {
+        int minimumLength = Math.Max(1, entityCount);
+        if (!s_threadDirtyIndexBufferInUse)
+        {
+            int[]? buffer = s_threadDirtyIndexBuffer;
+            if (buffer is null || buffer.Length < minimumLength)
+            {
+                buffer = new int[minimumLength];
+                s_threadDirtyIndexBuffer = buffer;
+            }
+
+            s_threadDirtyIndexBufferInUse = true;
+            return new DirtyIndexBufferLease(buffer, fromPool: false);
+        }
+
+        return new DirtyIndexBufferLease(ArrayPool<int>.Shared.Rent(minimumLength), fromPool: true);
+    }
+
+    private readonly ref struct DirtyIndexBufferLease
+    {
+        private readonly int[] _buffer;
+        private readonly bool _fromPool;
+
+        public DirtyIndexBufferLease(int[] buffer, bool fromPool)
+        {
+            _buffer = buffer;
+            _fromPool = fromPool;
+        }
+
+        public Span<int> AsSpan(int length) => _buffer.AsSpan(0, length);
+
+        public void Dispose()
+        {
+            if (_fromPool)
+            {
+                ArrayPool<int>.Shared.Return(_buffer, clearArray: false);
+                return;
+            }
+
+            s_threadDirtyIndexBufferInUse = false;
+        }
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ArchetypeManager.ArchetypeEnumerator QueryArchetypes(ReadOnlySpan<ComponentId> required)
@@ -37,12 +80,8 @@ public sealed partial class World
                 ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
                 ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(column);
                 int count = entities.Length;
-                ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
-                ref T valueRef = ref MemoryMarshal.GetReference(values);
                 for (int i = 0; i < count; i++)
-                {
-                    action(Unsafe.Add(ref entityRef, i), in Unsafe.Add(ref valueRef, i));
-                }
+                    action(entities[i], in values[i]);
 
                 directMatched += count;
             }
@@ -60,12 +99,8 @@ public sealed partial class World
             ReadOnlySpan<Entity> entities = archetype.GetEntitySpan();
             ReadOnlySpan<T> values = archetype.GetComponentSpanAt<T>(plan.Column1);
             int count = entities.Length;
-            ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
-            ref T valueRef = ref MemoryMarshal.GetReference(values);
             for (int i = 0; i < count; i++)
-            {
-                action(Unsafe.Add(ref entityRef, i), in Unsafe.Add(ref valueRef, i));
-            }
+                action(entities[i], in values[i]);
 
             matched += count;
         }
@@ -100,16 +135,8 @@ public sealed partial class World
                 ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(column1);
                 ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(column2);
                 int count = entities.Length;
-                ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
-                ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
-                ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
                 for (int i = 0; i < count; i++)
-                {
-                    action(
-                        Unsafe.Add(ref entityRef, i),
-                        in Unsafe.Add(ref value1Ref, i),
-                        in Unsafe.Add(ref value2Ref, i));
-                }
+                    action(entities[i], in values1[i], in values2[i]);
 
                 directMatched += count;
             }
@@ -128,16 +155,8 @@ public sealed partial class World
             ReadOnlySpan<T1> values1 = archetype.GetComponentSpanAt<T1>(plan.Column1);
             ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(plan.Column2);
             int count = entities.Length;
-            ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
-            ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
-            ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
             for (int i = 0; i < count; i++)
-            {
-                action(
-                    Unsafe.Add(ref entityRef, i),
-                    in Unsafe.Add(ref value1Ref, i),
-                    in Unsafe.Add(ref value2Ref, i));
-            }
+                action(entities[i], in values1[i], in values2[i]);
 
             matched += count;
         }
@@ -179,18 +198,8 @@ public sealed partial class World
                 ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(column2);
                 ReadOnlySpan<T3> values3 = archetype.GetComponentSpanAt<T3>(column3);
                 int count = entities.Length;
-                ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
-                ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
-                ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
-                ref T3 value3Ref = ref MemoryMarshal.GetReference(values3);
                 for (int i = 0; i < count; i++)
-                {
-                    action(
-                        Unsafe.Add(ref entityRef, i),
-                        in Unsafe.Add(ref value1Ref, i),
-                        in Unsafe.Add(ref value2Ref, i),
-                        in Unsafe.Add(ref value3Ref, i));
-                }
+                    action(entities[i], in values1[i], in values2[i], in values3[i]);
 
                 directMatched += count;
             }
@@ -210,18 +219,8 @@ public sealed partial class World
             ReadOnlySpan<T2> values2 = archetype.GetComponentSpanAt<T2>(plan.Column2);
             ReadOnlySpan<T3> values3 = archetype.GetComponentSpanAt<T3>(plan.Column3);
             int count = entities.Length;
-            ref Entity entityRef = ref MemoryMarshal.GetReference(entities);
-            ref T1 value1Ref = ref MemoryMarshal.GetReference(values1);
-            ref T2 value2Ref = ref MemoryMarshal.GetReference(values2);
-            ref T3 value3Ref = ref MemoryMarshal.GetReference(values3);
             for (int i = 0; i < count; i++)
-            {
-                action(
-                    Unsafe.Add(ref entityRef, i),
-                    in Unsafe.Add(ref value1Ref, i),
-                    in Unsafe.Add(ref value2Ref, i),
-                    in Unsafe.Add(ref value3Ref, i));
-            }
+                action(entities[i], in values1[i], in values2[i], in values3[i]);
 
             matched += count;
         }
@@ -483,19 +482,15 @@ public sealed partial class World
             if (entityCount == 0)
                 continue;
 
-            int[] rented = RentDirtyIndexBuffer(entityCount);
-            try
+            using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(entityCount);
             {
-                int dirtyCount = action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1), rented.AsSpan(0, entityCount));
+                Span<int> dirtyIndices = dirtyBuffer.AsSpan(entityCount);
+                int dirtyCount = action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1), dirtyIndices);
                 if (dirtyCount > 0)
                 {
-                    _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                    _dirty.Mark(writeId, entities, dirtyIndices[..dirtyCount]);
                     matched += dirtyCount;
                 }
-            }
-            finally
-            {
-                ArrayPool<int>.Shared.Return(rented, clearArray: false);
             }
         }
 
@@ -577,23 +572,19 @@ public sealed partial class World
             if (entityCount == 0)
                 continue;
 
-            int[] rented = RentDirtyIndexBuffer(entityCount);
-            try
+            using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(entityCount);
             {
+                Span<int> dirtyIndices = dirtyBuffer.AsSpan(entityCount);
                 int dirtyCount = action(
                     entities,
                     archetype.GetComponentSpanAt<TRead>(plan.Column1),
                     archetype.GetComponentSpanAt<TWrite>(plan.Column2),
-                    rented.AsSpan(0, entityCount));
+                    dirtyIndices);
                 if (dirtyCount > 0)
                 {
-                    _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                    _dirty.Mark(writeId, entities, dirtyIndices[..dirtyCount]);
                     matched += dirtyCount;
                 }
-            }
-            finally
-            {
-                ArrayPool<int>.Shared.Return(rented, clearArray: false);
             }
         }
 
@@ -682,24 +673,20 @@ public sealed partial class World
             if (entityCount == 0)
                 continue;
 
-            int[] rented = RentDirtyIndexBuffer(entityCount);
-            try
+            using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(entityCount);
             {
+                Span<int> dirtyIndices = dirtyBuffer.AsSpan(entityCount);
                 int dirtyCount = action(
                     entities,
                     archetype.GetComponentSpanAt<TRead1>(plan.Column1),
                     archetype.GetComponentSpanAt<TRead2>(plan.Column2),
                     archetype.GetComponentSpanAt<TWrite>(plan.Column3),
-                    rented.AsSpan(0, entityCount));
+                    dirtyIndices);
                 if (dirtyCount > 0)
                 {
-                    _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                    _dirty.Mark(writeId, entities, dirtyIndices[..dirtyCount]);
                     matched += dirtyCount;
                 }
-            }
-            finally
-            {
-                ArrayPool<int>.Shared.Return(rented, clearArray: false);
             }
         }
 
@@ -800,19 +787,15 @@ public sealed partial class World
 
             if (parallelFor is null || entityCount <= resolvedBlockSize)
             {
-                int[] rented = RentDirtyIndexBuffer(entityCount);
-                try
+                using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(entityCount);
                 {
-                    int dirtyCount = action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1), rented.AsSpan(0, entityCount));
+                    Span<int> dirtyIndices = dirtyBuffer.AsSpan(entityCount);
+                    int dirtyCount = action(entities, archetype.GetComponentSpanAt<TWrite>(plan.Column1), dirtyIndices);
                     if (dirtyCount > 0)
                     {
-                        _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                        _dirty.Mark(writeId, entities, dirtyIndices[..dirtyCount]);
                         matched += dirtyCount;
                     }
-                }
-                finally
-                {
-                    ArrayPool<int>.Shared.Return(rented, clearArray: false);
                 }
             }
             else
@@ -821,22 +804,18 @@ public sealed partial class World
                 {
                     int start = index * resolvedBlockSize;
                     int length = Math.Min(resolvedBlockSize, entityCount - start);
-                    int[] rented = RentDirtyIndexBuffer(length);
-                    try
+                    using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(length);
                     {
+                        Span<int> dirtyIndices = dirtyBuffer.AsSpan(length);
                         int dirtyCount = action(
                             archetype.GetEntitySpan().Slice(start, length),
                             archetype.GetComponentSpanAt<TWrite>(plan.Column1).Slice(start, length),
-                            rented.AsSpan(0, length));
+                            dirtyIndices);
                         if (dirtyCount > 0)
                         {
-                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), rented.AsSpan(0, dirtyCount));
+                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), dirtyIndices[..dirtyCount]);
                             Interlocked.Add(ref matched, dirtyCount);
                         }
-                    }
-                    finally
-                    {
-                        ArrayPool<int>.Shared.Return(rented, clearArray: false);
                     }
                 });
             }
@@ -959,23 +938,19 @@ public sealed partial class World
 
             if (parallelFor is null || entityCount <= resolvedBlockSize)
             {
-                int[] rented = RentDirtyIndexBuffer(entityCount);
-                try
+                using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(entityCount);
                 {
+                    Span<int> dirtyIndices = dirtyBuffer.AsSpan(entityCount);
                     int dirtyCount = action(
                         entities,
                         archetype.GetComponentSpanAt<TRead>(plan.Column1),
                         archetype.GetComponentSpanAt<TWrite>(plan.Column2),
-                        rented.AsSpan(0, entityCount));
+                        dirtyIndices);
                     if (dirtyCount > 0)
                     {
-                        _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                        _dirty.Mark(writeId, entities, dirtyIndices[..dirtyCount]);
                         matched += dirtyCount;
                     }
-                }
-                finally
-                {
-                    ArrayPool<int>.Shared.Return(rented, clearArray: false);
                 }
             }
             else
@@ -984,23 +959,19 @@ public sealed partial class World
                 {
                     int start = index * resolvedBlockSize;
                     int length = Math.Min(resolvedBlockSize, entityCount - start);
-                    int[] rented = RentDirtyIndexBuffer(length);
-                    try
+                    using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(length);
                     {
+                        Span<int> dirtyIndices = dirtyBuffer.AsSpan(length);
                         int dirtyCount = action(
                             archetype.GetEntitySpan().Slice(start, length),
                             archetype.GetComponentSpanAt<TRead>(plan.Column1).Slice(start, length),
                             archetype.GetComponentSpanAt<TWrite>(plan.Column2).Slice(start, length),
-                            rented.AsSpan(0, length));
+                            dirtyIndices);
                         if (dirtyCount > 0)
                         {
-                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), rented.AsSpan(0, dirtyCount));
+                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), dirtyIndices[..dirtyCount]);
                             Interlocked.Add(ref matched, dirtyCount);
                         }
-                    }
-                    finally
-                    {
-                        ArrayPool<int>.Shared.Return(rented, clearArray: false);
                     }
                 });
             }
@@ -1134,24 +1105,20 @@ public sealed partial class World
 
             if (parallelFor is null || entityCount <= resolvedBlockSize)
             {
-                int[] rented = RentDirtyIndexBuffer(entityCount);
-                try
+                using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(entityCount);
                 {
+                    Span<int> dirtyIndices = dirtyBuffer.AsSpan(entityCount);
                     int dirtyCount = action(
                         entities,
                         archetype.GetComponentSpanAt<TRead1>(plan.Column1),
                         archetype.GetComponentSpanAt<TRead2>(plan.Column2),
                         archetype.GetComponentSpanAt<TWrite>(plan.Column3),
-                        rented.AsSpan(0, entityCount));
+                        dirtyIndices);
                     if (dirtyCount > 0)
                     {
-                        _dirty.Mark(writeId, entities, rented.AsSpan(0, dirtyCount));
+                        _dirty.Mark(writeId, entities, dirtyIndices[..dirtyCount]);
                         matched += dirtyCount;
                     }
-                }
-                finally
-                {
-                    ArrayPool<int>.Shared.Return(rented, clearArray: false);
                 }
             }
             else
@@ -1160,24 +1127,20 @@ public sealed partial class World
                 {
                     int start = index * resolvedBlockSize;
                     int length = Math.Min(resolvedBlockSize, entityCount - start);
-                    int[] rented = RentDirtyIndexBuffer(length);
-                    try
+                    using DirtyIndexBufferLease dirtyBuffer = RentDirtyIndexBuffer(length);
                     {
+                        Span<int> dirtyIndices = dirtyBuffer.AsSpan(length);
                         int dirtyCount = action(
                             archetype.GetEntitySpan().Slice(start, length),
                             archetype.GetComponentSpanAt<TRead1>(plan.Column1).Slice(start, length),
                             archetype.GetComponentSpanAt<TRead2>(plan.Column2).Slice(start, length),
                             archetype.GetComponentSpanAt<TWrite>(plan.Column3).Slice(start, length),
-                            rented.AsSpan(0, length));
+                            dirtyIndices);
                         if (dirtyCount > 0)
                         {
-                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), rented.AsSpan(0, dirtyCount));
+                            _dirty.Mark(writeId, archetype.GetEntitySpan().Slice(start, length), dirtyIndices[..dirtyCount]);
                             Interlocked.Add(ref matched, dirtyCount);
                         }
-                    }
-                    finally
-                    {
-                        ArrayPool<int>.Shared.Return(rented, clearArray: false);
                     }
                 });
             }
