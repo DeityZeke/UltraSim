@@ -1,0 +1,73 @@
+{
+  "SuiteName": "ECS Kernel GC Soak Suite",
+  "KernelName": "new",
+  "RuntimeVersion": "8.0.11",
+  "Configuration": "Release",
+  "ProcessorCount": 16,
+  "TimestampUtc": "2026-04-21T02:07:34.6603365+00:00",
+  "DurationSeconds": 5,
+  "SampleIntervalSeconds": 5,
+  "WarmupTicks": 120,
+  "Results": [
+    {
+      "Id": "parallel-v1-active",
+      "Name": "TickParallel_Active35_Shuffle10_V1PulseMovement_100k",
+      "DurationSeconds": 5.0022572,
+      "TotalTicks": 3653,
+      "MeanTickMilliseconds": 1.368541527511632,
+      "P50TickMilliseconds": 1.36,
+      "P95TickMilliseconds": 1.4449999999999998,
+      "P99TickMilliseconds": 1.5852680000000001,
+      "MaxTickMilliseconds": 2.5512,
+      "AllocatedBytesDelta": 7822192,
+      "ManagedBytesDelta": 7830096,
+      "PostGcManagedBytesDelta": 1874792,
+      "WorkingSetBytesDelta": 2117632,
+      "Gen0Collections": 0,
+      "Gen1Collections": 0,
+      "Gen2Collections": 0,
+      "Checksum": 0,
+      "Retention": {
+        "Dirty": {
+          "CaptureEnabled": false,
+          "CaptureWorkerCount": 0,
+          "LocalStateCount": 4,
+          "GlobalAllEntityBytes": 1600000,
+          "GlobalAllIndexBytes": 1600000,
+          "GlobalComponentSetCount": 3,
+          "GlobalComponentEntityBytes": 3145728,
+          "GlobalComponentIndexBytes": 6029376,
+          "LocalComponentSetCount": 7,
+          "LocalStateAllEntityBytes": 1187840,
+          "LocalStateAllIndexBytes": 0,
+          "LocalComponentEntityBytes": 2490368,
+          "LocalComponentIndexBytes": 0
+        },
+        "Worker": {
+          "ExecutionMode": "ParallelBatches",
+          "AllowIntraSystemParallelInSerialMode": false,
+          "DirtyCaptureWorkerCount": 3,
+          "WorkerCount": 2
+        },
+        "ThreadDirtyIndexBufferBytes": 49152,
+        "ThreadDirtyIndexBufferThreads": 3
+      },
+      "Samples": [
+        {
+          "ElapsedSeconds": 5.0004185,
+          "TotalTicks": 3653,
+          "IntervalTicks": 3653,
+          "IntervalMeanTickMilliseconds": 1.368541527511632,
+          "IntervalMaxTickMilliseconds": 2.5512,
+          "AllocatedBytesDelta": 7819056,
+          "ManagedBytesDelta": 7830096,
+          "WorkingSetBytesDelta": 2134016,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        }
+      ]
+    }
+  ]
+}

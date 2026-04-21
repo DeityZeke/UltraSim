@@ -2058,18 +2058,16 @@ namespace UltraSim.ECS
 
                 localStateCount++;
                 localAllEntityBytes += state.All.EntityCapacity * 8L;
-                localAllIndexBytes += state.All.IndexCapacity * 16L;
 
-                DirtySet?[] byComponent = state.ByComponent;
+                EntityBuffer?[] byComponent = state.ByComponent;
                 for (int c = 0; c < byComponent.Length; c++)
                 {
-                    DirtySet? set = byComponent[c];
+                    EntityBuffer? set = byComponent[c];
                     if (set is null)
                         continue;
 
                     localComponentSetCount++;
                     localComponentEntityBytes += set.EntityCapacity * 8L;
-                    localComponentIndexBytes += set.IndexCapacity * 16L;
                 }
             }
 

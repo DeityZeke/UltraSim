@@ -384,11 +384,11 @@ internal sealed partial class DirtyTracker
                 _all.Mark(allEntities[e]);
 
             ReadOnlySpan<int> touched = state.TouchedComponents;
-            DirtySet?[] byComponent = state.ByComponent;
+            EntityBuffer?[] byComponent = state.ByComponent;
             for (int c = 0; c < touched.Length; c++)
             {
                 int componentIndex = touched[c];
-                DirtySet? localSet = byComponent[componentIndex];
+                EntityBuffer? localSet = byComponent[componentIndex];
                 if (localSet is null || localSet.Count == 0)
                     continue;
 
@@ -406,16 +406,16 @@ internal sealed partial class DirtyTracker
 
     private sealed class LocalDirtyState
     {
-        public readonly DirtySet All;
-        public DirtySet?[] ByComponent;
+        public readonly EntityBuffer All;
+        public EntityBuffer?[] ByComponent;
         private int[] _touchedComponents;
         private int _touchedCount;
         private bool _hasPending;
 
         public LocalDirtyState(int capacity)
         {
-            All = new DirtySet(capacity);
-            ByComponent = new DirtySet?[32];
+            All = new EntityBuffer(capacity);
+            ByComponent = new EntityBuffer?[32];
             _touchedComponents = new int[8];
             _touchedCount = 0;
             _hasPending = false;
@@ -436,13 +436,13 @@ internal sealed partial class DirtyTracker
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Mark(Entity entity)
         {
-            All.Mark(entity);
+            All.Append(entity);
             _hasPending = true;
         }
 
         public void MarkUnique(ReadOnlySpan<Entity> entities)
         {
-            All.MarkKnownUniqueRange(entities);
+            All.AppendRange(entities);
             _hasPending = true;
         }
 
@@ -452,19 +452,19 @@ internal sealed partial class DirtyTracker
             if (index < 0)
                 throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
 
-            All.Mark(entity);
             EnsureComponentCapacity(index + 1);
-            DirtySet? set = ByComponent[index];
+            EntityBuffer? set = ByComponent[index];
             if (set is null)
             {
-                set = new DirtySet(DefaultEntityCapacity);
+                set = new EntityBuffer(DefaultEntityCapacity);
                 ByComponent[index] = set;
             }
 
             if (set.Count == 0)
                 TrackTouchedComponent(index);
 
-            set.Mark(entity);
+            All.Append(entity);
+            set.Append(entity);
             _hasPending = true;
         }
 
@@ -475,22 +475,18 @@ internal sealed partial class DirtyTracker
                 throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
 
             EnsureComponentCapacity(index + 1);
-            DirtySet? componentSet = ByComponent[index];
+            EntityBuffer? componentSet = ByComponent[index];
             if (componentSet is null)
             {
-                componentSet = new DirtySet(DefaultEntityCapacity);
+                componentSet = new EntityBuffer(DefaultEntityCapacity);
                 ByComponent[index] = componentSet;
             }
 
             if (componentSet.Count == 0)
                 TrackTouchedComponent(index);
 
-            for (int i = 0; i < entities.Length; i++)
-            {
-                Entity entity = entities[i];
-                All.Mark(entity);
-                componentSet.Mark(entity);
-            }
+            All.AppendRange(entities);
+            componentSet.AppendRange(entities);
 
             _hasPending = true;
         }
@@ -502,18 +498,18 @@ internal sealed partial class DirtyTracker
                 throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
 
             EnsureComponentCapacity(index + 1);
-            DirtySet? componentSet = ByComponent[index];
+            EntityBuffer? componentSet = ByComponent[index];
             if (componentSet is null)
             {
-                componentSet = new DirtySet(DefaultEntityCapacity);
+                componentSet = new EntityBuffer(DefaultEntityCapacity);
                 ByComponent[index] = componentSet;
             }
 
             if (componentSet.Count == 0)
                 TrackTouchedComponent(index);
 
-            All.MarkKnownUniqueRange(entities);
-            componentSet.MarkKnownUniqueRange(entities);
+            All.AppendRange(entities);
+            componentSet.AppendRange(entities);
             _hasPending = true;
         }
 
@@ -524,10 +520,10 @@ internal sealed partial class DirtyTracker
                 throw new ArgumentOutOfRangeException(nameof(componentId), "ComponentId.Invalid is not allowed.");
 
             EnsureComponentCapacity(index + 1);
-            DirtySet? componentSet = ByComponent[index];
+            EntityBuffer? componentSet = ByComponent[index];
             if (componentSet is null)
             {
-                componentSet = new DirtySet(DefaultEntityCapacity);
+                componentSet = new EntityBuffer(DefaultEntityCapacity);
                 ByComponent[index] = componentSet;
             }
 
@@ -541,8 +537,8 @@ internal sealed partial class DirtyTracker
                     throw new ArgumentException("Dirty index is outside the entity span.", nameof(dirtyIndices));
 
                 Entity entity = entities[dirtyIndex];
-                All.Mark(entity);
-                componentSet.Mark(entity);
+                All.Append(entity);
+                componentSet.Append(entity);
             }
 
             _hasPending = true;
@@ -575,6 +571,66 @@ internal sealed partial class DirtyTracker
                 Array.Resize(ref _touchedComponents, _touchedComponents.Length * 2);
 
             _touchedComponents[_touchedCount++] = index;
+        }
+    }
+
+    private sealed class EntityBuffer
+    {
+        private Entity[] _entities;
+        private int _count;
+
+        public EntityBuffer(int capacity)
+        {
+            _entities = new Entity[capacity];
+            _count = 0;
+        }
+
+        public int Count
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _count;
+        }
+
+        public ReadOnlySpan<Entity> EntitiesSpan
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _entities.AsSpan(0, _count);
+        }
+
+        internal int EntityCapacity
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => _entities.Length;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Append(Entity entity)
+        {
+            EnsureCapacity(_count + 1);
+            _entities[_count++] = entity;
+        }
+
+        public void AppendRange(ReadOnlySpan<Entity> entities)
+        {
+            if (entities.Length == 0)
+                return;
+
+            EnsureCapacity(_count + entities.Length);
+            entities.CopyTo(_entities.AsSpan(_count));
+            _count += entities.Length;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Clear() => _count = 0;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EnsureCapacity(int needed)
+        {
+            if (needed <= _entities.Length)
+                return;
+
+            int newSize = Math.Max(_entities.Length * 2, needed);
+            Array.Resize(ref _entities, newSize);
         }
     }
 

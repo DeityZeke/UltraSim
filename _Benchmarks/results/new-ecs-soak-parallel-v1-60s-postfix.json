@@ -1,0 +1,143 @@
+{
+  "SuiteName": "ECS Kernel GC Soak Suite",
+  "KernelName": "new",
+  "RuntimeVersion": "8.0.11",
+  "Configuration": "Release",
+  "ProcessorCount": 16,
+  "TimestampUtc": "2026-04-21T02:10:09.7447119+00:00",
+  "DurationSeconds": 60,
+  "SampleIntervalSeconds": 10,
+  "WarmupTicks": 120,
+  "Results": [
+    {
+      "Id": "parallel-v1-active",
+      "Name": "TickParallel_Active35_Shuffle10_V1PulseMovement_100k",
+      "DurationSeconds": 60.0035143,
+      "TotalTicks": 56390,
+      "MeanTickMilliseconds": 1.0636199077850643,
+      "P50TickMilliseconds": 1.0609,
+      "P95TickMilliseconds": 1.0962,
+      "P99TickMilliseconds": 1.1739,
+      "MaxTickMilliseconds": 2.4719,
+      "AllocatedBytesDelta": 68931096,
+      "ManagedBytesDelta": 19815096,
+      "PostGcManagedBytesDelta": 2094616,
+      "WorkingSetBytesDelta": 47591424,
+      "Gen0Collections": 1,
+      "Gen1Collections": 0,
+      "Gen2Collections": 0,
+      "Checksum": 0,
+      "Retention": {
+        "Dirty": {
+          "CaptureEnabled": false,
+          "CaptureWorkerCount": 0,
+          "LocalStateCount": 17,
+          "GlobalAllEntityBytes": 1600000,
+          "GlobalAllIndexBytes": 1600000,
+          "GlobalComponentSetCount": 3,
+          "GlobalComponentEntityBytes": 3145728,
+          "GlobalComponentIndexBytes": 7340096,
+          "LocalComponentSetCount": 21,
+          "LocalStateAllEntityBytes": 2555904,
+          "LocalStateAllIndexBytes": 0,
+          "LocalComponentEntityBytes": 3473408,
+          "LocalComponentIndexBytes": 0
+        },
+        "Worker": {
+          "ExecutionMode": "ParallelBatches",
+          "AllowIntraSystemParallelInSerialMode": false,
+          "DirtyCaptureWorkerCount": 17,
+          "WorkerCount": 16
+        },
+        "ThreadDirtyIndexBufferBytes": 278528,
+        "ThreadDirtyIndexBufferThreads": 17
+      },
+      "Samples": [
+        {
+          "ElapsedSeconds": 10.0002864,
+          "TotalTicks": 9370,
+          "IntervalTicks": 9370,
+          "IntervalMeanTickMilliseconds": 1.0670259338313783,
+          "IntervalMaxTickMilliseconds": 2.4209,
+          "AllocatedBytesDelta": 14572664,
+          "ManagedBytesDelta": 14586808,
+          "WorkingSetBytesDelta": 7876608,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        },
+        {
+          "ElapsedSeconds": 20.0006842,
+          "TotalTicks": 18769,
+          "IntervalTicks": 9399,
+          "IntervalMeanTickMilliseconds": 1.0632633790828778,
+          "IntervalMaxTickMilliseconds": 2.0888,
+          "AllocatedBytesDelta": 25667536,
+          "ManagedBytesDelta": 25698128,
+          "WorkingSetBytesDelta": 18546688,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        },
+        {
+          "ElapsedSeconds": 30.0006711,
+          "TotalTicks": 28172,
+          "IntervalTicks": 9403,
+          "IntervalMeanTickMilliseconds": 1.063126991385726,
+          "IntervalMaxTickMilliseconds": 1.3029,
+          "AllocatedBytesDelta": 36127744,
+          "ManagedBytesDelta": 36170440,
+          "WorkingSetBytesDelta": 29052928,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        },
+        {
+          "ElapsedSeconds": 40.0009783,
+          "TotalTicks": 37572,
+          "IntervalTicks": 9400,
+          "IntervalMeanTickMilliseconds": 1.06346378723404,
+          "IntervalMaxTickMilliseconds": 2.4719,
+          "AllocatedBytesDelta": 47731512,
+          "ManagedBytesDelta": 47781296,
+          "WorkingSetBytesDelta": 39563264,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        },
+        {
+          "ElapsedSeconds": 50.0006821,
+          "TotalTicks": 46985,
+          "IntervalTicks": 9413,
+          "IntervalMeanTickMilliseconds": 1.0619497928396868,
+          "IntervalMaxTickMilliseconds": 2.4002,
+          "AllocatedBytesDelta": 58333832,
+          "ManagedBytesDelta": 9193752,
+          "WorkingSetBytesDelta": 47562752,
+          "Gen0Collections": 1,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        },
+        {
+          "ElapsedSeconds": 60.000744,
+          "TotalTicks": 56390,
+          "IntervalTicks": 9405,
+          "IntervalMeanTickMilliseconds": 1.0629032429558702,
+          "IntervalMaxTickMilliseconds": 1.6702,
+          "AllocatedBytesDelta": 68927256,
+          "ManagedBytesDelta": 19806912,
+          "WorkingSetBytesDelta": 47562752,
+          "Gen0Collections": 1,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0,
+          "Checksum": 0
+        }
+      ]
+    }
+  ]
+}
