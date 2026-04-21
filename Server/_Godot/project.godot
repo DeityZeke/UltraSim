@@ -11,12 +11,19 @@ config_version=5
 [application]
 
 config/name="UltraSim_Server"
-config/features=PackedStringArray("4.6", "Forward Plus")
+run/main_scene="res://Scenes/ServerShellRoot.tscn"
+config/features=PackedStringArray("4.6", "C#", "Forward Plus")
 config/icon="res://icon.svg"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=420
+window/size/resizable=false
 
 [dotnet]
 
-project/assembly_name="UltraSim_Server"
+project/assembly_name="UltraSim.Server.Godot"
 
 [physics]
 

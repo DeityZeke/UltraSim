@@ -1,14 +1,24 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Godot.NET.Sdk/4.6.2">
 
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
+    <AssemblyName>UltraSim.Server.Godot</AssemblyName>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;obj/**;.godot\**;.godot/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Hosting\UltraSim.Server.Hosting.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="obj/**" />
+    <Compile Remove=".godot\**\*.cs" />
+    <Compile Remove=".godot/**" />
   </ItemGroup>
 
 </Project>
