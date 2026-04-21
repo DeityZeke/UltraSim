@@ -10,4 +10,6 @@ public sealed class ServerApplicationHooks
     public Action<ServerApplication>? Stop { get; init; }
     public Func<ServerApplication, bool>? IsAcceptingConnections { get; init; }
     public Func<ServerApplication, int>? GetActiveSessions { get; init; }
+    public Func<ServerApplication, IReadOnlyList<ServerPlayerSessionSnapshot>>? GetPlayerSessions { get; init; }
+    public Func<ServerApplication, IReadOnlyList<ServerAccountSummarySnapshot>>? GetAccountSummaries { get; init; }
 }

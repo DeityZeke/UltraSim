@@ -185,6 +185,16 @@ public sealed class ServerApplication : IServerApplication
             _maxTickMilliseconds);
     }
 
+    public IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot()
+    {
+        return _hooks.GetPlayerSessions?.Invoke(this) ?? Array.Empty<ServerPlayerSessionSnapshot>();
+    }
+
+    public IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot()
+    {
+        return _hooks.GetAccountSummaries?.Invoke(this) ?? Array.Empty<ServerAccountSummarySnapshot>();
+    }
+
     public bool TryExecuteCommand(ServerControlCommand command, out ServerCommandResult result)
     {
         _totalCommands++;

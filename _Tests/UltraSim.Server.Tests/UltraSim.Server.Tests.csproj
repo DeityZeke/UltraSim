@@ -26,7 +26,7 @@
       <Private>true</Private>
     </Reference>
     <Reference Include="UltraSim.Server.Godot">
-      <HintPath>..\..\Server\_Godot\bin\$(Configuration)\net8.0\UltraSim.Server.Godot.dll</HintPath>
+      <HintPath>..\..\Server\_Godot\.godot\mono\temp\bin\$(Configuration)\UltraSim.Server.Godot.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

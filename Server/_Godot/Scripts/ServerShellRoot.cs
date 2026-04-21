@@ -503,6 +503,8 @@ public partial class ServerShellRoot : Control
             return;
 
         ServerStatusSnapshot status = _controller.GetStatusSnapshot();
+        IReadOnlyList<ServerPlayerSessionSnapshot> players = _controller.GetPlayerSessionsSnapshot();
+        IReadOnlyList<ServerAccountSummarySnapshot> accounts = _controller.GetAccountSummariesSnapshot();
 
         if (_profileValue is not null)
             _profileValue.Text = status.ProfileName;
@@ -517,10 +519,14 @@ public partial class ServerShellRoot : Control
             _sessionsValue.Text = $"{status.ActiveSessions}/{status.PeakSessions}";
 
         if (_playersSummaryValue is not null)
-            _playersSummaryValue.Text = $"{status.ActiveSessions} online now, peak {status.PeakSessions}.";
+            _playersSummaryValue.Text = players.Count == 0
+                ? $"{status.ActiveSessions} online now, peak {status.PeakSessions}."
+                : $"{players.Count} player rows available for operator view.";
 
         if (_accountsSummaryValue is not null)
-            _accountsSummaryValue.Text = "Account directory actions are placeholders until account storage is wired.";
+            _accountsSummaryValue.Text = accounts.Count == 0
+                ? "Account directory actions are placeholders until account storage is wired."
+                : $"{accounts.Count} account rows available for operator view.";
 
         RefreshControls(status.State);
     }

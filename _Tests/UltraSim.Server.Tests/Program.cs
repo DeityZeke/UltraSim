@@ -16,6 +16,8 @@ internal static class TestRunner
         Run(nameof(ServerCommandResult_FactoryHelpers_ProduceExpectedKinds), ServerCommandResult_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerStatusSnapshot_PreservesSuppliedValues), ServerStatusSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
+        Run(nameof(ServerPlayerSessionSnapshot_PreservesSuppliedValues), ServerPlayerSessionSnapshot_PreservesSuppliedValues);
+        Run(nameof(ServerAccountSummarySnapshot_PreservesSuppliedValues), ServerAccountSummarySnapshot_PreservesSuppliedValues);
         Run(nameof(ServerApplicationEvent_PreservesSuppliedValues), ServerApplicationEvent_PreservesSuppliedValues);
         Run(nameof(IServerApplication_ExposesExpectedControlSurface), IServerApplication_ExposesExpectedControlSurface);
         Run(nameof(ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder), ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder);
@@ -27,6 +29,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
+        Run(nameof(ServerApplication_PlayerAndAccountSnapshots_ReflectHookData), ServerApplication_PlayerAndAccountSnapshots_ReflectHookData);
         Run(nameof(ServerHostLoop_Pump_TicksAtFixedStepCadence), ServerHostLoop_Pump_TicksAtFixedStepCadence);
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
         Run(nameof(ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks), ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks);
@@ -127,6 +130,38 @@ internal static class TestRunner
         Assert.Equal(4.5, snapshot.MaxTickMilliseconds);
     }
 
+    private static void ServerPlayerSessionSnapshot_PreservesSuppliedValues()
+    {
+        var snapshot = new ServerPlayerSessionSnapshot(
+            SessionId: "session-1",
+            PlayerName: "Aster",
+            AccountId: "acct-7",
+            SessionState: "Authenticated",
+            Detail: "zone=island-a");
+
+        Assert.Equal("session-1", snapshot.SessionId);
+        Assert.Equal("Aster", snapshot.PlayerName);
+        Assert.Equal("acct-7", snapshot.AccountId);
+        Assert.Equal("Authenticated", snapshot.SessionState);
+        Assert.Equal("zone=island-a", snapshot.Detail);
+    }
+
+    private static void ServerAccountSummarySnapshot_PreservesSuppliedValues()
+    {
+        var snapshot = new ServerAccountSummarySnapshot(
+            AccountId: "acct-7",
+            DisplayName: "Aster",
+            IsOnline: true,
+            IsBanned: false,
+            Detail: "role=operator");
+
+        Assert.Equal("acct-7", snapshot.AccountId);
+        Assert.Equal("Aster", snapshot.DisplayName);
+        Assert.True(snapshot.IsOnline);
+        Assert.False(snapshot.IsBanned);
+        Assert.Equal("role=operator", snapshot.Detail);
+    }
+
     private static void ServerApplicationEvent_PreservesSuppliedValues()
     {
         DateTimeOffset timestamp = new(2026, 4, 20, 12, 0, 0, TimeSpan.Zero);
@@ -156,6 +191,8 @@ internal static class TestRunner
         AssertMethod(contract, nameof(IServerApplication.Restart), typeof(void));
         AssertMethod(contract, nameof(IServerApplication.GetStatusSnapshot), typeof(ServerStatusSnapshot));
         AssertMethod(contract, nameof(IServerApplication.GetMetricsSnapshot), typeof(ServerMetricsSnapshot));
+        AssertMethod(contract, nameof(IServerApplication.GetPlayerSessionsSnapshot), typeof(IReadOnlyList<ServerPlayerSessionSnapshot>));
+        AssertMethod(contract, nameof(IServerApplication.GetAccountSummariesSnapshot), typeof(IReadOnlyList<ServerAccountSummarySnapshot>));
 
         MethodInfo? tryExecute = contract.GetMethod(nameof(IServerApplication.TryExecuteCommand));
         Assert.NotNull(tryExecute);
@@ -367,6 +404,31 @@ internal static class TestRunner
         Assert.Equal(0L, metrics.TotalFaults);
         Assert.True(metrics.MeanTickMilliseconds >= 0d);
         Assert.True(metrics.MaxTickMilliseconds >= 0d);
+    }
+
+    private static void ServerApplication_PlayerAndAccountSnapshots_ReflectHookData()
+    {
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                GetPlayerSessions = _ => new[]
+                {
+                    new ServerPlayerSessionSnapshot("session-1", "Aster", "acct-7", "Authenticated", "zone=island-a"),
+                },
+                GetAccountSummaries = _ => new[]
+                {
+                    new ServerAccountSummarySnapshot("acct-7", "Aster", IsOnline: true, IsBanned: false, Detail: "role=operator"),
+                },
+            });
+
+        IReadOnlyList<ServerPlayerSessionSnapshot> players = app.GetPlayerSessionsSnapshot();
+        IReadOnlyList<ServerAccountSummarySnapshot> accounts = app.GetAccountSummariesSnapshot();
+
+        Assert.Equal(1, players.Count);
+        Assert.Equal("Aster", players[0].PlayerName);
+        Assert.Equal(1, accounts.Count);
+        Assert.Equal("acct-7", accounts[0].AccountId);
     }
 
     private static void ServerHostLoop_Pump_TicksAtFixedStepCadence()
@@ -616,16 +678,34 @@ internal static class TestRunner
     private static void GodotServerShellController_ExposesSharedControlSurface()
     {
         var observed = new List<ServerApplicationEvent>();
-        using var controller = new GodotServerShellController(new GodotServerShellOptions("test-godot", TickMilliseconds: 10));
+        using var controller = new GodotServerShellController(
+            new GodotServerShellOptions("test-godot", TickMilliseconds: 10),
+            _ => new ServerApplication(
+                new ServerApplicationOptions("test-godot"),
+                new ServerApplicationHooks
+                {
+                    GetPlayerSessions = _ => new[]
+                    {
+                        new ServerPlayerSessionSnapshot("session-1", "Aster", "acct-7", "Authenticated"),
+                    },
+                    GetAccountSummaries = _ => new[]
+                    {
+                        new ServerAccountSummarySnapshot("acct-7", "Aster", IsOnline: true, IsBanned: false),
+                    },
+                }));
         controller.EventRaised += observed.Add;
 
         controller.Start();
         controller.TickFrame(0.03d);
         ServerCommandResult status = controller.Execute(ServerControlCommand.Status());
+        IReadOnlyList<ServerPlayerSessionSnapshot> players = controller.GetPlayerSessionsSnapshot();
+        IReadOnlyList<ServerAccountSummarySnapshot> accounts = controller.GetAccountSummariesSnapshot();
         controller.Shutdown();
 
         Assert.Equal(ServerApplicationState.Stopped, controller.State);
         Assert.Equal(ServerCommandResultKind.Accepted, status.Kind);
+        Assert.Equal(1, players.Count);
+        Assert.Equal(1, accounts.Count);
         Assert.True(observed.Count > 0);
         Assert.Equal(ServerApplicationEventKind.StateChanged, observed[0].Kind);
     }
