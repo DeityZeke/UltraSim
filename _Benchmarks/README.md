@@ -44,6 +44,7 @@ Results are written to:
 - `_Benchmarks/results/new-ecs-benchmarks.json`
 - `_Benchmarks/results/old-ecs-benchmarks.json`
 - `_Benchmarks/results/ecs-benchmark-summary.md`
+- `_Benchmarks/results/network-benchmarks.json`
 
 ## GC Soak Mode
 
@@ -87,3 +88,20 @@ Current interpretation guidance:
 - use soak mode to catch allocation drift, GC pressure, and retained-memory cliffs that the microbenchmark harness intentionally hides by forcing full collections between scenarios
 - current heavy-scheduler soak runs were used to validate the active movement `100k` cases, including worker-count retention diagnostics for parallel dirty-capture behavior
 - the present soak coverage is strong enough to flag obvious GC/retention regressions, but it is still not a replacement for longer mixed-host runtime validation once wrapper fronts exist
+
+## Network Benchmarks
+
+There is now a first standalone network benchmark runner focused on shared fanout versus naive per-recipient rebuild:
+
+```powershell
+dotnet build .\_Benchmarks\UltraSim.Network.Benchmarks\UltraSim.Network.Benchmarks.csproj -c Release
+dotnet .\_Benchmarks\UltraSim.Network.Benchmarks\bin\Release\net8.0\UltraSim.Network.Benchmarks.dll
+```
+
+Results are written to `_Benchmarks/results/network-benchmarks.json`.
+
+Current intent:
+
+- validate the `scheduled work -> scoped published frame -> subscriber fanout` bridge
+- compare shared-frame fanout against naive per-recipient rebuild
+- track both time and allocation behavior early, before server/client integration hides the cost shape

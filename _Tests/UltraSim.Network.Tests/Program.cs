@@ -38,7 +38,9 @@ internal static class TestRunner
         Run(nameof(OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags), OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags);
         Run(nameof(ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals), ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals);
         Run(nameof(SharedFramePublisher_CreatesTypedPublishedFrames), SharedFramePublisher_CreatesTypedPublishedFrames);
+        Run(nameof(ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames), ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames);
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
+        Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -814,6 +816,35 @@ internal static class TestRunner
         Assert.Equal(ChannelType.ReliableOrdered, ordered.Channel);
     }
 
+    private static void ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames()
+    {
+        ScheduledWorkItem[] items =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 40,
+                ItemKey: 900,
+                Payload: ImmutablePayloadBuffer.CopyFrom([1, 2])),
+            new(
+                ScheduledWorkKind.OrderedEvent,
+                PacketClass.ReliableEvent,
+                Sequence: 41,
+                ItemKey: 0,
+                Payload: ImmutablePayloadBuffer.CopyFrom([3, 4]))
+        ];
+        SubscriptionKey[] scopes = [new SubscriptionKey(11), new SubscriptionKey(22)];
+        var projected = new ScopedPublishedFrame[2];
+
+        int count = ScheduledWorkPublishedFrameProjector.Project(items, scopes, projected);
+
+        Assert.Equal(2, count);
+        Assert.Equal((ulong)11, projected[0].ScopeKey.Value);
+        Assert.Equal(RealtimeStateFramePacket.PacketId, projected[0].Frame.PacketId);
+        Assert.Equal((ulong)22, projected[1].ScopeKey.Value);
+        Assert.Equal(ReliableEventFramePacket.PacketId, projected[1].Frame.PacketId);
+    }
+
     private static void OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers()
     {
         var registry = new ConnectionSubscriptionRegistry();
@@ -845,6 +876,60 @@ internal static class TestRunner
             Assert.Equal((ulong)500, decoded.ItemKey);
             Assert.True(decoded.Payload.Span.SequenceEqual(new byte[] { 1, 2, 3, 4 }));
         }
+    }
+
+    private static void SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey latestKey = new(500);
+        SubscriptionKey eventKey = new(600);
+        registry.Subscribe(new ConnectionId(1), latestKey);
+        registry.Subscribe(new ConnectionId(2), latestKey);
+        registry.Subscribe(new ConnectionId(2), eventKey);
+        registry.Subscribe(new ConnectionId(3), eventKey);
+
+        ScopedPublishedFrame[] frames =
+        [
+            new(
+                latestKey,
+                SharedFramePublisher.PublishLatestState(70, 701, ImmutablePayloadBuffer.CopyFrom([7]))),
+            new(
+                eventKey,
+                SharedFramePublisher.PublishOrderedEvent(80, ImmutablePayloadBuffer.CopyFrom([8, 9])))
+        ];
+
+        var dispatcher = new SubscriptionFanoutDispatcher(registry, new OutboundDatagramAssembler());
+        var subscriberScratch = new ConnectionId[8];
+        var output = new OutboundDatagram[8];
+        SubscriptionFanoutDispatchResult result = dispatcher.Dispatch(frames, subscriberScratch, output);
+
+        Assert.Equal(2, result.FrameCount);
+        Assert.Equal(4, result.SubscriberDeliveries);
+        Assert.Equal(4, result.DatagramCount);
+
+        int latestCount = 0;
+        int eventCount = 0;
+        for (int i = 0; i < result.DatagramCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            if (header.PacketId == RealtimeStateFramePacket.PacketId)
+            {
+                latestCount++;
+                var reader = new BitReader(payload);
+                RealtimeStateFramePacket frame = RealtimeStateFramePacket.Deserialize(ref reader);
+                Assert.Equal((ulong)70, frame.Sequence);
+            }
+            else if (header.PacketId == ReliableEventFramePacket.PacketId)
+            {
+                eventCount++;
+                var reader = new BitReader(payload);
+                ReliableEventFramePacket frame = ReliableEventFramePacket.Deserialize(ref reader);
+                Assert.Equal((ulong)80, frame.Sequence);
+            }
+        }
+
+        Assert.Equal(2, latestCount);
+        Assert.Equal(2, eventCount);
     }
 }
 

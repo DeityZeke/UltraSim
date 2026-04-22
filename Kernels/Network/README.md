@@ -57,6 +57,8 @@ What exists today:
   - connection subscription registry
   - published shared-frame descriptors
   - build-once fanout assembly over subscriber sets
+  - scheduled-work projection into scoped published frames
+  - scoped fanout dispatch over subscriber registries
 
 What does not exist yet:
 
@@ -133,3 +135,16 @@ Start small and measurable:
 5. server/client adapters
 
 Tests and benchmarks should land with each slice rather than after the full stack exists.
+
+## Early Benchmark Note
+
+The first dedicated network fanout benchmark now exists at:
+
+- `_Benchmarks/UltraSim.Network.Benchmarks`
+- output: `_Benchmarks/results/network-benchmarks.json`
+
+Current early result:
+
+- shared-frame fanout clearly reduces allocations versus naive per-recipient rebuild
+- wall-clock improvement is not universal yet in the current implementation
+- the seam is worth keeping, but the projection/dispatch path still needs tuning before it can be treated as a settled throughput win

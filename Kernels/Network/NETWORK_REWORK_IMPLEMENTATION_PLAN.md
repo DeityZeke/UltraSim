@@ -337,15 +337,29 @@ Current status:
   - `ConnectionSubscriptionRegistry`
   - `PublishedFrame`
   - `SharedFramePublisher`
+  - `ScopedPublishedFrame`
+  - `ScheduledWorkPublishedFrameProjector`
+  - `SubscriptionFanoutDispatcher`
   - fanout assembly from a shared published frame to many recipient connections
 - current behavior:
   - typed state/event frames can be built once as shared published bodies
   - subscriber sets can be copied out per scope key
+  - scheduled work can be projected into scoped published frames
   - the assembler can fan out a shared published frame across many recipients
 - still deferred from the broader bridge slice:
   - player-centered AOI policy and chunk/cell-backed subscription maintenance
   - integration between stream scheduling and shared published-frame fanout
   - bridge-facing publish classification from ECS/server state changes
+
+Benchmark note:
+
+- the first dedicated network fanout benchmark runner now exists in `_Benchmarks/UltraSim.Network.Benchmarks`
+- current early data shows:
+  - clear allocation improvement for shared-frame fanout
+  - mixed wall-clock results depending on scale
+- implication:
+  - the seam is worth keeping
+  - projection/dispatch and final envelope assembly still need tuning before this path can be treated as a definitive throughput win
 
 ### Phase N5: Server Bridge Slice
 
@@ -421,10 +435,13 @@ Current status in this repo:
   - control-plane/session loopback
   - typed control/session observability seams
   - the first stream-model slice
+  - scheduler/assembly primitives
+  - the first publish/subscription fanout bridge
 
-The next implementation target after this stream slice should be:
+The next implementation target after this bridge slice should be:
 
-- scheduler and assembly contracts
-- then the first publish/subscription bridge work
+- AOI-backed subscription maintenance policy
+- stream-integrated publish projection into fanout scheduling
+- then broader server bridge work
 
 not full replication yet.
