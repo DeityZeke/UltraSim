@@ -7,4 +7,6 @@ public enum HandshakeRejectReason : byte
     SchemaHashMismatch = 2,
     ContentHashMismatch = 3,
     MissingRequiredFeatures = 4,
+    DuplicateSession = 5,
+    ServerBusy = 6,
 }

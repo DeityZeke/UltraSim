@@ -22,8 +22,10 @@ internal static class TestRunner
         Run(nameof(NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents), NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents);
         Run(nameof(NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates), NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates);
         Run(nameof(NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions), NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions);
+        Run(nameof(NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak), NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak);
         Run(nameof(ControlPlane_LoopbackHandshake_RoundTripsOverTransport), ControlPlane_LoopbackHandshake_RoundTripsOverTransport);
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
+        Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
@@ -335,6 +337,30 @@ internal static class TestRunner
         Assert.Equal(ConnectionSessionState.Disconnected, readySnapshot.State);
     }
 
+    private static void NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak()
+    {
+        var sessions = new NetworkSessionManager(new SessionAdmissionPolicy(
+            DuplicateSessionPolicy.RejectNew,
+            MaxActiveSessions: 1,
+            AuthTimeoutTicks: 5,
+            KeepAliveTimeoutTicks: 5));
+
+        SessionId first = sessions.CreateSession(new ConnectionId(20), 100);
+        Assert.False(sessions.TryCreateSession(new ConnectionId(20), 101, out _, out SessionDisconnectReason duplicateReason));
+        Assert.Equal(SessionDisconnectReason.DuplicateSession, duplicateReason);
+        Assert.True(sessions.TryMarkHandshaking(first, 102));
+        Assert.Equal(1, sessions.SweepTimeouts(107));
+        Assert.True(sessions.TryRemoveDisconnected(first, 108));
+
+        SessionMetricsSnapshot metrics = sessions.GetMetricsSnapshot();
+        Assert.Equal(0, metrics.TotalSessions);
+        Assert.Equal(1, metrics.PeakConcurrentSessions);
+        Assert.Equal(1, metrics.CreatedSessions);
+        Assert.Equal(1, metrics.RejectedSessions);
+        Assert.Equal(1, metrics.TimeoutDisconnects);
+        Assert.Equal(1, metrics.RemovedSessions);
+    }
+
     private static void ControlPlane_LoopbackHandshake_RoundTripsOverTransport()
     {
         using var pair = new LoopbackTransportPair();
@@ -387,6 +413,64 @@ internal static class TestRunner
         Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
         Assert.Equal(ConnectionSessionState.Disconnected, clientSnapshot.State);
         Assert.Equal(SessionDisconnectReason.Rejected, clientSnapshot.DisconnectReason);
+
+        ControlPlaneEvent[] serverEvents = new ControlPlaneEvent[4];
+        int serverEventCount = server.DrainEvents(serverEvents);
+        Assert.Equal(1, serverEventCount);
+        Assert.Equal(ControlPlaneEventKind.HandshakeRejected, serverEvents[0].Kind);
+        Assert.Equal(HandshakeRejectReason.ContentHashMismatch, serverEvents[0].HandshakeRejectReason);
+    }
+
+    private static void ControlPlane_AdmissionReject_ReportsReasonAndMetrics()
+    {
+        using var pair = new LoopbackTransportPair();
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
+        var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
+        var sessionPolicy = new SessionAdmissionPolicy(
+            DuplicateSessionPolicy.RejectNew,
+            MaxActiveSessions: 1,
+            AuthTimeoutTicks: 0,
+            KeepAliveTimeoutTicks: 0);
+        var server = new NetworkControlPlaneHost(
+            NetworkControlPlaneRole.Server,
+            pair.Server,
+            handshakePolicy: policy,
+            sessionPolicy: sessionPolicy);
+        var client = new NetworkControlPlaneHost(
+            NetworkControlPlaneRole.Client,
+            pair.Client,
+            clientHello: hello);
+        server.Start();
+        client.Start();
+
+        client.BeginClientHandshake(new ConnectionId(30), 300);
+        server.Pump(301);
+        client.Pump(302);
+
+        SessionId rejectedClientSession = client.BeginClientHandshake(new ConnectionId(31), 303);
+        server.Pump(304);
+        client.Pump(305);
+
+        Assert.True(client.Sessions.TryGetSnapshot(rejectedClientSession, out SessionSnapshot rejectedSnapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, rejectedSnapshot.State);
+        Assert.Equal(SessionDisconnectReason.Rejected, rejectedSnapshot.DisconnectReason);
+
+        ControlPlaneMetricsSnapshot serverMetrics = server.GetMetricsSnapshot();
+        Assert.Equal(1, serverMetrics.HandshakeAccepts);
+        Assert.Equal(1, serverMetrics.HandshakeRejects);
+        Assert.Equal(1, serverMetrics.AdmissionRejects);
+
+        ControlPlaneEvent[] events = new ControlPlaneEvent[4];
+        int eventCount = server.DrainEvents(events);
+        Assert.Equal(2, eventCount);
+        Assert.Equal(ControlPlaneEventKind.HandshakeAccepted, events[0].Kind);
+        Assert.Equal(ControlPlaneEventKind.SessionAdmissionRejected, events[1].Kind);
+        Assert.Equal(HandshakeRejectReason.ServerBusy, events[1].HandshakeRejectReason);
+        Assert.Equal(SessionDisconnectReason.ServerBusy, events[1].DisconnectReason);
     }
 
     private static void ControlPlane_PingProbe_RoundTripsAfterReadyHandshake()
@@ -417,6 +501,13 @@ internal static class TestRunner
         Assert.Equal((ushort)17, client.ReceivedPongs[0].Sequence);
         Assert.Equal((uint)303, client.ReceivedPongs[0].ClientTick);
         Assert.Equal((uint)304, client.ReceivedPongs[0].ServerTick);
+
+        ControlPlaneMetricsSnapshot serverMetrics = server.GetMetricsSnapshot();
+        ControlPlaneMetricsSnapshot clientMetrics = client.GetMetricsSnapshot();
+        Assert.Equal(1, serverMetrics.PingProbesReceived);
+        Assert.Equal(1, serverMetrics.PongProbesSent);
+        Assert.Equal(1, clientMetrics.PingProbesSent);
+        Assert.Equal(1, clientMetrics.PongProbesReceived);
     }
 }
 

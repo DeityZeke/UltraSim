@@ -18,6 +18,11 @@ public sealed class NetworkSessionManager
     private readonly Queue<SessionLifecycleEvent> _lifecycleEvents = new();
     private readonly SessionAdmissionPolicy _policy;
     private uint _nextSessionId = 1;
+    private int _createdSessions;
+    private int _rejectedSessions;
+    private int _timeoutDisconnects;
+    private int _removedSessions;
+    private int _peakConcurrentSessions;
 
     public NetworkSessionManager(SessionAdmissionPolicy policy = default)
     {
@@ -68,6 +73,7 @@ public sealed class NetworkSessionManager
                     if (_policy.DuplicateSessionPolicy == DuplicateSessionPolicy.RejectNew)
                     {
                         rejectReason = SessionDisconnectReason.DuplicateSession;
+                        _rejectedSessions++;
                         _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
                             SessionLifecycleEventKind.Rejected,
                             SessionId.Invalid,
@@ -86,6 +92,7 @@ public sealed class NetworkSessionManager
             if (_policy.MaxActiveSessions > 0 && _sessionsById.Count >= _policy.MaxActiveSessions)
             {
                 rejectReason = SessionDisconnectReason.ServerBusy;
+                _rejectedSessions++;
                 _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
                     SessionLifecycleEventKind.Rejected,
                     SessionId.Invalid,
@@ -113,6 +120,8 @@ public sealed class NetworkSessionManager
 
             _sessionsById.Add(sessionId, entry);
             _sessionIdByConnection.Add(connectionId, sessionId);
+            _createdSessions++;
+            _peakConcurrentSessions = Math.Max(_peakConcurrentSessions, _sessionsById.Count);
             _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
                 SessionLifecycleEventKind.Created,
                 sessionId,
@@ -150,6 +159,58 @@ public sealed class NetworkSessionManager
 
         snapshot = default;
         return false;
+    }
+
+    public SessionMetricsSnapshot GetMetricsSnapshot()
+    {
+        lock (_sync)
+        {
+            int connecting = 0;
+            int handshaking = 0;
+            int authenticated = 0;
+            int ready = 0;
+            int disconnecting = 0;
+            int disconnected = 0;
+
+            foreach (SessionEntry entry in _sessionsById.Values)
+            {
+                switch (entry.State)
+                {
+                    case ConnectionSessionState.Connecting:
+                        connecting++;
+                        break;
+                    case ConnectionSessionState.Handshaking:
+                        handshaking++;
+                        break;
+                    case ConnectionSessionState.Authenticated:
+                        authenticated++;
+                        break;
+                    case ConnectionSessionState.Ready:
+                        ready++;
+                        break;
+                    case ConnectionSessionState.Disconnecting:
+                        disconnecting++;
+                        break;
+                    case ConnectionSessionState.Disconnected:
+                        disconnected++;
+                        break;
+                }
+            }
+
+            return new SessionMetricsSnapshot(
+                TotalSessions: _sessionsById.Count,
+                PeakConcurrentSessions: _peakConcurrentSessions,
+                ConnectingSessions: connecting,
+                HandshakingSessions: handshaking,
+                AuthenticatedSessions: authenticated,
+                ReadySessions: ready,
+                DisconnectingSessions: disconnecting,
+                DisconnectedSessions: disconnected,
+                CreatedSessions: _createdSessions,
+                RejectedSessions: _rejectedSessions,
+                TimeoutDisconnects: _timeoutDisconnects,
+                RemovedSessions: _removedSessions);
+        }
     }
 
     public int DrainLifecycleEvents(Span<SessionLifecycleEvent> destination)
@@ -235,6 +296,7 @@ public sealed class NetworkSessionManager
 
             _sessionsById.Remove(sessionId);
             _sessionIdByConnection.Remove(entry.ConnectionId);
+            _removedSessions++;
             _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
                 SessionLifecycleEventKind.Removed,
                 sessionId,
@@ -365,6 +427,9 @@ public sealed class NetworkSessionManager
         if (entry.State != ConnectionSessionState.Disconnecting &&
             entry.State != ConnectionSessionState.Disconnected)
         {
+            if (reason == SessionDisconnectReason.Timeout)
+                _timeoutDisconnects++;
+
             ConnectionSessionState previous = entry.State;
             entry.State = ConnectionSessionState.Disconnecting;
             entry.DisconnectReason = reason;
@@ -398,6 +463,7 @@ public sealed class NetworkSessionManager
         {
             _sessionsById.Remove(entry.SessionId);
             _sessionIdByConnection.Remove(entry.ConnectionId);
+            _removedSessions++;
             _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
                 SessionLifecycleEventKind.Removed,
                 entry.SessionId,

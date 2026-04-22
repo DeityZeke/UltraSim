@@ -31,9 +31,11 @@ What exists today:
   - minimal connection/session identity primitives
   - local session registry
   - session lifecycle snapshots/events
+  - session metrics snapshots
   - minimal client/server control-plane host over loopback
   - duplicate-session and admission policy
   - timeout sweep support
+  - control-plane metrics and typed control-plane events
   - a first post-handshake control message family (`PingProbe` / `PongProbe`)
 
 What does not exist yet:

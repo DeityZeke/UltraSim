@@ -10,6 +10,18 @@ public sealed class NetworkControlPlaneHost
     private readonly HandshakeHelloPacket _clientHello;
     private readonly SessionAdmissionPolicy _sessionPolicy;
     private readonly List<PongProbePacket> _receivedPongs = new();
+    private readonly Queue<ControlPlaneEvent> _events = new();
+    private int _inboundDatagrams;
+    private int _decodeFailures;
+    private int _dispatchMisses;
+    private int _handshakeStarts;
+    private int _handshakeAccepts;
+    private int _handshakeRejects;
+    private int _admissionRejects;
+    private int _pingProbesSent;
+    private int _pingProbesReceived;
+    private int _pongProbesSent;
+    private int _pongProbesReceived;
 
     private readonly record struct DispatchContext(
         NetworkControlPlaneHost Host,
@@ -63,6 +75,21 @@ public sealed class NetworkControlPlaneHost
 
     public bool IsRunning => _transport.IsRunning;
 
+    public SessionMetricsSnapshot GetSessionMetricsSnapshot() => Sessions.GetMetricsSnapshot();
+
+    public ControlPlaneMetricsSnapshot GetMetricsSnapshot() => new(
+        InboundDatagrams: _inboundDatagrams,
+        DecodeFailures: _decodeFailures,
+        DispatchMisses: _dispatchMisses,
+        HandshakeStarts: _handshakeStarts,
+        HandshakeAccepts: _handshakeAccepts,
+        HandshakeRejects: _handshakeRejects,
+        AdmissionRejects: _admissionRejects,
+        PingProbesSent: _pingProbesSent,
+        PingProbesReceived: _pingProbesReceived,
+        PongProbesSent: _pongProbesSent,
+        PongProbesReceived: _pongProbesReceived);
+
     public void Start() => _transport.Start();
 
     public void Stop() => _transport.Stop();
@@ -74,6 +101,14 @@ public sealed class NetworkControlPlaneHost
 
         SessionId sessionId = Sessions.CreateSession(connectionId, nowTicks);
         Sessions.TryMarkHandshaking(sessionId, nowTicks);
+        _handshakeStarts++;
+        _events.Enqueue(new ControlPlaneEvent(
+            ControlPlaneEventKind.HandshakeStarted,
+            connectionId,
+            sessionId,
+            SessionDisconnectReason.None,
+            HandshakeRejectReason.None,
+            nowTicks));
         SendPacket(connectionId, _clientHello, PacketHeaderFlags.HighPriorityHint);
         _transport.FlushOutbound();
         return sessionId;
@@ -90,13 +125,18 @@ public sealed class NetworkControlPlaneHost
                 break;
 
             total += count;
+            _inboundDatagrams += count;
             for (int i = 0; i < count; i++)
             {
                 InboundDatagram datagram = _inboundScratch[i];
                 if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
+                {
+                    _decodeFailures++;
                     continue;
+                }
 
-                _registry.TryDispatch(new DispatchContext(this, datagram.ConnectionId, nowTicks), header, payload);
+                if (!_registry.TryDispatch(new DispatchContext(this, datagram.ConnectionId, nowTicks), header, payload))
+                    _dispatchMisses++;
             }
 
             if (count < _inboundScratch.Length)
@@ -117,9 +157,18 @@ public sealed class NetworkControlPlaneHost
             return false;
 
         Sessions.TryTouchActivity(sessionId, clientTick);
+        _pingProbesSent++;
         SendPacket(connectionId, new PingProbePacket(sequence, clientTick), PacketHeaderFlags.HighPriorityHint);
         _transport.FlushOutbound();
         return true;
+    }
+
+    public int DrainEvents(Span<ControlPlaneEvent> destination)
+    {
+        int count = 0;
+        while (count < destination.Length && _events.Count > 0)
+            destination[count++] = _events.Dequeue();
+        return count;
     }
 
     private void OnHandshakeHello(ConnectionId connectionId, long nowTicks, in HandshakeHelloPacket packet)
@@ -128,7 +177,17 @@ public sealed class NetworkControlPlaneHost
         {
             if (!Sessions.TryCreateSession(connectionId, nowTicks, out sessionId, out SessionDisconnectReason rejectReason))
             {
-                SendPacket(connectionId, new HandshakeResultPacket(false, HandshakeRejectReason.None), PacketHeaderFlags.HighPriorityHint);
+                HandshakeRejectReason handshakeRejectReason = ToHandshakeRejectReason(rejectReason);
+                _handshakeRejects++;
+                _admissionRejects++;
+                _events.Enqueue(new ControlPlaneEvent(
+                    ControlPlaneEventKind.SessionAdmissionRejected,
+                    connectionId,
+                    SessionId.Invalid,
+                    rejectReason,
+                    handshakeRejectReason,
+                    nowTicks));
+                SendPacket(connectionId, new HandshakeResultPacket(false, handshakeRejectReason), PacketHeaderFlags.HighPriorityHint);
                 return;
             }
         }
@@ -139,12 +198,28 @@ public sealed class NetworkControlPlaneHost
         {
             Sessions.TryMarkAuthenticated(sessionId, nowTicks);
             Sessions.TryMarkReady(sessionId, nowTicks);
+            _handshakeAccepts++;
+            _events.Enqueue(new ControlPlaneEvent(
+                ControlPlaneEventKind.HandshakeAccepted,
+                connectionId,
+                sessionId,
+                SessionDisconnectReason.None,
+                HandshakeRejectReason.None,
+                nowTicks));
             SendPacket(connectionId, new HandshakeResultPacket(true), PacketHeaderFlags.HighPriorityHint);
             return;
         }
 
         Sessions.TryBeginDisconnect(sessionId, SessionDisconnectReason.Rejected, nowTicks);
         Sessions.TryCompleteDisconnect(sessionId, nowTicks);
+        _handshakeRejects++;
+        _events.Enqueue(new ControlPlaneEvent(
+            ControlPlaneEventKind.HandshakeRejected,
+            connectionId,
+            sessionId,
+            SessionDisconnectReason.Rejected,
+            result.RejectReason,
+            nowTicks));
         SendPacket(connectionId, new HandshakeResultPacket(false, result.RejectReason, result.MissingFeatures), PacketHeaderFlags.HighPriorityHint);
     }
 
@@ -157,11 +232,27 @@ public sealed class NetworkControlPlaneHost
         {
             Sessions.TryMarkAuthenticated(sessionId, nowTicks);
             Sessions.TryMarkReady(sessionId, nowTicks);
+            _handshakeAccepts++;
+            _events.Enqueue(new ControlPlaneEvent(
+                ControlPlaneEventKind.HandshakeAccepted,
+                connectionId,
+                sessionId,
+                SessionDisconnectReason.None,
+                HandshakeRejectReason.None,
+                nowTicks));
             return;
         }
 
         Sessions.TryBeginDisconnect(sessionId, SessionDisconnectReason.Rejected, nowTicks);
         Sessions.TryCompleteDisconnect(sessionId, nowTicks);
+        _handshakeRejects++;
+        _events.Enqueue(new ControlPlaneEvent(
+            ControlPlaneEventKind.HandshakeRejected,
+            connectionId,
+            sessionId,
+            SessionDisconnectReason.Rejected,
+            packet.RejectReason,
+            nowTicks));
     }
 
     private void OnPingProbe(ConnectionId connectionId, long nowTicks, in PingProbePacket packet)
@@ -172,6 +263,8 @@ public sealed class NetworkControlPlaneHost
             return;
 
         Sessions.TryTouchActivity(sessionId, nowTicks);
+        _pingProbesReceived++;
+        _pongProbesSent++;
         SendPacket(connectionId, new PongProbePacket(packet.Sequence, packet.ClientTick, checked((uint)nowTicks)), PacketHeaderFlags.HighPriorityHint);
     }
 
@@ -180,7 +273,25 @@ public sealed class NetworkControlPlaneHost
         if (!Sessions.TryGetSessionIdByConnection(connectionId, out SessionId sessionId))
             return;
         Sessions.TryTouchActivity(sessionId, nowTicks);
+        _pongProbesReceived++;
+        _events.Enqueue(new ControlPlaneEvent(
+            ControlPlaneEventKind.PongReceived,
+            connectionId,
+            sessionId,
+            SessionDisconnectReason.None,
+            HandshakeRejectReason.None,
+            nowTicks));
         _receivedPongs.Add(packet);
+    }
+
+    private static HandshakeRejectReason ToHandshakeRejectReason(SessionDisconnectReason reason)
+    {
+        return reason switch
+        {
+            SessionDisconnectReason.DuplicateSession => HandshakeRejectReason.DuplicateSession,
+            SessionDisconnectReason.ServerBusy => HandshakeRejectReason.ServerBusy,
+            _ => HandshakeRejectReason.None,
+        };
     }
 
     private void SendPacket<TPacket>(ConnectionId connectionId, in TPacket packet, PacketHeaderFlags flags)
