@@ -173,3 +173,14 @@ Current first standalone harness snapshot:
 - `pending_max = 0`
 
 This is the first standalone counterpart to the earlier in-runner mini-ramp, and it is the right place to scale toward `64 / 128 / 256` before widening replication breadth further.
+
+Current scaling note from the first longer harness pass:
+
+- `256` clients / `30s`: `tick_p95 = 1.959 ms`
+- `384` clients / `30s`: `tick_p95 = 3.592 ms`
+- `480` clients / `30s`: `tick_p95 = 3.517 ms`
+- `496` clients / `30s`: `tick_p95 = 3.954 ms`
+- `512` clients / `30s`: borderline, observed between `3.748 ms` and `4.199 ms` across runs
+- `640` clients / `30s`: `tick_p95 = 5.194 ms`
+
+So the current movement-only UDP/session-host path is healthy up to roughly `~500` active clients at `62 Hz` before crossing a `4 ms` network-tail budget, with zero pending-input backlog in the passing range.

@@ -224,6 +224,15 @@ That checkpoint has now been followed by the first standalone ramp tool:
   - `tick_max = 0.869 ms`
   - `pending_max = 0`
 
+Current first scaling read:
+
+- `256` clients / `30s`: `tick_p95 = 1.959 ms`
+- `496` clients / `30s`: `tick_p95 = 3.954 ms`
+- `512` clients / `30s`: borderline, observed around the `4 ms` ceiling across runs
+- `640` clients / `30s`: `tick_p95 = 5.194 ms`
+
+That makes the current practical ceiling for the narrow movement-only UDP/session-host slice roughly `~500` active clients at `62 Hz` before a `4 ms` p95 network budget is exceeded.
+
 Current higher-layer policy direction:
 
 - `Realtime` latest-state is the preferred lane for small continuously changing observer-visible entity state

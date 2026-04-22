@@ -62,16 +62,24 @@ public sealed class ClientMovementSessionHost
 
     public int Pump(long nowTicks)
     {
-        int count = _transport.PollInbound(_inboundScratch);
-        if (count > 0)
+        int totalCount = 0;
+        while (true)
         {
+            int count = _transport.PollInbound(_inboundScratch);
+            if (count <= 0)
+                break;
+
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, count);
             _control.ProcessInbound(inbound, nowTicks);
             _movement.ProcessInbound(inbound);
+            totalCount += count;
+
+            if (count < _inboundScratch.Length)
+                break;
         }
 
         _control.FlushOutbound();
-        return count;
+        return totalCount;
     }
 
     public bool TrySendInput(

@@ -1,0 +1,65 @@
+{
+  "timestamp_utc": "2026-04-22T23:23:00.2296553Z",
+  "harness": "udp-session-host-ramp",
+  "args": {
+    "stages": "384,448,480",
+    "stage_mode": "independent",
+    "stage_duration_seconds": 30,
+    "settle_seconds": 3,
+    "tick_hz": 62,
+    "active_ratio": 1,
+    "port": 0,
+    "slo_tick_p95_ms": 4,
+    "slo_pending_max": 128
+  },
+  "stages": [
+    {
+      "stage_index": 0,
+      "target_clients": 384,
+      "active_clients": 384,
+      "ready_clients": 384,
+      "tick_avg_ms": 2.778,
+      "tick_p95_ms": 3.592,
+      "tick_p99_ms": 3.844,
+      "tick_max_ms": 10.01,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 1242848920,
+      "connect_attempts": 384,
+      "connect_success": 384,
+      "connect_success_rate": 1
+    },
+    {
+      "stage_index": 1,
+      "target_clients": 448,
+      "active_clients": 448,
+      "ready_clients": 448,
+      "tick_avg_ms": 3.171,
+      "tick_p95_ms": 3.283,
+      "tick_p99_ms": 3.698,
+      "tick_max_ms": 8.028,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 1445497040,
+      "connect_attempts": 448,
+      "connect_success": 448,
+      "connect_success_rate": 1
+    },
+    {
+      "stage_index": 2,
+      "target_clients": 480,
+      "active_clients": 480,
+      "ready_clients": 480,
+      "tick_avg_ms": 3.404,
+      "tick_p95_ms": 3.517,
+      "tick_p99_ms": 3.933,
+      "tick_max_ms": 10.079,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 1548749416,
+      "connect_attempts": 480,
+      "connect_success": 480,
+      "connect_success_rate": 1
+    }
+  ]
+}

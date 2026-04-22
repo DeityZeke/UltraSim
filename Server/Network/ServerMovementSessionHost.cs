@@ -59,15 +59,24 @@ public sealed class ServerMovementSessionHost
 
     public int Pump(long nowTicks, float deltaSeconds, uint serverTick)
     {
-        int inboundCount = _transport.PollInbound(_inboundScratch);
-        if (inboundCount > 0)
+        int totalInboundCount = 0;
+        while (true)
         {
+            int inboundCount = _transport.PollInbound(_inboundScratch);
+            if (inboundCount <= 0)
+                break;
+
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, inboundCount);
             _control.ProcessInbound(inbound, nowTicks);
             HandleControlPlaneEvents(nowTicks);
             _movement.ProcessInbound(inbound);
+            totalInboundCount += inboundCount;
+
+            if (inboundCount < _inboundScratch.Length)
+                break;
         }
-        else
+
+        if (totalInboundCount == 0)
         {
             _control.Sessions.SweepTimeouts(nowTicks);
         }
@@ -75,7 +84,7 @@ public sealed class ServerMovementSessionHost
         HandleSessionLifecycleEvents(nowTicks);
         _movement.AdvanceAndSend(deltaSeconds, serverTick);
         _control.FlushOutbound();
-        return inboundCount;
+        return totalInboundCount;
     }
 
     private void HandleControlPlaneEvents(long nowTicks)

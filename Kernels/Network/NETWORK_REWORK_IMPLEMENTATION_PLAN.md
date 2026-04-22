@@ -523,5 +523,6 @@ The next implementation target after this bridge slice should be:
 - and then use that richer slice plus the new paired movement round-trip as the first real candidate for socket-driven harness/ramp validation
 - that checkpoint now exists in minimal form through the shared session-host UDP mini-ramp; the next harness step should be a broader standalone bot runner, not another throwaway transport-specific benchmark shape
 - that broader standalone bot runner now exists in first form under `_Benchmarks/UltraSim.Network.BotHarness`; the next step is scaling/stressing it, not inventing a third temporary harness path
+- first scaling/stress passes now exist too, and the current narrow movement-only slice is landing around a practical `~500` active-client ceiling at `62 Hz` before a `4 ms` p95 network-tail budget is crossed
 
 not full replication yet.
