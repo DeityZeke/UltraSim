@@ -235,6 +235,18 @@ Done when:
 - control-plane traffic can round-trip through loopback
 - handshake/session lifecycle basics are test-covered
 
+Current status:
+
+- started
+- the first control-plane foundation is now in place:
+  - `BitWriter` / `BitReader`
+  - typed `IPacket<T>` contracts
+  - `PacketEnvelopeHeader`
+  - `PacketRegistry<TContext>`
+  - `PacketCodec`
+  - handshake packets and validation policy
+- a full session-runtime state machine is still deferred to the next slice
+
 ### Phase N3: Stream Model Slice
 
 Deliver:

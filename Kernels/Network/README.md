@@ -22,11 +22,18 @@ What exists today:
   - immutable outbound payload buffers
   - transform-stage hooks
   - loopback transport
+- first control-plane/runtime contracts for:
+  - bit serialization
+  - typed packet contracts
+  - small lane-neutral packet envelope headers
+  - packet registry and typed dispatch
+  - handshake packets and validation policy
+  - minimal connection/session identity primitives
 
 What does not exist yet:
 
-- full protocol codecs
-- handshake/session runtime
+- broader protocol families beyond the first control-plane slice
+- full handshake/session runtime flow
 - latest-state and ordered-event stream implementations
 - scheduler/assembly pipeline
 - ECS/server/client integration layers

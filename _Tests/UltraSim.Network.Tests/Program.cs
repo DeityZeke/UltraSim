@@ -15,6 +15,11 @@ internal static class TestRunner
         Run(nameof(OutboundTransformContext_PreservesSuppliedFlags), OutboundTransformContext_PreservesSuppliedFlags);
         Run(nameof(INetworkTransport_ExposesExpectedSurface), INetworkTransport_ExposesExpectedSurface);
         Run(nameof(IOutboundTransform_ExposesExplicitTransformHook), IOutboundTransform_ExposesExplicitTransformHook);
+        Run(nameof(PacketEnvelopeHeader_RoundTripsExpectedFields), PacketEnvelopeHeader_RoundTripsExpectedFields);
+        Run(nameof(PacketCodec_EncodesAndDecodesHandshakeHello), PacketCodec_EncodesAndDecodesHandshakeHello);
+        Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
+        Run(nameof(HandshakeGate_AcceptsAndRejectsExpectedReasons), HandshakeGate_AcceptsAndRejectsExpectedReasons);
+        Run(nameof(ControlPlane_LoopbackHandshake_RoundTripsOverTransport), ControlPlane_LoopbackHandshake_RoundTripsOverTransport);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -170,6 +175,113 @@ internal static class TestRunner
         MethodInfo? method = contract.GetMethod(name, parameterTypes);
         Assert.NotNull(method);
         Assert.Equal(returnType, method!.ReturnType);
+    }
+
+    private static void PacketEnvelopeHeader_RoundTripsExpectedFields()
+    {
+        byte[] bytes = new byte[PacketEnvelopeHeader.SizeInBytes];
+        var writer = new BitWriter(bytes);
+        var header = new PacketEnvelopeHeader(0x1234, PacketHeaderFlags.Compressed | PacketHeaderFlags.HighPriorityHint, 77);
+        header.Serialize(ref writer);
+
+        var reader = new BitReader(bytes);
+        PacketEnvelopeHeader decoded = PacketEnvelopeHeader.Deserialize(ref reader);
+
+        Assert.Equal((ushort)0x1234, decoded.PacketId);
+        Assert.Equal(PacketHeaderFlags.Compressed | PacketHeaderFlags.HighPriorityHint, decoded.Flags);
+        Assert.Equal((ushort)77, decoded.PayloadLength);
+    }
+
+    private static void PacketCodec_EncodesAndDecodesHandshakeHello()
+    {
+        var hello = new HandshakeHelloPacket(
+            protocolVersion: 7,
+            schemaHash: 11,
+            contentHash: 13,
+            features: FeatureFlags.Compression | FeatureFlags.SharedPayloadFanout);
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(hello, PacketHeaderFlags.None);
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(HandshakeHelloPacket.PacketId, header.PacketId);
+        Assert.Equal(PacketHeaderFlags.None, header.Flags);
+
+        var reader = new BitReader(payload);
+        HandshakeHelloPacket decoded = HandshakeHelloPacket.Deserialize(ref reader);
+        Assert.Equal((uint)7, decoded.ProtocolVersion);
+        Assert.Equal((ulong)11, decoded.SchemaHash);
+        Assert.Equal((ulong)13, decoded.ContentHash);
+        Assert.Equal(FeatureFlags.Compression | FeatureFlags.SharedPayloadFanout, decoded.Features);
+    }
+
+    private static void PacketRegistry_DispatchesTypedPacketAndMetadata()
+    {
+        var registry = new PacketRegistry<List<string>>();
+        registry.Register<HandshakeHelloPacket>(static (List<string> messages, in HandshakeHelloPacket packet) =>
+        {
+            messages.Add($"hello:{packet.ProtocolVersion}:{packet.Features}");
+        });
+        registry.Seal();
+
+        var hello = new HandshakeHelloPacket(3, 4, 5, FeatureFlags.BulkTransfer);
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(hello);
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+
+        var messages = new List<string>();
+        Assert.True(registry.TryDispatch(messages, header, payload));
+        Assert.Equal(ChannelType.ReliableOrdered, registry.GetChannel(HandshakeHelloPacket.PacketId));
+        Assert.Equal(NetworkPlane.Control, registry.GetPlane(HandshakeHelloPacket.PacketId));
+        Assert.Equal(PacketClass.Control, registry.GetPacketClass(HandshakeHelloPacket.PacketId));
+        Assert.Equal("hello:3:BulkTransfer", messages[0]);
+    }
+
+    private static void HandshakeGate_AcceptsAndRejectsExpectedReasons()
+    {
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 8,
+            SchemaHash: 100,
+            ContentHash: 200,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+
+        var acceptedHello = new HandshakeHelloPacket(8, 100, 200, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression);
+        HandshakeValidationResult accepted = HandshakeGate.Validate(acceptedHello, policy);
+        Assert.True(accepted.Accepted);
+
+        var rejectedHello = new HandshakeHelloPacket(8, 100, 201, FeatureFlags.None);
+        HandshakeValidationResult rejected = HandshakeGate.Validate(rejectedHello, policy);
+        Assert.False(rejected.Accepted);
+        Assert.Equal(HandshakeRejectReason.ContentHashMismatch, rejected.RejectReason);
+    }
+
+    private static void ControlPlane_LoopbackHandshake_RoundTripsOverTransport()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var registry = new PacketRegistry<List<HandshakeHelloPacket>>();
+        registry.Register<HandshakeHelloPacket>(static (List<HandshakeHelloPacket> packets, in HandshakeHelloPacket packet) => packets.Add(packet));
+        registry.Seal();
+
+        var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(hello, PacketHeaderFlags.HighPriorityHint);
+        pair.Client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            HandshakeHelloPacket.Plane,
+            HandshakeHelloPacket.PacketClass,
+            HandshakeHelloPacket.Channel,
+            encoded));
+        pair.Client.FlushOutbound();
+
+        var inbound = new InboundDatagram[4];
+        int count = pair.Server.PollInbound(inbound);
+        Assert.Equal(1, count);
+        Assert.True(PacketCodec.TryDecodeEnvelope(inbound[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(PacketHeaderFlags.HighPriorityHint, header.Flags);
+
+        var packets = new List<HandshakeHelloPacket>();
+        Assert.True(registry.TryDispatch(packets, header, payload));
+        Assert.Equal((uint)9, packets[0].ProtocolVersion);
+        Assert.Equal(FeatureFlags.Compression, packets[0].Features);
     }
 }
 
