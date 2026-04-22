@@ -32,14 +32,15 @@ What exists today:
   - local session registry
   - session lifecycle snapshots/events
   - minimal client/server control-plane host over loopback
+  - duplicate-session and admission policy
+  - timeout sweep support
+  - a first post-handshake control message family (`PingProbe` / `PongProbe`)
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
-  - timeouts
-  - duplicate session handling
-  - disconnect/admission policy
+  - richer disconnect/admission policy beyond the current minimal rules
 - latest-state and ordered-event stream implementations
 - scheduler/assembly pipeline
 - ECS/server/client integration layers

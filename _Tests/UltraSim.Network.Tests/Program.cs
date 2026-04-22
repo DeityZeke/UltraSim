@@ -20,8 +20,11 @@ internal static class TestRunner
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
         Run(nameof(HandshakeGate_AcceptsAndRejectsExpectedReasons), HandshakeGate_AcceptsAndRejectsExpectedReasons);
         Run(nameof(NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents), NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents);
+        Run(nameof(NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates), NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates);
+        Run(nameof(NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions), NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions);
         Run(nameof(ControlPlane_LoopbackHandshake_RoundTripsOverTransport), ControlPlane_LoopbackHandshake_RoundTripsOverTransport);
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
+        Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -280,6 +283,58 @@ internal static class TestRunner
         Assert.Equal(ConnectionSessionState.Disconnected, events[5].CurrentState);
     }
 
+    private static void NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates()
+    {
+        var rejecting = new NetworkSessionManager(new SessionAdmissionPolicy(
+            DuplicateSessionPolicy.RejectNew,
+            MaxActiveSessions: 0,
+            AuthTimeoutTicks: 0,
+            KeepAliveTimeoutTicks: 0));
+        SessionId first = rejecting.CreateSession(new ConnectionId(7), 1);
+        Assert.False(rejecting.TryCreateSession(new ConnectionId(7), 2, out _, out SessionDisconnectReason duplicateReason));
+        Assert.Equal(SessionDisconnectReason.DuplicateSession, duplicateReason);
+        Assert.True(rejecting.TryGetSnapshot(first, out SessionSnapshot rejectSnapshot));
+        Assert.Equal(ConnectionSessionState.Connecting, rejectSnapshot.State);
+
+        var replacing = new NetworkSessionManager(new SessionAdmissionPolicy(
+            DuplicateSessionPolicy.ReplaceExisting,
+            MaxActiveSessions: 0,
+            AuthTimeoutTicks: 0,
+            KeepAliveTimeoutTicks: 0));
+        SessionId replaceFirst = replacing.CreateSession(new ConnectionId(8), 1);
+        Assert.True(replacing.TryCreateSession(new ConnectionId(8), 2, out SessionId replaceSecond, out SessionDisconnectReason replaceReason));
+        Assert.Equal(SessionDisconnectReason.None, replaceReason);
+        Assert.False(replacing.TryGetSnapshot(replaceFirst, out _));
+        Assert.True(replacing.TryGetSnapshot(replaceSecond, out SessionSnapshot replaceSnapshot));
+        Assert.Equal(ConnectionSessionState.Connecting, replaceSnapshot.State);
+    }
+
+    private static void NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions()
+    {
+        var sessions = new NetworkSessionManager(new SessionAdmissionPolicy(
+            DuplicateSessionPolicy.RejectNew,
+            MaxActiveSessions: 0,
+            AuthTimeoutTicks: 5,
+            KeepAliveTimeoutTicks: 5));
+        SessionId authSession = sessions.CreateSession(new ConnectionId(10), 100);
+        Assert.True(sessions.TryMarkHandshaking(authSession, 101));
+
+        Assert.Equal(1, sessions.SweepTimeouts(106));
+        Assert.True(sessions.TryGetSnapshot(authSession, out SessionSnapshot authSnapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, authSnapshot.State);
+        Assert.Equal(SessionDisconnectReason.Timeout, authSnapshot.DisconnectReason);
+
+        SessionId readySession = sessions.CreateSession(new ConnectionId(11), 200);
+        Assert.True(sessions.TryMarkHandshaking(readySession, 201));
+        Assert.True(sessions.TryMarkAuthenticated(readySession, 202));
+        Assert.True(sessions.TryMarkReady(readySession, 203));
+        Assert.True(sessions.TryTouchActivity(readySession, 204));
+
+        Assert.Equal(1, sessions.SweepTimeouts(209));
+        Assert.True(sessions.TryGetSnapshot(readySession, out SessionSnapshot readySnapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, readySnapshot.State);
+    }
+
     private static void ControlPlane_LoopbackHandshake_RoundTripsOverTransport()
     {
         using var pair = new LoopbackTransportPair();
@@ -332,6 +387,36 @@ internal static class TestRunner
         Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
         Assert.Equal(ConnectionSessionState.Disconnected, clientSnapshot.State);
         Assert.Equal(SessionDisconnectReason.Rejected, clientSnapshot.DisconnectReason);
+    }
+
+    private static void ControlPlane_PingProbe_RoundTripsAfterReadyHandshake()
+    {
+        using var pair = new LoopbackTransportPair();
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
+        var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
+        var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, pair.Server, handshakePolicy: policy);
+        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, pair.Client, clientHello: hello);
+        server.Start();
+        client.Start();
+
+        SessionId clientSession = client.BeginClientHandshake(new ConnectionId(3), nowTicks: 300);
+        server.Pump(301);
+        client.Pump(302);
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot snapshot));
+        Assert.Equal(ConnectionSessionState.Ready, snapshot.State);
+
+        Assert.True(client.SendPingProbe(new ConnectionId(3), sequence: 17, clientTick: 303));
+        server.Pump(304);
+        client.Pump(305);
+
+        Assert.Equal(1, client.ReceivedPongs.Count);
+        Assert.Equal((ushort)17, client.ReceivedPongs[0].Sequence);
+        Assert.Equal((uint)303, client.ReceivedPongs[0].ClientTick);
+        Assert.Equal((uint)304, client.ReceivedPongs[0].ServerTick);
     }
 }
 

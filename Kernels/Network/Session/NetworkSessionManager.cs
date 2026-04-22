@@ -16,7 +16,18 @@ public sealed class NetworkSessionManager
     private readonly Dictionary<SessionId, SessionEntry> _sessionsById = new();
     private readonly Dictionary<ConnectionId, SessionId> _sessionIdByConnection = new();
     private readonly Queue<SessionLifecycleEvent> _lifecycleEvents = new();
+    private readonly SessionAdmissionPolicy _policy;
     private uint _nextSessionId = 1;
+
+    public NetworkSessionManager(SessionAdmissionPolicy policy = default)
+    {
+        if (policy.MaxActiveSessions < 0)
+            throw new ArgumentOutOfRangeException(nameof(policy));
+
+        _policy = policy.Equals(default(SessionAdmissionPolicy))
+            ? SessionAdmissionPolicy.Default
+            : policy;
+    }
 
     public int Count
     {
@@ -29,27 +40,67 @@ public sealed class NetworkSessionManager
 
     public SessionId CreateSession(ConnectionId connectionId, long nowTicks)
     {
+        if (TryCreateSession(connectionId, nowTicks, out SessionId sessionId, out SessionDisconnectReason rejectReason))
+            return sessionId;
+
+        throw new InvalidOperationException($"Session creation rejected for connection {connectionId}: {rejectReason}");
+    }
+
+    public bool TryCreateSession(
+        ConnectionId connectionId,
+        long nowTicks,
+        out SessionId sessionId,
+        out SessionDisconnectReason rejectReason)
+    {
         lock (_sync)
         {
             if (!connectionId.IsValid)
                 throw new ArgumentOutOfRangeException(nameof(connectionId));
+
+            sessionId = SessionId.Invalid;
+            rejectReason = SessionDisconnectReason.None;
 
             if (_sessionIdByConnection.TryGetValue(connectionId, out SessionId existing))
             {
                 if (_sessionsById.TryGetValue(existing, out SessionEntry? existingSession) &&
                     existingSession.State != ConnectionSessionState.Disconnected)
                 {
-                    throw new InvalidOperationException($"Connection {connectionId} already has an active session.");
-                }
+                    if (_policy.DuplicateSessionPolicy == DuplicateSessionPolicy.RejectNew)
+                    {
+                        rejectReason = SessionDisconnectReason.DuplicateSession;
+                        _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
+                            SessionLifecycleEventKind.Rejected,
+                            SessionId.Invalid,
+                            connectionId,
+                            ConnectionSessionState.Disconnected,
+                            ConnectionSessionState.Disconnected,
+                            rejectReason,
+                            nowTicks));
+                        return false;
+                    }
 
-                _sessionIdByConnection.Remove(connectionId);
-                _sessionsById.Remove(existing);
+                    ForceDisconnect_NoLock(existingSession, SessionDisconnectReason.DuplicateSession, nowTicks, removeDisconnected: true);
+                }
+            }
+
+            if (_policy.MaxActiveSessions > 0 && _sessionsById.Count >= _policy.MaxActiveSessions)
+            {
+                rejectReason = SessionDisconnectReason.ServerBusy;
+                _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
+                    SessionLifecycleEventKind.Rejected,
+                    SessionId.Invalid,
+                    connectionId,
+                    ConnectionSessionState.Disconnected,
+                    ConnectionSessionState.Disconnected,
+                    rejectReason,
+                    nowTicks));
+                return false;
             }
 
             if (_nextSessionId == 0)
                 throw new InvalidOperationException("Session id space exhausted.");
 
-            SessionId sessionId = new(_nextSessionId++);
+            sessionId = new SessionId(_nextSessionId++);
             var entry = new SessionEntry
             {
                 SessionId = sessionId,
@@ -70,7 +121,7 @@ public sealed class NetworkSessionManager
                 ConnectionSessionState.Connecting,
                 SessionDisconnectReason.None,
                 nowTicks));
-            return sessionId;
+            return true;
         }
     }
 
@@ -208,6 +259,54 @@ public sealed class NetworkSessionManager
         }
     }
 
+    public bool TryDisconnectConnection(
+        ConnectionId connectionId,
+        SessionDisconnectReason reason,
+        long nowTicks,
+        bool removeDisconnected = true)
+    {
+        lock (_sync)
+        {
+            if (!_sessionIdByConnection.TryGetValue(connectionId, out SessionId sessionId))
+                return false;
+            if (!_sessionsById.TryGetValue(sessionId, out SessionEntry? entry))
+                return false;
+
+            ForceDisconnect_NoLock(entry, reason, nowTicks, removeDisconnected);
+            return true;
+        }
+    }
+
+    public int SweepTimeouts(long nowTicks)
+    {
+        if (_policy.AuthTimeoutTicks <= 0 && _policy.KeepAliveTimeoutTicks <= 0)
+            return 0;
+
+        lock (_sync)
+        {
+            if (_sessionsById.Count == 0)
+                return 0;
+
+            SessionEntry[] snapshot = new SessionEntry[_sessionsById.Count];
+            _sessionsById.Values.CopyTo(snapshot, 0);
+            int count = 0;
+            for (int i = 0; i < snapshot.Length; i++)
+            {
+                SessionEntry entry = snapshot[i];
+                if (!_sessionsById.ContainsKey(entry.SessionId))
+                    continue;
+
+                if (!ShouldTimeout(entry, nowTicks))
+                    continue;
+
+                ForceDisconnect_NoLock(entry, SessionDisconnectReason.Timeout, nowTicks, removeDisconnected: false);
+                count++;
+            }
+
+            return count;
+        }
+    }
+
     private bool TryTransition(
         SessionId sessionId,
         ConnectionSessionState expected,
@@ -234,6 +333,79 @@ public sealed class NetworkSessionManager
                 entry.DisconnectReason,
                 nowTicks));
             return true;
+        }
+    }
+
+    private bool ShouldTimeout(SessionEntry entry, long nowTicks)
+    {
+        long elapsed = nowTicks - entry.LastActivityTicks;
+        if (elapsed < 0)
+            return false;
+
+        return entry.State switch
+        {
+            ConnectionSessionState.Connecting or
+            ConnectionSessionState.Handshaking or
+            ConnectionSessionState.Authenticated =>
+                _policy.AuthTimeoutTicks > 0 && elapsed >= _policy.AuthTimeoutTicks,
+            ConnectionSessionState.Ready or
+            ConnectionSessionState.Disconnecting =>
+                _policy.KeepAliveTimeoutTicks > 0 && elapsed >= _policy.KeepAliveTimeoutTicks,
+            ConnectionSessionState.Disconnected => false,
+            _ => false,
+        };
+    }
+
+    private void ForceDisconnect_NoLock(
+        SessionEntry entry,
+        SessionDisconnectReason reason,
+        long nowTicks,
+        bool removeDisconnected)
+    {
+        if (entry.State != ConnectionSessionState.Disconnecting &&
+            entry.State != ConnectionSessionState.Disconnected)
+        {
+            ConnectionSessionState previous = entry.State;
+            entry.State = ConnectionSessionState.Disconnecting;
+            entry.DisconnectReason = reason;
+            entry.LastActivityTicks = nowTicks;
+            _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
+                SessionLifecycleEventKind.StateChanged,
+                entry.SessionId,
+                entry.ConnectionId,
+                previous,
+                entry.State,
+                reason,
+                nowTicks));
+        }
+
+        if (entry.State != ConnectionSessionState.Disconnected)
+        {
+            ConnectionSessionState previous = entry.State;
+            entry.State = ConnectionSessionState.Disconnected;
+            entry.LastActivityTicks = nowTicks;
+            _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
+                SessionLifecycleEventKind.StateChanged,
+                entry.SessionId,
+                entry.ConnectionId,
+                previous,
+                entry.State,
+                entry.DisconnectReason,
+                nowTicks));
+        }
+
+        if (removeDisconnected)
+        {
+            _sessionsById.Remove(entry.SessionId);
+            _sessionIdByConnection.Remove(entry.ConnectionId);
+            _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
+                SessionLifecycleEventKind.Removed,
+                entry.SessionId,
+                entry.ConnectionId,
+                ConnectionSessionState.Disconnected,
+                ConnectionSessionState.Disconnected,
+                entry.DisconnectReason,
+                nowTicks));
         }
     }
 }

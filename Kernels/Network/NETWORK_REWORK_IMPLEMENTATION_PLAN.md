@@ -248,11 +248,14 @@ Current status:
   - `NetworkSessionManager`
   - session snapshots and lifecycle events
   - `NetworkControlPlaneHost` for minimal loopback client/server handshake flow
+  - duplicate-session and admission policy
+  - timeout sweep support
+  - `PingProbePacket` / `PongProbePacket`
 - still deferred from the broader session/runtime slice:
-  - timeout policy
-  - duplicate session policy
-  - explicit admission/rejection policy
-  - richer disconnect semantics
+  - richer admission/rejection result reporting
+  - broader control-plane message families
+  - more complete disconnect semantics
+  - bridge-facing session metrics/stats
 
 ### Phase N3: Stream Model Slice
 

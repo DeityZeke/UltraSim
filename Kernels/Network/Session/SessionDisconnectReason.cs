@@ -3,8 +3,13 @@ namespace UltraSim.Network;
 public enum SessionDisconnectReason : byte
 {
     None = 0,
-    Rejected = 1,
+    Unknown = 1,
     Timeout = 2,
-    Closed = 3,
-    Unknown = 4,
+    DuplicateSession = 3,
+    ProtocolViolation = 4,
+    ServerShutdown = 5,
+    Kicked = 6,
+    ServerBusy = 7,
+    Rejected = 8,
+    Closed = 9,
 }
