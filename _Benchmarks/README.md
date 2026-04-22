@@ -113,4 +113,5 @@ Current intent:
 Current interpretation guidance:
 
 - shared-frame fanout is already a clear allocation win over naive rebuild, but not yet a universal throughput win
-- AOI subscription maintenance is now real and benchmarked, but the first implementation is still allocation-heavy enough that it should be treated as correctness-first rather than performance-settled
+- AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
+- the next benchmark-driven tuning target is the shared-frame projection/dispatch path, not AOI correctness

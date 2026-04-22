@@ -94,6 +94,9 @@ public sealed class OutboundDatagramAssembler
         bool allowCompression = true,
         bool allowSegmentation = true)
     {
+        if (_transforms.Length == 0)
+            return AssembleFanoutWithoutTransforms(connections, frame, destination);
+
         int count = 0;
         int compressed = 0;
         int encrypted = 0;
@@ -115,5 +118,31 @@ public sealed class OutboundDatagramAssembler
         }
 
         return new OutboundAssemblyResult(count, compressed, encrypted);
+    }
+
+    private static OutboundAssemblyResult AssembleFanoutWithoutTransforms(
+        ReadOnlySpan<ConnectionId> connections,
+        in PublishedFrame frame,
+        Span<OutboundDatagram> destination)
+    {
+        if (destination.Length == 0 || connections.Length == 0)
+            return default;
+
+        ImmutablePayloadBuffer envelope = PacketCodec.EncodeEnvelope(frame.PacketId, frame.Body, frame.DefaultHeaderFlags);
+        int count = Math.Min(connections.Length, destination.Length);
+        for (int i = 0; i < count; i++)
+        {
+            destination[i] = new OutboundDatagram(
+                connections[i],
+                frame.Plane,
+                frame.PacketClass,
+                frame.Channel,
+                envelope);
+        }
+
+        return new OutboundAssemblyResult(
+            Count: count,
+            CompressedCount: (frame.DefaultHeaderFlags & PacketHeaderFlags.Compressed) != 0 ? count : 0,
+            EncryptedCount: (frame.DefaultHeaderFlags & PacketHeaderFlags.Encrypted) != 0 ? count : 0);
     }
 }

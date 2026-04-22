@@ -359,11 +359,13 @@ Current status:
   - `ChunkSubscriptionKey`
   - `ChunkAoiPolicy`
   - `ChunkAoiSubscriptionMaintainer`
+  - registry-owned `ReconcileConnection(...)` support in `ConnectionSubscriptionRegistry`
 - current behavior:
   - AOI rings are defined in meters around the player, not by chunk-count semantics
   - chunk overlap is derived from those world-space radii
   - chunks are assigned to the nearest overlapping ring only
   - connection subscription sets can now be reconciled as a player moves
+  - AOI maintenance no longer keeps a second authoritative per-connection scope map outside the registry
 - still deferred from the broader subscription bridge slice:
   - direct integration between AOI maintenance and stream-work publication
   - denser reverse-index/backpressure-aware subscription maintenance
@@ -375,10 +377,11 @@ Benchmark note:
 - current early data shows:
   - clear allocation improvement for shared-frame fanout
   - mixed wall-clock results depending on scale
-  - AOI subscription maintenance benchmarks now exist and are currently allocation-heavy
+  - AOI subscription maintenance benchmarks now exist and improved substantially after the registry-owned reconcile pass
 - implication:
   - the seam is worth keeping
-  - projection/dispatch, AOI maintenance, and final envelope assembly still need tuning before this path can be treated as a definitive throughput win
+  - projection/dispatch and final envelope assembly still need tuning before the shared-frame path can be treated as a definitive throughput win
+  - AOI maintenance is no longer the same level of concern it was in the first benchmark pass
 
 ### Phase N5: Server Bridge Slice
 
@@ -460,7 +463,7 @@ Current status in this repo:
 The next implementation target after this bridge slice should be:
 
 - stream-integrated publish projection into fanout scheduling
-- AOI maintenance tuning informed by the first benchmark pass
+- continued shared-frame dispatch tuning informed by the benchmark pass
 - then broader server bridge work
 
 not full replication yet.

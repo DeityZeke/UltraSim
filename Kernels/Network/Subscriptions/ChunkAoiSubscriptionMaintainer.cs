@@ -4,9 +4,7 @@ public sealed class ChunkAoiSubscriptionMaintainer
 {
     private readonly object _sync = new();
     private readonly ChunkAoiPolicy _policy;
-    private readonly Dictionary<ConnectionId, HashSet<SubscriptionKey>> _scopeKeysByConnection = new();
-    private readonly HashSet<SubscriptionKey> _desiredKeyScratch = new();
-    private readonly List<SubscriptionKey> _currentKeyScratch = new();
+    private readonly List<SubscriptionKey> _desiredKeyScratch = new();
 
     public ChunkAoiSubscriptionMaintainer(ChunkAoiPolicy policy)
     {
@@ -24,48 +22,9 @@ public sealed class ChunkAoiSubscriptionMaintainer
 
         lock (_sync)
         {
-            if (!_scopeKeysByConnection.TryGetValue(connectionId, out HashSet<SubscriptionKey>? current))
-            {
-                current = new HashSet<SubscriptionKey>();
-                _scopeKeysByConnection.Add(connectionId, current);
-            }
-
             _desiredKeyScratch.Clear();
             _policy.CollectKeys(center, _desiredKeyScratch);
-
-            int added = 0;
-            foreach (SubscriptionKey key in _desiredKeyScratch)
-            {
-                if (current.Contains(key))
-                    continue;
-
-                subscriptions.Subscribe(connectionId, key);
-                added++;
-            }
-
-            int removed = 0;
-            _currentKeyScratch.Clear();
-            foreach (SubscriptionKey key in current)
-                _currentKeyScratch.Add(key);
-            for (int i = 0; i < _currentKeyScratch.Count; i++)
-            {
-                SubscriptionKey key = _currentKeyScratch[i];
-                if (_desiredKeyScratch.Contains(key))
-                    continue;
-
-                subscriptions.Unsubscribe(connectionId, key);
-                removed++;
-            }
-
-            current.Clear();
-            foreach (SubscriptionKey key in _desiredKeyScratch)
-                current.Add(key);
-
-            return new AoiSubscriptionUpdateResult(
-                DesiredScopeCount: _desiredKeyScratch.Count,
-                AddedCount: added,
-                RemovedCount: removed,
-                Changed: added > 0 || removed > 0);
+            return subscriptions.ReconcileConnection(connectionId, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(_desiredKeyScratch));
         }
     }
 
@@ -73,10 +32,6 @@ public sealed class ChunkAoiSubscriptionMaintainer
     {
         ArgumentNullException.ThrowIfNull(subscriptions);
 
-        lock (_sync)
-        {
-            _scopeKeysByConnection.Remove(connectionId);
-            return subscriptions.RemoveConnection(connectionId);
-        }
+        return subscriptions.RemoveConnection(connectionId);
     }
 }

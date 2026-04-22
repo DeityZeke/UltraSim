@@ -66,6 +66,7 @@ What exists today:
   - player-centered AOI ring policy defined in meters
   - chunk-overlap subscription scope collection
   - per-connection AOI subscription reconciliation
+  - registry-owned bulk reconcile path for AOI updates
 
 What does not exist yet:
 
@@ -154,5 +155,6 @@ Current early result:
 - shared-frame fanout clearly reduces allocations versus naive per-recipient rebuild
 - wall-clock improvement is not universal yet in the current implementation
 - AOI-backed subscription maintenance is now implemented and test-covered
-- the current AOI update path is functionally correct but still allocation-heavy in benchmark form
-- the seam is worth keeping, but both the projection/dispatch path and AOI maintenance path still need tuning before they can be treated as settled throughput wins
+- the AOI update path was materially improved by moving reconcile ownership into the subscription registry and collapsing per-connection duplicate state
+- the current AOI benchmark is now in a much healthier range, but the shared-frame projection/dispatch path is still the more obvious throughput tuning target
+- the seam is worth keeping, but the projection/dispatch path still needs tuning before it can be treated as a settled throughput win
