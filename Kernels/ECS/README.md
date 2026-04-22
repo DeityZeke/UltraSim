@@ -135,7 +135,7 @@ Implemented so far:
 - worker-count retention diagnostics for dirty-capture and thread-local scratch state,
 - worker-local dirty capture redesigned around bounded append-only entity buffers instead of large per-worker index dedupe tables,
 - prefab startup slice now in place through typed prefab contracts, `PrefabDefinition`, `PrefabCatalog`, immediate world prefab spawn helpers, and deferred prefab structural queue integration,
-- persistence seams still held for the next Phase 2 slice,
+- persistence startup slice now in place through stable persistence ids, instance-owned type registry, canonical persistence signatures, and in-memory entity snapshot capture/restore,
 - executable incremental tests.
 
 Current practical status:
@@ -147,17 +147,20 @@ Current practical status:
 - current soak runs show bounded retained memory and stable tick latency in the heaviest active movement scenarios,
 - profiling snapshots currently measure as effectively negligible overhead in scheduler-heavy runs,
 - per-system live timing data is now consumable through runtime snapshots for future performance-panel views without reviving the old control-panel UI directly inside the kernel,
-- Phase 2 has now started with an initial prefab runtime slice rather than leaving prefabs as placeholder-only seams,
+- Phase 2 now has both initial prefab and persistence runtime slices rather than only placeholder seams,
 - execution-mode crossover is now clearer:
   - `ParallelBatches` is the best fit for the heavier oscillating movement workloads,
   - `Serial` plus intra-system parallelism is the best fit for the current `v1` pulse movement shape,
 - automatic cadence spreading is now enabled by default for non-critical stages, with a default cap of `10` distinct offsets per period bucket,
 - automatic cadence spreading is still intentionally not applied to `Movement` and `Combat`, because current measurements show that benefit is workload-dependent rather than universally positive there,
-- persistence remains intentionally deferred behind working seams,
 - prefab work is now partially landed but still intentionally narrow:
   - no static global prefab registry,
   - no file-backed/data-driven loader yet,
   - no richer prefab import/catalog pipeline yet,
+- persistence work is now partially landed but still intentionally narrow:
+  - in-memory snapshot capture/restore exists,
+  - file-backed save/load adapters do not,
+  - manifest/type-database/versioning work is still deferred,
 - the main remaining competitive gaps are now concentrated in a narrow destroy/dirty-drain path set rather than in core architecture.
 
 Accepted current tradeoffs:
@@ -168,8 +171,8 @@ Accepted current tradeoffs:
 
 Still intentionally deferred:
 
-- persistence/runtime save-load port,
 - broader prefab runtime work beyond the current startup slice,
+- broader persistence runtime/file-format work beyond the current startup slice,
 - broader integration helpers and higher-level tooling.
 
 ## Phase 2 Prefabs
@@ -199,6 +202,39 @@ Still deferred for later Phase 2 slices:
 - file-backed/data-driven prefab loading,
 - richer prefab catalogs/import pipelines,
 - deeper spawn-path optimization if real workloads justify it.
+
+## Phase 2 Persistence
+
+The first persistence slice is now implemented.
+
+Current persistence pieces:
+
+- `PersistenceIdAttribute`
+- `PersistenceKind`
+- `PersistenceTypeRecord`
+- `PersistenceTypeRegistry`
+- `PersistenceComponentDescriptor`
+- `PersistenceSignature`
+- `PersistenceSignatureBuilder`
+- `EntityPersistenceSnapshot`
+- `WorldPersistenceView`
+- `PersistenceArchetypeView`
+- `World.CapturePersistenceSnapshot(...)`
+- `World.RestorePersistenceSnapshot(...)`
+
+Current persistence policy:
+
+- persistence types are instance-owned and explicit rather than process-global,
+- only components that implement `ISerializableComponent<T>` and carry a stable `PersistenceId` participate in the snapshot layer,
+- the current slice is an in-memory grouped entity snapshot/restore path, not a save-file format,
+- restore currently appends compatible persistent entities into a target world and marks restored components dirty.
+
+Still deferred for later Phase 2 slices:
+
+- binary or other file-backed persistence adapters,
+- richer type-database and manifest work,
+- deeper versioned component serialization beyond the current in-memory shape,
+- broader system-owned persistence tooling.
 
 ## Scheduler Guidance
 

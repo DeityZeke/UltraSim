@@ -71,6 +71,9 @@ internal static class TestRunner
         Run(nameof(World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns), World_SystemRuntimeSnapshots_StayUntimedUntilProfilingRuns);
         Run(nameof(World_TickAndManualExecution_RejectInvalidDeltaSeconds), World_TickAndManualExecution_RejectInvalidDeltaSeconds);
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
+        Run(nameof(PersistenceTypeRegistry_RegisterSchemaComponents_FindsSerializableComponents), PersistenceTypeRegistry_RegisterSchemaComponents_FindsSerializableComponents);
+        Run(nameof(World_CapturePersistenceSnapshot_GroupsSerializableComponents_AndSkipsTransientData), World_CapturePersistenceSnapshot_GroupsSerializableComponents_AndSkipsTransientData);
+        Run(nameof(World_RestorePersistenceSnapshot_AppendsEntitiesAndRestoresPersistentComponents), World_RestorePersistenceSnapshot_AppendsEntitiesAndRestoresPersistentComponents);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
         Run(nameof(ArchetypeSignature_RejectsInvalidComponentIds), ArchetypeSignature_RejectsInvalidComponentIds);
@@ -2382,6 +2385,145 @@ internal static class TestRunner
         Assert.Throws<InvalidOperationException>(() => noAdapterWorld.Load(reader));
     }
 
+    private static void PersistenceTypeRegistry_RegisterSchemaComponents_FindsSerializableComponents()
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<PersistentPosition>();
+        builder.RegisterComponent<Position>();
+        builder.RegisterComponent<PersistentVelocity>();
+
+        EcsSchema schema = builder.Build();
+        var registry = new PersistenceTypeRegistry();
+        registry.RegisterSchemaComponents(schema);
+        registry.Seal();
+
+        Assert.Equal(2, registry.Count);
+        Assert.True(registry.TryGetByType<PersistentPosition>(out PersistenceTypeRecord positionRecord));
+        Assert.Equal((uint)1001, positionRecord.PersistenceId);
+        Assert.True(registry.TryGetByType<PersistentVelocity>(out PersistenceTypeRecord velocityRecord));
+        Assert.Equal((uint)1002, velocityRecord.PersistenceId);
+        Assert.False(registry.TryGetByType<Position>(out _));
+        Assert.Equal(2, registry.GetAllSorted().Length);
+    }
+
+    private static void World_CapturePersistenceSnapshot_GroupsSerializableComponents_AndSkipsTransientData()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId persistentPositionId = builder.RegisterComponent<PersistentPosition>();
+        ComponentId persistentVelocityId = builder.RegisterComponent<PersistentVelocity>();
+        ComponentId transientPositionId = builder.RegisterComponent<Position>();
+        EcsSchema schema = builder.Build();
+        var world = new World(schema);
+
+        Entity both = world.CreateDefault(new ArchetypeSignature([persistentPositionId, persistentVelocityId]));
+        Entity persistentOnly = world.CreateDefault(new ArchetypeSignature([persistentPositionId]));
+        Entity persistentAndTransient = world.CreateDefault(new ArchetypeSignature([persistentPositionId, transientPositionId]));
+
+        Assert.True(world.SetComponent(both, new PersistentPosition(11)));
+        Assert.True(world.SetComponent(both, new PersistentVelocity(3)));
+        Assert.True(world.SetComponent(persistentOnly, new PersistentPosition(22)));
+        Assert.True(world.SetComponent(persistentAndTransient, new PersistentPosition(33)));
+        Assert.True(world.SetComponent(persistentAndTransient, new Position(999)));
+
+        var registry = new PersistenceTypeRegistry();
+        registry.RegisterSchemaComponents(schema);
+        registry.Seal();
+
+        EntityPersistenceSnapshot snapshot = world.CapturePersistenceSnapshot(registry);
+
+        Assert.Equal(3, snapshot.EntityCount);
+        Assert.Equal(2, snapshot.GroupCount);
+
+        EntityPersistenceGroup? positionOnlyGroup = null;
+        EntityPersistenceGroup? positionVelocityGroup = null;
+        for (int i = 0; i < snapshot.Groups.Count; i++)
+        {
+            EntityPersistenceGroup group = snapshot.Groups[i];
+            if (group.Sections.Length == 1)
+                positionOnlyGroup = group;
+            else if (group.Sections.Length == 2)
+                positionVelocityGroup = group;
+        }
+
+        Assert.True(positionOnlyGroup is not null);
+        Assert.True(positionVelocityGroup is not null);
+        Assert.Equal(2, positionOnlyGroup!.EntityCount);
+        Assert.Equal(1, positionVelocityGroup!.EntityCount);
+
+        Assert.Equal(typeof(PersistentPosition), positionOnlyGroup.Sections[0].Descriptor.ClrType);
+        Assert.Equal(typeof(PersistentPosition), positionVelocityGroup.Sections[0].Descriptor.ClrType);
+        Assert.Equal(typeof(PersistentVelocity), positionVelocityGroup.Sections[1].Descriptor.ClrType);
+
+        Assert.SequenceEqual(new PersistentPosition[] { new(22), new(33) }, (PersistentPosition[])positionOnlyGroup.Sections[0].Values);
+        Assert.SequenceEqual(new PersistentPosition[] { new(11) }, (PersistentPosition[])positionVelocityGroup.Sections[0].Values);
+        Assert.SequenceEqual(new PersistentVelocity[] { new(3) }, (PersistentVelocity[])positionVelocityGroup.Sections[1].Values);
+    }
+
+    private static void World_RestorePersistenceSnapshot_AppendsEntitiesAndRestoresPersistentComponents()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId persistentPositionId = builder.RegisterComponent<PersistentPosition>();
+        ComponentId persistentVelocityId = builder.RegisterComponent<PersistentVelocity>();
+        ComponentId transientPositionId = builder.RegisterComponent<Position>();
+        EcsSchema schema = builder.Build();
+
+        var source = new World(schema);
+        Entity both = source.CreateDefault(new ArchetypeSignature([persistentPositionId, persistentVelocityId]));
+        Entity positionOnly = source.CreateDefault(new ArchetypeSignature([persistentPositionId]));
+        Entity persistentAndTransient = source.CreateDefault(new ArchetypeSignature([persistentPositionId, transientPositionId]));
+
+        Assert.True(source.SetComponent(both, new PersistentPosition(41)));
+        Assert.True(source.SetComponent(both, new PersistentVelocity(7)));
+        Assert.True(source.SetComponent(positionOnly, new PersistentPosition(52)));
+        Assert.True(source.SetComponent(persistentAndTransient, new PersistentPosition(63)));
+        Assert.True(source.SetComponent(persistentAndTransient, new Position(1234)));
+
+        var registry = new PersistenceTypeRegistry();
+        registry.RegisterSchemaComponents(schema);
+        registry.Seal();
+
+        EntityPersistenceSnapshot snapshot = source.CapturePersistenceSnapshot(registry);
+
+        var target = new World(schema);
+        int restored = target.RestorePersistenceSnapshot(snapshot);
+        Assert.Equal(3, restored);
+
+        var restoredView = new WorldPersistenceView(target, ReadOnlySpan<ComponentId>.Empty, excludeEmpty: true);
+        Assert.Equal(2, restoredView.ArchetypeCount);
+        Assert.Equal(3, restoredView.EntityCount);
+
+        var persistentPositions = new List<int>();
+        var persistentVelocities = new List<int>();
+        for (int i = 0; i < restoredView.Archetypes.Count; i++)
+        {
+            PersistenceArchetypeView archetype = restoredView.Archetypes[i];
+            Assert.False(archetype.HasComponent(transientPositionId));
+
+            if (archetype.HasComponent(persistentPositionId))
+            {
+                ReadOnlySpan<PersistentPosition> positions = archetype.GetComponentSpan<PersistentPosition>(persistentPositionId);
+                for (int slot = 0; slot < positions.Length; slot++)
+                    persistentPositions.Add(positions[slot].X);
+            }
+
+            if (archetype.HasComponent(persistentVelocityId))
+            {
+                ReadOnlySpan<PersistentVelocity> velocities = archetype.GetComponentSpan<PersistentVelocity>(persistentVelocityId);
+                for (int slot = 0; slot < velocities.Length; slot++)
+                    persistentVelocities.Add(velocities[slot].X);
+            }
+        }
+
+        persistentPositions.Sort();
+        persistentVelocities.Sort();
+        Assert.SequenceEqual(new[] { 41, 52, 63 }, persistentPositions);
+        Assert.SequenceEqual(new[] { 7 }, persistentVelocities);
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        Assert.Equal(3, target.DrainDirtyTo<PersistentPosition>(dirty));
+        Assert.Equal(1, target.DrainDirtyTo<PersistentVelocity>(dirty));
+    }
+
     private static void WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet()
     {
         var builder = new EcsSchemaBuilder();
@@ -2653,8 +2795,30 @@ internal static class TestRunner
     {
     }
 
+    [PersistenceId(1001)]
+    private readonly record struct PersistentPosition(int X) : ISerializableComponent<PersistentPosition>
+    {
+        public static void Serialize(ref BitWriter writer, in PersistentPosition value)
+        {
+        }
+
+        public static PersistentPosition Deserialize(ref BitReader reader, ushort version)
+            => default;
+    }
+
     private readonly record struct Velocity(int X) : IComponent<Velocity>
     {
+    }
+
+    [PersistenceId(1002)]
+    private readonly record struct PersistentVelocity(int X) : ISerializableComponent<PersistentVelocity>
+    {
+        public static void Serialize(ref BitWriter writer, in PersistentVelocity value)
+        {
+        }
+
+        public static PersistentVelocity Deserialize(ref BitReader reader, ushort version)
+            => default;
     }
 
     private struct NotSelfComponent : IComponent<Position>
