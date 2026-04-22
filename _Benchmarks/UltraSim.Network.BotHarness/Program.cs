@@ -25,8 +25,8 @@ internal static class HarnessProgram
         string jsonPath = Path.Combine(reportDir, $"network_bot_harness_{stamp}.json");
 
         Console.WriteLine($"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}");
-        Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PendAvg  PendMax  ConnOK");
-        Console.WriteLine("------------------------------------------------------------------------------------------------");
+        Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMax  TickSLO  PingSLO");
+        Console.WriteLine("-----------------------------------------------------------------------------------------------------------------------");
 
         var rows = new JsonArray();
         using var harness = new MovementRampHarness(options);
@@ -48,9 +48,10 @@ internal static class HarnessProgram
             Console.WriteLine(
                 $"{stageIndex,5}  {result.TargetClients,6} {result.ActiveClients,6}  {result.ReadyClients,5}  " +
                 $"{result.TickAverageMs,7:0.000}  {result.TickP95Ms,7:0.000}  {result.TickP99Ms,7:0.000}  {result.TickMaxMs,7:0.000}  " +
-                $"{result.PendingAverage,7:0.00}  {result.PendingMax,7}  {result.ConnectSuccessRate,6:0.000}");
+                $"{result.PingAverageMs,7:0.000}  {result.PingP95Ms,8:0.000}  {result.PingMaxMs,7:0.000}  " +
+                $"{result.PendingMax,7}  {(result.TickSloPass ? "PASS" : "FAIL"),7}  {(result.PingSloPass ? "PASS" : "FAIL"),7}");
 
-            if (result.TickP95Ms > options.SloTickP95Ms || result.PendingMax > options.SloPendingMax)
+            if (ShouldStop(options.StopOn, result))
                 break;
         }
 
@@ -74,6 +75,17 @@ internal static class HarnessProgram
 
         return stageValue;
     }
+
+    private static bool ShouldStop(string stopOn, StageResult result)
+    {
+        return stopOn.ToLowerInvariant() switch
+        {
+            "tick" => !result.TickSloPass,
+            "ping" => !result.PingSloPass,
+            "none" => false,
+            _ => !result.TickSloPass || !result.PingSloPass,
+        };
+    }
 }
 
 internal sealed class MovementRampHarness : IDisposable
@@ -88,6 +100,7 @@ internal sealed class MovementRampHarness : IDisposable
     private readonly List<Entity> _spawnedEntities = [];
     private uint _nextNetworkEntityId = 1;
     private long _clockTicks;
+    private readonly PongProbePacket[] _pongScratch = new PongProbePacket[256];
 
     public MovementRampHarness(HarnessArgs options)
     {
@@ -131,6 +144,7 @@ internal sealed class MovementRampHarness : IDisposable
         var tickSamplesMs = new List<double>(measuredTicks);
         long pendingSum = 0;
         int pendingMax = 0;
+        var pingSamplesMs = new List<double>(Math.Max(32, _clients.Count * Math.Max(1, measuredTicks / Math.Max(1, _options.PingIntervalTicks))));
         long allocBefore = GC.GetTotalAllocatedBytes(true);
 
         for (int tick = 0; tick < measuredTicks; tick++)
@@ -140,8 +154,16 @@ internal sealed class MovementRampHarness : IDisposable
             long start = Stopwatch.GetTimestamp();
             _clockTicks += 2;
             _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, (uint)(stageIndex * 100_000 + tick + 1));
+            long clientNowTicks = _clockTicks + 1;
             for (int i = 0; i < _clients.Count; i++)
-                _clients[i].Host.Pump(_clockTicks + 1);
+            {
+                ClientHandle client = _clients[i];
+                if (client.Host.IsReady && _options.PingIntervalTicks > 0 && (tick % _options.PingIntervalTicks) == 0)
+                    client.TrySendPing((uint)tick);
+
+                client.Host.Pump(clientNowTicks);
+                client.CollectPongSamples(clientNowTicks, _pongScratch, pingSamplesMs);
+            }
             long end = Stopwatch.GetTimestamp();
 
             double elapsedMs = (end - start) * 1000.0 / Stopwatch.Frequency;
@@ -158,11 +180,14 @@ internal sealed class MovementRampHarness : IDisposable
 
         long allocAfter = GC.GetTotalAllocatedBytes(false);
         TickWindowStats stats = new TickWindowStats(tickSamplesMs);
+        TickWindowStats pingStats = new TickWindowStats(pingSamplesMs);
         int readyClients = 0;
+        var perClientPing = new JsonArray();
         for (int i = 0; i < _clients.Count; i++)
         {
             if (_clients[i].Host.IsReady)
                 readyClients++;
+            perClientPing.Add(_clients[i].BuildPingJson());
         }
 
         return new StageResult(
@@ -174,11 +199,18 @@ internal sealed class MovementRampHarness : IDisposable
             TickP95Ms: stats.P95Ms,
             TickP99Ms: stats.P99Ms,
             TickMaxMs: stats.MaxMs,
+            PingAverageMs: pingStats.AverageMs,
+            PingP95Ms: pingStats.P95Ms,
+            PingMaxMs: pingStats.MaxMs,
             PendingAverage: tickSamplesMs.Count == 0 ? 0d : pendingSum / (double)tickSamplesMs.Count,
             PendingMax: pendingMax,
             AllocatedBytes: allocAfter - allocBefore,
             ConnectAttempts: connectAttempts,
-            ConnectSuccess: Math.Min(connectAttempts, readyClients));
+            ConnectSuccess: Math.Min(connectAttempts, readyClients),
+            SloTickP95Ms: _options.SloTickP95Ms,
+            SloPendingMax: _options.SloPendingMax,
+            SloPingP95Ms: _options.SloPingP95Ms,
+            PerClientPing: perClientPing);
     }
 
     public void Reset()
@@ -327,8 +359,68 @@ internal sealed class MovementRampHarness : IDisposable
         return true;
     }
 
-    private sealed record ClientHandle(int ClientIndex, UdpSocketNetworkTransport Transport, ClientMovementSessionHost Host) : IDisposable
+    private sealed class ClientHandle : IDisposable
     {
+        private readonly Dictionary<ushort, long> _pingSentAt = new();
+        private readonly List<double> _pingSamplesMs = [];
+        private ushort _nextPingSequence = 1;
+
+        public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host)
+        {
+            ClientIndex = clientIndex;
+            Transport = transport;
+            Host = host;
+        }
+
+        public int ClientIndex { get; }
+        public UdpSocketNetworkTransport Transport { get; }
+        public ClientMovementSessionHost Host { get; }
+
+        public void TrySendPing(uint clientTick)
+        {
+            ushort sequence = _nextPingSequence++;
+            if (Host.Control.SendPingProbe(Host.ConnectionId, sequence, clientTick))
+                _pingSentAt[sequence] = Stopwatch.GetTimestamp();
+        }
+
+        public void CollectPongSamples(long nowTicks, Span<PongProbePacket> scratch, List<double> aggregateSamples)
+        {
+            while (true)
+            {
+                int count = Host.Control.DrainReceivedPongs(scratch);
+                if (count <= 0)
+                    break;
+
+                for (int i = 0; i < count; i++)
+                {
+                    PongProbePacket pong = scratch[i];
+                    if (!_pingSentAt.Remove(pong.Sequence, out long sentAt))
+                        continue;
+
+                    double rttMs = (Stopwatch.GetTimestamp() - sentAt) * 1000.0 / Stopwatch.Frequency;
+                    _pingSamplesMs.Add(rttMs);
+                    aggregateSamples.Add(rttMs);
+                }
+
+                if (count < scratch.Length)
+                    break;
+            }
+        }
+
+        public JsonObject BuildPingJson()
+        {
+            TickWindowStats stats = new TickWindowStats(_pingSamplesMs.Count == 0 ? [] : new List<double>(_pingSamplesMs));
+            return new JsonObject
+            {
+                ["client_index"] = ClientIndex,
+                ["sample_count"] = _pingSamplesMs.Count,
+                ["ping_avg_ms"] = Math.Round(stats.AverageMs, 3),
+                ["ping_p95_ms"] = Math.Round(stats.P95Ms, 3),
+                ["ping_p99_ms"] = Math.Round(stats.P99Ms, 3),
+                ["ping_max_ms"] = Math.Round(stats.MaxMs, 3),
+            };
+        }
+
         public void Dispose()
         {
             Host.Stop();
@@ -348,10 +440,14 @@ internal sealed class HarnessArgs
     public int Port { get; set; } = 0;
     public string ReportDir { get; set; } = "_Benchmarks/results";
     public double SloTickP95Ms { get; set; } = 4.0;
+    public double SloPingP95Ms { get; set; } = 50.0;
     public int SloPendingMax { get; set; } = 128;
+    public double PingIntervalSeconds { get; set; } = 1.0;
+    public string StopOn { get; set; } = "either";
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
     public int SettleTicks => Math.Max(1, (int)Math.Round(SettleSeconds * TickHz, MidpointRounding.AwayFromZero));
+    public int PingIntervalTicks => Math.Max(1, (int)Math.Round(PingIntervalSeconds * TickHz, MidpointRounding.AwayFromZero));
     public float TickDeltaSeconds => 1f / TickHz;
 
     public static HarnessArgs Parse(string[] args)
@@ -371,7 +467,10 @@ internal sealed class HarnessArgs
             else if (arg == "--port") options.Port = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--report-dir") options.ReportDir = Next() ?? options.ReportDir;
             else if (arg == "--slo-tick-p95-ms") options.SloTickP95Ms = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--slo-ping-p95-ms") options.SloPingP95Ms = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--slo-pending-max") options.SloPendingMax = int.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--ping-interval-s") options.PingIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--stop-on") options.StopOn = Next() ?? options.StopOn;
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
@@ -407,7 +506,10 @@ internal sealed class HarnessArgs
             ["active_ratio"] = ActiveRatio,
             ["port"] = Port,
             ["slo_tick_p95_ms"] = SloTickP95Ms,
+            ["slo_ping_p95_ms"] = SloPingP95Ms,
             ["slo_pending_max"] = SloPendingMax,
+            ["ping_interval_seconds"] = PingIntervalSeconds,
+            ["stop_on"] = StopOn,
         };
     }
 }
@@ -421,13 +523,22 @@ internal readonly record struct StageResult(
     double TickP95Ms,
     double TickP99Ms,
     double TickMaxMs,
+    double PingAverageMs,
+    double PingP95Ms,
+    double PingMaxMs,
     double PendingAverage,
     int PendingMax,
     long AllocatedBytes,
     int ConnectAttempts,
-    int ConnectSuccess)
+    int ConnectSuccess,
+    double SloTickP95Ms,
+    int SloPendingMax,
+    double SloPingP95Ms,
+    JsonArray PerClientPing)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
+    public bool TickSloPass => TickP95Ms <= SloTickP95Ms && PendingMax <= SloPendingMax;
+    public bool PingSloPass => PingP95Ms <= SloPingP95Ms;
 
     public JsonObject ToJson()
     {
@@ -441,12 +552,18 @@ internal readonly record struct StageResult(
             ["tick_p95_ms"] = Math.Round(TickP95Ms, 3),
             ["tick_p99_ms"] = Math.Round(TickP99Ms, 3),
             ["tick_max_ms"] = Math.Round(TickMaxMs, 3),
+            ["ping_avg_ms"] = Math.Round(PingAverageMs, 3),
+            ["ping_p95_ms"] = Math.Round(PingP95Ms, 3),
+            ["ping_max_ms"] = Math.Round(PingMaxMs, 3),
             ["pending_avg"] = Math.Round(PendingAverage, 3),
             ["pending_max"] = PendingMax,
             ["alloc_bytes"] = AllocatedBytes,
             ["connect_attempts"] = ConnectAttempts,
             ["connect_success"] = ConnectSuccess,
             ["connect_success_rate"] = Math.Round(ConnectSuccessRate, 4),
+            ["tick_slo_pass"] = TickSloPass,
+            ["ping_slo_pass"] = PingSloPass,
+            ["per_client_ping"] = PerClientPing,
         };
     }
 }

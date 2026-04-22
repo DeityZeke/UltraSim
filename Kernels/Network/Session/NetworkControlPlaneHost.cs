@@ -173,6 +173,18 @@ public sealed class NetworkControlPlaneHost
         return count;
     }
 
+    public int DrainReceivedPongs(Span<PongProbePacket> destination)
+    {
+        int count = Math.Min(destination.Length, _receivedPongs.Count);
+        for (int i = 0; i < count; i++)
+            destination[i] = _receivedPongs[i];
+
+        if (count > 0)
+            _receivedPongs.RemoveRange(0, count);
+
+        return count;
+    }
+
     private void OnHandshakeHello(ConnectionId connectionId, long nowTicks, in HandshakeHelloPacket packet)
     {
         if (!Sessions.TryGetSessionIdByConnection(connectionId, out SessionId sessionId))

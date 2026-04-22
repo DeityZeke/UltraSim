@@ -184,3 +184,20 @@ Current scaling note from the first longer harness pass:
 - `640` clients / `30s`: `tick_p95 = 5.194 ms`
 
 So the current movement-only UDP/session-host path is healthy up to roughly `~500` active clients at `62 Hz` before crossing a `4 ms` network-tail budget, with zero pending-input backlog in the passing range.
+
+The harness now also tracks control-plane ping RTT and supports two explicit stop categories:
+
+- `--stop-on tick`
+  for the practical “real use” server/network budget ceiling
+- `--stop-on ping`
+  for the highest CCU that still keeps ping p95 under the latency SLO
+
+Current split from the latest runs:
+
+- tick-limited ceiling:
+  - `512` clients failed the `4 ms` tick-p95 target
+  - practical current ceiling is roughly `~480-500`
+- ping-limited ceiling:
+  - `2048` clients still passed `ping_p95 < 50 ms`
+  - `2064` clients failed with `ping_p95 = 50.943 ms`
+  - current latency-limited ceiling is roughly `~2048`

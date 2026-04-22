@@ -9,6 +9,7 @@ It is intentionally narrow:
 - handshake + movement on one transport poll path
 - staged client-count ramps
 - per-stage tick timing stats
+- per-stage ping timing stats
 - simple client pending-input backlog stats
 
 It does not yet try to recreate the full old bot harness feature set:
@@ -27,6 +28,21 @@ dotnet .\_Benchmarks\UltraSim.Network.BotHarness\bin\Release\net8.0\UltraSim.Net
 ```
 
 Reports are written to `_Benchmarks/results/network_bot_harness_*.json`.
+
+Useful options:
+
+- `--slo-tick-p95-ms <n>`
+- `--slo-ping-p95-ms <n>`
+- `--ping-interval-s <n>`
+- `--stop-on either|tick|ping|none`
+
+Recommended run categories:
+
+1. Real use / server-budget ceiling
+   `--stop-on tick --slo-tick-p95-ms 4 --slo-ping-p95-ms 50`
+
+2. Latency ceiling / highest CCU while keeping ping healthy
+   `--stop-on ping --slo-tick-p95-ms 999 --slo-ping-p95-ms 50`
 
 ## Current Role
 

@@ -233,6 +233,18 @@ Current first scaling read:
 
 That makes the current practical ceiling for the narrow movement-only UDP/session-host slice roughly `~500` active clients at `62 Hz` before a `4 ms` p95 network budget is exceeded.
 
+The standalone harness now also tracks control-plane ping RTT, so the same slice can be evaluated two ways:
+
+- real-use ceiling:
+  - based on tick/network budget (`tick_p95`)
+- latency ceiling:
+  - based on player-facing responsiveness (`ping_p95`)
+
+Current read:
+
+- tick-limited ceiling: roughly `~480-500`
+- ping-limited ceiling: roughly `~2048`
+
 Current higher-layer policy direction:
 
 - `Realtime` latest-state is the preferred lane for small continuously changing observer-visible entity state

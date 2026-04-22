@@ -524,5 +524,6 @@ The next implementation target after this bridge slice should be:
 - that checkpoint now exists in minimal form through the shared session-host UDP mini-ramp; the next harness step should be a broader standalone bot runner, not another throwaway transport-specific benchmark shape
 - that broader standalone bot runner now exists in first form under `_Benchmarks/UltraSim.Network.BotHarness`; the next step is scaling/stressing it, not inventing a third temporary harness path
 - first scaling/stress passes now exist too, and the current narrow movement-only slice is landing around a practical `~500` active-client ceiling at `62 Hz` before a `4 ms` p95 network-tail budget is crossed
+- the harness now also tracks ping RTT, and the same narrow slice is currently landing around a separate latency-limited ceiling of roughly `~2048` active clients before `ping_p95` crosses `50 ms`
 
 not full replication yet.
