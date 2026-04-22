@@ -29,11 +29,17 @@ What exists today:
   - packet registry and typed dispatch
   - handshake packets and validation policy
   - minimal connection/session identity primitives
+  - local session registry
+  - session lifecycle snapshots/events
+  - minimal client/server control-plane host over loopback
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
-- full handshake/session runtime flow
+- richer session policy:
+  - timeouts
+  - duplicate session handling
+  - disconnect/admission policy
 - latest-state and ordered-event stream implementations
 - scheduler/assembly pipeline
 - ECS/server/client integration layers

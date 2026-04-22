@@ -237,15 +237,22 @@ Done when:
 
 Current status:
 
-- started
-- the first control-plane foundation is now in place:
+- in progress
+- the first control-plane/session foundation is now in place:
   - `BitWriter` / `BitReader`
   - typed `IPacket<T>` contracts
   - `PacketEnvelopeHeader`
   - `PacketRegistry<TContext>`
   - `PacketCodec`
   - handshake packets and validation policy
-- a full session-runtime state machine is still deferred to the next slice
+  - `NetworkSessionManager`
+  - session snapshots and lifecycle events
+  - `NetworkControlPlaneHost` for minimal loopback client/server handshake flow
+- still deferred from the broader session/runtime slice:
+  - timeout policy
+  - duplicate session policy
+  - explicit admission/rejection policy
+  - richer disconnect semantics
 
 ### Phase N3: Stream Model Slice
 

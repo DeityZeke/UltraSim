@@ -19,7 +19,9 @@ internal static class TestRunner
         Run(nameof(PacketCodec_EncodesAndDecodesHandshakeHello), PacketCodec_EncodesAndDecodesHandshakeHello);
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
         Run(nameof(HandshakeGate_AcceptsAndRejectsExpectedReasons), HandshakeGate_AcceptsAndRejectsExpectedReasons);
+        Run(nameof(NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents), NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents);
         Run(nameof(ControlPlane_LoopbackHandshake_RoundTripsOverTransport), ControlPlane_LoopbackHandshake_RoundTripsOverTransport);
+        Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -252,36 +254,84 @@ internal static class TestRunner
         Assert.Equal(HandshakeRejectReason.ContentHashMismatch, rejected.RejectReason);
     }
 
+    private static void NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents()
+    {
+        var sessions = new NetworkSessionManager();
+        SessionId sessionId = sessions.CreateSession(new ConnectionId(5), nowTicks: 10);
+        Assert.True(sessions.TryMarkHandshaking(sessionId, 11));
+        Assert.True(sessions.TryMarkAuthenticated(sessionId, 12));
+        Assert.True(sessions.TryMarkReady(sessionId, 13));
+        Assert.True(sessions.TryBeginDisconnect(sessionId, SessionDisconnectReason.Closed, 14));
+        Assert.True(sessions.TryCompleteDisconnect(sessionId, 15));
+
+        Assert.True(sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, snapshot.State);
+        Assert.Equal(SessionDisconnectReason.Closed, snapshot.DisconnectReason);
+
+        SessionLifecycleEvent[] events = new SessionLifecycleEvent[8];
+        int count = sessions.DrainLifecycleEvents(events);
+        Assert.Equal(6, count);
+        Assert.Equal(SessionLifecycleEventKind.Created, events[0].Kind);
+        Assert.Equal(ConnectionSessionState.Connecting, events[0].CurrentState);
+        Assert.Equal(ConnectionSessionState.Handshaking, events[1].CurrentState);
+        Assert.Equal(ConnectionSessionState.Authenticated, events[2].CurrentState);
+        Assert.Equal(ConnectionSessionState.Ready, events[3].CurrentState);
+        Assert.Equal(ConnectionSessionState.Disconnecting, events[4].CurrentState);
+        Assert.Equal(ConnectionSessionState.Disconnected, events[5].CurrentState);
+    }
+
     private static void ControlPlane_LoopbackHandshake_RoundTripsOverTransport()
     {
         using var pair = new LoopbackTransportPair();
-        pair.Server.Start();
-        pair.Client.Start();
-
-        var registry = new PacketRegistry<List<HandshakeHelloPacket>>();
-        registry.Register<HandshakeHelloPacket>(static (List<HandshakeHelloPacket> packets, in HandshakeHelloPacket packet) => packets.Add(packet));
-        registry.Seal();
-
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
         var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
-        ImmutablePayloadBuffer encoded = PacketCodec.Encode(hello, PacketHeaderFlags.HighPriorityHint);
-        pair.Client.EnqueueOutbound(new OutboundDatagram(
-            new ConnectionId(1),
-            HandshakeHelloPacket.Plane,
-            HandshakeHelloPacket.PacketClass,
-            HandshakeHelloPacket.Channel,
-            encoded));
-        pair.Client.FlushOutbound();
+        var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, pair.Server, handshakePolicy: policy);
+        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, pair.Client, clientHello: hello);
+        server.Start();
+        client.Start();
 
-        var inbound = new InboundDatagram[4];
-        int count = pair.Server.PollInbound(inbound);
-        Assert.Equal(1, count);
-        Assert.True(PacketCodec.TryDecodeEnvelope(inbound[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
-        Assert.Equal(PacketHeaderFlags.HighPriorityHint, header.Flags);
+        SessionId clientSession = client.BeginClientHandshake(new ConnectionId(1), nowTicks: 100);
+        server.Pump(101);
+        client.Pump(102);
 
-        var packets = new List<HandshakeHelloPacket>();
-        Assert.True(registry.TryDispatch(packets, header, payload));
-        Assert.Equal((uint)9, packets[0].ProtocolVersion);
-        Assert.Equal(FeatureFlags.Compression, packets[0].Features);
+        Assert.True(server.Sessions.TryGetSessionIdByConnection(new ConnectionId(1), out SessionId serverSession));
+        Assert.True(server.Sessions.TryGetSnapshot(serverSession, out SessionSnapshot serverSnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, serverSnapshot.State);
+
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, clientSnapshot.State);
+    }
+
+    private static void ControlPlane_LoopbackHandshake_RejectsInvalidHello()
+    {
+        using var pair = new LoopbackTransportPair();
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
+        var badHello = new HandshakeHelloPacket(9, 10, 99, FeatureFlags.None);
+        var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, pair.Server, handshakePolicy: policy);
+        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, pair.Client, clientHello: badHello);
+        server.Start();
+        client.Start();
+
+        SessionId clientSession = client.BeginClientHandshake(new ConnectionId(2), nowTicks: 200);
+        server.Pump(201);
+        client.Pump(202);
+
+        Assert.True(server.Sessions.TryGetSessionIdByConnection(new ConnectionId(2), out SessionId serverSession));
+        Assert.True(server.Sessions.TryGetSnapshot(serverSession, out SessionSnapshot serverSnapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, serverSnapshot.State);
+        Assert.Equal(SessionDisconnectReason.Rejected, serverSnapshot.DisconnectReason);
+
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, clientSnapshot.State);
+        Assert.Equal(SessionDisconnectReason.Rejected, clientSnapshot.DisconnectReason);
     }
 }
 
