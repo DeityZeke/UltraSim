@@ -1,4 +1,5 @@
 using UltraSim.ECS.Benchmarks.Core;
+using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Network;
 using UltraSim.Server;
@@ -38,6 +39,7 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateEcsClassifiedPublishAndFanoutScenario("EcsClassifiedPublishAndFanout_1024Realtime_256Bulk_128Subs", realtimeEntityCount: 1024, bulkEventCount: 256, subscriberCount: 128);
     yield return CreateEcsAoiLatestStatePublishAndFanoutScenario("EcsAoiLatestStatePublishAndFanout_1024Entities_128Connections", entityCount: 1024, connectionCount: 128);
     yield return CreateEcsAoiClassifiedPublishAndFanoutScenario("EcsAoiClassifiedPublishAndFanout_1024Realtime_256Reliable_128Bulk_128Connections", realtimeEntityCount: 1024, reliableEventCount: 256, bulkEventCount: 128, connectionCount: 128);
+    yield return CreateClientMovementLoopbackScenario("ClientMovementLoopback_1024Inputs", inputCount: 1024);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -179,6 +181,20 @@ static BenchmarkScenario CreateEcsAoiClassifiedPublishAndFanoutScenario(string n
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunEcsAoiClassifiedPublishAndFanoutScenario(realtimeEntityCount, reliableEventCount, bulkEventCount, connectionCount),
+    };
+}
+
+static BenchmarkScenario CreateClientMovementLoopbackScenario(string name, int inputCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "ClientNetworkLoopback",
+        Comparable = false,
+        Scale = inputCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunClientMovementLoopbackScenario(inputCount),
     };
 }
 
@@ -602,6 +618,57 @@ static ScenarioMeasurement RunEcsAoiClassifiedPublishAndFanoutScenario(int realt
     {
         GC.KeepAlive(publisher);
     }
+}
+
+static ScenarioMeasurement RunClientMovementLoopbackScenario(int inputCount)
+{
+    using var pair = new LoopbackTransportPair();
+    pair.Client.Start();
+    pair.Server.Start();
+
+    var bridge = new ClientMovementNetworkBridge(pair.Client, new ConnectionId(1));
+    long checksum = 0;
+
+    for (int i = 0; i < inputCount; i++)
+    {
+        bridge.TrySendInput(
+            new ClientMovementInput((short)(i % 200 - 100), (short)(100 - (i % 200)), (byte)(i & 3)),
+            (uint)(1000 + i),
+            new ClientMovementState(i, i * 2, 1.5f, 2.5f),
+            out _);
+    }
+
+    pair.Client.FlushOutbound();
+    var inbound = new InboundDatagram[Math.Max(32, inputCount)];
+    int received = pair.Server.PollInbound(inbound);
+    for (int i = 0; i < received; i++)
+    {
+        if (!PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out _, out ReadOnlySpan<byte> payload))
+            continue;
+
+        var reader = new UltraSim.Network.BitReader(payload);
+        MovementInputPacket input = MovementInputPacket.Deserialize(ref reader);
+        ImmutablePayloadBuffer response = PacketCodec.Encode(new MovementStatePacket(
+            NetworkEntityId: 1,
+            ServerTick: (uint)(2000 + i),
+            LastProcessedInputSequence: input.InputSequence,
+            PositionX: i,
+            PositionY: i * 2,
+            VelocityX: 1.5f,
+            VelocityY: 2.5f));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            MovementStatePacket.Plane,
+            MovementStatePacket.PacketClass,
+            MovementStatePacket.Channel,
+            response));
+    }
+
+    pair.Server.FlushOutbound();
+    int decoded = bridge.PollInbound();
+    checksum += decoded + bridge.LastReceiveResult.LastProcessedInputSequence + bridge.LastReceiveResult.ServerTick;
+
+    return new ScenarioMeasurement(received + decoded, checksum);
 }
 
 static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)

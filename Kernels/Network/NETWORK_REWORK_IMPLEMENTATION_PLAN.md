@@ -440,6 +440,17 @@ Done when:
 
 - client-side correction/interpolation structures are integrated against the new kernel shape
 
+Current status:
+
+- started with the first narrow movement slice
+- current delivered pieces:
+  - `MovementInputPacket`
+  - `MovementStatePacket`
+  - `Client/Core` sequencing/prediction/interpolation primitives
+  - `Client/Network` movement send/receive bridge
+  - loopback integration tests
+  - first loopback benchmark
+
 ## Testing Strategy
 
 Tests should land with each slice.

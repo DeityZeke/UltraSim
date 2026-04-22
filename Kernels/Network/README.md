@@ -91,6 +91,11 @@ What now exists above the kernel:
 - first AOI-backed ECS publication rules for:
   - latest-state over player-centered ring scopes
   - ordered events over player-centered ring scopes
+- the first client-side bridge slice in `Client/Network`
+  - movement input send path
+  - authoritative movement-state receive path
+  - prediction acknowledgement hook
+  - interpolation-ready state buffering through `Client/Core`
 - separate benchmark coverage for that higher-layer publish/fanout path
 
 ## Design Position
@@ -184,6 +189,7 @@ Current early result:
 - the benchmark runner now also includes the first ECS-originated dirty publish and dirty publish-plus-fanout scenarios
 - the benchmark runner now also includes the first mixed ECS-classification scenario with realtime latest-state plus bulk ordered events
 - the benchmark runner now also includes the first AOI-backed ECS publish-plus-fanout scenario and a mixed AOI-classified scenario
+- the benchmark runner now also includes the first client loopback movement scenario
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win
 
 Current higher-layer policy direction:

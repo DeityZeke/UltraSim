@@ -52,11 +52,33 @@ public ref struct BitWriter
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void WriteInt16(short value)
+    {
+        EnsureRemaining(2);
+        BinaryPrimitives.WriteInt16LittleEndian(_buffer.Slice(_position, 2), value);
+        _position += 2;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void WriteUInt32(uint value)
     {
         EnsureRemaining(4);
         BinaryPrimitives.WriteUInt32LittleEndian(_buffer.Slice(_position, 4), value);
         _position += 4;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void WriteInt32(int value)
+    {
+        EnsureRemaining(4);
+        BinaryPrimitives.WriteInt32LittleEndian(_buffer.Slice(_position, 4), value);
+        _position += 4;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void WriteSingle(float value)
+    {
+        WriteUInt32(BitConverter.SingleToUInt32Bits(value));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -41,12 +41,36 @@ public ref struct BitReader
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public short ReadInt16()
+    {
+        EnsureRemaining(2);
+        short value = BinaryPrimitives.ReadInt16LittleEndian(_buffer.Slice(_position, 2));
+        _position += 2;
+        return value;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public uint ReadUInt32()
     {
         EnsureRemaining(4);
         uint value = BinaryPrimitives.ReadUInt32LittleEndian(_buffer.Slice(_position, 4));
         _position += 4;
         return value;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int ReadInt32()
+    {
+        EnsureRemaining(4);
+        int value = BinaryPrimitives.ReadInt32LittleEndian(_buffer.Slice(_position, 4));
+        _position += 4;
+        return value;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public float ReadSingle()
+    {
+        return BitConverter.UInt32BitsToSingle(ReadUInt32());
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

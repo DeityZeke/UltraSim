@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="UltraSim.Client.Core">
+      <HintPath>..\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Network">
+      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="BuildClientNetworkDependencies" BeforeTargets="PrepareForBuild">
+    <MSBuild
+      Projects="..\Core\UltraSim.Client.Core.csproj;..\..\Kernels\Network\UltraSim.Network.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
+</Project>

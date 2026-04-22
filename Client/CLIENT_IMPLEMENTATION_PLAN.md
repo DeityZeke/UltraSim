@@ -1,0 +1,102 @@
+# Client Rebuild Plan
+
+## Purpose
+
+Rebuild the client runtime around the same boundary discipline as ECS, server, and network:
+
+- engine-agnostic core first
+- network bridge second
+- Godot wrapper last
+
+## Initial Layout
+
+```text
+Client/
+  AGENTS.md
+  CLIENT_IMPLEMENTATION_PLAN.md
+  Core/
+  Network/
+  _Godot/
+```
+
+## Old-Code Reference
+
+Use the old client network code as reference for:
+
+- `ClientInputSendBridge`
+- `ClientPredictionBridge`
+- `ClientInterpolationBridge`
+- `ClientNetworkEntityMap`
+- `ClientNetworkBridge`
+
+Preserve the useful behavior. Do not preserve the old project structure by default.
+
+## Phase C1: Core Contracts
+
+Deliver:
+
+- input sample/sequencer
+- prediction store
+- interpolation buffer
+- small movement input/state contracts
+
+Done when:
+
+- client-side sequencing/prediction/interpolation are test-covered without any transport dependency
+
+Current status:
+
+- done for the first narrow movement slice
+- current delivered core pieces:
+  - `ClientInputSequencer<TInput>`
+  - `ClientPredictionStore<TState>`
+  - `ClientInterpolationBuffer<TState>`
+  - `ClientMovementInput`
+  - `ClientMovementState`
+
+## Phase C2: Client Network Bridge
+
+Deliver:
+
+- movement input packet send path
+- authoritative movement-state receive path
+- prediction acknowledgement hook
+- loopback integration tests
+
+Done when:
+
+- one real movement vertical slice works over `Kernels/Network`
+
+Current status:
+
+- started and already useful
+- current delivered bridge pieces:
+  - `MovementInputPacket`
+  - `MovementStatePacket`
+  - `ClientMovementNetworkBridge`
+  - loopback integration tests
+  - first loopback benchmark
+
+## Phase C3: Godot Wrapper
+
+Deliver:
+
+- bind local input to client runtime
+- bind received authoritative state to presentation/runtime hooks
+- keep `_Godot` thin
+
+## Bot-Harness Readiness
+
+The first bot-harness checkpoint should happen after `C2`, not after a full client feature set.
+
+At that point the shared shape should be real enough to test:
+
+- connect/handshake
+- input send cadence
+- authoritative movement receive cadence
+- disconnect/load behavior
+
+Current note:
+
+- the repo has now reached the first meaningful pre-bot-harness checkpoint on the client side
+- what is still missing before that harness becomes worth wiring is the real server-side movement ingestion/authoritative movement path on the other end of this bridge
