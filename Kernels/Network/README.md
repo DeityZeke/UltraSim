@@ -153,8 +153,8 @@ The first dedicated network fanout benchmark now exists at:
 Current early result:
 
 - shared-frame fanout clearly reduces allocations versus naive per-recipient rebuild
-- wall-clock improvement is not universal yet in the current implementation
+- after removing the intermediate projection step from the hot dispatch path, shared-frame fanout is now also ahead in wall-clock on the current synthetic benchmark
 - AOI-backed subscription maintenance is now implemented and test-covered
 - the AOI update path was materially improved by moving reconcile ownership into the subscription registry and collapsing per-connection duplicate state
-- the current AOI benchmark is now in a much healthier range, but the shared-frame projection/dispatch path is still the more obvious throughput tuning target
-- the seam is worth keeping, but the projection/dispatch path still needs tuning before it can be treated as a settled throughput win
+- the current AOI benchmark is now in a much healthier range
+- the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win

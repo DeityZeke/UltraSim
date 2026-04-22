@@ -2,6 +2,16 @@ namespace UltraSim.Network;
 
 public static class SharedFramePublisher
 {
+    public static PublishedFrame Publish(in ScheduledWorkItem item)
+    {
+        return item.Kind switch
+        {
+            ScheduledWorkKind.LatestState => PublishLatestState(item.Sequence, item.ItemKey, item.Payload),
+            ScheduledWorkKind.OrderedEvent => PublishOrderedEvent(item.Sequence, item.Payload),
+            _ => throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}."),
+        };
+    }
+
     public static PublishedFrame PublishLatestState(ulong sequence, ulong itemKey, ImmutablePayloadBuffer payload)
     {
         ArgumentNullException.ThrowIfNull(payload);

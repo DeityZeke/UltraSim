@@ -112,6 +112,6 @@ Current intent:
 
 Current interpretation guidance:
 
-- shared-frame fanout is already a clear allocation win over naive rebuild, but not yet a universal throughput win
+- shared-frame fanout is now both a clear allocation win and a throughput win on the current synthetic benchmark after the direct scheduled-work dispatch path replaced the intermediate projection step
 - AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
-- the next benchmark-driven tuning target is the shared-frame projection/dispatch path, not AOI correctness
+- the next benchmark-driven tuning target is no longer the basic fanout bridge shape; it is the deeper server-facing publish integration that will sit on top of it

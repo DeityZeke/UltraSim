@@ -41,6 +41,7 @@ internal static class TestRunner
         Run(nameof(ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames), ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames);
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
+        Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers), SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers);
         Run(nameof(ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass), ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass);
         Run(nameof(ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap), ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap);
         Run(nameof(ChunkAoiSubscriptionMaintainer_ReconcilesSubscriptionsAcrossMovement), ChunkAoiSubscriptionMaintainer_ReconcilesSubscriptionsAcrossMovement);
@@ -935,6 +936,68 @@ internal static class TestRunner
         Assert.Equal(2, eventCount);
     }
 
+    private static void SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey latestKey = new(650);
+        SubscriptionKey eventKey = new(651);
+        registry.Subscribe(new ConnectionId(1), latestKey);
+        registry.Subscribe(new ConnectionId(2), latestKey);
+        registry.Subscribe(new ConnectionId(2), eventKey);
+        registry.Subscribe(new ConnectionId(3), eventKey);
+
+        ScheduledWorkItem[] items =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 81,
+                ItemKey: 810,
+                Payload: ImmutablePayloadBuffer.CopyFrom([8])),
+            new(
+                ScheduledWorkKind.OrderedEvent,
+                PacketClass.ReliableEvent,
+                Sequence: 82,
+                ItemKey: 0,
+                Payload: ImmutablePayloadBuffer.CopyFrom([9, 10]))
+        ];
+        SubscriptionKey[] scopeKeys = [latestKey, eventKey];
+        var dispatcher = new SubscriptionFanoutDispatcher(registry, new OutboundDatagramAssembler());
+        var subscriberScratch = new ConnectionId[8];
+        var output = new OutboundDatagram[8];
+
+        SubscriptionFanoutDispatchResult result = dispatcher.DispatchScheduledWork(items, scopeKeys, subscriberScratch, output);
+
+        Assert.Equal(2, result.FrameCount);
+        Assert.Equal(4, result.SubscriberDeliveries);
+        Assert.Equal(4, result.DatagramCount);
+
+        int latestCount = 0;
+        int eventCount = 0;
+        for (int i = 0; i < result.DatagramCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            if (header.PacketId == RealtimeStateFramePacket.PacketId)
+            {
+                latestCount++;
+                var reader = new BitReader(payload);
+                RealtimeStateFramePacket frame = RealtimeStateFramePacket.Deserialize(ref reader);
+                Assert.Equal((ulong)81, frame.Sequence);
+                Assert.Equal((ulong)810, frame.ItemKey);
+            }
+            else if (header.PacketId == ReliableEventFramePacket.PacketId)
+            {
+                eventCount++;
+                var reader = new BitReader(payload);
+                ReliableEventFramePacket frame = ReliableEventFramePacket.Deserialize(ref reader);
+                Assert.Equal((ulong)82, frame.Sequence);
+            }
+        }
+
+        Assert.Equal(2, latestCount);
+        Assert.Equal(2, eventCount);
+    }
+
     private static void ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass()
     {
         var registry = new ConnectionSubscriptionRegistry();
@@ -961,11 +1024,10 @@ internal static class TestRunner
         ];
         SubscriptionKey[] scopeKeys = [latestKey, eventKey];
         var bridge = new ScheduledWorkFanoutBridge(registry);
-        var projected = new ScopedPublishedFrame[2];
         var subscribers = new ConnectionId[4];
         var output = new OutboundDatagram[4];
 
-        ScheduledWorkFanoutResult result = bridge.Dispatch(items, scopeKeys, projected, subscribers, output);
+        ScheduledWorkFanoutResult result = bridge.Dispatch(items, scopeKeys, subscribers, output);
 
         Assert.Equal(2, result.ProjectedFrameCount);
         Assert.Equal(3, result.SubscriberDeliveries);

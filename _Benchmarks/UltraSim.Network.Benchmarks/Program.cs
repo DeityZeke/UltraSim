@@ -94,13 +94,11 @@ static ScenarioMeasurement RunFanoutScenario(int frameCount, int subscriberCount
     if (shared)
     {
         var bridge = new ScheduledWorkFanoutBridge(registry, assembler);
-        var projected = new ScopedPublishedFrame[frameCount];
         var subscriberScratch = new ConnectionId[subscriberCount];
         var output = new OutboundDatagram[frameCount * subscriberCount];
         ScheduledWorkFanoutResult result = bridge.Dispatch(
             items,
             scopeKeys,
-            projected,
             subscriberScratch,
             output);
 

@@ -376,11 +376,11 @@ Benchmark note:
 - the first dedicated network fanout benchmark runner now exists in `_Benchmarks/UltraSim.Network.Benchmarks`
 - current early data shows:
   - clear allocation improvement for shared-frame fanout
-  - mixed wall-clock results depending on scale
+  - after removing the intermediate projection step from the hot path, shared-frame fanout now also leads the naive rebuild path in the current benchmark
   - AOI subscription maintenance benchmarks now exist and improved substantially after the registry-owned reconcile pass
 - implication:
   - the seam is worth keeping
-  - projection/dispatch and final envelope assembly still need tuning before the shared-frame path can be treated as a definitive throughput win
+  - the shared-frame path is now strong enough to treat as the preferred kernel direction
   - AOI maintenance is no longer the same level of concern it was in the first benchmark pass
 
 ### Phase N5: Server Bridge Slice
@@ -463,7 +463,6 @@ Current status in this repo:
 The next implementation target after this bridge slice should be:
 
 - stream-integrated publish projection into fanout scheduling
-- continued shared-frame dispatch tuning informed by the benchmark pass
 - then broader server bridge work
 
 not full replication yet.

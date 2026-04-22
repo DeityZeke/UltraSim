@@ -13,18 +13,17 @@ public sealed class ScheduledWorkFanoutBridge
     public ScheduledWorkFanoutResult Dispatch(
         ReadOnlySpan<ScheduledWorkItem> items,
         ReadOnlySpan<SubscriptionKey> scopeKeys,
-        Span<ScopedPublishedFrame> projectedFrames,
         Span<ConnectionId> subscriberScratch,
         Span<OutboundDatagram> output)
     {
-        int projectedCount = ScheduledWorkPublishedFrameProjector.Project(items, scopeKeys, projectedFrames);
-        SubscriptionFanoutDispatchResult dispatch = _dispatcher.Dispatch(
-            projectedFrames[..projectedCount],
+        SubscriptionFanoutDispatchResult dispatch = _dispatcher.DispatchScheduledWork(
+            items,
+            scopeKeys,
             subscriberScratch,
             output);
 
         return new ScheduledWorkFanoutResult(
-            ProjectedFrameCount: projectedCount,
+            ProjectedFrameCount: dispatch.FrameCount,
             SubscriberDeliveries: dispatch.SubscriberDeliveries,
             DatagramCount: dispatch.DatagramCount,
             CompressedCount: dispatch.CompressedCount);

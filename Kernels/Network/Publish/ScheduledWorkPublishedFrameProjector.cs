@@ -17,15 +17,7 @@ public static class ScheduledWorkPublishedFrameProjector
             if (!scopeKey.IsValid)
                 throw new ArgumentOutOfRangeException(nameof(scopeKeys));
 
-            ScheduledWorkItem item = items[i];
-            PublishedFrame frame = item.Kind switch
-            {
-                ScheduledWorkKind.LatestState => SharedFramePublisher.PublishLatestState(item.Sequence, item.ItemKey, item.Payload),
-                ScheduledWorkKind.OrderedEvent => SharedFramePublisher.PublishOrderedEvent(item.Sequence, item.Payload),
-                _ => throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}."),
-            };
-
-            destination[i] = new ScopedPublishedFrame(scopeKey, frame);
+            destination[i] = new ScopedPublishedFrame(scopeKey, SharedFramePublisher.Publish(items[i]));
         }
 
         return count;
