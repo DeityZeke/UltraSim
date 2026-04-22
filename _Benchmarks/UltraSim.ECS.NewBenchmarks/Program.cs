@@ -2477,14 +2477,12 @@ namespace UltraSim.ECS
 
         private static long CaptureThreadDirtyIndexBufferBytes()
         {
-            long bytes = 0;
-            foreach (KeyValuePair<int, int> pair in s_threadDirtyIndexBufferLengths)
-                bytes += pair.Value * sizeof(int);
-
-            return bytes;
+            return s_threadDirtyIndexBuffer is { Length: > 0 } buffer
+                ? buffer.Length * sizeof(int)
+                : 0;
         }
 
-        private static int CaptureThreadDirtyIndexBufferThreadCount() => s_threadDirtyIndexBufferLengths.Count;
+        private static int CaptureThreadDirtyIndexBufferThreadCount() => s_threadDirtyIndexBuffer is { Length: > 0 } ? 1 : 0;
     }
 
     internal sealed partial class SystemManager

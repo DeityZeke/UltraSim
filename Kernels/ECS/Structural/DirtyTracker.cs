@@ -38,6 +38,9 @@ internal sealed partial class DirtyTracker
         if (entities.Length == 0)
             return;
 
+        if (TryMarkCapturedUnique(entities))
+            return;
+
         lock (_sync)
         {
             for (int i = 0; i < entities.Length; i++)

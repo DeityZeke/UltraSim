@@ -23,6 +23,7 @@ internal static class TestRunner
         Run(nameof(SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField), SystemSchedule_FromDescriptorAndSettings_UsesNoPriorityField);
         Run(nameof(ExplicitSetComponent_MarksDirty), ExplicitSetComponent_MarksDirty);
         Run(nameof(PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware), PatchComponent_AndSetOrAddComponent_KeepWritesExplicitAndDirtyAware);
+        Run(nameof(World_PublicStructuralApi_SingleAndBatchTimingContracts_AreExplicit), World_PublicStructuralApi_SingleAndBatchTimingContracts_AreExplicit);
         Run(nameof(StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty), StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty);
         Run(nameof(StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities), StructuralQueue_BatchedAddRemoveAndDestroy_WorkAcrossMultipleEntities);
         Run(nameof(StructuralQueue_DestroyWholeArchetypeBatch_KeepsDirtyAndClearsAllRows), StructuralQueue_DestroyWholeArchetypeBatch_KeepsDirtyAndClearsAllRows);
@@ -43,6 +44,7 @@ internal static class TestRunner
         Run(nameof(SystemContext_ParallelSparseChunkWrites_AreSafeInSerialMode), SystemContext_ParallelSparseChunkWrites_AreSafeInSerialMode);
         Run(nameof(SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags), SystemManager_Tick_RespectsStageOrderDueNessAndManualFlags);
         Run(nameof(SystemManager_DueTicks_WrapAcrossUintBoundary), SystemManager_DueTicks_WrapAcrossUintBoundary);
+        Run(nameof(SystemManager_DependencyCycles_ThrowDuringScheduleBuild), SystemManager_DependencyCycles_ThrowDuringScheduleBuild);
         Run(nameof(SystemManager_RequiresOverridesRegistrationOrderWithinStage), SystemManager_RequiresOverridesRegistrationOrderWithinStage);
         Run(nameof(SystemManager_BatchesNonConflictingSystemsTogether), SystemManager_BatchesNonConflictingSystemsTogether);
         Run(nameof(World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems), World_DefaultPhaseStaggering_SpreadsNonCriticalSamePeriodSystems);
@@ -64,6 +66,7 @@ internal static class TestRunner
         Run(nameof(World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks), World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
+        Run(nameof(ArchetypeSignature_RejectsInvalidComponentIds), ArchetypeSignature_RejectsInvalidComponentIds);
 
         Console.WriteLine("All ECS scaffold tests passed.");
     }
@@ -362,6 +365,33 @@ internal static class TestRunner
         world.ProcessStructuralQueues();
         Assert.False(world.HasComponent<Velocity>(entity));
         Assert.Equal(1, world.DrainDirtyTo<Velocity>(dirty));
+    }
+
+    private static void World_PublicStructuralApi_SingleAndBatchTimingContracts_AreExplicit()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var world = new World(builder.Build());
+        ArchetypeSignature signature = new([positionId]);
+
+        Entity immediate = world.CreateDefault(signature);
+        Assert.True(world.Entities.IsAlive(immediate));
+
+        ReadOnlySpan<ArchetypeSignature> createBatch = [signature, signature];
+        world.CreateDefault(createBatch);
+        Assert.Equal(1, world.Entities.AliveCount);
+        world.ProcessStructuralQueues();
+        Assert.Equal(3, world.Entities.AliveCount);
+
+        world.Destroy(immediate);
+        Assert.False(world.Entities.IsAlive(immediate));
+
+        Entity deferred = world.CreateDefault(signature);
+        ReadOnlySpan<Entity> destroyBatch = [deferred];
+        world.Destroy(destroyBatch);
+        Assert.True(world.Entities.IsAlive(deferred));
+        world.ProcessStructuralQueues();
+        Assert.False(world.Entities.IsAlive(deferred));
     }
 
     private static void StructuralQueue_AddRemoveDestroy_PreservesDataAndTracksDirty()
@@ -1184,6 +1214,41 @@ internal static class TestRunner
         manager.Tick(world, 4, 0.016f, world.Commands);
 
         Assert.Equal(2, ticksRun);
+    }
+
+    private static void SystemManager_DependencyCycles_ThrowDuringScheduleBuild()
+    {
+        var world = new World(new EcsSchemaBuilder().Build());
+        var log = new List<string>();
+
+        var first = new CycleLoggingSystem(
+            "CycleA",
+            new SystemDescriptor(
+                "CycleA",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.Empty,
+                requires: [CycleLoggingSystemTwoType]),
+            log);
+
+        var second = new CycleLoggingSystemTwo(
+            "CycleB",
+            new SystemDescriptor(
+                "CycleB",
+                SystemStage.AI,
+                1,
+                0,
+                ComponentMask.Empty,
+                ComponentMask.Empty,
+                requires: [CycleLoggingSystemType]),
+            log);
+
+        world.RegisterSystem(first);
+        world.RegisterSystem(second);
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => world.SealSystems());
+        Assert.Contains("dependency cycle", ex.Message);
     }
 
     private static void SystemManager_RequiresOverridesRegistrationOrderWithinStage()
@@ -2076,6 +2141,12 @@ internal static class TestRunner
         Assert.Throws<InvalidOperationException>(() => world.SetComponent(Entity.Null, new Position(1)));
     }
 
+    private static void ArchetypeSignature_RejectsInvalidComponentIds()
+    {
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => new ArchetypeSignature([ComponentId.Invalid]));
+        Assert.Contains("invalid", ex.Message);
+    }
+
     private static void World_SaveLoadAndSaveAllLoadAll_UsePersistenceAndSystemHooks()
     {
         var recorder = new List<string>();
@@ -2573,6 +2644,8 @@ internal static class TestRunner
     }
 
     private static readonly Type DependencyLoggingSystemType = typeof(DependencyLoggingSystem);
+    private static readonly Type CycleLoggingSystemType = typeof(CycleLoggingSystem);
+    private static readonly Type CycleLoggingSystemTwoType = typeof(CycleLoggingSystemTwo);
 
     private sealed class DependencyLoggingSystem : LoggingSystem
     {
@@ -2585,6 +2658,22 @@ internal static class TestRunner
     private sealed class DependentLoggingSystem : LoggingSystem
     {
         public DependentLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class CycleLoggingSystem : LoggingSystem
+    {
+        public CycleLoggingSystem(string label, SystemDescriptor descriptor, List<string> log)
+            : base(label, descriptor, log)
+        {
+        }
+    }
+
+    private sealed class CycleLoggingSystemTwo : LoggingSystem
+    {
+        public CycleLoggingSystemTwo(string label, SystemDescriptor descriptor, List<string> log)
             : base(label, descriptor, log)
         {
         }
@@ -3001,5 +3090,11 @@ internal static class Assert
             if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
                 throw new InvalidOperationException($"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
         }
+    }
+
+    public static void Contains(string expectedSubstring, string actual)
+    {
+        if (actual is null || !actual.Contains(expectedSubstring, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Expected substring '{expectedSubstring}' was not found.");
     }
 }

@@ -13,6 +13,7 @@ public sealed class ArchetypeManager
     private readonly EcsSchema _schema;
     private readonly List<Archetype> _archetypes;
     private readonly Dictionary<ArchetypeSignature, Archetype> _bySignature;
+    private ReadOnlyCollection<Archetype>? _archetypesView;
     private Archetype? _emptyArchetype;
     private int _version;
 
@@ -35,7 +36,7 @@ public sealed class ArchetypeManager
         get => _version;
     }
 
-    public IReadOnlyList<Archetype> Archetypes => new ReadOnlyCollection<Archetype>(_archetypes);
+    public IReadOnlyList<Archetype> Archetypes => _archetypesView ??= new ReadOnlyCollection<Archetype>(_archetypes);
 
     internal Archetype GetOrCreateEmpty()
     {

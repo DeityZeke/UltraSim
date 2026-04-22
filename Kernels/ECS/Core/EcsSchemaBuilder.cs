@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Reflection;
+using System.Linq.Expressions;
 
 namespace UltraSim.ECS;
 
@@ -17,6 +18,7 @@ public sealed class EcsSchemaBuilder
     public ComponentId RegisterComponent(Type componentType)
     {
         ArgumentNullException.ThrowIfNull(componentType);
+        ValidateComponentType(componentType);
 
         return RegisterComponent(componentType, CreateFactory(componentType), CreateCopier(componentType));
     }
@@ -62,19 +64,17 @@ public sealed class EcsSchemaBuilder
 
     private static Func<int, IComponentColumn> CreateFactory(Type componentType)
     {
-        ValidateComponentType(componentType);
-
         Type columnType = typeof(ComponentColumn<>).MakeGenericType(componentType);
         var ctor = columnType.GetConstructor(new[] { typeof(int) })
             ?? throw new InvalidOperationException($"Missing component column constructor for {componentType.FullName}.");
 
-        return capacity => (IComponentColumn)ctor.Invoke(new object[] { capacity });
+        ParameterExpression capacity = Expression.Parameter(typeof(int), "capacity");
+        UnaryExpression body = Expression.Convert(Expression.New(ctor, capacity), typeof(IComponentColumn));
+        return Expression.Lambda<Func<int, IComponentColumn>>(body, capacity).Compile();
     }
 
     private static ComponentColumnCopier CreateCopier(Type componentType)
     {
-        ValidateComponentType(componentType);
-
         Type cacheType = typeof(ComponentColumnCopierCache<>).MakeGenericType(componentType);
         FieldInfo field = cacheType.GetField("Copy", BindingFlags.Public | BindingFlags.Static)
             ?? throw new InvalidOperationException($"Missing component column copier for {componentType.FullName}.");

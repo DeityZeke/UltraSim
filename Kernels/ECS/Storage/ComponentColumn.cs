@@ -47,7 +47,10 @@ internal sealed class ComponentColumn<T> : IComponentColumn
 
     public void CopyFrom(IComponentColumn source, int sourceSlot, int destinationSlot)
     {
-        CopyFromTyped((ComponentColumn<T>)source, sourceSlot, destinationSlot);
+        if (source is not ComponentColumn<T> typed)
+            throw new InvalidCastException($"Expected {typeof(ComponentColumn<T>).Name}, got {source.GetType().Name}.");
+
+        CopyFromTyped(typed, sourceSlot, destinationSlot);
     }
 
     public Span<T> AsSpan(int count) => _data.AsSpan(0, count);

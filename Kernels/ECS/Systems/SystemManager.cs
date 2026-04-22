@@ -430,10 +430,7 @@ internal sealed partial class SystemManager
 
                 int phaseLimit = stageMax <= 0 ? 1 : Math.Min(schedule.PeriodTicks, stageMax);
                 if (phaseLimit <= 1)
-                {
-                    schedule.StartOffset = 0;
                     continue;
-                }
 
                 countersByPeriod.TryGetValue(schedule.PeriodTicks, out int counter);
                 schedule.StartOffset = counter % phaseLimit;
@@ -449,8 +446,7 @@ internal sealed partial class SystemManager
         if (count <= 1)
             return systems.ToArray();
 
-        var indexMap = new int[_systems.Count];
-        Array.Fill(indexMap, -1);
+        var indexMap = new Dictionary<int, int>(count);
 
         for (int i = 0; i < count; i++)
             indexMap[systems[i].Value] = i;
@@ -468,8 +464,7 @@ internal sealed partial class SystemManager
                 if ((uint)requiredId >= (uint)_systems.Count)
                     continue;
 
-                int dependencyIndex = indexMap[requiredId];
-                if (dependencyIndex < 0)
+                if (!indexMap.TryGetValue(requiredId, out int dependencyIndex))
                     continue;
 
                 indegree[i]++;
@@ -506,11 +501,11 @@ internal sealed partial class SystemManager
 
         if (write != count)
         {
-            for (int i = 0; i < count; i++)
-            {
-                if (indegree[i] > 0)
-                    result[write++] = systems[i];
-            }
+            string cycleNames = string.Join(", ", systems
+                .Where((_, i) => indegree[i] > 0)
+                .Select(id => _descriptors[id.Value].Name));
+            SystemStage stage = _schedules[systems[0].Value].Stage;
+            throw new InvalidOperationException($"System dependency cycle detected in stage {stage}: {cycleNames}");
         }
 
         return result;
@@ -642,7 +637,7 @@ internal sealed partial class SystemManager
         stats.LastRunTick = worldTick;
         stats.LastElapsedTicks = elapsedTicks;
         stats.PeakElapsedTicks = Math.Max(stats.PeakElapsedTicks, elapsedTicks);
-        stats.MinElapsedTicks = Math.Min(stats.MinElapsedTicks == 0 ? long.MaxValue : stats.MinElapsedTicks, elapsedTicks);
+        stats.MinElapsedTicks = Math.Min(stats.MinElapsedTicks, elapsedTicks);
         stats.AverageElapsedMilliseconds = stats.UpdateCount == 0
             ? elapsedMs
             : (TimingEmaAlpha * elapsedMs) + ((1d - TimingEmaAlpha) * stats.AverageElapsedMilliseconds);

@@ -30,6 +30,9 @@ public sealed class ArchetypeSignature : IEquatable<ArchetypeSignature>
         for (int i = 0; i < componentIds.Length; i++)
         {
             int id = componentIds[i].Value;
+            if (id < 0)
+                throw new ArgumentException($"ComponentId {id} is invalid.", nameof(componentIds));
+
             if (id > maxId)
                 maxId = id;
         }

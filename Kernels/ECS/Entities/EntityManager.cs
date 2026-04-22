@@ -199,8 +199,7 @@ public sealed class EntityManager : IEntityReadOnly
         for (int i = 0; i < entities.Length; i++)
         {
             int index = (int)entities[i].Index;
-            locations[index] = default;
-            locations[index].Slot = -1;
+            locations[index] = new Location { Slot = -1 };
 
             uint nextVersion = versions[index] + 1;
             if (nextVersion == 0)
@@ -220,8 +219,7 @@ public sealed class EntityManager : IEntityReadOnly
         if (_locations[index].Archetype is not null)
             _aliveCount--;
 
-        _locations[index] = default;
-        _locations[index].Slot = -1;
+        _locations[index] = new Location { Slot = -1 };
 
         uint nextVersion = _versions[index] + 1;
         if (nextVersion == 0)

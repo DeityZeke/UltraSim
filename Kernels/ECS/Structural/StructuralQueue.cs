@@ -292,11 +292,8 @@ internal sealed class StructuralQueue
 
         public void AddRange(ReadOnlySpan<Entity> entities, ReadOnlySpan<T> values)
         {
-            for (int i = 0; i < entities.Length; i++)
-            {
-                _writeEntities.Add(entities[i]);
-                _writeValues.Add(values[i]);
-            }
+            AppendRange(_writeEntities, entities);
+            AppendRange(_writeValues, values);
         }
 
         public void AddRepeated(ReadOnlySpan<Entity> entities, in T value)
@@ -347,8 +344,7 @@ internal sealed class StructuralQueue
 
         public void AddRange(ReadOnlySpan<Entity> entities)
         {
-            for (int i = 0; i < entities.Length; i++)
-                _writeEntities.Add(entities[i]);
+            AppendRange(_writeEntities, entities);
         }
 
         public bool SwapForApply()

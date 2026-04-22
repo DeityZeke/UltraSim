@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -7,10 +6,11 @@ namespace UltraSim.ECS;
 
 public sealed partial class World
 {
+    // Query plans are intentionally preferred unconditionally in the current kernel. The older direct-scan
+    // path remains as dormant scaffolding for future re-evaluation, so the threshold stays at zero by design.
     private const int DirectQueryArchetypeThreshold = 0;
     [ThreadStatic] private static int[]? s_threadDirtyIndexBuffer;
     [ThreadStatic] private static bool s_threadDirtyIndexBufferInUse;
-    private static readonly ConcurrentDictionary<int, int> s_threadDirtyIndexBufferLengths = new();
 
     private static DirtyIndexBufferLease RentDirtyIndexBuffer(int entityCount)
     {
@@ -22,7 +22,6 @@ public sealed partial class World
             {
                 buffer = new int[minimumLength];
                 s_threadDirtyIndexBuffer = buffer;
-                s_threadDirtyIndexBufferLengths[Environment.CurrentManagedThreadId] = buffer.Length;
             }
 
             s_threadDirtyIndexBufferInUse = true;
@@ -1218,7 +1217,7 @@ public sealed partial class World
                 });
             }
 
-            _dirty.Mark(writeId, entities);
+            _dirty.MarkUnique(writeId, entities);
             matched += entityCount;
         }
 

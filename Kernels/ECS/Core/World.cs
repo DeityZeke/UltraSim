@@ -84,12 +84,21 @@ public sealed partial class World
     public ComponentId GetComponentId<T>() where T : unmanaged, IComponent<T>
         => Schema.GetComponentId<T>();
 
+    /// <summary>
+    /// Creates one entity immediately and returns its handle.
+    /// </summary>
     public Entity CreateDefault(ArchetypeSignature signature)
     {
         EnsureNotShutdown();
         return CreateDefaultImmediate(signature);
     }
 
+    /// <summary>
+    /// Enqueues a batch of default-constructed entities for the next structural barrier.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the single-entity overload, this batch form is deferred and does not return handles immediately.
+    /// </remarks>
     public void CreateDefault(ReadOnlySpan<ArchetypeSignature> signatures)
     {
         EnqueueCreateDefault(signatures);
@@ -235,12 +244,21 @@ public sealed partial class World
         _ = _structural.Apply(this);
     }
 
+    /// <summary>
+    /// Destroys one entity immediately.
+    /// </summary>
     public void Destroy(Entity entity)
     {
         EnsureNotShutdown();
         DestroyImmediate(entity);
     }
 
+    /// <summary>
+    /// Enqueues a batch destroy for the next structural barrier.
+    /// </summary>
+    /// <remarks>
+    /// Unlike the single-entity overload, this batch form is deferred until structural queues are processed.
+    /// </remarks>
     public void Destroy(ReadOnlySpan<Entity> entities)
     {
         EnqueueDestroy(entities);
