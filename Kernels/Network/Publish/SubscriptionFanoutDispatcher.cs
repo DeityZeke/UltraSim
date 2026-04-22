@@ -58,15 +58,11 @@ public sealed class SubscriptionFanoutDispatcher
 
     public SubscriptionFanoutDispatchResult DispatchScheduledWork(
         ReadOnlySpan<ScheduledWorkItem> items,
-        ReadOnlySpan<SubscriptionKey> scopeKeys,
         Span<ConnectionId> subscriberScratch,
         Span<OutboundDatagram> destination,
         bool allowCompression = true,
         bool allowSegmentation = true)
     {
-        if (items.Length != scopeKeys.Length)
-            throw new ArgumentException("Items and scope key spans must have the same length.");
-
         int frameCount = 0;
         int subscriberDeliveries = 0;
         int datagramCount = 0;
@@ -75,15 +71,16 @@ public sealed class SubscriptionFanoutDispatcher
 
         for (int i = 0; i < items.Length && datagramCount < destination.Length; i++)
         {
-            SubscriptionKey scopeKey = scopeKeys[i];
+            ScheduledWorkItem item = items[i];
+            SubscriptionKey scopeKey = item.ScopeKey;
             if (!scopeKey.IsValid)
-                throw new ArgumentOutOfRangeException(nameof(scopeKeys));
+                throw new ArgumentOutOfRangeException(nameof(items));
 
             int subscriberCount = _subscriptions.CopySubscribers(scopeKey, subscriberScratch);
             if (subscriberCount == 0)
                 continue;
 
-            PublishedFrame frame = SharedFramePublisher.Publish(items[i]);
+            PublishedFrame frame = SharedFramePublisher.Publish(item);
             frameCount++;
             subscriberDeliveries += subscriberCount;
 

@@ -5,4 +5,5 @@ public readonly record struct ScheduledWorkItem(
     PacketClass PacketClass,
     ulong Sequence,
     ulong ItemKey,
+    SubscriptionKey ScopeKey,
     ImmutablePayloadBuffer Payload);

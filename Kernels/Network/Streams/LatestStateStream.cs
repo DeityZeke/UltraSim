@@ -6,6 +6,7 @@ public sealed class LatestStateStream
     {
         public ulong ItemKey;
         public ulong Sequence;
+        public SubscriptionKey ScopeKey;
         public ImmutablePayloadBuffer Payload = default!;
     }
 
@@ -14,6 +15,11 @@ public sealed class LatestStateStream
     private ulong _nextSequence = 1;
 
     public ulong Publish(ulong itemKey, ImmutablePayloadBuffer payload)
+    {
+        return Publish(itemKey, default, payload);
+    }
+
+    public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, ImmutablePayloadBuffer payload)
     {
         if (itemKey == 0)
             throw new ArgumentOutOfRangeException(nameof(itemKey));
@@ -24,6 +30,7 @@ public sealed class LatestStateStream
             if (_entriesByKey.TryGetValue(itemKey, out Entry? entry))
             {
                 entry.Sequence = sequence;
+                entry.ScopeKey = scopeKey;
                 entry.Payload = payload;
             }
             else
@@ -32,6 +39,7 @@ public sealed class LatestStateStream
                 {
                     ItemKey = itemKey,
                     Sequence = sequence,
+                    ScopeKey = scopeKey,
                     Payload = payload,
                 });
             }
@@ -74,7 +82,7 @@ public sealed class LatestStateStream
             for (int i = 0; i < count; i++)
             {
                 Entry entry = updates[i];
-                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.Payload);
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.Payload);
                 lastSequence = entry.Sequence;
             }
 

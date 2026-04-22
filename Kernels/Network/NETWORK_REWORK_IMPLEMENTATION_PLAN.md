@@ -282,6 +282,7 @@ Current status:
   - explicit latest-state and ordered-event cursors
   - bounded ordered-event recovery signaling when a reader falls behind retention
   - simple stream snapshots and drain-result records
+  - scope-aware latest-state and ordered-event publication
 - still deferred inside this slice:
   - richer snapshot descriptors/baseline metadata
   - shared payload references instead of direct immutable payload ownership
@@ -341,12 +342,14 @@ Current status:
   - `ScheduledWorkPublishedFrameProjector`
   - `SubscriptionFanoutDispatcher`
   - `ScheduledWorkFanoutBridge`
+  - `ConnectionStreamFanoutBridge`
   - fanout assembly from a shared published frame to many recipient connections
 - current behavior:
   - typed state/event frames can be built once as shared published bodies
   - subscriber sets can be copied out per scope key
   - scheduled work can be projected into scoped published frames
   - scheduled work plus scope keys can now be bridged directly into fanout dispatch through a single kernel path
+  - scope-aware stream publication can now flow through scheduling directly into fanout dispatch
   - the assembler can fan out a shared published frame across many recipients
 - still deferred from the broader bridge slice:
   - integration between stream scheduling and shared published-frame fanout
@@ -377,6 +380,7 @@ Benchmark note:
 - current early data shows:
   - clear allocation improvement for shared-frame fanout
   - after removing the intermediate projection step from the hot path, shared-frame fanout now also leads the naive rebuild path in the current benchmark
+  - the first integrated `schedule -> fanout` benchmark path is now in place and is healthy
   - AOI subscription maintenance benchmarks now exist and improved substantially after the registry-owned reconcile pass
 - implication:
   - the seam is worth keeping
@@ -462,7 +466,7 @@ Current status in this repo:
 
 The next implementation target after this bridge slice should be:
 
-- stream-integrated publish projection into fanout scheduling
 - then broader server bridge work
+- specifically: the first server-side publish classification layer that feeds these scoped streams from real runtime state
 
 not full replication yet.

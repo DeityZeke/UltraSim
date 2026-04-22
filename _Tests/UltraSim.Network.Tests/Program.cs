@@ -43,6 +43,7 @@ internal static class TestRunner
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers), SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers);
         Run(nameof(ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass), ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass);
+        Run(nameof(ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork), ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork);
         Run(nameof(ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap), ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap);
         Run(nameof(ChunkAoiSubscriptionMaintainer_ReconcilesSubscriptionsAcrossMovement), ChunkAoiSubscriptionMaintainer_ReconcilesSubscriptionsAcrossMovement);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
@@ -532,9 +533,11 @@ internal static class TestRunner
     private static void LatestStateStream_CoalescesAndDrainsByLatestVersion()
     {
         var stream = new LatestStateStream();
-        stream.Publish(1, ImmutablePayloadBuffer.CopyFrom([1]));
-        ulong newerSequence = stream.Publish(1, ImmutablePayloadBuffer.CopyFrom([2]));
-        ulong otherSequence = stream.Publish(2, ImmutablePayloadBuffer.CopyFrom([3]));
+        SubscriptionKey keyA = new(11);
+        SubscriptionKey keyB = new(22);
+        stream.Publish(1, keyA, ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong newerSequence = stream.Publish(1, keyA, ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong otherSequence = stream.Publish(2, keyB, ImmutablePayloadBuffer.CopyFrom([3]));
 
         LatestStateSnapshot snapshot = stream.GetSnapshot();
         Assert.Equal(2, snapshot.ItemCount);
@@ -545,8 +548,10 @@ internal static class TestRunner
 
         Assert.Equal(2, result.Count);
         Assert.Equal(newerSequence, updates[0].Sequence);
+        Assert.Equal((ulong)11, updates[0].ScopeKey.Value);
         Assert.Equal((byte)2, updates[0].Payload.Span[0]);
         Assert.Equal((ulong)2, updates[1].ItemKey);
+        Assert.Equal((ulong)22, updates[1].ScopeKey.Value);
         Assert.Equal((byte)3, updates[1].Payload.Span[0]);
         Assert.Equal(otherSequence, result.NextCursor.LastSeenSequence);
     }
@@ -554,9 +559,9 @@ internal static class TestRunner
     private static void LatestStateStream_PartialDrain_AdvancesCursor()
     {
         var stream = new LatestStateStream();
-        ulong first = stream.Publish(10, ImmutablePayloadBuffer.CopyFrom([10]));
-        ulong second = stream.Publish(20, ImmutablePayloadBuffer.CopyFrom([20]));
-        ulong third = stream.Publish(30, ImmutablePayloadBuffer.CopyFrom([30]));
+        ulong first = stream.Publish(10, new SubscriptionKey(10), ImmutablePayloadBuffer.CopyFrom([10]));
+        ulong second = stream.Publish(20, new SubscriptionKey(20), ImmutablePayloadBuffer.CopyFrom([20]));
+        ulong third = stream.Publish(30, new SubscriptionKey(30), ImmutablePayloadBuffer.CopyFrom([30]));
 
         var firstBatch = new LatestStateUpdate[2];
         LatestStateDrainResult firstResult = stream.DrainSince(default, firstBatch);
@@ -573,9 +578,9 @@ internal static class TestRunner
     private static void OrderedEventStream_DrainsInOrderAndAdvancesCursor()
     {
         var stream = new OrderedEventStream(capacity: 4);
-        ulong first = stream.Publish(ImmutablePayloadBuffer.CopyFrom([1]));
-        ulong second = stream.Publish(ImmutablePayloadBuffer.CopyFrom([2]));
-        ulong third = stream.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+        ulong first = stream.Publish(new SubscriptionKey(41), ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong second = stream.Publish(new SubscriptionKey(42), ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong third = stream.Publish(new SubscriptionKey(43), ImmutablePayloadBuffer.CopyFrom([3]));
 
         OrderedEventSnapshot snapshot = stream.GetSnapshot();
         Assert.Equal(3, snapshot.Count);
@@ -587,7 +592,9 @@ internal static class TestRunner
         Assert.Equal(OrderedEventDrainStatus.Success, firstDrain.Status);
         Assert.Equal(2, firstDrain.Count);
         Assert.Equal(first, batch[0].Sequence);
+        Assert.Equal((ulong)41, batch[0].ScopeKey.Value);
         Assert.Equal(second, batch[1].Sequence);
+        Assert.Equal((ulong)42, batch[1].ScopeKey.Value);
 
         var nextBatch = new OrderedEventEntry[2];
         OrderedEventDrainResult secondDrain = stream.DrainSince(firstDrain.NextCursor, nextBatch);
@@ -598,9 +605,9 @@ internal static class TestRunner
     private static void OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind()
     {
         var stream = new OrderedEventStream(capacity: 2);
-        ulong first = stream.Publish(ImmutablePayloadBuffer.CopyFrom([1]));
-        stream.Publish(ImmutablePayloadBuffer.CopyFrom([2]));
-        ulong third = stream.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+        ulong first = stream.Publish(new SubscriptionKey(51), ImmutablePayloadBuffer.CopyFrom([1]));
+        stream.Publish(new SubscriptionKey(52), ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong third = stream.Publish(new SubscriptionKey(53), ImmutablePayloadBuffer.CopyFrom([3]));
 
         var batch = new OrderedEventEntry[2];
         OrderedEventDrainResult drain = stream.DrainSince(new OrderedEventCursor(first), batch);
@@ -615,8 +622,10 @@ internal static class TestRunner
     {
         var latest = new LatestStateStream();
         var ordered = new OrderedEventStream(capacity: 8);
-        ulong realtimeSequence = latest.Publish(100, ImmutablePayloadBuffer.CopyFrom([1, 2]));
-        ulong eventSequence = ordered.Publish(ImmutablePayloadBuffer.CopyFrom([9]));
+        SubscriptionKey latestKey = new(1001);
+        SubscriptionKey eventKey = new(1002);
+        ulong realtimeSequence = latest.Publish(100, latestKey, ImmutablePayloadBuffer.CopyFrom([1, 2]));
+        ulong eventSequence = ordered.Publish(eventKey, ImmutablePayloadBuffer.CopyFrom([9]));
         var scheduler = new ConnectionStreamScheduler(latest, ordered);
 
         var work = new ScheduledWorkItem[4];
@@ -635,18 +644,20 @@ internal static class TestRunner
         Assert.Equal(PacketClass.Realtime, work[0].PacketClass);
         Assert.Equal(realtimeSequence, work[0].Sequence);
         Assert.Equal((ulong)100, work[0].ItemKey);
+        Assert.Equal((ulong)1001, work[0].ScopeKey.Value);
         Assert.Equal(ScheduledWorkKind.OrderedEvent, work[1].Kind);
         Assert.Equal(PacketClass.ReliableEvent, work[1].PacketClass);
         Assert.Equal(eventSequence, work[1].Sequence);
+        Assert.Equal((ulong)1002, work[1].ScopeKey.Value);
     }
 
     private static void ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork()
     {
         var latest = new LatestStateStream();
         var ordered = new OrderedEventStream(capacity: 8);
-        ulong firstRealtime = latest.Publish(1, ImmutablePayloadBuffer.CopyFrom([1]));
-        ulong secondRealtime = latest.Publish(2, ImmutablePayloadBuffer.CopyFrom([2]));
-        ulong firstEvent = ordered.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+        ulong firstRealtime = latest.Publish(1, new SubscriptionKey(2001), ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong secondRealtime = latest.Publish(2, new SubscriptionKey(2002), ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong firstEvent = ordered.Publish(new SubscriptionKey(2003), ImmutablePayloadBuffer.CopyFrom([3]));
         var scheduler = new ConnectionStreamScheduler(latest, ordered);
 
         var work = new ScheduledWorkItem[4];
@@ -678,10 +689,10 @@ internal static class TestRunner
     {
         var latest = new LatestStateStream();
         var ordered = new OrderedEventStream(capacity: 2);
-        latest.Publish(10, ImmutablePayloadBuffer.CopyFrom([1]));
-        ordered.Publish(ImmutablePayloadBuffer.CopyFrom([2]));
-        ordered.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
-        ulong newestEvent = ordered.Publish(ImmutablePayloadBuffer.CopyFrom([4]));
+        latest.Publish(10, new SubscriptionKey(3001), ImmutablePayloadBuffer.CopyFrom([1]));
+        ordered.Publish(new SubscriptionKey(3002), ImmutablePayloadBuffer.CopyFrom([2]));
+        ordered.Publish(new SubscriptionKey(3003), ImmutablePayloadBuffer.CopyFrom([3]));
+        ulong newestEvent = ordered.Publish(new SubscriptionKey(3004), ImmutablePayloadBuffer.CopyFrom([4]));
         var scheduler = new ConnectionStreamScheduler(latest, ordered);
 
         var work = new ScheduledWorkItem[4];
@@ -709,12 +720,14 @@ internal static class TestRunner
                 PacketClass.Realtime,
                 Sequence: 10,
                 ItemKey: 55,
+                ScopeKey: default,
                 Payload: ImmutablePayloadBuffer.CopyFrom([1, 2, 3])),
             new(
                 ScheduledWorkKind.OrderedEvent,
                 PacketClass.ReliableEvent,
                 Sequence: 20,
                 ItemKey: 0,
+                ScopeKey: default,
                 Payload: ImmutablePayloadBuffer.CopyFrom([9, 8]))
         ];
 
@@ -755,6 +768,7 @@ internal static class TestRunner
                 PacketClass.ReliableEvent,
                 Sequence: 30,
                 ItemKey: 0,
+                ScopeKey: default,
                 Payload: ImmutablePayloadBuffer.CopyFrom([4, 5]))
         ];
 
@@ -829,12 +843,14 @@ internal static class TestRunner
                 PacketClass.Realtime,
                 Sequence: 40,
                 ItemKey: 900,
+                ScopeKey: new SubscriptionKey(11),
                 Payload: ImmutablePayloadBuffer.CopyFrom([1, 2])),
             new(
                 ScheduledWorkKind.OrderedEvent,
                 PacketClass.ReliableEvent,
                 Sequence: 41,
                 ItemKey: 0,
+                ScopeKey: new SubscriptionKey(22),
                 Payload: ImmutablePayloadBuffer.CopyFrom([3, 4]))
         ];
         SubscriptionKey[] scopes = [new SubscriptionKey(11), new SubscriptionKey(22)];
@@ -953,20 +969,21 @@ internal static class TestRunner
                 PacketClass.Realtime,
                 Sequence: 81,
                 ItemKey: 810,
+                ScopeKey: latestKey,
                 Payload: ImmutablePayloadBuffer.CopyFrom([8])),
             new(
                 ScheduledWorkKind.OrderedEvent,
                 PacketClass.ReliableEvent,
                 Sequence: 82,
                 ItemKey: 0,
+                ScopeKey: eventKey,
                 Payload: ImmutablePayloadBuffer.CopyFrom([9, 10]))
         ];
-        SubscriptionKey[] scopeKeys = [latestKey, eventKey];
         var dispatcher = new SubscriptionFanoutDispatcher(registry, new OutboundDatagramAssembler());
         var subscriberScratch = new ConnectionId[8];
         var output = new OutboundDatagram[8];
 
-        SubscriptionFanoutDispatchResult result = dispatcher.DispatchScheduledWork(items, scopeKeys, subscriberScratch, output);
+        SubscriptionFanoutDispatchResult result = dispatcher.DispatchScheduledWork(items, subscriberScratch, output);
 
         Assert.Equal(2, result.FrameCount);
         Assert.Equal(4, result.SubscriberDeliveries);
@@ -1014,20 +1031,21 @@ internal static class TestRunner
                 PacketClass.Realtime,
                 Sequence: 90,
                 ItemKey: 900,
+                ScopeKey: latestKey,
                 Payload: ImmutablePayloadBuffer.CopyFrom([1, 2])),
             new(
                 ScheduledWorkKind.OrderedEvent,
                 PacketClass.ReliableEvent,
                 Sequence: 91,
                 ItemKey: 0,
+                ScopeKey: eventKey,
                 Payload: ImmutablePayloadBuffer.CopyFrom([3]))
         ];
-        SubscriptionKey[] scopeKeys = [latestKey, eventKey];
         var bridge = new ScheduledWorkFanoutBridge(registry);
         var subscribers = new ConnectionId[4];
         var output = new OutboundDatagram[4];
 
-        ScheduledWorkFanoutResult result = bridge.Dispatch(items, scopeKeys, subscribers, output);
+        ScheduledWorkFanoutResult result = bridge.Dispatch(items, subscribers, output);
 
         Assert.Equal(2, result.ProjectedFrameCount);
         Assert.Equal(3, result.SubscriberDeliveries);
@@ -1057,6 +1075,44 @@ internal static class TestRunner
 
         Assert.Equal(2, latestCount);
         Assert.Equal(1, eventCount);
+    }
+
+    private static void ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        SubscriptionKey latestKey = new(801);
+        SubscriptionKey eventKey = new(802);
+        ulong latestSequence = latest.Publish(500, latestKey, ImmutablePayloadBuffer.CopyFrom([5, 0]));
+        ulong eventSequence = ordered.Publish(eventKey, ImmutablePayloadBuffer.CopyFrom([8, 0]));
+
+        var registry = new ConnectionSubscriptionRegistry();
+        registry.Subscribe(new ConnectionId(1), latestKey);
+        registry.Subscribe(new ConnectionId(2), latestKey);
+        registry.Subscribe(new ConnectionId(2), eventKey);
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(latest, ordered),
+            new ScheduledWorkFanoutBridge(registry));
+        var scheduled = new ScheduledWorkItem[4];
+        var subscribers = new ConnectionId[4];
+        var output = new OutboundDatagram[4];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscribers,
+            output);
+
+        Assert.Equal(2, result.Schedule.Count);
+        Assert.False(result.Schedule.OrderedEventRecoveryRequired);
+        Assert.Equal(3, result.Fanout.DatagramCount);
+        Assert.Equal(3, result.Fanout.SubscriberDeliveries);
+        Assert.Equal(latestSequence, scheduled[0].Sequence);
+        Assert.Equal((ulong)801, scheduled[0].ScopeKey.Value);
+        Assert.Equal(eventSequence, scheduled[1].Sequence);
+        Assert.Equal((ulong)802, scheduled[1].ScopeKey.Value);
     }
 
     private static void ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap()

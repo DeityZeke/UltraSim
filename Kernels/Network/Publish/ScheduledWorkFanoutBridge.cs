@@ -12,13 +12,11 @@ public sealed class ScheduledWorkFanoutBridge
 
     public ScheduledWorkFanoutResult Dispatch(
         ReadOnlySpan<ScheduledWorkItem> items,
-        ReadOnlySpan<SubscriptionKey> scopeKeys,
         Span<ConnectionId> subscriberScratch,
         Span<OutboundDatagram> output)
     {
         SubscriptionFanoutDispatchResult dispatch = _dispatcher.DispatchScheduledWork(
             items,
-            scopeKeys,
             subscriberScratch,
             output);
 

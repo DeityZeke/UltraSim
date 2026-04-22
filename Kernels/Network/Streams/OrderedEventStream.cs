@@ -18,10 +18,15 @@ public sealed class OrderedEventStream
 
     public ulong Publish(ImmutablePayloadBuffer payload)
     {
+        return Publish(default, payload);
+    }
+
+    public ulong Publish(SubscriptionKey scopeKey, ImmutablePayloadBuffer payload)
+    {
         lock (_sync)
         {
             ulong sequence = _nextSequence++;
-            _ring[_writeIndex] = new OrderedEventEntry(sequence, payload);
+            _ring[_writeIndex] = new OrderedEventEntry(sequence, scopeKey, payload);
             _writeIndex = (_writeIndex + 1) % _ring.Length;
             if (_count < _ring.Length)
                 _count++;

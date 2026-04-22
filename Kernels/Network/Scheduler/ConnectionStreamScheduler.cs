@@ -43,6 +43,7 @@ public sealed class ConnectionStreamScheduler
                 PacketClass.Realtime,
                 update.Sequence,
                 update.ItemKey,
+                update.ScopeKey,
                 update.Payload);
             latestCursor = new LatestStateCursor(update.Sequence);
             realtimeItems++;
@@ -68,6 +69,7 @@ public sealed class ConnectionStreamScheduler
                     PacketClass.ReliableEvent,
                     entry.Sequence,
                     0,
+                    entry.ScopeKey,
                     entry.Payload);
                 eventCursor = new OrderedEventCursor(entry.Sequence + 1);
                 reliableItems++;

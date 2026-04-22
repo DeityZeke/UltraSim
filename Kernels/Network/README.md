@@ -43,6 +43,7 @@ What exists today:
   - explicit cursor types
   - bounded event recovery signaling
   - simple stream snapshots/drain results
+  - scope-aware stream publication for latest-state and ordered-event updates
 - first scheduler contracts for:
   - per-class connection budgets
   - connection schedule state
@@ -60,6 +61,7 @@ What exists today:
   - scheduled-work projection into scoped published frames
   - scoped fanout dispatch over subscriber registries
   - one-step `ScheduledWork + Scope -> Fanout` bridge for future server adapters
+  - direct `ConnectionStreamScheduler -> Fanout` bridge for scoped stream work
 - first AOI-backed subscription maintenance contracts for:
   - world-space 2D positions
   - chunk coordinates and chunk-backed scope keys
@@ -157,4 +159,5 @@ Current early result:
 - AOI-backed subscription maintenance is now implemented and test-covered
 - the AOI update path was materially improved by moving reconcile ownership into the subscription registry and collapsing per-connection duplicate state
 - the current AOI benchmark is now in a much healthier range
+- the stream-integrated `schedule -> fanout` benchmark path is now in place and is also behaving well
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win
