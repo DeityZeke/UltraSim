@@ -23,67 +23,95 @@ public sealed class OutboundDatagramAssembler
         for (int i = 0; i < items.Length && count < destination.Length; i++)
         {
             ScheduledWorkItem item = items[i];
-            PacketHeaderFlags flags = item.PacketClass == PacketClass.Realtime
-                ? PacketHeaderFlags.HighPriorityHint
-                : PacketHeaderFlags.None;
-
-            ImmutablePayloadBuffer body;
-            NetworkPlane plane;
-            PacketClass packetClass;
-            ChannelType channel;
-            switch (item.Kind)
+            PublishedFrame frame = item.Kind switch
             {
-                case ScheduledWorkKind.LatestState:
-                    body = PacketCodec.EncodePayload(new RealtimeStateFramePacket(item.Sequence, item.ItemKey, item.Payload));
-                    plane = RealtimeStateFramePacket.Plane;
-                    packetClass = RealtimeStateFramePacket.PacketClass;
-                    channel = RealtimeStateFramePacket.Channel;
-                    break;
-                case ScheduledWorkKind.OrderedEvent:
-                    body = PacketCodec.EncodePayload(new ReliableEventFramePacket(item.Sequence, item.Payload));
-                    plane = ReliableEventFramePacket.Plane;
-                    packetClass = ReliableEventFramePacket.PacketClass;
-                    channel = ReliableEventFramePacket.Channel;
-                    break;
-                default:
-                    throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}.");
-            }
-
-            var context = new OutboundTransformContext(
-                connectionId,
-                plane,
-                packetClass,
-                channel,
-                AllowCompression: allowCompression,
-                AllowSegmentation: allowSegmentation);
-
-            ImmutablePayloadBuffer transformedBody = body;
-            PacketHeaderFlags transformedFlags = flags;
-            for (int transformIndex = 0; transformIndex < _transforms.Length; transformIndex++)
-            {
-                OutboundTransformResult result = _transforms[transformIndex].Transform(transformedBody, transformedFlags, context);
-                transformedBody = result.Payload;
-                transformedFlags = result.HeaderFlags;
-            }
-
-            ImmutablePayloadBuffer envelope = item.Kind switch
-            {
-                ScheduledWorkKind.LatestState => PacketCodec.EncodeEnvelope(RealtimeStateFramePacket.PacketId, transformedBody, transformedFlags),
-                ScheduledWorkKind.OrderedEvent => PacketCodec.EncodeEnvelope(ReliableEventFramePacket.PacketId, transformedBody, transformedFlags),
+                ScheduledWorkKind.LatestState => SharedFramePublisher.PublishLatestState(item.Sequence, item.ItemKey, item.Payload),
+                ScheduledWorkKind.OrderedEvent => SharedFramePublisher.PublishOrderedEvent(item.Sequence, item.Payload),
                 _ => throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}."),
             };
 
-            if ((transformedFlags & PacketHeaderFlags.Compressed) != 0)
-                compressed++;
-            if ((transformedFlags & PacketHeaderFlags.Encrypted) != 0)
-                encrypted++;
-
-            destination[count++] = new OutboundDatagram(
+            OutboundAssemblyResult singleResult = AssemblePublished(
                 connectionId,
-                plane,
-                packetClass,
-                channel,
-                envelope);
+                frame,
+                destination[count..],
+                allowCompression,
+                allowSegmentation);
+            if (singleResult.Count == 0)
+                break;
+
+            count += singleResult.Count;
+            compressed += singleResult.CompressedCount;
+            encrypted += singleResult.EncryptedCount;
+        }
+
+        return new OutboundAssemblyResult(count, compressed, encrypted);
+    }
+
+    public OutboundAssemblyResult AssemblePublished(
+        ConnectionId connectionId,
+        in PublishedFrame frame,
+        Span<OutboundDatagram> destination,
+        bool allowCompression = true,
+        bool allowSegmentation = true)
+    {
+        if (destination.Length == 0)
+            return default;
+
+        var context = new OutboundTransformContext(
+            connectionId,
+            frame.Plane,
+            frame.PacketClass,
+            frame.Channel,
+            AllowCompression: allowCompression,
+            AllowSegmentation: allowSegmentation);
+
+        ImmutablePayloadBuffer transformedBody = frame.Body;
+        PacketHeaderFlags transformedFlags = frame.DefaultHeaderFlags;
+        for (int transformIndex = 0; transformIndex < _transforms.Length; transformIndex++)
+        {
+            OutboundTransformResult result = _transforms[transformIndex].Transform(transformedBody, transformedFlags, context);
+            transformedBody = result.Payload;
+            transformedFlags = result.HeaderFlags;
+        }
+
+        ImmutablePayloadBuffer envelope = PacketCodec.EncodeEnvelope(frame.PacketId, transformedBody, transformedFlags);
+        destination[0] = new OutboundDatagram(
+            connectionId,
+            frame.Plane,
+            frame.PacketClass,
+            frame.Channel,
+            envelope);
+        return new OutboundAssemblyResult(
+            Count: 1,
+            CompressedCount: (transformedFlags & PacketHeaderFlags.Compressed) != 0 ? 1 : 0,
+            EncryptedCount: (transformedFlags & PacketHeaderFlags.Encrypted) != 0 ? 1 : 0);
+    }
+
+    public OutboundAssemblyResult AssembleFanout(
+        ReadOnlySpan<ConnectionId> connections,
+        in PublishedFrame frame,
+        Span<OutboundDatagram> destination,
+        bool allowCompression = true,
+        bool allowSegmentation = true)
+    {
+        int count = 0;
+        int compressed = 0;
+        int encrypted = 0;
+
+        for (int i = 0; i < connections.Length && count < destination.Length; i++)
+        {
+            OutboundAssemblyResult singleResult = AssemblePublished(
+                connections[i],
+                frame,
+                destination[count..],
+                allowCompression,
+                allowSegmentation);
+            if (singleResult.Count == 0)
+                break;
+
+            count += singleResult.Count;
+            compressed += singleResult.CompressedCount;
+            encrypted += singleResult.EncryptedCount;
         }
 
         return new OutboundAssemblyResult(count, compressed, encrypted);

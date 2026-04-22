@@ -52,13 +52,19 @@ What exists today:
   - typed state/event frame packets
   - transform-aware outbound datagram assembly
   - header-flag mutation through the transform seam
+- first publish/subscription contracts for:
+  - subscription keys
+  - connection subscription registry
+  - published shared-frame descriptors
+  - build-once fanout assembly over subscriber sets
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
   - richer disconnect/admission policy beyond the current minimal rules
-- shared-payload fanout-aware assembly and scheduling
+- AOI-backed subscription maintenance policy
+- stream-integrated publish projection into fanout scheduling
 - ECS/server/client integration layers
 
 ## Design Position

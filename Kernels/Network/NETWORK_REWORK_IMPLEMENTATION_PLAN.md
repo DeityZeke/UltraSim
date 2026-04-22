@@ -332,6 +332,21 @@ Current status:
   - transform hooks run before final envelope construction
   - compression/encryption header flags can now be set by transforms
 
+- the first publish/subscription bridge primitives are now in place:
+  - `SubscriptionKey`
+  - `ConnectionSubscriptionRegistry`
+  - `PublishedFrame`
+  - `SharedFramePublisher`
+  - fanout assembly from a shared published frame to many recipient connections
+- current behavior:
+  - typed state/event frames can be built once as shared published bodies
+  - subscriber sets can be copied out per scope key
+  - the assembler can fan out a shared published frame across many recipients
+- still deferred from the broader bridge slice:
+  - player-centered AOI policy and chunk/cell-backed subscription maintenance
+  - integration between stream scheduling and shared published-frame fanout
+  - bridge-facing publish classification from ECS/server state changes
+
 ### Phase N5: Server Bridge Slice
 
 Deliver:

@@ -36,6 +36,9 @@ internal static class TestRunner
         Run(nameof(ConnectionStreamScheduler_SignalsOrderedEventRecovery), ConnectionStreamScheduler_SignalsOrderedEventRecovery);
         Run(nameof(OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames), OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames);
         Run(nameof(OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags), OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags);
+        Run(nameof(ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals), ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals);
+        Run(nameof(SharedFramePublisher_CreatesTypedPublishedFrames), SharedFramePublisher_CreatesTypedPublishedFrames);
+        Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -754,11 +757,94 @@ internal static class TestRunner
 
         Assert.Equal(1, result.Count);
         Assert.Equal(1, result.CompressedCount);
-        Assert.True(PacketCodec.TryDecodeEnvelope(output[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.True(output[0].Payload.Length >= PacketEnvelopeHeader.SizeInBytes);
+        var reader = new BitReader(output[0].Payload.Span);
+        PacketEnvelopeHeader header = PacketEnvelopeHeader.Deserialize(ref reader);
         Assert.Equal(PacketHeaderFlags.Compressed, header.Flags);
-        var reader = new BitReader(payload);
-        ReliableEventFramePacket frame = ReliableEventFramePacket.Deserialize(ref reader);
-        Assert.True(frame.Payload.Span.SequenceEqual(new byte[] { 4, 5, 255 }));
+        Assert.Equal(ReliableEventFramePacket.PacketId, header.PacketId);
+        Assert.Equal((ushort)(output[0].Payload.Length - PacketEnvelopeHeader.SizeInBytes), header.PayloadLength);
+        Assert.Equal((byte)255, output[0].Payload.Span[^1]);
+    }
+
+    private static void ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey keyA = new(100);
+        SubscriptionKey keyB = new(200);
+
+        Assert.True(registry.Subscribe(new ConnectionId(1), keyA));
+        Assert.False(registry.Subscribe(new ConnectionId(1), keyA));
+        Assert.True(registry.Subscribe(new ConnectionId(2), keyA));
+        Assert.True(registry.Subscribe(new ConnectionId(1), keyB));
+
+        Assert.Equal(2, registry.CountSubscribers(keyA));
+        Assert.Equal(1, registry.CountSubscribers(keyB));
+
+        var subscribers = new ConnectionId[4];
+        int count = registry.CopySubscribers(keyA, subscribers);
+        Assert.Equal(2, count);
+        Assert.True(Array.Exists(subscribers, static c => c.Value == 1));
+        Assert.True(Array.Exists(subscribers, static c => c.Value == 2));
+
+        Assert.True(registry.Unsubscribe(new ConnectionId(2), keyA));
+        Assert.Equal(1, registry.CountSubscribers(keyA));
+        Assert.Equal(2, registry.RemoveConnection(new ConnectionId(1)));
+        Assert.Equal(0, registry.CountSubscribers(keyB));
+    }
+
+    private static void SharedFramePublisher_CreatesTypedPublishedFrames()
+    {
+        ImmutablePayloadBuffer payload = ImmutablePayloadBuffer.CopyFrom([7, 8]);
+        PublishedFrame latest = SharedFramePublisher.PublishLatestState(12, 44, payload);
+        Assert.Equal(RealtimeStateFramePacket.PacketId, latest.PacketId);
+        Assert.Equal(NetworkPlane.State, latest.Plane);
+        Assert.Equal(PacketClass.Realtime, latest.PacketClass);
+        Assert.Equal(ChannelType.UnreliableSequenced, latest.Channel);
+        Assert.Equal(PacketHeaderFlags.HighPriorityHint, latest.DefaultHeaderFlags);
+
+        var latestReader = new BitReader(latest.Body.Span);
+        RealtimeStateFramePacket latestFrame = RealtimeStateFramePacket.Deserialize(ref latestReader);
+        Assert.Equal((ulong)12, latestFrame.Sequence);
+        Assert.Equal((ulong)44, latestFrame.ItemKey);
+        Assert.True(latestFrame.Payload.Span.SequenceEqual(new byte[] { 7, 8 }));
+
+        PublishedFrame ordered = SharedFramePublisher.PublishOrderedEvent(21, payload);
+        Assert.Equal(ReliableEventFramePacket.PacketId, ordered.PacketId);
+        Assert.Equal(PacketClass.ReliableEvent, ordered.PacketClass);
+        Assert.Equal(ChannelType.ReliableOrdered, ordered.Channel);
+    }
+
+    private static void OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey key = new(300);
+        registry.Subscribe(new ConnectionId(10), key);
+        registry.Subscribe(new ConnectionId(11), key);
+        registry.Subscribe(new ConnectionId(12), key);
+
+        var subscribers = new ConnectionId[4];
+        int subscriberCount = registry.CopySubscribers(key, subscribers);
+        Assert.Equal(3, subscriberCount);
+
+        PublishedFrame frame = SharedFramePublisher.PublishLatestState(
+            sequence: 99,
+            itemKey: 500,
+            payload: ImmutablePayloadBuffer.CopyFrom([1, 2, 3, 4]));
+        var assembler = new OutboundDatagramAssembler();
+        var output = new OutboundDatagram[4];
+        OutboundAssemblyResult result = assembler.AssembleFanout(subscribers.AsSpan(0, subscriberCount), frame, output);
+
+        Assert.Equal(3, result.Count);
+        for (int i = 0; i < result.Count; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            Assert.Equal(RealtimeStateFramePacket.PacketId, header.PacketId);
+            var reader = new BitReader(payload);
+            RealtimeStateFramePacket decoded = RealtimeStateFramePacket.Deserialize(ref reader);
+            Assert.Equal((ulong)99, decoded.Sequence);
+            Assert.Equal((ulong)500, decoded.ItemKey);
+            Assert.True(decoded.Payload.Span.SequenceEqual(new byte[] { 1, 2, 3, 4 }));
+        }
     }
 }
 
