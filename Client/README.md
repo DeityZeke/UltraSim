@@ -25,11 +25,13 @@ What now exists:
   - authoritative movement-state receive path
   - prediction acknowledgement hook
   - loopback-testable movement bridge
+  - the first paired server/client movement round-trip slice now exists over loopback via `Server/Network`
 
 Current benchmark note:
 
 - the first client loopback movement scenario now exists in `_Benchmarks/results/network-benchmarks.json`
 - current snapshot:
-  - `ClientMovementLoopback_1024Inputs`: `0.949 ms`, `1.22 MB`
+  - `ClientMovementLoopback_1024Inputs`: `0.926 ms`, `1.22 MB`
+  - `ServerMovementLoopback_1024Inputs`: `2.105 ms`, `3.43 MB`
 
 The old client networking code remains the behavioral reference for these concepts, but not the architecture template.

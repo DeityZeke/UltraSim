@@ -40,6 +40,7 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateEcsAoiLatestStatePublishAndFanoutScenario("EcsAoiLatestStatePublishAndFanout_1024Entities_128Connections", entityCount: 1024, connectionCount: 128);
     yield return CreateEcsAoiClassifiedPublishAndFanoutScenario("EcsAoiClassifiedPublishAndFanout_1024Realtime_256Reliable_128Bulk_128Connections", realtimeEntityCount: 1024, reliableEventCount: 256, bulkEventCount: 128, connectionCount: 128);
     yield return CreateClientMovementLoopbackScenario("ClientMovementLoopback_1024Inputs", inputCount: 1024);
+    yield return CreateServerMovementLoopbackScenario("ServerMovementLoopback_1024Inputs", inputCount: 1024);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -195,6 +196,20 @@ static BenchmarkScenario CreateClientMovementLoopbackScenario(string name, int i
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunClientMovementLoopbackScenario(inputCount),
+    };
+}
+
+static BenchmarkScenario CreateServerMovementLoopbackScenario(string name, int inputCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "ServerMovementLoopback",
+        Comparable = false,
+        Scale = inputCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunServerMovementLoopbackScenario(inputCount),
     };
 }
 
@@ -671,6 +686,84 @@ static ScenarioMeasurement RunClientMovementLoopbackScenario(int inputCount)
     return new ScenarioMeasurement(received + decoded, checksum);
 }
 
+static ScenarioMeasurement RunServerMovementLoopbackScenario(int inputCount)
+{
+    var builder = new EcsSchemaBuilder();
+    ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
+    World world = new(builder.Build());
+    ArchetypeSignature signature = new([movementId]);
+    Entity entity = world.CreateDefault(signature);
+    world.SetComponent(entity, new BenchMovementBody(0f, 0f, 0f, 0f));
+
+    using var pair = new LoopbackTransportPair();
+    pair.Client.Start();
+    pair.Server.Start();
+
+    void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
+            return;
+
+        float velocityX = input.MoveX / 100f;
+        float velocityY = input.MoveY / 100f;
+        body = body with
+        {
+            VelocityX = velocityX,
+            VelocityY = velocityY,
+            PositionX = body.PositionX + velocityX * deltaSeconds,
+            PositionY = body.PositionY + velocityY * deltaSeconds,
+        };
+        movementWorld.SetComponent(movementEntity, body);
+    }
+
+    bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
+        {
+            packet = default;
+            return false;
+        }
+
+        packet = new MovementStatePacket(
+            networkEntityId,
+            serverTick,
+            lastProcessedInputSequence,
+            body.PositionX,
+            body.PositionY,
+            body.VelocityX,
+            body.VelocityY);
+        return true;
+    }
+
+    var client = new ClientMovementNetworkBridge(pair.Client, new ConnectionId(1));
+    var server = new ServerEcsMovementNetworkBridge(
+        world,
+        pair.Server,
+        ApplyMovementInput,
+        ProjectMovementState);
+    server.Bind(new ConnectionId(1), entity, networkEntityId: 1);
+
+    long checksum = 0;
+    for (int i = 0; i < inputCount; i++)
+    {
+        client.TrySendInput(
+            new ClientMovementInput((short)(i % 200 - 100), (short)(100 - (i % 200)), (byte)(i & 3)),
+            (uint)(1000 + i),
+            new ClientMovementState(i, i * 2, 1.5f, 2.5f),
+            out _);
+        pair.Client.FlushOutbound();
+        checksum += server.PollInputs();
+        checksum += server.AdvanceAndSend(0.016f, (uint)(2000 + i));
+        checksum += client.PollInbound();
+    }
+
+    if (world.TryGetComponent(entity, out BenchMovementBody finalState))
+        checksum += (long)(finalState.PositionX * 1000f) + (long)(finalState.PositionY * 1000f);
+
+    checksum += client.LastReceiveResult.ServerTick + client.LastReceiveResult.LastProcessedInputSequence;
+    return new ScenarioMeasurement(inputCount * 3, checksum);
+}
+
 static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)
 {
     IServerApplication application = new ServerApplication(
@@ -835,6 +928,7 @@ readonly record struct BenchChunkEvent(int ChunkId, int ScopeBucket) : IComponen
     public const int ScopeCount = 8;
 }
 
+readonly record struct BenchMovementBody(float PositionX, float PositionY, float VelocityX, float VelocityY) : IComponent<BenchMovementBody>;
 readonly record struct BenchAoiPosition(int X, int Y) : IComponent<BenchAoiPosition>;
 readonly record struct BenchAoiEvent(int X, int Y, int EventCode) : IComponent<BenchAoiEvent>;
 readonly record struct BenchAoiBulkEvent(int X, int Y, int EventCode) : IComponent<BenchAoiBulkEvent>;

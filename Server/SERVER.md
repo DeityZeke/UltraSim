@@ -31,6 +31,10 @@ Current `Server/Network` state:
   - AOI latest-state publication over player-centered ring scopes
   - AOI ordered-event publication over the same ring scopes
   - this is the first real gameplay-facing scope path, not just the earlier operator or synthetic scope slices
+- the first authoritative movement round-trip slice now also exists there:
+  - server-side polling of `MovementInputPacket`
+  - ECS-owned authoritative movement application
+  - owner-state projection back into `MovementStatePacket`
 - this is still the correct join point; `Kernels/ECS` and `Kernels/Network` remain separate
 
 Current recommended gameplay publish policy:

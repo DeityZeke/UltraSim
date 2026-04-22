@@ -96,6 +96,10 @@ What now exists above the kernel:
   - authoritative movement-state receive path
   - prediction acknowledgement hook
   - interpolation-ready state buffering through `Client/Core`
+- the first paired server/client movement round-trip slice in `Server/Network`
+  - transport input polling on the server side
+  - authoritative ECS movement application
+  - owner-state packet projection back to the client bridge
 - separate benchmark coverage for that higher-layer publish/fanout path
 
 ## Design Position
@@ -190,6 +194,7 @@ Current early result:
 - the benchmark runner now also includes the first mixed ECS-classification scenario with realtime latest-state plus bulk ordered events
 - the benchmark runner now also includes the first AOI-backed ECS publish-plus-fanout scenario and a mixed AOI-classified scenario
 - the benchmark runner now also includes the first client loopback movement scenario
+- the benchmark runner now also includes the first paired server/client movement loopback scenario
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win
 
 Current higher-layer policy direction:

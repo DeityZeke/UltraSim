@@ -76,6 +76,7 @@ Current status:
   - `ClientMovementNetworkBridge`
   - loopback integration tests
   - first loopback benchmark
+  - first paired server/client authoritative movement round-trip over loopback via `ServerEcsMovementNetworkBridge`
 
 ## Phase C3: Godot Wrapper
 
@@ -99,4 +100,5 @@ At that point the shared shape should be real enough to test:
 Current note:
 
 - the repo has now reached the first meaningful pre-bot-harness checkpoint on the client side
-- what is still missing before that harness becomes worth wiring is the real server-side movement ingestion/authoritative movement path on the other end of this bridge
+- the paired server-side movement ingestion/authoritative movement path now exists for one narrow loopback slice
+- what is still missing before the harness becomes worth wiring is the real socket transport path and the next broader gameplay/server movement integration layer on top of this slice

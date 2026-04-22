@@ -450,6 +450,7 @@ Current status:
   - `Client/Network` movement send/receive bridge
   - loopback integration tests
   - first loopback benchmark
+  - first paired server/client authoritative movement round-trip over loopback through `Server/Network`
 
 ## Testing Strategy
 
@@ -511,6 +512,6 @@ The next implementation target after this bridge slice should be:
   - observer-visible continuous state -> `Realtime`
   - discrete gameplay events -> `ReliableEvent`
   - terrain/housing/large world payloads -> `Bulk`
-- and then use that richer slice as the first real candidate for socket-driven harness/ramp validation
+- and then use that richer slice plus the new paired movement round-trip as the first real candidate for socket-driven harness/ramp validation
 
 not full replication yet.

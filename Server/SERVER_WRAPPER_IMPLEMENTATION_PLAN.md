@@ -428,6 +428,10 @@ Current note:
 - that same bridge now also has its first actual gameplay-facing scope slice:
   - AOI latest-state publication over player-centered ring scopes
   - AOI ordered-event publication over the same ring scopes
+- that same bridge now also has its first narrow authoritative movement slice:
+  - input polling from the network transport
+  - ECS-owned movement application
+  - owner-state projection back to the client-side movement bridge over loopback
 
 ## Risks To Watch
 
