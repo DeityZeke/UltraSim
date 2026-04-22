@@ -43,6 +43,7 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateClientMovementLoopbackScenario("ClientMovementLoopback_1024Inputs", inputCount: 1024);
     yield return CreateServerMovementLoopbackScenario("ServerMovementLoopback_1024Inputs", inputCount: 1024);
     yield return CreateUdpMovementRoundTripScenario("UdpMovementRoundTrip_1024Inputs", inputCount: 1024);
+    yield return CreateUdpMovementMiniRampScenario("UdpMovementMiniRamp_32Clients_240Ticks", clientCount: 32, ticks: 240);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -226,6 +227,20 @@ static BenchmarkScenario CreateUdpMovementRoundTripScenario(string name, int inp
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunUdpMovementRoundTripScenario(inputCount),
+    };
+}
+
+static BenchmarkScenario CreateUdpMovementMiniRampScenario(string name, int clientCount, int ticks)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "UdpMovementRamp",
+        Comparable = false,
+        Scale = clientCount * ticks,
+        WarmupCount = 1,
+        IterationCount = 3,
+        Execute = () => RunUdpMovementMiniRampScenario(clientCount, ticks),
     };
 }
 
@@ -879,6 +894,158 @@ static ScenarioMeasurement RunUdpMovementRoundTripScenario(int inputCount)
 
     checksum += client.LastReceiveResult.ServerTick + client.LastReceiveResult.LastProcessedInputSequence;
     return new ScenarioMeasurement(inputCount * 3, checksum);
+}
+
+static ScenarioMeasurement RunUdpMovementMiniRampScenario(int clientCount, int ticks)
+{
+    PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+    using var serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+        new IPEndPoint(IPAddress.Loopback, 0),
+        metadata));
+    serverTransport.Start();
+    var serverEndPoint = (IPEndPoint)serverTransport.LocalEndPoint!;
+
+    var builder = new EcsSchemaBuilder();
+    ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
+    World world = new(builder.Build());
+    ArchetypeSignature signature = new([movementId]);
+    uint nextNetworkEntityId = 1;
+    var spawnedEntities = new List<Entity>(clientCount);
+
+    void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
+            return;
+
+        float velocityX = input.MoveX / 100f;
+        float velocityY = input.MoveY / 100f;
+        body = body with
+        {
+            VelocityX = velocityX,
+            VelocityY = velocityY,
+            PositionX = body.PositionX + velocityX * deltaSeconds,
+            PositionY = body.PositionY + velocityY * deltaSeconds,
+        };
+        movementWorld.SetComponent(movementEntity, body);
+    }
+
+    bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
+        {
+            packet = default;
+            return false;
+        }
+
+        packet = new MovementStatePacket(
+            networkEntityId,
+            serverTick,
+            lastProcessedInputSequence,
+            body.PositionX,
+            body.PositionY,
+            body.VelocityX,
+            body.VelocityY);
+        return true;
+    }
+
+    ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+    {
+        Entity entity = movementWorld.CreateDefault(signature);
+        movementWorld.SetComponent(entity, new BenchMovementBody(0f, 0f, 0f, 0f));
+        spawnedEntities.Add(entity);
+        return new ServerMovementSessionSpawn(entity, nextNetworkEntityId++);
+    }
+
+    var handshakePolicy = new HandshakePolicy(
+        ProtocolVersion: 3,
+        SchemaHash: 4,
+        ContentHash: 5,
+        RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+    var serverHost = new ServerMovementSessionHost(
+        world,
+        serverTransport,
+        ApplyMovementInput,
+        ProjectMovementState,
+        SpawnSession,
+        handshakePolicy: handshakePolicy);
+    serverHost.Start();
+
+    var clients = new List<(UdpSocketNetworkTransport Transport, ClientMovementSessionHost Host)>(clientCount);
+    try
+    {
+        for (int i = 0; i < clientCount; i++)
+        {
+            var clientTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+                new IPEndPoint(IPAddress.Loopback, 0),
+                metadata,
+                serverEndPoint,
+                new ConnectionId(1),
+                AllowDynamicConnections: false));
+            clientTransport.Start();
+            var clientHost = new ClientMovementSessionHost(
+                clientTransport,
+                new ConnectionId(1),
+                new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression));
+            clientHost.Start();
+            clientHost.BeginHandshake(100 + i);
+            clients.Add((clientTransport, clientHost));
+        }
+
+        for (int step = 0; step < 64 && (serverHost.BoundConnectionCount < clientCount || clients.Exists(static c => !c.Host.IsReady)); step++)
+        {
+            serverHost.Pump(200 + step * 2, 0.016f, (uint)(step + 1));
+            for (int i = 0; i < clients.Count; i++)
+                clients[i].Host.Pump(201 + step * 2);
+        }
+
+        if (serverHost.BoundConnectionCount != clientCount)
+            throw new InvalidOperationException($"Expected {clientCount} bound clients, got {serverHost.BoundConnectionCount}.");
+
+        long checksum = 0;
+        for (int tick = 0; tick < ticks; tick++)
+        {
+            for (int i = 0; i < clients.Count; i++)
+            {
+                short moveX = (short)(80 + ((tick + i) % 40));
+                short moveY = (short)(20 + ((tick * 3 + i) % 30));
+                clients[i].Host.TrySendInput(
+                    new ClientMovementInput(moveX, moveY, (byte)(tick & 3)),
+                    clientTick: (uint)(1000 + tick),
+                    predictedState: default,
+                    out _);
+            }
+
+            checksum += serverHost.Pump(1000 + tick * 2, 0.016f, (uint)(5000 + tick));
+            for (int i = 0; i < clients.Count; i++)
+                checksum += clients[i].Host.Pump(1001 + tick * 2);
+        }
+
+        for (int flush = 0; flush < 4; flush++)
+        {
+            checksum += serverHost.Pump(4000 + flush * 2, 0.016f, (uint)(9000 + flush));
+            for (int i = 0; i < clients.Count; i++)
+                checksum += clients[i].Host.Pump(4001 + flush * 2);
+        }
+
+        for (int i = 0; i < spawnedEntities.Count; i++)
+        {
+            if (world.TryGetComponent(spawnedEntities[i], out BenchMovementBody body))
+                checksum += (long)(body.PositionX * 1000f) + (long)(body.PositionY * 1000f);
+        }
+
+        for (int i = 0; i < clients.Count; i++)
+        {
+            checksum += clients[i].Host.Movement.LastReceiveResult.ServerTick;
+            checksum += clients[i].Host.Movement.LastReceiveResult.LastProcessedInputSequence;
+        }
+
+        return new ScenarioMeasurement(clientCount * ticks * 3, checksum);
+    }
+    finally
+    {
+        for (int i = 0; i < clients.Count; i++)
+            clients[i].Transport.Dispose();
+    }
 }
 
 static int PollUntilNonZero<TState>(Func<TState, int> poll, TState state, int maxAttempts)

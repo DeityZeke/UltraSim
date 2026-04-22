@@ -102,6 +102,10 @@ What now exists above the kernel:
   - transport input polling on the server side
   - authoritative ECS movement application
   - owner-state packet projection back to the client bridge
+- shared live movement/session hosts above the kernel:
+  - `ClientMovementSessionHost`
+  - `ServerMovementSessionHost`
+  - one transport poll path shared by control-plane handshake and movement traffic
 - separate benchmark coverage for that higher-layer publish/fanout path
 
 ## Design Position
@@ -198,7 +202,17 @@ Current early result:
 - the benchmark runner now also includes the first client loopback movement scenario
 - the benchmark runner now also includes the first paired server/client movement loopback scenario
 - the benchmark runner now also includes the first UDP socket-backed movement round-trip scenario
+- the benchmark runner now also includes the first small live multi-client UDP movement ramp scenario over the shared session-host pump shape
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win
+
+Current movement/ramp checkpoint:
+
+- `ClientMovementLoopback_1024Inputs`: `0.913 ms`, `1.22 MB`
+- `ServerMovementLoopback_1024Inputs`: `2.176 ms`, `3.43 MB`
+- `UdpMovementRoundTrip_1024Inputs`: `15.431 ms`, `4.32 MB`
+- `UdpMovementMiniRamp_32Clients_240Ticks`: `108.954 ms`, `14.46 MB`
+
+That last scenario is the first honest “many live clients moving through one shared pump loop” signal. It is the intended pre-bot-harness checkpoint, not the final ramp harness.
 
 Current higher-layer policy direction:
 

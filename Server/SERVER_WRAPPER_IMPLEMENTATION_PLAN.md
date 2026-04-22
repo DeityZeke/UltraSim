@@ -433,6 +433,7 @@ Current note:
   - ECS-owned movement application
   - owner-state projection back to the client-side movement bridge over loopback
   - that same slice now also has a real UDP socket-backed validation path after control-plane handshake
+  - that same slice now also has shared live session hosts (`ServerMovementSessionHost` / `ClientMovementSessionHost`) plus a first small multi-client UDP ramp benchmark
 
 ## Risks To Watch
 

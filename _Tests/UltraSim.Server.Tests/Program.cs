@@ -62,6 +62,7 @@ internal static class TestRunner
         Run(nameof(ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams), ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams);
         Run(nameof(ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement), ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement);
         Run(nameof(ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement), ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement);
+        Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -1591,6 +1592,135 @@ internal static class TestRunner
         Assert.AlmostEqual(0.2f, authoritative.PositionY);
         Assert.AlmostEqual(1.2f, authoritative.VelocityX);
         Assert.AlmostEqual(0.4f, authoritative.VelocityY);
+    }
+
+    private static void ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement()
+    {
+        const int clientCount = 3;
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        using var serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata));
+        serverTransport.Start();
+        var serverEndPoint = (IPEndPoint)Assert.NotNull(serverTransport.LocalEndPoint);
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+        uint nextNetworkEntityId = 1;
+        var spawnedEntities = new List<Entity>(clientCount);
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            float velocityX = input.MoveX / 100f;
+            float velocityY = input.MoveY / 100f;
+            body = body with
+            {
+                VelocityX = velocityX,
+                VelocityY = velocityY,
+                PositionX = body.PositionX + velocityX * deltaSeconds,
+                PositionY = body.PositionY + velocityY * deltaSeconds,
+            };
+            Assert.True(movementWorld.SetComponent(movementEntity, body));
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            packet = new MovementStatePacket(
+                networkEntityId,
+                serverTick,
+                lastProcessedInputSequence,
+                body.PositionX,
+                body.PositionY,
+                body.VelocityX,
+                body.VelocityY);
+            return true;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            spawnedEntities.Add(entity);
+            return new ServerMovementSessionSpawn(entity, nextNetworkEntityId++);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            serverTransport,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy);
+        serverHost.Start();
+
+        var clients = new List<(UdpSocketNetworkTransport Transport, ClientMovementSessionHost Host)>(clientCount);
+        for (int i = 0; i < clientCount; i++)
+        {
+            var clientTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+                new IPEndPoint(IPAddress.Loopback, 0),
+                metadata,
+                serverEndPoint,
+                new ConnectionId(1),
+                AllowDynamicConnections: false));
+            clientTransport.Start();
+            var clientHost = new ClientMovementSessionHost(
+                clientTransport,
+                new ConnectionId(1),
+                new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression));
+            clientHost.Start();
+            clientHost.BeginHandshake(100 + i);
+            clients.Add((clientTransport, clientHost));
+        }
+
+        for (int step = 0; step < 32; step++)
+        {
+            serverHost.Pump(200 + step * 2, 0.016f, (uint)(step + 1));
+            for (int i = 0; i < clients.Count; i++)
+                clients[i].Host.Pump(201 + step * 2);
+        }
+
+        Assert.Equal(clientCount, serverHost.BoundConnectionCount);
+        for (int i = 0; i < clients.Count; i++)
+            Assert.True(clients[i].Host.IsReady);
+
+        for (int i = 0; i < clients.Count; i++)
+        {
+            Assert.True(clients[i].Host.TrySendInput(
+                new ClientMovementInput((short)(100 + i * 10), (short)(20 + i * 5), 1),
+                clientTick: (uint)(1000 + i),
+                predictedState: new ClientMovementState(),
+                out _));
+        }
+
+        for (int step = 0; step < 8; step++)
+        {
+            serverHost.Pump(400 + step * 2, 0.5f, (uint)(100 + step));
+            for (int i = 0; i < clients.Count; i++)
+                clients[i].Host.Pump(401 + step * 2);
+        }
+
+        Assert.Equal(clientCount, spawnedEntities.Count);
+        for (int i = 0; i < spawnedEntities.Count; i++)
+        {
+            Assert.True(world.TryGetComponent(spawnedEntities[i], out ServerEcsMovementBody body));
+            Assert.True(body.PositionX > 0f);
+            Assert.True(body.PositionY > 0f);
+        }
+
+        for (int i = 0; i < clients.Count; i++)
+        {
+            Assert.Equal((ushort)1, clients[i].Host.Movement.LastReceiveResult.LastProcessedInputSequence);
+            clients[i].Transport.Dispose();
+        }
     }
 
     private static World CreateEcsTestWorld(bool enableProfiling, bool registerSystems = true)

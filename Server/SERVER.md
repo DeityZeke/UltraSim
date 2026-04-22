@@ -36,6 +36,7 @@ Current `Server/Network` state:
   - ECS-owned authoritative movement application
   - owner-state projection back into `MovementStatePacket`
   - the same narrow slice now also works over the real UDP transport after control-plane handshake
+  - `ServerMovementSessionHost` now keeps control-plane handshake and movement on one shared live transport poll path
 - this is still the correct join point; `Kernels/ECS` and `Kernels/Network` remain separate
 
 Current recommended gameplay publish policy:

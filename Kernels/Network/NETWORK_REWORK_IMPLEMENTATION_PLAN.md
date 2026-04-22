@@ -451,10 +451,13 @@ Current status:
   - `MovementStatePacket`
   - `Client/Core` sequencing/prediction/interpolation primitives
   - `Client/Network` movement send/receive bridge
+  - `ClientMovementSessionHost`
+  - `ServerMovementSessionHost`
   - loopback integration tests
   - first loopback benchmark
   - first paired server/client authoritative movement round-trip over loopback through `Server/Network`
   - first paired server/client authoritative movement round-trip over real UDP socket transport after handshake
+  - first small live multi-client UDP movement ramp benchmark over the shared session-host pump path
 
 ## Testing Strategy
 
@@ -518,5 +521,6 @@ The next implementation target after this bridge slice should be:
   - discrete gameplay events -> `ReliableEvent`
   - terrain/housing/large world payloads -> `Bulk`
 - and then use that richer slice plus the new paired movement round-trip as the first real candidate for socket-driven harness/ramp validation
+- that checkpoint now exists in minimal form through the shared session-host UDP mini-ramp; the next harness step should be a broader standalone bot runner, not another throwaway transport-specific benchmark shape
 
 not full replication yet.
