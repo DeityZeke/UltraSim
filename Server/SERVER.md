@@ -18,4 +18,12 @@ Current default host tick rate:
 - the ECS world remains host-driven, so this is the current default server/world tick cadence
 - network cadence is not locked to a separate default yet; the new network kernel is still pump-driven by higher layers until the fuller server bridge/runtime policy lands
 
+Current `Server/Network` state:
+
+- runtime/operator snapshots and events from `Server/Core` publish into scoped network streams
+- the first ECS-facing bridge now also exists there:
+  - ECS world/runtime snapshots
+  - dirty component publication into scoped latest-state streams
+- this is still the correct join point; `Kernels/ECS` and `Kernels/Network` remain separate
+
 See [SERVER_WRAPPER_IMPLEMENTATION_PLAN.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md) for the concrete implementation plan and [AGENTS.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/AGENTS.md) for subsystem-specific engineering rules.

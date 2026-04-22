@@ -16,6 +16,10 @@
       <HintPath>..\..\Server\Core\bin\$(Configuration)\net8.0\UltraSim.Server.Core.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.ECS">
+      <HintPath>..\..\Kernels\ECS\bin\$(Configuration)\net8.0\UltraSim.ECS.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="UltraSim.Server.Network">
       <HintPath>..\..\Server\Network\bin\$(Configuration)\net8.0\UltraSim.Server.Network.dll</HintPath>
       <Private>true</Private>
@@ -28,7 +32,7 @@
 
   <Target Name="BuildBenchmarkDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\UltraSim.ECS.BenchmarkCore\UltraSim.ECS.BenchmarkCore.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj"
+      Projects="..\UltraSim.ECS.BenchmarkCore\UltraSim.ECS.BenchmarkCore.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>

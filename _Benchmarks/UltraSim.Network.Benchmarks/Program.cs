@@ -1,4 +1,5 @@
 using UltraSim.ECS.Benchmarks.Core;
+using UltraSim.ECS;
 using UltraSim.Network;
 using UltraSim.Server;
 using UltraSim.Server.Network;
@@ -27,6 +28,13 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateScheduleAndFanoutScenario("ScheduleAndFanout_256Items_512Subs", itemCount: 256, subscriberCount: 512);
     yield return CreateServerRuntimePublishScenario("ServerRuntimePublish_32Systems_16Players_16Accounts", systemCount: 32, playerCount: 16, accountCount: 16);
     yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_64Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 64);
+    yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_128Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 128);
+    yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_256Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 256);
+    yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_512Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 512);
+    yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_1024Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 1024);
+    yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_2048Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 2048);
+    yield return CreateEcsDirtyPublishScenario("EcsDirtyPublish_1024Entities", entityCount: 1024);
+    yield return CreateEcsDirtyPublishAndFanoutScenario("EcsDirtyPublishAndFanout_1024Entities_128Subs", entityCount: 1024, subscriberCount: 128);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -98,6 +106,34 @@ static BenchmarkScenario CreateServerRuntimePublishAndFanoutScenario(string name
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunServerRuntimePublishAndFanoutScenario(systemCount, playerCount, accountCount, subscriberCount),
+    };
+}
+
+static BenchmarkScenario CreateEcsDirtyPublishScenario(string name, int entityCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "EcsNetworkPublish",
+        Comparable = false,
+        Scale = entityCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunEcsDirtyPublishScenario(entityCount),
+    };
+}
+
+static BenchmarkScenario CreateEcsDirtyPublishAndFanoutScenario(string name, int entityCount, int subscriberCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "EcsNetworkFanout",
+        Comparable = false,
+        Scale = entityCount * subscriberCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunEcsDirtyPublishAndFanoutScenario(entityCount, subscriberCount),
     };
 }
 
@@ -297,6 +333,68 @@ static ScenarioMeasurement RunServerRuntimePublishAndFanoutScenario(int systemCo
     return new ScenarioMeasurement(result.Fanout.DatagramCount, checksum);
 }
 
+static ScenarioMeasurement RunEcsDirtyPublishScenario(int entityCount)
+{
+    ServerEcsWorldNetworkPublisher publisher = CreateEcsWorldPublisher(entityCount);
+    try
+    {
+        int published = publisher.PublishDirtyLatestState<BenchPosition>(
+            scopeSelector: static (_, position) => new SubscriptionKey((ulong)(position.ScopeBucket + 1)),
+            payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position));
+
+        return new ScenarioMeasurement(
+            published,
+            published * 17L + publisher.LatestStateStream.GetSnapshot().ItemCount);
+    }
+    finally
+    {
+        GC.KeepAlive(publisher);
+    }
+}
+
+static ScenarioMeasurement RunEcsDirtyPublishAndFanoutScenario(int entityCount, int subscriberCount)
+{
+    ServerEcsWorldNetworkPublisher publisher = CreateEcsWorldPublisher(entityCount);
+    try
+    {
+        int published = publisher.PublishDirtyLatestState<BenchPosition>(
+            scopeSelector: static (_, position) => new SubscriptionKey((ulong)(position.ScopeBucket + 1)),
+            payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position));
+
+        var registry = new ConnectionSubscriptionRegistry();
+        for (int subscriber = 0; subscriber < subscriberCount; subscriber++)
+        {
+            ConnectionId connection = new(subscriber + 1);
+            for (int bucket = 0; bucket < BenchPosition.ScopeCount; bucket++)
+                registry.Subscribe(connection, new SubscriptionKey((ulong)(bucket + 1)));
+        }
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(registry));
+        var scheduled = new ScheduledWorkItem[published];
+        var subscribers = new ConnectionId[subscriberCount];
+        var output = new OutboundDatagram[published * subscriberCount];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscribers,
+            output);
+
+        long checksum = 0;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+            checksum += output[i].Payload.Length + output[i].ConnectionId.Value;
+
+        return new ScenarioMeasurement(result.Fanout.DatagramCount, checksum);
+    }
+    finally
+    {
+        GC.KeepAlive(publisher);
+    }
+}
+
 static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)
 {
     IServerApplication application = new ServerApplication(
@@ -311,6 +409,22 @@ static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int sys
         });
     application.Start();
     return new ServerRuntimeNetworkPublisher(application);
+}
+
+static ServerEcsWorldNetworkPublisher CreateEcsWorldPublisher(int entityCount)
+{
+    var builder = new EcsSchemaBuilder();
+    ComponentId positionId = builder.RegisterComponent<BenchPosition>();
+    World world = new(builder.Build());
+    ArchetypeSignature signature = new([positionId]);
+
+    for (int i = 0; i < entityCount; i++)
+    {
+        Entity entity = world.CreateDefault(signature);
+        world.SetComponent(entity, new BenchPosition(i, i % BenchPosition.ScopeCount));
+    }
+
+    return new ServerEcsWorldNetworkPublisher(world);
 }
 
 static IReadOnlyList<ServerSystemRuntimeSnapshot> CreateSystems(int count)
@@ -351,4 +465,9 @@ static IReadOnlyList<ServerAccountSummarySnapshot> CreateAccounts(int count)
     for (int i = 0; i < count; i++)
         snapshots[i] = new ServerAccountSummarySnapshot($"acct-{i}", $"Player{i}", IsOnline: (i & 1) == 0, IsBanned: false, Detail: $"role={(i == 0 ? "operator" : "player")}");
     return snapshots;
+}
+
+readonly record struct BenchPosition(int X, int ScopeBucket) : IComponent<BenchPosition>
+{
+    public const int ScopeCount = 16;
 }

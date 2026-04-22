@@ -408,10 +408,12 @@ Current status:
   - `ServerApplication` status, metrics, system runtime snapshots, player session snapshots, and account summaries can be published into scoped `LatestStateStream` items
   - `ServerApplication` events can be published into scoped `OrderedEventStream` items
   - those published items can already flow through the existing `schedule -> fanout` bridge
+  - ECS world/runtime snapshots can now be published into scoped latest-state items through the same layer
+  - dirty ECS component updates can now be classified and published into scoped latest-state items through the same layer
 - still deferred inside this slice:
   - ECS-driven state classification
   - connection-owned cursor persistence/policy
-  - richer server-side scope classification beyond the current operator/runtime view
+  - richer server-side scope classification beyond the current operator/runtime and first dirty-component view
   - transport/session-owned publish loops at the server runtime layer
 
 ### Phase N6: Client Bridge Slice
@@ -478,6 +480,7 @@ Current status in this repo:
   - scheduler/assembly primitives
   - the first publish/subscription fanout bridge
   - the first higher-layer `Server/Network` publish adapter over the kernel
+  - the first ECS-facing dirty-state publication path over that adapter
 
 The next implementation target after this bridge slice should be:
 

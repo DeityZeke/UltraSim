@@ -1,4 +1,5 @@
 using System.Reflection;
+using UltraSim.ECS;
 using UltraSim.Server;
 using UltraSim.Server.Console;
 using UltraSim.Server.Godot;
@@ -50,6 +51,10 @@ internal static class TestRunner
         Run(nameof(ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems), ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems);
         Run(nameof(ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents), ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents);
         Run(nameof(ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams), ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams);
+        Run(nameof(ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots), ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots);
+        Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates);
+        Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer);
+        Run(nameof(ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams), ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -939,7 +944,7 @@ internal static class TestRunner
         {
             Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
             Assert.Equal(RealtimeStateFramePacket.PacketId, header.PacketId);
-            var reader = new BitReader(payload);
+            var reader = new UltraSim.Network.BitReader(payload);
             RealtimeStateFramePacket frame = RealtimeStateFramePacket.Deserialize(ref reader);
 
             if (frame.ItemKey == ServerRuntimeNetworkItemKeys.Status)
@@ -967,6 +972,197 @@ internal static class TestRunner
         Assert.Equal(1, systemSeen);
         Assert.Equal(1, playerSeen);
         Assert.Equal(1, accountSeen);
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: true);
+        world.Tick(0.016f);
+
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        ServerEcsWorldPublishResult publish = publisher.PublishRuntimeState();
+
+        Assert.Equal(1, publish.WorldCount);
+        Assert.Equal(1, publish.SystemCount);
+
+        var updates = new LatestStateUpdate[4];
+        LatestStateDrainResult drain = publisher.LatestStateStream.DrainSince(default, updates);
+        Assert.Equal(2, drain.Count);
+
+        Assert.Equal((ulong)ServerEcsNetworkScopes.OperatorWorld.Value, updates[0].ScopeKey.Value);
+        ServerEcsWorldSnapshot worldSnapshot = ServerRuntimeNetworkPayloadCodec.Decode<ServerEcsWorldSnapshot>(updates[0].Payload);
+        Assert.Equal((uint)1, worldSnapshot.WorldTick);
+        Assert.Equal(1, worldSnapshot.SystemCount);
+        Assert.True(worldSnapshot.ProfilingEnabled);
+
+        Assert.Equal((ulong)ServerEcsNetworkScopes.OperatorSystems.Value, updates[1].ScopeKey.Value);
+        SystemRuntimeSnapshot systemSnapshot = ServerRuntimeNetworkPayloadCodec.Decode<SystemRuntimeSnapshot>(updates[1].Payload);
+        Assert.Equal("ServerEcsTestSystem", systemSnapshot.Name);
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: false, registerSystems: false);
+        ComponentId positionId = world.Schema.GetComponentId<ServerEcsPosition>();
+        ArchetypeSignature signature = new([positionId]);
+        Entity left = world.CreateDefault(signature);
+        Entity right = world.CreateDefault(signature);
+
+        Assert.True(world.SetComponent(left, new ServerEcsPosition(2, 4)));
+        Assert.True(world.SetComponent(right, new ServerEcsPosition(20, 8)));
+
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        int published = publisher.PublishDirtyLatestState<ServerEcsPosition>(
+            scopeSelector: static (_, position) => position.X < 10 ? new SubscriptionKey(1) : new SubscriptionKey(2),
+            payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position));
+
+        Assert.Equal(2, published);
+
+        var updates = new LatestStateUpdate[4];
+        LatestStateDrainResult drain = publisher.LatestStateStream.DrainSince(default, updates);
+        Assert.Equal(2, drain.Count);
+
+        ulong leftKey = ServerEcsNetworkItemKeys.GetComponentItemKey<ServerEcsPosition>(left);
+        ulong rightKey = ServerEcsNetworkItemKeys.GetComponentItemKey<ServerEcsPosition>(right);
+
+        int leftSeen = 0;
+        int rightSeen = 0;
+        for (int i = 0; i < drain.Count; i++)
+        {
+            ServerEcsPosition position = ServerRuntimeNetworkPayloadCodec.Decode<ServerEcsPosition>(updates[i].Payload);
+            if (updates[i].ItemKey == leftKey)
+            {
+                leftSeen++;
+                Assert.Equal((ulong)1, updates[i].ScopeKey.Value);
+                Assert.Equal(new ServerEcsPosition(2, 4), position);
+            }
+            else if (updates[i].ItemKey == rightKey)
+            {
+                rightSeen++;
+                Assert.Equal((ulong)2, updates[i].ScopeKey.Value);
+                Assert.Equal(new ServerEcsPosition(20, 8), position);
+            }
+        }
+
+        Assert.Equal(1, leftSeen);
+        Assert.Equal(1, rightSeen);
+        Assert.Equal(0, publisher.PublishDirtyLatestState<ServerEcsPosition>(
+            scopeSelector: static (_, position) => position.X < 10 ? new SubscriptionKey(1) : new SubscriptionKey(2),
+            payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position)));
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: false, registerSystems: false);
+        ComponentId positionId = world.Schema.GetComponentId<ServerEcsPosition>();
+        ArchetypeSignature signature = new([positionId]);
+
+        for (int i = 0; i < 300; i++)
+        {
+            Entity entity = world.CreateDefault(signature);
+            Assert.True(world.SetComponent(entity, new ServerEcsPosition(i, i)));
+        }
+
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        int published = publisher.PublishDirtyLatestState<ServerEcsPosition>(
+            scopeSelector: static (_, _) => new SubscriptionKey(9),
+            payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+            batchSize: 64);
+
+        Assert.Equal(300, published);
+        Assert.Equal(300, publisher.LatestStateStream.GetSnapshot().ItemCount);
+        Assert.Equal(0, world.GetDirtyCount<ServerEcsPosition>());
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: true);
+        ComponentId positionId = world.Schema.GetComponentId<ServerEcsPosition>();
+        ArchetypeSignature signature = new([positionId]);
+        Entity entity = world.CreateDefault(signature);
+        Assert.True(world.SetComponent(entity, new ServerEcsPosition(12, 24)));
+        world.Tick(0.016f);
+
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        publisher.PublishRuntimeState();
+        int dirtyPublished = publisher.PublishDirtyLatestState<ServerEcsPosition>(
+            scopeSelector: static (_, _) => new SubscriptionKey(77),
+            payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position));
+
+        Assert.Equal(1, dirtyPublished);
+
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        subscriptions.Subscribe(new ConnectionId(1), ServerEcsNetworkScopes.OperatorWorld);
+        subscriptions.Subscribe(new ConnectionId(1), ServerEcsNetworkScopes.OperatorSystems);
+        subscriptions.Subscribe(new ConnectionId(1), new SubscriptionKey(77));
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(subscriptions));
+        var scheduled = new ScheduledWorkItem[16];
+        var subscriberScratch = new ConnectionId[4];
+        var output = new OutboundDatagram[16];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscriberScratch,
+            output);
+
+        Assert.Equal(3, result.Schedule.Count);
+        Assert.Equal(3, result.Fanout.DatagramCount);
+
+        int worldSeen = 0;
+        int systemSeen = 0;
+        int positionSeen = 0;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            Assert.Equal(RealtimeStateFramePacket.PacketId, header.PacketId);
+            var reader = new UltraSim.Network.BitReader(payload);
+            RealtimeStateFramePacket frame = RealtimeStateFramePacket.Deserialize(ref reader);
+
+            if (frame.ItemKey == ServerEcsNetworkItemKeys.World)
+            {
+                worldSeen++;
+            }
+            else if (frame.ItemKey == ServerEcsNetworkItemKeys.GetSystemRuntimeItemKey(world.GetSystemRuntimeSnapshots()[0]))
+            {
+                systemSeen++;
+            }
+            else if (frame.ItemKey == ServerEcsNetworkItemKeys.GetComponentItemKey<ServerEcsPosition>(entity))
+            {
+                positionSeen++;
+            }
+        }
+
+        Assert.Equal(1, worldSeen);
+        Assert.Equal(1, systemSeen);
+        Assert.Equal(1, positionSeen);
+    }
+
+    private static World CreateEcsTestWorld(bool enableProfiling, bool registerSystems = true)
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<ServerEcsPosition>();
+        World world = new(builder.Build());
+        world.ProfilingEnabled = enableProfiling;
+
+        if (registerSystems)
+        {
+            world.RegisterSystem(new ServerEcsTestSystem(
+                new SystemDescriptor(
+                    "ServerEcsTestSystem",
+                    SystemStage.AI,
+                    defaultPeriodTicks: 1,
+                    defaultStartOffset: 0,
+                    ComponentMask.Empty,
+                    ComponentMask.Empty)));
+        }
+
+        world.Initialize();
+        return world;
     }
 
     private static void AssertMethod(Type contract, string name, Type returnType, params Type[] parameterTypes)
@@ -1059,5 +1255,21 @@ internal sealed class RecordingHostSink : IServerHostEventSink
     public void OnEvent(ServerApplicationEvent evt)
     {
         Events.Add(evt);
+    }
+}
+
+internal readonly record struct ServerEcsPosition(int X, int Y) : IComponent<ServerEcsPosition>;
+
+internal sealed class ServerEcsTestSystem : SystemBase
+{
+    public ServerEcsTestSystem(SystemDescriptor descriptor)
+    {
+        Descriptor = descriptor;
+    }
+
+    public override SystemDescriptor Descriptor { get; }
+
+    public override void Update(in SystemContext ctx)
+    {
     }
 }

@@ -422,6 +422,9 @@ Current note:
 
 - wrapper defaults are now back on the old server cadence: `16 ms`
 - the first `Server/Network` bridge slice now exists and publishes runtime snapshots/events into scoped network streams without violating the kernel boundary
+- that bridge now also has its first ECS-facing publication slice:
+  - ECS world/system runtime snapshots
+  - dirty component publication into scoped latest-state streams
 
 ## Risks To Watch
 

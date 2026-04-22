@@ -423,6 +423,9 @@ public sealed partial class World
     public int DrainDirtyTo<T>(Span<Entity> destination) where T : unmanaged, IComponent<T>
         => _dirty.CopyAndClearComponentTo(Schema.GetComponentId<T>(), destination);
 
+    public int GetDirtyCount<T>() where T : unmanaged, IComponent<T>
+        => _dirty.CountComponent(Schema.GetComponentId<T>());
+
     /// <summary>
     /// Registers a single system before the world is sealed.
     /// </summary>

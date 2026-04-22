@@ -134,6 +134,19 @@ internal sealed partial class DirtyTracker
         }
     }
 
+    public int CountComponent(ComponentId componentId)
+    {
+        int index = componentId.Value;
+        if ((uint)index >= (uint)_byComponent.Length || _byComponent[index] is null)
+            return 0;
+
+        lock (_sync)
+        {
+            DirtySet? set = _byComponent[index];
+            return set is null ? 0 : set.Count;
+        }
+    }
+
     public void Clear()
     {
         lock (_sync)
