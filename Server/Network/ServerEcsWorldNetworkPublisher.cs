@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using UltraSim.ECS;
 using UltraSim.Network;
 
@@ -10,6 +11,7 @@ public sealed class ServerEcsWorldNetworkPublisher
     private readonly World _world;
     private readonly LatestStateStream _latestState;
     private readonly OrderedEventStream _orderedEvents;
+    private readonly List<SubscriptionKey> _scopeScratch = new();
 
     public ServerEcsWorldNetworkPublisher(
         World world,
@@ -128,6 +130,98 @@ public sealed class ServerEcsWorldNetworkPublisher
                     rule.PacketClass,
                     rule.PayloadSelector(entity, value));
                 published++;
+            }
+
+            return published;
+        }
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(rented, clearArray: false);
+        }
+    }
+
+    public int PublishChunkAoiLatestState<T>(ServerEcsChunkAoiLatestStateRule<T> rule, int batchSize = 256)
+        where T : unmanaged, IComponent<T>
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+        int dirtyCount = _world.GetDirtyCount<T>();
+        if (dirtyCount == 0)
+            return 0;
+
+        Entity[] rented = ArrayPool<Entity>.Shared.Rent(Math.Max(batchSize, dirtyCount));
+
+        try
+        {
+            int count = _world.DrainDirtyTo<T>(rented.AsSpan(0, dirtyCount));
+            int published = 0;
+            for (int i = 0; i < count; i++)
+            {
+                Entity entity = rented[i];
+                if (!_world.TryGetComponent<T>(entity, out T value))
+                    continue;
+
+                _scopeScratch.Clear();
+                rule.ScopeClassifier.CollectBroadcastKeys(rule.PositionSelector(entity, value), _scopeScratch);
+                ulong baseItemKey = rule.ItemKeySelector(entity, value);
+                ImmutablePayloadBuffer payload = rule.PayloadSelector(entity, value);
+                ReadOnlySpan<SubscriptionKey> scopes = CollectionsMarshal.AsSpan(_scopeScratch);
+                for (int scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
+                {
+                    SubscriptionKey scopeKey = scopes[scopeIndex];
+                    _latestState.Publish(
+                        ServerEcsNetworkItemKeys.CombineWithScope(baseItemKey, scopeKey),
+                        scopeKey,
+                        rule.PacketClass,
+                        payload);
+                    published++;
+                }
+            }
+
+            return published;
+        }
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(rented, clearArray: false);
+        }
+    }
+
+    public int PublishChunkAoiOrderedEvents<T>(ServerEcsChunkAoiOrderedEventRule<T> rule, int batchSize = 256)
+        where T : unmanaged, IComponent<T>
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+        int dirtyCount = _world.GetDirtyCount<T>();
+        if (dirtyCount == 0)
+            return 0;
+
+        Entity[] rented = ArrayPool<Entity>.Shared.Rent(Math.Max(batchSize, dirtyCount));
+
+        try
+        {
+            int count = _world.DrainDirtyTo<T>(rented.AsSpan(0, dirtyCount));
+            int published = 0;
+            for (int i = 0; i < count; i++)
+            {
+                Entity entity = rented[i];
+                if (!_world.TryGetComponent<T>(entity, out T value))
+                    continue;
+
+                _scopeScratch.Clear();
+                rule.ScopeClassifier.CollectBroadcastKeys(rule.PositionSelector(entity, value), _scopeScratch);
+                ImmutablePayloadBuffer payload = rule.PayloadSelector(entity, value);
+                ReadOnlySpan<SubscriptionKey> scopes = CollectionsMarshal.AsSpan(_scopeScratch);
+                for (int scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
+                {
+                    _orderedEvents.Publish(scopes[scopeIndex], rule.PacketClass, payload);
+                    published++;
+                }
             }
 
             return published;

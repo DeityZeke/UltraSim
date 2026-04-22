@@ -55,6 +55,8 @@ internal static class TestRunner
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer);
         Run(nameof(ServerEcsWorldNetworkPublisher_Rules_ClassifyBulkLatestStateAndBulkOrderedEvents), ServerEcsWorldNetworkPublisher_Rules_ClassifyBulkLatestStateAndBulkOrderedEvents);
+        Run(nameof(ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_UsesActualRingScopedSubscriptions), ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_UsesActualRingScopedSubscriptions);
+        Run(nameof(ServerEcsWorldNetworkPublisher_ChunkAoiOrderedEvents_UseRingScopedReliableAndBulkClassification), ServerEcsWorldNetworkPublisher_ChunkAoiOrderedEvents_UseRingScopedReliableAndBulkClassification);
         Run(nameof(ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams), ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams);
 
         Console.WriteLine("All Server contract tests passed.");
@@ -1157,6 +1159,168 @@ internal static class TestRunner
         Assert.Equal(1, bulkOrderedSeen);
     }
 
+    private static void ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_UsesActualRingScopedSubscriptions()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: false, registerSystems: false);
+        ComponentId positionId = world.Schema.GetComponentId<ServerEcsPosition>();
+        ArchetypeSignature signature = new([positionId]);
+        Entity entity = world.CreateDefault(signature);
+        Assert.True(world.SetComponent(entity, new ServerEcsPosition(8, 8)));
+
+        var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f, 23.5f);
+        var classifier = new ServerEcsChunkAoiScopeClassifier(policy);
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        int published = publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<ServerEcsPosition>(
+                classifier,
+                positionSelector: static (_, position) => new WorldPosition2(position.X, position.Y),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                packetClass: PacketClass.Realtime));
+
+        Assert.Equal(policy.RingCount, published);
+
+        var latestBatch = new LatestStateUpdate[4];
+        LatestStateDrainResult latestDrain = publisher.LatestStateStream.DrainSince(default, latestBatch);
+        Assert.Equal(2, latestDrain.Count);
+        Assert.True(latestBatch[0].ItemKey != latestBatch[1].ItemKey);
+
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        var maintainer = new ChunkAoiSubscriptionMaintainer(policy);
+        AoiSubscriptionUpdateResult near = maintainer.UpdateConnection(new ConnectionId(1), new WorldPosition2(8f, 8f), subscriptions);
+        AoiSubscriptionUpdateResult mid = maintainer.UpdateConnection(new ConnectionId(2), new WorldPosition2(32f, 8f), subscriptions);
+        AoiSubscriptionUpdateResult far = maintainer.UpdateConnection(new ConnectionId(3), new WorldPosition2(80f, 8f), subscriptions);
+
+        Assert.True(near.AddedCount > 0);
+        Assert.True(mid.AddedCount > 0);
+        Assert.True(far.AddedCount > 0);
+
+        publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<ServerEcsPosition>(
+                classifier,
+                positionSelector: static (_, position) => new WorldPosition2(position.X, position.Y),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                packetClass: PacketClass.Realtime));
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(subscriptions));
+        var scheduled = new ScheduledWorkItem[8];
+        var subscriberScratch = new ConnectionId[16];
+        var output = new OutboundDatagram[8];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscriberScratch,
+            output);
+
+        Assert.Equal(2, result.Schedule.Count);
+        Assert.Equal(2, result.Fanout.DatagramCount);
+
+        bool connection1Seen = false;
+        bool connection2Seen = false;
+        bool connection3Seen = false;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+        {
+            if (output[i].ConnectionId.Value == 1)
+                connection1Seen = true;
+            else if (output[i].ConnectionId.Value == 2)
+                connection2Seen = true;
+            else if (output[i].ConnectionId.Value == 3)
+                connection3Seen = true;
+        }
+
+        Assert.True(connection1Seen);
+        Assert.True(connection2Seen);
+        Assert.False(connection3Seen);
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_ChunkAoiOrderedEvents_UseRingScopedReliableAndBulkClassification()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId eventId = builder.RegisterComponent<ServerEcsAoiEvent>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([eventId]);
+        Entity entity = world.CreateDefault(signature);
+        Assert.True(world.SetComponent(entity, new ServerEcsAoiEvent(8, 8, 101)));
+
+        var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f, 23.5f);
+        var classifier = new ServerEcsChunkAoiScopeClassifier(policy);
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        var maintainer = new ChunkAoiSubscriptionMaintainer(policy);
+        maintainer.UpdateConnection(new ConnectionId(1), new WorldPosition2(8f, 8f), subscriptions);
+        maintainer.UpdateConnection(new ConnectionId(2), new WorldPosition2(32f, 8f), subscriptions);
+        maintainer.UpdateConnection(new ConnectionId(3), new WorldPosition2(80f, 8f), subscriptions);
+
+        int reliablePublished = publisher.PublishChunkAoiOrderedEvents(
+            new ServerEcsChunkAoiOrderedEventRule<ServerEcsAoiEvent>(
+                classifier,
+                positionSelector: static (_, evt) => new WorldPosition2(evt.X, evt.Y),
+                payloadSelector: static (_, evt) => ServerRuntimeNetworkPayloadCodec.Encode(evt),
+                packetClass: PacketClass.ReliableEvent));
+
+        Assert.Equal(policy.RingCount, reliablePublished);
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(subscriptions));
+        var scheduled = new ScheduledWorkItem[8];
+        var subscriberScratch = new ConnectionId[16];
+        var output = new OutboundDatagram[8];
+
+        ConnectionScheduledFanoutResult reliableResult = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscriberScratch,
+            output);
+
+        Assert.Equal(2, reliableResult.Schedule.Count);
+        Assert.Equal(2, reliableResult.Fanout.DatagramCount);
+
+        bool connection1Seen = false;
+        bool connection2Seen = false;
+        bool connection3Seen = false;
+        for (int i = 0; i < reliableResult.Fanout.DatagramCount; i++)
+        {
+            Assert.Equal(PacketClass.ReliableEvent, output[i].PacketClass);
+            if (output[i].ConnectionId.Value == 1)
+                connection1Seen = true;
+            else if (output[i].ConnectionId.Value == 2)
+                connection2Seen = true;
+            else if (output[i].ConnectionId.Value == 3)
+                connection3Seen = true;
+        }
+
+        Assert.True(connection1Seen);
+        Assert.True(connection2Seen);
+        Assert.False(connection3Seen);
+
+        Assert.True(world.SetComponent(entity, new ServerEcsAoiEvent(8, 8, 202)));
+        int bulkPublished = publisher.PublishChunkAoiOrderedEvents(
+            new ServerEcsChunkAoiOrderedEventRule<ServerEcsAoiEvent>(
+                classifier,
+                positionSelector: static (_, evt) => new WorldPosition2(evt.X, evt.Y),
+                payloadSelector: static (_, evt) => ServerRuntimeNetworkPayloadCodec.Encode(evt),
+                packetClass: PacketClass.Bulk));
+
+        Assert.Equal(policy.RingCount, bulkPublished);
+
+        ConnectionScheduledFanoutResult bulkResult = bridge.ScheduleAndDispatch(
+            reliableResult.Schedule.NextState,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscriberScratch,
+            output);
+
+        Assert.Equal(2, bulkResult.Schedule.Count);
+        Assert.Equal(2, bulkResult.Fanout.DatagramCount);
+        for (int i = 0; i < bulkResult.Fanout.DatagramCount; i++)
+            Assert.Equal(PacketClass.Bulk, output[i].PacketClass);
+    }
+
     private static void ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams()
     {
         World world = CreateEcsTestWorld(enableProfiling: true);
@@ -1343,6 +1507,7 @@ internal sealed class RecordingHostSink : IServerHostEventSink
 
 internal readonly record struct ServerEcsPosition(int X, int Y) : IComponent<ServerEcsPosition>;
 internal readonly record struct ServerEcsEvent(int EventCode) : IComponent<ServerEcsEvent>;
+internal readonly record struct ServerEcsAoiEvent(int X, int Y, int EventCode) : IComponent<ServerEcsAoiEvent>;
 
 internal sealed class ServerEcsTestSystem : SystemBase
 {

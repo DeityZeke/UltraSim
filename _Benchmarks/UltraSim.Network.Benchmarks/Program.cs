@@ -36,6 +36,8 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateEcsDirtyPublishScenario("EcsDirtyPublish_1024Entities", entityCount: 1024);
     yield return CreateEcsDirtyPublishAndFanoutScenario("EcsDirtyPublishAndFanout_1024Entities_128Subs", entityCount: 1024, subscriberCount: 128);
     yield return CreateEcsClassifiedPublishAndFanoutScenario("EcsClassifiedPublishAndFanout_1024Realtime_256Bulk_128Subs", realtimeEntityCount: 1024, bulkEventCount: 256, subscriberCount: 128);
+    yield return CreateEcsAoiLatestStatePublishAndFanoutScenario("EcsAoiLatestStatePublishAndFanout_1024Entities_128Connections", entityCount: 1024, connectionCount: 128);
+    yield return CreateEcsAoiClassifiedPublishAndFanoutScenario("EcsAoiClassifiedPublishAndFanout_1024Realtime_256Reliable_128Bulk_128Connections", realtimeEntityCount: 1024, reliableEventCount: 256, bulkEventCount: 128, connectionCount: 128);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -149,6 +151,34 @@ static BenchmarkScenario CreateEcsClassifiedPublishAndFanoutScenario(string name
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunEcsClassifiedPublishAndFanoutScenario(realtimeEntityCount, bulkEventCount, subscriberCount),
+    };
+}
+
+static BenchmarkScenario CreateEcsAoiLatestStatePublishAndFanoutScenario(string name, int entityCount, int connectionCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "EcsNetworkAoiFanout",
+        Comparable = false,
+        Scale = entityCount * connectionCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunEcsAoiLatestStatePublishAndFanoutScenario(entityCount, connectionCount),
+    };
+}
+
+static BenchmarkScenario CreateEcsAoiClassifiedPublishAndFanoutScenario(string name, int realtimeEntityCount, int reliableEventCount, int bulkEventCount, int connectionCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "EcsNetworkAoiClassifiedFanout",
+        Comparable = false,
+        Scale = (realtimeEntityCount + reliableEventCount + bulkEventCount) * connectionCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunEcsAoiClassifiedPublishAndFanoutScenario(realtimeEntityCount, reliableEventCount, bulkEventCount, connectionCount),
     };
 }
 
@@ -463,6 +493,117 @@ static ScenarioMeasurement RunEcsClassifiedPublishAndFanoutScenario(int realtime
     }
 }
 
+static ScenarioMeasurement RunEcsAoiLatestStatePublishAndFanoutScenario(int entityCount, int connectionCount)
+{
+    var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f, 23.5f, 39.5f);
+    var classifier = new ServerEcsChunkAoiScopeClassifier(policy);
+    ServerEcsWorldNetworkPublisher publisher = CreateEcsAoiWorldPublisher(entityCount);
+    try
+    {
+        int published = publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<BenchPosition>(
+                classifier,
+                positionSelector: static (_, position) => new WorldPosition2(position.X, position.ScopeBucket * 8f),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                packetClass: PacketClass.Realtime));
+
+        var registry = new ConnectionSubscriptionRegistry();
+        var maintainer = new ChunkAoiSubscriptionMaintainer(policy);
+        for (int connection = 0; connection < connectionCount; connection++)
+        {
+            float x = (connection % 16) * 12f;
+            float y = (connection / 16) * 12f;
+            maintainer.UpdateConnection(new ConnectionId(connection + 1), new WorldPosition2(x, y), registry);
+        }
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(registry));
+        var scheduled = new ScheduledWorkItem[published];
+        var subscribers = new ConnectionId[Math.Max(256, connectionCount)];
+        var output = new OutboundDatagram[Math.Max(1024, published * connectionCount)];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscribers,
+            output);
+
+        long checksum = 0;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+            checksum += output[i].Payload.Length + output[i].ConnectionId.Value;
+
+        return new ScenarioMeasurement(result.Fanout.DatagramCount, checksum);
+    }
+    finally
+    {
+        GC.KeepAlive(publisher);
+    }
+}
+
+static ScenarioMeasurement RunEcsAoiClassifiedPublishAndFanoutScenario(int realtimeEntityCount, int reliableEventCount, int bulkEventCount, int connectionCount)
+{
+    var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f, 23.5f, 39.5f);
+    var classifier = new ServerEcsChunkAoiScopeClassifier(policy);
+    ServerEcsWorldNetworkPublisher publisher = CreateEcsAoiClassifiedWorldPublisher(realtimeEntityCount, reliableEventCount, bulkEventCount);
+    try
+    {
+        int realtimePublished = publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<BenchAoiPosition>(
+                classifier,
+                positionSelector: static (_, position) => new WorldPosition2(position.X, position.Y),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                packetClass: PacketClass.Realtime));
+        int reliablePublished = publisher.PublishChunkAoiOrderedEvents(
+            new ServerEcsChunkAoiOrderedEventRule<BenchAoiEvent>(
+                classifier,
+                positionSelector: static (_, evt) => new WorldPosition2(evt.X, evt.Y),
+                payloadSelector: static (_, evt) => ServerRuntimeNetworkPayloadCodec.Encode(evt),
+                packetClass: PacketClass.ReliableEvent));
+        int bulkPublished = publisher.PublishChunkAoiOrderedEvents(
+            new ServerEcsChunkAoiOrderedEventRule<BenchAoiBulkEvent>(
+                classifier,
+                positionSelector: static (_, evt) => new WorldPosition2(evt.X, evt.Y),
+                payloadSelector: static (_, evt) => ServerRuntimeNetworkPayloadCodec.Encode(evt),
+                packetClass: PacketClass.Bulk));
+
+        var registry = new ConnectionSubscriptionRegistry();
+        var maintainer = new ChunkAoiSubscriptionMaintainer(policy);
+        for (int connection = 0; connection < connectionCount; connection++)
+        {
+            float x = (connection % 16) * 12f;
+            float y = (connection / 16) * 12f;
+            maintainer.UpdateConnection(new ConnectionId(connection + 1), new WorldPosition2(x, y), registry);
+        }
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(registry));
+        int published = realtimePublished + reliablePublished + bulkPublished;
+        var scheduled = new ScheduledWorkItem[published];
+        var subscribers = new ConnectionId[Math.Max(256, connectionCount)];
+        var output = new OutboundDatagram[Math.Max(1024, published * connectionCount)];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscribers,
+            output);
+
+        long checksum = 0;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+            checksum += output[i].Payload.Length + output[i].ConnectionId.Value + (int)output[i].PacketClass;
+
+        return new ScenarioMeasurement(result.Fanout.DatagramCount, checksum);
+    }
+    finally
+    {
+        GC.KeepAlive(publisher);
+    }
+}
+
 static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)
 {
     IServerApplication application = new ServerApplication(
@@ -519,6 +660,64 @@ static ServerEcsWorldNetworkPublisher CreateClassifiedEcsWorldPublisher(int real
     return new ServerEcsWorldNetworkPublisher(world);
 }
 
+static ServerEcsWorldNetworkPublisher CreateEcsAoiWorldPublisher(int entityCount)
+{
+    var builder = new EcsSchemaBuilder();
+    ComponentId positionId = builder.RegisterComponent<BenchPosition>();
+    World world = new(builder.Build());
+    ArchetypeSignature signature = new([positionId]);
+
+    for (int i = 0; i < entityCount; i++)
+    {
+        Entity entity = world.CreateDefault(signature);
+        int x = (i % 32) * 8;
+        int yBucket = i / 32;
+        world.SetComponent(entity, new BenchPosition(x, yBucket));
+    }
+
+    return new ServerEcsWorldNetworkPublisher(world);
+}
+
+static ServerEcsWorldNetworkPublisher CreateEcsAoiClassifiedWorldPublisher(int realtimeEntityCount, int reliableEventCount, int bulkEventCount)
+{
+    var builder = new EcsSchemaBuilder();
+    ComponentId positionId = builder.RegisterComponent<BenchAoiPosition>();
+    ComponentId reliableEventId = builder.RegisterComponent<BenchAoiEvent>();
+    ComponentId bulkEventId = builder.RegisterComponent<BenchAoiBulkEvent>();
+    World world = new(builder.Build());
+    ArchetypeSignature positionSignature = new([positionId]);
+    ArchetypeSignature reliableSignature = new([reliableEventId]);
+    ArchetypeSignature bulkSignature = new([bulkEventId]);
+
+    for (int i = 0; i < realtimeEntityCount; i++)
+    {
+        Entity entity = world.CreateDefault(positionSignature);
+        world.SetComponent(entity, new BenchAoiPosition(
+            X: (i % 32) * 8,
+            Y: (i / 32) * 8));
+    }
+
+    for (int i = 0; i < reliableEventCount; i++)
+    {
+        Entity entity = world.CreateDefault(reliableSignature);
+        world.SetComponent(entity, new BenchAoiEvent(
+            X: (i % 32) * 8,
+            Y: (i / 32) * 8,
+            EventCode: i));
+    }
+
+    for (int i = 0; i < bulkEventCount; i++)
+    {
+        Entity entity = world.CreateDefault(bulkSignature);
+        world.SetComponent(entity, new BenchAoiBulkEvent(
+            X: (i % 32) * 8,
+            Y: (i / 32) * 8,
+            EventCode: i));
+    }
+
+    return new ServerEcsWorldNetworkPublisher(world);
+}
+
 static IReadOnlyList<ServerSystemRuntimeSnapshot> CreateSystems(int count)
 {
     var snapshots = new ServerSystemRuntimeSnapshot[count];
@@ -568,3 +767,7 @@ readonly record struct BenchChunkEvent(int ChunkId, int ScopeBucket) : IComponen
 {
     public const int ScopeCount = 8;
 }
+
+readonly record struct BenchAoiPosition(int X, int Y) : IComponent<BenchAoiPosition>;
+readonly record struct BenchAoiEvent(int X, int Y, int EventCode) : IComponent<BenchAoiEvent>;
+readonly record struct BenchAoiBulkEvent(int X, int Y, int EventCode) : IComponent<BenchAoiBulkEvent>;

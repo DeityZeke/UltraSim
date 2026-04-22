@@ -122,6 +122,8 @@ Current network benchmark scenarios now include:
 - `EcsDirtyPublish_*`
 - `EcsDirtyPublishAndFanout_*`
 - `EcsClassifiedPublishAndFanout_*`
+- `EcsAoiLatestStatePublishAndFanout_*`
+- `EcsAoiClassifiedPublishAndFanout_*`
 - AOI subscription maintenance
 
 Current interpretation guidance:
@@ -132,5 +134,7 @@ Current interpretation guidance:
 - the first subscriber-scaling curve for `ServerRuntimePublishAndFanout_*` is now in place, and current measurements remain well below a `16 ms` server tick budget even at `2048` subscribers
 - the first ECS-dirty publish scenarios are now in place, and they already caught one real bridge bug: partial-buffer dirty drains dropping updates; that regression is now fixed and test-covered
 - the first mixed ECS classification scenario is now in place, exercising realtime latest-state plus bulk ordered-event publication through the same bridge
+- the first AOI-backed ECS publish scenario is now in place, exercising real ring-scoped latest-state publication through the same bridge
+- the first mixed AOI-classified ECS scenario is now in place, exercising `Realtime`, `ReliableEvent`, and `Bulk` through player-centered ring scopes rather than synthetic scopes
 - AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
 - the next benchmark-driven tuning target is no longer the basic fanout bridge shape; it is the deeper server-facing publish integration that will sit on top of it

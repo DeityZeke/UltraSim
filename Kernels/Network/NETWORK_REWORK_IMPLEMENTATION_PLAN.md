@@ -417,10 +417,14 @@ Current status:
     - `Bulk` latest-state
     - `ReliableEvent` ordered events
     - `Bulk` ordered events
+  - first AOI-backed ECS publish rules now exist for:
+    - `Realtime` latest-state over player-centered ring scopes
+    - `ReliableEvent` ordered events over the same ring scopes
+    - `Bulk` ordered events over the same ring scopes
 - still deferred inside this slice:
-  - ECS-driven state classification
+  - richer ECS-driven state classification beyond the first realtime/reliable/bulk rule families
   - connection-owned cursor persistence/policy
-  - richer server-side scope classification beyond the current operator/runtime and first dirty-component view
+  - richer server-side scope classification beyond the current operator/runtime and first dirty-component plus first AOI ring-scoped slices
   - transport/session-owned publish loops at the server runtime layer
 
 ### Phase N6: Client Bridge Slice
@@ -492,6 +496,10 @@ Current status in this repo:
 The next implementation target after this bridge slice should be:
 
 - broader server bridge work from ECS/runtime state into these scoped streams
-- specifically: replace the current server-runtime operator/status slice with richer real gameplay/server publish classification as the next adapter layer
+- specifically: keep moving from generic dirty-component publication toward actual gameplay replication families on top of the new rule split:
+  - observer-visible continuous state -> `Realtime`
+  - discrete gameplay events -> `ReliableEvent`
+  - terrain/housing/large world payloads -> `Bulk`
+- and then use that richer slice as the first real candidate for socket-driven harness/ramp validation
 
 not full replication yet.

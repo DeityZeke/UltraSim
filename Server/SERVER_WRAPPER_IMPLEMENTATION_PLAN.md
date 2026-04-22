@@ -425,6 +425,9 @@ Current note:
 - that bridge now also has its first ECS-facing publication slice:
   - ECS world/system runtime snapshots
   - dirty component publication into scoped latest-state streams
+- that same bridge now also has its first actual gameplay-facing scope slice:
+  - AOI latest-state publication over player-centered ring scopes
+  - AOI ordered-event publication over the same ring scopes
 
 ## Risks To Watch
 

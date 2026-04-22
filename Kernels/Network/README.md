@@ -88,6 +88,9 @@ What now exists above the kernel:
 - ECS world/runtime snapshot publication from `Kernels/ECS` into scoped network streams via the same server bridge layer
 - dirty ECS component publication into scoped latest-state streams via the same server bridge layer
 - typed ECS publish-rule descriptors for classifying component families into `Realtime`, `ReliableEvent`, or `Bulk`
+- first AOI-backed ECS publication rules for:
+  - latest-state over player-centered ring scopes
+  - ordered events over player-centered ring scopes
 - separate benchmark coverage for that higher-layer publish/fanout path
 
 ## Design Position
@@ -180,4 +183,12 @@ Current early result:
 - the benchmark runner now also includes the first higher-layer server-runtime publish and publish-plus-fanout scenarios
 - the benchmark runner now also includes the first ECS-originated dirty publish and dirty publish-plus-fanout scenarios
 - the benchmark runner now also includes the first mixed ECS-classification scenario with realtime latest-state plus bulk ordered events
+- the benchmark runner now also includes the first AOI-backed ECS publish-plus-fanout scenario and a mixed AOI-classified scenario
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win
+
+Current higher-layer policy direction:
+
+- `Realtime` latest-state is the preferred lane for small continuously changing observer-visible entity state
+- `ReliableEvent` is the preferred lane for discrete gameplay events that must preserve order/reliability
+- `Bulk` is the preferred lane for large or compression-friendly world payloads that must stay isolated from combat/movement
+- player-centered AOI rings are now the preferred gameplay scope model for that higher layer; chunk keys remain the maintenance/indexing primitive underneath

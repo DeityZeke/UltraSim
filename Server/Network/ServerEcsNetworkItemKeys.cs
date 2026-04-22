@@ -1,4 +1,5 @@
 using UltraSim.ECS;
+using UltraSim.Network;
 
 namespace UltraSim.Server.Network;
 
@@ -16,6 +17,18 @@ public static class ServerEcsNetworkItemKeys
     {
         ulong hash = ComponentTypeHash<T>.Value;
         MixUInt64(ref hash, entity.Packed);
+        return hash == 0 ? 1UL : hash;
+    }
+
+    public static ulong CombineWithScope(ulong itemKey, SubscriptionKey scopeKey)
+    {
+        if (itemKey == 0)
+            throw new ArgumentOutOfRangeException(nameof(itemKey));
+        if (!scopeKey.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(scopeKey));
+
+        ulong hash = itemKey;
+        MixUInt64(ref hash, scopeKey.Value);
         return hash == 0 ? 1UL : hash;
     }
 
