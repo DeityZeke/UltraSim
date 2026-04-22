@@ -214,6 +214,16 @@ Current movement/ramp checkpoint:
 
 That last scenario is the first honest “many live clients moving through one shared pump loop” signal. It is the intended pre-bot-harness checkpoint, not the final ramp harness.
 
+That checkpoint has now been followed by the first standalone ramp tool:
+
+- `_Benchmarks/UltraSim.Network.BotHarness`
+- current first harness snapshot at `32` clients / `5s` / `62 Hz`:
+  - `tick_avg = 0.312 ms`
+  - `tick_p95 = 0.336 ms`
+  - `tick_p99 = 0.393 ms`
+  - `tick_max = 0.869 ms`
+  - `pending_max = 0`
+
 Current higher-layer policy direction:
 
 - `Realtime` latest-state is the preferred lane for small continuously changing observer-visible entity state

@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UltraSim.ECS">
+      <HintPath>..\..\Kernels\ECS\bin\$(Configuration)\net8.0\UltraSim.ECS.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Network">
+      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Network">
+      <HintPath>..\..\Server\Network\bin\$(Configuration)\net8.0\UltraSim.Server.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Core">
+      <HintPath>..\..\Client\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Network">
+      <HintPath>..\..\Client\Network\bin\$(Configuration)\net8.0\UltraSim.Client.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="BuildBotHarnessDependencies" BeforeTargets="PrepareForBuild">
+    <MSBuild
+      Projects="..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
+
+</Project>

@@ -146,3 +146,30 @@ Current interpretation guidance:
 - the first small multi-client UDP ramp benchmark is now in place, measuring live handshake + movement through shared client/server session hosts before a standalone bot harness exists
 - AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
 - the next benchmark-driven tuning target is no longer the basic fanout bridge shape; it is the deeper server-facing publish integration that will sit on top of it
+
+## Network Bot Harness
+
+There is also now a first standalone network ramp harness:
+
+- project: `_Benchmarks/UltraSim.Network.BotHarness`
+- report output: `_Benchmarks/results/network_bot_harness_*.json`
+
+It is intentionally narrower than the old bot harnesses:
+
+- real UDP sockets
+- shared session-host transport polling
+- handshake + movement round-trip
+- staged client ramps
+- per-stage `tick_avg`, `tick_p95`, `tick_p99`, `tick_max`
+- simple pending-input backlog stats
+
+Current first standalone harness snapshot:
+
+- `32` clients for `5` seconds at `62 Hz`
+- `tick_avg = 0.312 ms`
+- `tick_p95 = 0.336 ms`
+- `tick_p99 = 0.393 ms`
+- `tick_max = 0.869 ms`
+- `pending_max = 0`
+
+This is the first standalone counterpart to the earlier in-runner mini-ramp, and it is the right place to scale toward `64 / 128 / 256` before widening replication breadth further.

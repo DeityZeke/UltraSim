@@ -1,0 +1,49 @@
+{
+  "timestamp_utc": "2026-04-22T23:17:20.9252263Z",
+  "harness": "udp-session-host-ramp",
+  "args": {
+    "stages": "4,8",
+    "stage_mode": "independent",
+    "stage_duration_seconds": 1,
+    "settle_seconds": 0.25,
+    "tick_hz": 62,
+    "active_ratio": 1,
+    "port": 0,
+    "slo_tick_p95_ms": 4,
+    "slo_pending_max": 128
+  },
+  "stages": [
+    {
+      "stage_index": 0,
+      "target_clients": 4,
+      "active_clients": 4,
+      "ready_clients": 4,
+      "tick_avg_ms": 0.05,
+      "tick_p95_ms": 0.044,
+      "tick_p99_ms": 0.308,
+      "tick_max_ms": 0.585,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 435784,
+      "connect_attempts": 4,
+      "connect_success": 4,
+      "connect_success_rate": 1
+    },
+    {
+      "stage_index": 1,
+      "target_clients": 8,
+      "active_clients": 8,
+      "ready_clients": 8,
+      "tick_avg_ms": 0.079,
+      "tick_p95_ms": 0.086,
+      "tick_p99_ms": 0.102,
+      "tick_max_ms": 0.102,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 886000,
+      "connect_attempts": 8,
+      "connect_success": 8,
+      "connect_success_rate": 1
+    }
+  ]
+}
