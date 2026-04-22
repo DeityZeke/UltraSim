@@ -37,13 +37,18 @@ What exists today:
   - timeout sweep support
   - control-plane metrics and typed control-plane events
   - a first post-handshake control message family (`PingProbe` / `PongProbe`)
+- first stream-model contracts for:
+  - `LatestStateStream`
+  - `OrderedEventStream`
+  - explicit cursor types
+  - bounded event recovery signaling
+  - simple stream snapshots/drain results
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
   - richer disconnect/admission policy beyond the current minimal rules
-- latest-state and ordered-event stream implementations
 - scheduler/assembly pipeline
 - ECS/server/client integration layers
 

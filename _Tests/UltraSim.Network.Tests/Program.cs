@@ -27,6 +27,10 @@ internal static class TestRunner
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
         Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
+        Run(nameof(LatestStateStream_CoalescesAndDrainsByLatestVersion), LatestStateStream_CoalescesAndDrainsByLatestVersion);
+        Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
+        Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
+        Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -508,6 +512,88 @@ internal static class TestRunner
         Assert.Equal(1, serverMetrics.PongProbesSent);
         Assert.Equal(1, clientMetrics.PingProbesSent);
         Assert.Equal(1, clientMetrics.PongProbesReceived);
+    }
+
+    private static void LatestStateStream_CoalescesAndDrainsByLatestVersion()
+    {
+        var stream = new LatestStateStream();
+        stream.Publish(1, ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong newerSequence = stream.Publish(1, ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong otherSequence = stream.Publish(2, ImmutablePayloadBuffer.CopyFrom([3]));
+
+        LatestStateSnapshot snapshot = stream.GetSnapshot();
+        Assert.Equal(2, snapshot.ItemCount);
+        Assert.Equal(otherSequence, snapshot.HighestPublishedSequence);
+
+        var updates = new LatestStateUpdate[4];
+        LatestStateDrainResult result = stream.DrainSince(default, updates);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(newerSequence, updates[0].Sequence);
+        Assert.Equal((byte)2, updates[0].Payload.Span[0]);
+        Assert.Equal((ulong)2, updates[1].ItemKey);
+        Assert.Equal((byte)3, updates[1].Payload.Span[0]);
+        Assert.Equal(otherSequence, result.NextCursor.LastSeenSequence);
+    }
+
+    private static void LatestStateStream_PartialDrain_AdvancesCursor()
+    {
+        var stream = new LatestStateStream();
+        ulong first = stream.Publish(10, ImmutablePayloadBuffer.CopyFrom([10]));
+        ulong second = stream.Publish(20, ImmutablePayloadBuffer.CopyFrom([20]));
+        ulong third = stream.Publish(30, ImmutablePayloadBuffer.CopyFrom([30]));
+
+        var firstBatch = new LatestStateUpdate[2];
+        LatestStateDrainResult firstResult = stream.DrainSince(default, firstBatch);
+        Assert.Equal(2, firstResult.Count);
+        Assert.Equal(first, firstBatch[0].Sequence);
+        Assert.Equal(second, firstBatch[1].Sequence);
+
+        var secondBatch = new LatestStateUpdate[2];
+        LatestStateDrainResult secondResult = stream.DrainSince(firstResult.NextCursor, secondBatch);
+        Assert.Equal(1, secondResult.Count);
+        Assert.Equal(third, secondBatch[0].Sequence);
+    }
+
+    private static void OrderedEventStream_DrainsInOrderAndAdvancesCursor()
+    {
+        var stream = new OrderedEventStream(capacity: 4);
+        ulong first = stream.Publish(ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong second = stream.Publish(ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong third = stream.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+
+        OrderedEventSnapshot snapshot = stream.GetSnapshot();
+        Assert.Equal(3, snapshot.Count);
+        Assert.Equal(first, snapshot.OldestAvailableSequence);
+        Assert.Equal(third, snapshot.NewestAvailableSequence);
+
+        var batch = new OrderedEventEntry[2];
+        OrderedEventDrainResult firstDrain = stream.DrainSince(default, batch);
+        Assert.Equal(OrderedEventDrainStatus.Success, firstDrain.Status);
+        Assert.Equal(2, firstDrain.Count);
+        Assert.Equal(first, batch[0].Sequence);
+        Assert.Equal(second, batch[1].Sequence);
+
+        var nextBatch = new OrderedEventEntry[2];
+        OrderedEventDrainResult secondDrain = stream.DrainSince(firstDrain.NextCursor, nextBatch);
+        Assert.Equal(1, secondDrain.Count);
+        Assert.Equal(third, nextBatch[0].Sequence);
+    }
+
+    private static void OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind()
+    {
+        var stream = new OrderedEventStream(capacity: 2);
+        ulong first = stream.Publish(ImmutablePayloadBuffer.CopyFrom([1]));
+        stream.Publish(ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong third = stream.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+
+        var batch = new OrderedEventEntry[2];
+        OrderedEventDrainResult drain = stream.DrainSince(new OrderedEventCursor(first), batch);
+        Assert.Equal(OrderedEventDrainStatus.RecoveryRequired, drain.Status);
+        Assert.Equal(0, drain.Count);
+        Assert.Equal(third - 1, drain.NextCursor.NextSequence);
+        Assert.Equal(third - 1, drain.OldestAvailableSequence);
+        Assert.Equal(third, drain.NewestAvailableSequence);
     }
 }
 

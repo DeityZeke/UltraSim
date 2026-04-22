@@ -273,6 +273,21 @@ Done when:
 - latest-state and event semantics are test-covered
 - snapshot recovery rules are explicit
 
+Current status:
+
+- started
+- the first stream primitives are now in place:
+  - `LatestStateStream`
+  - `OrderedEventStream`
+  - explicit latest-state and ordered-event cursors
+  - bounded ordered-event recovery signaling when a reader falls behind retention
+  - simple stream snapshots and drain-result records
+- still deferred inside this slice:
+  - richer snapshot descriptors/baseline metadata
+  - shared payload references instead of direct immutable payload ownership
+  - stream benchmarks
+  - scheduler-facing work-item projection
+
 ### Phase N4: Scheduler And Assembly
 
 Deliver:
@@ -357,10 +372,15 @@ Initial benchmark targets:
 Current status in this repo:
 
 - `Kernels/Network` previously had no meaningful implementation
-- this first pass establishes the architecture docs and the initial foundation scaffold
+- the repo now has:
+  - foundation contracts
+  - control-plane/session loopback
+  - typed control/session observability seams
+  - the first stream-model slice
 
-The next implementation target after this scaffold should be:
+The next implementation target after this stream slice should be:
 
-- `Serialization + Protocol + Control-plane loopback`
+- scheduler and assembly contracts
+- then the first publish/subscription bridge work
 
 not full replication yet.
