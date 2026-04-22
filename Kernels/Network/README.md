@@ -44,11 +44,15 @@ What exists today:
   - bounded event recovery signaling
   - simple stream snapshots/drain results
   - scope-aware stream publication for latest-state and ordered-event updates
+  - packet-class-aware stream publication for:
+    - latest-state `Realtime` / `Bulk`
+    - ordered-event `ReliableEvent` / `Bulk`
 - first scheduler contracts for:
   - per-class connection budgets
   - connection schedule state
   - typed scheduled work items
   - stream scheduling with recovery signaling
+  - explicit `Bulk` budgeting alongside `Realtime` and `ReliableEvent`
 - first assembly/finalization contracts for:
   - typed state/event frame packets
   - transform-aware outbound datagram assembly
@@ -83,6 +87,7 @@ What now exists above the kernel:
 - runtime snapshot/event publication from `Server/Core` into scoped network streams
 - ECS world/runtime snapshot publication from `Kernels/ECS` into scoped network streams via the same server bridge layer
 - dirty ECS component publication into scoped latest-state streams via the same server bridge layer
+- typed ECS publish-rule descriptors for classifying component families into `Realtime`, `ReliableEvent`, or `Bulk`
 - separate benchmark coverage for that higher-layer publish/fanout path
 
 ## Design Position
@@ -174,4 +179,5 @@ Current early result:
 - the stream-integrated `schedule -> fanout` benchmark path is now in place and is also behaving well
 - the benchmark runner now also includes the first higher-layer server-runtime publish and publish-plus-fanout scenarios
 - the benchmark runner now also includes the first ECS-originated dirty publish and dirty publish-plus-fanout scenarios
+- the benchmark runner now also includes the first mixed ECS-classification scenario with realtime latest-state plus bulk ordered events
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win

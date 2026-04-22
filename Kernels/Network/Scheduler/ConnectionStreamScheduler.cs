@@ -19,7 +19,7 @@ public sealed class ConnectionStreamScheduler
         Span<ScheduledWorkItem> destination)
     {
         if (destination.Length == 0)
-            return new ConnectionScheduleResult(0, state, false, 0, 0, 0, 0);
+            return new ConnectionScheduleResult(0, state, false, 0, 0, 0, 0, 0, 0);
 
         var latestBuffer = new LatestStateUpdate[destination.Length];
         LatestStateDrainResult latestResult = _latestState.DrainSince(state.LatestStateCursor, latestBuffer);
@@ -27,27 +27,28 @@ public sealed class ConnectionStreamScheduler
         int count = 0;
         int realtimeItems = 0;
         int reliableItems = 0;
+        int bulkItems = 0;
         int realtimeBytes = 0;
         int reliableBytes = 0;
+        int bulkBytes = 0;
         LatestStateCursor latestCursor = state.LatestStateCursor;
 
         for (int i = 0; i < latestResult.Count && count < destination.Length; i++)
         {
             LatestStateUpdate update = latestBuffer[i];
             int payloadBytes = update.Payload.Length;
-            if (WouldExceedBudget(realtimeItems, realtimeBytes, payloadBytes, budget.Realtime))
+            if (WouldExceedBudget(update.PacketClass, realtimeItems, reliableItems, bulkItems, realtimeBytes, reliableBytes, bulkBytes, payloadBytes, budget))
                 break;
 
             destination[count++] = new ScheduledWorkItem(
                 ScheduledWorkKind.LatestState,
-                PacketClass.Realtime,
+                update.PacketClass,
                 update.Sequence,
                 update.ItemKey,
                 update.ScopeKey,
                 update.Payload);
             latestCursor = new LatestStateCursor(update.Sequence);
-            realtimeItems++;
-            realtimeBytes += payloadBytes;
+            Accumulate(update.PacketClass, payloadBytes, ref realtimeItems, ref reliableItems, ref bulkItems, ref realtimeBytes, ref reliableBytes, ref bulkBytes);
         }
 
         var eventBuffer = new OrderedEventEntry[Math.Max(0, destination.Length - count)];
@@ -61,19 +62,18 @@ public sealed class ConnectionStreamScheduler
             {
                 OrderedEventEntry entry = eventBuffer[i];
                 int payloadBytes = entry.Payload.Length;
-                if (WouldExceedBudget(reliableItems, reliableBytes, payloadBytes, budget.ReliableEvent))
+                if (WouldExceedBudget(entry.PacketClass, realtimeItems, reliableItems, bulkItems, realtimeBytes, reliableBytes, bulkBytes, payloadBytes, budget))
                     break;
 
                 destination[count++] = new ScheduledWorkItem(
                     ScheduledWorkKind.OrderedEvent,
-                    PacketClass.ReliableEvent,
+                    entry.PacketClass,
                     entry.Sequence,
                     0,
                     entry.ScopeKey,
                     entry.Payload);
                 eventCursor = new OrderedEventCursor(entry.Sequence + 1);
-                reliableItems++;
-                reliableBytes += payloadBytes;
+                Accumulate(entry.PacketClass, payloadBytes, ref realtimeItems, ref reliableItems, ref bulkItems, ref realtimeBytes, ref reliableBytes, ref bulkBytes);
             }
         }
         else
@@ -87,16 +87,79 @@ public sealed class ConnectionStreamScheduler
             OrderedEventRecoveryRequired: recoveryRequired,
             RealtimeItemsScheduled: realtimeItems,
             ReliableEventItemsScheduled: reliableItems,
+            BulkItemsScheduled: bulkItems,
             RealtimeBytesScheduled: realtimeBytes,
-            ReliableEventBytesScheduled: reliableBytes);
+            ReliableEventBytesScheduled: reliableBytes,
+            BulkBytesScheduled: bulkBytes);
     }
 
-    private static bool WouldExceedBudget(int itemCount, int totalBytes, int nextPayloadBytes, PacketClassBudget budget)
+    private static bool WouldExceedBudget(
+        PacketClass packetClass,
+        int realtimeItems,
+        int reliableItems,
+        int bulkItems,
+        int realtimeBytes,
+        int reliableBytes,
+        int bulkBytes,
+        int nextPayloadBytes,
+        ConnectionSendBudget budget)
     {
-        if (itemCount >= budget.MaxItems)
+        PacketClassBudget classBudget = packetClass switch
+        {
+            PacketClass.Realtime => budget.Realtime,
+            PacketClass.ReliableEvent => budget.ReliableEvent,
+            PacketClass.Bulk => budget.Bulk,
+            _ => throw new InvalidOperationException($"Unsupported packet class for stream scheduling: {packetClass}."),
+        };
+
+        int itemCount = packetClass switch
+        {
+            PacketClass.Realtime => realtimeItems,
+            PacketClass.ReliableEvent => reliableItems,
+            PacketClass.Bulk => bulkItems,
+            _ => 0,
+        };
+        int totalBytes = packetClass switch
+        {
+            PacketClass.Realtime => realtimeBytes,
+            PacketClass.ReliableEvent => reliableBytes,
+            PacketClass.Bulk => bulkBytes,
+            _ => 0,
+        };
+
+        if (itemCount >= classBudget.MaxItems)
             return true;
 
         long nextBytes = (long)totalBytes + nextPayloadBytes;
-        return nextBytes > budget.MaxPayloadBytes;
+        return nextBytes > classBudget.MaxPayloadBytes;
+    }
+
+    private static void Accumulate(
+        PacketClass packetClass,
+        int payloadBytes,
+        ref int realtimeItems,
+        ref int reliableItems,
+        ref int bulkItems,
+        ref int realtimeBytes,
+        ref int reliableBytes,
+        ref int bulkBytes)
+    {
+        switch (packetClass)
+        {
+            case PacketClass.Realtime:
+                realtimeItems++;
+                realtimeBytes += payloadBytes;
+                break;
+            case PacketClass.ReliableEvent:
+                reliableItems++;
+                reliableBytes += payloadBytes;
+                break;
+            case PacketClass.Bulk:
+                bulkItems++;
+                bulkBytes += payloadBytes;
+                break;
+            default:
+                throw new InvalidOperationException($"Unsupported packet class for stream scheduling: {packetClass}.");
+        }
     }
 }

@@ -18,15 +18,23 @@ public sealed class OrderedEventStream
 
     public ulong Publish(ImmutablePayloadBuffer payload)
     {
-        return Publish(default, payload);
+        return Publish(default, PacketClass.ReliableEvent, payload);
     }
 
     public ulong Publish(SubscriptionKey scopeKey, ImmutablePayloadBuffer payload)
     {
+        return Publish(scopeKey, PacketClass.ReliableEvent, payload);
+    }
+
+    public ulong Publish(SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload)
+    {
+        if (packetClass is not PacketClass.ReliableEvent and not PacketClass.Bulk)
+            throw new ArgumentOutOfRangeException(nameof(packetClass), "Ordered-event stream only supports ReliableEvent or Bulk packet classes.");
+
         lock (_sync)
         {
             ulong sequence = _nextSequence++;
-            _ring[_writeIndex] = new OrderedEventEntry(sequence, scopeKey, payload);
+            _ring[_writeIndex] = new OrderedEventEntry(sequence, scopeKey, packetClass, payload);
             _writeIndex = (_writeIndex + 1) % _ring.Length;
             if (_count < _ring.Length)
                 _count++;

@@ -7,6 +7,7 @@ public sealed class LatestStateStream
         public ulong ItemKey;
         public ulong Sequence;
         public SubscriptionKey ScopeKey;
+        public PacketClass PacketClass;
         public ImmutablePayloadBuffer Payload = default!;
     }
 
@@ -16,13 +17,20 @@ public sealed class LatestStateStream
 
     public ulong Publish(ulong itemKey, ImmutablePayloadBuffer payload)
     {
-        return Publish(itemKey, default, payload);
+        return Publish(itemKey, default, PacketClass.Realtime, payload);
     }
 
     public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, ImmutablePayloadBuffer payload)
     {
+        return Publish(itemKey, scopeKey, PacketClass.Realtime, payload);
+    }
+
+    public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload)
+    {
         if (itemKey == 0)
             throw new ArgumentOutOfRangeException(nameof(itemKey));
+        if (packetClass is not PacketClass.Realtime and not PacketClass.Bulk)
+            throw new ArgumentOutOfRangeException(nameof(packetClass), "Latest-state stream only supports Realtime or Bulk packet classes.");
 
         lock (_sync)
         {
@@ -31,6 +39,7 @@ public sealed class LatestStateStream
             {
                 entry.Sequence = sequence;
                 entry.ScopeKey = scopeKey;
+                entry.PacketClass = packetClass;
                 entry.Payload = payload;
             }
             else
@@ -40,6 +49,7 @@ public sealed class LatestStateStream
                     ItemKey = itemKey,
                     Sequence = sequence,
                     ScopeKey = scopeKey,
+                    PacketClass = packetClass,
                     Payload = payload,
                 });
             }
@@ -82,7 +92,7 @@ public sealed class LatestStateStream
             for (int i = 0; i < count; i++)
             {
                 Entry entry = updates[i];
-                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.Payload);
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload);
                 lastSequence = entry.Sequence;
             }
 

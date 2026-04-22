@@ -35,6 +35,7 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_2048Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 2048);
     yield return CreateEcsDirtyPublishScenario("EcsDirtyPublish_1024Entities", entityCount: 1024);
     yield return CreateEcsDirtyPublishAndFanoutScenario("EcsDirtyPublishAndFanout_1024Entities_128Subs", entityCount: 1024, subscriberCount: 128);
+    yield return CreateEcsClassifiedPublishAndFanoutScenario("EcsClassifiedPublishAndFanout_1024Realtime_256Bulk_128Subs", realtimeEntityCount: 1024, bulkEventCount: 256, subscriberCount: 128);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -134,6 +135,20 @@ static BenchmarkScenario CreateEcsDirtyPublishAndFanoutScenario(string name, int
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunEcsDirtyPublishAndFanoutScenario(entityCount, subscriberCount),
+    };
+}
+
+static BenchmarkScenario CreateEcsClassifiedPublishAndFanoutScenario(string name, int realtimeEntityCount, int bulkEventCount, int subscriberCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "EcsNetworkClassifiedFanout",
+        Comparable = false,
+        Scale = (realtimeEntityCount + bulkEventCount) * subscriberCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunEcsClassifiedPublishAndFanoutScenario(realtimeEntityCount, bulkEventCount, subscriberCount),
     };
 }
 
@@ -395,6 +410,59 @@ static ScenarioMeasurement RunEcsDirtyPublishAndFanoutScenario(int entityCount, 
     }
 }
 
+static ScenarioMeasurement RunEcsClassifiedPublishAndFanoutScenario(int realtimeEntityCount, int bulkEventCount, int subscriberCount)
+{
+    ServerEcsWorldNetworkPublisher publisher = CreateClassifiedEcsWorldPublisher(realtimeEntityCount, bulkEventCount);
+    try
+    {
+        int realtimePublished = publisher.PublishDirtyLatestState(
+            new ServerEcsLatestStateRule<BenchPosition>(
+                scopeSelector: static (_, position) => new SubscriptionKey((ulong)(position.ScopeBucket + 1)),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                packetClass: PacketClass.Realtime));
+        int bulkPublished = publisher.PublishDirtyOrderedEvents(
+            new ServerEcsOrderedEventRule<BenchChunkEvent>(
+                scopeSelector: static (_, evt) => new SubscriptionKey((ulong)(5000 + evt.ScopeBucket)),
+                payloadSelector: static (_, evt) => ServerRuntimeNetworkPayloadCodec.Encode(evt),
+                packetClass: PacketClass.Bulk));
+
+        var registry = new ConnectionSubscriptionRegistry();
+        for (int subscriber = 0; subscriber < subscriberCount; subscriber++)
+        {
+            ConnectionId connection = new(subscriber + 1);
+            for (int bucket = 0; bucket < BenchPosition.ScopeCount; bucket++)
+                registry.Subscribe(connection, new SubscriptionKey((ulong)(bucket + 1)));
+            for (int bucket = 0; bucket < BenchChunkEvent.ScopeCount; bucket++)
+                registry.Subscribe(connection, new SubscriptionKey((ulong)(5000 + bucket)));
+        }
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(registry));
+        int published = realtimePublished + bulkPublished;
+        var scheduled = new ScheduledWorkItem[published];
+        var subscribers = new ConnectionId[subscriberCount];
+        var output = new OutboundDatagram[published * subscriberCount];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscribers,
+            output);
+
+        long checksum = 0;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+            checksum += output[i].Payload.Length + output[i].ConnectionId.Value + (int)output[i].PacketClass;
+
+        return new ScenarioMeasurement(result.Fanout.DatagramCount, checksum);
+    }
+    finally
+    {
+        GC.KeepAlive(publisher);
+    }
+}
+
 static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)
 {
     IServerApplication application = new ServerApplication(
@@ -422,6 +490,30 @@ static ServerEcsWorldNetworkPublisher CreateEcsWorldPublisher(int entityCount)
     {
         Entity entity = world.CreateDefault(signature);
         world.SetComponent(entity, new BenchPosition(i, i % BenchPosition.ScopeCount));
+    }
+
+    return new ServerEcsWorldNetworkPublisher(world);
+}
+
+static ServerEcsWorldNetworkPublisher CreateClassifiedEcsWorldPublisher(int realtimeEntityCount, int bulkEventCount)
+{
+    var builder = new EcsSchemaBuilder();
+    ComponentId positionId = builder.RegisterComponent<BenchPosition>();
+    ComponentId eventId = builder.RegisterComponent<BenchChunkEvent>();
+    World world = new(builder.Build());
+    ArchetypeSignature positionSignature = new([positionId]);
+    ArchetypeSignature eventSignature = new([eventId]);
+
+    for (int i = 0; i < realtimeEntityCount; i++)
+    {
+        Entity entity = world.CreateDefault(positionSignature);
+        world.SetComponent(entity, new BenchPosition(i, i % BenchPosition.ScopeCount));
+    }
+
+    for (int i = 0; i < bulkEventCount; i++)
+    {
+        Entity entity = world.CreateDefault(eventSignature);
+        world.SetComponent(entity, new BenchChunkEvent(i, i % BenchChunkEvent.ScopeCount));
     }
 
     return new ServerEcsWorldNetworkPublisher(world);
@@ -470,4 +562,9 @@ static IReadOnlyList<ServerAccountSummarySnapshot> CreateAccounts(int count)
 readonly record struct BenchPosition(int X, int ScopeBucket) : IComponent<BenchPosition>
 {
     public const int ScopeCount = 16;
+}
+
+readonly record struct BenchChunkEvent(int ChunkId, int ScopeBucket) : IComponent<BenchChunkEvent>
+{
+    public const int ScopeCount = 8;
 }

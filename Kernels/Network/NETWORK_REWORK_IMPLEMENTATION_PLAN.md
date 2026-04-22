@@ -317,6 +317,7 @@ Current status:
   - latest-state (`Realtime`) work is scheduled before ordered-event (`ReliableEvent`) work
   - per-class item and payload-byte budgets are enforced
   - ordered-event recovery requirements propagate through schedule results
+  - `Bulk` is now a first-class scheduled packet class with its own budget lane
 - still deferred inside this slice:
   - shared payload references/fanout-aware scheduling
   - benchmark coverage for scheduling/drain behavior
@@ -351,6 +352,7 @@ Current status:
   - scheduled work plus scope keys can now be bridged directly into fanout dispatch through a single kernel path
   - scope-aware stream publication can now flow through scheduling directly into fanout dispatch
   - the assembler can fan out a shared published frame across many recipients
+  - published latest-state and ordered-event frames now preserve `Bulk` packet-class metadata through assembly as well
 - still deferred from the broader bridge slice:
   - integration between stream scheduling and shared published-frame fanout
   - bridge-facing publish classification from ECS/server state changes
@@ -410,6 +412,11 @@ Current status:
   - those published items can already flow through the existing `schedule -> fanout` bridge
   - ECS world/runtime snapshots can now be published into scoped latest-state items through the same layer
   - dirty ECS component updates can now be classified and published into scoped latest-state items through the same layer
+  - typed ECS publish rules now exist for:
+    - `Realtime` latest-state
+    - `Bulk` latest-state
+    - `ReliableEvent` ordered events
+    - `Bulk` ordered events
 - still deferred inside this slice:
   - ECS-driven state classification
   - connection-owned cursor persistence/policy

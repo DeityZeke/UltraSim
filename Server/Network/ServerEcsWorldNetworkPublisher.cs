@@ -54,13 +54,19 @@ public sealed class ServerEcsWorldNetworkPublisher
         int batchSize = 256)
         where T : unmanaged, IComponent<T>
     {
-        ArgumentNullException.ThrowIfNull(scopeSelector);
-        ArgumentNullException.ThrowIfNull(payloadSelector);
+        return PublishDirtyLatestState(
+            new ServerEcsLatestStateRule<T>(scopeSelector, payloadSelector, itemKeySelector),
+            batchSize);
+    }
+
+    public int PublishDirtyLatestState<T>(ServerEcsLatestStateRule<T> rule, int batchSize = 256)
+        where T : unmanaged, IComponent<T>
+    {
+        ArgumentNullException.ThrowIfNull(rule);
 
         if (batchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(batchSize));
 
-        itemKeySelector ??= static (entity, _) => ServerEcsNetworkItemKeys.GetComponentItemKey<T>(entity);
         int dirtyCount = _world.GetDirtyCount<T>();
         if (dirtyCount == 0)
             return 0;
@@ -78,9 +84,49 @@ public sealed class ServerEcsWorldNetworkPublisher
                     continue;
 
                 _latestState.Publish(
-                    itemKeySelector(entity, value),
-                    scopeSelector(entity, value),
-                    payloadSelector(entity, value));
+                    rule.ItemKeySelector(entity, value),
+                    rule.ScopeSelector(entity, value),
+                    rule.PacketClass,
+                    rule.PayloadSelector(entity, value));
+                published++;
+            }
+
+            return published;
+        }
+        finally
+        {
+            ArrayPool<Entity>.Shared.Return(rented, clearArray: false);
+        }
+    }
+
+    public int PublishDirtyOrderedEvents<T>(ServerEcsOrderedEventRule<T> rule, int batchSize = 256)
+        where T : unmanaged, IComponent<T>
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        if (batchSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(batchSize));
+
+        int dirtyCount = _world.GetDirtyCount<T>();
+        if (dirtyCount == 0)
+            return 0;
+
+        Entity[] rented = ArrayPool<Entity>.Shared.Rent(Math.Max(batchSize, dirtyCount));
+
+        try
+        {
+            int count = _world.DrainDirtyTo<T>(rented.AsSpan(0, dirtyCount));
+            int published = 0;
+            for (int i = 0; i < count; i++)
+            {
+                Entity entity = rented[i];
+                if (!_world.TryGetComponent<T>(entity, out T value))
+                    continue;
+
+                _orderedEvents.Publish(
+                    rule.ScopeSelector(entity, value),
+                    rule.PacketClass,
+                    rule.PayloadSelector(entity, value));
                 published++;
             }
 

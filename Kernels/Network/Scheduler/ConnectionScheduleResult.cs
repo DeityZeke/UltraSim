@@ -6,5 +6,7 @@ public readonly record struct ConnectionScheduleResult(
     bool OrderedEventRecoveryRequired,
     int RealtimeItemsScheduled,
     int ReliableEventItemsScheduled,
+    int BulkItemsScheduled,
     int RealtimeBytesScheduled,
-    int ReliableEventBytesScheduled);
+    int ReliableEventBytesScheduled,
+    int BulkBytesScheduled);

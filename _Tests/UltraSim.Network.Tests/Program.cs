@@ -31,7 +31,9 @@ internal static class TestRunner
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
         Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
+        Run(nameof(StreamPrimitives_PreserveBulkPacketClassMetadata), StreamPrimitives_PreserveBulkPacketClassMetadata);
         Run(nameof(ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget), ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget);
+        Run(nameof(ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget), ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget);
         Run(nameof(ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork), ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork);
         Run(nameof(ConnectionStreamScheduler_SignalsOrderedEventRecovery), ConnectionStreamScheduler_SignalsOrderedEventRecovery);
         Run(nameof(OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames), OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames);
@@ -549,9 +551,11 @@ internal static class TestRunner
         Assert.Equal(2, result.Count);
         Assert.Equal(newerSequence, updates[0].Sequence);
         Assert.Equal((ulong)11, updates[0].ScopeKey.Value);
+        Assert.Equal(PacketClass.Realtime, updates[0].PacketClass);
         Assert.Equal((byte)2, updates[0].Payload.Span[0]);
         Assert.Equal((ulong)2, updates[1].ItemKey);
         Assert.Equal((ulong)22, updates[1].ScopeKey.Value);
+        Assert.Equal(PacketClass.Realtime, updates[1].PacketClass);
         Assert.Equal((byte)3, updates[1].Payload.Span[0]);
         Assert.Equal(otherSequence, result.NextCursor.LastSeenSequence);
     }
@@ -593,13 +597,36 @@ internal static class TestRunner
         Assert.Equal(2, firstDrain.Count);
         Assert.Equal(first, batch[0].Sequence);
         Assert.Equal((ulong)41, batch[0].ScopeKey.Value);
+        Assert.Equal(PacketClass.ReliableEvent, batch[0].PacketClass);
         Assert.Equal(second, batch[1].Sequence);
         Assert.Equal((ulong)42, batch[1].ScopeKey.Value);
+        Assert.Equal(PacketClass.ReliableEvent, batch[1].PacketClass);
 
         var nextBatch = new OrderedEventEntry[2];
         OrderedEventDrainResult secondDrain = stream.DrainSince(firstDrain.NextCursor, nextBatch);
         Assert.Equal(1, secondDrain.Count);
         Assert.Equal(third, nextBatch[0].Sequence);
+    }
+
+    private static void StreamPrimitives_PreserveBulkPacketClassMetadata()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 4);
+
+        ulong latestSequence = latest.Publish(7, new SubscriptionKey(71), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([7]));
+        ulong eventSequence = ordered.Publish(new SubscriptionKey(81), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([8]));
+
+        var latestBatch = new LatestStateUpdate[2];
+        LatestStateDrainResult latestDrain = latest.DrainSince(default, latestBatch);
+        Assert.Equal(1, latestDrain.Count);
+        Assert.Equal(latestSequence, latestBatch[0].Sequence);
+        Assert.Equal(PacketClass.Bulk, latestBatch[0].PacketClass);
+
+        var eventBatch = new OrderedEventEntry[2];
+        OrderedEventDrainResult eventDrain = ordered.DrainSince(default, eventBatch);
+        Assert.Equal(1, eventDrain.Count);
+        Assert.Equal(eventSequence, eventBatch[0].Sequence);
+        Assert.Equal(PacketClass.Bulk, eventBatch[0].PacketClass);
     }
 
     private static void OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind()
@@ -633,6 +660,7 @@ internal static class TestRunner
             default,
             new ConnectionSendBudget(
                 new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 8),
+                new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 8),
                 new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 8)),
             work);
 
@@ -651,6 +679,33 @@ internal static class TestRunner
         Assert.Equal((ulong)1002, work[1].ScopeKey.Value);
     }
 
+    private static void ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        ulong bulkLatest = latest.Publish(901, new SubscriptionKey(9001), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([1, 2, 3]));
+        ulong bulkEvent = ordered.Publish(new SubscriptionKey(9002), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([4, 5]));
+        var scheduler = new ConnectionStreamScheduler(latest, ordered);
+
+        var work = new ScheduledWorkItem[4];
+        ConnectionScheduleResult result = scheduler.Schedule(
+            default,
+            new ConnectionSendBudget(
+                new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0),
+                new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0),
+                new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 8)),
+            work);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(0, result.RealtimeItemsScheduled);
+        Assert.Equal(0, result.ReliableEventItemsScheduled);
+        Assert.Equal(2, result.BulkItemsScheduled);
+        Assert.Equal(PacketClass.Bulk, work[0].PacketClass);
+        Assert.Equal(bulkLatest, work[0].Sequence);
+        Assert.Equal(PacketClass.Bulk, work[1].PacketClass);
+        Assert.Equal(bulkEvent, work[1].Sequence);
+    }
+
     private static void ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork()
     {
         var latest = new LatestStateStream();
@@ -665,6 +720,7 @@ internal static class TestRunner
             default,
             new ConnectionSendBudget(
                 new PacketClassBudget(MaxItems: 1, MaxPayloadBytes: 16),
+                new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0),
                 new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0)),
             work);
 
@@ -677,7 +733,8 @@ internal static class TestRunner
             firstResult.NextState,
             new ConnectionSendBudget(
                 new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 16),
-                new PacketClassBudget(MaxItems: 1, MaxPayloadBytes: 16)),
+                new PacketClassBudget(MaxItems: 1, MaxPayloadBytes: 16),
+                new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0)),
             nextWork);
 
         Assert.Equal(2, secondResult.Count);
@@ -708,6 +765,7 @@ internal static class TestRunner
         Assert.Equal(ScheduledWorkKind.LatestState, work[0].Kind);
         Assert.Equal(newestEvent - 1, result.NextState.OrderedEventCursor.NextSequence);
         Assert.Equal(0, result.ReliableEventItemsScheduled);
+        Assert.Equal(0, result.BulkItemsScheduled);
     }
 
     private static void OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames()
@@ -832,6 +890,15 @@ internal static class TestRunner
         Assert.Equal(ReliableEventFramePacket.PacketId, ordered.PacketId);
         Assert.Equal(PacketClass.ReliableEvent, ordered.PacketClass);
         Assert.Equal(ChannelType.ReliableOrdered, ordered.Channel);
+
+        PublishedFrame bulkLatest = SharedFramePublisher.PublishLatestState(22, 45, payload, PacketClass.Bulk);
+        Assert.Equal(PacketClass.Bulk, bulkLatest.PacketClass);
+        Assert.Equal(ChannelType.ReliableOrdered, bulkLatest.Channel);
+        Assert.Equal(PacketHeaderFlags.None, bulkLatest.DefaultHeaderFlags);
+
+        PublishedFrame bulkOrdered = SharedFramePublisher.PublishOrderedEvent(23, payload, PacketClass.Bulk);
+        Assert.Equal(PacketClass.Bulk, bulkOrdered.PacketClass);
+        Assert.Equal(ChannelType.ReliableOrdered, bulkOrdered.Channel);
     }
 
     private static void ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames()

@@ -24,6 +24,9 @@ Current `Server/Network` state:
 - the first ECS-facing bridge now also exists there:
   - ECS world/runtime snapshots
   - dirty component publication into scoped latest-state streams
+- typed ECS publish rules now exist there too:
+  - latest-state rules can classify into `Realtime` or `Bulk`
+  - ordered-event rules can classify into `ReliableEvent` or `Bulk`
 - this is still the correct join point; `Kernels/ECS` and `Kernels/Network` remain separate
 
 See [SERVER_WRAPPER_IMPLEMENTATION_PLAN.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md) for the concrete implementation plan and [AGENTS.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/AGENTS.md) for subsystem-specific engineering rules.

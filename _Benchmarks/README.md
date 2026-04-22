@@ -121,6 +121,7 @@ Current network benchmark scenarios now include:
 - `ServerRuntimePublishAndFanout_*`
 - `EcsDirtyPublish_*`
 - `EcsDirtyPublishAndFanout_*`
+- `EcsClassifiedPublishAndFanout_*`
 - AOI subscription maintenance
 
 Current interpretation guidance:
@@ -130,5 +131,6 @@ Current interpretation guidance:
 - the first server-runtime publish scenarios are now in place and currently show the operator/status bridge slice is cheap enough to keep building on
 - the first subscriber-scaling curve for `ServerRuntimePublishAndFanout_*` is now in place, and current measurements remain well below a `16 ms` server tick budget even at `2048` subscribers
 - the first ECS-dirty publish scenarios are now in place, and they already caught one real bridge bug: partial-buffer dirty drains dropping updates; that regression is now fixed and test-covered
+- the first mixed ECS classification scenario is now in place, exercising realtime latest-state plus bulk ordered-event publication through the same bridge
 - AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
 - the next benchmark-driven tuning target is no longer the basic fanout bridge shape; it is the deeper server-facing publish integration that will sit on top of it
