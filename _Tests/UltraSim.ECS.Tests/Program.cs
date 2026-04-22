@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.ECS.Persistence;
+using System.IO;
 using System.Threading;
 
 TestRunner.Run();
@@ -74,6 +75,9 @@ internal static class TestRunner
         Run(nameof(PersistenceTypeRegistry_RegisterSchemaComponents_FindsSerializableComponents), PersistenceTypeRegistry_RegisterSchemaComponents_FindsSerializableComponents);
         Run(nameof(World_CapturePersistenceSnapshot_GroupsSerializableComponents_AndSkipsTransientData), World_CapturePersistenceSnapshot_GroupsSerializableComponents_AndSkipsTransientData);
         Run(nameof(World_RestorePersistenceSnapshot_AppendsEntitiesAndRestoresPersistentComponents), World_RestorePersistenceSnapshot_AppendsEntitiesAndRestoresPersistentComponents);
+        Run(nameof(BinaryEntityPersistenceSerializer_RoundTripsSnapshot), BinaryEntityPersistenceSerializer_RoundTripsSnapshot);
+        Run(nameof(BinaryWorldPersistenceAdapter_SaveLoad_RoundTripsPersistentEntities), BinaryWorldPersistenceAdapter_SaveLoad_RoundTripsPersistentEntities);
+        Run(nameof(BinaryWorldPersistenceAdapter_RejectsNonBinaryReadersAndWriters), BinaryWorldPersistenceAdapter_RejectsNonBinaryReadersAndWriters);
         Run(nameof(WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet), WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet);
         Run(nameof(World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse), World_Lifecycle_AutoInitializesSealsAndShutdownBlocksFurtherUse);
         Run(nameof(ArchetypeSignature_RejectsInvalidComponentIds), ArchetypeSignature_RejectsInvalidComponentIds);
@@ -2524,6 +2528,85 @@ internal static class TestRunner
         Assert.Equal(1, target.DrainDirtyTo<PersistentVelocity>(dirty));
     }
 
+    private static void BinaryEntityPersistenceSerializer_RoundTripsSnapshot()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId persistentPositionId = builder.RegisterComponent<PersistentPosition>();
+        ComponentId persistentVelocityId = builder.RegisterComponent<PersistentVelocity>();
+        EcsSchema schema = builder.Build();
+
+        var world = new World(schema);
+        Entity entity = world.CreateDefault(new ArchetypeSignature([persistentPositionId, persistentVelocityId]));
+        Assert.True(world.SetComponent(entity, new PersistentPosition(77)));
+        Assert.True(world.SetComponent(entity, new PersistentVelocity(12)));
+
+        var registry = new PersistenceTypeRegistry();
+        registry.RegisterSchemaComponents(schema);
+        registry.Seal();
+
+        EntityPersistenceSnapshot snapshot = world.CapturePersistenceSnapshot(registry);
+
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryDataWriter(stream, leaveOpen: true))
+            BinaryEntityPersistenceSerializer.WriteSnapshot(writer, snapshot);
+
+        stream.Position = 0;
+        using var reader = new BinaryDataReader(stream, leaveOpen: true);
+        EntityPersistenceSnapshot roundTripped = BinaryEntityPersistenceSerializer.ReadSnapshot(reader, schema, registry);
+
+        Assert.Equal(1, roundTripped.GroupCount);
+        Assert.Equal(1, roundTripped.EntityCount);
+        Assert.SequenceEqual(new ulong[] { entity.Packed }, roundTripped.Groups[0].SourceEntityPackedIds);
+        Assert.SequenceEqual(new PersistentPosition[] { new(77) }, (PersistentPosition[])roundTripped.Groups[0].Sections[0].Values);
+        Assert.SequenceEqual(new PersistentVelocity[] { new(12) }, (PersistentVelocity[])roundTripped.Groups[0].Sections[1].Values);
+    }
+
+    private static void BinaryWorldPersistenceAdapter_SaveLoad_RoundTripsPersistentEntities()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId persistentPositionId = builder.RegisterComponent<PersistentPosition>();
+        ComponentId persistentVelocityId = builder.RegisterComponent<PersistentVelocity>();
+        ComponentId transientPositionId = builder.RegisterComponent<Position>();
+        EcsSchema schema = builder.Build();
+
+        var source = new World(schema);
+        Entity entity = source.CreateDefault(new ArchetypeSignature([persistentPositionId, persistentVelocityId, transientPositionId]));
+        Assert.True(source.SetComponent(entity, new PersistentPosition(88)));
+        Assert.True(source.SetComponent(entity, new PersistentVelocity(13)));
+        Assert.True(source.SetComponent(entity, new Position(9999)));
+
+        var registry = new PersistenceTypeRegistry();
+        var adapter = new BinaryWorldPersistenceAdapter(registry);
+
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryDataWriter(stream, leaveOpen: true))
+            adapter.Save(source, writer);
+
+        var target = new World(schema);
+        stream.Position = 0;
+        using (var reader = new BinaryDataReader(stream, leaveOpen: true))
+            adapter.Load(target, reader);
+
+        var restoredView = new WorldPersistenceView(target, ReadOnlySpan<ComponentId>.Empty, excludeEmpty: true);
+        Assert.Equal(1, restoredView.EntityCount);
+        Assert.Equal(1, restoredView.ArchetypeCount);
+        Assert.False(restoredView.Archetypes[0].HasComponent(transientPositionId));
+        Assert.SequenceEqual(new PersistentPosition[] { new(88) }, restoredView.Archetypes[0].GetComponentSpan<PersistentPosition>(persistentPositionId).ToArray());
+        Assert.SequenceEqual(new PersistentVelocity[] { new(13) }, restoredView.Archetypes[0].GetComponentSpan<PersistentVelocity>(persistentVelocityId).ToArray());
+    }
+
+    private static void BinaryWorldPersistenceAdapter_RejectsNonBinaryReadersAndWriters()
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<PersistentPosition>();
+        EcsSchema schema = builder.Build();
+        var world = new World(schema);
+        var adapter = new BinaryWorldPersistenceAdapter(new PersistenceTypeRegistry());
+
+        Assert.Throws<InvalidOperationException>(() => adapter.Save(world, new TestDataWriter()));
+        Assert.Throws<InvalidOperationException>(() => adapter.Load(world, new TestDataReader()));
+    }
+
     private static void WorldPersistenceView_CapturesFilteredReadOnlyArchetypeSet()
     {
         var builder = new EcsSchemaBuilder();
@@ -2800,10 +2883,11 @@ internal static class TestRunner
     {
         public static void Serialize(ref BitWriter writer, in PersistentPosition value)
         {
+            writer.WriteInt32(value.X);
         }
 
         public static PersistentPosition Deserialize(ref BitReader reader, ushort version)
-            => default;
+            => new(reader.ReadInt32());
     }
 
     private readonly record struct Velocity(int X) : IComponent<Velocity>
@@ -2815,10 +2899,11 @@ internal static class TestRunner
     {
         public static void Serialize(ref BitWriter writer, in PersistentVelocity value)
         {
+            writer.WriteInt32(value.X);
         }
 
         public static PersistentVelocity Deserialize(ref BitReader reader, ushort version)
-            => default;
+            => new(reader.ReadInt32());
     }
 
     private struct NotSelfComponent : IComponent<Position>

@@ -217,6 +217,10 @@ Current persistence pieces:
 - `PersistenceSignature`
 - `PersistenceSignatureBuilder`
 - `EntityPersistenceSnapshot`
+- `BinaryDataWriter`
+- `BinaryDataReader`
+- `BinaryEntityPersistenceSerializer`
+- `BinaryWorldPersistenceAdapter`
 - `WorldPersistenceView`
 - `PersistenceArchetypeView`
 - `World.CapturePersistenceSnapshot(...)`
@@ -226,12 +230,13 @@ Current persistence policy:
 
 - persistence types are instance-owned and explicit rather than process-global,
 - only components that implement `ISerializableComponent<T>` and carry a stable `PersistenceId` participate in the snapshot layer,
-- the current slice is an in-memory grouped entity snapshot/restore path, not a save-file format,
+- the current slice now includes both:
+  - an in-memory grouped entity snapshot/restore path,
+  - a narrow single-stream binary save/load adapter built on that snapshot shape,
 - restore currently appends compatible persistent entities into a target world and marks restored components dirty.
 
 Still deferred for later Phase 2 slices:
 
-- binary or other file-backed persistence adapters,
 - richer type-database and manifest work,
 - deeper versioned component serialization beyond the current in-memory shape,
 - broader system-owned persistence tooling.

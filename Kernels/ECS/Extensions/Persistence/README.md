@@ -12,6 +12,10 @@ Current pieces in place:
 - `PersistenceSignature`
 - `PersistenceSignatureBuilder`
 - `EntityPersistenceSnapshot`
+- `BinaryDataWriter`
+- `BinaryDataReader`
+- `BinaryEntityPersistenceSerializer`
+- `BinaryWorldPersistenceAdapter`
 - `IEcsPersistenceAdapter`
 - `ISerializableComponent<T>`
 - world/system save-load hooks
@@ -22,15 +26,16 @@ Current pieces in place:
 
 Current intentional limits:
 
-- persistence is currently an in-memory snapshot/restore layer, not a file format
+- persistence now has both:
+  - an in-memory snapshot/restore layer,
+  - a narrow single-stream binary adapter on top of that model
 - `IDataReader` / `IDataWriter` remain minimal adapter seams
-- there is no binary save-set writer/reader yet
 - system persistence still uses only the existing `SystemBase.Serialize/Deserialize` hooks
-- component versioned bit-level serialization is still deferred beyond the current in-memory snapshot slice
+- broader multi-file save-set/manifest work is still deferred
+- component versioned bit-level serialization now has a working `BitWriter` / `BitReader` base, but broader schema/version database work is still deferred
 
 Expected future work:
 
-- binary or other persistence adapters
 - system-owned state persistence
 - richer type/version databases and manifest work
-- file-backed save/load pipelines
+- broader file-backed save/load pipelines
