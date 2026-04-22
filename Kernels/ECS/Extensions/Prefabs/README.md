@@ -1,12 +1,27 @@
-# Prefab Extension Placeholder
+# Prefab Extension
 
-Prefabs are a second-wave import for the new ECS kernel.
+Prefabs are now in Phase 2 startup rather than pure placeholder status.
 
-The core kernel intentionally does not carry the old prefab registry during Phase 1.
+Current pieces in place:
 
-Expected future work:
+- `IPrefab<TSelf>`
+- `ITemplatePrefab<TSelf>`
+- `IResolvedPrefab<TSelf>`
+- `PrefabDefinition`
+- `PrefabCatalog`
+- immediate `World.CreatePrefab(...)` helpers
+- resolver-backed `World.CreatePrefab(string key)` / `TryCreatePrefab(...)`
 
-- prefab resolver contracts,
-- template spawn helpers,
-- data-driven prefab loading,
-- resolved-column spawn optimizations.
+Current intentional limits:
+
+- prefab spawning is immediate-only for now
+- there is no static global prefab registry
+- file-backed/data-driven loading is still deferred
+- resolved-column application exists, but resolved-column caching/other deeper spawn optimizations are still deferred
+
+Expected later work:
+
+- deferred prefab spawn queue integration
+- data-driven prefab loading
+- richer prefab catalogs and import pipelines
+- additional spawn-path optimization once real workloads justify it

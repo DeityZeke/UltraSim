@@ -16,11 +16,9 @@ public sealed class EcsWorldServices
     public IEcsPersistenceAdapter? PersistenceAdapter { get; init; }
 }
 
-/// <summary>
-/// Marker seam for future prefab resolution.
-/// </summary>
 public interface IEcsPrefabResolver
 {
+    bool TryResolvePrefab(string key, out PrefabDefinition prefab);
 }
 
 /// <summary>

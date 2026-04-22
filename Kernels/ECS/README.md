@@ -134,7 +134,8 @@ Implemented so far:
 - dedicated scheduler feature report coverage for profiling overhead, execution-mode crossover, and cadence spreading,
 - worker-count retention diagnostics for dirty-capture and thread-local scratch state,
 - worker-local dirty capture redesigned around bounded append-only entity buffers instead of large per-worker index dedupe tables,
-- prefab/persistence seams held for second-wave import,
+- prefab startup slice now in place through typed prefab contracts, `PrefabDefinition`, `PrefabCatalog`, and immediate world prefab spawn helpers,
+- persistence seams still held for the next Phase 2 slice,
 - executable incremental tests.
 
 Current practical status:
@@ -146,12 +147,18 @@ Current practical status:
 - current soak runs show bounded retained memory and stable tick latency in the heaviest active movement scenarios,
 - profiling snapshots currently measure as effectively negligible overhead in scheduler-heavy runs,
 - per-system live timing data is now consumable through runtime snapshots for future performance-panel views without reviving the old control-panel UI directly inside the kernel,
+- Phase 2 has now started with an initial prefab runtime slice rather than leaving prefabs as placeholder-only seams,
 - execution-mode crossover is now clearer:
   - `ParallelBatches` is the best fit for the heavier oscillating movement workloads,
   - `Serial` plus intra-system parallelism is the best fit for the current `v1` pulse movement shape,
 - automatic cadence spreading is now enabled by default for non-critical stages, with a default cap of `10` distinct offsets per period bucket,
 - automatic cadence spreading is still intentionally not applied to `Movement` and `Combat`, because current measurements show that benefit is workload-dependent rather than universally positive there,
-- prefabs and persistence remain intentionally deferred behind working seams,
+- persistence remains intentionally deferred behind working seams,
+- prefab work is now partially landed but still intentionally narrow:
+  - immediate spawn only,
+  - no static global prefab registry,
+  - no file-backed/data-driven loader yet,
+  - no deferred prefab queue integration yet,
 - the main remaining competitive gaps are now concentrated in a narrow destroy/dirty-drain path set rather than in core architecture.
 
 Accepted current tradeoffs:
@@ -162,9 +169,37 @@ Accepted current tradeoffs:
 
 Still intentionally deferred:
 
-- prefab runtime port,
 - persistence/runtime save-load port,
+- broader prefab runtime work beyond the current startup slice,
 - broader integration helpers and higher-level tooling.
+
+## Phase 2 Prefabs
+
+The first prefab slice is now implemented.
+
+Current prefab pieces:
+
+- `IPrefab<TSelf>`
+- `ITemplatePrefab<TSelf>`
+- `IResolvedPrefab<TSelf>`
+- `PrefabDefinition`
+- `PrefabCatalog`
+- immediate `World.CreatePrefab(...)` helpers
+- resolver-backed `World.CreatePrefab(string key)` / `TryCreatePrefab(...)`
+
+Current prefab policy:
+
+- prefabs remain instance-owned and engine-agnostic,
+- there is no process-global prefab registry,
+- the current path is immediate spawn only,
+- spawned prefab entities mark their applied components dirty so future persistence/replication layers can observe them consistently.
+
+Still deferred for later Phase 2 slices:
+
+- deferred prefab structural queue integration,
+- file-backed/data-driven prefab loading,
+- richer prefab catalogs/import pipelines,
+- deeper spawn-path optimization if real workloads justify it.
 
 ## Scheduler Guidance
 

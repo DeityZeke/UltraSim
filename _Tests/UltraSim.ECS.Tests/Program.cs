@@ -14,6 +14,10 @@ internal static class TestRunner
         Run(nameof(Build_FreezesBuilder), Build_FreezesBuilder);
         Run(nameof(Schemas_AreIsolatedAcrossBuilders), Schemas_AreIsolatedAcrossBuilders);
         Run(nameof(World_UsesSuppliedSchemaAndServices), World_UsesSuppliedSchemaAndServices);
+        Run(nameof(World_CreatePrefab_TypedPrefab_AppliesInitialComponentState), World_CreatePrefab_TypedPrefab_AppliesInitialComponentState);
+        Run(nameof(World_CreatePrefab_TemplatePrefab_AppliesTemplateAndInstanceState), World_CreatePrefab_TemplatePrefab_AppliesTemplateAndInstanceState);
+        Run(nameof(World_CreatePrefab_ResolvedPrefab_UsesResolvedColumnPath), World_CreatePrefab_ResolvedPrefab_UsesResolvedColumnPath);
+        Run(nameof(World_CreatePrefab_ByKey_UsesConfiguredResolver), World_CreatePrefab_ByKey_UsesConfiguredResolver);
         Run(nameof(Schema_CreatesColumnsFromRegisteredFactories), Schema_CreatesColumnsFromRegisteredFactories);
         Run(nameof(ArchetypeManager_NormalizesAndCachesSignatures), ArchetypeManager_NormalizesAndCachesSignatures);
         Run(nameof(ArchetypeManager_EnumerateWith_FiltersAndSnapshots), ArchetypeManager_EnumerateWith_FiltersAndSnapshots);
@@ -148,6 +152,81 @@ internal static class TestRunner
         Assert.Same(schema, world.Schema);
         Assert.Same(services, world.Services);
         Assert.Equal(id, world.GetComponentId<Position>());
+    }
+
+    private static void World_CreatePrefab_TypedPrefab_AppliesInitialComponentState()
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity entity = world.CreatePrefab(new SimpleMoverPrefab(10, 4));
+
+        Assert.True(world.Entities.IsAlive(entity));
+        Assert.Equal(new Position(10), world.GetComponent<Position>(entity));
+        Assert.Equal(new Velocity(4), world.GetComponent<Velocity>(entity));
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        int dirtyPosition = world.DrainDirtyTo<Position>(dirty);
+        Assert.Equal(1, dirtyPosition);
+        Assert.Equal(entity, dirty[0]);
+        int dirtyVelocity = world.DrainDirtyTo<Velocity>(dirty);
+        Assert.Equal(1, dirtyVelocity);
+        Assert.Equal(entity, dirty[0]);
+    }
+
+    private static void World_CreatePrefab_TemplatePrefab_AppliesTemplateAndInstanceState()
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity entity = world.CreatePrefab(new TemplateMoverPrefab(7));
+
+        Assert.Equal(new Position(100), world.GetComponent<Position>(entity));
+        Assert.Equal(new Velocity(7), world.GetComponent<Velocity>(entity));
+    }
+
+    private static void World_CreatePrefab_ResolvedPrefab_UsesResolvedColumnPath()
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        builder.RegisterComponent<Acceleration>();
+        var world = new World(builder.Build());
+
+        Entity entity = world.CreatePrefab(new ResolvedMoverPrefab(12, 5, 2));
+
+        Assert.Equal(new Position(12), world.GetComponent<Position>(entity));
+        Assert.Equal(new Velocity(5), world.GetComponent<Velocity>(entity));
+        Assert.Equal(new Acceleration(2), world.GetComponent<Acceleration>(entity));
+    }
+
+    private static void World_CreatePrefab_ByKey_UsesConfiguredResolver()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var schema = builder.Build();
+        var catalog = new PrefabCatalog();
+        ArchetypeSignature signature = new([positionId]);
+        catalog.Add("spawn/position-42", PrefabDefinition.Create(
+            signature,
+            static (Archetype archetype, int slot) =>
+            {
+                archetype.GetComponentSpan<Position>(new ComponentId(0))[slot] = new Position(42);
+            }));
+
+        var world = new World(schema, new EcsWorldServices
+        {
+            PrefabResolver = catalog,
+        });
+
+        Assert.True(world.TryCreatePrefab("spawn/position-42", out Entity entity));
+        Assert.Equal(new Position(42), world.GetComponent<Position>(entity));
+        Assert.False(world.TryCreatePrefab("missing", out Entity missing));
+        Assert.Equal(Entity.Null, missing);
     }
 
     private static void Schema_CreatesColumnsFromRegisteredFactories()
@@ -2467,6 +2546,61 @@ internal static class TestRunner
     {
     }
 
+    private readonly record struct SimpleMoverPrefab(int PositionX, int VelocityX) : IPrefab<SimpleMoverPrefab>
+    {
+        public ArchetypeSignature Signature => new([new ComponentId(0), new ComponentId(1)]);
+
+        public void ApplyTo(Archetype archetype, int slot)
+        {
+            archetype.GetComponentSpan<Position>(new ComponentId(0))[slot] = new Position(PositionX);
+            archetype.GetComponentSpan<Velocity>(new ComponentId(1))[slot] = new Velocity(VelocityX);
+        }
+    }
+
+    private readonly record struct TemplateMoverPrefab(int VelocityX) : ITemplatePrefab<TemplateMoverPrefab>
+    {
+        public ArchetypeSignature Signature => new([new ComponentId(0), new ComponentId(1)]);
+        public bool HasPerInstanceData => true;
+
+        public void ApplyTo(Archetype archetype, int slot)
+        {
+            ApplyTemplateTo(archetype, slot);
+            ApplyInstanceTo(archetype, slot);
+        }
+
+        public void ApplyTemplateTo(Archetype archetype, int slot)
+        {
+            archetype.GetComponentSpan<Position>(new ComponentId(0))[slot] = new Position(100);
+        }
+
+        public void ApplyInstanceTo(Archetype archetype, int slot)
+        {
+            archetype.GetComponentSpan<Velocity>(new ComponentId(1))[slot] = new Velocity(VelocityX);
+        }
+    }
+
+    private readonly record struct ResolvedMoverPrefab(int PositionX, int VelocityX, int AccelerationX) : IResolvedPrefab<ResolvedMoverPrefab>
+    {
+        public static ComponentId[] ResolvedComponentIds { get; } = [new ComponentId(0), new ComponentId(1), new ComponentId(2)];
+
+        public ArchetypeSignature Signature => new(ResolvedComponentIds);
+
+        public void ApplyTo(Archetype archetype, int slot)
+        {
+            ApplyResolvedTo(archetype, slot, [-1, -1, -1]);
+        }
+
+        public void ApplyResolvedTo(Archetype archetype, int slot, ReadOnlySpan<int> columns)
+        {
+            if (columns.Length != 3 || columns[0] < 0 || columns[1] < 0 || columns[2] < 0)
+                throw new InvalidOperationException("Resolved prefab columns were not supplied.");
+
+            archetype.GetComponentSpan<Position>(ResolvedComponentIds[0])[slot] = new Position(PositionX);
+            archetype.GetComponentSpan<Velocity>(ResolvedComponentIds[1])[slot] = new Velocity(VelocityX);
+            archetype.GetComponentSpan<Acceleration>(ResolvedComponentIds[2])[slot] = new Acceleration(AccelerationX);
+        }
+    }
+
     private delegate void SystemContextAction(in SystemContext ctx);
 
     private sealed class PeriodOverrideSettings : SystemSettings
@@ -2492,6 +2626,11 @@ internal static class TestRunner
 
     private sealed class NoOpPrefabResolver : IEcsPrefabResolver
     {
+        public bool TryResolvePrefab(string key, out PrefabDefinition prefab)
+        {
+            prefab = default;
+            return false;
+        }
     }
 
     private sealed class NoOpPersistenceAdapter : IEcsPersistenceAdapter
