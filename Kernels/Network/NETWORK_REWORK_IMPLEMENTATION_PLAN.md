@@ -317,10 +317,20 @@ Current status:
   - per-class item and payload-byte budgets are enforced
   - ordered-event recovery requirements propagate through schedule results
 - still deferred inside this slice:
-  - packet assembly/finalization
   - shared payload references/fanout-aware scheduling
   - benchmark coverage for scheduling/drain behavior
   - broader packet-class handling beyond the current stream pair
+  - higher-level publish/subscription integration
+
+- the first assembly/finalization primitives are now in place:
+  - `RealtimeStateFramePacket`
+  - `ReliableEventFramePacket`
+  - `OutboundDatagramAssembler`
+  - transform-stage header flag mutation via `OutboundTransformResult`
+- current behavior:
+  - scheduled work items assemble into concrete outbound datagrams
+  - transform hooks run before final envelope construction
+  - compression/encryption header flags can now be set by transforms
 
 ### Phase N5: Server Bridge Slice
 

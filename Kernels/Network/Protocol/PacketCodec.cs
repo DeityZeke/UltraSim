@@ -10,28 +10,23 @@ public static class PacketCodec
         int initialCapacity = DefaultInitialCapacity)
         where TPacket : struct, IPacket<TPacket>
     {
-        if (initialCapacity < PacketEnvelopeHeader.SizeInBytes)
-            initialCapacity = PacketEnvelopeHeader.SizeInBytes;
+        ImmutablePayloadBuffer payload = EncodePayload(packet, initialCapacity);
+        return EncodeEnvelope(TPacket.PacketId, payload, flags);
+    }
 
-        int capacity = initialCapacity;
+    public static ImmutablePayloadBuffer EncodePayload<TPacket>(
+        in TPacket packet,
+        int initialCapacity = DefaultInitialCapacity)
+        where TPacket : struct, IPacket<TPacket>
+    {
+        int capacity = Math.Max(1, initialCapacity - PacketEnvelopeHeader.SizeInBytes);
         while (true)
         {
             byte[] buffer = new byte[capacity];
             try
             {
                 var writer = new BitWriter(buffer);
-                writer.WriteUInt16(TPacket.PacketId);
-                writer.WriteByte((byte)flags);
-                writer.WriteUInt16(0); // patched below
-
-                int payloadStart = writer.Position;
                 packet.Serialize(ref writer);
-                int payloadLength = writer.Position - payloadStart;
-                if ((uint)payloadLength > ushort.MaxValue)
-                    throw new InvalidOperationException($"Packet 0x{TPacket.PacketId:X4} exceeds ushort payload length.");
-
-                buffer[3] = (byte)(payloadLength & 0xFF);
-                buffer[4] = (byte)(payloadLength >> 8);
                 Array.Resize(ref buffer, writer.Position);
                 return ImmutablePayloadBuffer.FromOwned(buffer);
             }
@@ -40,6 +35,24 @@ public static class PacketCodec
                 capacity *= 2;
             }
         }
+    }
+
+    public static ImmutablePayloadBuffer EncodeEnvelope(
+        ushort packetId,
+        ImmutablePayloadBuffer payload,
+        PacketHeaderFlags flags = PacketHeaderFlags.None)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if ((uint)payload.Length > ushort.MaxValue)
+            throw new InvalidOperationException($"Packet 0x{packetId:X4} exceeds ushort payload length.");
+
+        byte[] buffer = new byte[PacketEnvelopeHeader.SizeInBytes + payload.Length];
+        var writer = new BitWriter(buffer);
+        writer.WriteUInt16(packetId);
+        writer.WriteByte((byte)flags);
+        writer.WriteUInt16((ushort)payload.Length);
+        writer.WriteBytes(payload.Span);
+        return ImmutablePayloadBuffer.FromOwned(buffer);
     }
 
     public static bool TryDecodeEnvelope(

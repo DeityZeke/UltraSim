@@ -6,5 +6,5 @@ namespace UltraSim.Network;
 /// </summary>
 public interface IOutboundTransform
 {
-    ImmutablePayloadBuffer Transform(ImmutablePayloadBuffer payload, in OutboundTransformContext context);
+    OutboundTransformResult Transform(ImmutablePayloadBuffer payload, PacketHeaderFlags headerFlags, in OutboundTransformContext context);
 }

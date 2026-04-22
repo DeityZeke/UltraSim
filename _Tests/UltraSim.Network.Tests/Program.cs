@@ -34,6 +34,8 @@ internal static class TestRunner
         Run(nameof(ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget), ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget);
         Run(nameof(ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork), ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork);
         Run(nameof(ConnectionStreamScheduler_SignalsOrderedEventRecovery), ConnectionStreamScheduler_SignalsOrderedEventRecovery);
+        Run(nameof(OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames), OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames);
+        Run(nameof(OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags), OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -121,8 +123,9 @@ internal static class TestRunner
         AssertMethod(
             contract,
             nameof(IOutboundTransform.Transform),
+            typeof(OutboundTransformResult),
             typeof(ImmutablePayloadBuffer),
-            typeof(ImmutablePayloadBuffer),
+            typeof(PacketHeaderFlags),
             typeof(OutboundTransformContext).MakeByRefType());
     }
 
@@ -686,6 +689,77 @@ internal static class TestRunner
         Assert.Equal(newestEvent - 1, result.NextState.OrderedEventCursor.NextSequence);
         Assert.Equal(0, result.ReliableEventItemsScheduled);
     }
+
+    private static void OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames()
+    {
+        var assembler = new OutboundDatagramAssembler();
+        ScheduledWorkItem[] items =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 10,
+                ItemKey: 55,
+                Payload: ImmutablePayloadBuffer.CopyFrom([1, 2, 3])),
+            new(
+                ScheduledWorkKind.OrderedEvent,
+                PacketClass.ReliableEvent,
+                Sequence: 20,
+                ItemKey: 0,
+                Payload: ImmutablePayloadBuffer.CopyFrom([9, 8]))
+        ];
+
+        var output = new OutboundDatagram[2];
+        OutboundAssemblyResult result = assembler.Assemble(new ConnectionId(77), items, output);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(NetworkPlane.State, output[0].Plane);
+        Assert.Equal(PacketClass.Realtime, output[0].PacketClass);
+        Assert.Equal(ChannelType.UnreliableSequenced, output[0].Channel);
+        Assert.True(PacketCodec.TryDecodeEnvelope(output[0].Payload.Span, out PacketEnvelopeHeader realtimeHeader, out ReadOnlySpan<byte> realtimePayload));
+        Assert.Equal(RealtimeStateFramePacket.PacketId, realtimeHeader.PacketId);
+        Assert.Equal(PacketHeaderFlags.HighPriorityHint, realtimeHeader.Flags);
+        var realtimeReader = new BitReader(realtimePayload);
+        RealtimeStateFramePacket realtimeFrame = RealtimeStateFramePacket.Deserialize(ref realtimeReader);
+        Assert.Equal((ulong)10, realtimeFrame.Sequence);
+        Assert.Equal((ulong)55, realtimeFrame.ItemKey);
+        Assert.True(realtimeFrame.Payload.Span.SequenceEqual(new byte[] { 1, 2, 3 }));
+
+        Assert.Equal(PacketClass.ReliableEvent, output[1].PacketClass);
+        Assert.Equal(ChannelType.ReliableOrdered, output[1].Channel);
+        Assert.True(PacketCodec.TryDecodeEnvelope(output[1].Payload.Span, out PacketEnvelopeHeader eventHeader, out ReadOnlySpan<byte> eventPayload));
+        Assert.Equal(ReliableEventFramePacket.PacketId, eventHeader.PacketId);
+        Assert.Equal(PacketHeaderFlags.None, eventHeader.Flags);
+        var eventReader = new BitReader(eventPayload);
+        ReliableEventFramePacket eventFrame = ReliableEventFramePacket.Deserialize(ref eventReader);
+        Assert.Equal((ulong)20, eventFrame.Sequence);
+        Assert.True(eventFrame.Payload.Span.SequenceEqual(new byte[] { 9, 8 }));
+    }
+
+    private static void OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags()
+    {
+        var assembler = new OutboundDatagramAssembler(new MarkCompressedTransform());
+        ScheduledWorkItem[] items =
+        [
+            new(
+                ScheduledWorkKind.OrderedEvent,
+                PacketClass.ReliableEvent,
+                Sequence: 30,
+                ItemKey: 0,
+                Payload: ImmutablePayloadBuffer.CopyFrom([4, 5]))
+        ];
+
+        var output = new OutboundDatagram[1];
+        OutboundAssemblyResult result = assembler.Assemble(new ConnectionId(88), items, output);
+
+        Assert.Equal(1, result.Count);
+        Assert.Equal(1, result.CompressedCount);
+        Assert.True(PacketCodec.TryDecodeEnvelope(output[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(PacketHeaderFlags.Compressed, header.Flags);
+        var reader = new BitReader(payload);
+        ReliableEventFramePacket frame = ReliableEventFramePacket.Deserialize(ref reader);
+        Assert.True(frame.Payload.Span.SequenceEqual(new byte[] { 4, 5, 255 }));
+    }
 }
 
 internal static class Assert
@@ -713,5 +787,18 @@ internal static class Assert
     {
         if (value is null)
             throw new InvalidOperationException(message ?? "Expected value to be non-null.");
+    }
+}
+
+internal sealed class MarkCompressedTransform : IOutboundTransform
+{
+    public OutboundTransformResult Transform(ImmutablePayloadBuffer payload, PacketHeaderFlags headerFlags, in OutboundTransformContext context)
+    {
+        byte[] data = new byte[payload.Length + 1];
+        payload.Span.CopyTo(data);
+        data[^1] = 255;
+        return new OutboundTransformResult(
+            ImmutablePayloadBuffer.FromOwned(data),
+            headerFlags | PacketHeaderFlags.Compressed);
     }
 }

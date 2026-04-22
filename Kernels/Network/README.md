@@ -48,13 +48,17 @@ What exists today:
   - connection schedule state
   - typed scheduled work items
   - stream scheduling with recovery signaling
+- first assembly/finalization contracts for:
+  - typed state/event frame packets
+  - transform-aware outbound datagram assembly
+  - header-flag mutation through the transform seam
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
   - richer disconnect/admission policy beyond the current minimal rules
-- packet assembly/finalization pipeline
+- shared-payload fanout-aware assembly and scheduling
 - ECS/server/client integration layers
 
 ## Design Position
