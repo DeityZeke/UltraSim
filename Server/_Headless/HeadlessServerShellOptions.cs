@@ -2,7 +2,7 @@ namespace UltraSim.Server.Headless;
 
 public sealed record HeadlessServerShellOptions(
     string ProfileName,
-    int TickMilliseconds = 50,
+    int TickMilliseconds = 16,
     int MaxCatchUpTicksPerPump = 8,
     bool AutoStart = true,
     bool SaveOnStop = false,

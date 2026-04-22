@@ -2,7 +2,7 @@ namespace UltraSim.Server.Console;
 
 public sealed record ConsoleServerShellOptions(
     string ProfileName,
-    int TickMilliseconds = 50,
+    int TickMilliseconds = 16,
     int MaxCatchUpTicksPerPump = 8,
     bool AutoStart = true,
     bool SaveOnStop = false,

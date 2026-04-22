@@ -4,6 +4,8 @@ using UltraSim.Server.Console;
 using UltraSim.Server.Godot;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
+using UltraSim.Server.Network;
+using UltraSim.Network;
 
 TestRunner.Run();
 
@@ -32,6 +34,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
         Run(nameof(ServerApplication_SystemRuntimeSnapshots_ReflectHookData), ServerApplication_SystemRuntimeSnapshots_ReflectHookData);
         Run(nameof(ServerApplication_PlayerAndAccountSnapshots_ReflectHookData), ServerApplication_PlayerAndAccountSnapshots_ReflectHookData);
+        Run(nameof(ServerWrapperDefaults_Use16MillisecondTick), ServerWrapperDefaults_Use16MillisecondTick);
         Run(nameof(ServerHostLoop_Pump_TicksAtFixedStepCadence), ServerHostLoop_Pump_TicksAtFixedStepCadence);
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
         Run(nameof(ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks), ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks);
@@ -44,6 +47,9 @@ internal static class TestRunner
         Run(nameof(ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases), ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases);
         Run(nameof(ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly), ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly);
         Run(nameof(GodotServerShellController_ExposesSharedControlSurface), GodotServerShellController_ExposesSharedControlSurface);
+        Run(nameof(ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems), ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems);
+        Run(nameof(ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents), ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents);
+        Run(nameof(ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams), ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams);
 
         Console.WriteLine("All Server contract tests passed.");
     }
@@ -466,6 +472,14 @@ internal static class TestRunner
         Assert.Equal("acct-7", accounts[0].AccountId);
     }
 
+    private static void ServerWrapperDefaults_Use16MillisecondTick()
+    {
+        Assert.Equal(TimeSpan.FromMilliseconds(16), ServerHostLoopOptions.Default.TickInterval);
+        Assert.Equal(16, HeadlessServerShellOptions.Default.TickMilliseconds);
+        Assert.Equal(16, ConsoleServerShellOptions.Default.TickMilliseconds);
+        Assert.Equal(16, GodotServerShellOptions.Default.TickMilliseconds);
+    }
+
     private static void ServerApplication_SystemRuntimeSnapshots_ReflectHookData()
     {
         var app = new ServerApplication(
@@ -794,6 +808,165 @@ internal static class TestRunner
         Assert.Equal(1, accounts.Count);
         Assert.True(observed.Count > 0);
         Assert.Equal(ServerApplicationEventKind.StateChanged, observed[0].Kind);
+    }
+
+    private static void ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems()
+    {
+        var app = new ServerApplication(
+            new ServerApplicationOptions("net-test"),
+            new ServerApplicationHooks
+            {
+                IsAcceptingConnections = _ => true,
+                GetActiveSessions = _ => 2,
+                GetSystemRuntimeSnapshots = _ => new[]
+                {
+                    new ServerSystemRuntimeSnapshot("Movement", "Movement", true, false, 4, 1, 77, 11, 0.25, 0.5, 1.5, 0.1, 2),
+                },
+                GetPlayerSessions = _ => new[]
+                {
+                    new ServerPlayerSessionSnapshot("session-1", "Aster", "acct-7", "Authenticated", "zone=island-a"),
+                },
+                GetAccountSummaries = _ => new[]
+                {
+                    new ServerAccountSummarySnapshot("acct-7", "Aster", IsOnline: true, IsBanned: false, Detail: "role=operator"),
+                },
+            });
+        app.Start();
+
+        using var publisher = new ServerRuntimeNetworkPublisher(app);
+        ServerRuntimeNetworkPublishResult publish = publisher.PublishCurrentState();
+
+        Assert.Equal(1, publish.StatusCount);
+        Assert.Equal(1, publish.MetricsCount);
+        Assert.Equal(1, publish.SystemCount);
+        Assert.Equal(1, publish.PlayerCount);
+        Assert.Equal(1, publish.AccountCount);
+
+        var updates = new LatestStateUpdate[8];
+        LatestStateDrainResult drain = publisher.LatestStateStream.DrainSince(default, updates);
+        Assert.Equal(5, drain.Count);
+
+        Assert.Equal((ulong)ServerRuntimeNetworkScopes.OperatorStatus.Value, updates[0].ScopeKey.Value);
+        ServerStatusSnapshot status = ServerRuntimeNetworkPayloadCodec.Decode<ServerStatusSnapshot>(updates[0].Payload);
+        Assert.Equal("net-test", status.ProfileName);
+
+        ServerMetricsSnapshot metrics = ServerRuntimeNetworkPayloadCodec.Decode<ServerMetricsSnapshot>(updates[1].Payload);
+        Assert.Equal(0L, metrics.TotalTicks);
+
+        Assert.Equal((ulong)ServerRuntimeNetworkScopes.OperatorSystems.Value, updates[2].ScopeKey.Value);
+        ServerSystemRuntimeSnapshot system = ServerRuntimeNetworkPayloadCodec.Decode<ServerSystemRuntimeSnapshot>(updates[2].Payload);
+        Assert.Equal("Movement", system.Name);
+
+        Assert.Equal((ulong)ServerRuntimeNetworkScopes.OperatorPlayers.Value, updates[3].ScopeKey.Value);
+        ServerPlayerSessionSnapshot player = ServerRuntimeNetworkPayloadCodec.Decode<ServerPlayerSessionSnapshot>(updates[3].Payload);
+        Assert.Equal("session-1", player.SessionId);
+
+        Assert.Equal((ulong)ServerRuntimeNetworkScopes.OperatorAccounts.Value, updates[4].ScopeKey.Value);
+        ServerAccountSummarySnapshot account = ServerRuntimeNetworkPayloadCodec.Decode<ServerAccountSummarySnapshot>(updates[4].Payload);
+        Assert.Equal("acct-7", account.AccountId);
+    }
+
+    private static void ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents()
+    {
+        var app = new ServerApplication(new ServerApplicationOptions("event-test"));
+        using var publisher = new ServerRuntimeNetworkPublisher(app);
+
+        app.Start();
+        app.RequestSave();
+
+        var entries = new OrderedEventEntry[8];
+        OrderedEventDrainResult drain = publisher.OrderedEventStream.DrainSince(default, entries);
+
+        Assert.True(drain.Count > 0);
+        Assert.Equal((ulong)ServerRuntimeNetworkScopes.OperatorEvents.Value, entries[0].ScopeKey.Value);
+        ServerApplicationEvent evt = ServerRuntimeNetworkPayloadCodec.Decode<ServerApplicationEvent>(entries[0].Payload);
+        Assert.Equal(ServerApplicationEventKind.StateChanged, evt.Kind);
+    }
+
+    private static void ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams()
+    {
+        var app = new ServerApplication(
+            new ServerApplicationOptions("bridge-test"),
+            new ServerApplicationHooks
+            {
+                GetSystemRuntimeSnapshots = _ => new[]
+                {
+                    new ServerSystemRuntimeSnapshot("Movement", "Movement", true, false, 4, 1, 77, 11, 0.25, 0.5, 1.5, 0.1, 2),
+                },
+                GetPlayerSessions = _ => new[]
+                {
+                    new ServerPlayerSessionSnapshot("session-1", "Aster", "acct-7", "Authenticated"),
+                },
+                GetAccountSummaries = _ => new[]
+                {
+                    new ServerAccountSummarySnapshot("acct-7", "Aster", IsOnline: true, IsBanned: false),
+                },
+            });
+        app.Start();
+
+        using var publisher = new ServerRuntimeNetworkPublisher(app);
+        publisher.PublishCurrentState();
+
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        subscriptions.Subscribe(new ConnectionId(1), ServerRuntimeNetworkScopes.OperatorStatus);
+        subscriptions.Subscribe(new ConnectionId(1), ServerRuntimeNetworkScopes.OperatorSystems);
+        subscriptions.Subscribe(new ConnectionId(1), ServerRuntimeNetworkScopes.OperatorPlayers);
+        subscriptions.Subscribe(new ConnectionId(1), ServerRuntimeNetworkScopes.OperatorAccounts);
+
+        var bridge = new ConnectionStreamFanoutBridge(
+            new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+            new ScheduledWorkFanoutBridge(subscriptions));
+        var scheduled = new ScheduledWorkItem[16];
+        var subscriberScratch = new ConnectionId[4];
+        var output = new OutboundDatagram[16];
+
+        ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+            default,
+            ConnectionSendBudget.Unlimited,
+            scheduled,
+            subscriberScratch,
+            output);
+
+        Assert.Equal(5, result.Schedule.Count);
+        Assert.Equal(5, result.Fanout.DatagramCount);
+
+        int statusSeen = 0;
+        int metricsSeen = 0;
+        int systemSeen = 0;
+        int playerSeen = 0;
+        int accountSeen = 0;
+        for (int i = 0; i < result.Fanout.DatagramCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            Assert.Equal(RealtimeStateFramePacket.PacketId, header.PacketId);
+            var reader = new BitReader(payload);
+            RealtimeStateFramePacket frame = RealtimeStateFramePacket.Deserialize(ref reader);
+
+            if (frame.ItemKey == ServerRuntimeNetworkItemKeys.Status)
+            {
+                statusSeen++;
+            }
+            else if (frame.ItemKey == ServerRuntimeNetworkItemKeys.Metrics)
+            {
+                metricsSeen++;
+            }
+            else
+            {
+                string json = System.Text.Encoding.UTF8.GetString(frame.Payload.Span);
+                if (json.Contains("\"sessionId\":\"session-1\"", StringComparison.Ordinal))
+                    playerSeen++;
+                else if (json.Contains("\"accountId\":\"acct-7\"", StringComparison.Ordinal))
+                    accountSeen++;
+                else if (json.Contains("\"name\":\"Movement\"", StringComparison.Ordinal))
+                    systemSeen++;
+            }
+        }
+
+        Assert.Equal(1, statusSeen);
+        Assert.Equal(1, metricsSeen);
+        Assert.Equal(1, systemSeen);
+        Assert.Equal(1, playerSeen);
+        Assert.Equal(1, accountSeen);
     }
 
     private static void AssertMethod(Type contract, string name, Type returnType, params Type[] parameterTypes)

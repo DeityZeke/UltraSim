@@ -75,8 +75,13 @@ What does not exist yet:
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
   - richer disconnect/admission policy beyond the current minimal rules
-- stream-integrated publish projection into fanout scheduling
-- ECS/server/client integration layers
+- ECS/client integration layers
+
+What now exists above the kernel:
+
+- the first server-side bridge slice in [Server/Network](/d:/MEGA/Godot%20Projects/UltraSim/Server/Network)
+- runtime snapshot/event publication from `Server/Core` into scoped network streams
+- separate benchmark coverage for that higher-layer publish/fanout path
 
 ## Design Position
 
@@ -115,6 +120,11 @@ Bridge layers that consume this kernel belong outside this folder:
 - server ECS/network integration
 - client ECS/network integration
 - host/wrapper glue
+
+The first concrete example of that rule now exists:
+
+- `Server/Network` joins server runtime state to `Kernels/Network`
+- `Kernels/Network` itself still has no ECS or wrapper references
 
 ## Old-Code Lessons
 
@@ -160,4 +170,5 @@ Current early result:
 - the AOI update path was materially improved by moving reconcile ownership into the subscription registry and collapsing per-connection duplicate state
 - the current AOI benchmark is now in a much healthier range
 - the stream-integrated `schedule -> fanout` benchmark path is now in place and is also behaving well
+- the benchmark runner now also includes the first higher-layer server-runtime publish and publish-plus-fanout scenarios
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win

@@ -26,6 +26,7 @@ Server/
   SERVER.md
   SERVER_WRAPPER_IMPLEMENTATION_PLAN.md
   Core/
+  Network/
   Hosting/
   Discovery/
   _Headless/
@@ -36,6 +37,7 @@ Server/
 Why this layout:
 
 - `Core` is the reusable application runtime
+- `Network` is the server-side bridge that consumes `Kernels/Network` without contaminating it with ECS or wrapper concerns
 - `Hosting` is the generic loop/control glue used by every shell
 - `_Headless`, `_Console`, and `_Godot` are host fronts, consistent with the existing underscore wrapper naming
 - `Discovery` remains a separate adapter area, not something baked into the core
@@ -147,6 +149,20 @@ Does not own:
 
 - gameplay logic
 - world logic
+
+### `Server/Network`
+
+Owns:
+
+- server-facing publish classification into network scopes/streams
+- translation from runtime snapshots/events into network payloads
+- future connection-owned cursor/subscription bridge work above `Kernels/Network`
+
+Does not own:
+
+- transport kernel primitives
+- ECS kernel internals
+- wrapper/UI concerns
 - wrapper-specific rendering or UI
 
 ### `Server/_Headless`
@@ -337,6 +353,20 @@ Done when:
 
 - discovery/ops concerns remain adapters rather than core runtime ownership
 
+### Phase S8: Server/Network Bridge
+
+Deliver:
+
+- `Server/Network`
+- runtime snapshot/event publication into scoped network streams
+- first server-side operator/status publish classification over `Kernels/Network`
+- keep ECS/network coupling out of both kernels by joining them here instead
+
+Done when:
+
+- server-side runtime state can feed the network kernel through an explicit adapter layer
+- the bridge is test-covered and benchmarked separately from wrappers
+
 ## Test Plan
 
 Start tests immediately in `_Tests/UltraSim.Server.Tests/`.
@@ -387,6 +417,11 @@ Before shifting focus back to broader gameplay/persistence/network work:
 - save semantics are test-covered
 - basic host-loop benchmarks exist
 - wrappers do not reach into internals for normal operations
+
+Current note:
+
+- wrapper defaults are now back on the old server cadence: `16 ms`
+- the first `Server/Network` bridge slice now exists and publishes runtime snapshots/events into scoped network streams without violating the kernel boundary
 
 ## Risks To Watch
 

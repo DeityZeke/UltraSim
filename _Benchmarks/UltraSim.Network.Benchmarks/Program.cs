@@ -1,5 +1,7 @@
 using UltraSim.ECS.Benchmarks.Core;
 using UltraSim.Network;
+using UltraSim.Server;
+using UltraSim.Server.Network;
 
 string outputPath = Path.Combine("_Benchmarks", "results", "network-benchmarks.json");
 for (int i = 0; i < args.Length - 1; i++)
@@ -23,6 +25,8 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateFanoutScenario("Fanout_NaiveRebuild_256Frames_512Subs", frameCount: 256, subscriberCount: 512, shared: false);
     yield return CreateScheduleAndFanoutScenario("ScheduleAndFanout_64Items_128Subs", itemCount: 64, subscriberCount: 128);
     yield return CreateScheduleAndFanoutScenario("ScheduleAndFanout_256Items_512Subs", itemCount: 256, subscriberCount: 512);
+    yield return CreateServerRuntimePublishScenario("ServerRuntimePublish_32Systems_16Players_16Accounts", systemCount: 32, playerCount: 16, accountCount: 16);
+    yield return CreateServerRuntimePublishAndFanoutScenario("ServerRuntimePublishAndFanout_32Systems_64Subs", systemCount: 32, playerCount: 16, accountCount: 16, subscriberCount: 64);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -66,6 +70,34 @@ static BenchmarkScenario CreateScheduleAndFanoutScenario(string name, int itemCo
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunScheduleAndFanoutScenario(itemCount, subscriberCount),
+    };
+}
+
+static BenchmarkScenario CreateServerRuntimePublishScenario(string name, int systemCount, int playerCount, int accountCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "ServerNetworkPublish",
+        Comparable = false,
+        Scale = systemCount + playerCount + accountCount + 2,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunServerRuntimePublishScenario(systemCount, playerCount, accountCount),
+    };
+}
+
+static BenchmarkScenario CreateServerRuntimePublishAndFanoutScenario(string name, int systemCount, int playerCount, int accountCount, int subscriberCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "ServerNetworkFanout",
+        Comparable = false,
+        Scale = (systemCount + playerCount + accountCount + 2) * subscriberCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunServerRuntimePublishAndFanoutScenario(systemCount, playerCount, accountCount, subscriberCount),
     };
 }
 
@@ -216,4 +248,107 @@ static ScenarioMeasurement RunAoiScenario(int connectionCount, int ticks)
         checksum += maintainer.RemoveConnection(new ConnectionId(i + 1), registry);
 
     return new ScenarioMeasurement(connectionCount * ticks, checksum);
+}
+
+static ScenarioMeasurement RunServerRuntimePublishScenario(int systemCount, int playerCount, int accountCount)
+{
+    using var publisher = CreateServerRuntimeNetworkPublisher(systemCount, playerCount, accountCount);
+    ServerRuntimeNetworkPublishResult result = publisher.PublishCurrentState();
+
+    int operations = result.StatusCount + result.MetricsCount + result.SystemCount + result.PlayerCount + result.AccountCount;
+    long checksum = result.StatusCount + result.MetricsCount + result.SystemCount * 10L + result.PlayerCount * 100L + result.AccountCount * 1000L;
+    return new ScenarioMeasurement(operations, checksum);
+}
+
+static ScenarioMeasurement RunServerRuntimePublishAndFanoutScenario(int systemCount, int playerCount, int accountCount, int subscriberCount)
+{
+    using var publisher = CreateServerRuntimeNetworkPublisher(systemCount, playerCount, accountCount);
+    publisher.PublishCurrentState();
+
+    var registry = new ConnectionSubscriptionRegistry();
+    for (int subscriber = 0; subscriber < subscriberCount; subscriber++)
+    {
+        ConnectionId connection = new(subscriber + 1);
+        registry.Subscribe(connection, ServerRuntimeNetworkScopes.OperatorStatus);
+        registry.Subscribe(connection, ServerRuntimeNetworkScopes.OperatorSystems);
+        registry.Subscribe(connection, ServerRuntimeNetworkScopes.OperatorPlayers);
+        registry.Subscribe(connection, ServerRuntimeNetworkScopes.OperatorAccounts);
+    }
+
+    var bridge = new ConnectionStreamFanoutBridge(
+        new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream),
+        new ScheduledWorkFanoutBridge(registry));
+    int itemCount = systemCount + playerCount + accountCount + 2;
+    var scheduled = new ScheduledWorkItem[itemCount];
+    var subscribers = new ConnectionId[subscriberCount];
+    var output = new OutboundDatagram[itemCount * subscriberCount];
+
+    ConnectionScheduledFanoutResult result = bridge.ScheduleAndDispatch(
+        default,
+        ConnectionSendBudget.Unlimited,
+        scheduled,
+        subscribers,
+        output);
+
+    long checksum = 0;
+    for (int i = 0; i < result.Fanout.DatagramCount; i++)
+        checksum += output[i].Payload.Length + output[i].ConnectionId.Value;
+
+    return new ScenarioMeasurement(result.Fanout.DatagramCount, checksum);
+}
+
+static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)
+{
+    IServerApplication application = new ServerApplication(
+        new ServerApplicationOptions("bench-runtime"),
+        new ServerApplicationHooks
+        {
+            IsAcceptingConnections = _ => true,
+            GetActiveSessions = _ => playerCount,
+            GetSystemRuntimeSnapshots = _ => CreateSystems(systemCount),
+            GetPlayerSessions = _ => CreatePlayers(playerCount),
+            GetAccountSummaries = _ => CreateAccounts(accountCount),
+        });
+    application.Start();
+    return new ServerRuntimeNetworkPublisher(application);
+}
+
+static IReadOnlyList<ServerSystemRuntimeSnapshot> CreateSystems(int count)
+{
+    var snapshots = new ServerSystemRuntimeSnapshot[count];
+    for (int i = 0; i < count; i++)
+    {
+        snapshots[i] = new ServerSystemRuntimeSnapshot(
+            $"System{i}",
+            (i & 1) == 0 ? "Movement" : "Logic",
+            Enabled: true,
+            Manual: false,
+            PeriodTicks: (i % 4) + 1,
+            StartOffset: i % 3,
+            LastRunTick: (uint)(100 + i),
+            UpdateCount: 1000 + i,
+            LastUpdateMilliseconds: 0.1 + i * 0.001,
+            AverageUpdateMilliseconds: 0.2 + i * 0.001,
+            PeakUpdateMilliseconds: 0.4 + i * 0.001,
+            MinUpdateMilliseconds: 0.05,
+            ControlCount: i % 2);
+    }
+
+    return snapshots;
+}
+
+static IReadOnlyList<ServerPlayerSessionSnapshot> CreatePlayers(int count)
+{
+    var snapshots = new ServerPlayerSessionSnapshot[count];
+    for (int i = 0; i < count; i++)
+        snapshots[i] = new ServerPlayerSessionSnapshot($"session-{i}", $"Player{i}", $"acct-{i}", "Authenticated", $"zone=island-{i % 4}");
+    return snapshots;
+}
+
+static IReadOnlyList<ServerAccountSummarySnapshot> CreateAccounts(int count)
+{
+    var snapshots = new ServerAccountSummarySnapshot[count];
+    for (int i = 0; i < count; i++)
+        snapshots[i] = new ServerAccountSummarySnapshot($"acct-{i}", $"Player{i}", IsOnline: (i & 1) == 0, IsBanned: false, Detail: $"role={(i == 0 ? "operator" : "player")}");
+    return snapshots;
 }

@@ -32,6 +32,8 @@ Use this split unless there is a strong reason not to:
 
 - `Server/Core`
   - engine-agnostic server application core
+- `Server/Network`
+  - server-side bridge between runtime state and `Kernels/Network`
 - `Server/Hosting`
   - generic host-loop and command/log plumbing
 - `Server/_Headless`
@@ -54,6 +56,14 @@ Use this split unless there is a strong reason not to:
 - status/metrics snapshots
 - command surface
 - event stream for observability
+
+## What Belongs In Server/Network
+
+- publish classification from server/runtime state into network scopes
+- payload shaping for server-owned snapshots/events
+- future cursor/subscription bridge logic that needs both server concepts and `Kernels/Network`
+
+Keep this out of `Kernels/Network` itself. The network kernel stays engine-agnostic and ECS-agnostic.
 
 ## What Does Not Belong In Core
 

@@ -108,13 +108,23 @@ Current intent:
 
 - validate the `scheduled work -> scoped published frame -> subscriber fanout` bridge
 - validate the direct `stream -> schedule -> fanout` bridge
+- validate the first higher-layer `Server/Core -> Server/Network -> Kernels/Network` publish path
 - compare shared-frame fanout against naive per-recipient rebuild
 - measure the first `player position -> AOI ring overlap -> subscription reconciliation` path
 - track both time and allocation behavior early, before server/client integration hides the cost shape
+
+Current network benchmark scenarios now include:
+
+- shared-frame fanout versus naive rebuild
+- direct `schedule -> fanout`
+- `ServerRuntimePublish_*`
+- `ServerRuntimePublishAndFanout_*`
+- AOI subscription maintenance
 
 Current interpretation guidance:
 
 - shared-frame fanout is now both a clear allocation win and a throughput win on the current synthetic benchmark after the direct scheduled-work dispatch path replaced the intermediate projection step
 - the integrated `schedule -> fanout` scenarios are now present and currently look healthy enough to treat this bridge shape as viable
+- the first server-runtime publish scenarios are now in place and currently show the operator/status bridge slice is cheap enough to keep building on
 - AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
 - the next benchmark-driven tuning target is no longer the basic fanout bridge shape; it is the deeper server-facing publish integration that will sit on top of it

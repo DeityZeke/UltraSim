@@ -400,6 +400,20 @@ Done when:
 
 - server bridge can publish and schedule outbound work without violating ECS boundaries
 
+Current status:
+
+- started
+- the first server-side bridge slice now exists in `Server/Network`
+- current behavior:
+  - `ServerApplication` status, metrics, system runtime snapshots, player session snapshots, and account summaries can be published into scoped `LatestStateStream` items
+  - `ServerApplication` events can be published into scoped `OrderedEventStream` items
+  - those published items can already flow through the existing `schedule -> fanout` bridge
+- still deferred inside this slice:
+  - ECS-driven state classification
+  - connection-owned cursor persistence/policy
+  - richer server-side scope classification beyond the current operator/runtime view
+  - transport/session-owned publish loops at the server runtime layer
+
 ### Phase N6: Client Bridge Slice
 
 Deliver:
@@ -463,10 +477,11 @@ Current status in this repo:
   - the first stream-model slice
   - scheduler/assembly primitives
   - the first publish/subscription fanout bridge
+  - the first higher-layer `Server/Network` publish adapter over the kernel
 
 The next implementation target after this bridge slice should be:
 
-- then broader server bridge work
-- specifically: the first server-side publish classification layer that feeds these scoped streams from real runtime state
+- broader server bridge work from ECS/runtime state into these scoped streams
+- specifically: replace the current server-runtime operator/status slice with richer real gameplay/server publish classification as the next adapter layer
 
 not full replication yet.

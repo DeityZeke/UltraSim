@@ -2,7 +2,7 @@ namespace UltraSim.Server.Godot;
 
 public sealed record GodotServerShellOptions(
     string ProfileName,
-    int TickMilliseconds = 50,
+    int TickMilliseconds = 16,
     int MaxCatchUpTicksPerPump = 8,
     bool SaveOnStop = false)
 {
