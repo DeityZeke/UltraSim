@@ -21,6 +21,8 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateFanoutScenario("Fanout_NaiveRebuild_64Frames_128Subs", frameCount: 64, subscriberCount: 128, shared: false);
     yield return CreateFanoutScenario("Fanout_SharedFrame_256Frames_512Subs", frameCount: 256, subscriberCount: 512, shared: true);
     yield return CreateFanoutScenario("Fanout_NaiveRebuild_256Frames_512Subs", frameCount: 256, subscriberCount: 512, shared: false);
+    yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
+    yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
 
 static BenchmarkScenario CreateFanoutScenario(string name, int frameCount, int subscriberCount, bool shared)
@@ -34,6 +36,20 @@ static BenchmarkScenario CreateFanoutScenario(string name, int frameCount, int s
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunFanoutScenario(frameCount, subscriberCount, shared),
+    };
+}
+
+static BenchmarkScenario CreateAoiScenario(string name, int connectionCount, int ticks)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "NetworkAoi",
+        Comparable = false,
+        Scale = connectionCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunAoiScenario(connectionCount, ticks),
     };
 }
 
@@ -77,13 +93,14 @@ static ScenarioMeasurement RunFanoutScenario(int frameCount, int subscriberCount
 
     if (shared)
     {
+        var bridge = new ScheduledWorkFanoutBridge(registry, assembler);
         var projected = new ScopedPublishedFrame[frameCount];
-        int projectedCount = ScheduledWorkPublishedFrameProjector.Project(items, scopeKeys, projected);
-        var dispatcher = new SubscriptionFanoutDispatcher(registry, assembler);
         var subscriberScratch = new ConnectionId[subscriberCount];
         var output = new OutboundDatagram[frameCount * subscriberCount];
-        SubscriptionFanoutDispatchResult result = dispatcher.Dispatch(
-            projected.AsSpan(0, projectedCount),
+        ScheduledWorkFanoutResult result = bridge.Dispatch(
+            items,
+            scopeKeys,
+            projected,
             subscriberScratch,
             output);
 
@@ -114,4 +131,31 @@ static ScenarioMeasurement RunFanoutScenario(int frameCount, int subscriberCount
     }
 
     return new ScenarioMeasurement(operations, checksum);
+}
+
+static ScenarioMeasurement RunAoiScenario(int connectionCount, int ticks)
+{
+    var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f, 23.5f, 39.5f);
+    var maintainer = new ChunkAoiSubscriptionMaintainer(policy);
+    var registry = new ConnectionSubscriptionRegistry();
+
+    long checksum = 0;
+    for (int tick = 0; tick < ticks; tick++)
+    {
+        for (int i = 0; i < connectionCount; i++)
+        {
+            float x = (i % 64) * 3f + tick * 0.5f;
+            float y = (i / 64) * 3f + ((tick + i) % 7) * 0.25f;
+            AoiSubscriptionUpdateResult result = maintainer.UpdateConnection(
+                new ConnectionId(i + 1),
+                new WorldPosition2(x, y),
+                registry);
+            checksum += result.DesiredScopeCount + result.AddedCount - result.RemovedCount;
+        }
+    }
+
+    for (int i = 0; i < connectionCount; i++)
+        checksum += maintainer.RemoveConnection(new ConnectionId(i + 1), registry);
+
+    return new ScenarioMeasurement(connectionCount * ticks, checksum);
 }

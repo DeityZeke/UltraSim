@@ -8,7 +8,7 @@ It replaces the old `_OLD/UltraSim/Network` stack by preserving the useful seman
 
 ## Current Status
 
-This folder is now in the first scaffold stage.
+This folder is now in active early implementation, not just scaffold.
 
 What exists today:
 
@@ -59,13 +59,19 @@ What exists today:
   - build-once fanout assembly over subscriber sets
   - scheduled-work projection into scoped published frames
   - scoped fanout dispatch over subscriber registries
+  - one-step `ScheduledWork + Scope -> Fanout` bridge for future server adapters
+- first AOI-backed subscription maintenance contracts for:
+  - world-space 2D positions
+  - chunk coordinates and chunk-backed scope keys
+  - player-centered AOI ring policy defined in meters
+  - chunk-overlap subscription scope collection
+  - per-connection AOI subscription reconciliation
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
   - richer disconnect/admission policy beyond the current minimal rules
-- AOI-backed subscription maintenance policy
 - stream-integrated publish projection into fanout scheduling
 - ECS/server/client integration layers
 
@@ -147,4 +153,6 @@ Current early result:
 
 - shared-frame fanout clearly reduces allocations versus naive per-recipient rebuild
 - wall-clock improvement is not universal yet in the current implementation
-- the seam is worth keeping, but the projection/dispatch path still needs tuning before it can be treated as a settled throughput win
+- AOI-backed subscription maintenance is now implemented and test-covered
+- the current AOI update path is functionally correct but still allocation-heavy in benchmark form
+- the seam is worth keeping, but both the projection/dispatch path and AOI maintenance path still need tuning before they can be treated as settled throughput wins

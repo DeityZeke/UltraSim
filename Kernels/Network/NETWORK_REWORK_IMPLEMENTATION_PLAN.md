@@ -340,16 +340,34 @@ Current status:
   - `ScopedPublishedFrame`
   - `ScheduledWorkPublishedFrameProjector`
   - `SubscriptionFanoutDispatcher`
+  - `ScheduledWorkFanoutBridge`
   - fanout assembly from a shared published frame to many recipient connections
 - current behavior:
   - typed state/event frames can be built once as shared published bodies
   - subscriber sets can be copied out per scope key
   - scheduled work can be projected into scoped published frames
+  - scheduled work plus scope keys can now be bridged directly into fanout dispatch through a single kernel path
   - the assembler can fan out a shared published frame across many recipients
 - still deferred from the broader bridge slice:
-  - player-centered AOI policy and chunk/cell-backed subscription maintenance
   - integration between stream scheduling and shared published-frame fanout
   - bridge-facing publish classification from ECS/server state changes
+
+- the first AOI-backed subscription maintenance primitives are now in place:
+  - `WorldPosition2`
+  - `ChunkCoord`
+  - `ChunkSubscriptionScope`
+  - `ChunkSubscriptionKey`
+  - `ChunkAoiPolicy`
+  - `ChunkAoiSubscriptionMaintainer`
+- current behavior:
+  - AOI rings are defined in meters around the player, not by chunk-count semantics
+  - chunk overlap is derived from those world-space radii
+  - chunks are assigned to the nearest overlapping ring only
+  - connection subscription sets can now be reconciled as a player moves
+- still deferred from the broader subscription bridge slice:
+  - direct integration between AOI maintenance and stream-work publication
+  - denser reverse-index/backpressure-aware subscription maintenance
+  - broader server-bridge-facing AOI classification
 
 Benchmark note:
 
@@ -357,9 +375,10 @@ Benchmark note:
 - current early data shows:
   - clear allocation improvement for shared-frame fanout
   - mixed wall-clock results depending on scale
+  - AOI subscription maintenance benchmarks now exist and are currently allocation-heavy
 - implication:
   - the seam is worth keeping
-  - projection/dispatch and final envelope assembly still need tuning before this path can be treated as a definitive throughput win
+  - projection/dispatch, AOI maintenance, and final envelope assembly still need tuning before this path can be treated as a definitive throughput win
 
 ### Phase N5: Server Bridge Slice
 
@@ -440,8 +459,8 @@ Current status in this repo:
 
 The next implementation target after this bridge slice should be:
 
-- AOI-backed subscription maintenance policy
 - stream-integrated publish projection into fanout scheduling
+- AOI maintenance tuning informed by the first benchmark pass
 - then broader server bridge work
 
 not full replication yet.

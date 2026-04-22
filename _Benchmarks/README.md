@@ -91,7 +91,10 @@ Current interpretation guidance:
 
 ## Network Benchmarks
 
-There is now a first standalone network benchmark runner focused on shared fanout versus naive per-recipient rebuild:
+There is now a first standalone network benchmark runner focused on:
+
+- shared fanout versus naive per-recipient rebuild
+- AOI subscription update/reconciliation cost
 
 ```powershell
 dotnet build .\_Benchmarks\UltraSim.Network.Benchmarks\UltraSim.Network.Benchmarks.csproj -c Release
@@ -104,4 +107,10 @@ Current intent:
 
 - validate the `scheduled work -> scoped published frame -> subscriber fanout` bridge
 - compare shared-frame fanout against naive per-recipient rebuild
+- measure the first `player position -> AOI ring overlap -> subscription reconciliation` path
 - track both time and allocation behavior early, before server/client integration hides the cost shape
+
+Current interpretation guidance:
+
+- shared-frame fanout is already a clear allocation win over naive rebuild, but not yet a universal throughput win
+- AOI subscription maintenance is now real and benchmarked, but the first implementation is still allocation-heavy enough that it should be treated as correctness-first rather than performance-settled
