@@ -1,0 +1,11 @@
+using System.Net;
+
+namespace UltraSim.Network;
+
+public sealed record UdpSocketNetworkTransportOptions(
+    IPEndPoint LocalEndPoint,
+    PacketMetadataRegistry PacketMetadata,
+    IPEndPoint? DefaultRemoteEndPoint = null,
+    ConnectionId DefaultConnectionId = default,
+    bool AllowDynamicConnections = true,
+    int MaxDatagramBytes = 2048);

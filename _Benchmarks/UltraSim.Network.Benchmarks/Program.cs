@@ -1,3 +1,4 @@
+using System.Net;
 using UltraSim.ECS.Benchmarks.Core;
 using UltraSim.Client;
 using UltraSim.ECS;
@@ -41,6 +42,7 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
     yield return CreateEcsAoiClassifiedPublishAndFanoutScenario("EcsAoiClassifiedPublishAndFanout_1024Realtime_256Reliable_128Bulk_128Connections", realtimeEntityCount: 1024, reliableEventCount: 256, bulkEventCount: 128, connectionCount: 128);
     yield return CreateClientMovementLoopbackScenario("ClientMovementLoopback_1024Inputs", inputCount: 1024);
     yield return CreateServerMovementLoopbackScenario("ServerMovementLoopback_1024Inputs", inputCount: 1024);
+    yield return CreateUdpMovementRoundTripScenario("UdpMovementRoundTrip_1024Inputs", inputCount: 1024);
     yield return CreateAoiScenario("Aoi_Update_512Connections_120Ticks", connectionCount: 512, ticks: 120);
     yield return CreateAoiScenario("Aoi_Update_2048Connections_120Ticks", connectionCount: 2048, ticks: 120);
 }
@@ -210,6 +212,20 @@ static BenchmarkScenario CreateServerMovementLoopbackScenario(string name, int i
         WarmupCount = 1,
         IterationCount = 5,
         Execute = () => RunServerMovementLoopbackScenario(inputCount),
+    };
+}
+
+static BenchmarkScenario CreateUdpMovementRoundTripScenario(string name, int inputCount)
+{
+    return new BenchmarkScenario
+    {
+        Name = name,
+        Category = "UdpMovementRoundTrip",
+        Comparable = false,
+        Scale = inputCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunUdpMovementRoundTripScenario(inputCount),
     };
 }
 
@@ -762,6 +778,121 @@ static ScenarioMeasurement RunServerMovementLoopbackScenario(int inputCount)
 
     checksum += client.LastReceiveResult.ServerTick + client.LastReceiveResult.LastProcessedInputSequence;
     return new ScenarioMeasurement(inputCount * 3, checksum);
+}
+
+static ScenarioMeasurement RunUdpMovementRoundTripScenario(int inputCount)
+{
+    PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+    using var serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+        new IPEndPoint(IPAddress.Loopback, 0),
+        metadata));
+    serverTransport.Start();
+    var serverEndPoint = (IPEndPoint)serverTransport.LocalEndPoint!;
+
+    using var clientTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+        new IPEndPoint(IPAddress.Loopback, 0),
+        metadata,
+        serverEndPoint,
+        new ConnectionId(1),
+        AllowDynamicConnections: false));
+    clientTransport.Start();
+
+    var handshakePolicy = new HandshakePolicy(
+        ProtocolVersion: 3,
+        SchemaHash: 4,
+        ContentHash: 5,
+        RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+    var handshakeHello = new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression);
+    var serverControl = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, serverTransport, handshakePolicy: handshakePolicy);
+    var clientControl = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, clientTransport, clientHello: handshakeHello);
+
+    clientControl.BeginClientHandshake(new ConnectionId(1), nowTicks: 100);
+    for (int i = 0; i < 8; i++)
+    {
+        serverControl.Pump(101 + i * 2);
+        clientControl.Pump(102 + i * 2);
+    }
+
+    var builder = new EcsSchemaBuilder();
+    ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
+    World world = new(builder.Build());
+    ArchetypeSignature signature = new([movementId]);
+    Entity entity = world.CreateDefault(signature);
+    world.SetComponent(entity, new BenchMovementBody(0f, 0f, 0f, 0f));
+
+    void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
+            return;
+
+        float velocityX = input.MoveX / 100f;
+        float velocityY = input.MoveY / 100f;
+        body = body with
+        {
+            VelocityX = velocityX,
+            VelocityY = velocityY,
+            PositionX = body.PositionX + velocityX * deltaSeconds,
+            PositionY = body.PositionY + velocityY * deltaSeconds,
+        };
+        movementWorld.SetComponent(movementEntity, body);
+    }
+
+    bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
+        {
+            packet = default;
+            return false;
+        }
+
+        packet = new MovementStatePacket(
+            networkEntityId,
+            serverTick,
+            lastProcessedInputSequence,
+            body.PositionX,
+            body.PositionY,
+            body.VelocityX,
+            body.VelocityY);
+        return true;
+    }
+
+    var client = new ClientMovementNetworkBridge(clientTransport, new ConnectionId(1));
+    var server = new ServerEcsMovementNetworkBridge(world, serverTransport, ApplyMovementInput, ProjectMovementState);
+    server.Bind(new ConnectionId(1), entity, networkEntityId: 1);
+
+    long checksum = 0;
+    for (int i = 0; i < inputCount; i++)
+    {
+        client.TrySendInput(
+            new ClientMovementInput((short)(i % 200 - 100), (short)(100 - (i % 200)), (byte)(i & 3)),
+            (uint)(1000 + i),
+            new ClientMovementState(i, i * 2, 1.5f, 2.5f),
+            out _);
+        clientTransport.FlushOutbound();
+        checksum += PollUntilNonZero(static serverBridge => serverBridge.PollInputs(), server, maxAttempts: 256);
+        checksum += server.AdvanceAndSend(0.016f, (uint)(2000 + i));
+        checksum += PollUntilNonZero(static clientBridge => clientBridge.PollInbound(), client, maxAttempts: 256);
+    }
+
+    if (world.TryGetComponent(entity, out BenchMovementBody finalState))
+        checksum += (long)(finalState.PositionX * 1000f) + (long)(finalState.PositionY * 1000f);
+
+    checksum += client.LastReceiveResult.ServerTick + client.LastReceiveResult.LastProcessedInputSequence;
+    return new ScenarioMeasurement(inputCount * 3, checksum);
+}
+
+static int PollUntilNonZero<TState>(Func<TState, int> poll, TState state, int maxAttempts)
+{
+    for (int i = 0; i < maxAttempts; i++)
+    {
+        int result = poll(state);
+        if (result > 0)
+            return result;
+
+        Thread.SpinWait(64);
+    }
+
+    return 0;
 }
 
 static ServerRuntimeNetworkPublisher CreateServerRuntimeNetworkPublisher(int systemCount, int playerCount, int accountCount)

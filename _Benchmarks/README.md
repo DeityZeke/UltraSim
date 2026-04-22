@@ -126,6 +126,7 @@ Current network benchmark scenarios now include:
 - `EcsAoiClassifiedPublishAndFanout_*`
 - `ClientMovementLoopback_*`
 - `ServerMovementLoopback_*`
+- `UdpMovementRoundTrip_*`
 - AOI subscription maintenance
 
 Current interpretation guidance:
@@ -140,5 +141,6 @@ Current interpretation guidance:
 - the first mixed AOI-classified ECS scenario is now in place, exercising `Realtime`, `ReliableEvent`, and `Bulk` through player-centered ring scopes rather than synthetic scopes
 - the first client loopback movement benchmark is now in place, measuring the narrow client-side input-send plus authoritative-state receive path before any Godot wrapper or bot harness exists
 - the first paired server/client movement benchmark is now in place, measuring the narrow end-to-end authoritative movement round-trip over loopback before any real socket transport or bot harness exists
+- the first UDP socket-backed movement benchmark is now in place, measuring the same narrow movement round-trip after real control-plane handshake over a real transport
 - AOI subscription maintenance is now real and benchmarked, and the first heavy allocation cliff was materially improved by moving reconcile ownership into the subscription registry
 - the next benchmark-driven tuning target is no longer the basic fanout bridge shape; it is the deeper server-facing publish integration that will sit on top of it

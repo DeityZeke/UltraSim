@@ -117,35 +117,37 @@ public sealed class NetworkControlPlaneHost
     public int Pump(long nowTicks)
     {
         Sessions.SweepTimeouts(nowTicks);
-        int total = 0;
-        while (true)
-        {
-            int count = _transport.PollInbound(_inboundScratch);
-            if (count == 0)
-                break;
-
-            total += count;
-            _inboundDatagrams += count;
-            for (int i = 0; i < count; i++)
-            {
-                InboundDatagram datagram = _inboundScratch[i];
-                if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                {
-                    _decodeFailures++;
-                    continue;
-                }
-
-                if (!_registry.TryDispatch(new DispatchContext(this, datagram.ConnectionId, nowTicks), header, payload))
-                    _dispatchMisses++;
-            }
-
-            if (count < _inboundScratch.Length)
-                break;
-        }
-
+        int total = PollAndProcessInbound(nowTicks);
         _transport.FlushOutbound();
         return total;
     }
+
+    public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound, long nowTicks)
+    {
+        Sessions.SweepTimeouts(nowTicks);
+        int processed = 0;
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            InboundDatagram datagram = inbound[i];
+            if (datagram.Plane != NetworkPlane.Control)
+                continue;
+
+            processed++;
+            _inboundDatagrams++;
+            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
+            {
+                _decodeFailures++;
+                continue;
+            }
+
+            if (!_registry.TryDispatch(new DispatchContext(this, datagram.ConnectionId, nowTicks), header, payload))
+                _dispatchMisses++;
+        }
+
+        return processed;
+    }
+
+    public void FlushOutbound() => _transport.FlushOutbound();
 
     public bool SendPingProbe(ConnectionId connectionId, ushort sequence, uint clientTick)
     {
@@ -304,5 +306,22 @@ public sealed class NetworkControlPlaneHost
             TPacket.PacketClass,
             TPacket.Channel,
             buffer));
+    }
+
+    private int PollAndProcessInbound(long nowTicks)
+    {
+        int total = 0;
+        while (true)
+        {
+            int count = _transport.PollInbound(_inboundScratch);
+            if (count == 0)
+                break;
+
+            total += ProcessInbound(_inboundScratch.AsSpan(0, count), nowTicks);
+            if (count < _inboundScratch.Length)
+                break;
+        }
+
+        return total;
     }
 }

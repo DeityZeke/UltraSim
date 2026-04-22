@@ -432,6 +432,7 @@ Current note:
   - input polling from the network transport
   - ECS-owned movement application
   - owner-state projection back to the client-side movement bridge over loopback
+  - that same slice now also has a real UDP socket-backed validation path after control-plane handshake
 
 ## Risks To Watch
 

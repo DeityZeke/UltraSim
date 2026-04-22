@@ -1,3 +1,4 @@
+using System.Net;
 using System.Reflection;
 using UltraSim.Network;
 
@@ -18,12 +19,14 @@ internal static class TestRunner
         Run(nameof(PacketEnvelopeHeader_RoundTripsExpectedFields), PacketEnvelopeHeader_RoundTripsExpectedFields);
         Run(nameof(PacketCodec_EncodesAndDecodesHandshakeHello), PacketCodec_EncodesAndDecodesHandshakeHello);
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
+        Run(nameof(PacketMetadataRegistry_ResolvesRegisteredPacketMetadata), PacketMetadataRegistry_ResolvesRegisteredPacketMetadata);
         Run(nameof(HandshakeGate_AcceptsAndRejectsExpectedReasons), HandshakeGate_AcceptsAndRejectsExpectedReasons);
         Run(nameof(NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents), NetworkSessionManager_CreatesTransitionsAndDrainsLifecycleEvents);
         Run(nameof(NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates), NetworkSessionManager_AdmissionPolicy_RejectsAndReplacesDuplicates);
         Run(nameof(NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions), NetworkSessionManager_SweepTimeouts_DisconnectsExpiredSessions);
         Run(nameof(NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak), NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak);
         Run(nameof(ControlPlane_LoopbackHandshake_RoundTripsOverTransport), ControlPlane_LoopbackHandshake_RoundTripsOverTransport);
+        Run(nameof(ControlPlane_UdpHandshake_RoundTripsOverTransport), ControlPlane_UdpHandshake_RoundTripsOverTransport);
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
         Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
@@ -50,6 +53,7 @@ internal static class TestRunner
         Run(nameof(ChunkAoiSubscriptionMaintainer_ReconcilesSubscriptionsAcrossMovement), ChunkAoiSubscriptionMaintainer_ReconcilesSubscriptionsAcrossMovement);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
+        Run(nameof(UdpSocketTransport_RoundTripsDatagrams), UdpSocketTransport_RoundTripsDatagrams);
 
         Console.WriteLine("All Network scaffold tests passed.");
     }
@@ -186,6 +190,48 @@ internal static class TestRunner
         Assert.Equal(0, pair.Client.PollInbound(buffer));
     }
 
+    private static void UdpSocketTransport_RoundTripsDatagrams()
+    {
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        using var server = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata));
+        server.Start();
+
+        var serverEndPoint = (IPEndPoint)Assert.NotNull(server.LocalEndPoint);
+        using var client = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata,
+            serverEndPoint,
+            new ConnectionId(1),
+            AllowDynamicConnections: false));
+        client.Start();
+
+        ImmutablePayloadBuffer payload = PacketCodec.Encode(new PingProbePacket(sequence: 7, clientTick: 1234));
+        client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            NetworkPlane.Control,
+            PacketClass.Control,
+            ChannelType.ReliableOrdered,
+            payload));
+        client.FlushOutbound();
+
+        var inbound = new InboundDatagram[4];
+        int count = PollUntilReceived(server, inbound, maxAttempts: 256);
+
+        Assert.Equal(1, count);
+        Assert.Equal(1, inbound[0].ConnectionId.Value);
+        Assert.Equal(NetworkPlane.Control, inbound[0].Plane);
+        Assert.Equal(PacketClass.Control, inbound[0].PacketClass);
+        Assert.Equal(ChannelType.ReliableOrdered, inbound[0].Channel);
+        Assert.True(PacketCodec.TryDecodeEnvelope(inbound[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> rawPayload));
+        Assert.Equal(PingProbePacket.PacketId, header.PacketId);
+        var reader = new BitReader(rawPayload);
+        PingProbePacket packet = PingProbePacket.Deserialize(ref reader);
+        Assert.Equal((ushort)7, packet.Sequence);
+        Assert.Equal((uint)1234, packet.ClientTick);
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -261,6 +307,23 @@ internal static class TestRunner
         Assert.Equal(NetworkPlane.Control, registry.GetPlane(HandshakeHelloPacket.PacketId));
         Assert.Equal(PacketClass.Control, registry.GetPacketClass(HandshakeHelloPacket.PacketId));
         Assert.Equal("hello:3:BulkTransfer", messages[0]);
+    }
+
+    private static void PacketMetadataRegistry_ResolvesRegisteredPacketMetadata()
+    {
+        PacketMetadataRegistry registry = DefaultPacketMetadata.Create();
+
+        Assert.True(registry.TryGet(HandshakeHelloPacket.PacketId, out NetworkPlane helloPlane, out PacketClass helloClass, out ChannelType helloChannel));
+        Assert.Equal(NetworkPlane.Control, helloPlane);
+        Assert.Equal(PacketClass.Control, helloClass);
+        Assert.Equal(ChannelType.ReliableOrdered, helloChannel);
+
+        Assert.True(registry.TryGet(MovementInputPacket.PacketId, out NetworkPlane inputPlane, out PacketClass inputClass, out ChannelType inputChannel));
+        Assert.Equal(NetworkPlane.Input, inputPlane);
+        Assert.Equal(PacketClass.Realtime, inputClass);
+        Assert.Equal(ChannelType.UnreliableSequenced, inputChannel);
+
+        Assert.False(registry.TryGet(0x7FFF, out _, out _, out _));
     }
 
     private static void HandshakeGate_AcceptsAndRejectsExpectedReasons()
@@ -400,6 +463,43 @@ internal static class TestRunner
         SessionId clientSession = client.BeginClientHandshake(new ConnectionId(1), nowTicks: 100);
         server.Pump(101);
         client.Pump(102);
+
+        Assert.True(server.Sessions.TryGetSessionIdByConnection(new ConnectionId(1), out SessionId serverSession));
+        Assert.True(server.Sessions.TryGetSnapshot(serverSession, out SessionSnapshot serverSnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, serverSnapshot.State);
+
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, clientSnapshot.State);
+    }
+
+    private static void ControlPlane_UdpHandshake_RoundTripsOverTransport()
+    {
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        using var serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata));
+        serverTransport.Start();
+        var serverEndPoint = (IPEndPoint)Assert.NotNull(serverTransport.LocalEndPoint);
+
+        using var clientTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata,
+            serverEndPoint,
+            new ConnectionId(1),
+            AllowDynamicConnections: false));
+        clientTransport.Start();
+
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
+        var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
+        var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, serverTransport, handshakePolicy: policy);
+        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, clientTransport, clientHello: hello);
+
+        SessionId clientSession = client.BeginClientHandshake(new ConnectionId(1), nowTicks: 100);
+        PumpUntilHandshakeReady(server, client, serverTicksStart: 101, clientTicksStart: 102);
 
         Assert.True(server.Sessions.TryGetSessionIdByConnection(new ConnectionId(1), out SessionId serverSession));
         Assert.True(server.Sessions.TryGetSnapshot(serverSession, out SessionSnapshot serverSnapshot));
@@ -1234,6 +1334,49 @@ internal static class TestRunner
         int removed = maintainer.RemoveConnection(connectionId, registry);
         Assert.Equal(moved.DesiredScopeCount, removed);
     }
+
+    private static void PumpUntilHandshakeReady(
+        NetworkControlPlaneHost server,
+        NetworkControlPlaneHost client,
+        long serverTicksStart,
+        long clientTicksStart,
+        int maxSteps = 16)
+    {
+        long serverTicks = serverTicksStart;
+        long clientTicks = clientTicksStart;
+        for (int i = 0; i < maxSteps; i++)
+        {
+            server.Pump(serverTicks++);
+            client.Pump(clientTicks++);
+
+            if (server.Sessions.TryGetSessionIdByConnection(new ConnectionId(1), out SessionId serverSessionId) &&
+                server.Sessions.TryGetSnapshot(serverSessionId, out SessionSnapshot serverSnapshot) &&
+                serverSnapshot.State == ConnectionSessionState.Ready &&
+                client.Sessions.TryGetSessionIdByConnection(new ConnectionId(1), out SessionId clientSessionId) &&
+                client.Sessions.TryGetSnapshot(clientSessionId, out SessionSnapshot clientSnapshot) &&
+                clientSnapshot.State == ConnectionSessionState.Ready)
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException("Handshake did not reach Ready state within the expected pump window.");
+    }
+
+    private static int PollUntilReceived(INetworkTransport transport, InboundDatagram[] destination, int maxAttempts)
+    {
+        for (int i = 0; i < maxAttempts; i++)
+        {
+            int count = transport.PollInbound(destination);
+            if (count > 0)
+                return count;
+
+            Thread.SpinWait(64);
+        }
+
+        return 0;
+    }
+
 }
 
 internal static class Assert
@@ -1261,6 +1404,15 @@ internal static class Assert
     {
         if (value is null)
             throw new InvalidOperationException(message ?? "Expected value to be non-null.");
+    }
+
+    public static T NotNull<T>(T? value, string? message = null)
+        where T : class
+    {
+        if (value is null)
+            throw new InvalidOperationException(message ?? "Expected value to be non-null.");
+
+        return value;
     }
 }
 

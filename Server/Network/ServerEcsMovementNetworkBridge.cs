@@ -77,40 +77,49 @@ public sealed class ServerEcsMovementNetworkBridge
             if (count == 0)
                 break;
 
-            for (int i = 0; i < count; i++)
-            {
-                ref readonly InboundDatagram datagram = ref inbound[i];
-                if (datagram.Plane != NetworkPlane.Input)
-                    continue;
-
-                if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                {
-                    LastIgnoredInputCount++;
-                    continue;
-                }
-
-                if (!_bindings.TryGetValue(datagram.ConnectionId, out _))
-                {
-                    LastIgnoredInputCount++;
-                    continue;
-                }
-
-                if (header.PacketId != MovementInputPacket.PacketId)
-                {
-                    LastIgnoredInputCount++;
-                    continue;
-                }
-
-                var reader = new UltraSim.Network.BitReader(payload);
-                MovementInputPacket packet = MovementInputPacket.Deserialize(ref reader);
-                OnMovementInput(datagram.ConnectionId, packet);
-            }
+            ProcessInbound(inbound.AsSpan(0, count));
 
             if (count < inbound.Length)
                 break;
         }
 
         return LastReceivedInputCount;
+    }
+
+    public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        int processed = 0;
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            ref readonly InboundDatagram datagram = ref inbound[i];
+            if (datagram.Plane != NetworkPlane.Input)
+                continue;
+
+            processed++;
+            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
+            {
+                LastIgnoredInputCount++;
+                continue;
+            }
+
+            if (!_bindings.TryGetValue(datagram.ConnectionId, out _))
+            {
+                LastIgnoredInputCount++;
+                continue;
+            }
+
+            if (header.PacketId != MovementInputPacket.PacketId)
+            {
+                LastIgnoredInputCount++;
+                continue;
+            }
+
+            var reader = new UltraSim.Network.BitReader(payload);
+            MovementInputPacket packet = MovementInputPacket.Deserialize(ref reader);
+            OnMovementInput(datagram.ConnectionId, packet);
+        }
+
+        return processed;
     }
 
     public int AdvanceAndSend(float deltaSeconds, uint serverTick)

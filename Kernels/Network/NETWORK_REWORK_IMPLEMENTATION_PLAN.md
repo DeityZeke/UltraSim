@@ -253,6 +253,9 @@ Current status:
   - timeout sweep support
   - control-plane metrics snapshots and typed control-plane events
   - `PingProbePacket` / `PongProbePacket`
+  - `PacketMetadataRegistry`
+  - `DefaultPacketMetadata`
+  - `UdpSocketNetworkTransport`
 - still deferred from the broader session/runtime slice:
   - broader control-plane message families
   - more complete disconnect semantics
@@ -451,6 +454,7 @@ Current status:
   - loopback integration tests
   - first loopback benchmark
   - first paired server/client authoritative movement round-trip over loopback through `Server/Network`
+  - first paired server/client authoritative movement round-trip over real UDP socket transport after handshake
 
 ## Testing Strategy
 
@@ -498,6 +502,7 @@ Current status in this repo:
 - the repo now has:
   - foundation contracts
   - control-plane/session loopback
+  - real UDP socket transport
   - typed control/session observability seams
   - the first stream-model slice
   - scheduler/assembly primitives

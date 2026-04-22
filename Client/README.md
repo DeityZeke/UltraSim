@@ -31,7 +31,8 @@ Current benchmark note:
 
 - the first client loopback movement scenario now exists in `_Benchmarks/results/network-benchmarks.json`
 - current snapshot:
-  - `ClientMovementLoopback_1024Inputs`: `0.926 ms`, `1.22 MB`
-  - `ServerMovementLoopback_1024Inputs`: `2.105 ms`, `3.43 MB`
+  - `ClientMovementLoopback_1024Inputs`: `0.953 ms`, `1.22 MB`
+  - `ServerMovementLoopback_1024Inputs`: `2.201 ms`, `3.43 MB`
+  - `UdpMovementRoundTrip_1024Inputs`: `15.205 ms`, `4.32 MB`
 
 The old client networking code remains the behavioral reference for these concepts, but not the architecture template.

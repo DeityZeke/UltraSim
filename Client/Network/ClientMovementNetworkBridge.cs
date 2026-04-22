@@ -83,18 +83,26 @@ public sealed class ClientMovementNetworkBridge
     {
         var inbound = new InboundDatagram[32];
         int count = _transport.PollInbound(inbound);
-        for (int i = 0; i < count; i++)
+        ProcessInbound(inbound.AsSpan(0, count));
+        return count;
+    }
+
+    public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        int processed = 0;
+        for (int i = 0; i < inbound.Length; i++)
         {
-            if (inbound[i].ConnectionId != _connectionId)
+            if (inbound[i].ConnectionId != _connectionId || inbound[i].Plane != NetworkPlane.State)
                 continue;
 
+            processed++;
             if (!PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
                 continue;
 
             _registry.TryDispatch(this, header, payload);
         }
 
-        return count;
+        return processed;
     }
 
     public bool TrySampleInterpolatedState(uint targetServerTick, InterpolationLerp<ClientMovementState> lerp, out ClientMovementState state)

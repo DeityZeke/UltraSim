@@ -22,6 +22,8 @@ What exists today:
   - immutable outbound payload buffers
   - transform-stage hooks
   - loopback transport
+  - UDP socket transport
+  - packet-id metadata classification for real transports
 - first control-plane/runtime contracts for:
   - bit serialization
   - typed packet contracts
@@ -195,6 +197,7 @@ Current early result:
 - the benchmark runner now also includes the first AOI-backed ECS publish-plus-fanout scenario and a mixed AOI-classified scenario
 - the benchmark runner now also includes the first client loopback movement scenario
 - the benchmark runner now also includes the first paired server/client movement loopback scenario
+- the benchmark runner now also includes the first UDP socket-backed movement round-trip scenario
 - the seam is worth keeping, and the current shared-frame path is now a credible throughput win rather than just an allocation win
 
 Current higher-layer policy direction:

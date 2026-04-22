@@ -101,4 +101,5 @@ Current note:
 
 - the repo has now reached the first meaningful pre-bot-harness checkpoint on the client side
 - the paired server-side movement ingestion/authoritative movement path now exists for one narrow loopback slice
-- what is still missing before the harness becomes worth wiring is the real socket transport path and the next broader gameplay/server movement integration layer on top of this slice
+- a real UDP socket transport path now also exists for that slice
+- what is still missing before the harness becomes worth wiring is the next broader gameplay/server movement/runtime integration layer on top of this slice, not another transport rewrite
