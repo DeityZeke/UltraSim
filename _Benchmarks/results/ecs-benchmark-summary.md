@@ -1,95 +1,95 @@
 # ECS Benchmark Summary
 
-Generated: 2026-04-21T21:35:10.6652575+00:00
+Generated: 2026-04-22T01:29:51.3262476+00:00
 ProcessorCount: 16
 
 | Scenario | Scale | New ms | Old ms | New ns/op | Old ns/op | Faster | Alloc Delta |
 | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |
-| CreateDefaultDeferred_Position | 1000 | 0.072 | 0.333 | 72.3 | 332.7 | new | -31416 |
-| CreateDefaultDeferred_Position | 10000 | 0.226 | 0.926 | 22.6 | 92.6 | new | -1454960 |
-| CreateDefaultDeferred_Position | 50000 | 1.718 | 7.917 | 34.4 | 158.3 | new | -5508048 |
-| CreateDestroyReuseChurn_Position | 1000 | 0.717 | 0.698 | 358.5 | 349.0 | old | -25375 |
-| CreateDestroyReuseChurn_Position | 10000 | 1.225 | 3.041 | 63.0 | 156.3 | new | -595776 |
-| CreateDestroyReuseChurn_Position | 50000 | 2.269 | 4.174 | 22.8 | 42.0 | new | -2483136 |
-| DeferredAdd_Velocity | 1000 | 0.473 | 0.463 | 472.6 | 463.0 | old | -97080 |
-| DeferredAdd_Velocity | 10000 | 2.015 | 4.302 | 201.5 | 430.2 | new | -2801352 |
-| DeferredAdd_Velocity | 50000 | 7.381 | 12.736 | 147.6 | 254.7 | new | -11230016 |
-| DeferredDestroy_SparseVictims | 1000 | 0.211 | 0.278 | 422.4 | 556.1 | new | -74040 |
-| DeferredDestroy_SparseVictims | 10000 | 1.797 | 2.504 | 359.5 | 500.7 | new | -1860616 |
-| DeferredDestroy_SparseVictims | 50000 | 4.327 | 8.075 | 173.1 | 323.0 | new | -7490536 |
-| DeferredDestroy | 1000 | 0.173 | 0.230 | 173.1 | 229.6 | new | -76304 |
-| DeferredDestroy | 10000 | 1.385 | 2.202 | 138.5 | 220.2 | new | -1944480 |
-| DeferredDestroy | 50000 | 4.124 | 7.860 | 82.5 | 157.2 | new | -7745920 |
-| DeferredRemove_Velocity | 1000 | 0.346 | 0.435 | 346.2 | 434.7 | new | -91592 |
-| DeferredRemove_Velocity | 10000 | 2.401 | 4.264 | 240.1 | 426.4 | new | -2226104 |
-| DeferredRemove_Velocity | 50000 | 6.806 | 13.072 | 136.1 | 261.4 | new | -8935352 |
-| DirtyDrain_Position | 1000 | 0.267 | 0.280 | 266.7 | 279.8 | new | -75516 |
-| DirtyDrain_Position | 10000 | 1.105 | 3.105 | 110.5 | 310.5 | new | -1842336 |
-| DirtyDrain_Position | 50000 | 4.926 | 8.518 | 98.5 | 170.4 | new | -7497368 |
-| HotLoop_DeferredAdd_Velocity | 50000 | 2.705 | 4.357 | 54.1 | 87.1 | new | -4133992 |
-| HotLoop_DirtyDrain_Position | 50000 | 0.910 | 0.963 | 18.2 | 19.3 | new | -1344 |
-| HotLoop_Query1_Read_Position | 50000 | 0.125 | 0.188 | 2.5 | 3.8 | new | -1432 |
-| HotLoop_SetComponent_Position | 50000 | 0.758 | 0.856 | 15.2 | 17.1 | new | -1344 |
-| HotLoop_TickParallel_DirtyAwareWriteSystems | 10000 | 190.527 | 220.399 | 23.8 | 27.5 | new | -1146738 |
-| HotLoop_TickParallel_OscillatingMovement | 10000 | 154.234 | 442.022 | 19.3 | 55.3 | new | 101056 |
-| HotLoop_TickParallel_OscillatingMovement | 100000 | 1049.495 | 4268.615 | 13.1 | 53.4 | new | 101056 |
-| HotLoop_TickParallel_QuerySystems | 10000 | 29.106 | 45.500 | 3.6 | 5.7 | new | 27456 |
-| HotLoop_TickParallel_ReadOnlySystems | 10000 | 3.989 | 62.428 | 0.5 | 7.8 | new | 65856 |
-| HotLoop_TickSerial_DirtyAwareWriteSystems | 10000 | 96.368 | 82.201 | 12.0 | 10.3 | old | -1344 |
-| HotLoop_TickSerial_OscillatingMovement | 10000 | 190.999 | 344.580 | 23.9 | 43.1 | new | 72256 |
-| HotLoop_TickSerial_OscillatingMovement | 100000 | 1509.082 | 3577.854 | 18.9 | 44.7 | new | 72256 |
-| HotLoop_TickSerial_QuerySystems | 10000 | 12.003 | 19.372 | 1.5 | 2.4 | new | -26886 |
-| HotLoop_TickSerial_ReadOnlySystems | 10000 | 6.320 | 24.081 | 0.8 | 3.0 | new | -1344 |
-| HotLoop_TryGetComponent_Position | 50000 | 0.239 | 0.720 | 4.8 | 14.4 | new | -1344 |
-| MigrationCycle_AddRemoveVelocity | 1000 | 2.105 | 2.380 | 1052.4 | 1190.2 | new | -70392 |
-| MigrationCycle_AddRemoveVelocity | 10000 | 2.062 | 5.841 | 103.1 | 292.0 | new | -2800808 |
-| MigrationCycle_AddRemoveVelocity | 50000 | 7.007 | 13.079 | 70.1 | 130.8 | new | -10807414 |
-| PersistenceView_Filtered_Position | 1000 | 0.284 | 0.327 | 283.6 | 326.5 | new | -76656 |
-| PersistenceView_Filtered_Position | 10000 | 1.699 | 4.704 | 169.9 | 470.4 | new | -2201608 |
-| PersistenceView_Filtered_Position | 50000 | 7.042 | 12.473 | 140.8 | 249.5 | new | -8827440 |
-| Query1_Read_Position | 1000 | 0.181 | 0.250 | 180.8 | 249.9 | new | -58896 |
-| Query1_Read_Position | 10000 | 1.506 | 1.971 | 150.6 | 197.1 | new | -1682320 |
-| Query1_Read_Position | 50000 | 4.879 | 7.453 | 97.6 | 149.1 | new | -6695360 |
-| Query2_Read_PositionVelocity | 1000 | 0.261 | 0.269 | 260.6 | 268.9 | new | -67080 |
-| Query2_Read_PositionVelocity | 10000 | 2.113 | 3.376 | 211.3 | 337.6 | new | -1938280 |
-| Query2_Read_PositionVelocity | 50000 | 7.048 | 10.921 | 141.0 | 218.4 | new | -7737435 |
-| Query3_Read_PositionVelocityHealth | 1000 | 0.334 | 0.331 | 334.5 | 331.3 | old | -75264 |
-| Query3_Read_PositionVelocityHealth | 10000 | 2.927 | 4.320 | 292.7 | 432.0 | new | -2192224 |
-| Query3_Read_PositionVelocityHealth | 50000 | 10.144 | 11.200 | 202.9 | 224.0 | new | -8778056 |
-| SetComponent_Position | 1000 | 0.870 | 1.651 | 870.0 | 1651.1 | new | -66912 |
-| SetComponent_Position | 10000 | 1.741 | 2.641 | 174.1 | 264.1 | new | -1762336 |
-| SetComponent_Position | 50000 | 5.368 | 11.412 | 107.4 | 228.2 | new | -7097368 |
-| TickParallel_Active35_Shuffle10_OscillatingMovement_100k_200Ticks | 100000 | 525.335 | 2345.339 | 6.6 | 29.3 | new | -10205775 |
-| TickParallel_Active35_Shuffle10_V1PulseMovement_100k_200Ticks | 100000 | 305.192 | 589.010 | 5.1 | 9.8 | new | 13610956 |
-| TickParallel_DirtyAwareWriteSystems_10k_200Ticks | 10000 | 188.821 | 219.829 | 23.6 | 27.5 | new | -15081700 |
-| TickParallel_OscillatingMovement_100k_200Ticks | 100000 | 901.494 | 3988.162 | 11.3 | 49.9 | new | -13962448 |
-| TickParallel_OscillatingMovement_10k_200Ticks | 10000 | 137.288 | 401.196 | 17.2 | 50.1 | new | -2091989 |
-| TickParallel_QuerySystems_10k_200Ticks | 10000 | 35.404 | 49.448 | 4.4 | 6.2 | new | -1575080 |
-| TickParallel_ReadOnlySystems_10k_200Ticks | 10000 | 8.608 | 59.093 | 1.1 | 7.4 | new | -2290425 |
-| TickParallel_V1PulseMovement_100k_50Ticks | 100000 | 110.121 | 224.912 | 7.3 | 15.0 | new | 15212000 |
-| TickSerial_Active35_Shuffle10_OscillatingMovement_100k_200Ticks | 100000 | 804.793 | 2329.280 | 10.1 | 29.1 | new | -17303615 |
-| TickSerial_Active35_Shuffle10_V1PulseMovement_100k_200Ticks | 100000 | 197.836 | 748.130 | 3.3 | 12.5 | new | 6409134 |
-| TickSerial_DirtyAwareWriteSystems_10k_200Ticks | 10000 | 93.929 | 90.384 | 11.7 | 11.3 | old | -1933376 |
-| TickSerial_OscillatingMovement_100k_200Ticks | 100000 | 1246.901 | 3139.470 | 15.6 | 39.2 | new | -13379552 |
-| TickSerial_OscillatingMovement_10k_200Ticks | 10000 | 168.680 | 306.603 | 21.1 | 38.3 | new | -1579128 |
-| TickSerial_QuerySystems_10k_200Ticks | 10000 | 20.228 | 41.130 | 2.5 | 5.1 | new | -1436328 |
-| TickSerial_ReadOnlySystems_10k_200Ticks | 10000 | 10.892 | 37.331 | 1.4 | 4.7 | new | -1933456 |
-| TickSerial_V1PulseMovement_100k_50Ticks | 100000 | 56.738 | 184.132 | 3.8 | 12.3 | new | 719512 |
-| TryGetComponent_Position | 1000 | 0.253 | 0.403 | 253.4 | 403.1 | new | -66912 |
-| TryGetComponent_Position | 10000 | 1.479 | 2.395 | 147.9 | 239.5 | new | -1761932 |
-| TryGetComponent_Position | 50000 | 4.951 | 9.877 | 99.0 | 197.5 | new | -7097022 |
+| CreateDefaultDeferred_Position | 1000 | 0.069 | 0.297 | 68.6 | 296.7 | new | -23416 |
+| CreateDefaultDeferred_Position | 10000 | 0.161 | 0.881 | 16.1 | 88.1 | new | -1323984 |
+| CreateDefaultDeferred_Position | 50000 | 0.978 | 3.710 | 19.6 | 74.2 | new | -4981792 |
+| CreateDestroyReuseChurn_Position | 1000 | 0.591 | 0.647 | 295.5 | 323.3 | new | -23432 |
+| CreateDestroyReuseChurn_Position | 10000 | 1.166 | 1.919 | 59.9 | 98.6 | new | -590848 |
+| CreateDestroyReuseChurn_Position | 50000 | 2.568 | 3.086 | 25.9 | 31.1 | new | -2478208 |
+| DeferredAdd_Velocity | 1000 | 0.331 | 0.418 | 330.7 | 417.7 | new | -69816 |
+| DeferredAdd_Velocity | 10000 | 1.847 | 3.261 | 184.7 | 326.1 | new | -2343720 |
+| DeferredAdd_Velocity | 50000 | 6.518 | 8.108 | 130.4 | 162.2 | new | -9390866 |
+| DeferredDestroy_SparseVictims | 1000 | 0.193 | 0.206 | 386.2 | 411.8 | new | -67064 |
+| DeferredDestroy_SparseVictims | 10000 | 1.543 | 1.751 | 308.6 | 350.3 | new | -1761384 |
+| DeferredDestroy_SparseVictims | 50000 | 2.227 | 4.721 | 89.1 | 188.8 | new | -7090421 |
+| DeferredDestroy | 1000 | 0.184 | 0.211 | 184.2 | 210.6 | new | -67256 |
+| DeferredDestroy | 10000 | 1.112 | 1.668 | 111.2 | 166.8 | new | -1812456 |
+| DeferredDestroy | 50000 | 2.298 | 5.175 | 46.0 | 103.5 | new | -7214655 |
+| DeferredRemove_Velocity | 1000 | 0.326 | 0.416 | 326.3 | 415.7 | new | -86512 |
+| DeferredRemove_Velocity | 10000 | 2.050 | 3.105 | 205.0 | 310.5 | new | -2159488 |
+| DeferredRemove_Velocity | 50000 | 5.805 | 9.311 | 116.1 | 186.2 | new | -8666152 |
+| DirtyDrain_Position | 1000 | 0.221 | 0.238 | 221.5 | 238.3 | new | -67920 |
+| DirtyDrain_Position | 10000 | 1.507 | 1.732 | 150.7 | 173.2 | new | -1711360 |
+| DirtyDrain_Position | 50000 | 2.719 | 5.547 | 54.4 | 110.9 | new | -6967181 |
+| HotLoop_DeferredAdd_Velocity | 50000 | 3.420 | 3.742 | 68.4 | 74.8 | new | -2824200 |
+| HotLoop_DirtyDrain_Position | 50000 | 0.843 | 0.881 | 16.9 | 17.6 | new | -1344 |
+| HotLoop_Query1_Read_Position | 50000 | 0.118 | 0.193 | 2.4 | 3.9 | new | -1432 |
+| HotLoop_SetComponent_Position | 50000 | 0.667 | 0.754 | 13.3 | 15.1 | new | -1344 |
+| HotLoop_TickParallel_DirtyAwareWriteSystems | 10000 | 164.859 | 191.699 | 20.6 | 24.0 | new | -346808 |
+| HotLoop_TickParallel_OscillatingMovement | 10000 | 130.921 | 397.562 | 16.4 | 49.7 | new | 101056 |
+| HotLoop_TickParallel_OscillatingMovement | 100000 | 929.935 | 3897.665 | 11.6 | 48.7 | new | 101056 |
+| HotLoop_TickParallel_QuerySystems | 10000 | 23.738 | 41.475 | 3.0 | 5.2 | new | 27456 |
+| HotLoop_TickParallel_ReadOnlySystems | 10000 | 3.061 | 45.141 | 0.4 | 5.6 | new | 65856 |
+| HotLoop_TickSerial_DirtyAwareWriteSystems | 10000 | 79.878 | 71.813 | 10.0 | 9.0 | old | -1344 |
+| HotLoop_TickSerial_OscillatingMovement | 10000 | 161.769 | 301.238 | 20.2 | 37.7 | new | 72256 |
+| HotLoop_TickSerial_OscillatingMovement | 100000 | 1354.761 | 3133.502 | 16.9 | 39.2 | new | 72256 |
+| HotLoop_TickSerial_QuerySystems | 10000 | 13.847 | 16.913 | 1.7 | 2.1 | new | -26944 |
+| HotLoop_TickSerial_ReadOnlySystems | 10000 | 6.333 | 22.680 | 0.8 | 2.8 | new | -1344 |
+| HotLoop_TryGetComponent_Position | 50000 | 0.205 | 0.569 | 4.1 | 11.4 | new | -1344 |
+| MigrationCycle_AddRemoveVelocity | 1000 | 1.576 | 2.149 | 787.8 | 1074.6 | new | -64624 |
+| MigrationCycle_AddRemoveVelocity | 10000 | 1.623 | 4.142 | 81.1 | 207.1 | new | -2732456 |
+| MigrationCycle_AddRemoveVelocity | 50000 | 4.592 | 10.116 | 45.9 | 101.2 | new | -10538148 |
+| PersistenceView_Filtered_Position | 1000 | 0.270 | 0.312 | 269.8 | 312.3 | new | -68656 |
+| PersistenceView_Filtered_Position | 10000 | 2.572 | 2.878 | 257.2 | 287.8 | new | -2070632 |
+| PersistenceView_Filtered_Position | 50000 | 3.670 | 8.070 | 73.4 | 161.4 | new | -8297336 |
+| Query1_Read_Position | 1000 | 0.174 | 0.201 | 174.0 | 200.9 | new | -50896 |
+| Query1_Read_Position | 10000 | 1.079 | 1.604 | 107.9 | 160.4 | new | -1551344 |
+| Query1_Read_Position | 50000 | 2.733 | 5.332 | 54.7 | 106.6 | new | -6171019 |
+| Query2_Read_PositionVelocity | 1000 | 0.239 | 0.262 | 238.8 | 262.4 | new | -59080 |
+| Query2_Read_PositionVelocity | 10000 | 1.934 | 2.635 | 193.4 | 263.5 | new | -1807304 |
+| Query2_Read_PositionVelocity | 50000 | 5.166 | 8.007 | 103.3 | 160.1 | new | -7211380 |
+| Query3_Read_PositionVelocityHealth | 1000 | 0.300 | 0.320 | 299.5 | 319.6 | new | -67264 |
+| Query3_Read_PositionVelocityHealth | 10000 | 2.588 | 3.503 | 258.8 | 350.3 | new | -2061248 |
+| Query3_Read_PositionVelocityHealth | 50000 | 7.510 | 8.038 | 150.2 | 160.8 | new | -8251728 |
+| SetComponent_Position | 1000 | 0.784 | 1.448 | 783.7 | 1448.1 | new | -58912 |
+| SetComponent_Position | 10000 | 1.559 | 2.284 | 155.9 | 228.4 | new | -1631360 |
+| SetComponent_Position | 50000 | 4.193 | 5.491 | 83.9 | 109.8 | new | -6571016 |
+| TickParallel_Active35_Shuffle10_OscillatingMovement_100k_200Ticks | 100000 | 459.540 | 2184.648 | 5.7 | 27.3 | new | -12676018 |
+| TickParallel_Active35_Shuffle10_V1PulseMovement_100k_200Ticks | 100000 | 261.041 | 558.754 | 4.4 | 9.3 | new | 11758668 |
+| TickParallel_DirtyAwareWriteSystems_10k_200Ticks | 10000 | 170.664 | 194.648 | 21.3 | 24.3 | new | -6353631 |
+| TickParallel_OscillatingMovement_100k_200Ticks | 100000 | 809.563 | 3615.867 | 10.1 | 45.2 | new | -12913896 |
+| TickParallel_OscillatingMovement_10k_200Ticks | 10000 | 114.624 | 374.209 | 14.3 | 46.8 | new | -1961032 |
+| TickParallel_QuerySystems_10k_200Ticks | 10000 | 33.600 | 45.436 | 4.2 | 5.7 | new | -1493764 |
+| TickParallel_ReadOnlySystems_10k_200Ticks | 10000 | 9.391 | 61.617 | 1.2 | 7.7 | new | -2160688 |
+| TickParallel_V1PulseMovement_100k_50Ticks | 100000 | 95.762 | 218.001 | 6.4 | 14.5 | new | 13693920 |
+| TickSerial_Active35_Shuffle10_OscillatingMovement_100k_200Ticks | 100000 | 739.647 | 2066.269 | 9.2 | 25.8 | new | -16256960 |
+| TickSerial_Active35_Shuffle10_V1PulseMovement_100k_200Ticks | 100000 | 159.974 | 653.729 | 2.7 | 10.9 | new | 8047195 |
+| TickSerial_DirtyAwareWriteSystems_10k_200Ticks | 10000 | 78.012 | 78.727 | 9.8 | 9.8 | new | -1802400 |
+| TickSerial_OscillatingMovement_100k_200Ticks | 100000 | 1129.576 | 2690.489 | 14.1 | 33.6 | new | -12331536 |
+| TickSerial_OscillatingMovement_10k_200Ticks | 10000 | 139.933 | 263.133 | 17.5 | 32.9 | new | -1448688 |
+| TickSerial_QuerySystems_10k_200Ticks | 10000 | 16.905 | 28.110 | 2.1 | 3.5 | new | -1302098 |
+| TickSerial_ReadOnlySystems_10k_200Ticks | 10000 | 10.582 | 35.301 | 1.3 | 4.4 | new | -1802480 |
+| TickSerial_V1PulseMovement_100k_50Ticks | 100000 | 52.374 | 164.034 | 3.5 | 10.9 | new | 1767528 |
+| TryGetComponent_Position | 1000 | 0.210 | 0.379 | 209.8 | 378.9 | new | -58912 |
+| TryGetComponent_Position | 10000 | 1.144 | 1.887 | 114.4 | 188.7 | new | -1631360 |
+| TryGetComponent_Position | 50000 | 3.053 | 5.100 | 61.1 | 102.0 | new | -6571030 |
 
 ## New-Only Scenarios
-- `SchemaBuild_4Components` scale `4` mean `0.010 ms`, alloc `3536`
-- `CreateDefaultImmediate_Position` scale `1000` mean `0.142 ms`, alloc `91912`
-- `PatchComponent_Position` scale `1000` mean `0.326 ms`, alloc `153712`
-- `CreateDefaultImmediate_Position` scale `10000` mean `0.748 ms`, alloc `2058664`
-- `PatchComponent_Position` scale `10000` mean `1.030 ms`, alloc `2196088`
-- `CreateDefaultImmediate_Position` scale `50000` mean `3.434 ms`, alloc `8351776`
-- `PatchComponent_Position` scale `50000` mean `4.686 ms`, alloc `9575848`
+- `SchemaBuild_4Components` scale `4` mean `0.009 ms`, alloc `3536`
+- `CreateDefaultImmediate_Position` scale `1000` mean `0.116 ms`, alloc `92136`
+- `PatchComponent_Position` scale `1000` mean `0.227 ms`, alloc `145720`
+- `CreateDefaultImmediate_Position` scale `10000` mean `0.726 ms`, alloc `2058888`
+- `PatchComponent_Position` scale `10000` mean `1.711 ms`, alloc `2065216`
+- `CreateDefaultImmediate_Position` scale `50000` mean `1.541 ms`, alloc `8351232`
+- `PatchComponent_Position` scale `50000` mean `3.005 ms`, alloc `9055696`
 
 ## Old-Only Scenarios
-- `ComponentRegister_4Components` scale `4` mean `0.009 ms`, alloc `2128`
-- `GetComponentRef_Write_Position` scale `1000` mean `0.210 ms`, alloc `221632`
-- `GetComponentRef_Write_Position` scale `10000` mean `2.355 ms`, alloc `3958424`
-- `GetComponentRef_Write_Position` scale `50000` mean `9.532 ms`, alloc `16673072`
+- `ComponentRegister_4Components` scale `4` mean `0.008 ms`, alloc `2128`
+- `GetComponentRef_Write_Position` scale `1000` mean `0.189 ms`, alloc `205640`
+- `GetComponentRef_Write_Position` scale `10000` mean `1.556 ms`, alloc `3696576`
+- `GetComponentRef_Write_Position` scale `50000` mean `4.943 ms`, alloc `15622872`

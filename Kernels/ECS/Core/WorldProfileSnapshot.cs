@@ -5,6 +5,7 @@ namespace UltraSim.ECS;
 /// </summary>
 public readonly record struct StructuralApplyStats(
     int CreateDefaultCount,
+    int PrefabCount,
     int DestroyCount,
     int AddCount,
     int RemoveCount);

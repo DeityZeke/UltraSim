@@ -18,6 +18,9 @@ internal static class TestRunner
         Run(nameof(World_CreatePrefab_TemplatePrefab_AppliesTemplateAndInstanceState), World_CreatePrefab_TemplatePrefab_AppliesTemplateAndInstanceState);
         Run(nameof(World_CreatePrefab_ResolvedPrefab_UsesResolvedColumnPath), World_CreatePrefab_ResolvedPrefab_UsesResolvedColumnPath);
         Run(nameof(World_CreatePrefab_ByKey_UsesConfiguredResolver), World_CreatePrefab_ByKey_UsesConfiguredResolver);
+        Run(nameof(World_EnqueueCreatePrefab_DefinitionBatch_AppliesAfterStructuralBarrier), World_EnqueueCreatePrefab_DefinitionBatch_AppliesAfterStructuralBarrier);
+        Run(nameof(World_EnqueueCreatePrefab_TypedBatch_AppliesAfterStructuralBarrier), World_EnqueueCreatePrefab_TypedBatch_AppliesAfterStructuralBarrier);
+        Run(nameof(World_TryEnqueueCreatePrefab_ByKey_ResolvesAfterStructuralBarrier), World_TryEnqueueCreatePrefab_ByKey_ResolvesAfterStructuralBarrier);
         Run(nameof(Schema_CreatesColumnsFromRegisteredFactories), Schema_CreatesColumnsFromRegisteredFactories);
         Run(nameof(ArchetypeManager_NormalizesAndCachesSignatures), ArchetypeManager_NormalizesAndCachesSignatures);
         Run(nameof(ArchetypeManager_EnumerateWith_FiltersAndSnapshots), ArchetypeManager_EnumerateWith_FiltersAndSnapshots);
@@ -227,6 +230,120 @@ internal static class TestRunner
         Assert.Equal(new Position(42), world.GetComponent<Position>(entity));
         Assert.False(world.TryCreatePrefab("missing", out Entity missing));
         Assert.Equal(Entity.Null, missing);
+    }
+
+    private static void World_EnqueueCreatePrefab_DefinitionBatch_AppliesAfterStructuralBarrier()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        ReadOnlySpan<PrefabDefinition> prefabs =
+        [
+            PrefabDefinition.Create(
+                new ArchetypeSignature([positionId, velocityId]),
+                static (Archetype archetype, int slot) =>
+                {
+                    archetype.GetComponentSpan<Position>(new ComponentId(0))[slot] = new Position(11);
+                    archetype.GetComponentSpan<Velocity>(new ComponentId(1))[slot] = new Velocity(3);
+                }),
+            PrefabDefinition.Create(
+                new ArchetypeSignature([positionId, velocityId]),
+                static (Archetype archetype, int slot) =>
+                {
+                    archetype.GetComponentSpan<Position>(new ComponentId(0))[slot] = new Position(22);
+                    archetype.GetComponentSpan<Velocity>(new ComponentId(1))[slot] = new Velocity(4);
+                }),
+        ];
+
+        world.EnqueueCreatePrefab(prefabs);
+        Assert.Equal(0, world.Entities.AliveCount);
+
+        world.ProcessStructuralQueues();
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        int dirtyCount = world.DrainDirtyTo<Position>(dirty);
+        Assert.Equal(2, dirtyCount);
+        Assert.Equal(2, world.DrainDirtyTo<Velocity>(dirty));
+
+        var positions = new HashSet<int>();
+        var velocities = new HashSet<int>();
+        for (int i = 0; i < dirtyCount; i++)
+        {
+            Entity entity = dirty[i];
+            Assert.True(world.Entities.IsAlive(entity));
+            positions.Add(world.GetComponent<Position>(entity).X);
+            velocities.Add(world.GetComponent<Velocity>(entity).X);
+        }
+
+        Assert.True(positions.SetEquals([11, 22]));
+        Assert.True(velocities.SetEquals([3, 4]));
+    }
+
+    private static void World_EnqueueCreatePrefab_TypedBatch_AppliesAfterStructuralBarrier()
+    {
+        var builder = new EcsSchemaBuilder();
+        builder.RegisterComponent<Position>();
+        builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        ReadOnlySpan<SimpleMoverPrefab> prefabs =
+        [
+            new SimpleMoverPrefab(7, 1),
+            new SimpleMoverPrefab(9, 2),
+        ];
+
+        world.EnqueueCreatePrefab(prefabs);
+        Assert.Equal(0, world.Entities.AliveCount);
+
+        world.ProcessStructuralQueues();
+
+        Span<Entity> dirty = stackalloc Entity[8];
+        int dirtyCount = world.DrainDirtyTo<Position>(dirty);
+        Assert.Equal(2, dirtyCount);
+
+        var positions = new HashSet<int>();
+        var velocities = new HashSet<int>();
+        for (int i = 0; i < dirtyCount; i++)
+        {
+            Entity entity = dirty[i];
+            positions.Add(world.GetComponent<Position>(entity).X);
+            velocities.Add(world.GetComponent<Velocity>(entity).X);
+        }
+
+        Assert.True(positions.SetEquals([7, 9]));
+        Assert.True(velocities.SetEquals([1, 2]));
+    }
+
+    private static void World_TryEnqueueCreatePrefab_ByKey_ResolvesAfterStructuralBarrier()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        var catalog = new PrefabCatalog();
+        catalog.Add("spawn/deferred-position-64", PrefabDefinition.Create(
+            new ArchetypeSignature([positionId]),
+            static (Archetype archetype, int slot) =>
+            {
+                archetype.GetComponentSpan<Position>(new ComponentId(0))[slot] = new Position(64);
+            }));
+
+        var world = new World(builder.Build(), new EcsWorldServices
+        {
+            PrefabResolver = catalog,
+        });
+
+        Assert.True(world.TryEnqueueCreatePrefab("spawn/deferred-position-64"));
+        Assert.False(world.TryEnqueueCreatePrefab("missing"));
+        Assert.Equal(0, world.Entities.AliveCount);
+
+        world.ProcessStructuralQueues();
+
+        Span<Entity> dirty = stackalloc Entity[4];
+        int dirtyCount = world.DrainDirtyTo<Position>(dirty);
+        Assert.Equal(1, dirtyCount);
+        Assert.True(world.Entities.IsAlive(dirty[0]));
+        Assert.Equal(new Position(64), world.GetComponent<Position>(dirty[0]));
     }
 
     private static void Schema_CreatesColumnsFromRegisteredFactories()
@@ -2056,6 +2173,7 @@ internal static class TestRunner
         world.DrainDirtyTo(dirty);
 
         world.EnqueueCreateDefault(new ArchetypeSignature([positionId]));
+        world.EnqueueCreatePrefab(new SimpleMoverPrefab(31, 5));
         world.RegisterSystem(new ContextActionSystem<DeterminismVelocityTag>(
             new SystemDescriptor(
                 "ProfileAdd",
@@ -2075,6 +2193,7 @@ internal static class TestRunner
         WorldProfileSnapshot profile = world.LastProfile;
         Assert.Equal((uint)0, profile.Tick);
         Assert.Equal(1, profile.PreSystems.CreateDefaultCount);
+        Assert.Equal(1, profile.PreSystems.PrefabCount);
         Assert.Equal(0, profile.PreSystems.AddCount);
         Assert.Equal(1, profile.PostSystems.AddCount);
         Assert.Equal(0, profile.PostSystems.DestroyCount);

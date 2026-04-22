@@ -19,6 +19,12 @@ public sealed partial class World
 
         public void EnqueueCreateDefault(ArchetypeSignature signature) => _world.EnqueueCreateDefault(signature);
         public void EnqueueCreateDefault(ReadOnlySpan<ArchetypeSignature> signatures) => _world.EnqueueCreateDefault(signatures);
+        public void EnqueueCreatePrefab(PrefabDefinition prefab) => _world.EnqueueCreatePrefab(prefab);
+        public void EnqueueCreatePrefab(ReadOnlySpan<PrefabDefinition> prefabs) => _world.EnqueueCreatePrefab(prefabs);
+        public void EnqueueCreatePrefab<TPrefab>(in TPrefab prefab) where TPrefab : unmanaged, IPrefab<TPrefab> => _world.EnqueueCreatePrefab(in prefab);
+        public void EnqueueCreatePrefab<TPrefab>(ReadOnlySpan<TPrefab> prefabs) where TPrefab : unmanaged, IPrefab<TPrefab> => _world.EnqueueCreatePrefab(prefabs);
+        public void EnqueueCreatePrefab(string key) => _world.EnqueueCreatePrefab(key);
+        public bool TryEnqueueCreatePrefab(string key) => _world.TryEnqueueCreatePrefab(key);
         public void EnqueueDestroy(Entity entity) => _world.EnqueueDestroy(entity);
         public void EnqueueDestroy(ReadOnlySpan<Entity> entities) => _world.EnqueueDestroy(entities);
         public void EnqueueAdd<T>(Entity entity, T value) where T : unmanaged, IComponent<T> => _world.EnqueueAdd(entity, value);
@@ -114,6 +120,55 @@ public sealed partial class World
     {
         EnsureNotShutdown();
         _structural.EnqueueCreateDefault(signatures);
+    }
+
+    public void EnqueueCreatePrefab(PrefabDefinition prefab)
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueCreatePrefab(prefab);
+    }
+
+    public void EnqueueCreatePrefab(ReadOnlySpan<PrefabDefinition> prefabs)
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueCreatePrefab(prefabs);
+    }
+
+    public void EnqueueCreatePrefab<TPrefab>(in TPrefab prefab)
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueCreatePrefab(in prefab);
+    }
+
+    public void EnqueueCreatePrefab<TPrefab>(ReadOnlySpan<TPrefab> prefabs)
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        EnsureNotShutdown();
+        _structural.EnqueueCreatePrefab(prefabs);
+    }
+
+    public void EnqueueCreatePrefab(string key)
+    {
+        EnsureNotShutdown();
+
+        if (!TryEnqueueCreatePrefab(key))
+            throw new InvalidOperationException($"Prefab '{key}' could not be resolved for this world.");
+    }
+
+    public bool TryEnqueueCreatePrefab(string key)
+    {
+        EnsureNotShutdown();
+
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("Prefab key is required.", nameof(key));
+
+        IEcsPrefabResolver? resolver = Services.PrefabResolver;
+        if (resolver is null || !resolver.TryResolvePrefab(key, out PrefabDefinition prefab))
+            return false;
+
+        _structural.EnqueueCreatePrefab(prefab);
+        return true;
     }
 
     public void EnqueueDestroy(Entity entity)
@@ -510,11 +565,16 @@ public sealed partial class World
 
     internal Entity CreateDefaultImmediate(ArchetypeSignature signature)
     {
+        return CreateDefaultImmediate(signature, out _, out _);
+    }
+
+    internal Entity CreateDefaultImmediate(ArchetypeSignature signature, out Archetype archetype, out int slot)
+    {
         ArgumentNullException.ThrowIfNull(signature);
 
-        Archetype archetype = Archetypes.GetOrCreate(signature);
+        archetype = Archetypes.GetOrCreate(signature);
         Entity entity = EntityStore.Allocate();
-        int slot = archetype.AddEntity(entity);
+        slot = archetype.AddEntity(entity);
         EntityStore.SetLocation(entity, archetype, slot);
         _dirty.Mark(entity);
         return entity;

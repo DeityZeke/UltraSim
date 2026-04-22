@@ -8,18 +8,7 @@ public sealed partial class World
     public Entity CreatePrefab(PrefabDefinition prefab)
     {
         EnsureNotShutdown();
-
-        Entity entity = CreateDefaultImmediate(prefab.Signature);
-        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
-            throw new InvalidOperationException("Created prefab entity could not be located.");
-
-        prefab.ApplyTo(archetype, slot);
-
-        ReadOnlySpan<ComponentId> componentIds = archetype.ComponentIds;
-        for (int i = 0; i < componentIds.Length; i++)
-            _dirty.Mark(componentIds[i], entity);
-
-        return entity;
+        return CreatePrefabImmediate(prefab);
     }
 
     /// <summary>
@@ -29,18 +18,7 @@ public sealed partial class World
         where TPrefab : unmanaged, IPrefab<TPrefab>
     {
         EnsureNotShutdown();
-
-        Entity entity = CreateDefaultImmediate(prefab.Signature);
-        if (!EntityStore.TryGetLocation(entity, out Archetype archetype, out int slot))
-            throw new InvalidOperationException("Created prefab entity could not be located.");
-
-        PrefabDefinition.PrefabTypeCache<TPrefab>.Apply(in prefab, archetype, slot);
-
-        ReadOnlySpan<ComponentId> componentIds = archetype.ComponentIds;
-        for (int i = 0; i < componentIds.Length; i++)
-            _dirty.Mark(componentIds[i], entity);
-
-        return entity;
+        return CreatePrefabImmediate(in prefab);
     }
 
     /// <summary>
@@ -71,7 +49,56 @@ public sealed partial class World
             return false;
         }
 
-        entity = CreatePrefab(prefab);
+        entity = CreatePrefabImmediate(prefab);
         return true;
+    }
+
+    internal Entity CreatePrefabImmediate(PrefabDefinition prefab)
+    {
+        Entity entity = CreateDefaultImmediate(prefab.Signature, out Archetype archetype, out int slot);
+        prefab.ApplyTo(archetype, slot);
+        MarkPrefabComponentsDirty(archetype, entity);
+        return entity;
+    }
+
+    internal Entity CreatePrefabImmediate<TPrefab>(in TPrefab prefab)
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        Entity entity = CreateDefaultImmediate(prefab.Signature, out Archetype archetype, out int slot);
+        PrefabDefinition.PrefabTypeCache<TPrefab>.Apply(in prefab, archetype, slot);
+        MarkPrefabComponentsDirty(archetype, entity);
+        return entity;
+    }
+
+    internal int CreatePrefabImmediateBatch(ReadOnlySpan<PrefabDefinition> prefabs)
+    {
+        int created = 0;
+        for (int i = 0; i < prefabs.Length; i++)
+        {
+            _ = CreatePrefabImmediate(prefabs[i]);
+            created++;
+        }
+
+        return created;
+    }
+
+    internal int CreatePrefabImmediateBatch<TPrefab>(ReadOnlySpan<TPrefab> prefabs)
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        int created = 0;
+        for (int i = 0; i < prefabs.Length; i++)
+        {
+            _ = CreatePrefabImmediate(in prefabs[i]);
+            created++;
+        }
+
+        return created;
+    }
+
+    private void MarkPrefabComponentsDirty(Archetype archetype, Entity entity)
+    {
+        ReadOnlySpan<ComponentId> componentIds = archetype.ComponentIds;
+        for (int i = 0; i < componentIds.Length; i++)
+            _dirty.Mark(componentIds[i], entity);
     }
 }

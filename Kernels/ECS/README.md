@@ -134,7 +134,7 @@ Implemented so far:
 - dedicated scheduler feature report coverage for profiling overhead, execution-mode crossover, and cadence spreading,
 - worker-count retention diagnostics for dirty-capture and thread-local scratch state,
 - worker-local dirty capture redesigned around bounded append-only entity buffers instead of large per-worker index dedupe tables,
-- prefab startup slice now in place through typed prefab contracts, `PrefabDefinition`, `PrefabCatalog`, and immediate world prefab spawn helpers,
+- prefab startup slice now in place through typed prefab contracts, `PrefabDefinition`, `PrefabCatalog`, immediate world prefab spawn helpers, and deferred prefab structural queue integration,
 - persistence seams still held for the next Phase 2 slice,
 - executable incremental tests.
 
@@ -155,10 +155,9 @@ Current practical status:
 - automatic cadence spreading is still intentionally not applied to `Movement` and `Combat`, because current measurements show that benefit is workload-dependent rather than universally positive there,
 - persistence remains intentionally deferred behind working seams,
 - prefab work is now partially landed but still intentionally narrow:
-  - immediate spawn only,
   - no static global prefab registry,
   - no file-backed/data-driven loader yet,
-  - no deferred prefab queue integration yet,
+  - no richer prefab import/catalog pipeline yet,
 - the main remaining competitive gaps are now concentrated in a narrow destroy/dirty-drain path set rather than in core architecture.
 
 Accepted current tradeoffs:
@@ -186,17 +185,17 @@ Current prefab pieces:
 - `PrefabCatalog`
 - immediate `World.CreatePrefab(...)` helpers
 - resolver-backed `World.CreatePrefab(string key)` / `TryCreatePrefab(...)`
+- deferred `EnqueueCreatePrefab(...)` queue support for definitions, typed prefabs, and resolver-backed keys
 
 Current prefab policy:
 
 - prefabs remain instance-owned and engine-agnostic,
 - there is no process-global prefab registry,
-- the current path is immediate spawn only,
+- both immediate and deferred structural prefab spawn paths now exist,
 - spawned prefab entities mark their applied components dirty so future persistence/replication layers can observe them consistently.
 
 Still deferred for later Phase 2 slices:
 
-- deferred prefab structural queue integration,
 - file-backed/data-driven prefab loading,
 - richer prefab catalogs/import pipelines,
 - deeper spawn-path optimization if real workloads justify it.

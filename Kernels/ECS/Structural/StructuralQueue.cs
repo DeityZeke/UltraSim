@@ -7,12 +7,17 @@ internal sealed class StructuralQueue
     private readonly object _sync = new();
     private List<ArchetypeSignature> _createDefaultsWrite = new();
     private List<ArchetypeSignature> _createDefaultsRead = new();
+    private List<PrefabDefinition> _prefabDefinitionsWrite = new();
+    private List<PrefabDefinition> _prefabDefinitionsRead = new();
     private List<Entity> _destroysWrite = new();
     private List<Entity> _destroysRead = new();
+    private readonly List<IStructuralPrefabBuffer> _prefabBuffers = new();
+    private readonly Dictionary<Type, IStructuralPrefabBuffer> _prefabByType = new();
     private readonly List<IStructuralAddBuffer> _addBuffers = new();
     private readonly Dictionary<Type, IStructuralAddBuffer> _addByType = new();
     private readonly List<IStructuralRemoveBuffer> _removeBuffers = new();
     private readonly Dictionary<Type, IStructuralRemoveBuffer> _removeByType = new();
+    private int _prefabCount;
     private int _addCount;
     private int _removeCount;
 
@@ -23,8 +28,11 @@ internal sealed class StructuralQueue
             lock (_sync)
                 return _createDefaultsWrite.Count > 0
                     || _createDefaultsRead.Count > 0
+                    || _prefabDefinitionsWrite.Count > 0
+                    || _prefabDefinitionsRead.Count > 0
                     || _destroysWrite.Count > 0
                     || _destroysRead.Count > 0
+                    || _prefabCount > 0
                     || _addCount > 0
                     || _removeCount > 0;
         }
@@ -45,6 +53,44 @@ internal sealed class StructuralQueue
                 ArgumentNullException.ThrowIfNull(signatures[i]);
 
             AppendRange(_createDefaultsWrite, signatures);
+        }
+    }
+
+    public void EnqueueCreatePrefab(PrefabDefinition prefab)
+    {
+        lock (_sync)
+        {
+            _prefabDefinitionsWrite.Add(prefab);
+            _prefabCount++;
+        }
+    }
+
+    public void EnqueueCreatePrefab(ReadOnlySpan<PrefabDefinition> prefabs)
+    {
+        lock (_sync)
+        {
+            AppendRange(_prefabDefinitionsWrite, prefabs);
+            _prefabCount += prefabs.Length;
+        }
+    }
+
+    public void EnqueueCreatePrefab<TPrefab>(in TPrefab prefab)
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        lock (_sync)
+        {
+            GetPrefabBuffer<TPrefab>().Add(prefab);
+            _prefabCount++;
+        }
+    }
+
+    public void EnqueueCreatePrefab<TPrefab>(ReadOnlySpan<TPrefab> prefabs)
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        lock (_sync)
+        {
+            GetPrefabBuffer<TPrefab>().AddRange(prefabs);
+            _prefabCount += prefabs.Length;
         }
     }
 
@@ -110,8 +156,10 @@ internal sealed class StructuralQueue
 
     public StructuralApplyStats Apply(World world)
     {
+        IStructuralPrefabBuffer[] prefabBuffers;
         IStructuralAddBuffer[] addBuffers;
         IStructuralRemoveBuffer[] removeBuffers;
+        int prefabCount;
         int addCount;
         int removeCount;
 
@@ -119,8 +167,11 @@ internal sealed class StructuralQueue
         {
             if (_createDefaultsWrite.Count == 0
                 && _createDefaultsRead.Count == 0
+                && _prefabDefinitionsWrite.Count == 0
+                && _prefabDefinitionsRead.Count == 0
                 && _destroysWrite.Count == 0
                 && _destroysRead.Count == 0
+                && _prefabCount == 0
                 && _addCount == 0
                 && _removeCount == 0)
             {
@@ -128,12 +179,16 @@ internal sealed class StructuralQueue
             }
 
             SwapCreateDefaultsForApply();
+            SwapPrefabDefinitionsForApply();
             SwapDestroysForApply();
+            prefabBuffers = SnapshotPrefabBuffers();
             addBuffers = SnapshotAddBuffers();
             removeBuffers = SnapshotRemoveBuffers();
+            prefabCount = _prefabCount;
             addCount = _addCount;
             removeCount = _removeCount;
 
+            _prefabCount = 0;
             _addCount = 0;
             _removeCount = 0;
         }
@@ -141,6 +196,11 @@ internal sealed class StructuralQueue
         _ = world.DestroyImmediateBatch(CollectionsMarshal.AsSpan(_destroysRead));
 
         _ = world.CreateDefaultImmediateBatch(CollectionsMarshal.AsSpan(_createDefaultsRead));
+
+        _ = world.CreatePrefabImmediateBatch(CollectionsMarshal.AsSpan(_prefabDefinitionsRead));
+
+        for (int i = 0; i < prefabBuffers.Length; i++)
+            prefabBuffers[i].Apply(world);
 
         for (int i = 0; i < removeBuffers.Length; i++)
             removeBuffers[i].Apply(world);
@@ -151,10 +211,12 @@ internal sealed class StructuralQueue
         int createDefaultCount = _createDefaultsRead.Count;
         int destroyCount = _destroysRead.Count;
         _createDefaultsRead.Clear();
+        _prefabDefinitionsRead.Clear();
         _destroysRead.Clear();
 
         return new StructuralApplyStats(
             CreateDefaultCount: createDefaultCount,
+            PrefabCount: prefabCount,
             DestroyCount: destroyCount,
             AddCount: addCount,
             RemoveCount: removeCount);
@@ -166,10 +228,16 @@ internal sealed class StructuralQueue
         {
             _createDefaultsWrite.Clear();
             _createDefaultsRead.Clear();
+            _prefabDefinitionsWrite.Clear();
+            _prefabDefinitionsRead.Clear();
             _destroysWrite.Clear();
             _destroysRead.Clear();
+            _prefabCount = 0;
             _addCount = 0;
             _removeCount = 0;
+
+            for (int i = 0; i < _prefabBuffers.Count; i++)
+                _prefabBuffers[i].ClearAll();
 
             for (int i = 0; i < _addBuffers.Count; i++)
                 _addBuffers[i].ClearAll();
@@ -187,12 +255,36 @@ internal sealed class StructuralQueue
         (_createDefaultsWrite, _createDefaultsRead) = (_createDefaultsRead, _createDefaultsWrite);
     }
 
+    private void SwapPrefabDefinitionsForApply()
+    {
+        if (_prefabDefinitionsWrite.Count == 0)
+            return;
+
+        (_prefabDefinitionsWrite, _prefabDefinitionsRead) = (_prefabDefinitionsRead, _prefabDefinitionsWrite);
+    }
+
     private void SwapDestroysForApply()
     {
         if (_destroysWrite.Count == 0)
             return;
 
         (_destroysWrite, _destroysRead) = (_destroysRead, _destroysWrite);
+    }
+
+    private IStructuralPrefabBuffer[] SnapshotPrefabBuffers()
+    {
+        if (_prefabCount == 0)
+            return Array.Empty<IStructuralPrefabBuffer>();
+
+        var buffers = new List<IStructuralPrefabBuffer>(_prefabBuffers.Count);
+        for (int i = 0; i < _prefabBuffers.Count; i++)
+        {
+            IStructuralPrefabBuffer buffer = _prefabBuffers[i];
+            if (buffer.SwapForApply())
+                buffers.Add(buffer);
+        }
+
+        return buffers.Count == 0 ? Array.Empty<IStructuralPrefabBuffer>() : buffers.ToArray();
     }
 
     private IStructuralAddBuffer[] SnapshotAddBuffers()
@@ -225,6 +317,19 @@ internal sealed class StructuralQueue
         }
 
         return buffers.Count == 0 ? Array.Empty<IStructuralRemoveBuffer>() : buffers.ToArray();
+    }
+
+    private StructuralPrefabBuffer<TPrefab> GetPrefabBuffer<TPrefab>()
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        Type type = typeof(TPrefab);
+        if (_prefabByType.TryGetValue(type, out IStructuralPrefabBuffer? existing))
+            return (StructuralPrefabBuffer<TPrefab>)existing;
+
+        var created = new StructuralPrefabBuffer<TPrefab>();
+        _prefabByType.Add(type, created);
+        _prefabBuffers.Add(created);
+        return created;
     }
 
     private StructuralAddBuffer<T> GetAddBuffer<T>() where T : unmanaged, IComponent<T>
@@ -270,11 +375,56 @@ internal sealed class StructuralQueue
         void ClearAll();
     }
 
+    private interface IStructuralPrefabBuffer
+    {
+        bool SwapForApply();
+        void Apply(World world);
+        void ClearAll();
+    }
+
     private interface IStructuralRemoveBuffer
     {
         bool SwapForApply();
         void Apply(World world);
         void ClearAll();
+    }
+
+    private sealed class StructuralPrefabBuffer<TPrefab> : IStructuralPrefabBuffer
+        where TPrefab : unmanaged, IPrefab<TPrefab>
+    {
+        private List<TPrefab> _writePrefabs = new();
+        private List<TPrefab> _readPrefabs = new();
+
+        public void Add(TPrefab prefab)
+        {
+            _writePrefabs.Add(prefab);
+        }
+
+        public void AddRange(ReadOnlySpan<TPrefab> prefabs)
+        {
+            AppendRange(_writePrefabs, prefabs);
+        }
+
+        public bool SwapForApply()
+        {
+            if (_writePrefabs.Count == 0)
+                return false;
+
+            (_writePrefabs, _readPrefabs) = (_readPrefabs, _writePrefabs);
+            return _readPrefabs.Count > 0;
+        }
+
+        public void Apply(World world)
+        {
+            _ = world.CreatePrefabImmediateBatch((ReadOnlySpan<TPrefab>)CollectionsMarshal.AsSpan(_readPrefabs));
+            _readPrefabs.Clear();
+        }
+
+        public void ClearAll()
+        {
+            _writePrefabs.Clear();
+            _readPrefabs.Clear();
+        }
     }
 
     private sealed class StructuralAddBuffer<T> : IStructuralAddBuffer where T : unmanaged, IComponent<T>
