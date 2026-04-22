@@ -43,13 +43,18 @@ What exists today:
   - explicit cursor types
   - bounded event recovery signaling
   - simple stream snapshots/drain results
+- first scheduler contracts for:
+  - per-class connection budgets
+  - connection schedule state
+  - typed scheduled work items
+  - stream scheduling with recovery signaling
 
 What does not exist yet:
 
 - broader protocol families beyond the first control-plane slice
 - richer session policy:
   - richer disconnect/admission policy beyond the current minimal rules
-- scheduler/assembly pipeline
+- packet assembly/finalization pipeline
 - ECS/server/client integration layers
 
 ## Design Position

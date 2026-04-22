@@ -303,6 +303,25 @@ Done when:
 - overload behavior is explicit and measurable
 - budget/degradation tests exist
 
+Current status:
+
+- started
+- the first scheduler primitives are now in place:
+  - `PacketClassBudget`
+  - `ConnectionSendBudget`
+  - `ConnectionScheduleState`
+  - `ScheduledWorkItem`
+  - `ConnectionStreamScheduler`
+- current behavior:
+  - latest-state (`Realtime`) work is scheduled before ordered-event (`ReliableEvent`) work
+  - per-class item and payload-byte budgets are enforced
+  - ordered-event recovery requirements propagate through schedule results
+- still deferred inside this slice:
+  - packet assembly/finalization
+  - shared payload references/fanout-aware scheduling
+  - benchmark coverage for scheduling/drain behavior
+  - broader packet-class handling beyond the current stream pair
+
 ### Phase N5: Server Bridge Slice
 
 Deliver:

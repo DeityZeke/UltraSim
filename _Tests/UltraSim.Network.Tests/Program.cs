@@ -31,6 +31,9 @@ internal static class TestRunner
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
         Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
+        Run(nameof(ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget), ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget);
+        Run(nameof(ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork), ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork);
+        Run(nameof(ConnectionStreamScheduler_SignalsOrderedEventRecovery), ConnectionStreamScheduler_SignalsOrderedEventRecovery);
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
 
@@ -594,6 +597,94 @@ internal static class TestRunner
         Assert.Equal(third - 1, drain.NextCursor.NextSequence);
         Assert.Equal(third - 1, drain.OldestAvailableSequence);
         Assert.Equal(third, drain.NewestAvailableSequence);
+    }
+
+    private static void ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        ulong realtimeSequence = latest.Publish(100, ImmutablePayloadBuffer.CopyFrom([1, 2]));
+        ulong eventSequence = ordered.Publish(ImmutablePayloadBuffer.CopyFrom([9]));
+        var scheduler = new ConnectionStreamScheduler(latest, ordered);
+
+        var work = new ScheduledWorkItem[4];
+        ConnectionScheduleResult result = scheduler.Schedule(
+            default,
+            new ConnectionSendBudget(
+                new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 8),
+                new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 8)),
+            work);
+
+        Assert.Equal(2, result.Count);
+        Assert.False(result.OrderedEventRecoveryRequired);
+        Assert.Equal(1, result.RealtimeItemsScheduled);
+        Assert.Equal(1, result.ReliableEventItemsScheduled);
+        Assert.Equal(ScheduledWorkKind.LatestState, work[0].Kind);
+        Assert.Equal(PacketClass.Realtime, work[0].PacketClass);
+        Assert.Equal(realtimeSequence, work[0].Sequence);
+        Assert.Equal((ulong)100, work[0].ItemKey);
+        Assert.Equal(ScheduledWorkKind.OrderedEvent, work[1].Kind);
+        Assert.Equal(PacketClass.ReliableEvent, work[1].PacketClass);
+        Assert.Equal(eventSequence, work[1].Sequence);
+    }
+
+    private static void ConnectionStreamScheduler_LeavesCursorsOnUnscheduledWork()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        ulong firstRealtime = latest.Publish(1, ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong secondRealtime = latest.Publish(2, ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong firstEvent = ordered.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+        var scheduler = new ConnectionStreamScheduler(latest, ordered);
+
+        var work = new ScheduledWorkItem[4];
+        ConnectionScheduleResult firstResult = scheduler.Schedule(
+            default,
+            new ConnectionSendBudget(
+                new PacketClassBudget(MaxItems: 1, MaxPayloadBytes: 16),
+                new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0)),
+            work);
+
+        Assert.Equal(1, firstResult.Count);
+        Assert.Equal(firstRealtime, firstResult.NextState.LatestStateCursor.LastSeenSequence);
+        Assert.Equal(0UL, firstResult.NextState.OrderedEventCursor.NextSequence);
+
+        var nextWork = new ScheduledWorkItem[4];
+        ConnectionScheduleResult secondResult = scheduler.Schedule(
+            firstResult.NextState,
+            new ConnectionSendBudget(
+                new PacketClassBudget(MaxItems: 2, MaxPayloadBytes: 16),
+                new PacketClassBudget(MaxItems: 1, MaxPayloadBytes: 16)),
+            nextWork);
+
+        Assert.Equal(2, secondResult.Count);
+        Assert.Equal(secondRealtime, nextWork[0].Sequence);
+        Assert.Equal(firstEvent, nextWork[1].Sequence);
+    }
+
+    private static void ConnectionStreamScheduler_SignalsOrderedEventRecovery()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 2);
+        latest.Publish(10, ImmutablePayloadBuffer.CopyFrom([1]));
+        ordered.Publish(ImmutablePayloadBuffer.CopyFrom([2]));
+        ordered.Publish(ImmutablePayloadBuffer.CopyFrom([3]));
+        ulong newestEvent = ordered.Publish(ImmutablePayloadBuffer.CopyFrom([4]));
+        var scheduler = new ConnectionStreamScheduler(latest, ordered);
+
+        var work = new ScheduledWorkItem[4];
+        ConnectionScheduleResult result = scheduler.Schedule(
+            new ConnectionScheduleState(
+                default,
+                new OrderedEventCursor(1)),
+            ConnectionSendBudget.Unlimited,
+            work);
+
+        Assert.True(result.OrderedEventRecoveryRequired);
+        Assert.Equal(1, result.Count);
+        Assert.Equal(ScheduledWorkKind.LatestState, work[0].Kind);
+        Assert.Equal(newestEvent - 1, result.NextState.OrderedEventCursor.NextSequence);
+        Assert.Equal(0, result.ReliableEventItemsScheduled);
     }
 }
 
