@@ -158,6 +158,11 @@ internal sealed class MovementRampHarness : IDisposable
         long observerFramesApplied = 0;
         long observerEventsReceived = 0;
         long observerEventsApplied = 0;
+        long ownerCorrectionSamples = 0;
+        double ownerCorrectionPositionErrorSum = 0d;
+        double ownerCorrectionPositionErrorMax = 0d;
+        double ownerCorrectionVelocityErrorSum = 0d;
+        double ownerCorrectionVelocityErrorMax = 0d;
         long allocBefore = GC.GetTotalAllocatedBytes(true);
 
         StageReplicationContext? replication = _options.ObserverReplication
@@ -220,6 +225,14 @@ internal sealed class MovementRampHarness : IDisposable
             observerFramesApplied += _clients[i].ObserverFramesApplied;
             observerEventsReceived += _clients[i].ObserverEventsReceived;
             observerEventsApplied += _clients[i].ObserverEventsApplied;
+            ClientMovementCorrectionSnapshot correction = _clients[i].Host.Movement.CorrectionStats.Snapshot();
+            ownerCorrectionSamples += correction.SampleCount;
+            ownerCorrectionPositionErrorSum += correction.AveragePositionError * correction.SampleCount;
+            ownerCorrectionVelocityErrorSum += correction.AverageVelocityError * correction.SampleCount;
+            if (correction.MaxPositionError > ownerCorrectionPositionErrorMax)
+                ownerCorrectionPositionErrorMax = correction.MaxPositionError;
+            if (correction.MaxVelocityError > ownerCorrectionVelocityErrorMax)
+                ownerCorrectionVelocityErrorMax = correction.MaxVelocityError;
             perClientPing.Add(_clients[i].BuildPingJson());
         }
 
@@ -252,6 +265,11 @@ internal sealed class MovementRampHarness : IDisposable
             ObserverFramesApplied: observerFramesApplied,
             ObserverEventsReceived: observerEventsReceived,
             ObserverEventsApplied: observerEventsApplied,
+            OwnerCorrectionSamples: ownerCorrectionSamples,
+            OwnerCorrectionAveragePositionError: ownerCorrectionSamples == 0 ? 0d : ownerCorrectionPositionErrorSum / ownerCorrectionSamples,
+            OwnerCorrectionMaxPositionError: ownerCorrectionPositionErrorMax,
+            OwnerCorrectionAverageVelocityError: ownerCorrectionSamples == 0 ? 0d : ownerCorrectionVelocityErrorSum / ownerCorrectionSamples,
+            OwnerCorrectionMaxVelocityError: ownerCorrectionVelocityErrorMax,
             ObserverStateItems: CountObserverStateItems());
     }
 
@@ -359,10 +377,12 @@ internal sealed class MovementRampHarness : IDisposable
 
             short moveX = (short)(80 + ((int)clientTick + i) % 40);
             short moveY = (short)(20 + (((int)clientTick * 3) + i) % 30);
+            var input = new ClientMovementInput(moveX, moveY, (byte)(clientTick & 3));
+            ClientMovementState predictedState = client.PredictNextState(input, _options.TickDeltaSeconds);
             client.Host.TrySendInput(
-                new ClientMovementInput(moveX, moveY, (byte)(clientTick & 3)),
+                input,
                 clientTick,
-                default,
+                predictedState,
                 out _);
         }
     }
@@ -527,6 +547,8 @@ internal sealed class MovementRampHarness : IDisposable
         private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
         private readonly List<BenchMovementEventBody> _observerEvents = [];
         private ushort _nextPingSequence = 1;
+        private ClientMovementState _predictedOwnerState;
+        private uint _lastAuthoritativeServerTick;
 
         public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host)
         {
@@ -543,6 +565,18 @@ internal sealed class MovementRampHarness : IDisposable
         public long ObserverEventsReceived { get; private set; }
         public long ObserverEventsApplied { get; private set; }
         public int ObserverStateCount => _observerStates.Count;
+
+        public ClientMovementState PredictNextState(in ClientMovementInput input, float deltaSeconds)
+        {
+            float velocityX = input.MoveX / 100f;
+            float velocityY = input.MoveY / 100f;
+            _predictedOwnerState = new ClientMovementState(
+                _predictedOwnerState.PositionX + velocityX * deltaSeconds,
+                _predictedOwnerState.PositionY + velocityY * deltaSeconds,
+                velocityX,
+                velocityY);
+            return _predictedOwnerState;
+        }
 
         public void TrySendPing(uint clientTick)
         {
@@ -584,6 +618,13 @@ internal sealed class MovementRampHarness : IDisposable
             {
                 ObserverEventsReceived += Host.ObserverEvents.LastReceivedEventCount;
                 ObserverEventsApplied += Host.ObserverEvents.LastAppliedEventCount;
+            }
+
+            ClientMovementStateReceiveResult ownerResult = Host.Movement.LastReceiveResult;
+            if (ownerResult.ServerTick != 0 && ownerResult.ServerTick != _lastAuthoritativeServerTick)
+            {
+                _predictedOwnerState = ownerResult.AuthoritativeState;
+                _lastAuthoritativeServerTick = ownerResult.ServerTick;
             }
         }
 
@@ -829,6 +870,11 @@ internal readonly record struct StageResult(
     long ObserverFramesApplied,
     long ObserverEventsReceived,
     long ObserverEventsApplied,
+    long OwnerCorrectionSamples,
+    double OwnerCorrectionAveragePositionError,
+    double OwnerCorrectionMaxPositionError,
+    double OwnerCorrectionAverageVelocityError,
+    double OwnerCorrectionMaxVelocityError,
     int ObserverStateItems)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
@@ -867,6 +913,11 @@ internal readonly record struct StageResult(
             ["observer_frames_applied"] = ObserverFramesApplied,
             ["observer_events_received"] = ObserverEventsReceived,
             ["observer_events_applied"] = ObserverEventsApplied,
+            ["owner_correction_samples"] = OwnerCorrectionSamples,
+            ["owner_correction_avg_position_error"] = Math.Round(OwnerCorrectionAveragePositionError, 6),
+            ["owner_correction_max_position_error"] = Math.Round(OwnerCorrectionMaxPositionError, 6),
+            ["owner_correction_avg_velocity_error"] = Math.Round(OwnerCorrectionAverageVelocityError, 6),
+            ["owner_correction_max_velocity_error"] = Math.Round(OwnerCorrectionMaxVelocityError, 6),
             ["observer_state_items"] = ObserverStateItems,
         };
     }

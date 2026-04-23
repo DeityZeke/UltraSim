@@ -12,6 +12,7 @@ Current focus:
 - input sequencing
 - prediction acknowledgement
 - interpolation-ready authoritative state buffering
+- first owner-correction metrics and correction-pressure visibility
 
 What now exists:
 
@@ -24,6 +25,7 @@ What now exists:
   - movement input send path over `Kernels/Network`
   - authoritative movement-state receive path
   - prediction acknowledgement hook
+  - first correction-magnitude tracking against predicted owner state
   - loopback-testable movement bridge
   - `ClientMovementSessionHost` for shared control-plane + movement polling over one live transport path
   - the first paired server/client movement round-trip slice now exists over loopback via `Server/Network`
@@ -42,5 +44,6 @@ The current client/network checkpoint is now beyond narrow loopback only:
 - real UDP socket transport exists
 - the live session path keeps handshake and movement on one shared poll loop
 - the first small multi-client UDP ramp signal exists without putting protocol/runtime logic into `Client/_Godot`
+- the widened live harness now also exposes owner-correction sample counts and correction magnitudes for the first real owner path
 
 The old client networking code remains the behavioral reference for these concepts, but not the architecture template.

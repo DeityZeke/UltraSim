@@ -81,6 +81,11 @@ The widened harness now reports:
 - `observer_frames_applied`
 - `observer_events_received`
 - `observer_events_applied`
+- `owner_correction_samples`
+- `owner_correction_avg_position_error`
+- `owner_correction_max_position_error`
+- `owner_correction_avg_velocity_error`
+- `owner_correction_max_velocity_error`
 - `observer_state_items`
 
 That split matters:
@@ -105,6 +110,12 @@ The widened harness can now also include a first ordered observer-event family o
 - control cadence with `--observer-event-every-ticks <n>`
 
 That path uses the same live session hosts, AOI subscriptions, fanout bridge, and client-side decode/apply flow as the latest-state path.
+
+The owner path is now also slightly less synthetic:
+
+- the harness now sends predicted owner movement state instead of a zero/default predicted state
+- the client bridge records correction magnitude when an authoritative movement state acknowledges a predicted input
+- this is still a narrow owner-correction slice, not the full old reconciliation system
 
 Current first read with actual client consume:
 

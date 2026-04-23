@@ -74,9 +74,14 @@ Current status:
   - `MovementInputPacket`
   - `MovementStatePacket`
   - `ClientMovementNetworkBridge`
+  - first owner-correction tracking against predicted state
   - loopback integration tests
   - first loopback benchmark
   - first paired server/client authoritative movement round-trip over loopback via `ServerEcsMovementNetworkBridge`
+  - widened live harness reporting for:
+    - owner correction sample counts
+    - average/max position error
+    - average/max velocity error
 
 ## Phase C3: Godot Wrapper
 

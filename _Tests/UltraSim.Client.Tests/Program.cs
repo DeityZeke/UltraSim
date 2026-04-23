@@ -232,10 +232,14 @@ internal static class TestRunner
         int inboundCount = bridge.PollInbound();
         Assert.Equal(1, inboundCount);
         Assert.Equal((ushort)1, bridge.LastReceiveResult.LastProcessedInputSequence);
+        Assert.Equal(new ClientMovementState(10f, 20f, 1.5f, 2.5f), bridge.LastReceiveResult.AuthoritativeState);
+        Assert.True(bridge.LastReceiveResult.HadPredictedState);
         Assert.Equal(1, bridge.LastReceiveResult.RemovedPendingInputs);
         Assert.Equal(1, bridge.LastReceiveResult.RemovedPredictions);
         Assert.Equal(0, bridge.Sequencer.PendingCount);
         Assert.Equal(0, bridge.PredictionStore.Count);
+        Assert.True(bridge.LastReceiveResult.PositionErrorMagnitude > 0f);
+        Assert.True(bridge.CorrectionStats.Snapshot().SampleCount > 0);
 
         bridge.Interpolation.AddSample(210, new ClientMovementState(20f, 30f, 3f, 4f));
         Assert.True(bridge.TrySampleInterpolatedState(205, static (in ClientMovementState a, in ClientMovementState b, float alpha) =>

@@ -15,6 +15,7 @@ public sealed class ClientMovementNetworkBridge
     private readonly ClientInputSequencer<ClientMovementInput> _sequencer;
     private readonly ClientPredictionStore<ClientMovementState> _predictionStore;
     private readonly ClientInterpolationBuffer<ClientMovementState> _interpolation;
+    private readonly ClientMovementCorrectionStats _correctionStats;
     private ClientInputSample<ClientMovementInput>[] _pendingScratch = new ClientInputSample<ClientMovementInput>[64];
 
     public ClientMovementNetworkBridge(
@@ -32,6 +33,7 @@ public sealed class ClientMovementNetworkBridge
         _sequencer = sequencer ?? new ClientInputSequencer<ClientMovementInput>();
         _predictionStore = predictionStore ?? new ClientPredictionStore<ClientMovementState>();
         _interpolation = interpolation ?? new ClientInterpolationBuffer<ClientMovementState>();
+        _correctionStats = new ClientMovementCorrectionStats();
         _registry = new PacketRegistry<ClientMovementNetworkBridge>();
         _registry.Register<MovementStatePacket>(static (ClientMovementNetworkBridge bridge, in MovementStatePacket packet) => bridge.OnMovementState(packet));
         _registry.Seal();
@@ -41,6 +43,7 @@ public sealed class ClientMovementNetworkBridge
     public ClientInputSequencer<ClientMovementInput> Sequencer => _sequencer;
     public ClientPredictionStore<ClientMovementState> PredictionStore => _predictionStore;
     public ClientInterpolationBuffer<ClientMovementState> Interpolation => _interpolation;
+    public ClientMovementCorrectionStats CorrectionStats => _correctionStats;
     public ClientMovementStateReceiveResult LastReceiveResult { get; private set; }
 
     public ClientInputSample<ClientMovementInput> QueuePredictedInput(
@@ -131,17 +134,39 @@ public sealed class ClientMovementNetworkBridge
 
     private void OnMovementState(in MovementStatePacket packet)
     {
+        var authoritativeState = new ClientMovementState(packet.PositionX, packet.PositionY, packet.VelocityX, packet.VelocityY);
+        bool hadPredictedState = _predictionStore.TryGet(packet.LastProcessedInputSequence, out PredictedStateSample<ClientMovementState> predicted);
+        float positionErrorMagnitude = 0f;
+        float velocityErrorMagnitude = 0f;
+        if (hadPredictedState)
+        {
+            positionErrorMagnitude = ComputeMagnitude(
+                authoritativeState.PositionX - predicted.State.PositionX,
+                authoritativeState.PositionY - predicted.State.PositionY);
+            velocityErrorMagnitude = ComputeMagnitude(
+                authoritativeState.VelocityX - predicted.State.VelocityX,
+                authoritativeState.VelocityY - predicted.State.VelocityY);
+            _correctionStats.Record(positionErrorMagnitude, velocityErrorMagnitude);
+        }
+
         int removedPending = _sequencer.AcknowledgeUpTo(packet.LastProcessedInputSequence);
         int removedPredictions = _predictionStore.RemoveAcknowledgedUpTo(packet.LastProcessedInputSequence);
-        _interpolation.AddSample(
-            packet.ServerTick,
-            new ClientMovementState(packet.PositionX, packet.PositionY, packet.VelocityX, packet.VelocityY));
+        _interpolation.AddSample(packet.ServerTick, authoritativeState);
         LastReceiveResult = new ClientMovementStateReceiveResult(
             packet.NetworkEntityId,
             packet.ServerTick,
             packet.LastProcessedInputSequence,
+            authoritativeState,
+            hadPredictedState,
+            positionErrorMagnitude,
+            velocityErrorMagnitude,
             removedPending,
             removedPredictions);
+    }
+
+    private static float ComputeMagnitude(float x, float y)
+    {
+        return MathF.Sqrt((x * x) + (y * y));
     }
 
     private int CopyPendingToScratch()
