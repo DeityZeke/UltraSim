@@ -545,6 +545,7 @@ The next implementation target after this bridge slice should be:
     - harness-side AOI-scoped ordered-event publication on top of the same movement entities
     - configurable event cadence for widening runs
   - the widened live path now also has a second observer-visible latest-state family on top of the base movement state
+  - the widened live path now also has its first `Bulk` observer latest-state family with configurable cadence
   - the live owner path now also has its first explicit correction-send policy seam:
     - server-side owner correction deadband
     - server-side max silent ticks

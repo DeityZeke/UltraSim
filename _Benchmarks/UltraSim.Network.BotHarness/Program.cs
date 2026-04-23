@@ -120,9 +120,10 @@ internal sealed class MovementRampHarness : IDisposable
         var builder = new EcsSchemaBuilder();
         ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
         ComponentId movementVisualId = builder.RegisterComponent<BenchMovementVisualBody>();
+        ComponentId movementBulkId = builder.RegisterComponent<BenchMovementBulkBody>();
         ComponentId movementEventId = builder.RegisterComponent<BenchMovementEventBody>();
         _world = new World(builder.Build());
-        _movementSignature = new ArchetypeSignature([movementId, movementVisualId, movementEventId]);
+        _movementSignature = new ArchetypeSignature([movementId, movementVisualId, movementBulkId, movementEventId]);
 
         var handshakePolicy = new HandshakePolicy(
             ProtocolVersion: 3,
@@ -411,6 +412,7 @@ internal sealed class MovementRampHarness : IDisposable
         Entity entity = movementWorld.CreateDefault(_movementSignature);
         movementWorld.SetComponent(entity, new BenchMovementBody(startX, startY, 0f, 0f));
         movementWorld.SetComponent(entity, new BenchMovementVisualBody(startX, startY, 0f, 0f));
+        movementWorld.SetComponent(entity, new BenchMovementBulkBody(startX, startY, 0f, 0f, 0, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f));
         movementWorld.SetComponent(entity, new BenchMovementEventBody(startX, startY, 0, 0, 0, 0));
         _spawnedEntities.Add(entity);
         return new ServerMovementSessionSpawn(entity, _nextNetworkEntityId++);
@@ -469,6 +471,17 @@ internal sealed class MovementRampHarness : IDisposable
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                     static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
                     static (entity, _) => ComposeHarnessVisualItemKey(entity)));
+        }
+
+        if (_options.ObserverBulkState)
+        {
+            published += replication.Publisher.PublishChunkAoiLatestState(
+                new ServerEcsChunkAoiLatestStateRule<BenchMovementBulkBody>(
+                    replication.Classifier,
+                    static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
+                    static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                    static (entity, _) => ComposeHarnessBulkItemKey(entity),
+                    packetClass: PacketClass.Bulk));
         }
 
         if (_options.ObserverEvents)
@@ -543,6 +556,27 @@ internal sealed class MovementRampHarness : IDisposable
                 headingDegrees));
         }
 
+        if (_options.ObserverBulkState &&
+            (_options.ObserverBulkEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverBulkEveryTicks) == 0))
+        {
+            float speed = MathF.Sqrt((velocityX * velocityX) + (velocityY * velocityY));
+            float headingDegrees = MathF.Atan2(velocityY, velocityX) * (180f / MathF.PI);
+            movementWorld.SetComponent(movementEntity, new BenchMovementBulkBody(
+                body.PositionX,
+                body.PositionY,
+                speed,
+                headingDegrees,
+                input.ClientTick,
+                body.PositionX * 0.1f,
+                body.PositionY * 0.1f,
+                speed * 0.25f,
+                speed * 0.5f,
+                headingDegrees * 0.01f,
+                headingDegrees * 0.02f,
+                velocityX * velocityY,
+                (body.PositionX + body.PositionY) * 0.05f));
+        }
+
         if (_options.ObserverEvents &&
             (_options.ObserverEventEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverEventEveryTicks) == 0))
         {
@@ -583,12 +617,21 @@ internal sealed class MovementRampHarness : IDisposable
         return key == 0 ? 1UL : key;
     }
 
+    private static ulong ComposeHarnessBulkItemKey(Entity entity)
+    {
+        const ulong familyTag = 0xC31D_0000_0000_0000UL;
+        ulong packed = entity.Packed & 0x0000_FFFF_FFFF_FFFFUL;
+        ulong key = familyTag | packed;
+        return key == 0 ? 1UL : key;
+    }
+
     private sealed class ClientHandle : IDisposable
     {
         private readonly Dictionary<ushort, long> _pingSentAt = new();
         private readonly List<double> _pingSamplesMs = [];
         private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
         private readonly Dictionary<ulong, BenchMovementVisualBody> _observerVisualStates = [];
+        private readonly Dictionary<ulong, BenchMovementBulkBody> _observerBulkStates = [];
         private readonly List<BenchMovementEventBody> _observerEvents = [];
         private ushort _nextPingSequence = 1;
         private ClientMovementState _predictedOwnerState;
@@ -617,7 +660,7 @@ internal sealed class MovementRampHarness : IDisposable
         public long ObserverFramesApplied { get; private set; }
         public long ObserverEventsReceived { get; private set; }
         public long ObserverEventsApplied { get; private set; }
-        public int ObserverStateCount => _observerStates.Count + _observerVisualStates.Count;
+        public int ObserverStateCount => _observerStates.Count + _observerVisualStates.Count + _observerBulkStates.Count;
 
         public ClientMovementState PredictNextState(in ClientMovementInput input, float deltaSeconds)
         {
@@ -708,6 +751,12 @@ internal sealed class MovementRampHarness : IDisposable
 
         public void ApplyObserverState(ulong itemKey, ImmutablePayloadBuffer payload)
         {
+            if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xC31D_0000_0000_0000UL)
+            {
+                _observerBulkStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBulkBody>(payload);
+                return;
+            }
+
             if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xB24F_0000_0000_0000UL)
             {
                 _observerVisualStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
@@ -802,7 +851,9 @@ internal sealed class HarnessArgs
     public string StopOn { get; set; } = "either";
     public bool ObserverReplication { get; set; }
     public bool ObserverVisualState { get; set; }
+    public bool ObserverBulkState { get; set; }
     public bool ObserverEvents { get; set; }
+    public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
     public int SpawnGridWidth { get; set; } = 32;
@@ -839,7 +890,9 @@ internal sealed class HarnessArgs
             else if (arg == "--stop-on") options.StopOn = Next() ?? options.StopOn;
             else if (arg == "--observer-replication") options.ObserverReplication = true;
             else if (arg == "--observer-visual-state") options.ObserverVisualState = true;
+            else if (arg == "--observer-bulk-state") options.ObserverBulkState = true;
             else if (arg == "--observer-events") options.ObserverEvents = true;
+            else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -851,6 +904,7 @@ internal sealed class HarnessArgs
 
         options.TickHz = Math.Max(1, options.TickHz);
         options.ActiveRatio = Math.Clamp(options.ActiveRatio, 0d, 1d);
+        options.ObserverBulkEveryTicks = Math.Max(1, options.ObserverBulkEveryTicks);
         options.ObserverEventEveryTicks = Math.Max(1, options.ObserverEventEveryTicks);
         if (options.AoiRadiiMeters.Length == 0)
             options.AoiRadiiMeters = [7.5f];
@@ -901,6 +955,8 @@ internal sealed class HarnessArgs
             ["stop_on"] = StopOn,
             ["observer_replication"] = ObserverReplication,
             ["observer_visual_state"] = ObserverVisualState,
+            ["observer_bulk_state"] = ObserverBulkState,
+            ["observer_bulk_every_ticks"] = ObserverBulkEveryTicks,
             ["observer_events"] = ObserverEvents,
             ["observer_event_every_ticks"] = ObserverEventEveryTicks,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
@@ -1069,4 +1125,5 @@ internal readonly struct TickWindowStats
 
 internal readonly record struct BenchMovementBody(float PositionX, float PositionY, float VelocityX, float VelocityY) : IComponent<BenchMovementBody>;
 internal readonly record struct BenchMovementVisualBody(float PositionX, float PositionY, float Speed, float HeadingDegrees) : IComponent<BenchMovementVisualBody>;
+internal readonly record struct BenchMovementBulkBody(float PositionX, float PositionY, float Speed, float HeadingDegrees, uint ClientTick, float SampleA, float SampleB, float SampleC, float SampleD, float SampleE, float SampleF, float SampleG, float SampleH) : IComponent<BenchMovementBulkBody>;
 internal readonly record struct BenchMovementEventBody(float PositionX, float PositionY, short MoveX, short MoveY, uint ClientTick, byte Flags) : IComponent<BenchMovementEventBody>;

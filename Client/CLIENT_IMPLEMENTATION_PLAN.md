@@ -90,6 +90,7 @@ Current status:
   - widened live observer-consume path now includes:
     - movement latest-state
     - a second observer-visible latest-state family
+    - a first bulk/latest-state observer family
     - ordered observer events
 
 ## Phase C3: Godot Wrapper

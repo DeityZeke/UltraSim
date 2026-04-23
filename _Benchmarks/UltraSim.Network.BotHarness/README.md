@@ -40,6 +40,8 @@ Useful options:
 - `--stop-on either|tick|ping|none`
 - `--observer-replication`
 - `--observer-visual-state`
+- `--observer-bulk-state`
+- `--observer-bulk-every-ticks <n>`
 - `--observer-events`
 - `--observer-event-every-ticks <n>`
 - `--spawn-spacing-m <n>`
@@ -124,6 +126,16 @@ The widened harness can now also include a second observer-visible latest-state 
   - optional ordered observer events
 
 This keeps the “broaden the live path” work honest: observer cost no longer comes from only one latest-state family.
+
+The widened harness can now also include a first `Bulk` observer family:
+
+- enable with `--observer-bulk-state`
+- control cadence with `--observer-bulk-every-ticks <n>`
+- current intent:
+  - `Realtime` latest-state for movement
+  - optional second `Realtime` latest-state family for visual-style state
+  - optional `Bulk` latest-state family for larger lower-cadence state
+  - optional `ReliableEvent` ordered events
 
 The owner path is now also slightly less synthetic:
 
