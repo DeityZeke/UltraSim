@@ -329,10 +329,17 @@ public sealed class NetworkControlPlaneHost
                 break;
 
             total += ProcessInbound(_inboundScratch.AsSpan(0, count), nowTicks);
+            DisposeInbound(_inboundScratch.AsSpan(0, count));
             if (count < _inboundScratch.Length)
                 break;
         }
 
         return total;
+    }
+
+    private static void DisposeInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+            inbound[i].Dispose();
     }
 }

@@ -287,8 +287,8 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
             return;
 
-        byte[] payloadCopy = payload.ToArray();
-        var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, payloadCopy);
+        InboundPayloadBuffer payloadBuffer = InboundPayloadBuffer.CopyFromPooled(payload);
+        var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, payloadBuffer);
         if (count < destination.Length)
         {
             destination[count++] = inbound;

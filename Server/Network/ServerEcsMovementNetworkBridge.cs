@@ -87,6 +87,7 @@ public sealed class ServerEcsMovementNetworkBridge
                 break;
 
             ProcessInbound(inbound.AsSpan(0, count));
+            DisposeInbound(inbound.AsSpan(0, count));
 
             if (count < inbound.Length)
                 break;
@@ -235,5 +236,11 @@ public sealed class ServerEcsMovementNetworkBridge
         float distanceSquared = (dx * dx) + (dy * dy);
         float deadband = _ownerCorrectionPolicy.PositionDeadband;
         return distanceSquared > (deadband * deadband);
+    }
+
+    private static void DisposeInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+            inbound[i].Dispose();
     }
 }

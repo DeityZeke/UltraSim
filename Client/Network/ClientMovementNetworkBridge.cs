@@ -83,6 +83,7 @@ public sealed class ClientMovementNetworkBridge
     {
         int count = _transport.PollInbound(_inboundScratch);
         ProcessInbound(_inboundScratch.AsSpan(0, count));
+        DisposeInbound(_inboundScratch.AsSpan(0, count));
         return count;
     }
 
@@ -191,5 +192,11 @@ public sealed class ClientMovementNetworkBridge
                 newSize = 64;
             _pendingScratch = new ClientInputSample<ClientMovementInput>[newSize];
         }
+    }
+
+    private static void DisposeInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+            inbound[i].Dispose();
     }
 }

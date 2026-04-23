@@ -132,6 +132,7 @@ public sealed class ClientMovementSessionHost
             }
 
             totalCount += count;
+            DisposeInbound(inbound);
 
             if (count < _inboundScratch.Length)
                 break;
@@ -167,6 +168,12 @@ public sealed class ClientMovementSessionHost
             observerStateElapsedTicks,
             observerEventElapsedTicks);
         return totalCount;
+    }
+
+    private static void DisposeInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+            inbound[i].Dispose();
     }
 
     public bool TrySendInput(

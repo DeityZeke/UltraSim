@@ -111,6 +111,7 @@ public sealed class ServerMovementSessionHost
             _sessionRuntime.ProcessInbound(inbound);
             _movement.ProcessInbound(inbound);
             totalInboundCount += inboundCount;
+            DisposeInbound(inbound);
 
             if (inboundCount < _inboundScratch.Length)
                 break;
@@ -191,5 +192,11 @@ public sealed class ServerMovementSessionHost
     public bool TryGetLastStateBaselineAck(ConnectionId connectionId, out StateBaselineDescriptor descriptor)
     {
         return _sessionRuntime.BaselineAcks.TryGetLastAcknowledged(connectionId, out descriptor);
+    }
+
+    private static void DisposeInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+            inbound[i].Dispose();
     }
 }
