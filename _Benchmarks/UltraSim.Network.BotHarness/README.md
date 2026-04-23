@@ -313,3 +313,21 @@ Current interpretation:
 - stable latest-state item identity across scopes was the right structural direction for AOI observer state
 - the client observer latest-state path is no longer forced to treat the same logical observed item as a different key per ring
 - the current broadened `0.40` / `64` profile now sits inside the `4 ms` tick-p95 target without increasing observer payload size
+
+Current ordered-event slot/store result:
+
+- report: `_Benchmarks/results/network_bot_harness_20260423_124205.json`
+- change:
+  - harness-side observer events now carry a stable observer slot and store by slot instead of appending into one global queue
+- `10s` widened `0.40` run:
+  - `32`: `tick_p95 = 1.856 ms`
+  - `48`: `tick_p95 = 2.434 ms`
+  - `64`: `tick_p95 = 1.733 ms`
+  - `client_observer_state_p95 = 0.317 ms`
+  - `client_observer_event_p95 = 0.181 ms`
+
+Current interpretation:
+
+- the event-side client path is now materially cheaper in the widened harness
+- however, the resulting `32–64` curve is even more obviously non-monotonic
+- that means the next useful step is to investigate the geometry/subscription-shape behavior directly, not to immediately treat the latest event-slot run as the final ceiling

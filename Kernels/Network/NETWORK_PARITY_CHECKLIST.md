@@ -18,8 +18,12 @@ The new stack is already past scaffold stage:
 - control-plane handshake/session path exists
 - movement input and owner-state round-trip exist
 - AOI-backed observer latest-state publication exists
+- explicit ordered-event acknowledgement exists
 - standalone multi-client ramp harness exists
 - widened observer-replication harness exists
+- ring-aware AOI latest-state cadence exists
+- widened `Realtime + ReliableEvent + Bulk` observer paths exist
+- widened `0.40` multi-ring profile now has a passing `64`-client `tick_p95 < 4 ms` run
 
 But the new stack is not yet at old-network parity.
 
@@ -73,9 +77,17 @@ The most important missing pieces are:
 2. Regular use of `0.35` / `0.40` active movement profiles in ramp runs
 3. Broader replication families beyond the current first observer-state slice
 4. Mature reliable ordered delivery semantics as a real runtime path
+Current state:
+- highest-contiguous ordered-event ack now exists
+- client-side contiguous ordered-event apply now exists
+- retransmit / replay / resend policy does not exist yet
 5. Snapshot / baseline / recovery path as a real runtime path
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables
+
+Additional important gap:
+
+8. Delta/baseline packet flow instead of the current mostly full-state observer payload path
 
 ## Important Non-Goal
 
@@ -115,6 +127,7 @@ The new stack is now broad enough for:
 - honest movement-only ceiling measurements
 - honest first observer-replication ceiling measurements
 - honest client/server socket-backed ramp validation
+- first broadened three-lane, three-ring comparisons that are starting to look structurally comparable to old-style load shapes
 
 It is not yet broad enough for:
 

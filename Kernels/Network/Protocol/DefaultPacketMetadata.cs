@@ -14,6 +14,7 @@ public static class DefaultPacketMetadata
         registry.Register<PongProbePacket>();
         registry.Register<RealtimeStateFramePacket>();
         registry.Register<ReliableEventFramePacket>();
+        registry.Register<ReliableEventAckPacket>();
         registry.Register<MovementInputPacket>();
         registry.Register<MovementStatePacket>();
         registry.Seal();

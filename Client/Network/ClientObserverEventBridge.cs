@@ -10,21 +10,34 @@ public sealed class ClientObserverEventBridge
 {
     private readonly ConnectionId _connectionId;
     private readonly ClientReliableEventFrameApplier? _applyEvent;
+    private readonly Dictionary<ulong, ImmutablePayloadBuffer> _pendingBySequence;
+    private readonly int _maxBufferedEvents;
+    private ulong _nextExpectedSequence;
     private ulong _lastAppliedSequence;
+    private ulong _pendingAckSequence;
 
-    public ClientObserverEventBridge(ConnectionId connectionId, ClientReliableEventFrameApplier? applyEvent = null)
+    public ClientObserverEventBridge(
+        ConnectionId connectionId,
+        ClientReliableEventFrameApplier? applyEvent = null,
+        int maxBufferedEvents = 64)
     {
         if (!connectionId.IsValid)
             throw new ArgumentOutOfRangeException(nameof(connectionId));
+        if (maxBufferedEvents <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maxBufferedEvents));
 
         _connectionId = connectionId;
         _applyEvent = applyEvent;
+        _maxBufferedEvents = maxBufferedEvents;
+        _pendingBySequence = new Dictionary<ulong, ImmutablePayloadBuffer>(maxBufferedEvents);
     }
 
     public ConnectionId ConnectionId => _connectionId;
     public int LastReceivedEventCount { get; private set; }
     public int LastAppliedEventCount { get; private set; }
+    public int BufferedEventCount => _pendingBySequence.Count;
     public ulong LastAppliedSequence => _lastAppliedSequence;
+    public ulong LastAcknowledgedSequence => _pendingAckSequence;
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
@@ -69,11 +82,61 @@ public sealed class ClientObserverEventBridge
     private void OnReliableEventFrame(in ReliableEventFramePacket packet)
     {
         LastReceivedEventCount++;
-        if (_lastAppliedSequence != 0 && packet.Sequence <= _lastAppliedSequence)
+
+        if (_nextExpectedSequence == 0)
+        {
+            Apply(packet.Sequence, packet.Payload);
+            _nextExpectedSequence = packet.Sequence + 1;
+            DrainBufferedContiguous();
+            return;
+        }
+
+        if (packet.Sequence < _nextExpectedSequence)
             return;
 
-        _lastAppliedSequence = packet.Sequence;
-        _applyEvent?.Invoke(packet.Sequence, packet.Payload);
+        if (packet.Sequence == _nextExpectedSequence)
+        {
+            Apply(packet.Sequence, packet.Payload);
+            _nextExpectedSequence++;
+            DrainBufferedContiguous();
+            return;
+        }
+
+        if (_pendingBySequence.ContainsKey(packet.Sequence))
+            return;
+        if (_pendingBySequence.Count >= _maxBufferedEvents)
+            return;
+
+        _pendingBySequence.Add(packet.Sequence, packet.Payload);
+    }
+
+    public bool TryDequeueAckPacket(out ReliableEventAckPacket packet)
+    {
+        if (_pendingAckSequence == 0)
+        {
+            packet = default;
+            return false;
+        }
+
+        packet = new ReliableEventAckPacket(_pendingAckSequence);
+        _pendingAckSequence = 0;
+        return true;
+    }
+
+    private void DrainBufferedContiguous()
+    {
+        while (_pendingBySequence.Remove(_nextExpectedSequence, out ImmutablePayloadBuffer? payload))
+        {
+            Apply(_nextExpectedSequence, payload);
+            _nextExpectedSequence++;
+        }
+    }
+
+    private void Apply(ulong sequence, ImmutablePayloadBuffer payload)
+    {
+        _lastAppliedSequence = sequence;
+        _pendingAckSequence = sequence;
+        _applyEvent?.Invoke(sequence, payload);
         LastAppliedEventCount++;
     }
 }

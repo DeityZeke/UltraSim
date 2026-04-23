@@ -436,6 +436,7 @@ Current status:
   - connection-owned cursor persistence/policy
   - richer server-side scope classification beyond the current operator/runtime and first dirty-component plus first AOI ring-scoped slices
   - transport/session-owned publish loops at the server runtime layer
+  - full reliable ordered replay/resend policy beyond the first explicit ack seam
 
 ### Phase N6: Client Bridge Slice
 
@@ -456,6 +457,7 @@ Current status:
 - current delivered pieces:
   - `MovementInputPacket`
   - `MovementStatePacket`
+  - `ReliableEventAckPacket`
   - `Client/Core` sequencing/prediction/interpolation primitives
   - `Client/Network` movement send/receive bridge
   - `ClientMovementSessionHost`
@@ -467,6 +469,11 @@ Current status:
   - first small live multi-client UDP movement ramp benchmark over the shared session-host pump path
   - first widened observer-replication ramp path with actual client-side observer latest-state decode/apply
   - transport-level same-connection UDP envelope bundling in the widened live path
+  - first explicit ordered-event reliability seam:
+    - client applies reliable-event frames contiguously instead of just accepting any newer sequence
+    - client buffers out-of-order reliable-event frames until the gap closes
+    - client emits highest-contiguous `ReliableEventAckPacket` acknowledgements
+    - server session host now tracks highest acknowledged reliable-event sequence per connection
 
 ## Testing Strategy
 

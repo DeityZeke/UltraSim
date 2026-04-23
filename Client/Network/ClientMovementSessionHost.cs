@@ -119,13 +119,27 @@ public sealed class ClientMovementSessionHost
 
                 dispatchStart = Stopwatch.GetTimestamp();
                 if (_observerEvents?.TryProcessEnvelope(header, payload) == true)
+                {
                     observerEventElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
+                    continue;
+                }
             }
 
             totalCount += count;
 
             if (count < _inboundScratch.Length)
                 break;
+        }
+
+        if (_observerEvents is not null &&
+            _observerEvents.TryDequeueAckPacket(out ReliableEventAckPacket ackPacket))
+        {
+            _transport.EnqueueOutbound(new OutboundDatagram(
+                ConnectionId,
+                ReliableEventAckPacket.Plane,
+                ReliableEventAckPacket.PacketClass,
+                ReliableEventAckPacket.Channel,
+                PacketCodec.Encode(ackPacket)));
         }
 
         _control.FlushOutbound();

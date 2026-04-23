@@ -14,7 +14,9 @@ internal static class TestRunner
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
         Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
+        Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
+        Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
         Run(nameof(ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches), ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches);
 
         Console.WriteLine("All Client scaffold tests passed.");
@@ -185,6 +187,76 @@ internal static class TestRunner
         Assert.Equal((ulong)11, lastSequence);
         Assert.True(lastPayload is not null);
         Assert.Equal((byte)5, lastPayload![0]);
+        Assert.True(bridge.TryDequeueAckPacket(out ReliableEventAckPacket ack));
+        Assert.Equal((ulong)11, ack.Sequence);
+        Assert.False(bridge.TryDequeueAckPacket(out _));
+    }
+
+    private static void ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses()
+    {
+        var applied = new List<ulong>();
+        var bridge = new ClientObserverEventBridge(
+            new ConnectionId(9),
+            (sequence, _) => applied.Add(sequence));
+
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(10, ImmutablePayloadBuffer.CopyFrom([1]))).Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(12, ImmutablePayloadBuffer.CopyFrom([2]))).Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(11, ImmutablePayloadBuffer.CopyFrom([3]))).Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(3, processed);
+        Assert.Equal(3, bridge.LastReceivedEventCount);
+        Assert.Equal(3, bridge.LastAppliedEventCount);
+        Assert.Equal(0, bridge.BufferedEventCount);
+        Assert.SequenceEqual([10UL, 11UL, 12UL], applied);
+        Assert.True(bridge.TryDequeueAckPacket(out ReliableEventAckPacket ack));
+        Assert.Equal((ulong)12, ack.Sequence);
+    }
+
+    private static void ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Client.Start();
+        pair.Server.Start();
+
+        var observerEvents = new ClientObserverEventBridge(new ConnectionId(1));
+        var host = new ClientMovementSessionHost(
+            pair.Client,
+            new ConnectionId(1),
+            default,
+            observerEvents: observerEvents,
+            maxPollBatch: 4);
+
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventFramePacket.Plane,
+            ReliableEventFramePacket.PacketClass,
+            ReliableEventFramePacket.Channel,
+            PacketCodec.Encode(new ReliableEventFramePacket(20, ImmutablePayloadBuffer.CopyFrom([5, 6])))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventFramePacket.Plane,
+            ReliableEventFramePacket.PacketClass,
+            ReliableEventFramePacket.Channel,
+            PacketCodec.Encode(new ReliableEventFramePacket(21, ImmutablePayloadBuffer.CopyFrom([7, 8])))));
+        pair.Server.FlushOutbound();
+
+        int inboundCount = host.Pump(1000);
+        Assert.Equal(2, inboundCount);
+        Assert.Equal((ulong)21, observerEvents.LastAppliedSequence);
+
+        var ackInbound = new InboundDatagram[4];
+        int ackCount = pair.Server.PollInbound(ackInbound);
+        Assert.Equal(1, ackCount);
+        Assert.True(PacketCodec.TryDecodeEnvelope(ackInbound[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(ReliableEventAckPacket.PacketId, header.PacketId);
+        var reader = new BitReader(payload);
+        ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
+        Assert.Equal((ulong)21, ack.Sequence);
     }
 
     private static void ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState()
@@ -349,5 +421,17 @@ internal static class Assert
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
             throw new InvalidOperationException(message ?? $"Expected '{expected}' but got '{actual}'.");
+    }
+
+    public static void SequenceEqual<T>(IReadOnlyList<T> expected, IReadOnlyList<T> actual, string? message = null)
+    {
+        if (expected.Count != actual.Count)
+            throw new InvalidOperationException(message ?? $"Expected sequence count {expected.Count}, got {actual.Count}.");
+
+        for (int i = 0; i < expected.Count; i++)
+        {
+            if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
+                throw new InvalidOperationException(message ?? $"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
+        }
     }
 }

@@ -19,6 +19,7 @@ public sealed class ServerMovementSessionHost
     private readonly ControlPlaneEvent[] _controlEvents;
     private readonly SessionLifecycleEvent[] _sessionEvents;
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
+    private readonly ReliableEventAckTracker _reliableEventAcks = new();
 
     public ServerMovementSessionHost(
         World world,
@@ -52,6 +53,7 @@ public sealed class ServerMovementSessionHost
 
     public NetworkControlPlaneHost Control => _control;
     public ServerEcsMovementNetworkBridge Movement => _movement;
+    public ReliableEventAckTracker ReliableEventAcks => _reliableEventAcks;
     public int BoundConnectionCount => _entityByConnection.Count;
 
     public int CopyBoundConnections(Span<ConnectionId> destination)
@@ -88,6 +90,7 @@ public sealed class ServerMovementSessionHost
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, inboundCount);
             _control.ProcessInbound(inbound, nowTicks);
             HandleControlPlaneEvents(nowTicks);
+            ProcessReliableEventAcks(inbound);
             _movement.ProcessInbound(inbound);
             totalInboundCount += inboundCount;
 
@@ -151,10 +154,35 @@ public sealed class ServerMovementSessionHost
 
                 _movement.Unbind(evt.ConnectionId);
                 _entityByConnection.Remove(evt.ConnectionId);
+                _reliableEventAcks.Remove(evt.ConnectionId);
                 _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
                 if (_despawnSession is null && _world.Entities.IsAlive(entity))
                     _world.Destroy(entity);
             }
+        }
+    }
+
+    public bool TryGetLastReliableEventAck(ConnectionId connectionId, out ulong sequence)
+    {
+        return _reliableEventAcks.TryGetLastAcknowledged(connectionId, out sequence);
+    }
+
+    private void ProcessReliableEventAcks(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            ref readonly InboundDatagram datagram = ref inbound[i];
+            if (datagram.ConnectionId == ConnectionId.Invalid || datagram.Plane != NetworkPlane.State)
+                continue;
+
+            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
+                continue;
+            if (header.PacketId != ReliableEventAckPacket.PacketId)
+                continue;
+
+            var reader = new UltraSim.Network.BitReader(payload);
+            ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
+            _reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Sequence, out _);
         }
     }
 }

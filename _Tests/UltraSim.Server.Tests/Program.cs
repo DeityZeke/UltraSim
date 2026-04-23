@@ -64,6 +64,7 @@ internal static class TestRunner
         Run(nameof(ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement), ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement);
         Run(nameof(ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement), ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement);
         Run(nameof(ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates), ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates);
+        Run(nameof(ServerMovementSessionHost_TracksReliableEventAcksFromClient), ServerMovementSessionHost_TracksReliableEventAcksFromClient);
         Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
 
         Console.WriteLine("All Server contract tests passed.");
@@ -1765,6 +1766,83 @@ internal static class TestRunner
             Assert.Equal((ushort)1, clients[i].Host.Movement.LastReceiveResult.LastProcessedInputSequence);
             clients[i].Transport.Dispose();
         }
+    }
+
+    private static void ServerMovementSessionHost_TracksReliableEventAcksFromClient()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            body = body with
+            {
+                VelocityX = input.MoveX / 100f,
+                VelocityY = input.MoveY / 100f,
+                PositionX = body.PositionX + (input.MoveX / 100f) * deltaSeconds,
+                PositionY = body.PositionY + (input.MoveY / 100f) * deltaSeconds,
+            };
+            Assert.True(movementWorld.SetComponent(movementEntity, body));
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            packet = new MovementStatePacket(
+                networkEntityId,
+                serverTick,
+                lastProcessedInputSequence,
+                body.PositionX,
+                body.PositionY,
+                body.VelocityX,
+                body.VelocityY);
+            return true;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var host = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession);
+
+        pair.Client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventAckPacket.Plane,
+            ReliableEventAckPacket.PacketClass,
+            ReliableEventAckPacket.Channel,
+            PacketCodec.Encode(new ReliableEventAckPacket(27))));
+        pair.Client.FlushOutbound();
+
+        Assert.Equal(1, host.Pump(nowTicks: 1000, deltaSeconds: 0.016f, serverTick: 1));
+        Assert.True(host.TryGetLastReliableEventAck(new ConnectionId(1), out ulong acknowledgedSequence));
+        Assert.Equal((ulong)27, acknowledgedSequence);
+
+        pair.Client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventAckPacket.Plane,
+            ReliableEventAckPacket.PacketClass,
+            ReliableEventAckPacket.Channel,
+            PacketCodec.Encode(new ReliableEventAckPacket(26))));
+        pair.Client.FlushOutbound();
+
+        Assert.Equal(1, host.Pump(nowTicks: 1002, deltaSeconds: 0.016f, serverTick: 2));
+        Assert.True(host.TryGetLastReliableEventAck(new ConnectionId(1), out acknowledgedSequence));
+        Assert.Equal((ulong)27, acknowledgedSequence);
     }
 
     private static void ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates()

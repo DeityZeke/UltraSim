@@ -292,6 +292,15 @@ Current interpretation:
     - `client_observer_state_p95 = 1.389 ms`
     - `dispatch_p95 = 0.785 ms`
     - `tick_p95 = 3.865 ms`
+- a follow-up harness-side ordered-event slot/store pass now also exists:
+  - widened-harness observer events carry a stable observer slot and store by slot instead of one global queue
+  - current `10s` widened read:
+    - `32`: `tick_p95 = 1.856 ms`
+    - `48`: `tick_p95 = 2.434 ms`
+    - `64`: `tick_p95 = 1.733 ms`
+    - `client_observer_state_p95 = 0.317 ms`
+    - `client_observer_event_p95 = 0.181 ms`
+- the event-side client path is therefore materially cheaper, but the non-monotonic `32–64` band is now even more obvious, so the next benchmark step should be a focused geometry/subscription-shape investigation rather than more blind widening
 
 Current observer-replication read with actual client consume:
 

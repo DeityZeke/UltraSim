@@ -98,6 +98,7 @@ What now exists above the kernel:
   - movement input send path
   - authoritative movement-state receive path
   - prediction acknowledgement hook
+  - explicit ordered-event acknowledgement hook
   - interpolation-ready state buffering through `Client/Core`
 - the first paired server/client movement round-trip slice in `Server/Network`
   - transport input polling on the server side
@@ -108,6 +109,11 @@ What now exists above the kernel:
   - `ServerMovementSessionHost`
   - one transport poll path shared by control-plane handshake and movement traffic
 - separate benchmark coverage for that higher-layer publish/fanout path
+- the first explicit ordered-event reliability seam above the kernel:
+  - contiguous ordered-event apply on the client
+  - out-of-order ordered-event buffering on the client
+  - highest-contiguous `ReliableEventAckPacket` emission back to the server
+  - per-connection ordered-event acknowledgement tracking in the live server session host
 
 ## Design Position
 
@@ -271,6 +277,28 @@ Current higher-layer policy direction:
 - `ReliableEvent` is the preferred lane for discrete gameplay events that must preserve order/reliability
 - `Bulk` is the preferred lane for large or compression-friendly world payloads that must stay isolated from combat/movement
 - player-centered AOI rings are now the preferred gameplay scope model for that higher layer; chunk keys remain the maintenance/indexing primitive underneath
+
+Current latest widened live-path result:
+
+- after preserving stable latest-state item identity across AOI scopes and switching the widened harness observer latest-state store to slot-indexed arrays, the current less-dense broadened `0.40` profile now has a passing `64`-client run:
+  - report: `_Benchmarks/results/network_bot_harness_20260423_034433.json`
+  - `32`: `tick_p95 = 1.504 ms`
+  - `48`: `tick_p95 = 3.589 ms`
+  - `64`: `tick_p95 = 3.865 ms`
+- a follow-up harness-side ordered-event slot/store pass also now exists and is being evaluated against longer runs:
+  - report: `_Benchmarks/results/network_bot_harness_20260423_124205.json`
+  - current `10s` widened profile read:
+    - `32`: `tick_p95 = 1.856 ms`
+    - `48`: `tick_p95 = 2.434 ms`
+    - `64`: `tick_p95 = 1.733 ms`
+
+Current interpretation:
+
+- the new architecture is now broad enough to produce honest multi-lane, multi-ring widened results under a real UDP/session-host path
+- the next important question is no longer “does the widened path fundamentally work?”
+- it is “why does the `32–64` band still show non-monotonic cost behavior across multiple runs and profiles?”
+- that investigation should happen before treating the newest widened ceilings as fully settled
+- on correctness/runtime semantics, the next meaningful gap after this is still broader reliable ordered delivery plus snapshot/baseline/recovery, not another transport-only optimization pass
 
 ## Parity Position
 
