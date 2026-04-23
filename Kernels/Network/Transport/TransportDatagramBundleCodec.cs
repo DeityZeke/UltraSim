@@ -9,7 +9,7 @@ internal static class TransportDatagramBundleCodec
 {
     public const ushort BundleMarker = ushort.MaxValue;
     private const int HeaderSize = sizeof(ushort) + sizeof(ushort);
-    private const int EntryHeaderSize = sizeof(ushort);
+    private const int OffsetSize = sizeof(ushort);
 
     public static bool IsBundle(ReadOnlySpan<byte> source)
     {
@@ -22,15 +22,25 @@ internal static class TransportDatagramBundleCodec
     public static bool TryBeginReadBundle(
         ReadOnlySpan<byte> source,
         out ushort entryCount,
-        out ReadOnlySpan<byte> entries)
+        out ReadOnlySpan<byte> offsets,
+        out ReadOnlySpan<byte> payloads)
     {
         entryCount = 0;
-        entries = default;
+        offsets = default;
+        payloads = default;
         if (source.Length < HeaderSize || ReadUInt16(source) != BundleMarker)
             return false;
 
         entryCount = ReadUInt16(source.Slice(sizeof(ushort)));
-        entries = source.Slice(HeaderSize);
+        int offsetsBytes = entryCount * OffsetSize;
+        if (source.Length < HeaderSize + offsetsBytes)
+        {
+            entryCount = 0;
+            return false;
+        }
+
+        offsets = source.Slice(HeaderSize, offsetsBytes);
+        payloads = source.Slice(HeaderSize + offsetsBytes);
         return true;
     }
 
@@ -43,29 +53,29 @@ internal static class TransportDatagramBundleCodec
         ArgumentNullException.ThrowIfNull(payloads);
         if ((uint)startIndex >= (uint)payloads.Count)
             throw new ArgumentOutOfRangeException(nameof(startIndex));
-        if (maxDatagramBytes < HeaderSize + EntryHeaderSize + 1)
+        if (maxDatagramBytes < HeaderSize + OffsetSize + 1)
             throw new ArgumentOutOfRangeException(nameof(maxDatagramBytes));
 
-        int totalBytes = HeaderSize;
+        int payloadBytes = 0;
         packedCount = 0;
         for (int i = startIndex; i < payloads.Count; i++)
         {
             ImmutablePayloadBuffer payload = payloads[i];
-            int entryBytes = EntryHeaderSize + payload.Length;
-            if (packedCount > 0 && totalBytes + entryBytes > maxDatagramBytes)
+            int requiredBytes = HeaderSize + ((packedCount + 1) * OffsetSize) + payloadBytes + payload.Length;
+            if (packedCount > 0 && requiredBytes > maxDatagramBytes)
                 break;
 
-            if (entryBytes > maxDatagramBytes - HeaderSize)
+            if (HeaderSize + OffsetSize + payload.Length > maxDatagramBytes)
                 throw new InvalidOperationException("Single envelope exceeds transport datagram capacity.");
 
-            totalBytes += entryBytes;
+            payloadBytes += payload.Length;
             packedCount++;
         }
 
         if (packedCount <= 0)
             throw new InvalidOperationException("Transport bundle must contain at least one envelope.");
 
-        return totalBytes;
+        return HeaderSize + (packedCount * OffsetSize) + payloadBytes;
     }
 
     public static void WriteBundle(
@@ -80,57 +90,62 @@ internal static class TransportDatagramBundleCodec
         if (packedCount <= 0 || startIndex + packedCount > payloads.Count)
             throw new ArgumentOutOfRangeException(nameof(packedCount));
 
-        int requiredBytes = HeaderSize;
+        int requiredBytes = HeaderSize + (packedCount * OffsetSize);
         for (int i = 0; i < packedCount; i++)
-            requiredBytes += EntryHeaderSize + payloads[startIndex + i].Length;
+            requiredBytes += payloads[startIndex + i].Length;
 
         if (destination.Length < requiredBytes)
             throw new ArgumentOutOfRangeException(nameof(destination));
 
+        int payloadBaseOffset = HeaderSize + (packedCount * OffsetSize);
         int offset = 0;
         WriteUInt16(destination, ref offset, BundleMarker);
         WriteUInt16(destination, ref offset, checked((ushort)packedCount));
 
+        int payloadOffset = 0;
         for (int i = 0; i < packedCount; i++)
         {
             ImmutablePayloadBuffer payload = payloads[startIndex + i];
-            WriteUInt16(destination, ref offset, checked((ushort)payload.Length));
-            payload.Span.CopyTo(destination.Slice(offset, payload.Length));
-            offset += payload.Length;
+            WriteUInt16(destination, ref offset, checked((ushort)payloadOffset));
+            payload.Span.CopyTo(destination.Slice(payloadBaseOffset + payloadOffset, payload.Length));
+            payloadOffset += payload.Length;
         }
     }
 
     public ref struct Reader
     {
-        private ReadOnlySpan<byte> _remaining;
-        private ushort _remainingEntries;
+        private readonly ReadOnlySpan<byte> _offsets;
+        private readonly ReadOnlySpan<byte> _payloads;
+        private readonly ushort _entryCount;
+        private int _nextIndex;
 
         public Reader(ReadOnlySpan<byte> source)
         {
-            if (source.Length < HeaderSize || ReadUInt16(source) != BundleMarker)
+            if (!TryBeginReadBundle(source, out ushort entryCount, out ReadOnlySpan<byte> offsets, out ReadOnlySpan<byte> payloads))
                 throw new ArgumentOutOfRangeException(nameof(source));
 
-            _remainingEntries = ReadUInt16(source.Slice(sizeof(ushort)));
-            _remaining = source.Slice(HeaderSize);
+            _entryCount = entryCount;
+            _offsets = offsets;
+            _payloads = payloads;
+            _nextIndex = 0;
         }
 
-        public ushort Count => _remainingEntries;
+        public ushort Count => _entryCount;
 
         public bool TryReadNext(out ReadOnlySpan<byte> payload)
         {
             payload = default;
-            if (_remainingEntries == 0)
+            if (_nextIndex >= _entryCount)
                 return false;
-            if (_remaining.Length < EntryHeaderSize)
+            int currentStart = ReadUInt16(_offsets.Slice(_nextIndex * OffsetSize));
+            int nextStart = _nextIndex + 1 < _entryCount
+                ? ReadUInt16(_offsets.Slice((_nextIndex + 1) * OffsetSize))
+                : _payloads.Length;
+            if ((uint)currentStart > (uint)_payloads.Length || (uint)nextStart > (uint)_payloads.Length || nextStart < currentStart)
                 return false;
 
-            ushort length = ReadUInt16(_remaining);
-            if (_remaining.Length < EntryHeaderSize + length)
-                return false;
-
-            payload = _remaining.Slice(EntryHeaderSize, length);
-            _remaining = _remaining.Slice(EntryHeaderSize + length);
-            _remainingEntries--;
+            payload = _payloads.Slice(currentStart, nextStart - currentStart);
+            _nextIndex++;
             return true;
         }
     }

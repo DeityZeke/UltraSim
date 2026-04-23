@@ -228,28 +228,24 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
             InboundPayloadBuffer wirePayload = InboundPayloadBuffer.FromPooled(rentedReceiveBuffer, received);
             ReadOnlySpan<byte> datagramPayload = wirePayload.Span;
-            if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> entries))
+            if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> offsets, out ReadOnlySpan<byte> payloads))
             {
                 long bundleStart = Stopwatch.GetTimestamp();
-                int entryOffset = datagramPayload.Length - entries.Length;
-                int remainingOffset = entryOffset;
-                ReadOnlySpan<byte> remaining = entries;
                 for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
                 {
-                    if (remaining.Length < sizeof(ushort))
+                    int currentStart = BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice(entryIndex * sizeof(ushort)));
+                    int nextStart = entryIndex + 1 < entryCount
+                        ? BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice((entryIndex + 1) * sizeof(ushort)))
+                        : payloads.Length;
+                    if ((uint)currentStart > (uint)payloads.Length || (uint)nextStart > (uint)payloads.Length || nextStart < currentStart)
                         break;
 
-                    ushort entryLength = BinaryPrimitives.ReadUInt16LittleEndian(remaining);
-                    if (remaining.Length < sizeof(ushort) + entryLength)
-                        break;
-
+                    int entryLength = nextStart - currentStart;
                     InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.Slice(
                         wirePayload,
-                        remainingOffset + sizeof(ushort),
+                        datagramPayload.Length - payloads.Length + currentStart,
                         entryLength);
                     TryQueueInbound(connectionId, bundledPayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
-                    remaining = remaining.Slice(sizeof(ushort) + entryLength);
-                    remainingOffset += sizeof(ushort) + entryLength;
                 }
                 wirePayload.Dispose();
                 bundleUnpackTicks += Stopwatch.GetTimestamp() - bundleStart;
@@ -720,26 +716,23 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         InboundPayloadBuffer wirePayload = InboundPayloadBuffer.FromPooled(rentedReceiveBuffer, received);
         ReadOnlySpan<byte> datagramPayload = wirePayload.Span;
         long ignoredParseTicks = 0;
-        if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> entries))
+        if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> offsets, out ReadOnlySpan<byte> payloads))
         {
-            int remainingOffset = datagramPayload.Length - entries.Length;
-            ReadOnlySpan<byte> remaining = entries;
             for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
             {
-                if (remaining.Length < sizeof(ushort))
+                int currentStart = BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice(entryIndex * sizeof(ushort)));
+                int nextStart = entryIndex + 1 < entryCount
+                    ? BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice((entryIndex + 1) * sizeof(ushort)))
+                    : payloads.Length;
+                if ((uint)currentStart > (uint)payloads.Length || (uint)nextStart > (uint)payloads.Length || nextStart < currentStart)
                     break;
 
-                ushort entryLength = BinaryPrimitives.ReadUInt16LittleEndian(remaining);
-                if (remaining.Length < sizeof(ushort) + entryLength)
-                    break;
-
+                int entryLength = nextStart - currentStart;
                 InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.Slice(
                     wirePayload,
-                    remainingOffset + sizeof(ushort),
+                    datagramPayload.Length - payloads.Length + currentStart,
                     entryLength);
                 TryQueueInboundPending(connectionId, bundledPayload, ref ignoredParseTicks);
-                remaining = remaining.Slice(sizeof(ushort) + entryLength);
-                remainingOffset += sizeof(ushort) + entryLength;
             }
             wirePayload.Dispose();
             totalElapsedTicks += Stopwatch.GetTimestamp() - unpackStart;
