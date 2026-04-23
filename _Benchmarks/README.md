@@ -206,20 +206,37 @@ The harness has now also been widened with the first observer-replication load:
 
 - optional `--observer-replication`
 - real AOI-backed latest-state publish/fanout on top of the same live movement/session path
+- actual client-side observer-frame decode/apply on top of that widened path
 - report fields for:
   - `replication_published_items`
   - `replication_datagrams`
   - `replication_wire_datagrams`
+  - `observer_frames_received`
+  - `observer_frames_applied`
+  - `observer_state_items`
 
-Current observer-replication read:
+Current observer-replication read with actual client consume:
 
-- dense profile (`spawn-spacing-m 4`, `32x32` grid width cap):
-  - `32` clients: `tick_p95 = 1.176 ms`
-  - `64` clients: `tick_p95 = 2.650 ms`
-  - `64` clients: `replication_datagrams = 535,228`
-  - `64` clients: `replication_wire_datagrams = 34,198`
-- less-dense profile (`spawn-spacing-m 12`):
-  - `64` clients: `tick_p95 = 1.810 ms`
-  - `128` clients: `tick_p95 = 2.876 ms`
+- dense profile (`spawn-spacing-m 4`, `10s` stages):
+  - `64` clients: `tick_p95 = 2.429 ms`
+  - `68` clients: `tick_p95 = 6.039 ms`
+  - practical current ceiling: about `64`
+- less-dense profile (`spawn-spacing-m 12`, `10s` stages):
+  - `128` clients: `tick_p95 = 2.643 ms`
+  - `132` clients: `tick_p95 = 4.821 ms`
+  - practical current ceiling: about `128`
 
-The important correction here is that transport-level bundling is now real and measurable: the logical observer fanout count is still high, but the actual wire datagram count is much lower. That means the current widened bottleneck is no longer raw UDP send count alone.
+Supporting 5-second replication shape snapshots:
+
+- dense `64`:
+  - `replication_datagrams = 535,228`
+  - `replication_wire_datagrams = 34,198`
+  - `observer_frames_received = 535,228`
+  - `observer_frames_applied = 535,228`
+- less-dense `128`:
+  - `replication_datagrams = 208,252`
+  - `replication_wire_datagrams = 39,680`
+  - `observer_frames_received = 208,252`
+  - `observer_frames_applied = 208,252`
+
+The important correction here is that transport-level bundling is real and measurable, but once the client actually consumes observer state the widened practical ceiling drops sharply below the movement-only ceiling. That is the honest new baseline for the next widened gameplay slice.

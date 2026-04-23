@@ -12,6 +12,7 @@ internal static class TestRunner
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
+        Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
 
         Console.WriteLine("All Client scaffold tests passed.");
@@ -106,6 +107,46 @@ internal static class TestRunner
         var stateReader = new BitReader(statePayload);
         MovementStatePacket decodedState = MovementStatePacket.Deserialize(ref stateReader);
         Assert.Equal(state, decodedState);
+    }
+
+    private static void ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly()
+    {
+        int applyCount = 0;
+        ulong lastItemKey = 0;
+        ulong lastSequence = 0;
+        byte[]? lastPayload = null;
+
+        var bridge = new ClientObserverStateBridge(
+            new ConnectionId(7),
+            (itemKey, sequence, payload) =>
+            {
+                applyCount++;
+                lastItemKey = itemKey;
+                lastSequence = sequence;
+                lastPayload = payload.Span.ToArray();
+            });
+
+        ImmutablePayloadBuffer frame1 = PacketCodec.Encode(new RealtimeStateFramePacket(10, 1001, ImmutablePayloadBuffer.CopyFrom([1, 2])));
+        ImmutablePayloadBuffer frame2 = PacketCodec.Encode(new RealtimeStateFramePacket(9, 1001, ImmutablePayloadBuffer.CopyFrom([3, 4])));
+        ImmutablePayloadBuffer frame3 = PacketCodec.Encode(new RealtimeStateFramePacket(11, 1001, ImmutablePayloadBuffer.CopyFrom([5, 6])));
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Realtime, ChannelType.UnreliableSequenced, frame1.Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Realtime, ChannelType.UnreliableSequenced, frame2.Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Realtime, ChannelType.UnreliableSequenced, frame3.Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(3, processed);
+        Assert.Equal(3, bridge.LastReceivedFrameCount);
+        Assert.Equal(2, bridge.LastAppliedFrameCount);
+        Assert.Equal(2, applyCount);
+        Assert.Equal((ulong)1001, lastItemKey);
+        Assert.Equal((ulong)11, lastSequence);
+        Assert.True(lastPayload is not null);
+        Assert.Equal((byte)5, lastPayload![0]);
+        Assert.Equal(1, bridge.LatestItemCount);
     }
 
     private static void ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState()

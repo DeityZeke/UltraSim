@@ -249,19 +249,20 @@ Current first widened standalone-harness read:
 
 - the first AOI observer-replication pass is now wired into the standalone UDP harness
 - transport-level same-connection envelope bundling is now in place for the UDP transport
+- client-side observer-frame consumption is now wired into the standalone UDP harness through a narrow `ClientObserverStateBridge`
 - the widened harness now reports both:
   - logical replicated datagrams
   - actual wire datagrams after transport bundling
-- dense observer case (`spawn-spacing = 4m`) now looks healthy at:
-  - `32` clients: `tick_p95 = 1.176 ms`
-  - `64` clients: `tick_p95 = 2.650 ms`
-  - `64` clients: `replication_datagrams = 535,228`, `replication_wire_datagrams = 34,198`
-- less-dense observer case (`spawn-spacing = 12m`) now looks healthy at:
-  - `64` clients: `tick_p95 = 1.810 ms`
-  - `128` clients: `tick_p95 = 2.876 ms`
-  - `128` clients: `replication_datagrams = 208,252`, `replication_wire_datagrams = 39,680`
+- dense observer case (`spawn-spacing = 4m`) with actual client consume now has a practical `tick_p95 < 4 ms` ceiling of about `64` clients:
+  - `64` clients / `10s`: `tick_p95 = 2.429 ms`
+  - `68` clients / `10s`: `tick_p95 = 6.039 ms`
+  - `64` clients / `5s`: `replication_datagrams = 535,228`, `replication_wire_datagrams = 34,198`
+- less-dense observer case (`spawn-spacing = 12m`) with actual client consume now has a practical `tick_p95 < 4 ms` ceiling of about `128` clients:
+  - `128` clients / `10s`: `tick_p95 = 2.643 ms`
+  - `132` clients / `10s`: `tick_p95 = 4.821 ms`
+  - `128` clients / `5s`: `replication_datagrams = 208,252`, `replication_wire_datagrams = 39,680`
 
-That means the transport bundling fix is real, and the first widened observer load is no longer collapsing at `64` clients. The next question is not basic transport viability anymore; it is how quickly richer replication breadth, physics, and AI eat into this current headroom.
+That means the transport bundling fix is real, but once the client actually decodes and applies observer-visible state the widened ceiling drops well below the movement-only ceiling. The next question is now concrete: how much additional headroom is left once physics, AI, and broader replication families are added on top of this first honest observer path.
 
 Current higher-layer policy direction:
 

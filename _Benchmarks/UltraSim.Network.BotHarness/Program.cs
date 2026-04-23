@@ -148,6 +148,8 @@ internal sealed class MovementRampHarness : IDisposable
         long replicationDatagrams = 0;
         long replicationWireDatagrams = 0;
         long replicationPublishedItems = 0;
+        long observerFramesReceived = 0;
+        long observerFramesApplied = 0;
         long allocBefore = GC.GetTotalAllocatedBytes(true);
 
         StageReplicationContext? replication = _options.ObserverReplication
@@ -206,6 +208,8 @@ internal sealed class MovementRampHarness : IDisposable
         {
             if (_clients[i].Host.IsReady)
                 readyClients++;
+            observerFramesReceived += _clients[i].ObserverFramesReceived;
+            observerFramesApplied += _clients[i].ObserverFramesApplied;
             perClientPing.Add(_clients[i].BuildPingJson());
         }
 
@@ -233,7 +237,10 @@ internal sealed class MovementRampHarness : IDisposable
             ObserverReplicationEnabled: _options.ObserverReplication,
             ReplicationPublishedItems: replicationPublishedItems,
             ReplicationDatagrams: replicationDatagrams,
-            ReplicationWireDatagrams: replicationWireDatagrams);
+            ReplicationWireDatagrams: replicationWireDatagrams,
+            ObserverFramesReceived: observerFramesReceived,
+            ObserverFramesApplied: observerFramesApplied,
+            ObserverStateItems: CountObserverStateItems());
     }
 
     public void Reset()
@@ -278,13 +285,19 @@ internal sealed class MovementRampHarness : IDisposable
                 AllowDynamicConnections: false));
             transport.Start();
 
+            ClientHandle? handle = null;
+            var observerState = new ClientObserverStateBridge(
+                new ConnectionId(1),
+                (itemKey, _, payload) => handle!.ApplyObserverState(itemKey, payload));
             var host = new ClientMovementSessionHost(
                 transport,
                 new ConnectionId(1),
-                new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression));
+                new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+                observerState: observerState);
             host.Start();
+            handle = new ClientHandle(clientIndex, transport, host);
             host.BeginHandshake(_clockTicks + 100 + clientIndex);
-            _clients.Add(new ClientHandle(clientIndex, transport, host));
+            _clients.Add(handle);
         }
 
         return Math.Max(0, _clients.Count - before);
@@ -472,6 +485,7 @@ internal sealed class MovementRampHarness : IDisposable
     {
         private readonly Dictionary<ushort, long> _pingSentAt = new();
         private readonly List<double> _pingSamplesMs = [];
+        private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
         private ushort _nextPingSequence = 1;
 
         public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host)
@@ -484,6 +498,9 @@ internal sealed class MovementRampHarness : IDisposable
         public int ClientIndex { get; }
         public UdpSocketNetworkTransport Transport { get; }
         public ClientMovementSessionHost Host { get; }
+        public long ObserverFramesReceived { get; private set; }
+        public long ObserverFramesApplied { get; private set; }
+        public int ObserverStateCount => _observerStates.Count;
 
         public void TrySendPing(uint clientTick)
         {
@@ -514,6 +531,12 @@ internal sealed class MovementRampHarness : IDisposable
                 if (count < scratch.Length)
                     break;
             }
+
+            if (Host.ObserverState is not null)
+            {
+                ObserverFramesReceived += Host.ObserverState.LastReceivedFrameCount;
+                ObserverFramesApplied += Host.ObserverState.LastAppliedFrameCount;
+            }
         }
 
         public JsonObject BuildPingJson()
@@ -534,6 +557,11 @@ internal sealed class MovementRampHarness : IDisposable
         {
             Host.Stop();
             Transport.Dispose();
+        }
+
+        public void ApplyObserverState(ulong itemKey, ImmutablePayloadBuffer payload)
+        {
+            _observerStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
         }
     }
 
@@ -571,6 +599,14 @@ internal sealed class MovementRampHarness : IDisposable
         public ScheduledWorkItem[] ScheduledWork { get; set; }
         public ConnectionId[] SubscriberScratch { get; }
         public OutboundDatagram[] Output { get; set; }
+    }
+
+    private int CountObserverStateItems()
+    {
+        int total = 0;
+        for (int i = 0; i < _clients.Count; i++)
+            total += _clients[i].ObserverStateCount;
+        return total;
     }
 }
 
@@ -692,7 +728,10 @@ internal readonly record struct StageResult(
     bool ObserverReplicationEnabled,
     long ReplicationPublishedItems,
     long ReplicationDatagrams,
-    long ReplicationWireDatagrams)
+    long ReplicationWireDatagrams,
+    long ObserverFramesReceived,
+    long ObserverFramesApplied,
+    int ObserverStateItems)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
     public bool TickSloPass => TickP95Ms <= SloTickP95Ms && PendingMax <= SloPendingMax;
@@ -726,6 +765,9 @@ internal readonly record struct StageResult(
             ["replication_published_items"] = ReplicationPublishedItems,
             ["replication_datagrams"] = ReplicationDatagrams,
             ["replication_wire_datagrams"] = ReplicationWireDatagrams,
+            ["observer_frames_received"] = ObserverFramesReceived,
+            ["observer_frames_applied"] = ObserverFramesApplied,
+            ["observer_state_items"] = ObserverStateItems,
         };
     }
 }

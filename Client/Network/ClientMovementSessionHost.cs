@@ -11,6 +11,7 @@ public sealed class ClientMovementSessionHost
     private readonly INetworkTransport _transport;
     private readonly NetworkControlPlaneHost _control;
     private readonly ClientMovementNetworkBridge _movement;
+    private readonly ClientObserverStateBridge? _observerState;
     private readonly InboundDatagram[] _inboundScratch;
     private SessionId _sessionId;
 
@@ -21,6 +22,7 @@ public sealed class ClientMovementSessionHost
         ClientInputSequencer<ClientMovementInput>? sequencer = null,
         ClientPredictionStore<ClientMovementState>? predictionStore = null,
         ClientInterpolationBuffer<ClientMovementState>? interpolation = null,
+        ClientObserverStateBridge? observerState = null,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
@@ -29,12 +31,14 @@ public sealed class ClientMovementSessionHost
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _control = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, transport, clientHello: clientHello);
         _movement = new ClientMovementNetworkBridge(transport, connectionId, sequencer, predictionStore, interpolation);
+        _observerState = observerState;
         _inboundScratch = new InboundDatagram[maxPollBatch];
     }
 
     public ConnectionId ConnectionId => _movement.ConnectionId;
     public NetworkControlPlaneHost Control => _control;
     public ClientMovementNetworkBridge Movement => _movement;
+    public ClientObserverStateBridge? ObserverState => _observerState;
     public SessionId SessionId => _sessionId;
     public bool IsRunning => _transport.IsRunning;
 
@@ -72,6 +76,7 @@ public sealed class ClientMovementSessionHost
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, count);
             _control.ProcessInbound(inbound, nowTicks);
             _movement.ProcessInbound(inbound);
+            _observerState?.ProcessInbound(inbound);
             totalCount += count;
 
             if (count < _inboundScratch.Length)

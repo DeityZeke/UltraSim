@@ -13,6 +13,7 @@ It is intentionally narrow:
 - simple client pending-input backlog stats
 - optional observer-replication load on top of the same movement/session path
 - replication logical-vs-wire datagram reporting
+- optional real client-side observer-frame decode/apply on top of that widened path
 
 It does not yet try to recreate the full old bot harness feature set:
 
@@ -70,6 +71,9 @@ The widened harness now reports:
 - `replication_published_items`
 - `replication_datagrams`
 - `replication_wire_datagrams`
+- `observer_frames_received`
+- `observer_frames_applied`
+- `observer_state_items`
 
 That split matters:
 
@@ -78,13 +82,15 @@ That split matters:
 - `replication_wire_datagrams`
   actual UDP datagrams sent after transport-level same-connection bundling
 
-Current first read:
+Current first read with actual client consume:
 
-- dense profile (`spawn-spacing-m 4`)
-  - `32` clients: `tick_p95 = 1.176 ms`
-  - `64` clients: `tick_p95 = 2.650 ms`
-- less-dense profile (`spawn-spacing-m 12`)
-  - `64` clients: `tick_p95 = 1.810 ms`
-  - `128` clients: `tick_p95 = 2.876 ms`
+- dense profile (`spawn-spacing-m 4`, `10s` stages)
+  - `64` clients: `tick_p95 = 2.429 ms`
+  - `68` clients: `tick_p95 = 6.039 ms`
+  - practical current ceiling: about `64`
+- less-dense profile (`spawn-spacing-m 12`, `10s` stages)
+  - `128` clients: `tick_p95 = 2.643 ms`
+  - `132` clients: `tick_p95 = 4.821 ms`
+  - practical current ceiling: about `128`
 
-So the first widened replication load is now healthy enough to keep building on, and the transport bundling fix is visible in the wire-datagram counts rather than being only a code-structure claim.
+So the widened path is now measuring something materially closer to real observer replication: not just publish and transport, but client-side frame decode/apply too. The transport bundling fix still matters, but it is no longer the whole story.
