@@ -2167,7 +2167,7 @@ internal static class TestRunner
             if (count > 0)
                 return count;
 
-            Thread.SpinWait(64);
+            Thread.Sleep(1);
         }
 
         return 0;

@@ -12,6 +12,14 @@ namespace UltraSim.Network;
 /// </summary>
 public sealed class UdpSocketNetworkTransport : INetworkTransport
 {
+    private readonly record struct FlushExecutionResult(
+        long BundleElapsedTicks,
+        long SendElapsedTicks,
+        int LogicalDatagramCount,
+        int WireDatagramCount,
+        int BundledWireDatagramCount,
+        int SingleWireDatagramCount);
+
     private sealed class FlushBatchState
     {
         public readonly Dictionary<ConnectionId, List<OutboundDatagram>> ByConnection = new();
@@ -77,6 +85,12 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private FlushBatchState? _sendFlushBatch;
     private int _asyncMaxPendingBatchCount;
     private int _asyncInlineFallbackCount = 0;
+    private long _lastAsyncCompletedFlushElapsedTicks;
+    private long _lastAsyncCompletedSendElapsedTicks;
+    private int _lastAsyncCompletedLogicalDatagramCount;
+    private int _lastAsyncCompletedWireDatagramCount;
+    private int _lastAsyncCompletedBundledWireDatagramCount;
+    private int _lastAsyncCompletedSingleWireDatagramCount;
     private volatile bool _disposed;
     private volatile bool _running;
     private int _nextDynamicConnectionId;
@@ -217,7 +231,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 AsyncStaged: false,
                 AsyncPendingBatchCount: 0,
                 AsyncMaxPendingBatchCount: 0,
-                AsyncInlineFallbackCount: 0);
+                AsyncInlineFallbackCount: 0,
+                AsyncPreviousFlushElapsedTicks: 0,
+                AsyncPreviousSendElapsedTicks: 0,
+                AsyncHandoffWaitElapsedTicks: 0,
+                AsyncPreviousLogicalDatagramCount: 0,
+                AsyncPreviousWireDatagramCount: 0,
+                AsyncPreviousBundledWireDatagramCount: 0,
+                AsyncPreviousSingleWireDatagramCount: 0);
             return;
         }
 
@@ -338,7 +359,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 AsyncStaged: false,
                 AsyncPendingBatchCount: 0,
                 AsyncMaxPendingBatchCount: 0,
-                AsyncInlineFallbackCount: 0);
+                AsyncInlineFallbackCount: 0,
+                AsyncPreviousFlushElapsedTicks: 0,
+                AsyncPreviousSendElapsedTicks: 0,
+                AsyncHandoffWaitElapsedTicks: 0,
+                AsyncPreviousLogicalDatagramCount: 0,
+                AsyncPreviousWireDatagramCount: 0,
+                AsyncPreviousBundledWireDatagramCount: 0,
+                AsyncPreviousSingleWireDatagramCount: 0);
             ResetFlushScratch();
         }
     }
@@ -515,7 +543,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 AsyncStaged: false,
                 AsyncPendingBatchCount: _pendingAsyncFlushTask.IsCompleted ? 0 : 1,
                 AsyncMaxPendingBatchCount: _asyncMaxPendingBatchCount,
-                AsyncInlineFallbackCount: _asyncInlineFallbackCount);
+                AsyncInlineFallbackCount: _asyncInlineFallbackCount,
+                AsyncPreviousFlushElapsedTicks: Interlocked.Read(ref _lastAsyncCompletedFlushElapsedTicks),
+                AsyncPreviousSendElapsedTicks: Interlocked.Read(ref _lastAsyncCompletedSendElapsedTicks),
+                AsyncHandoffWaitElapsedTicks: 0,
+                AsyncPreviousLogicalDatagramCount: _lastAsyncCompletedLogicalDatagramCount,
+                AsyncPreviousWireDatagramCount: _lastAsyncCompletedWireDatagramCount,
+                AsyncPreviousBundledWireDatagramCount: _lastAsyncCompletedBundledWireDatagramCount,
+                AsyncPreviousSingleWireDatagramCount: _lastAsyncCompletedSingleWireDatagramCount);
             return;
         }
 
@@ -523,7 +558,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         if (pendingBatchCount > _asyncMaxPendingBatchCount)
             _asyncMaxPendingBatchCount = pendingBatchCount;
 
+        long handoffWaitStart = Stopwatch.GetTimestamp();
         _pendingAsyncFlushTask.GetAwaiter().GetResult();
+        long handoffWaitEnd = Stopwatch.GetTimestamp();
+        long handoffWaitTicks = handoffWaitEnd - handoffWaitStart;
 
         FlushBatchState sendBatch = buildBatch;
         _buildFlushBatch = _sendFlushBatch;
@@ -544,14 +582,27 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             AsyncStaged: true,
             AsyncPendingBatchCount: 1,
             AsyncMaxPendingBatchCount: _asyncMaxPendingBatchCount,
-            AsyncInlineFallbackCount: _asyncInlineFallbackCount);
+            AsyncInlineFallbackCount: _asyncInlineFallbackCount,
+            AsyncPreviousFlushElapsedTicks: Interlocked.Read(ref _lastAsyncCompletedFlushElapsedTicks),
+            AsyncPreviousSendElapsedTicks: Interlocked.Read(ref _lastAsyncCompletedSendElapsedTicks),
+            AsyncHandoffWaitElapsedTicks: handoffWaitTicks,
+            AsyncPreviousLogicalDatagramCount: _lastAsyncCompletedLogicalDatagramCount,
+            AsyncPreviousWireDatagramCount: _lastAsyncCompletedWireDatagramCount,
+            AsyncPreviousBundledWireDatagramCount: _lastAsyncCompletedBundledWireDatagramCount,
+            AsyncPreviousSingleWireDatagramCount: _lastAsyncCompletedSingleWireDatagramCount);
     }
 
     private void ExecuteAsyncFlushBatch(Socket socket, FlushBatchState batch)
     {
         try
         {
-            ExecuteFlushBatch(socket, batch.ByConnection, clearAfterSend: true);
+            FlushExecutionResult result = ExecuteFlushBatch(socket, batch.ByConnection, clearAfterSend: true);
+            Interlocked.Exchange(ref _lastAsyncCompletedFlushElapsedTicks, result.BundleElapsedTicks + result.SendElapsedTicks);
+            Interlocked.Exchange(ref _lastAsyncCompletedSendElapsedTicks, result.SendElapsedTicks);
+            _lastAsyncCompletedLogicalDatagramCount = result.LogicalDatagramCount;
+            _lastAsyncCompletedWireDatagramCount = result.WireDatagramCount;
+            _lastAsyncCompletedBundledWireDatagramCount = result.BundledWireDatagramCount;
+            _lastAsyncCompletedSingleWireDatagramCount = result.SingleWireDatagramCount;
         }
         finally
         {
@@ -559,14 +610,18 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         }
     }
 
-    private void ExecuteFlushBatch(Socket socket, Dictionary<ConnectionId, List<OutboundDatagram>> flushByConnection, bool clearAfterSend)
+    private FlushExecutionResult ExecuteFlushBatch(Socket socket, Dictionary<ConnectionId, List<OutboundDatagram>> flushByConnection, bool clearAfterSend)
     {
+        long bundleTicks = 0;
+        long sendTicks = 0;
+        int logicalDatagramCount = 0;
         int wireDatagramCount = 0;
         int bundledWireDatagramCount = 0;
         int singleWireDatagramCount = 0;
 
         foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in flushByConnection)
         {
+            logicalDatagramCount += datagrams.Count;
             if (!TryGetRemote(connectionId, out IPEndPoint? remote) || remote is null)
             {
                 for (int i = 0; i < datagrams.Count; i++)
@@ -580,7 +635,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 int bundleStart = index;
                 if (datagrams.Count - index == 1)
                 {
+                    long sendStart = Stopwatch.GetTimestamp();
                     socket.SendTo(datagrams[index].Payload.Span, SocketFlags.None, remote);
+                    long sendEnd = Stopwatch.GetTimestamp();
+                    sendTicks += sendEnd - sendStart;
                     datagrams[index].Dispose();
                     index++;
                     wireDatagramCount++;
@@ -599,12 +657,18 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 byte[] rented = ArrayPool<byte>.Shared.Rent(bundleBytes);
                 try
                 {
+                    long bundleEncodeStart = Stopwatch.GetTimestamp();
                     TransportDatagramBundleCodec.WriteBundle(
                         _bundlePayloadScratch,
                         0,
                         packedCount,
                         rented.AsSpan(0, bundleBytes));
+                    long bundleEncodeEnd = Stopwatch.GetTimestamp();
+                    bundleTicks += bundleEncodeEnd - bundleEncodeStart;
+                    long sendStart = Stopwatch.GetTimestamp();
                     socket.SendTo(rented.AsSpan(0, bundleBytes), SocketFlags.None, remote);
+                    long sendEnd = Stopwatch.GetTimestamp();
+                    sendTicks += sendEnd - sendStart;
                 }
                 finally
                 {
@@ -623,13 +687,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             ResetFlushScratch();
 
         LastFlushWireDatagramCount = wireDatagramCount;
-        LastFlushProfile = LastFlushProfile with
-        {
-            WireDatagramCount = wireDatagramCount,
-            BundledWireDatagramCount = bundledWireDatagramCount,
-            SingleWireDatagramCount = singleWireDatagramCount
-        };
         _bundlePayloadScratch.Clear();
+        return new FlushExecutionResult(
+            BundleElapsedTicks: bundleTicks,
+            SendElapsedTicks: sendTicks,
+            LogicalDatagramCount: logicalDatagramCount,
+            WireDatagramCount: wireDatagramCount,
+            BundledWireDatagramCount: bundledWireDatagramCount,
+            SingleWireDatagramCount: singleWireDatagramCount);
     }
 
     private static int CountLogicalDatagrams(Dictionary<ConnectionId, List<OutboundDatagram>> flushByConnection)

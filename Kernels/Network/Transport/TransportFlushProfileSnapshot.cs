@@ -13,4 +13,11 @@ public readonly record struct TransportFlushProfileSnapshot(
     bool AsyncStaged,
     int AsyncPendingBatchCount,
     int AsyncMaxPendingBatchCount,
-    int AsyncInlineFallbackCount);
+    int AsyncInlineFallbackCount,
+    long AsyncPreviousFlushElapsedTicks,
+    long AsyncPreviousSendElapsedTicks,
+    long AsyncHandoffWaitElapsedTicks,
+    int AsyncPreviousLogicalDatagramCount,
+    int AsyncPreviousWireDatagramCount,
+    int AsyncPreviousBundledWireDatagramCount,
+    int AsyncPreviousSingleWireDatagramCount);

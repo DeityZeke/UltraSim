@@ -167,6 +167,11 @@ internal sealed class MovementRampHarness : IDisposable
         var flushSendSamplesMs = new List<double>(measuredTicks);
         var flushConnectionSamples = new List<double>(measuredTicks);
         var flushWireDatagramSamples = new List<double>(measuredTicks);
+        var asyncFlushPreviousSamplesMs = new List<double>(measuredTicks);
+        var asyncFlushPreviousSendSamplesMs = new List<double>(measuredTicks);
+        var asyncFlushHandoffWaitSamplesMs = new List<double>(measuredTicks);
+        var asyncFlushPendingSamples = new List<double>(measuredTicks);
+        var asyncFlushPreviousWireDatagramSamples = new List<double>(measuredTicks);
         var clientPumpSamplesMs = new List<double>(measuredTicks);
         var clientPollSamplesMs = new List<double>(measuredTicks);
         var clientControlSamplesMs = new List<double>(measuredTicks);
@@ -235,6 +240,11 @@ internal sealed class MovementRampHarness : IDisposable
                         out double flushSendMs,
                         out int flushConnectionCount,
                         out int flushWireDatagramCount,
+                        out double asyncFlushPreviousMs,
+                        out double asyncFlushPreviousSendMs,
+                        out double asyncFlushHandoffWaitMs,
+                        out int asyncFlushPendingCount,
+                        out int asyncFlushPreviousWireDatagramCount,
                         out int bundledWireDatagrams,
                         out int singleWireDatagrams);
                     long dispatchEnd = Stopwatch.GetTimestamp();
@@ -251,6 +261,11 @@ internal sealed class MovementRampHarness : IDisposable
                     flushSendSamplesMs.Add(flushSendMs);
                     flushConnectionSamples.Add(flushConnectionCount);
                     flushWireDatagramSamples.Add(flushWireDatagramCount);
+                    asyncFlushPreviousSamplesMs.Add(asyncFlushPreviousMs);
+                    asyncFlushPreviousSendSamplesMs.Add(asyncFlushPreviousSendMs);
+                    asyncFlushHandoffWaitSamplesMs.Add(asyncFlushHandoffWaitMs);
+                    asyncFlushPendingSamples.Add(asyncFlushPendingCount);
+                    asyncFlushPreviousWireDatagramSamples.Add(asyncFlushPreviousWireDatagramCount);
                 }
                 else
                 {
@@ -263,6 +278,11 @@ internal sealed class MovementRampHarness : IDisposable
                     flushSendSamplesMs.Add(0d);
                     flushConnectionSamples.Add(0d);
                     flushWireDatagramSamples.Add(0d);
+                    asyncFlushPreviousSamplesMs.Add(0d);
+                    asyncFlushPreviousSendSamplesMs.Add(0d);
+                    asyncFlushHandoffWaitSamplesMs.Add(0d);
+                    asyncFlushPendingSamples.Add(0d);
+                    asyncFlushPreviousWireDatagramSamples.Add(0d);
                 }
             }
             else
@@ -277,6 +297,11 @@ internal sealed class MovementRampHarness : IDisposable
                 flushSendSamplesMs.Add(0d);
                 flushConnectionSamples.Add(0d);
                 flushWireDatagramSamples.Add(0d);
+                asyncFlushPreviousSamplesMs.Add(0d);
+                asyncFlushPreviousSendSamplesMs.Add(0d);
+                asyncFlushHandoffWaitSamplesMs.Add(0d);
+                asyncFlushPendingSamples.Add(0d);
+                asyncFlushPreviousWireDatagramSamples.Add(0d);
             }
             long clientNowTicks = _clockTicks + 1;
             long clientPumpStart = Stopwatch.GetTimestamp();
@@ -343,6 +368,11 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats flushSendStats = new TickWindowStats(flushSendSamplesMs);
         TickWindowStats flushConnectionStats = new TickWindowStats(flushConnectionSamples);
         TickWindowStats flushWireDatagramStats = new TickWindowStats(flushWireDatagramSamples);
+        TickWindowStats asyncFlushPreviousStats = new TickWindowStats(asyncFlushPreviousSamplesMs);
+        TickWindowStats asyncFlushPreviousSendStats = new TickWindowStats(asyncFlushPreviousSendSamplesMs);
+        TickWindowStats asyncFlushHandoffWaitStats = new TickWindowStats(asyncFlushHandoffWaitSamplesMs);
+        TickWindowStats asyncFlushPendingStats = new TickWindowStats(asyncFlushPendingSamples);
+        TickWindowStats asyncFlushPreviousWireDatagramStats = new TickWindowStats(asyncFlushPreviousWireDatagramSamples);
         TickWindowStats clientPumpStats = new TickWindowStats(clientPumpSamplesMs);
         TickWindowStats clientPollStats = new TickWindowStats(clientPollSamplesMs);
         TickWindowStats clientControlStats = new TickWindowStats(clientControlSamplesMs);
@@ -404,6 +434,16 @@ internal sealed class MovementRampHarness : IDisposable
             FlushConnectionsP95: flushConnectionStats.P95Ms,
             FlushWireDatagramsAverage: flushWireDatagramStats.AverageMs,
             FlushWireDatagramsP95: flushWireDatagramStats.P95Ms,
+            AsyncFlushPreviousAverageMs: asyncFlushPreviousStats.AverageMs,
+            AsyncFlushPreviousP95Ms: asyncFlushPreviousStats.P95Ms,
+            AsyncFlushPreviousSendAverageMs: asyncFlushPreviousSendStats.AverageMs,
+            AsyncFlushPreviousSendP95Ms: asyncFlushPreviousSendStats.P95Ms,
+            AsyncFlushHandoffWaitAverageMs: asyncFlushHandoffWaitStats.AverageMs,
+            AsyncFlushHandoffWaitP95Ms: asyncFlushHandoffWaitStats.P95Ms,
+            AsyncFlushPendingAverage: asyncFlushPendingStats.AverageMs,
+            AsyncFlushPendingP95: asyncFlushPendingStats.P95Ms,
+            AsyncFlushPreviousWireDatagramsAverage: asyncFlushPreviousWireDatagramStats.AverageMs,
+            AsyncFlushPreviousWireDatagramsP95: asyncFlushPreviousWireDatagramStats.P95Ms,
             ClientPumpAverageMs: clientPumpStats.AverageMs,
             ClientPumpP95Ms: clientPumpStats.P95Ms,
             ClientPollAverageMs: clientPollStats.AverageMs,
@@ -696,6 +736,11 @@ internal sealed class MovementRampHarness : IDisposable
         out double flushSendMs,
         out int flushConnectionCount,
         out int flushWireDatagramCount,
+        out double asyncFlushPreviousMs,
+        out double asyncFlushPreviousSendMs,
+        out double asyncFlushHandoffWaitMs,
+        out int asyncFlushPendingCount,
+        out int asyncFlushPreviousWireDatagramCount,
         out int bundledWireDatagrams,
         out int singleWireDatagrams)
     {
@@ -733,8 +778,10 @@ internal sealed class MovementRampHarness : IDisposable
             _serverTransport.FlushOutbound();
             long flushEnd = Stopwatch.GetTimestamp();
             dispatchFlushTicks += flushEnd - flushStart;
-            wireDatagrams = _serverTransport.LastFlushWireDatagramCount;
             TransportFlushProfileSnapshot flushProfile = _serverTransport.LastFlushProfile;
+            wireDatagrams = flushProfile.AsyncEnabled
+                ? flushProfile.AsyncPreviousWireDatagramCount
+                : _serverTransport.LastFlushWireDatagramCount;
             dispatchScheduleMs = dispatchScheduleTicks * 1000.0 / Stopwatch.Frequency;
             dispatchFanoutMs = dispatchFanoutTicks * 1000.0 / Stopwatch.Frequency;
             dispatchFlushMs = dispatchFlushTicks * 1000.0 / Stopwatch.Frequency;
@@ -742,9 +789,20 @@ internal sealed class MovementRampHarness : IDisposable
             flushBundleMs = flushProfile.BundleElapsedTicks * 1000.0 / Stopwatch.Frequency;
             flushSendMs = flushProfile.SendElapsedTicks * 1000.0 / Stopwatch.Frequency;
             flushConnectionCount = flushProfile.ConnectionCount;
-            flushWireDatagramCount = flushProfile.WireDatagramCount;
-            bundledWireDatagrams = flushProfile.BundledWireDatagramCount;
-            singleWireDatagrams = flushProfile.SingleWireDatagramCount;
+            flushWireDatagramCount = flushProfile.AsyncEnabled
+                ? flushProfile.AsyncPreviousWireDatagramCount
+                : flushProfile.WireDatagramCount;
+            asyncFlushPreviousMs = flushProfile.AsyncPreviousFlushElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            asyncFlushPreviousSendMs = flushProfile.AsyncPreviousSendElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            asyncFlushHandoffWaitMs = flushProfile.AsyncHandoffWaitElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            asyncFlushPendingCount = flushProfile.AsyncPendingBatchCount;
+            asyncFlushPreviousWireDatagramCount = flushProfile.AsyncPreviousWireDatagramCount;
+            bundledWireDatagrams = flushProfile.AsyncEnabled
+                ? flushProfile.AsyncPreviousBundledWireDatagramCount
+                : flushProfile.BundledWireDatagramCount;
+            singleWireDatagrams = flushProfile.AsyncEnabled
+                ? flushProfile.AsyncPreviousSingleWireDatagramCount
+                : flushProfile.SingleWireDatagramCount;
             return result.Fanout.DatagramCount;
         }
     }
@@ -1157,7 +1215,7 @@ internal sealed class HarnessArgs
     public bool ObserverEvents { get; set; }
     public bool LatestStateBatching { get; set; }
     public bool LatestStateRecipientPhasing { get; set; }
-    public bool AsyncServerFlush { get; set; }
+    public bool AsyncServerFlush { get; set; } = true;
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1368,6 +1426,16 @@ internal readonly record struct StageResult(
     double FlushConnectionsP95,
     double FlushWireDatagramsAverage,
     double FlushWireDatagramsP95,
+    double AsyncFlushPreviousAverageMs,
+    double AsyncFlushPreviousP95Ms,
+    double AsyncFlushPreviousSendAverageMs,
+    double AsyncFlushPreviousSendP95Ms,
+    double AsyncFlushHandoffWaitAverageMs,
+    double AsyncFlushHandoffWaitP95Ms,
+    double AsyncFlushPendingAverage,
+    double AsyncFlushPendingP95,
+    double AsyncFlushPreviousWireDatagramsAverage,
+    double AsyncFlushPreviousWireDatagramsP95,
     double ClientPumpAverageMs,
     double ClientPumpP95Ms,
     double ClientPollAverageMs,
@@ -1454,6 +1522,16 @@ internal readonly record struct StageResult(
             ["flush_connections_p95"] = Math.Round(FlushConnectionsP95, 3),
             ["flush_wire_datagrams_avg"] = Math.Round(FlushWireDatagramsAverage, 3),
             ["flush_wire_datagrams_p95"] = Math.Round(FlushWireDatagramsP95, 3),
+            ["async_flush_previous_avg_ms"] = Math.Round(AsyncFlushPreviousAverageMs, 3),
+            ["async_flush_previous_p95_ms"] = Math.Round(AsyncFlushPreviousP95Ms, 3),
+            ["async_flush_previous_send_avg_ms"] = Math.Round(AsyncFlushPreviousSendAverageMs, 3),
+            ["async_flush_previous_send_p95_ms"] = Math.Round(AsyncFlushPreviousSendP95Ms, 3),
+            ["async_flush_handoff_wait_avg_ms"] = Math.Round(AsyncFlushHandoffWaitAverageMs, 3),
+            ["async_flush_handoff_wait_p95_ms"] = Math.Round(AsyncFlushHandoffWaitP95Ms, 3),
+            ["async_flush_pending_avg"] = Math.Round(AsyncFlushPendingAverage, 3),
+            ["async_flush_pending_p95"] = Math.Round(AsyncFlushPendingP95, 3),
+            ["async_flush_previous_wire_datagrams_avg"] = Math.Round(AsyncFlushPreviousWireDatagramsAverage, 3),
+            ["async_flush_previous_wire_datagrams_p95"] = Math.Round(AsyncFlushPreviousWireDatagramsP95, 3),
             ["client_pump_avg_ms"] = Math.Round(ClientPumpAverageMs, 3),
             ["client_pump_p95_ms"] = Math.Round(ClientPumpP95Ms, 3),
             ["client_poll_avg_ms"] = Math.Round(ClientPollAverageMs, 3),

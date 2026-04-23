@@ -112,6 +112,16 @@ The widened harness now reports:
 - `flush_connections_p95`
 - `flush_wire_datagrams_avg`
 - `flush_wire_datagrams_p95`
+- `async_flush_previous_avg_ms`
+- `async_flush_previous_p95_ms`
+- `async_flush_previous_send_avg_ms`
+- `async_flush_previous_send_p95_ms`
+- `async_flush_handoff_wait_avg_ms`
+- `async_flush_handoff_wait_p95_ms`
+- `async_flush_pending_avg`
+- `async_flush_pending_p95`
+- `async_flush_previous_wire_datagrams_avg`
+- `async_flush_previous_wire_datagrams_p95`
 - `client_pump_avg_ms`
 - `client_pump_p95_ms`
 - `client_observer_state_decode_avg_ms`
@@ -200,12 +210,20 @@ The widened harness also has an experimental latest-state recipient-phasing seam
 
 The widened harness also has an experimental async server flush seam:
 
-- current harness default: async server flush disabled
+- current harness default: async server flush enabled
 - use `--enable-async-server-flush` for an A/B comparison on the same widened profile
+- use `--disable-async-server-flush` to force the older synchronous tick-thread flush path
 - current intent:
   - keep normal publish/schedule/fanout on the tick thread
   - hand the final UDP bundle/send pass to one bounded background flush set
   - preserve bounded backlog instead of introducing unbounded writer queues
+- current telemetry:
+  - `async_flush_previous_*`
+    - completed background flush cost from the prior handoff
+  - `async_flush_handoff_wait_*`
+    - tick-thread wait time when the previous async flush is still in flight
+  - `async_flush_pending_*`
+    - bounded pending-batch depth seen by the tick thread
 
 The widened harness can now also include a first `Bulk` observer family:
 
