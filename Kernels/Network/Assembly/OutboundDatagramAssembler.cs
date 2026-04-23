@@ -9,6 +9,8 @@ public sealed class OutboundDatagramAssembler
         _transforms = transforms ?? Array.Empty<IOutboundTransform>();
     }
 
+    public bool HasTransforms => _transforms.Length != 0;
+
     public OutboundAssemblyResult Assemble(
         ConnectionId connectionId,
         ReadOnlySpan<ScheduledWorkItem> items,

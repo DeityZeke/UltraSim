@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace UltraSim.Network;
 
 public sealed class ConnectionSubscriptionRegistry
@@ -63,8 +65,36 @@ public sealed class ConnectionSubscriptionRegistry
                 return 0;
 
             int count = Math.Min(connections.Count, destination.Length);
-            for (int i = 0; i < count; i++)
-                destination[i] = connections[i];
+            CollectionsMarshal.AsSpan(connections)[..count].CopyTo(destination);
+            return count;
+        }
+    }
+
+    public int WriteDatagramsForSubscribers(
+        SubscriptionKey key,
+        NetworkPlane plane,
+        PacketClass packetClass,
+        ChannelType channel,
+        ImmutablePayloadBuffer payload,
+        Span<OutboundDatagram> destination)
+    {
+        lock (_sync)
+        {
+            if (!_connectionsByKey.TryGetValue(key, out List<ConnectionId>? connections) || destination.Length == 0)
+                return 0;
+
+            int count = Math.Min(connections.Count, destination.Length);
+            ReadOnlySpan<ConnectionId> subscribers = CollectionsMarshal.AsSpan(connections)[..count];
+            for (int i = 0; i < subscribers.Length; i++)
+            {
+                destination[i] = new OutboundDatagram(
+                    subscribers[i],
+                    plane,
+                    packetClass,
+                    channel,
+                    payload);
+            }
+
             return count;
         }
     }
