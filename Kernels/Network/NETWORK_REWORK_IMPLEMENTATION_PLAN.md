@@ -544,6 +544,10 @@ The next implementation target after this bridge slice should be:
     - client-side ordered-event decode/apply
     - harness-side AOI-scoped ordered-event publication on top of the same movement entities
     - configurable event cadence for widening runs
+  - the live owner path now also has its first explicit correction-send policy seam:
+    - server-side owner correction deadband
+    - server-side max silent ticks
+    - harness-level configuration for both
 
 Current recommendation:
 

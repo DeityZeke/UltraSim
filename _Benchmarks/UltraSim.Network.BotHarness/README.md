@@ -44,6 +44,8 @@ Useful options:
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
+- `--owner-deadband <meters>`
+- `--owner-max-silent-ticks <n>`
 
 Recommended run categories:
 
@@ -116,6 +118,16 @@ The owner path is now also slightly less synthetic:
 - the harness now sends predicted owner movement state instead of a zero/default predicted state
 - the client bridge records correction magnitude when an authoritative movement state acknowledges a predicted input
 - this is still a narrow owner-correction slice, not the full old reconciliation system
+- owner correction policy is now configurable in the live harness:
+  - `--owner-deadband <meters>`
+  - `--owner-max-silent-ticks <n>`
+
+Position/correction note:
+
+- the harness movement body uses world-space float positions
+- `--spawn-spacing-m` writes directly into those position values
+- so owner-correction magnitudes in the report are in the same world-space meter units the harness already uses
+- the earlier large owner-correction spikes were not real drift; they were caused by the client predicting from `(0,0)` while the server spawned entities on a grid
 
 Current first read with actual client consume:
 

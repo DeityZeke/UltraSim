@@ -62,6 +62,7 @@ internal static class TestRunner
         Run(nameof(ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams), ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams);
         Run(nameof(ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement), ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement);
         Run(nameof(ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement), ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement);
+        Run(nameof(ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates), ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates);
         Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
 
         Console.WriteLine("All Server contract tests passed.");
@@ -1721,6 +1722,77 @@ internal static class TestRunner
             Assert.Equal((ushort)1, clients[i].Host.Movement.LastReceiveResult.LastProcessedInputSequence);
             clients[i].Transport.Dispose();
         }
+    }
+
+    private static void ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+        Entity entity = world.CreateDefault(signature);
+        Assert.True(world.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            float velocityX = input.MoveX / 100f;
+            float velocityY = input.MoveY / 100f;
+            body = body with
+            {
+                VelocityX = velocityX,
+                VelocityY = velocityY,
+                PositionX = body.PositionX + velocityX * deltaSeconds,
+                PositionY = body.PositionY + velocityY * deltaSeconds,
+            };
+            Assert.True(movementWorld.SetComponent(movementEntity, body));
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            packet = new MovementStatePacket(
+                networkEntityId,
+                serverTick,
+                lastProcessedInputSequence,
+                body.PositionX,
+                body.PositionY,
+                body.VelocityX,
+                body.VelocityY);
+            return true;
+        }
+
+        var server = new ServerEcsMovementNetworkBridge(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            new ServerMovementOwnerCorrectionPolicy(positionDeadband: 0.1f, maxSilentTicks: 3));
+        server.Bind(new ConnectionId(1), entity, networkEntityId: 91);
+
+        pair.Client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            MovementInputPacket.Plane,
+            MovementInputPacket.PacketClass,
+            MovementInputPacket.Channel,
+            PacketCodec.Encode(new MovementInputPacket(1, 1000, 80, 0, 0))));
+        pair.Client.FlushOutbound();
+
+        Assert.Equal(1, server.PollInputs());
+        Assert.Equal(1, server.AdvanceAndSend(0.016f, serverTick: 1));
+        Assert.Equal(1, server.LastSentStateCount);
+
+        Assert.Equal(0, server.AdvanceAndSend(0.016f, serverTick: 2));
+        Assert.Equal(0, server.LastSentStateCount);
+
+        Assert.Equal(0, server.AdvanceAndSend(0.016f, serverTick: 3));
+        Assert.Equal(0, server.LastSentStateCount);
+
+        Assert.Equal(1, server.AdvanceAndSend(0.016f, serverTick: 4));
+        Assert.Equal(1, server.LastSentStateCount);
     }
 
     private static World CreateEcsTestWorld(bool enableProfiling, bool registerSystems = true)

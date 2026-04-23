@@ -135,7 +135,10 @@ internal sealed class MovementRampHarness : IDisposable
             ApplyMovementInput,
             ProjectMovementState,
             SpawnSession,
-            handshakePolicy: handshakePolicy);
+            handshakePolicy: handshakePolicy,
+            ownerCorrectionPolicy: new ServerMovementOwnerCorrectionPolicy(
+                _options.OwnerCorrectionDeadband,
+                _options.OwnerCorrectionMaxSilentTicks));
         _serverHost.Start();
     }
 
@@ -329,7 +332,11 @@ internal sealed class MovementRampHarness : IDisposable
                 observerState: observerState,
                 observerEvents: observerEvents);
             host.Start();
-            handle = new ClientHandle(clientIndex, transport, host);
+            float spacing = _options.SpawnSpacingMeters;
+            int width = Math.Max(1, _options.SpawnGridWidth);
+            float startX = spacing <= 0f ? 0f : (clientIndex % width) * spacing;
+            float startY = spacing <= 0f ? 0f : (clientIndex / width) * spacing;
+            handle = new ClientHandle(clientIndex, transport, host, new ClientMovementState(startX, startY, 0f, 0f));
             host.BeginHandshake(_clockTicks + 100 + clientIndex);
             _clients.Add(handle);
         }
@@ -550,11 +557,12 @@ internal sealed class MovementRampHarness : IDisposable
         private ClientMovementState _predictedOwnerState;
         private uint _lastAuthoritativeServerTick;
 
-        public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host)
+        public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host, ClientMovementState initialPredictedOwnerState)
         {
             ClientIndex = clientIndex;
             Transport = transport;
             Host = host;
+            _predictedOwnerState = initialPredictedOwnerState;
         }
 
         public int ClientIndex { get; }
@@ -727,6 +735,8 @@ internal sealed class HarnessArgs
     public float SpawnSpacingMeters { get; set; } = 4f;
     public int SpawnGridWidth { get; set; } = 32;
     public float[] AoiRadiiMeters { get; set; } = [7.5f];
+    public float OwnerCorrectionDeadband { get; set; } = 0f;
+    public uint OwnerCorrectionMaxSilentTicks { get; set; } = 1;
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
     public int SettleTicks => Math.Max(1, (int)Math.Round(SettleSeconds * TickHz, MidpointRounding.AwayFromZero));
@@ -760,6 +770,8 @@ internal sealed class HarnessArgs
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--aoi-radii-m") options.AoiRadiiMeters = ParseFloatList(Next()!, nameof(AoiRadiiMeters));
+            else if (arg == "--owner-deadband") options.OwnerCorrectionDeadband = float.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--owner-max-silent-ticks") options.OwnerCorrectionMaxSilentTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
@@ -767,6 +779,10 @@ internal sealed class HarnessArgs
         options.ObserverEventEveryTicks = Math.Max(1, options.ObserverEventEveryTicks);
         if (options.AoiRadiiMeters.Length == 0)
             options.AoiRadiiMeters = [7.5f];
+        if (float.IsNaN(options.OwnerCorrectionDeadband) || float.IsInfinity(options.OwnerCorrectionDeadband) || options.OwnerCorrectionDeadband < 0f)
+            throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionDeadband));
+        if (options.OwnerCorrectionMaxSilentTicks == 0)
+            throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionMaxSilentTicks));
         return options;
     }
 
@@ -812,6 +828,8 @@ internal sealed class HarnessArgs
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
+            ["owner_deadband"] = OwnerCorrectionDeadband,
+            ["owner_max_silent_ticks"] = OwnerCorrectionMaxSilentTicks,
         };
     }
 

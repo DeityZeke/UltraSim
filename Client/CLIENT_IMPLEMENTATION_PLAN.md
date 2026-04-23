@@ -82,6 +82,9 @@ Current status:
     - owner correction sample counts
     - average/max position error
     - average/max velocity error
+  - first live owner-correction policy controls on the server path:
+    - position deadband
+    - max silent ticks
 
 ## Phase C3: Godot Wrapper
 

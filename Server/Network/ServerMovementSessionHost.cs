@@ -29,6 +29,7 @@ public sealed class ServerMovementSessionHost
         ServerMovementSessionDespawner? despawnSession = null,
         HandshakePolicy handshakePolicy = default,
         SessionAdmissionPolicy sessionPolicy = default,
+        ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
@@ -41,7 +42,7 @@ public sealed class ServerMovementSessionHost
             transport,
             handshakePolicy: handshakePolicy,
             sessionPolicy: sessionPolicy);
-        _movement = new ServerEcsMovementNetworkBridge(world, transport, applyInput, projectState);
+        _movement = new ServerEcsMovementNetworkBridge(world, transport, applyInput, projectState, ownerCorrectionPolicy);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _inboundScratch = new InboundDatagram[maxPollBatch];

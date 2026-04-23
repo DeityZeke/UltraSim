@@ -16,12 +16,16 @@ public sealed class ServerEcsMovementNetworkBridge
         MovementInputPacket CurrentInput,
         bool HasInput,
         ushort LastReceivedInputSequence,
-        ushort LastProcessedInputSequence);
+        ushort LastProcessedInputSequence,
+        MovementStatePacket LastSentState,
+        bool HasLastSentState,
+        uint LastSentServerTick);
 
     private readonly World _world;
     private readonly INetworkTransport _transport;
     private readonly ServerEcsMovementInputApplier _applyInput;
     private readonly ServerEcsMovementStateProjector _projectState;
+    private readonly ServerMovementOwnerCorrectionPolicy _ownerCorrectionPolicy;
     private readonly Dictionary<ConnectionId, BindingState> _bindings = new();
     private readonly List<ConnectionId> _connectionScratch = new();
 
@@ -29,12 +33,14 @@ public sealed class ServerEcsMovementNetworkBridge
         World world,
         INetworkTransport transport,
         ServerEcsMovementInputApplier applyInput,
-        ServerEcsMovementStateProjector projectState)
+        ServerEcsMovementStateProjector projectState,
+        ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _applyInput = applyInput ?? throw new ArgumentNullException(nameof(applyInput));
         _projectState = projectState ?? throw new ArgumentNullException(nameof(projectState));
+        _ownerCorrectionPolicy = ownerCorrectionPolicy == default ? ServerMovementOwnerCorrectionPolicy.Default : ownerCorrectionPolicy;
     }
 
     public int BindingCount => _bindings.Count;
@@ -57,7 +63,10 @@ public sealed class ServerEcsMovementNetworkBridge
             default,
             HasInput: false,
             LastReceivedInputSequence: 0,
-            LastProcessedInputSequence: 0);
+            LastProcessedInputSequence: 0,
+            LastSentState: default,
+            HasLastSentState: false,
+            LastSentServerTick: 0);
     }
 
     public bool Unbind(ConnectionId connectionId)
@@ -153,6 +162,12 @@ public sealed class ServerEcsMovementNetworkBridge
                 serverTick,
                 out MovementStatePacket packet))
             {
+                if (!ShouldSendOwnerCorrection(state, packet, serverTick))
+                {
+                    _bindings[connectionId] = state;
+                    continue;
+                }
+
                 ImmutablePayloadBuffer payload = PacketCodec.Encode(packet);
                 _transport.EnqueueOutbound(new OutboundDatagram(
                     connectionId,
@@ -160,6 +175,12 @@ public sealed class ServerEcsMovementNetworkBridge
                     MovementStatePacket.PacketClass,
                     MovementStatePacket.Channel,
                     payload));
+                state = state with
+                {
+                    LastSentState = packet,
+                    HasLastSentState = true,
+                    LastSentServerTick = serverTick,
+                };
                 sent++;
             }
 
@@ -197,5 +218,21 @@ public sealed class ServerEcsMovementNetworkBridge
     private static bool SequenceGt(ushort left, ushort right)
     {
         return unchecked((short)(left - right)) > 0;
+    }
+
+    private bool ShouldSendOwnerCorrection(in BindingState state, in MovementStatePacket packet, uint serverTick)
+    {
+        if (!state.HasLastSentState)
+            return true;
+
+        uint silentTicks = serverTick - state.LastSentServerTick;
+        if (silentTicks >= _ownerCorrectionPolicy.MaxSilentTicks)
+            return true;
+
+        float dx = packet.PositionX - state.LastSentState.PositionX;
+        float dy = packet.PositionY - state.LastSentState.PositionY;
+        float distanceSquared = (dx * dx) + (dy * dy);
+        float deadband = _ownerCorrectionPolicy.PositionDeadband;
+        return distanceSquared > (deadband * deadband);
     }
 }
