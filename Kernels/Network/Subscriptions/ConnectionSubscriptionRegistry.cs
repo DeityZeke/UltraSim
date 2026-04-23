@@ -4,9 +4,21 @@ namespace UltraSim.Network;
 
 public sealed class ConnectionSubscriptionRegistry
 {
+    private sealed class ConnectionList
+    {
+        public readonly List<ConnectionId> Ordered = new();
+        public readonly HashSet<ConnectionId> Membership = new();
+    }
+
+    private sealed class SubscriptionList
+    {
+        public readonly List<SubscriptionKey> Ordered = new();
+        public readonly HashSet<SubscriptionKey> Membership = new();
+    }
+
     private readonly object _sync = new();
-    private readonly Dictionary<SubscriptionKey, List<ConnectionId>> _connectionsByKey = new();
-    private readonly Dictionary<ConnectionId, List<SubscriptionKey>> _keysByConnection = new();
+    private readonly Dictionary<SubscriptionKey, ConnectionList> _connectionsByKey = new();
+    private readonly Dictionary<ConnectionId, SubscriptionList> _keysByConnection = new();
 
     public bool Subscribe(ConnectionId connectionId, SubscriptionKey key)
     {
@@ -33,13 +45,13 @@ public sealed class ConnectionSubscriptionRegistry
     {
         lock (_sync)
         {
-            if (!_keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? keys))
+            if (!_keysByConnection.TryGetValue(connectionId, out SubscriptionList? keys))
                 return 0;
 
             int removed = 0;
-            while (keys.Count > 0)
+            while (keys.Ordered.Count > 0)
             {
-                if (Unsubscribe_NoLock(connectionId, keys[^1]))
+                if (Unsubscribe_NoLock(connectionId, keys.Ordered[^1]))
                     removed++;
             }
 
@@ -51,8 +63,8 @@ public sealed class ConnectionSubscriptionRegistry
     {
         lock (_sync)
         {
-            return _connectionsByKey.TryGetValue(key, out List<ConnectionId>? connections)
-                ? connections.Count
+            return _connectionsByKey.TryGetValue(key, out ConnectionList? connections)
+                ? connections.Ordered.Count
                 : 0;
         }
     }
@@ -61,11 +73,11 @@ public sealed class ConnectionSubscriptionRegistry
     {
         lock (_sync)
         {
-            if (!_connectionsByKey.TryGetValue(key, out List<ConnectionId>? connections) || destination.Length == 0)
+            if (!_connectionsByKey.TryGetValue(key, out ConnectionList? connections) || destination.Length == 0)
                 return 0;
 
-            int count = Math.Min(connections.Count, destination.Length);
-            CollectionsMarshal.AsSpan(connections)[..count].CopyTo(destination);
+            int count = Math.Min(connections.Ordered.Count, destination.Length);
+            CollectionsMarshal.AsSpan(connections.Ordered)[..count].CopyTo(destination);
             return count;
         }
     }
@@ -79,8 +91,8 @@ public sealed class ConnectionSubscriptionRegistry
 
         lock (_sync)
         {
-            return _keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? keys) &&
-                   Contains(keys, key);
+            return _keysByConnection.TryGetValue(connectionId, out SubscriptionList? keys) &&
+                   keys.Membership.Contains(key);
         }
     }
 
@@ -91,8 +103,8 @@ public sealed class ConnectionSubscriptionRegistry
 
         lock (_sync)
         {
-            return _keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? keys) &&
-                   keys.Count != 0;
+            return _keysByConnection.TryGetValue(connectionId, out SubscriptionList? keys) &&
+                   keys.Ordered.Count != 0;
         }
     }
 
@@ -106,11 +118,11 @@ public sealed class ConnectionSubscriptionRegistry
     {
         lock (_sync)
         {
-            if (!_connectionsByKey.TryGetValue(key, out List<ConnectionId>? connections) || destination.Length == 0)
+            if (!_connectionsByKey.TryGetValue(key, out ConnectionList? connections) || destination.Length == 0)
                 return 0;
 
-            int count = Math.Min(connections.Count, destination.Length);
-            ReadOnlySpan<ConnectionId> subscribers = CollectionsMarshal.AsSpan(connections)[..count];
+            int count = Math.Min(connections.Ordered.Count, destination.Length);
+            ReadOnlySpan<ConnectionId> subscribers = CollectionsMarshal.AsSpan(connections.Ordered)[..count];
             for (int i = 0; i < subscribers.Length; i++)
             {
                 destination[i] = new OutboundDatagram(
@@ -132,9 +144,9 @@ public sealed class ConnectionSubscriptionRegistry
 
         lock (_sync)
         {
-            if (!_keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? currentKeys))
+            if (!_keysByConnection.TryGetValue(connectionId, out SubscriptionList? currentKeys))
             {
-                currentKeys = new List<SubscriptionKey>(desiredKeys.Length);
+                currentKeys = new SubscriptionList();
                 _keysByConnection.Add(connectionId, currentKeys);
             }
 
@@ -144,16 +156,16 @@ public sealed class ConnectionSubscriptionRegistry
                 SubscriptionKey key = desiredKeys[i];
                 if (!key.IsValid)
                     throw new ArgumentOutOfRangeException(nameof(desiredKeys));
-                if (Contains(currentKeys, key))
+                if (currentKeys.Membership.Contains(key))
                     continue;
                 if (Subscribe_NoLock(connectionId, key))
                     added++;
             }
 
             int removed = 0;
-            for (int i = currentKeys.Count - 1; i >= 0; i--)
+            for (int i = currentKeys.Ordered.Count - 1; i >= 0; i--)
             {
-                SubscriptionKey key = currentKeys[i];
+                SubscriptionKey key = currentKeys.Ordered[i];
                 if (Contains(desiredKeys, key))
                     continue;
                 if (Unsubscribe_NoLock(connectionId, key))
@@ -170,72 +182,53 @@ public sealed class ConnectionSubscriptionRegistry
 
     private bool Subscribe_NoLock(ConnectionId connectionId, SubscriptionKey key)
     {
-        if (!_connectionsByKey.TryGetValue(key, out List<ConnectionId>? connections))
+        if (!_connectionsByKey.TryGetValue(key, out ConnectionList? connections))
         {
-            connections = new List<ConnectionId>(1);
+            connections = new ConnectionList();
             _connectionsByKey.Add(key, connections);
         }
 
-        if (Contains(connections, connectionId))
+        if (!connections.Membership.Add(connectionId))
             return false;
 
-        connections.Add(connectionId);
+        connections.Ordered.Add(connectionId);
 
-        if (!_keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? keys))
+        if (!_keysByConnection.TryGetValue(connectionId, out SubscriptionList? keys))
         {
-            keys = new List<SubscriptionKey>(4);
+            keys = new SubscriptionList();
             _keysByConnection.Add(connectionId, keys);
         }
 
-        keys.Add(key);
+        keys.Membership.Add(key);
+        keys.Ordered.Add(key);
         return true;
     }
 
     private bool Unsubscribe_NoLock(ConnectionId connectionId, SubscriptionKey key)
     {
-        if (!_connectionsByKey.TryGetValue(key, out List<ConnectionId>? connections))
+        if (!_connectionsByKey.TryGetValue(key, out ConnectionList? connections))
             return false;
 
-        int connectionIndex = connections.IndexOf(connectionId);
-        if (connectionIndex < 0)
+        if (!connections.Membership.Remove(connectionId))
             return false;
 
-        connections.RemoveAt(connectionIndex);
-        if (connections.Count == 0)
+        int connectionIndex = connections.Ordered.IndexOf(connectionId);
+        if (connectionIndex >= 0)
+            connections.Ordered.RemoveAt(connectionIndex);
+        if (connections.Ordered.Count == 0)
             _connectionsByKey.Remove(key);
 
-        if (_keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? keys))
+        if (_keysByConnection.TryGetValue(connectionId, out SubscriptionList? keys))
         {
-            int keyIndex = keys.IndexOf(key);
+            keys.Membership.Remove(key);
+            int keyIndex = keys.Ordered.IndexOf(key);
             if (keyIndex >= 0)
-                keys.RemoveAt(keyIndex);
-            if (keys.Count == 0)
+                keys.Ordered.RemoveAt(keyIndex);
+            if (keys.Ordered.Count == 0)
                 _keysByConnection.Remove(connectionId);
         }
 
         return true;
-    }
-
-    private static bool Contains(List<ConnectionId> connections, ConnectionId connectionId)
-    {
-        for (int i = 0; i < connections.Count; i++)
-        {
-            if (connections[i] == connectionId)
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool Contains(List<SubscriptionKey> keys, SubscriptionKey key)
-    {
-        for (int i = 0; i < keys.Count; i++)
-        {
-            if (keys[i] == key)
-                return true;
-        }
-
-        return false;
     }
 
     private static bool Contains(ReadOnlySpan<SubscriptionKey> keys, SubscriptionKey key)
