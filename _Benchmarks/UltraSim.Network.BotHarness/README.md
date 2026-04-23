@@ -11,6 +11,8 @@ It is intentionally narrow:
 - per-stage tick timing stats
 - per-stage ping timing stats
 - simple client pending-input backlog stats
+- optional observer-replication load on top of the same movement/session path
+- replication logical-vs-wire datagram reporting
 
 It does not yet try to recreate the full old bot harness feature set:
 
@@ -35,6 +37,9 @@ Useful options:
 - `--slo-ping-p95-ms <n>`
 - `--ping-interval-s <n>`
 - `--stop-on either|tick|ping|none`
+- `--observer-replication`
+- `--spawn-spacing-m <n>`
+- `--spawn-grid-width <n>`
 
 Recommended run categories:
 
@@ -44,6 +49,12 @@ Recommended run categories:
 2. Latency ceiling / highest CCU while keeping ping healthy
    `--stop-on ping --slo-tick-p95-ms 999 --slo-ping-p95-ms 50`
 
+3. First widened observer-replication read
+   `--observer-replication --spawn-spacing-m 4`
+
+4. Less-dense observer-replication read
+   `--observer-replication --spawn-spacing-m 12`
+
 ## Current Role
 
 This tool exists to answer the question:
@@ -51,3 +62,29 @@ This tool exists to answer the question:
 - does the real socket/session/movement path still look healthy once many clients are connected at once?
 
 It is the intended checkpoint before a broader external-process or gameplay-richer harness.
+
+## Current Observer-Replication Note
+
+The widened harness now reports:
+
+- `replication_published_items`
+- `replication_datagrams`
+- `replication_wire_datagrams`
+
+That split matters:
+
+- `replication_datagrams`
+  logical per-recipient fanout before transport aggregation
+- `replication_wire_datagrams`
+  actual UDP datagrams sent after transport-level same-connection bundling
+
+Current first read:
+
+- dense profile (`spawn-spacing-m 4`)
+  - `32` clients: `tick_p95 = 1.176 ms`
+  - `64` clients: `tick_p95 = 2.650 ms`
+- less-dense profile (`spawn-spacing-m 12`)
+  - `64` clients: `tick_p95 = 1.810 ms`
+  - `128` clients: `tick_p95 = 2.876 ms`
+
+So the first widened replication load is now healthy enough to keep building on, and the transport bundling fix is visible in the wire-datagram counts rather than being only a code-structure claim.

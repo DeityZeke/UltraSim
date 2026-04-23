@@ -145,7 +145,14 @@ internal sealed class MovementRampHarness : IDisposable
         long pendingSum = 0;
         int pendingMax = 0;
         var pingSamplesMs = new List<double>(Math.Max(32, _clients.Count * Math.Max(1, measuredTicks / Math.Max(1, _options.PingIntervalTicks))));
+        long replicationDatagrams = 0;
+        long replicationWireDatagrams = 0;
+        long replicationPublishedItems = 0;
         long allocBefore = GC.GetTotalAllocatedBytes(true);
+
+        StageReplicationContext? replication = _options.ObserverReplication
+            ? CreateReplicationContext()
+            : null;
 
         for (int tick = 0; tick < measuredTicks; tick++)
         {
@@ -154,6 +161,18 @@ internal sealed class MovementRampHarness : IDisposable
             long start = Stopwatch.GetTimestamp();
             _clockTicks += 2;
             _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, (uint)(stageIndex * 100_000 + tick + 1));
+            if (replication is not null)
+            {
+                UpdateObserverSubscriptions(replication);
+                int published = PublishObserverReplication(replication);
+                if (published > 0)
+                {
+                    replicationPublishedItems += published;
+                    int dispatched = DispatchObserverReplication(replication, out int wireDatagrams);
+                    replicationDatagrams += dispatched;
+                    replicationWireDatagrams += wireDatagrams;
+                }
+            }
             long clientNowTicks = _clockTicks + 1;
             for (int i = 0; i < _clients.Count; i++)
             {
@@ -210,7 +229,11 @@ internal sealed class MovementRampHarness : IDisposable
             SloTickP95Ms: _options.SloTickP95Ms,
             SloPendingMax: _options.SloPendingMax,
             SloPingP95Ms: _options.SloPingP95Ms,
-            PerClientPing: perClientPing);
+            PerClientPing: perClientPing,
+            ObserverReplicationEnabled: _options.ObserverReplication,
+            ReplicationPublishedItems: replicationPublishedItems,
+            ReplicationDatagrams: replicationDatagrams,
+            ReplicationWireDatagrams: replicationWireDatagrams);
     }
 
     public void Reset()
@@ -317,10 +340,96 @@ internal sealed class MovementRampHarness : IDisposable
 
     private ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
     {
+        int spawnIndex = _spawnedEntities.Count;
+        float spacing = _options.SpawnSpacingMeters;
+        int width = Math.Max(1, _options.SpawnGridWidth);
+        float startX = spacing <= 0f ? 0f : (spawnIndex % width) * spacing;
+        float startY = spacing <= 0f ? 0f : (spawnIndex / width) * spacing;
+
         Entity entity = movementWorld.CreateDefault(_movementSignature);
-        movementWorld.SetComponent(entity, new BenchMovementBody(0f, 0f, 0f, 0f));
+        movementWorld.SetComponent(entity, new BenchMovementBody(startX, startY, 0f, 0f));
         _spawnedEntities.Add(entity);
         return new ServerMovementSessionSpawn(entity, _nextNetworkEntityId++);
+    }
+
+    private StageReplicationContext CreateReplicationContext()
+    {
+        var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f);
+        var publisher = new ServerEcsWorldNetworkPublisher(_world);
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        var scheduler = new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream);
+        var fanout = new ScheduledWorkFanoutBridge(subscriptions);
+        return new StageReplicationContext(
+            new ServerEcsChunkAoiScopeClassifier(policy),
+            new ChunkAoiSubscriptionMaintainer(policy),
+            subscriptions,
+            publisher,
+            new ConnectionStreamFanoutBridge(scheduler, fanout),
+            new ConnectionId[Math.Max(64, _clients.Count)],
+            new ScheduledWorkItem[Math.Max(4096, _clients.Count * 8)],
+            new ConnectionId[Math.Max(4096, _clients.Count)],
+            new OutboundDatagram[Math.Max(65536, _clients.Count * 128)]);
+    }
+
+    private void UpdateObserverSubscriptions(StageReplicationContext replication)
+    {
+        if (replication.BoundConnections.Length < _serverHost.BoundConnectionCount)
+            replication.BoundConnections = new ConnectionId[_serverHost.BoundConnectionCount];
+
+        int count = _serverHost.CopyBoundConnections(replication.BoundConnections);
+        for (int i = 0; i < count; i++)
+        {
+            ConnectionId connectionId = replication.BoundConnections[i];
+            if (!_serverHost.TryGetBoundEntity(connectionId, out Entity entity))
+                continue;
+            if (!_world.TryGetComponent(entity, out BenchMovementBody body))
+                continue;
+
+            replication.Maintainer.UpdateConnection(connectionId, new WorldPosition2(body.PositionX, body.PositionY), replication.Subscriptions);
+        }
+    }
+
+    private int PublishObserverReplication(StageReplicationContext replication)
+    {
+        return replication.Publisher.PublishDirtyLatestState<BenchMovementBody>(
+            scopeSelector: (entity, body) => ChunkSubscriptionKey.Create(
+                ringIndex: 0,
+                chunk: replication.Classifier.GetChunk(new WorldPosition2(body.PositionX, body.PositionY))),
+            payloadSelector: static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+            itemKeySelector: static (entity, _) => ServerEcsNetworkItemKeys.GetComponentItemKey<BenchMovementBody>(entity));
+    }
+
+    private int DispatchObserverReplication(StageReplicationContext replication, out int wireDatagrams)
+    {
+        wireDatagrams = 0;
+        while (true)
+        {
+            ConnectionScheduledFanoutResult result = replication.Bridge.ScheduleAndDispatch(
+                replication.ScheduleState,
+                ConnectionSendBudget.Unlimited,
+                replication.ScheduledWork,
+                replication.SubscriberScratch,
+                replication.Output);
+
+            if (result.Fanout.DatagramCount == replication.Output.Length)
+            {
+                replication.Output = new OutboundDatagram[replication.Output.Length << 1];
+                continue;
+            }
+
+            if (result.Schedule.Count == replication.ScheduledWork.Length)
+            {
+                replication.ScheduledWork = new ScheduledWorkItem[replication.ScheduledWork.Length << 1];
+                continue;
+            }
+
+            replication.ScheduleState = result.Schedule.NextState;
+            for (int i = 0; i < result.Fanout.DatagramCount; i++)
+                _serverTransport.EnqueueOutbound(replication.Output[i]);
+            _serverTransport.FlushOutbound();
+            wireDatagrams = _serverTransport.LastFlushWireDatagramCount;
+            return result.Fanout.DatagramCount;
+        }
     }
 
     private static void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
@@ -427,6 +536,42 @@ internal sealed class MovementRampHarness : IDisposable
             Transport.Dispose();
         }
     }
+
+    private sealed class StageReplicationContext
+    {
+        public StageReplicationContext(
+            ServerEcsChunkAoiScopeClassifier classifier,
+            ChunkAoiSubscriptionMaintainer maintainer,
+            ConnectionSubscriptionRegistry subscriptions,
+            ServerEcsWorldNetworkPublisher publisher,
+            ConnectionStreamFanoutBridge bridge,
+            ConnectionId[] boundConnections,
+            ScheduledWorkItem[] scheduledWork,
+            ConnectionId[] subscriberScratch,
+            OutboundDatagram[] output)
+        {
+            Classifier = classifier;
+            Maintainer = maintainer;
+            Subscriptions = subscriptions;
+            Publisher = publisher;
+            Bridge = bridge;
+            BoundConnections = boundConnections;
+            ScheduledWork = scheduledWork;
+            SubscriberScratch = subscriberScratch;
+            Output = output;
+        }
+
+        public ServerEcsChunkAoiScopeClassifier Classifier { get; }
+        public ChunkAoiSubscriptionMaintainer Maintainer { get; }
+        public ConnectionSubscriptionRegistry Subscriptions { get; }
+        public ServerEcsWorldNetworkPublisher Publisher { get; }
+        public ConnectionStreamFanoutBridge Bridge { get; }
+        public ConnectionScheduleState ScheduleState { get; set; }
+        public ConnectionId[] BoundConnections { get; set; }
+        public ScheduledWorkItem[] ScheduledWork { get; set; }
+        public ConnectionId[] SubscriberScratch { get; }
+        public OutboundDatagram[] Output { get; set; }
+    }
 }
 
 internal sealed class HarnessArgs
@@ -444,6 +589,9 @@ internal sealed class HarnessArgs
     public int SloPendingMax { get; set; } = 128;
     public double PingIntervalSeconds { get; set; } = 1.0;
     public string StopOn { get; set; } = "either";
+    public bool ObserverReplication { get; set; }
+    public float SpawnSpacingMeters { get; set; } = 4f;
+    public int SpawnGridWidth { get; set; } = 32;
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
     public int SettleTicks => Math.Max(1, (int)Math.Round(SettleSeconds * TickHz, MidpointRounding.AwayFromZero));
@@ -471,6 +619,9 @@ internal sealed class HarnessArgs
             else if (arg == "--slo-pending-max") options.SloPendingMax = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--ping-interval-s") options.PingIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--stop-on") options.StopOn = Next() ?? options.StopOn;
+            else if (arg == "--observer-replication") options.ObserverReplication = true;
+            else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
@@ -510,6 +661,9 @@ internal sealed class HarnessArgs
             ["slo_pending_max"] = SloPendingMax,
             ["ping_interval_seconds"] = PingIntervalSeconds,
             ["stop_on"] = StopOn,
+            ["observer_replication"] = ObserverReplication,
+            ["spawn_spacing_m"] = SpawnSpacingMeters,
+            ["spawn_grid_width"] = SpawnGridWidth,
         };
     }
 }
@@ -534,7 +688,11 @@ internal readonly record struct StageResult(
     double SloTickP95Ms,
     int SloPendingMax,
     double SloPingP95Ms,
-    JsonArray PerClientPing)
+    JsonArray PerClientPing,
+    bool ObserverReplicationEnabled,
+    long ReplicationPublishedItems,
+    long ReplicationDatagrams,
+    long ReplicationWireDatagrams)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
     public bool TickSloPass => TickP95Ms <= SloTickP95Ms && PendingMax <= SloPendingMax;
@@ -564,6 +722,10 @@ internal readonly record struct StageResult(
             ["tick_slo_pass"] = TickSloPass,
             ["ping_slo_pass"] = PingSloPass,
             ["per_client_ping"] = PerClientPing,
+            ["observer_replication"] = ObserverReplicationEnabled,
+            ["replication_published_items"] = ReplicationPublishedItems,
+            ["replication_datagrams"] = ReplicationDatagrams,
+            ["replication_wire_datagrams"] = ReplicationWireDatagrams,
         };
     }
 }

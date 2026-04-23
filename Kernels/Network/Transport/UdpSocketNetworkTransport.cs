@@ -12,6 +12,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private readonly UdpSocketNetworkTransportOptions _options;
     private readonly PacketMetadataRegistry _packetMetadata;
     private readonly ConcurrentQueue<OutboundDatagram> _outbound = new();
+    private readonly Queue<InboundDatagram> _pendingInbound = new();
     private readonly Dictionary<ConnectionId, IPEndPoint> _remoteByConnection = new();
     private readonly Dictionary<string, ConnectionId> _connectionByRemote = new(StringComparer.Ordinal);
     private readonly byte[] _receiveBuffer;
@@ -46,6 +47,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     public bool IsRunning => _running && !_disposed;
 
     public EndPoint? LocalEndPoint => _socket?.LocalEndPoint;
+    public int LastFlushWireDatagramCount { get; private set; }
 
     public void Start()
     {
@@ -73,7 +75,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             return 0;
 
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
-        int count = 0;
+        int count = DrainPendingInbound(destination);
         while (count < destination.Length && socket.Available > 0)
         {
             EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
@@ -90,22 +92,19 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             if (received <= 0 || remote is not IPEndPoint remoteEndPoint)
                 continue;
 
-            if (!PacketCodec.TryDecodeEnvelope(_receiveBuffer.AsSpan(0, received), out PacketEnvelopeHeader header, out _))
-                continue;
-            if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
-                continue;
-
             if (!TryGetOrAssignConnectionId(remoteEndPoint, out ConnectionId connectionId))
                 continue;
 
-            byte[] payloadCopy = new byte[received];
-            Buffer.BlockCopy(_receiveBuffer, 0, payloadCopy, 0, received);
-            destination[count++] = new InboundDatagram(
-                connectionId,
-                plane,
-                packetClass,
-                channel,
-                payloadCopy);
+            ReadOnlySpan<byte> datagramPayload = _receiveBuffer.AsSpan(0, received);
+            if (TransportDatagramBundleCodec.IsBundle(datagramPayload))
+            {
+                var reader = new TransportDatagramBundleCodec.Reader(datagramPayload);
+                while (reader.TryReadNext(out ReadOnlySpan<byte> bundledPayload))
+                    TryQueueInbound(connectionId, bundledPayload, destination, ref count);
+                continue;
+            }
+
+            TryQueueInbound(connectionId, datagramPayload, destination, ref count);
         }
 
         return count;
@@ -125,21 +124,54 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             return;
 
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
-        while (_outbound.TryDequeue(out OutboundDatagram datagram))
+        LastFlushWireDatagramCount = 0;
+
+        Dictionary<ConnectionId, List<OutboundDatagram>> pendingByConnection = DrainOutboundByConnection();
+        if (pendingByConnection.Count == 0)
+            return;
+
+        foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in pendingByConnection)
         {
-            if (!TryGetRemote(datagram.ConnectionId, out IPEndPoint? remote))
+            if (!TryGetRemote(connectionId, out IPEndPoint? remote))
                 continue;
             if (remote is null)
                 continue;
 
-            try
+            int index = 0;
+            while (index < datagrams.Count)
             {
-                socket.SendTo(datagram.Payload.Span, SocketFlags.None, remote);
-            }
-            catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
-            {
-                _outbound.Enqueue(datagram);
-                break;
+                int bundleStart = index;
+                ImmutablePayloadBuffer outboundPayload;
+                int packedCount;
+                if (datagrams.Count - index == 1)
+                {
+                    outboundPayload = datagrams[index].Payload;
+                    packedCount = 1;
+                }
+                else
+                {
+                    var payloads = new List<ImmutablePayloadBuffer>(datagrams.Count - index);
+                    for (int i = index; i < datagrams.Count; i++)
+                        payloads.Add(datagrams[i].Payload);
+                    outboundPayload = TransportDatagramBundleCodec.EncodeBundle(
+                        payloads,
+                        0,
+                        _options.MaxDatagramBytes,
+                        out packedCount);
+                }
+
+                try
+                {
+                    socket.SendTo(outboundPayload.Span, SocketFlags.None, remote);
+                    LastFlushWireDatagramCount++;
+                    index += packedCount;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
+                {
+                    for (int i = bundleStart; i < datagrams.Count; i++)
+                        _outbound.Enqueue(datagrams[i]);
+                    return;
+                }
             }
         }
     }
@@ -209,4 +241,54 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private static string GetRemoteKey(IPEndPoint remote) => remote.Address + ":" + remote.Port;
 
     private static IPEndPoint Clone(IPEndPoint endpoint) => new(endpoint.Address, endpoint.Port);
+
+    private int DrainPendingInbound(Span<InboundDatagram> destination)
+    {
+        int count = 0;
+        while (count < destination.Length && _pendingInbound.Count > 0)
+        {
+            destination[count++] = _pendingInbound.Dequeue();
+        }
+
+        return count;
+    }
+
+    private void TryQueueInbound(
+        ConnectionId connectionId,
+        ReadOnlySpan<byte> payload,
+        Span<InboundDatagram> destination,
+        ref int count)
+    {
+        if (!PacketCodec.TryDecodeEnvelope(payload, out PacketEnvelopeHeader header, out _))
+            return;
+        if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
+            return;
+
+        byte[] payloadCopy = payload.ToArray();
+        var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, payloadCopy);
+        if (count < destination.Length)
+        {
+            destination[count++] = inbound;
+            return;
+        }
+
+        _pendingInbound.Enqueue(inbound);
+    }
+
+    private Dictionary<ConnectionId, List<OutboundDatagram>> DrainOutboundByConnection()
+    {
+        var byConnection = new Dictionary<ConnectionId, List<OutboundDatagram>>();
+        while (_outbound.TryDequeue(out OutboundDatagram datagram))
+        {
+            if (!byConnection.TryGetValue(datagram.ConnectionId, out List<OutboundDatagram>? list))
+            {
+                list = new List<OutboundDatagram>();
+                byConnection.Add(datagram.ConnectionId, list);
+            }
+
+            list.Add(datagram);
+        }
+
+        return byConnection;
+    }
 }

@@ -53,6 +53,24 @@ public sealed class ServerMovementSessionHost
     public ServerEcsMovementNetworkBridge Movement => _movement;
     public int BoundConnectionCount => _entityByConnection.Count;
 
+    public int CopyBoundConnections(Span<ConnectionId> destination)
+    {
+        int count = 0;
+        foreach (ConnectionId connectionId in _entityByConnection.Keys)
+        {
+            if (count >= destination.Length)
+                break;
+            destination[count++] = connectionId;
+        }
+
+        return count;
+    }
+
+    public bool TryGetBoundEntity(ConnectionId connectionId, out Entity entity)
+    {
+        return _entityByConnection.TryGetValue(connectionId, out entity);
+    }
+
     public void Start() => _control.Start();
 
     public void Stop() => _control.Stop();

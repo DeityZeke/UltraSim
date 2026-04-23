@@ -201,3 +201,25 @@ Current split from the latest runs:
   - `2048` clients still passed `ping_p95 < 50 ms`
   - `2064` clients failed with `ping_p95 = 50.943 ms`
   - current latency-limited ceiling is roughly `~2048`
+
+The harness has now also been widened with the first observer-replication load:
+
+- optional `--observer-replication`
+- real AOI-backed latest-state publish/fanout on top of the same live movement/session path
+- report fields for:
+  - `replication_published_items`
+  - `replication_datagrams`
+  - `replication_wire_datagrams`
+
+Current observer-replication read:
+
+- dense profile (`spawn-spacing-m 4`, `32x32` grid width cap):
+  - `32` clients: `tick_p95 = 1.176 ms`
+  - `64` clients: `tick_p95 = 2.650 ms`
+  - `64` clients: `replication_datagrams = 535,228`
+  - `64` clients: `replication_wire_datagrams = 34,198`
+- less-dense profile (`spawn-spacing-m 12`):
+  - `64` clients: `tick_p95 = 1.810 ms`
+  - `128` clients: `tick_p95 = 2.876 ms`
+
+The important correction here is that transport-level bundling is now real and measurable: the logical observer fanout count is still high, but the actual wire datagram count is much lower. That means the current widened bottleneck is no longer raw UDP send count alone.
