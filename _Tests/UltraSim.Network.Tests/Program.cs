@@ -34,6 +34,8 @@ internal static class TestRunner
         Run(nameof(LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes), LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes);
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
         Run(nameof(LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted), LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted);
+        Run(nameof(ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection), ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection);
+        Run(nameof(ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection), ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
         Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
         Run(nameof(ReliableEventReplayBuffer_TracksAcknowledgesAndReplaysInOrder), ReliableEventReplayBuffer_TracksAcknowledgesAndReplaysInOrder);
@@ -808,6 +810,73 @@ internal static class TestRunner
         Assert.Equal((ulong)100, batch[0].ItemKey);
         Assert.Equal(second, batch[1].Sequence);
         Assert.Equal(PacketClass.Bulk, batch[1].PacketClass);
+    }
+
+    private static void ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection()
+    {
+        var tracker = new ConnectionLatestStateSentTracker();
+        ConnectionId connection1 = new(31);
+        ConnectionId connection2 = new(32);
+        LatestStateUpdate first = new(
+            ItemKey: 1001,
+            Sequence: 10,
+            ScopeKey: new SubscriptionKey(11),
+            PacketClass: PacketClass.Realtime,
+            Payload: ImmutablePayloadBuffer.CopyFrom([1]));
+        LatestStateUpdate movedScope = new(
+            ItemKey: 1001,
+            Sequence: 12,
+            ScopeKey: new SubscriptionKey(22),
+            PacketClass: PacketClass.Realtime,
+            Payload: ImmutablePayloadBuffer.CopyFrom([2]));
+
+        tracker.MarkSent(connection1, first);
+        tracker.MarkSent(connection1, movedScope);
+
+        Assert.True(tracker.TryGetLastSentSequence(connection1, 1001, out ulong connection1Sequence));
+        Assert.Equal((ulong)12, connection1Sequence);
+        Assert.False(tracker.TryGetLastSentSequence(connection2, 1001, out _));
+    }
+
+    private static void ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection()
+    {
+        var tracker = new ConnectionLatestStateSentTracker();
+        var planner = new ConnectionLatestStateDeltaPlanner(tracker);
+        ConnectionId connectionId = new(33);
+        LatestStateUpdate[] snapshot =
+        [
+            new(
+                ItemKey: 1001,
+                Sequence: 10,
+                ScopeKey: new SubscriptionKey(11),
+                PacketClass: PacketClass.Realtime,
+                Payload: ImmutablePayloadBuffer.CopyFrom([1])),
+            new(
+                ItemKey: 1002,
+                Sequence: 11,
+                ScopeKey: new SubscriptionKey(12),
+                PacketClass: PacketClass.Realtime,
+                Payload: ImmutablePayloadBuffer.CopyFrom([2])),
+            new(
+                ItemKey: 1001,
+                Sequence: 12,
+                ScopeKey: new SubscriptionKey(22),
+                PacketClass: PacketClass.Realtime,
+                Payload: ImmutablePayloadBuffer.CopyFrom([3])),
+        ];
+
+        tracker.MarkSent(connectionId, snapshot[0]);
+        var output = new LatestStateUpdate[4];
+
+        ConnectionLatestStateDeltaPlanResult result = planner.Plan(connectionId, snapshot, output);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal((ulong)12, result.HighestPlannedSequence);
+        Assert.Equal((ulong)1002, output[0].ItemKey);
+        Assert.Equal((ulong)11, output[0].Sequence);
+        Assert.Equal((ulong)1001, output[1].ItemKey);
+        Assert.Equal((ulong)12, output[1].Sequence);
+        Assert.Equal((ulong)22, output[1].ScopeKey.Value);
     }
 
     private static void StreamPrimitives_PreserveBulkPacketClassMetadata()

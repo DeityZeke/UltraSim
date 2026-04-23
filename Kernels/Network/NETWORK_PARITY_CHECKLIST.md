@@ -91,6 +91,7 @@ Current state:
 - baseline completion ack now exists
 - recovery planning now exists at the kernel level
 - full-baseline recovery execution now exists at the kernel bridge level
+- send-based per-connection latest-state tracking now exists as the first delta foundation
 - incremental delta/baseline advancement does not exist yet
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables
