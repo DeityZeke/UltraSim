@@ -589,7 +589,7 @@ internal sealed class MovementRampHarness : IDisposable
             var observerState = ClientObserverStateBridge.CreateSpanFastPath(
                 new ConnectionId(1),
                 (itemKey, _, payload) => handle!.ApplyObserverState(itemKey, payload));
-            var observerEvents = new ClientObserverEventBridge(
+            var observerEvents = ClientObserverEventBridge.CreateSpanFastPath(
                 new ConnectionId(1),
                 (_, payload) => handle!.ApplyObserverEvent(payload));
             var host = new ClientMovementSessionHost(
@@ -979,16 +979,16 @@ internal sealed class MovementRampHarness : IDisposable
     {
         private readonly Dictionary<ushort, long> _pingSentAt = new();
         private readonly List<double> _pingSamplesMs = [];
-        private BenchMovementBody[] _observerStates = new BenchMovementBody[128];
+        private BenchMovementBodyWire[] _observerStates = new BenchMovementBodyWire[128];
         private bool[] _observerStateOccupied = new bool[128];
         private int _observerStateCount;
-        private BenchMovementVisualBody[] _observerVisualStates = new BenchMovementVisualBody[128];
+        private BenchMovementVisualBodyWire[] _observerVisualStates = new BenchMovementVisualBodyWire[128];
         private bool[] _observerVisualStateOccupied = new bool[128];
         private int _observerVisualStateCount;
-        private BenchMovementBulkBody[] _observerBulkStates = new BenchMovementBulkBody[128];
+        private BenchMovementBulkBodyWire[] _observerBulkStates = new BenchMovementBulkBodyWire[128];
         private bool[] _observerBulkStateOccupied = new bool[128];
         private int _observerBulkStateCount;
-        private BenchMovementEventBody[] _observerEvents = new BenchMovementEventBody[128];
+        private BenchMovementEventBodyWire[] _observerEvents = new BenchMovementEventBodyWire[128];
         private bool[] _observerEventOccupied = new bool[128];
         private int _observerEventCount;
         private ushort _nextPingSequence = 1;
@@ -1121,7 +1121,7 @@ internal sealed class MovementRampHarness : IDisposable
                     _observerBulkStateCount++;
                 }
 
-                HarnessPayloadCodec.DecodeBulkInto(payload, ref _observerBulkStates[slot]);
+                _observerBulkStates[slot] = HarnessPayloadCodec.ReadBulkWire(payload);
                 return;
             }
 
@@ -1133,7 +1133,7 @@ internal sealed class MovementRampHarness : IDisposable
                     _observerVisualStateCount++;
                 }
 
-                HarnessPayloadCodec.DecodeVisualInto(payload, ref _observerVisualStates[slot]);
+                _observerVisualStates[slot] = HarnessPayloadCodec.ReadVisualWire(payload);
                 return;
             }
 
@@ -1143,12 +1143,12 @@ internal sealed class MovementRampHarness : IDisposable
                 _observerStateCount++;
             }
 
-            HarnessPayloadCodec.DecodeMovementInto(payload, ref _observerStates[slot]);
+            _observerStates[slot] = HarnessPayloadCodec.ReadMovementWire(payload);
         }
 
-        public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
+        public void ApplyObserverEvent(ReadOnlySpan<byte> payload)
         {
-            BenchMovementEventBody observerEvent = HarnessPayloadCodec.DecodeEvent(payload);
+            BenchMovementEventBodyWire observerEvent = HarnessPayloadCodec.ReadEventWire(payload);
             int slot = checked((int)observerEvent.ObserverSlot);
             EnsureObserverCapacity(slot);
             if (!_observerEventOccupied[slot])
@@ -1776,6 +1776,11 @@ internal static class HarnessPayloadCodec
             ReadSingle(span, 12));
     }
 
+    public static BenchMovementBodyWire ReadMovementWire(ReadOnlySpan<byte> span)
+    {
+        return MemoryMarshal.Read<BenchMovementBodyWire>(span);
+    }
+
     public static void DecodeMovementInto(ReadOnlySpan<byte> span, ref BenchMovementBody destination)
     {
         destination = new BenchMovementBody(
@@ -1793,6 +1798,11 @@ internal static class HarnessPayloadCodec
             ReadSingle(span, 4),
             ReadSingle(span, 8),
             ReadSingle(span, 12));
+    }
+
+    public static BenchMovementVisualBodyWire ReadVisualWire(ReadOnlySpan<byte> span)
+    {
+        return MemoryMarshal.Read<BenchMovementVisualBodyWire>(span);
     }
 
     public static void DecodeVisualInto(ReadOnlySpan<byte> span, ref BenchMovementVisualBody destination)
@@ -1821,6 +1831,11 @@ internal static class HarnessPayloadCodec
             ReadSingle(span, 40),
             ReadSingle(span, 44),
             ReadSingle(span, 48));
+    }
+
+    public static BenchMovementBulkBodyWire ReadBulkWire(ReadOnlySpan<byte> span)
+    {
+        return MemoryMarshal.Read<BenchMovementBulkBodyWire>(span);
     }
 
     public static void DecodeBulkInto(ReadOnlySpan<byte> span, ref BenchMovementBulkBody destination)
@@ -1854,6 +1869,11 @@ internal static class HarnessPayloadCodec
             span[20]);
     }
 
+    public static BenchMovementEventBodyWire ReadEventWire(ReadOnlySpan<byte> span)
+    {
+        return MemoryMarshal.Read<BenchMovementEventBodyWire>(span);
+    }
+
     private static void WriteSingle(byte[] bytes, int offset, float value)
     {
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset, 4), unchecked((uint)BitConverter.SingleToInt32Bits(value)));
@@ -1869,3 +1889,51 @@ internal readonly record struct BenchMovementBody(float PositionX, float Positio
 internal readonly record struct BenchMovementVisualBody(float PositionX, float PositionY, float Speed, float HeadingDegrees) : IComponent<BenchMovementVisualBody>;
 internal readonly record struct BenchMovementBulkBody(float PositionX, float PositionY, float Speed, float HeadingDegrees, uint ClientTick, float SampleA, float SampleB, float SampleC, float SampleD, float SampleE, float SampleF, float SampleG, float SampleH) : IComponent<BenchMovementBulkBody>;
 internal readonly record struct BenchMovementEventBody(uint ObserverSlot, float PositionX, float PositionY, short MoveX, short MoveY, uint ClientTick, byte Flags) : IComponent<BenchMovementEventBody>;
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+internal readonly struct BenchMovementBodyWire
+{
+    public readonly float PositionX;
+    public readonly float PositionY;
+    public readonly float VelocityX;
+    public readonly float VelocityY;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+internal readonly struct BenchMovementVisualBodyWire
+{
+    public readonly float PositionX;
+    public readonly float PositionY;
+    public readonly float Speed;
+    public readonly float HeadingDegrees;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+internal readonly struct BenchMovementBulkBodyWire
+{
+    public readonly float PositionX;
+    public readonly float PositionY;
+    public readonly float Speed;
+    public readonly float HeadingDegrees;
+    public readonly uint ClientTick;
+    public readonly float SampleA;
+    public readonly float SampleB;
+    public readonly float SampleC;
+    public readonly float SampleD;
+    public readonly float SampleE;
+    public readonly float SampleF;
+    public readonly float SampleG;
+    public readonly float SampleH;
+}
+
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+internal readonly struct BenchMovementEventBodyWire
+{
+    public readonly uint ObserverSlot;
+    public readonly float PositionX;
+    public readonly float PositionY;
+    public readonly short MoveX;
+    public readonly short MoveY;
+    public readonly uint ClientTick;
+    public readonly byte Flags;
+}
