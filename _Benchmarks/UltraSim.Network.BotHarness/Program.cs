@@ -119,9 +119,10 @@ internal sealed class MovementRampHarness : IDisposable
 
         var builder = new EcsSchemaBuilder();
         ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
+        ComponentId movementVisualId = builder.RegisterComponent<BenchMovementVisualBody>();
         ComponentId movementEventId = builder.RegisterComponent<BenchMovementEventBody>();
         _world = new World(builder.Build());
-        _movementSignature = new ArchetypeSignature([movementId, movementEventId]);
+        _movementSignature = new ArchetypeSignature([movementId, movementVisualId, movementEventId]);
 
         var handshakePolicy = new HandshakePolicy(
             ProtocolVersion: 3,
@@ -409,6 +410,7 @@ internal sealed class MovementRampHarness : IDisposable
 
         Entity entity = movementWorld.CreateDefault(_movementSignature);
         movementWorld.SetComponent(entity, new BenchMovementBody(startX, startY, 0f, 0f));
+        movementWorld.SetComponent(entity, new BenchMovementVisualBody(startX, startY, 0f, 0f));
         movementWorld.SetComponent(entity, new BenchMovementEventBody(startX, startY, 0, 0, 0, 0));
         _spawnedEntities.Add(entity);
         return new ServerMovementSessionSpawn(entity, _nextNetworkEntityId++);
@@ -458,6 +460,16 @@ internal sealed class MovementRampHarness : IDisposable
                 replication.Classifier,
                 static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                 static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body)));
+
+        if (_options.ObserverVisualState)
+        {
+            published += replication.Publisher.PublishChunkAoiLatestState(
+                new ServerEcsChunkAoiLatestStateRule<BenchMovementVisualBody>(
+                    replication.Classifier,
+                    static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
+                    static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                    static (entity, _) => ComposeHarnessVisualItemKey(entity)));
+        }
 
         if (_options.ObserverEvents)
         {
@@ -520,6 +532,17 @@ internal sealed class MovementRampHarness : IDisposable
         };
         movementWorld.SetComponent(movementEntity, body);
 
+        if (_options.ObserverVisualState)
+        {
+            float headingDegrees = MathF.Atan2(velocityY, velocityX) * (180f / MathF.PI);
+            float speed = MathF.Sqrt((velocityX * velocityX) + (velocityY * velocityY));
+            movementWorld.SetComponent(movementEntity, new BenchMovementVisualBody(
+                body.PositionX,
+                body.PositionY,
+                speed,
+                headingDegrees));
+        }
+
         if (_options.ObserverEvents &&
             (_options.ObserverEventEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverEventEveryTicks) == 0))
         {
@@ -552,11 +575,20 @@ internal sealed class MovementRampHarness : IDisposable
         return true;
     }
 
+    private static ulong ComposeHarnessVisualItemKey(Entity entity)
+    {
+        const ulong familyTag = 0xB24F_0000_0000_0000UL;
+        ulong packed = entity.Packed & 0x0000_FFFF_FFFF_FFFFUL;
+        ulong key = familyTag | packed;
+        return key == 0 ? 1UL : key;
+    }
+
     private sealed class ClientHandle : IDisposable
     {
         private readonly Dictionary<ushort, long> _pingSentAt = new();
         private readonly List<double> _pingSamplesMs = [];
         private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
+        private readonly Dictionary<ulong, BenchMovementVisualBody> _observerVisualStates = [];
         private readonly List<BenchMovementEventBody> _observerEvents = [];
         private ushort _nextPingSequence = 1;
         private ClientMovementState _predictedOwnerState;
@@ -585,7 +617,7 @@ internal sealed class MovementRampHarness : IDisposable
         public long ObserverFramesApplied { get; private set; }
         public long ObserverEventsReceived { get; private set; }
         public long ObserverEventsApplied { get; private set; }
-        public int ObserverStateCount => _observerStates.Count;
+        public int ObserverStateCount => _observerStates.Count + _observerVisualStates.Count;
 
         public ClientMovementState PredictNextState(in ClientMovementInput input, float deltaSeconds)
         {
@@ -676,6 +708,12 @@ internal sealed class MovementRampHarness : IDisposable
 
         public void ApplyObserverState(ulong itemKey, ImmutablePayloadBuffer payload)
         {
+            if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xB24F_0000_0000_0000UL)
+            {
+                _observerVisualStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
+                return;
+            }
+
             _observerStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
         }
 
@@ -763,6 +801,7 @@ internal sealed class HarnessArgs
     public double PingIntervalSeconds { get; set; } = 1.0;
     public string StopOn { get; set; } = "either";
     public bool ObserverReplication { get; set; }
+    public bool ObserverVisualState { get; set; }
     public bool ObserverEvents { get; set; }
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -799,6 +838,7 @@ internal sealed class HarnessArgs
             else if (arg == "--ping-interval-s") options.PingIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--stop-on") options.StopOn = Next() ?? options.StopOn;
             else if (arg == "--observer-replication") options.ObserverReplication = true;
+            else if (arg == "--observer-visual-state") options.ObserverVisualState = true;
             else if (arg == "--observer-events") options.ObserverEvents = true;
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -860,6 +900,7 @@ internal sealed class HarnessArgs
             ["ping_interval_seconds"] = PingIntervalSeconds,
             ["stop_on"] = StopOn,
             ["observer_replication"] = ObserverReplication,
+            ["observer_visual_state"] = ObserverVisualState,
             ["observer_events"] = ObserverEvents,
             ["observer_event_every_ticks"] = ObserverEventEveryTicks,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
@@ -1027,4 +1068,5 @@ internal readonly struct TickWindowStats
 }
 
 internal readonly record struct BenchMovementBody(float PositionX, float PositionY, float VelocityX, float VelocityY) : IComponent<BenchMovementBody>;
+internal readonly record struct BenchMovementVisualBody(float PositionX, float PositionY, float Speed, float HeadingDegrees) : IComponent<BenchMovementVisualBody>;
 internal readonly record struct BenchMovementEventBody(float PositionX, float PositionY, short MoveX, short MoveY, uint ClientTick, byte Flags) : IComponent<BenchMovementEventBody>;

@@ -87,6 +87,10 @@ Current status:
     - max silent ticks
   - first harness-only owner divergence seam:
     - configurable prediction jitter to make correction pressure measurable without contaminating runtime code
+  - widened live observer-consume path now includes:
+    - movement latest-state
+    - a second observer-visible latest-state family
+    - ordered observer events
 
 ## Phase C3: Godot Wrapper
 

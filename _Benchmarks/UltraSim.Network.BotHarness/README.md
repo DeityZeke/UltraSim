@@ -39,6 +39,7 @@ Useful options:
 - `--ping-interval-s <n>`
 - `--stop-on either|tick|ping|none`
 - `--observer-replication`
+- `--observer-visual-state`
 - `--observer-events`
 - `--observer-event-every-ticks <n>`
 - `--spawn-spacing-m <n>`
@@ -113,6 +114,16 @@ The widened harness can now also include a first ordered observer-event family o
 - control cadence with `--observer-event-every-ticks <n>`
 
 That path uses the same live session hosts, AOI subscriptions, fanout bridge, and client-side decode/apply flow as the latest-state path.
+
+The widened harness can now also include a second observer-visible latest-state family:
+
+- enable with `--observer-visual-state`
+- current harness shape:
+  - base movement latest-state
+  - optional visual latest-state
+  - optional ordered observer events
+
+This keeps the “broaden the live path” work honest: observer cost no longer comes from only one latest-state family.
 
 The owner path is now also slightly less synthetic:
 
