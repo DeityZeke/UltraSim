@@ -57,6 +57,7 @@ internal static class TestRunner
         Run(nameof(ConnectionRecoveryPlanner_BuildsFullBaselineWhenOrderedEventRecoveryIsRequired), ConnectionRecoveryPlanner_BuildsFullBaselineWhenOrderedEventRecoveryIsRequired);
         Run(nameof(ConnectionRecoveryExecutionBridge_RetransmitsBufferedEntriesWithinWindow), ConnectionRecoveryExecutionBridge_RetransmitsBufferedEntriesWithinWindow);
         Run(nameof(ConnectionRecoveryExecutionBridge_FallsBackToFullBaselineWhenReplayWindowIsBehind), ConnectionRecoveryExecutionBridge_FallsBackToFullBaselineWhenReplayWindowIsBehind);
+        Run(nameof(ConnectionLatestStateDeltaExecutionBridge_EmitsDeltaFramesAndMarksSentState), ConnectionLatestStateDeltaExecutionBridge_EmitsDeltaFramesAndMarksSentState);
         Run(nameof(ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames), ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames);
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
@@ -1356,6 +1357,62 @@ internal static class TestRunner
         Assert.Equal(newestEvent + 1, result.NextState.OrderedEventCursor.NextSequence);
         Assert.Equal(StateBaselineBeginPacket.PacketId, DecodeHeader(output[0]).PacketId);
         Assert.Equal(StateBaselineCompletePacket.PacketId, DecodeHeader(output[2]).PacketId);
+    }
+
+    private static void ConnectionLatestStateDeltaExecutionBridge_EmitsDeltaFramesAndMarksSentState()
+    {
+        var sentTracker = new ConnectionLatestStateSentTracker();
+        var planner = new ConnectionLatestStateDeltaPlanner(sentTracker);
+        var builder = new StateDeltaSnapshotBuilder(sentTracker);
+        var bridge = new ConnectionLatestStateDeltaExecutionBridge(planner, builder);
+        ConnectionId connectionId = new(34);
+        StateBaselineDescriptor baseline = new(
+            BaselineId: 9,
+            HighestLatestStateSequence: 20,
+            LastOrderedEventSequence: 40,
+            ItemCount: 2);
+        LatestStateUpdate[] snapshot =
+        [
+            new(
+                ItemKey: 1001,
+                Sequence: 10,
+                ScopeKey: new SubscriptionKey(11),
+                PacketClass: PacketClass.Realtime,
+                Payload: ImmutablePayloadBuffer.CopyFrom([1])),
+            new(
+                ItemKey: 1002,
+                Sequence: 11,
+                ScopeKey: new SubscriptionKey(12),
+                PacketClass: PacketClass.Bulk,
+                Payload: ImmutablePayloadBuffer.CopyFrom([2, 3])),
+        ];
+        sentTracker.MarkSent(connectionId, snapshot[0]);
+
+        var deltaScratch = new LatestStateUpdate[4];
+        var output = new OutboundDatagram[4];
+        ConnectionLatestStateDeltaExecutionResult result = bridge.Execute(
+            connectionId,
+            baseline,
+            snapshot,
+            deltaScratch,
+            output);
+
+        Assert.Equal(1, result.DeltaItemCount);
+        Assert.Equal(1, result.DatagramCount);
+        Assert.Equal((uint)9, result.BaselineId);
+        Assert.Equal((ulong)11, result.HighestSequence);
+        Assert.Equal(PacketClass.Bulk, output[0].PacketClass);
+        Assert.Equal(ChannelType.ReliableOrdered, output[0].Channel);
+
+        ReadOnlySpan<byte> payload = DecodePayload(output[0]);
+        var reader = new BitReader(payload);
+        StateDeltaFramePacket frame = StateDeltaFramePacket.Deserialize(ref reader);
+        Assert.Equal((uint)9, frame.BaselineId);
+        Assert.Equal((ulong)1002, frame.ItemKey);
+        Assert.Equal((ulong)11, frame.Sequence);
+        Assert.True(frame.Payload.Span.SequenceEqual(new byte[] { 2, 3 }));
+        Assert.True(sentTracker.TryGetLastSentSequence(connectionId, 1002, out ulong sentSequence));
+        Assert.Equal((ulong)11, sentSequence);
     }
 
     private static void OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames()

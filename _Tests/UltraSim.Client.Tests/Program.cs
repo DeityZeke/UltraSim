@@ -14,6 +14,7 @@ internal static class TestRunner
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
         Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
         Run(nameof(ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState), ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState);
+        Run(nameof(ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline), ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline);
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
@@ -233,6 +234,41 @@ internal static class TestRunner
         Assert.Equal((uint)5, baseline.BaselineId);
         Assert.Equal((ulong)41, baseline.LastOrderedEventSequence);
         Assert.False(bridge.TryDequeueCompletedBaseline(out _));
+    }
+
+    private static void ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline()
+    {
+        int applyCount = 0;
+        ulong lastItemKey = 0;
+        ulong lastSequence = 0;
+        var bridge = new ClientObserverStateBridge(
+            new ConnectionId(7),
+            (itemKey, sequence, _) =>
+            {
+                applyCount++;
+                lastItemKey = itemKey;
+                lastSequence = sequence;
+            });
+
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineBeginPacket(new StateBaselineDescriptor(5, 22, 41, 1))).Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineFramePacket(5, 1001, 21, ImmutablePayloadBuffer.CopyFrom([1]))).Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineCompletePacket(5)).Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateDeltaFramePacket(5, 1001, 23, ImmutablePayloadBuffer.CopyFrom([2]))).Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(4, processed);
+        Assert.Equal(1, bridge.LastReceivedBaselineFrameCount);
+        Assert.Equal(1, bridge.LastAppliedBaselineFrameCount);
+        Assert.Equal(1, bridge.LastReceivedDeltaFrameCount);
+        Assert.Equal(1, bridge.LastAppliedDeltaFrameCount);
+        Assert.Equal(2, applyCount);
+        Assert.Equal((ulong)1001, lastItemKey);
+        Assert.Equal((ulong)23, lastSequence);
+        Assert.Equal(1, bridge.LatestItemCount);
     }
 
     private static void ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses()

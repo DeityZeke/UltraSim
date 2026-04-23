@@ -19,6 +19,7 @@ public sealed class ClientObserverStateBridge
     private int _activeBaselineAppliedCount;
     private bool _hasCompletedBaseline;
     private StateBaselineDescriptor _completedBaseline;
+    private uint _lastCompletedBaselineId;
 
     public ClientObserverStateBridge(
         ConnectionId connectionId,
@@ -39,6 +40,8 @@ public sealed class ClientObserverStateBridge
     public int LastAppliedFrameCount { get; private set; }
     public int LastReceivedBaselineFrameCount { get; private set; }
     public int LastAppliedBaselineFrameCount { get; private set; }
+    public int LastReceivedDeltaFrameCount { get; private set; }
+    public int LastAppliedDeltaFrameCount { get; private set; }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
@@ -69,6 +72,8 @@ public sealed class ClientObserverStateBridge
         LastAppliedFrameCount = 0;
         LastReceivedBaselineFrameCount = 0;
         LastAppliedBaselineFrameCount = 0;
+        LastReceivedDeltaFrameCount = 0;
+        LastAppliedDeltaFrameCount = 0;
     }
 
     public bool TryProcessEnvelope(in PacketEnvelopeHeader header, ReadOnlySpan<byte> payload)
@@ -102,6 +107,14 @@ public sealed class ClientObserverStateBridge
             var reader = new BitReader(payload);
             StateBaselineCompletePacket packet = StateBaselineCompletePacket.Deserialize(ref reader);
             OnBaselineComplete(packet);
+            return true;
+        }
+
+        if (header.PacketId == StateDeltaFramePacket.PacketId)
+        {
+            var reader = new BitReader(payload);
+            StateDeltaFramePacket packet = StateDeltaFramePacket.Deserialize(ref reader);
+            OnDeltaFrame(packet);
             return true;
         }
 
@@ -178,10 +191,33 @@ public sealed class ClientObserverStateBridge
         if (!_hasActiveBaseline || packet.BaselineId != _activeBaseline.BaselineId)
             return;
 
+        _lastCompletedBaselineId = _activeBaseline.BaselineId;
         _completedBaseline = _activeBaseline;
         _hasCompletedBaseline = true;
         _hasActiveBaseline = false;
         _activeBaseline = default;
         _activeBaselineAppliedCount = 0;
+    }
+
+    private void OnDeltaFrame(in StateDeltaFramePacket packet)
+    {
+        LastReceivedDeltaFrameCount++;
+
+        if (_hasActiveBaseline)
+            return;
+        if (_lastCompletedBaselineId == 0 || packet.BaselineId > _lastCompletedBaselineId)
+            return;
+
+        ref ulong previousSequence = ref CollectionsMarshal.GetValueRefOrAddDefault(
+            _latestSequenceByItemKey,
+            packet.ItemKey,
+            out bool exists);
+
+        if (exists && packet.Sequence <= previousSequence)
+            return;
+
+        previousSequence = packet.Sequence;
+        _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
+        LastAppliedDeltaFrameCount++;
     }
 }
