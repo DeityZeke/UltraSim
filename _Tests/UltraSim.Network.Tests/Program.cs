@@ -35,6 +35,7 @@ internal static class TestRunner
         Run(nameof(LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes), LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes);
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
         Run(nameof(LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted), LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted);
+        Run(nameof(LatestStateStream_CopySnapshotForScopes_FiltersAndPreservesSequenceOrder), LatestStateStream_CopySnapshotForScopes_FiltersAndPreservesSequenceOrder);
         Run(nameof(ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection), ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection);
         Run(nameof(ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection), ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
@@ -834,6 +835,34 @@ internal static class TestRunner
         Assert.Equal((ulong)100, batch[0].ItemKey);
         Assert.Equal(second, batch[1].Sequence);
         Assert.Equal(PacketClass.Bulk, batch[1].PacketClass);
+    }
+
+    private static void LatestStateStream_CopySnapshotForScopes_FiltersAndPreservesSequenceOrder()
+    {
+        var stream = new LatestStateStream();
+        SubscriptionKey scopeA = new(11);
+        SubscriptionKey scopeB = new(22);
+        SubscriptionKey scopeC = new(33);
+
+        ulong first = stream.Publish(100, scopeA, ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong second = stream.Publish(200, scopeB, ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong third = stream.Publish(300, scopeA, PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([3]));
+        ulong fourth = stream.Publish(400, scopeC, ImmutablePayloadBuffer.CopyFrom([4]));
+
+        SubscriptionKey[] scopes = [scopeA, scopeC];
+        var batch = new LatestStateUpdate[8];
+
+        int count = stream.CopySnapshotForScopes(scopes, batch);
+
+        Assert.Equal(3, count);
+        Assert.Equal(first, batch[0].Sequence);
+        Assert.Equal(scopeA, batch[0].ScopeKey);
+        Assert.Equal(third, batch[1].Sequence);
+        Assert.Equal(scopeA, batch[1].ScopeKey);
+        Assert.Equal(PacketClass.Bulk, batch[1].PacketClass);
+        Assert.Equal(fourth, batch[2].Sequence);
+        Assert.Equal(scopeC, batch[2].ScopeKey);
+        Assert.False(batch[..count].Contains(new LatestStateUpdate(200, second, scopeB, PacketClass.Realtime, ImmutablePayloadBuffer.CopyFrom([2]))));
     }
 
     private static void ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection()

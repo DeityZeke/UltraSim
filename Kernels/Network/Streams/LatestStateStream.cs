@@ -127,6 +127,36 @@ public sealed class LatestStateStream
         }
     }
 
+    public int CopySnapshotForScopes(ReadOnlySpan<SubscriptionKey> scopeKeys, Span<LatestStateUpdate> destination)
+    {
+        if (scopeKeys.Length == 0 || destination.Length == 0)
+            return 0;
+
+        lock (_sync)
+        {
+            if (_entriesByKey.Count == 0)
+                return 0;
+
+            EnsureOrderedSnapshot_NoLock();
+            int count = 0;
+            for (int i = 0; i < _orderedSnapshotCount && count < destination.Length; i++)
+            {
+                Entry entry = _orderedSnapshot[i];
+                if (!Contains(scopeKeys, entry.ScopeKey))
+                    continue;
+
+                destination[count++] = new LatestStateUpdate(
+                    entry.ItemKey,
+                    entry.Sequence,
+                    entry.ScopeKey,
+                    entry.PacketClass,
+                    entry.Payload);
+            }
+
+            return count;
+        }
+    }
+
     private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence)
     {
         EntryKey key = new(itemKey, scopeKey);
@@ -184,6 +214,17 @@ public sealed class LatestStateStream
         }
 
         return low;
+    }
+
+    private static bool Contains(ReadOnlySpan<SubscriptionKey> keys, SubscriptionKey key)
+    {
+        for (int i = 0; i < keys.Length; i++)
+        {
+            if (keys[i] == key)
+                return true;
+        }
+
+        return false;
     }
 
     private sealed class EntrySequenceComparer : IComparer<Entry>

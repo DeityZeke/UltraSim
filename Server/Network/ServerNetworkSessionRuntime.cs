@@ -26,7 +26,6 @@ public sealed class ServerNetworkSessionRuntime
     private readonly Dictionary<ConnectionId, ConnectionScheduleState> _stateByConnection = new();
     private readonly ConnectionId[] _connectionScratch;
     private readonly SubscriptionKey[] _subscriptionScratch;
-    private readonly LatestStateUpdate[] _snapshotScratch;
     private readonly LatestStateUpdate[] _filteredSnapshotScratch;
     private readonly LatestStateUpdate[] _deltaScratch;
     private readonly ScheduledWorkItem[] _scheduledScratch;
@@ -66,7 +65,6 @@ public sealed class ServerNetworkSessionRuntime
             new StateDeltaSnapshotBuilder(_latestSentTracker));
         _connectionScratch = new ConnectionId[options.MaxConnections];
         _subscriptionScratch = new SubscriptionKey[options.MaxSnapshotItems];
-        _snapshotScratch = new LatestStateUpdate[options.MaxSnapshotItems];
         _filteredSnapshotScratch = new LatestStateUpdate[options.MaxSnapshotItems];
         _deltaScratch = new LatestStateUpdate[options.MaxSnapshotItems];
         _scheduledScratch = new ScheduledWorkItem[options.MaxScheduledItems];
@@ -279,18 +277,7 @@ public sealed class ServerNetworkSessionRuntime
 
     private int CopyFilteredLatestSnapshot(ReadOnlySpan<SubscriptionKey> subscriptions, Span<LatestStateUpdate> destination)
     {
-        int snapshotCount = _latestState.CopySnapshot(_snapshotScratch);
-        int count = 0;
-        for (int i = 0; i < snapshotCount && count < destination.Length; i++)
-        {
-            LatestStateUpdate update = _snapshotScratch[i];
-            if (!Contains(subscriptions, update.ScopeKey))
-                continue;
-
-            destination[count++] = update;
-        }
-
-        return count;
+        return _latestState.CopySnapshotForScopes(subscriptions, destination);
     }
 
     private int FilterOrderedEventsForConnection(
@@ -304,7 +291,7 @@ public sealed class ServerNetworkSessionRuntime
             ScheduledWorkItem item = source[i];
             if (item.Kind != ScheduledWorkKind.OrderedEvent)
                 continue;
-            if (!Contains(subscriptions, item.ScopeKey))
+            if (!SubscriptionContains(subscriptions, item.ScopeKey))
                 continue;
 
             destination[count++] = item;
@@ -327,7 +314,7 @@ public sealed class ServerNetworkSessionRuntime
             budget.Bulk);
     }
 
-    private static bool Contains(ReadOnlySpan<SubscriptionKey> keys, SubscriptionKey key)
+    private static bool SubscriptionContains(ReadOnlySpan<SubscriptionKey> keys, SubscriptionKey key)
     {
         for (int i = 0; i < keys.Length; i++)
         {
@@ -337,4 +324,5 @@ public sealed class ServerNetworkSessionRuntime
 
         return false;
     }
+
 }
