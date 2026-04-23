@@ -25,6 +25,22 @@ public sealed class ServerEcsChunkAoiScopeClassifier
         return _policy.RingCount;
     }
 
+    public int CollectBroadcastScopes(in WorldPosition2 position, ICollection<ChunkSubscriptionScope> destination)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+
+        ChunkCoord chunk = GetChunk(position);
+        for (int ringIndex = 0; ringIndex < _policy.RingCount; ringIndex++)
+        {
+            destination.Add(new ChunkSubscriptionScope(
+                ringIndex,
+                chunk,
+                ChunkSubscriptionKey.Create(ringIndex, chunk)));
+        }
+
+        return _policy.RingCount;
+    }
+
     public int CollectBroadcastKeys(in WorldPosition2 position, Span<SubscriptionKey> destination)
     {
         if (destination.Length < _policy.RingCount)

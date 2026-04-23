@@ -47,6 +47,7 @@ Useful options:
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
+- `--ring-cadence-ticks <t0,t1,t2,...>`
 - `--owner-deadband <meters>`
 - `--owner-max-silent-ticks <n>`
 - `--owner-prediction-jitter-percent <fraction>`
@@ -67,6 +68,9 @@ Recommended run categories:
 
 5. Broader multi-ring observer read without changing the code path
    `--observer-replication --spawn-spacing-m 12 --aoi-radii-m 7.5,23.5,39.5`
+
+6. Broader multi-ring observer read with explicit ring cadence
+   `--observer-replication --spawn-spacing-m 12 --aoi-radii-m 7.5,23.5,39.5 --ring-cadence-ticks 1,2,3`
 
 ## Current Role
 
@@ -107,6 +111,16 @@ The widened harness AOI policy is now configurable:
   - `--aoi-radii-m 7.5`
 - broader gameplay-shaped profile:
   - `--aoi-radii-m 7.5,23.5,39.5`
+
+Ring-aware latest-state cadence is also configurable:
+
+- `--ring-cadence-ticks 1,2,3`
+- current intent/default:
+  - ring `0`: every tick
+  - ring `1`: every `2` ticks
+  - ring `2`: every `3` ticks
+
+That cadence currently applies to AOI latest-state families in the server publish layer, not to ordered events.
 
 This is intended to let the same live path broaden naturally as replication families grow, without forking into a separate parity-only harness.
 
@@ -169,3 +183,31 @@ Current first read with actual client consume:
   - practical current ceiling: about `128`
 
 So the widened path is now measuring something materially closer to real observer replication: not just publish and transport, but client-side frame decode/apply too. The transport bundling fix still matters, but it is no longer the whole story.
+
+Current broader three-lane, three-ring read with ring-aware latest-state cadence:
+
+- profile:
+  - `--aoi-radii-m 7.5,23.5,39.5`
+  - `--ring-cadence-ticks 1,2,3`
+  - `--observer-replication`
+  - `--observer-visual-state`
+  - `--observer-bulk-state --observer-bulk-every-ticks 16`
+  - `--observer-events --observer-event-every-ticks 8`
+  - `--owner-deadband 0.05`
+  - `--owner-max-silent-ticks 4`
+  - `--owner-prediction-jitter-percent 0.05`
+- less-dense `spawn-spacing-m 12`, `3s` stages:
+  - `0.35` active:
+    - `32` clients: `tick_p95 = 1.738 ms`
+    - `48` clients: `tick_p95 = 3.037 ms`
+    - `64` clients: `tick_p95 = 4.152 ms`
+  - `0.40` active:
+    - `32` clients: `tick_p95 = 1.407 ms`
+    - `48` clients: `tick_p95 = 3.387 ms`
+    - `64` clients: `tick_p95 = 4.343 ms`
+
+Current read:
+
+- ring-aware cadence materially improved the widened three-lane profile compared to the earlier all-rings-every-pass shape
+- under this broader live path, `48` clients currently pass the `4 ms` tick-p95 target at both `0.35` and `0.40` active
+- `64` clients are still slightly over the `4 ms` target on the current less-dense three-lane profile

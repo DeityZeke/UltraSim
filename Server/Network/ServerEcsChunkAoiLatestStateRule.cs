@@ -11,6 +11,7 @@ public sealed class ServerEcsChunkAoiLatestStateRule<T>
         Func<Entity, T, WorldPosition2> positionSelector,
         Func<Entity, T, ImmutablePayloadBuffer> payloadSelector,
         Func<Entity, T, ulong>? itemKeySelector = null,
+        ServerEcsChunkAoiRingCadencePolicy? ringCadence = null,
         PacketClass packetClass = PacketClass.Realtime)
     {
         if (packetClass is not PacketClass.Realtime and not PacketClass.Bulk)
@@ -20,6 +21,7 @@ public sealed class ServerEcsChunkAoiLatestStateRule<T>
         PositionSelector = positionSelector ?? throw new ArgumentNullException(nameof(positionSelector));
         PayloadSelector = payloadSelector ?? throw new ArgumentNullException(nameof(payloadSelector));
         ItemKeySelector = itemKeySelector ?? (static (entity, _) => ServerEcsNetworkItemKeys.GetComponentItemKey<T>(entity));
+        RingCadence = ringCadence;
         PacketClass = packetClass;
     }
 
@@ -27,5 +29,6 @@ public sealed class ServerEcsChunkAoiLatestStateRule<T>
     public Func<Entity, T, WorldPosition2> PositionSelector { get; }
     public Func<Entity, T, ImmutablePayloadBuffer> PayloadSelector { get; }
     public Func<Entity, T, ulong> ItemKeySelector { get; }
+    public ServerEcsChunkAoiRingCadencePolicy? RingCadence { get; }
     public PacketClass PacketClass { get; }
 }

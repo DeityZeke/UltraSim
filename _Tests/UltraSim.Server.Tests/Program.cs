@@ -58,6 +58,7 @@ internal static class TestRunner
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer);
         Run(nameof(ServerEcsWorldNetworkPublisher_Rules_ClassifyBulkLatestStateAndBulkOrderedEvents), ServerEcsWorldNetworkPublisher_Rules_ClassifyBulkLatestStateAndBulkOrderedEvents);
         Run(nameof(ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_UsesActualRingScopedSubscriptions), ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_UsesActualRingScopedSubscriptions);
+        Run(nameof(ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_SupportsRingCadencePolicy), ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_SupportsRingCadencePolicy);
         Run(nameof(ServerEcsWorldNetworkPublisher_ChunkAoiOrderedEvents_UseRingScopedReliableAndBulkClassification), ServerEcsWorldNetworkPublisher_ChunkAoiOrderedEvents_UseRingScopedReliableAndBulkClassification);
         Run(nameof(ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams), ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams);
         Run(nameof(ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement), ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement);
@@ -1240,6 +1241,47 @@ internal static class TestRunner
         Assert.True(connection1Seen);
         Assert.True(connection2Seen);
         Assert.False(connection3Seen);
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_ChunkAoiLatestState_SupportsRingCadencePolicy()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: false, registerSystems: false);
+        ComponentId positionId = world.Schema.GetComponentId<ServerEcsPosition>();
+        ArchetypeSignature signature = new([positionId]);
+        Entity entity = world.CreateDefault(signature);
+        Assert.True(world.SetComponent(entity, new ServerEcsPosition(8, 8)));
+
+        var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f, 23.5f, 39.5f);
+        var classifier = new ServerEcsChunkAoiScopeClassifier(policy);
+        var publisher = new ServerEcsWorldNetworkPublisher(world);
+        var cadence = new ServerEcsChunkAoiRingCadencePolicy(1, 2, 3);
+
+        int publishedTick1 = publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<ServerEcsPosition>(
+                classifier,
+                positionSelector: static (_, position) => new WorldPosition2(position.X, position.Y),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                ringCadence: cadence,
+                packetClass: PacketClass.Realtime),
+            publishTick: 1);
+
+        Assert.Equal(1, publishedTick1);
+
+        var latestBatch = new LatestStateUpdate[4];
+        LatestStateDrainResult latestDrain = publisher.LatestStateStream.DrainSince(default, latestBatch);
+        Assert.Equal(1, latestDrain.Count);
+
+        Assert.True(world.SetComponent(entity, new ServerEcsPosition(9, 8)));
+        int publishedTick2 = publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<ServerEcsPosition>(
+                classifier,
+                positionSelector: static (_, position) => new WorldPosition2(position.X, position.Y),
+                payloadSelector: static (_, position) => ServerRuntimeNetworkPayloadCodec.Encode(position),
+                ringCadence: cadence,
+                packetClass: PacketClass.Realtime),
+            publishTick: 2);
+
+        Assert.Equal(2, publishedTick2);
     }
 
     private static void ServerEcsWorldNetworkPublisher_ChunkAoiOrderedEvents_UseRingScopedReliableAndBulkClassification()

@@ -546,6 +546,25 @@ The next implementation target after this bridge slice should be:
     - configurable event cadence for widening runs
   - the widened live path now also has a second observer-visible latest-state family on top of the base movement state
   - the widened live path now also has its first `Bulk` observer latest-state family with configurable cadence
+  - ring-aware AOI latest-state cadence now exists at the server publish-policy layer rather than in the network kernel
+  - the first comparable broader three-lane, three-ring matrix with ring-aware cadence now exists too:
+    - less-dense `spawn-spacing = 12m`
+    - `aoi-radii = 7.5,23.5,39.5`
+    - ring cadence `1,2,3`
+    - observer latest-state + visual latest-state + bulk latest-state + ordered events
+    - owner deadband/silent-tick policy and harness-side owner jitter enabled
+    - current results:
+      - `0.35` active:
+        - `32`: `tick_p95 = 1.738 ms`
+        - `48`: `tick_p95 = 3.037 ms`
+        - `64`: `tick_p95 = 4.152 ms`
+      - `0.40` active:
+        - `32`: `tick_p95 = 1.407 ms`
+        - `48`: `tick_p95 = 3.387 ms`
+        - `64`: `tick_p95 = 4.343 ms`
+    - current read:
+      - `48` now passes under this broader shape
+      - `64` is still slightly above the `4 ms` tick-p95 target
   - the live owner path now also has its first explicit correction-send policy seam:
     - server-side owner correction deadband
     - server-side max silent ticks

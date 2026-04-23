@@ -217,6 +217,38 @@ The harness has now also been widened with the first observer-replication load:
 - configurable live AOI ring radii via:
   - `--aoi-radii-m 7.5`
   - or broader gameplay-shaped policies such as `--aoi-radii-m 7.5,23.5,39.5`
+- configurable ring-aware latest-state cadence via:
+  - `--ring-cadence-ticks 1,2,3`
+  - current intent:
+    - ring `0`: every tick
+    - ring `1`: every `2` ticks
+    - ring `2`: every `3` ticks
+  - this cadence is currently applied in the server publish-policy layer, not in `Kernels/Network`
+
+Current broader three-lane, three-ring read:
+
+- profile:
+  - `spawn-spacing-m 12`
+  - `aoi-radii-m 7.5,23.5,39.5`
+  - ring cadence `1,2,3`
+  - observer latest-state + visual latest-state + bulk latest-state + ordered events
+  - owner deadband/silent-tick policy enabled
+  - harness-side owner prediction jitter enabled
+- results:
+  - `0.35` active:
+    - `32`: `tick_p95 = 1.738 ms`
+    - `48`: `tick_p95 = 3.037 ms`
+    - `64`: `tick_p95 = 4.152 ms`
+  - `0.40` active:
+    - `32`: `tick_p95 = 1.407 ms`
+    - `48`: `tick_p95 = 3.387 ms`
+    - `64`: `tick_p95 = 4.343 ms`
+
+Current interpretation:
+
+- ring-aware cadence materially improved the broadened load shape
+- the current practical ceiling for this less-dense three-lane profile is around `48` clients before crossing a `4 ms` network-tail target
+- `64` is close, but still over the target on the latest runs
 
 Current observer-replication read with actual client consume:
 

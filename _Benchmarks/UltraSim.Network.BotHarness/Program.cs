@@ -180,11 +180,12 @@ internal sealed class MovementRampHarness : IDisposable
 
             long start = Stopwatch.GetTimestamp();
             _clockTicks += 2;
-            _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, (uint)(stageIndex * 100_000 + tick + 1));
+            uint publishTick = (uint)(stageIndex * 100_000 + tick + 1);
+            _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick);
             if (replication is not null)
             {
                 UpdateObserverSubscriptions(replication);
-                int published = PublishObserverReplication(replication);
+                int published = PublishObserverReplication(replication, publishTick);
                 if (published > 0)
                 {
                     replicationPublishedItems += published;
@@ -431,6 +432,7 @@ internal sealed class MovementRampHarness : IDisposable
             subscriptions,
             publisher,
             new ConnectionStreamFanoutBridge(scheduler, fanout),
+            new ServerEcsChunkAoiRingCadencePolicy(ConvertRingCadence(_options.RingCadenceTicks)),
             new ConnectionId[Math.Max(64, _clients.Count)],
             new ScheduledWorkItem[Math.Max(4096, _clients.Count * 8)],
             new ConnectionId[Math.Max(4096, _clients.Count)],
@@ -455,13 +457,15 @@ internal sealed class MovementRampHarness : IDisposable
         }
     }
 
-    private int PublishObserverReplication(StageReplicationContext replication)
+    private int PublishObserverReplication(StageReplicationContext replication, uint publishTick)
     {
         int published = replication.Publisher.PublishChunkAoiLatestState(
             new ServerEcsChunkAoiLatestStateRule<BenchMovementBody>(
                 replication.Classifier,
                 static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
-                static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body)));
+                static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                ringCadence: replication.RingCadence),
+            publishTick);
 
         if (_options.ObserverVisualState)
         {
@@ -470,7 +474,9 @@ internal sealed class MovementRampHarness : IDisposable
                     replication.Classifier,
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                     static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
-                    static (entity, _) => ComposeHarnessVisualItemKey(entity)));
+                    static (entity, _) => ComposeHarnessVisualItemKey(entity),
+                    ringCadence: replication.RingCadence),
+                publishTick);
         }
 
         if (_options.ObserverBulkState)
@@ -481,7 +487,9 @@ internal sealed class MovementRampHarness : IDisposable
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                     static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
                     static (entity, _) => ComposeHarnessBulkItemKey(entity),
-                    packetClass: PacketClass.Bulk));
+                    ringCadence: replication.RingCadence,
+                    packetClass: PacketClass.Bulk),
+                publishTick);
         }
 
         if (_options.ObserverEvents)
@@ -623,6 +631,14 @@ internal sealed class MovementRampHarness : IDisposable
         ulong packed = entity.Packed & 0x0000_FFFF_FFFF_FFFFUL;
         ulong key = familyTag | packed;
         return key == 0 ? 1UL : key;
+    }
+
+    private static uint[] ConvertRingCadence(int[] cadenceTicks)
+    {
+        var converted = new uint[cadenceTicks.Length];
+        for (int i = 0; i < cadenceTicks.Length; i++)
+            converted[i] = checked((uint)cadenceTicks[i]);
+        return converted;
     }
 
     private sealed class ClientHandle : IDisposable
@@ -797,6 +813,7 @@ internal sealed class MovementRampHarness : IDisposable
             ConnectionSubscriptionRegistry subscriptions,
             ServerEcsWorldNetworkPublisher publisher,
             ConnectionStreamFanoutBridge bridge,
+            ServerEcsChunkAoiRingCadencePolicy ringCadence,
             ConnectionId[] boundConnections,
             ScheduledWorkItem[] scheduledWork,
             ConnectionId[] subscriberScratch,
@@ -807,6 +824,7 @@ internal sealed class MovementRampHarness : IDisposable
             Subscriptions = subscriptions;
             Publisher = publisher;
             Bridge = bridge;
+            RingCadence = ringCadence;
             BoundConnections = boundConnections;
             ScheduledWork = scheduledWork;
             SubscriberScratch = subscriberScratch;
@@ -818,6 +836,7 @@ internal sealed class MovementRampHarness : IDisposable
         public ConnectionSubscriptionRegistry Subscriptions { get; }
         public ServerEcsWorldNetworkPublisher Publisher { get; }
         public ConnectionStreamFanoutBridge Bridge { get; }
+        public ServerEcsChunkAoiRingCadencePolicy RingCadence { get; }
         public ConnectionScheduleState ScheduleState { get; set; }
         public ConnectionId[] BoundConnections { get; set; }
         public ScheduledWorkItem[] ScheduledWork { get; set; }
@@ -858,6 +877,7 @@ internal sealed class HarnessArgs
     public float SpawnSpacingMeters { get; set; } = 4f;
     public int SpawnGridWidth { get; set; } = 32;
     public float[] AoiRadiiMeters { get; set; } = [7.5f];
+    public int[] RingCadenceTicks { get; set; } = [1, 2, 3];
     public float OwnerCorrectionDeadband { get; set; } = 0f;
     public uint OwnerCorrectionMaxSilentTicks { get; set; } = 1;
     public float OwnerPredictionJitterPercent { get; set; } = 0f;
@@ -897,6 +917,7 @@ internal sealed class HarnessArgs
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--aoi-radii-m") options.AoiRadiiMeters = ParseFloatList(Next()!, nameof(AoiRadiiMeters));
+            else if (arg == "--ring-cadence-ticks") options.RingCadenceTicks = ParseIntList(Next()!, nameof(RingCadenceTicks));
             else if (arg == "--owner-deadband") options.OwnerCorrectionDeadband = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-max-silent-ticks") options.OwnerCorrectionMaxSilentTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-prediction-jitter-percent") options.OwnerPredictionJitterPercent = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -908,6 +929,8 @@ internal sealed class HarnessArgs
         options.ObserverEventEveryTicks = Math.Max(1, options.ObserverEventEveryTicks);
         if (options.AoiRadiiMeters.Length == 0)
             options.AoiRadiiMeters = [7.5f];
+        if (options.RingCadenceTicks.Length == 0)
+            options.RingCadenceTicks = [1, 2, 3];
         if (float.IsNaN(options.OwnerCorrectionDeadband) || float.IsInfinity(options.OwnerCorrectionDeadband) || options.OwnerCorrectionDeadband < 0f)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionDeadband));
         if (options.OwnerCorrectionMaxSilentTicks == 0)
@@ -938,6 +961,9 @@ internal sealed class HarnessArgs
         var aoiRadii = new JsonArray();
         for (int i = 0; i < AoiRadiiMeters.Length; i++)
             aoiRadii.Add(JsonValue.Create(AoiRadiiMeters[i]));
+        var ringCadence = new JsonArray();
+        for (int i = 0; i < RingCadenceTicks.Length; i++)
+            ringCadence.Add(JsonValue.Create(RingCadenceTicks[i]));
 
         return new JsonObject
         {
@@ -962,6 +988,7 @@ internal sealed class HarnessArgs
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
+            ["ring_cadence_ticks"] = ringCadence,
             ["owner_deadband"] = OwnerCorrectionDeadband,
             ["owner_max_silent_ticks"] = OwnerCorrectionMaxSilentTicks,
             ["owner_prediction_jitter_percent"] = OwnerPredictionJitterPercent,
@@ -988,6 +1015,27 @@ internal sealed class HarnessArgs
                 throw new ArgumentException("AOI radii must be strictly increasing.", name);
             values[i] = value;
             previous = value;
+        }
+
+        return values;
+    }
+
+    private static int[] ParseIntList(string raw, string name)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new ArgumentException("Value cannot be empty.", name);
+
+        string[] parts = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            throw new ArgumentException("Value cannot be empty.", name);
+
+        var values = new int[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            int value = int.Parse(parts[i], CultureInfo.InvariantCulture);
+            if (value <= 0)
+                throw new ArgumentOutOfRangeException(name, "Ring cadence ticks must be positive integers.");
+            values[i] = value;
         }
 
         return values;

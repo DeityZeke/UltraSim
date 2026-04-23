@@ -12,6 +12,7 @@ public sealed class ServerEcsWorldNetworkPublisher
     private readonly LatestStateStream _latestState;
     private readonly OrderedEventStream _orderedEvents;
     private readonly List<SubscriptionKey> _scopeScratch = new();
+    private readonly List<ChunkSubscriptionScope> _chunkScopeScratch = new();
 
     public ServerEcsWorldNetworkPublisher(
         World world,
@@ -143,6 +144,12 @@ public sealed class ServerEcsWorldNetworkPublisher
     public int PublishChunkAoiLatestState<T>(ServerEcsChunkAoiLatestStateRule<T> rule, int batchSize = 256)
         where T : unmanaged, IComponent<T>
     {
+        return PublishChunkAoiLatestState(rule, publishTick: 0, batchSize);
+    }
+
+    public int PublishChunkAoiLatestState<T>(ServerEcsChunkAoiLatestStateRule<T> rule, uint publishTick, int batchSize = 256)
+        where T : unmanaged, IComponent<T>
+    {
         ArgumentNullException.ThrowIfNull(rule);
 
         if (batchSize <= 0)
@@ -164,14 +171,18 @@ public sealed class ServerEcsWorldNetworkPublisher
                 if (!_world.TryGetComponent<T>(entity, out T value))
                     continue;
 
-                _scopeScratch.Clear();
-                rule.ScopeClassifier.CollectBroadcastKeys(rule.PositionSelector(entity, value), _scopeScratch);
+                _chunkScopeScratch.Clear();
+                rule.ScopeClassifier.CollectBroadcastScopes(rule.PositionSelector(entity, value), _chunkScopeScratch);
                 ulong baseItemKey = rule.ItemKeySelector(entity, value);
                 ImmutablePayloadBuffer payload = rule.PayloadSelector(entity, value);
-                ReadOnlySpan<SubscriptionKey> scopes = CollectionsMarshal.AsSpan(_scopeScratch);
+                ReadOnlySpan<ChunkSubscriptionScope> scopes = CollectionsMarshal.AsSpan(_chunkScopeScratch);
                 for (int scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
                 {
-                    SubscriptionKey scopeKey = scopes[scopeIndex];
+                    ChunkSubscriptionScope scope = scopes[scopeIndex];
+                    if (rule.RingCadence is not null && !rule.RingCadence.ShouldPublish(publishTick, scope.RingIndex))
+                        continue;
+
+                    SubscriptionKey scopeKey = scope.Key;
                     _latestState.Publish(
                         ServerEcsNetworkItemKeys.CombineWithScope(baseItemKey, scopeKey),
                         scopeKey,
