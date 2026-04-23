@@ -237,3 +237,20 @@ Current interpretation:
   - client pump / observer apply
   - dispatch / fanout
 - so the next worthwhile tuning work should focus there before trying more policy changes to the same widened profile
+
+Current client-side single-pass inbound result:
+
+- report: `_Benchmarks/results/observer_bulk_ringcad_breakdown_040_after_clientpass_rebuilt/network_bot_harness_20260423_021643.json`
+- change:
+  - `ClientMovementSessionHost` now processes state-plane inbound datagrams in one pass instead of scanning the same batch separately for movement, observer latest-state, and observer events
+- `64` clients:
+  - `tick_p95 = 4.316 ms`
+  - `server_pump_p95 = 0.352 ms`
+  - `publish_p95 = 0.168 ms`
+  - `dispatch_p95 = 0.803 ms`
+  - `client_pump_p95 = 2.147 ms`
+
+Current read:
+
+- the client-side single-pass change materially reduced the largest measured substage
+- the next hot slice is now more clearly dispatch / fanout plus the remaining client consume/apply work

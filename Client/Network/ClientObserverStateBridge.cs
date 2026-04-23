@@ -9,7 +9,6 @@ namespace UltraSim.Client;
 public sealed class ClientObserverStateBridge
 {
     private readonly ConnectionId _connectionId;
-    private readonly PacketRegistry<ClientObserverStateBridge> _registry;
     private readonly Dictionary<ulong, ulong> _latestSequenceByItemKey = new();
     private readonly ClientLatestStateFrameApplier? _applyLatestState;
 
@@ -20,9 +19,6 @@ public sealed class ClientObserverStateBridge
 
         _connectionId = connectionId;
         _applyLatestState = applyLatestState;
-        _registry = new PacketRegistry<ClientObserverStateBridge>();
-        _registry.Register<RealtimeStateFramePacket>(static (ClientObserverStateBridge bridge, in RealtimeStateFramePacket packet) => bridge.OnRealtimeStateFrame(packet));
-        _registry.Seal();
     }
 
     public ConnectionId ConnectionId => _connectionId;
@@ -32,8 +28,7 @@ public sealed class ClientObserverStateBridge
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
-        LastReceivedFrameCount = 0;
-        LastAppliedFrameCount = 0;
+        BeginPump();
 
         int processed = 0;
         for (int i = 0; i < inbound.Length; i++)
@@ -45,13 +40,30 @@ public sealed class ClientObserverStateBridge
             if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
                 continue;
 
-            if (!_registry.TryDispatch(this, header, payload))
+            if (!TryProcessEnvelope(header, payload))
                 continue;
 
             processed++;
         }
 
         return processed;
+    }
+
+    public void BeginPump()
+    {
+        LastReceivedFrameCount = 0;
+        LastAppliedFrameCount = 0;
+    }
+
+    public bool TryProcessEnvelope(in PacketEnvelopeHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (header.PacketId != RealtimeStateFramePacket.PacketId)
+            return false;
+
+        var reader = new BitReader(payload);
+        RealtimeStateFramePacket packet = RealtimeStateFramePacket.Deserialize(ref reader);
+        OnRealtimeStateFrame(packet);
+        return true;
     }
 
     private void OnRealtimeStateFrame(in RealtimeStateFramePacket packet)

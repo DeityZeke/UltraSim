@@ -15,6 +15,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
+        Run(nameof(ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches), ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches);
 
         Console.WriteLine("All Client scaffold tests passed.");
     }
@@ -252,6 +253,66 @@ internal static class TestRunner
         }, out ClientMovementState interpolated));
 
         Assert.Equal(new ClientMovementState(15f, 25f, 2.25f, 3.25f), interpolated);
+    }
+
+    private static void ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Client.Start();
+        pair.Server.Start();
+
+        int latestApplyCount = 0;
+        int eventApplyCount = 0;
+        var observerState = new ClientObserverStateBridge(
+            new ConnectionId(1),
+            (_, _, _) => latestApplyCount++);
+        var observerEvents = new ClientObserverEventBridge(
+            new ConnectionId(1),
+            (_, _) => eventApplyCount++);
+        var host = new ClientMovementSessionHost(
+            pair.Client,
+            new ConnectionId(1),
+            default,
+            observerState: observerState,
+            observerEvents: observerEvents,
+            maxPollBatch: 2);
+
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            MovementStatePacket.Plane,
+            MovementStatePacket.PacketClass,
+            MovementStatePacket.Channel,
+            PacketCodec.Encode(new MovementStatePacket(42, 100, 1, 1f, 2f, 3f, 4f))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            RealtimeStateFramePacket.Plane,
+            RealtimeStateFramePacket.PacketClass,
+            RealtimeStateFramePacket.Channel,
+            PacketCodec.Encode(new RealtimeStateFramePacket(10, 1001, ImmutablePayloadBuffer.CopyFrom([1, 2])))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            RealtimeStateFramePacket.Plane,
+            RealtimeStateFramePacket.PacketClass,
+            RealtimeStateFramePacket.Channel,
+            PacketCodec.Encode(new RealtimeStateFramePacket(11, 1002, ImmutablePayloadBuffer.CopyFrom([3, 4])))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventFramePacket.Plane,
+            ReliableEventFramePacket.PacketClass,
+            ReliableEventFramePacket.Channel,
+            PacketCodec.Encode(new ReliableEventFramePacket(20, ImmutablePayloadBuffer.CopyFrom([5, 6])))));
+        pair.Server.FlushOutbound();
+
+        int inboundCount = host.Pump(1000);
+
+        Assert.Equal(4, inboundCount);
+        Assert.Equal(2, observerState.LastReceivedFrameCount);
+        Assert.Equal(2, observerState.LastAppliedFrameCount);
+        Assert.Equal(2, latestApplyCount);
+        Assert.Equal(1, observerEvents.LastReceivedEventCount);
+        Assert.Equal(1, observerEvents.LastAppliedEventCount);
+        Assert.Equal(1, eventApplyCount);
+        Assert.Equal((ushort)1, host.Movement.LastReceiveResult.LastProcessedInputSequence);
     }
 
     private static void Run(string name, Action test)

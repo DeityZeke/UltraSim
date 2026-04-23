@@ -11,7 +11,6 @@ public sealed class ClientMovementNetworkBridge
 {
     private readonly INetworkTransport _transport;
     private readonly ConnectionId _connectionId;
-    private readonly PacketRegistry<ClientMovementNetworkBridge> _registry;
     private readonly ClientInputSequencer<ClientMovementInput> _sequencer;
     private readonly ClientPredictionStore<ClientMovementState> _predictionStore;
     private readonly ClientInterpolationBuffer<ClientMovementState> _interpolation;
@@ -34,9 +33,6 @@ public sealed class ClientMovementNetworkBridge
         _predictionStore = predictionStore ?? new ClientPredictionStore<ClientMovementState>();
         _interpolation = interpolation ?? new ClientInterpolationBuffer<ClientMovementState>();
         _correctionStats = new ClientMovementCorrectionStats();
-        _registry = new PacketRegistry<ClientMovementNetworkBridge>();
-        _registry.Register<MovementStatePacket>(static (ClientMovementNetworkBridge bridge, in MovementStatePacket packet) => bridge.OnMovementState(packet));
-        _registry.Seal();
     }
 
     public ConnectionId ConnectionId => _connectionId;
@@ -98,11 +94,13 @@ public sealed class ClientMovementNetworkBridge
             if (inbound[i].ConnectionId != _connectionId || inbound[i].Plane != NetworkPlane.State)
                 continue;
 
-            processed++;
             if (!PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
                 continue;
 
-            _registry.TryDispatch(this, header, payload);
+            if (!TryProcessEnvelope(header, payload))
+                continue;
+
+            processed++;
         }
 
         return processed;
@@ -129,6 +127,17 @@ public sealed class ClientMovementNetworkBridge
             MovementInputPacket.Channel,
             payload));
         result = new ClientMovementInputSendResult(sample.Sequence, payload.Length);
+        return true;
+    }
+
+    public bool TryProcessEnvelope(in PacketEnvelopeHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (header.PacketId != MovementStatePacket.PacketId)
+            return false;
+
+        var reader = new BitReader(payload);
+        MovementStatePacket packet = MovementStatePacket.Deserialize(ref reader);
+        OnMovementState(packet);
         return true;
     }
 

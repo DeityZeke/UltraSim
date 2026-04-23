@@ -71,6 +71,9 @@ public sealed class ClientMovementSessionHost
     public int Pump(long nowTicks)
     {
         int totalCount = 0;
+        _observerState?.BeginPump();
+        _observerEvents?.BeginPump();
+
         while (true)
         {
             int count = _transport.PollInbound(_inboundScratch);
@@ -79,9 +82,25 @@ public sealed class ClientMovementSessionHost
 
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, count);
             _control.ProcessInbound(inbound, nowTicks);
-            _movement.ProcessInbound(inbound);
-            _observerState?.ProcessInbound(inbound);
-            _observerEvents?.ProcessInbound(inbound);
+
+            for (int i = 0; i < count; i++)
+            {
+                ref readonly InboundDatagram datagram = ref inbound[i];
+                if (datagram.ConnectionId != ConnectionId || datagram.Plane != NetworkPlane.State)
+                    continue;
+
+                if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
+                    continue;
+
+                if (_movement.TryProcessEnvelope(header, payload))
+                    continue;
+
+                if (_observerState?.TryProcessEnvelope(header, payload) == true)
+                    continue;
+
+                _observerEvents?.TryProcessEnvelope(header, payload);
+            }
+
             totalCount += count;
 
             if (count < _inboundScratch.Length)

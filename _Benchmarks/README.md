@@ -260,6 +260,11 @@ Current interpretation:
   - `dispatch_p95 = 0.803 ms`
   - `client_pump_p95 = 2.570 ms`
 - so the next likely tuning targets are client consume/apply and dispatch/fanout, not server-side publish policy again
+- after the client-side single-pass inbound change:
+  - `tick_p95` moved from `4.367 ms` to `4.316 ms`
+  - `client_pump_p95` moved from `2.570 ms` to `2.147 ms`
+  - `dispatch_p95` stayed about the same at `0.803 ms`
+- that confirms the first useful optimization after cadence was on the client consume path, not on publish policy
 
 Current observer-replication read with actual client consume:
 

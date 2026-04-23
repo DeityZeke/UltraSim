@@ -9,7 +9,6 @@ namespace UltraSim.Client;
 public sealed class ClientObserverEventBridge
 {
     private readonly ConnectionId _connectionId;
-    private readonly PacketRegistry<ClientObserverEventBridge> _registry;
     private readonly ClientReliableEventFrameApplier? _applyEvent;
     private ulong _lastAppliedSequence;
 
@@ -20,9 +19,6 @@ public sealed class ClientObserverEventBridge
 
         _connectionId = connectionId;
         _applyEvent = applyEvent;
-        _registry = new PacketRegistry<ClientObserverEventBridge>();
-        _registry.Register<ReliableEventFramePacket>(static (ClientObserverEventBridge bridge, in ReliableEventFramePacket packet) => bridge.OnReliableEventFrame(packet));
-        _registry.Seal();
     }
 
     public ConnectionId ConnectionId => _connectionId;
@@ -32,8 +28,7 @@ public sealed class ClientObserverEventBridge
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
-        LastReceivedEventCount = 0;
-        LastAppliedEventCount = 0;
+        BeginPump();
 
         int processed = 0;
         for (int i = 0; i < inbound.Length; i++)
@@ -45,13 +40,30 @@ public sealed class ClientObserverEventBridge
             if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
                 continue;
 
-            if (!_registry.TryDispatch(this, header, payload))
+            if (!TryProcessEnvelope(header, payload))
                 continue;
 
             processed++;
         }
 
         return processed;
+    }
+
+    public void BeginPump()
+    {
+        LastReceivedEventCount = 0;
+        LastAppliedEventCount = 0;
+    }
+
+    public bool TryProcessEnvelope(in PacketEnvelopeHeader header, ReadOnlySpan<byte> payload)
+    {
+        if (header.PacketId != ReliableEventFramePacket.PacketId)
+            return false;
+
+        var reader = new BitReader(payload);
+        ReliableEventFramePacket packet = ReliableEventFramePacket.Deserialize(ref reader);
+        OnReliableEventFrame(packet);
+        return true;
     }
 
     private void OnReliableEventFrame(in ReliableEventFramePacket packet)
