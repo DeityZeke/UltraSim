@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 
@@ -162,11 +163,35 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                         _bundlePayloadScratch.Clear();
                         for (int i = index; i < datagrams.Count; i++)
                             _bundlePayloadScratch.Add(datagrams[i].Payload);
-                        outboundPayload = TransportDatagramBundleCodec.EncodeBundle(
+                        int bundleBytes = TransportDatagramBundleCodec.MeasureBundle(
                             _bundlePayloadScratch,
                             0,
                             _options.MaxDatagramBytes,
                             out packedCount);
+                        byte[] rented = ArrayPool<byte>.Shared.Rent(bundleBytes);
+                        try
+                        {
+                            TransportDatagramBundleCodec.WriteBundle(
+                                _bundlePayloadScratch,
+                                0,
+                                packedCount,
+                                rented.AsSpan(0, bundleBytes));
+                            socket.SendTo(rented.AsSpan(0, bundleBytes), SocketFlags.None, remote);
+                            LastFlushWireDatagramCount++;
+                            index += packedCount;
+                        }
+                        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
+                        {
+                            for (int i = bundleStart; i < datagrams.Count; i++)
+                                _outbound.Enqueue(datagrams[i]);
+                            return;
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(rented);
+                        }
+
+                        continue;
                     }
 
                     try

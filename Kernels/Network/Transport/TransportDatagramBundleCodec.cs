@@ -19,7 +19,7 @@ internal static class TransportDatagramBundleCodec
         return ReadUInt16(source) == BundleMarker;
     }
 
-    public static ImmutablePayloadBuffer EncodeBundle(
+    public static int MeasureBundle(
         IReadOnlyList<ImmutablePayloadBuffer> payloads,
         int startIndex,
         int maxDatagramBytes,
@@ -50,20 +50,39 @@ internal static class TransportDatagramBundleCodec
         if (packedCount <= 0)
             throw new InvalidOperationException("Transport bundle must contain at least one envelope.");
 
-        byte[] buffer = new byte[totalBytes];
+        return totalBytes;
+    }
+
+    public static void WriteBundle(
+        IReadOnlyList<ImmutablePayloadBuffer> payloads,
+        int startIndex,
+        int packedCount,
+        Span<byte> destination)
+    {
+        ArgumentNullException.ThrowIfNull(payloads);
+        if ((uint)startIndex >= (uint)payloads.Count)
+            throw new ArgumentOutOfRangeException(nameof(startIndex));
+        if (packedCount <= 0 || startIndex + packedCount > payloads.Count)
+            throw new ArgumentOutOfRangeException(nameof(packedCount));
+
+        int requiredBytes = HeaderSize;
+        for (int i = 0; i < packedCount; i++)
+            requiredBytes += EntryHeaderSize + payloads[startIndex + i].Length;
+
+        if (destination.Length < requiredBytes)
+            throw new ArgumentOutOfRangeException(nameof(destination));
+
         int offset = 0;
-        WriteUInt16(buffer, ref offset, BundleMarker);
-        WriteUInt16(buffer, ref offset, checked((ushort)packedCount));
+        WriteUInt16(destination, ref offset, BundleMarker);
+        WriteUInt16(destination, ref offset, checked((ushort)packedCount));
 
         for (int i = 0; i < packedCount; i++)
         {
             ImmutablePayloadBuffer payload = payloads[startIndex + i];
-            WriteUInt16(buffer, ref offset, checked((ushort)payload.Length));
-            payload.Span.CopyTo(buffer.AsSpan(offset, payload.Length));
+            WriteUInt16(destination, ref offset, checked((ushort)payload.Length));
+            payload.Span.CopyTo(destination.Slice(offset, payload.Length));
             offset += payload.Length;
         }
-
-        return ImmutablePayloadBuffer.FromOwned(buffer);
     }
 
     public ref struct Reader
@@ -106,7 +125,7 @@ internal static class TransportDatagramBundleCodec
         return (ushort)(source[0] | (source[1] << 8));
     }
 
-    private static void WriteUInt16(byte[] destination, ref int offset, ushort value)
+    private static void WriteUInt16(Span<byte> destination, ref int offset, ushort value)
     {
         destination[offset++] = (byte)value;
         destination[offset++] = (byte)(value >> 8);
