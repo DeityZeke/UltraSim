@@ -158,6 +158,9 @@ internal sealed class MovementRampHarness : IDisposable
         var serverPumpSamplesMs = new List<double>(measuredTicks);
         var publishSamplesMs = new List<double>(measuredTicks);
         var dispatchSamplesMs = new List<double>(measuredTicks);
+        var dispatchScheduleSamplesMs = new List<double>(measuredTicks);
+        var dispatchFanoutSamplesMs = new List<double>(measuredTicks);
+        var dispatchFlushSamplesMs = new List<double>(measuredTicks);
         var clientPumpSamplesMs = new List<double>(measuredTicks);
         var clientPollSamplesMs = new List<double>(measuredTicks);
         var clientControlSamplesMs = new List<double>(measuredTicks);
@@ -213,21 +216,35 @@ internal sealed class MovementRampHarness : IDisposable
                 {
                     replicationPublishedItems += published;
                     long dispatchStart = Stopwatch.GetTimestamp();
-                    int dispatched = DispatchObserverReplication(replication, out int wireDatagrams);
+                    int dispatched = DispatchObserverReplication(
+                        replication,
+                        out int wireDatagrams,
+                        out double dispatchScheduleMs,
+                        out double dispatchFanoutMs,
+                        out double dispatchFlushMs);
                     long dispatchEnd = Stopwatch.GetTimestamp();
                     replicationDatagrams += dispatched;
                     replicationWireDatagrams += wireDatagrams;
                     dispatchSamplesMs.Add((dispatchEnd - dispatchStart) * 1000.0 / Stopwatch.Frequency);
+                    dispatchScheduleSamplesMs.Add(dispatchScheduleMs);
+                    dispatchFanoutSamplesMs.Add(dispatchFanoutMs);
+                    dispatchFlushSamplesMs.Add(dispatchFlushMs);
                 }
                 else
                 {
                     dispatchSamplesMs.Add(0d);
+                    dispatchScheduleSamplesMs.Add(0d);
+                    dispatchFanoutSamplesMs.Add(0d);
+                    dispatchFlushSamplesMs.Add(0d);
                 }
             }
             else
             {
                 publishSamplesMs.Add(0d);
                 dispatchSamplesMs.Add(0d);
+                dispatchScheduleSamplesMs.Add(0d);
+                dispatchFanoutSamplesMs.Add(0d);
+                dispatchFlushSamplesMs.Add(0d);
             }
             long clientNowTicks = _clockTicks + 1;
             long clientPumpStart = Stopwatch.GetTimestamp();
@@ -286,6 +303,9 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats serverPumpStats = new TickWindowStats(serverPumpSamplesMs);
         TickWindowStats publishStats = new TickWindowStats(publishSamplesMs);
         TickWindowStats dispatchStats = new TickWindowStats(dispatchSamplesMs);
+        TickWindowStats dispatchScheduleStats = new TickWindowStats(dispatchScheduleSamplesMs);
+        TickWindowStats dispatchFanoutStats = new TickWindowStats(dispatchFanoutSamplesMs);
+        TickWindowStats dispatchFlushStats = new TickWindowStats(dispatchFlushSamplesMs);
         TickWindowStats clientPumpStats = new TickWindowStats(clientPumpSamplesMs);
         TickWindowStats clientPollStats = new TickWindowStats(clientPollSamplesMs);
         TickWindowStats clientControlStats = new TickWindowStats(clientControlSamplesMs);
@@ -331,6 +351,12 @@ internal sealed class MovementRampHarness : IDisposable
             PublishP95Ms: publishStats.P95Ms,
             DispatchAverageMs: dispatchStats.AverageMs,
             DispatchP95Ms: dispatchStats.P95Ms,
+            DispatchScheduleAverageMs: dispatchScheduleStats.AverageMs,
+            DispatchScheduleP95Ms: dispatchScheduleStats.P95Ms,
+            DispatchFanoutAverageMs: dispatchFanoutStats.AverageMs,
+            DispatchFanoutP95Ms: dispatchFanoutStats.P95Ms,
+            DispatchFlushAverageMs: dispatchFlushStats.AverageMs,
+            DispatchFlushP95Ms: dispatchFlushStats.P95Ms,
             ClientPumpAverageMs: clientPumpStats.AverageMs,
             ClientPumpP95Ms: clientPumpStats.P95Ms,
             ClientPollAverageMs: clientPollStats.AverageMs,
@@ -604,9 +630,17 @@ internal sealed class MovementRampHarness : IDisposable
         return published;
     }
 
-    private int DispatchObserverReplication(StageReplicationContext replication, out int wireDatagrams)
+    private int DispatchObserverReplication(
+        StageReplicationContext replication,
+        out int wireDatagrams,
+        out double dispatchScheduleMs,
+        out double dispatchFanoutMs,
+        out double dispatchFlushMs)
     {
         wireDatagrams = 0;
+        long dispatchScheduleTicks = 0;
+        long dispatchFanoutTicks = 0;
+        long dispatchFlushTicks = 0;
         while (true)
         {
             ConnectionScheduledFanoutResult result = replication.Bridge.ScheduleAndDispatch(
@@ -615,6 +649,8 @@ internal sealed class MovementRampHarness : IDisposable
                 replication.ScheduledWork,
                 replication.SubscriberScratch,
                 replication.Output);
+            dispatchScheduleTicks += result.ScheduleElapsedTicks;
+            dispatchFanoutTicks += result.FanoutElapsedTicks;
 
             if (result.Fanout.DatagramCount == replication.Output.Length)
             {
@@ -629,10 +665,16 @@ internal sealed class MovementRampHarness : IDisposable
             }
 
             replication.ScheduleState = result.Schedule.NextState;
+            long flushStart = Stopwatch.GetTimestamp();
             for (int i = 0; i < result.Fanout.DatagramCount; i++)
                 _serverTransport.EnqueueOutbound(replication.Output[i]);
             _serverTransport.FlushOutbound();
+            long flushEnd = Stopwatch.GetTimestamp();
+            dispatchFlushTicks += flushEnd - flushStart;
             wireDatagrams = _serverTransport.LastFlushWireDatagramCount;
+            dispatchScheduleMs = dispatchScheduleTicks * 1000.0 / Stopwatch.Frequency;
+            dispatchFanoutMs = dispatchFanoutTicks * 1000.0 / Stopwatch.Frequency;
+            dispatchFlushMs = dispatchFlushTicks * 1000.0 / Stopwatch.Frequency;
             return result.Fanout.DatagramCount;
         }
     }
@@ -1232,6 +1274,12 @@ internal readonly record struct StageResult(
     double PublishP95Ms,
     double DispatchAverageMs,
     double DispatchP95Ms,
+    double DispatchScheduleAverageMs,
+    double DispatchScheduleP95Ms,
+    double DispatchFanoutAverageMs,
+    double DispatchFanoutP95Ms,
+    double DispatchFlushAverageMs,
+    double DispatchFlushP95Ms,
     double ClientPumpAverageMs,
     double ClientPumpP95Ms,
     double ClientPollAverageMs,
@@ -1300,6 +1348,12 @@ internal readonly record struct StageResult(
             ["publish_p95_ms"] = Math.Round(PublishP95Ms, 3),
             ["dispatch_avg_ms"] = Math.Round(DispatchAverageMs, 3),
             ["dispatch_p95_ms"] = Math.Round(DispatchP95Ms, 3),
+            ["dispatch_schedule_avg_ms"] = Math.Round(DispatchScheduleAverageMs, 3),
+            ["dispatch_schedule_p95_ms"] = Math.Round(DispatchScheduleP95Ms, 3),
+            ["dispatch_fanout_avg_ms"] = Math.Round(DispatchFanoutAverageMs, 3),
+            ["dispatch_fanout_p95_ms"] = Math.Round(DispatchFanoutP95Ms, 3),
+            ["dispatch_flush_avg_ms"] = Math.Round(DispatchFlushAverageMs, 3),
+            ["dispatch_flush_p95_ms"] = Math.Round(DispatchFlushP95Ms, 3),
             ["client_pump_avg_ms"] = Math.Round(ClientPumpAverageMs, 3),
             ["client_pump_p95_ms"] = Math.Round(ClientPumpP95Ms, 3),
             ["client_poll_avg_ms"] = Math.Round(ClientPollAverageMs, 3),

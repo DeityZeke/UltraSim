@@ -92,6 +92,12 @@ The widened harness now reports:
 - `publish_p95_ms`
 - `dispatch_avg_ms`
 - `dispatch_p95_ms`
+- `dispatch_schedule_avg_ms`
+- `dispatch_schedule_p95_ms`
+- `dispatch_fanout_avg_ms`
+- `dispatch_fanout_p95_ms`
+- `dispatch_flush_avg_ms`
+- `dispatch_flush_p95_ms`
 - `client_pump_avg_ms`
 - `client_pump_p95_ms`
 - `client_observer_state_decode_avg_ms`

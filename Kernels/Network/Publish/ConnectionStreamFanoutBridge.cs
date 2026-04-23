@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 namespace UltraSim.Network;
 
 public sealed class ConnectionStreamFanoutBridge
@@ -20,11 +22,18 @@ public sealed class ConnectionStreamFanoutBridge
         Span<ConnectionId> subscriberScratch,
         Span<OutboundDatagram> output)
     {
+        long scheduleStart = Stopwatch.GetTimestamp();
         ConnectionScheduleResult schedule = _scheduler.Schedule(state, budget, scheduledWork);
+        long scheduleEnd = Stopwatch.GetTimestamp();
         ScheduledWorkFanoutResult fanout = _fanout.Dispatch(
             scheduledWork[..schedule.Count],
             subscriberScratch,
             output);
-        return new ConnectionScheduledFanoutResult(schedule, fanout);
+        long fanoutEnd = Stopwatch.GetTimestamp();
+        return new ConnectionScheduledFanoutResult(
+            schedule,
+            fanout,
+            scheduleEnd - scheduleStart,
+            fanoutEnd - scheduleEnd);
     }
 }
