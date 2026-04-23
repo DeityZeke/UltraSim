@@ -124,6 +124,16 @@ The widened harness now reports:
 - `async_flush_previous_wire_datagrams_p95`
 - `client_pump_avg_ms`
 - `client_pump_p95_ms`
+- `client_poll_pending_drain_avg_ms`
+- `client_poll_pending_drain_p95_ms`
+- `client_poll_socket_recv_avg_ms`
+- `client_poll_socket_recv_p95_ms`
+- `client_poll_bundle_unpack_avg_ms`
+- `client_poll_bundle_unpack_p95_ms`
+- `client_poll_payload_copy_avg_ms`
+- `client_poll_payload_copy_p95_ms`
+- `client_poll_envelope_parse_avg_ms`
+- `client_poll_envelope_parse_p95_ms`
 - `client_observer_state_decode_avg_ms`
 - `client_observer_state_decode_p95_ms`
 - `client_observer_state_apply_avg_ms`

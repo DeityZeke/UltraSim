@@ -95,10 +95,7 @@ public sealed class ClientMovementNetworkBridge
             if (inbound[i].ConnectionId != _connectionId || inbound[i].Plane != NetworkPlane.State)
                 continue;
 
-            if (!PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                continue;
-
-            if (!TryProcessEnvelope(header, payload))
+            if (!TryProcessEnvelope(inbound[i].Header, inbound[i].EnvelopePayloadSpan))
                 continue;
 
             processed++;

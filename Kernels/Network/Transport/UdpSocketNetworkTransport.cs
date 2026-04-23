@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -124,6 +125,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     public EndPoint? LocalEndPoint => _socket?.LocalEndPoint;
     public int LastFlushWireDatagramCount { get; private set; }
     public TransportFlushProfileSnapshot LastFlushProfile { get; private set; }
+    public TransportPollProfileSnapshot LastPollProfile { get; private set; }
 
     public void Start()
     {
@@ -148,17 +150,28 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     public int PollInbound(Span<InboundDatagram> destination)
     {
         if (!IsRunning || destination.Length == 0)
+        {
+            LastPollProfile = default;
             return 0;
+        }
 
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
+        long pendingDrainStart = Stopwatch.GetTimestamp();
         int count = DrainPendingInbound(destination);
+        long pendingDrainTicks = Stopwatch.GetTimestamp() - pendingDrainStart;
+        long socketReceiveTicks = 0;
+        long bundleUnpackTicks = 0;
+        long payloadCopyTicks = 0;
+        long envelopeParseTicks = 0;
         while (count < destination.Length && socket.Available > 0)
         {
             EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
             int received;
             try
             {
+                long receiveStart = Stopwatch.GetTimestamp();
                 received = socket.ReceiveFrom(_receiveBuffer, 0, _receiveBuffer.Length, SocketFlags.None, ref remote);
+                socketReceiveTicks += Stopwatch.GetTimestamp() - receiveStart;
             }
             catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.IOPending or SocketError.NoBufferSpaceAvailable)
             {
@@ -176,17 +189,37 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 continue;
 
             ReadOnlySpan<byte> datagramPayload = _receiveBuffer.AsSpan(0, received);
-            if (TransportDatagramBundleCodec.IsBundle(datagramPayload))
+            if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> entries))
             {
-                var reader = new TransportDatagramBundleCodec.Reader(datagramPayload);
-                while (reader.TryReadNext(out ReadOnlySpan<byte> bundledPayload))
-                    TryQueueInbound(connectionId, bundledPayload, destination, ref count);
+                long bundleStart = Stopwatch.GetTimestamp();
+                ReadOnlySpan<byte> remaining = entries;
+                for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+                {
+                    if (remaining.Length < sizeof(ushort))
+                        break;
+
+                    ushort entryLength = BinaryPrimitives.ReadUInt16LittleEndian(remaining);
+                    if (remaining.Length < sizeof(ushort) + entryLength)
+                        break;
+
+                    ReadOnlySpan<byte> bundledPayload = remaining.Slice(sizeof(ushort), entryLength);
+                    TryQueueInbound(connectionId, bundledPayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
+                    remaining = remaining.Slice(sizeof(ushort) + entryLength);
+                }
+                bundleUnpackTicks += Stopwatch.GetTimestamp() - bundleStart;
                 continue;
             }
 
-            TryQueueInbound(connectionId, datagramPayload, destination, ref count);
+            TryQueueInbound(connectionId, datagramPayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
         }
 
+        LastPollProfile = new TransportPollProfileSnapshot(
+            PendingDrainElapsedTicks: pendingDrainTicks,
+            SocketReceiveElapsedTicks: socketReceiveTicks,
+            BundleUnpackElapsedTicks: bundleUnpackTicks,
+            PayloadCopyElapsedTicks: payloadCopyTicks,
+            EnvelopeParseElapsedTicks: envelopeParseTicks,
+            QueuedDatagramCount: count);
         return count;
     }
 
@@ -473,15 +506,27 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         ConnectionId connectionId,
         ReadOnlySpan<byte> payload,
         Span<InboundDatagram> destination,
-        ref int count)
+        ref int count,
+        ref long envelopeParseTicks,
+        ref long payloadCopyTicks)
     {
+        long parseStart = Stopwatch.GetTimestamp();
         if (!PacketCodec.TryDecodeEnvelope(payload, out PacketEnvelopeHeader header, out _))
+        {
+            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
             return;
+        }
         if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
+        {
+            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
             return;
+        }
+        envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
 
+        long copyStart = Stopwatch.GetTimestamp();
         InboundPayloadBuffer payloadBuffer = InboundPayloadBuffer.CopyFromPooled(payload);
-        var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, payloadBuffer);
+        payloadCopyTicks += Stopwatch.GetTimestamp() - copyStart;
+        var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, header, payloadBuffer);
         if (count < destination.Length)
         {
             destination[count++] = inbound;

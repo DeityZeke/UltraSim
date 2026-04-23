@@ -106,25 +106,19 @@ public sealed class ServerEcsMovementNetworkBridge
                 continue;
 
             processed++;
-            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-            {
-                LastIgnoredInputCount++;
-                continue;
-            }
-
             if (!_bindings.TryGetValue(datagram.ConnectionId, out _))
             {
                 LastIgnoredInputCount++;
                 continue;
             }
 
-            if (header.PacketId != MovementInputPacket.PacketId)
+            if (datagram.PacketId != MovementInputPacket.PacketId)
             {
                 LastIgnoredInputCount++;
                 continue;
             }
 
-            var reader = new UltraSim.Network.BitReader(payload);
+            var reader = new UltraSim.Network.BitReader(datagram.EnvelopePayloadSpan);
             MovementInputPacket packet = MovementInputPacket.Deserialize(ref reader);
             OnMovementInput(datagram.ConnectionId, packet);
         }

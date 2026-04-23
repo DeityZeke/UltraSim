@@ -12,7 +12,7 @@ public sealed class NetworkControlPlaneHost
     private readonly List<PongProbePacket> _receivedPongs = new();
     private readonly Queue<ControlPlaneEvent> _events = new();
     private int _inboundDatagrams;
-    private int _decodeFailures;
+    private int _decodeFailures = 0;
     private int _dispatchMisses;
     private int _handshakeStarts;
     private int _handshakeAccepts;
@@ -134,13 +134,7 @@ public sealed class NetworkControlPlaneHost
 
             processed++;
             _inboundDatagrams++;
-            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-            {
-                _decodeFailures++;
-                continue;
-            }
-
-            if (!_registry.TryDispatch(new DispatchContext(this, datagram.ConnectionId, nowTicks), header, payload))
+            if (!_registry.TryDispatch(new DispatchContext(this, datagram.ConnectionId, nowTicks), datagram.Header, datagram.EnvelopePayloadSpan))
                 _dispatchMisses++;
         }
 

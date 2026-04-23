@@ -106,12 +106,9 @@ public sealed class ServerNetworkSessionRuntime
             if (datagram.ConnectionId == ConnectionId.Invalid || datagram.Plane != NetworkPlane.State)
                 continue;
 
-            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                continue;
-
-            if (header.PacketId == ReliableEventAckPacket.PacketId)
+            if (datagram.PacketId == ReliableEventAckPacket.PacketId)
             {
-                var reader = new BitReader(payload);
+                var reader = new BitReader(datagram.EnvelopePayloadSpan);
                 ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
                 if (_reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Sequence, out _))
                     _replayBuffer.AcknowledgeUpTo(datagram.ConnectionId, ack.Sequence);
@@ -119,9 +116,9 @@ public sealed class ServerNetworkSessionRuntime
                 continue;
             }
 
-            if (header.PacketId == StateBaselineAckPacket.PacketId)
+            if (datagram.PacketId == StateBaselineAckPacket.PacketId)
             {
-                var reader = new BitReader(payload);
+                var reader = new BitReader(datagram.EnvelopePayloadSpan);
                 StateBaselineAckPacket ack = StateBaselineAckPacket.Deserialize(ref reader);
                 if (_baselineAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor, out _))
                 {

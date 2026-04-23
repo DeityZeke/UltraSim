@@ -19,6 +19,21 @@ internal static class TransportDatagramBundleCodec
         return ReadUInt16(source) == BundleMarker;
     }
 
+    public static bool TryBeginReadBundle(
+        ReadOnlySpan<byte> source,
+        out ushort entryCount,
+        out ReadOnlySpan<byte> entries)
+    {
+        entryCount = 0;
+        entries = default;
+        if (source.Length < HeaderSize || ReadUInt16(source) != BundleMarker)
+            return false;
+
+        entryCount = ReadUInt16(source.Slice(sizeof(ushort)));
+        entries = source.Slice(HeaderSize);
+        return true;
+    }
+
     public static int MeasureBundle(
         IReadOnlyList<ImmutablePayloadBuffer> payloads,
         int startIndex,

@@ -74,6 +74,11 @@ public sealed class ClientMovementSessionHost
     {
         int totalCount = 0;
         long pollElapsedTicks = 0;
+        long pollPendingDrainElapsedTicks = 0;
+        long pollSocketReceiveElapsedTicks = 0;
+        long pollBundleUnpackElapsedTicks = 0;
+        long pollPayloadCopyElapsedTicks = 0;
+        long pollEnvelopeParseElapsedTicks = 0;
         long controlElapsedTicks = 0;
         long movementElapsedTicks = 0;
         long observerStateElapsedTicks = 0;
@@ -89,6 +94,15 @@ public sealed class ClientMovementSessionHost
             long pollStart = Stopwatch.GetTimestamp();
             int count = _transport.PollInbound(_inboundScratch);
             pollElapsedTicks += Stopwatch.GetTimestamp() - pollStart;
+            if (_transport is UdpSocketNetworkTransport udpTransport)
+            {
+                TransportPollProfileSnapshot pollProfile = udpTransport.LastPollProfile;
+                pollPendingDrainElapsedTicks += pollProfile.PendingDrainElapsedTicks;
+                pollSocketReceiveElapsedTicks += pollProfile.SocketReceiveElapsedTicks;
+                pollBundleUnpackElapsedTicks += pollProfile.BundleUnpackElapsedTicks;
+                pollPayloadCopyElapsedTicks += pollProfile.PayloadCopyElapsedTicks;
+                pollEnvelopeParseElapsedTicks += pollProfile.EnvelopeParseElapsedTicks;
+            }
             if (count <= 0)
                 break;
 
@@ -103,18 +117,15 @@ public sealed class ClientMovementSessionHost
                 if (datagram.ConnectionId != ConnectionId || datagram.Plane != NetworkPlane.State)
                     continue;
 
-                if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                    continue;
-
                 long dispatchStart = Stopwatch.GetTimestamp();
-                if (_movement.TryProcessEnvelope(header, payload))
+                if (_movement.TryProcessEnvelope(datagram.Header, datagram.EnvelopePayloadSpan))
                 {
                     movementElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
                     continue;
                 }
 
                 dispatchStart = Stopwatch.GetTimestamp();
-                if (_observerState?.TryProcessEnvelope(header, payload) == true)
+                if (_observerState?.TryProcessEnvelope(datagram.Header, datagram.EnvelopePayloadSpan) == true)
                 {
                     observerStateElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
                     ClientObserverStateProfileSnapshot observerProfile = _observerState.LastProfile;
@@ -129,7 +140,7 @@ public sealed class ClientMovementSessionHost
                 }
 
                 dispatchStart = Stopwatch.GetTimestamp();
-                if (_observerEvents?.TryProcessEnvelope(header, payload) == true)
+                if (_observerEvents?.TryProcessEnvelope(datagram.Header, datagram.EnvelopePayloadSpan) == true)
                 {
                     observerEventElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
                     continue;
@@ -168,6 +179,11 @@ public sealed class ClientMovementSessionHost
         LastPumpProfile = new ClientPumpProfileSnapshot(
             totalCount,
             pollElapsedTicks,
+            pollPendingDrainElapsedTicks,
+            pollSocketReceiveElapsedTicks,
+            pollBundleUnpackElapsedTicks,
+            pollPayloadCopyElapsedTicks,
+            pollEnvelopeParseElapsedTicks,
             controlElapsedTicks,
             movementElapsedTicks,
             observerStateElapsedTicks,

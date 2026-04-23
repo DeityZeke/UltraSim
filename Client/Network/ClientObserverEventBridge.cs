@@ -50,10 +50,7 @@ public sealed class ClientObserverEventBridge
             if (datagram.ConnectionId != _connectionId || datagram.Plane != NetworkPlane.State)
                 continue;
 
-            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                continue;
-
-            if (!TryProcessEnvelope(header, payload))
+            if (!TryProcessEnvelope(datagram.Header, datagram.EnvelopePayloadSpan))
                 continue;
 
             processed++;
