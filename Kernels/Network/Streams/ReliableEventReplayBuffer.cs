@@ -39,10 +39,15 @@ public sealed class ReliableEventReplayBuffer
         if (item.Kind != ScheduledWorkKind.OrderedEvent)
             throw new ArgumentOutOfRangeException(nameof(item), "Replay buffer only tracks ordered-event work items.");
 
-        Track(connectionId, item.Sequence, item.ScopeKey, item.PacketClass, item.Payload);
+        Track(connectionId, sentTick: 0, item.Sequence, item.ScopeKey, item.PacketClass, item.Payload);
     }
 
     public void Track(ConnectionId connectionId, ulong sequence, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload)
+    {
+        Track(connectionId, sentTick: 0, sequence, scopeKey, packetClass, payload);
+    }
+
+    public void Track(ConnectionId connectionId, long sentTick, ulong sequence, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload)
     {
         if (!connectionId.IsValid)
             throw new ArgumentOutOfRangeException(nameof(connectionId));
@@ -61,7 +66,7 @@ public sealed class ReliableEventReplayBuffer
         }
 
         slot = PhysicalIndex(window, window.Count - 1);
-        window.Entries[slot] = new ReliableEventReplayEntry(sequence, scopeKey, packetClass, payload);
+        window.Entries[slot] = new ReliableEventReplayEntry(sequence, sentTick, scopeKey, packetClass, payload);
     }
 
     public int AcknowledgeUpTo(ConnectionId connectionId, ulong sequence)
@@ -123,6 +128,18 @@ public sealed class ReliableEventReplayBuffer
         }
 
         sequence = 0;
+        return false;
+    }
+
+    public bool TryGetOldestEntry(ConnectionId connectionId, out ReliableEventReplayEntry entry)
+    {
+        if (_windowByConnection.TryGetValue(connectionId, out ConnectionWindow? window) && window.Count > 0)
+        {
+            entry = window.Entries[window.Start];
+            return true;
+        }
+
+        entry = default;
         return false;
     }
 

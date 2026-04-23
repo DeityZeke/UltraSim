@@ -81,6 +81,7 @@ Current state:
 - highest-contiguous ordered-event ack now exists
 - client-side contiguous ordered-event apply now exists
 - bounded replay window now exists
+- retransmit planning policy now exists
 - retransmit / resend is not yet wired as a live server runtime loop
 5. Snapshot / baseline / recovery path as a real runtime path
 Current state:

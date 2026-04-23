@@ -211,6 +211,7 @@ public sealed class ServerMovementSessionHost
             var reader = new UltraSim.Network.BitReader(payload);
             StateBaselineAckPacket ack = StateBaselineAckPacket.Deserialize(ref reader);
             _stateBaselineAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor, out _);
+            _reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor.LastOrderedEventSequence, out _);
         }
     }
 }

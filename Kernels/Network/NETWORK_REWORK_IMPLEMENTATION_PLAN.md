@@ -487,10 +487,13 @@ Current status:
     - `StateBaselineAckPacket`
     - `StateBaselineAckTracker`
     - `ReliableEventReplayBuffer`
+    - `ReliableEventRetransmitPolicy`
+    - `ReliableEventRetransmitPlanner`
     - `ConnectionRecoveryPlanner`
     - baseline completion is now acknowledged back to the server
     - ordered-event replay is now explicitly bounded per connection
     - recovery can now choose between normal incremental scheduling and full-baseline resync
+    - retransmit planning is now threshold-based and per-connection capped
 
 ## Testing Strategy
 

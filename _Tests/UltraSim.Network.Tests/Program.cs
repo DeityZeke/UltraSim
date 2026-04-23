@@ -38,6 +38,8 @@ internal static class TestRunner
         Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
         Run(nameof(ReliableEventReplayBuffer_TracksAcknowledgesAndReplaysInOrder), ReliableEventReplayBuffer_TracksAcknowledgesAndReplaysInOrder);
         Run(nameof(ReliableEventReplayBuffer_RequiresRecoveryWhenRequestedSequenceFallsBehindWindow), ReliableEventReplayBuffer_RequiresRecoveryWhenRequestedSequenceFallsBehindWindow);
+        Run(nameof(ReliableEventRetransmitPlanner_WaitsForThresholdThenReturnsBoundedReplaySet), ReliableEventRetransmitPlanner_WaitsForThresholdThenReturnsBoundedReplaySet);
+        Run(nameof(ReliableEventRetransmitPlanner_RequestsRecoveryWhenAckFallsBehindReplayWindow), ReliableEventRetransmitPlanner_RequestsRecoveryWhenAckFallsBehindReplayWindow);
         Run(nameof(StreamPrimitives_PreserveBulkPacketClassMetadata), StreamPrimitives_PreserveBulkPacketClassMetadata);
         Run(nameof(ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget), ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget);
         Run(nameof(ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget), ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget);
@@ -847,9 +849,9 @@ internal static class TestRunner
         var buffer = new ReliableEventReplayBuffer(capacityPerConnection: 4);
         ConnectionId connectionId = new(7);
 
-        buffer.Track(connectionId, 10, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
-        buffer.Track(connectionId, 11, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
-        buffer.Track(connectionId, 12, new SubscriptionKey(3), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([3]));
+        buffer.Track(connectionId, sentTick: 100, sequence: 10, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
+        buffer.Track(connectionId, sentTick: 101, sequence: 11, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
+        buffer.Track(connectionId, sentTick: 102, sequence: 12, new SubscriptionKey(3), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([3]));
 
         Assert.True(buffer.TryGetOldestSequence(connectionId, out ulong oldest));
         Assert.Equal((ulong)10, oldest);
@@ -873,9 +875,9 @@ internal static class TestRunner
         var buffer = new ReliableEventReplayBuffer(capacityPerConnection: 2);
         ConnectionId connectionId = new(8);
 
-        buffer.Track(connectionId, 20, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
-        buffer.Track(connectionId, 21, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
-        buffer.Track(connectionId, 22, new SubscriptionKey(3), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([3]));
+        buffer.Track(connectionId, sentTick: 100, sequence: 20, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
+        buffer.Track(connectionId, sentTick: 101, sequence: 21, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
+        buffer.Track(connectionId, sentTick: 102, sequence: 22, new SubscriptionKey(3), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([3]));
 
         var replay = new ReliableEventReplayEntry[4];
         int copied = buffer.CopyPendingSince(connectionId, 20, replay, out bool recoveryRequired);
@@ -884,6 +886,64 @@ internal static class TestRunner
         Assert.Equal(0, copied);
         Assert.True(buffer.TryGetOldestSequence(connectionId, out ulong oldest));
         Assert.Equal((ulong)21, oldest);
+    }
+
+    private static void ReliableEventRetransmitPlanner_WaitsForThresholdThenReturnsBoundedReplaySet()
+    {
+        var replay = new ReliableEventReplayBuffer(capacityPerConnection: 8);
+        var acks = new ReliableEventAckTracker();
+        ConnectionId connectionId = new(15);
+        replay.Track(connectionId, sentTick: 100, sequence: 10, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
+        replay.Track(connectionId, sentTick: 101, sequence: 11, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
+        replay.Track(connectionId, sentTick: 102, sequence: 12, new SubscriptionKey(3), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([3]));
+        acks.TryAcknowledge(connectionId, 9, out _);
+        var planner = new ReliableEventRetransmitPlanner(replay, acks);
+        var output = new ReliableEventReplayEntry[8];
+
+        ReliableEventRetransmitPlanResult early = planner.Plan(
+            connectionId,
+            nowTick: 102,
+            new ReliableEventRetransmitPolicy(RetransmitThresholdTicks: 3, MaxRetransmitItemsPerTick: 2),
+            output);
+
+        Assert.Equal(0, early.Count);
+        Assert.False(early.RecoveryRequired);
+        Assert.Equal((ulong)10, early.NextSequence);
+
+        ReliableEventRetransmitPlanResult ready = planner.Plan(
+            connectionId,
+            nowTick: 103,
+            new ReliableEventRetransmitPolicy(RetransmitThresholdTicks: 3, MaxRetransmitItemsPerTick: 2),
+            output);
+
+        Assert.Equal(2, ready.Count);
+        Assert.False(ready.RecoveryRequired);
+        Assert.Equal((ulong)10, output[0].Sequence);
+        Assert.Equal((ulong)11, output[1].Sequence);
+    }
+
+    private static void ReliableEventRetransmitPlanner_RequestsRecoveryWhenAckFallsBehindReplayWindow()
+    {
+        var replay = new ReliableEventReplayBuffer(capacityPerConnection: 2);
+        var acks = new ReliableEventAckTracker();
+        ConnectionId connectionId = new(16);
+        replay.Track(connectionId, sentTick: 100, sequence: 20, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
+        replay.Track(connectionId, sentTick: 101, sequence: 21, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
+        replay.Track(connectionId, sentTick: 102, sequence: 22, new SubscriptionKey(3), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([3]));
+        acks.TryAcknowledge(connectionId, 19, out _);
+        var planner = new ReliableEventRetransmitPlanner(replay, acks);
+        var output = new ReliableEventReplayEntry[4];
+
+        ReliableEventRetransmitPlanResult result = planner.Plan(
+            connectionId,
+            nowTick: 105,
+            ReliableEventRetransmitPolicy.Default,
+            output);
+
+        Assert.Equal(0, result.Count);
+        Assert.True(result.RecoveryRequired);
+        Assert.Equal((ulong)20, result.NextSequence);
+        Assert.Equal((ulong)21, result.OldestAvailableSequence);
     }
 
     private static void ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget()
