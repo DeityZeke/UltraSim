@@ -40,6 +40,7 @@ internal static class TestRunner
         Run(nameof(ReliableEventReplayBuffer_RequiresRecoveryWhenRequestedSequenceFallsBehindWindow), ReliableEventReplayBuffer_RequiresRecoveryWhenRequestedSequenceFallsBehindWindow);
         Run(nameof(ReliableEventRetransmitPlanner_WaitsForThresholdThenReturnsBoundedReplaySet), ReliableEventRetransmitPlanner_WaitsForThresholdThenReturnsBoundedReplaySet);
         Run(nameof(ReliableEventRetransmitPlanner_RequestsRecoveryWhenAckFallsBehindReplayWindow), ReliableEventRetransmitPlanner_RequestsRecoveryWhenAckFallsBehindReplayWindow);
+        Run(nameof(ReliableEventRetransmitBuilder_BuildsOrderedEventDatagrams), ReliableEventRetransmitBuilder_BuildsOrderedEventDatagrams);
         Run(nameof(StreamPrimitives_PreserveBulkPacketClassMetadata), StreamPrimitives_PreserveBulkPacketClassMetadata);
         Run(nameof(ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget), ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget);
         Run(nameof(ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget), ConnectionStreamScheduler_SchedulesBulkAgainstBulkBudget);
@@ -52,6 +53,8 @@ internal static class TestRunner
         Run(nameof(StateBaselineSnapshotBuilder_EmitsBeginFramesAndComplete), StateBaselineSnapshotBuilder_EmitsBeginFramesAndComplete);
         Run(nameof(ConnectionRecoveryPlanner_UsesSchedulerWhenNoRecoveryIsRequired), ConnectionRecoveryPlanner_UsesSchedulerWhenNoRecoveryIsRequired);
         Run(nameof(ConnectionRecoveryPlanner_BuildsFullBaselineWhenOrderedEventRecoveryIsRequired), ConnectionRecoveryPlanner_BuildsFullBaselineWhenOrderedEventRecoveryIsRequired);
+        Run(nameof(ConnectionRecoveryExecutionBridge_RetransmitsBufferedEntriesWithinWindow), ConnectionRecoveryExecutionBridge_RetransmitsBufferedEntriesWithinWindow);
+        Run(nameof(ConnectionRecoveryExecutionBridge_FallsBackToFullBaselineWhenReplayWindowIsBehind), ConnectionRecoveryExecutionBridge_FallsBackToFullBaselineWhenReplayWindowIsBehind);
         Run(nameof(ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames), ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames);
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
@@ -946,6 +949,35 @@ internal static class TestRunner
         Assert.Equal((ulong)21, result.OldestAvailableSequence);
     }
 
+    private static void ReliableEventRetransmitBuilder_BuildsOrderedEventDatagrams()
+    {
+        var builder = new ReliableEventRetransmitBuilder();
+        ReliableEventReplayEntry[] entries =
+        [
+            new(Sequence: 10, SentTick: 100, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1, 2])),
+            new(Sequence: 11, SentTick: 101, new SubscriptionKey(2), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([3, 4, 5])),
+        ];
+        var output = new OutboundDatagram[4];
+
+        OutboundAssemblyResult result = builder.Build(new ConnectionId(17), entries, output);
+
+        Assert.Equal(2, result.Count);
+        Assert.Equal(PacketClass.ReliableEvent, output[0].PacketClass);
+        Assert.Equal(PacketClass.Bulk, output[1].PacketClass);
+
+        ReadOnlySpan<byte> payload0 = DecodePayload(output[0]);
+        var reader0 = new BitReader(payload0);
+        ReliableEventFramePacket frame0 = ReliableEventFramePacket.Deserialize(ref reader0);
+        Assert.Equal((ulong)10, frame0.Sequence);
+        Assert.True(frame0.Payload.Span.SequenceEqual(new byte[] { 1, 2 }));
+
+        ReadOnlySpan<byte> payload1 = DecodePayload(output[1]);
+        var reader1 = new BitReader(payload1);
+        ReliableEventFramePacket frame1 = ReliableEventFramePacket.Deserialize(ref reader1);
+        Assert.Equal((ulong)11, frame1.Sequence);
+        Assert.True(frame1.Payload.Span.SequenceEqual(new byte[] { 3, 4, 5 }));
+    }
+
     private static void ConnectionStreamScheduler_PrioritizesRealtimeThenReliableWithinBudget()
     {
         var latest = new LatestStateStream();
@@ -1168,6 +1200,93 @@ internal static class TestRunner
         Assert.Equal(newestEvent + 1, result.NextState.OrderedEventCursor.NextSequence);
         Assert.Equal(StateBaselineBeginPacket.PacketId, DecodeHeader(baseline[0]).PacketId);
         Assert.Equal(StateBaselineCompletePacket.PacketId, DecodeHeader(baseline[2]).PacketId);
+    }
+
+    private static void ConnectionRecoveryExecutionBridge_RetransmitsBufferedEntriesWithinWindow()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        var recoveryPlanner = new ConnectionRecoveryPlanner(latest, ordered);
+        var replay = new ReliableEventReplayBuffer(capacityPerConnection: 8);
+        var acks = new ReliableEventAckTracker();
+        ConnectionId connectionId = new(18);
+        replay.Track(connectionId, sentTick: 100, sequence: 10, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
+        replay.Track(connectionId, sentTick: 101, sequence: 11, new SubscriptionKey(2), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([2, 3]));
+        acks.TryAcknowledge(connectionId, 9, out _);
+
+        var bridge = new ConnectionRecoveryExecutionBridge(
+            new ReliableEventRetransmitPlanner(replay, acks),
+            recoveryPlanner);
+
+        var replayScratch = new ReliableEventReplayEntry[4];
+        var snapshotScratch = new LatestStateUpdate[4];
+        var output = new OutboundDatagram[4];
+        ConnectionRecoveryExecutionResult result = bridge.Execute(
+            connectionId,
+            nowTick: 103,
+            new ReliableEventRetransmitPolicy(RetransmitThresholdTicks: 3, MaxRetransmitItemsPerTick: 4),
+            replayScratch,
+            snapshotScratch,
+            output);
+
+        Assert.Equal(ConnectionRecoveryMode.Retransmit, result.Mode);
+        Assert.Equal(2, result.ReplayEntryCount);
+        Assert.Equal(2, result.DatagramCount);
+        Assert.Equal(PacketClass.ReliableEvent, output[0].PacketClass);
+        Assert.Equal(PacketClass.Bulk, output[1].PacketClass);
+
+        ReadOnlySpan<byte> eventPayload0 = DecodePayload(output[0]);
+        var reader0 = new BitReader(eventPayload0);
+        ReliableEventFramePacket frame0 = ReliableEventFramePacket.Deserialize(ref reader0);
+        Assert.Equal((ulong)10, frame0.Sequence);
+
+        ReadOnlySpan<byte> eventPayload1 = DecodePayload(output[1]);
+        var reader1 = new BitReader(eventPayload1);
+        ReliableEventFramePacket frame1 = ReliableEventFramePacket.Deserialize(ref reader1);
+        Assert.Equal((ulong)11, frame1.Sequence);
+    }
+
+    private static void ConnectionRecoveryExecutionBridge_FallsBackToFullBaselineWhenReplayWindowIsBehind()
+    {
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        ulong latestSequence = latest.Publish(1001, new SubscriptionKey(11), ImmutablePayloadBuffer.CopyFrom([9, 9]));
+        ordered.Publish(new SubscriptionKey(21), ImmutablePayloadBuffer.CopyFrom([1]));
+        ordered.Publish(new SubscriptionKey(22), ImmutablePayloadBuffer.CopyFrom([2]));
+        ulong newestEvent = ordered.Publish(new SubscriptionKey(23), ImmutablePayloadBuffer.CopyFrom([3]));
+
+        var replay = new ReliableEventReplayBuffer(capacityPerConnection: 2);
+        var acks = new ReliableEventAckTracker();
+        ConnectionId connectionId = new(19);
+        replay.Track(connectionId, sentTick: 100, sequence: 20, new SubscriptionKey(1), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([1]));
+        replay.Track(connectionId, sentTick: 101, sequence: 21, new SubscriptionKey(2), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([2]));
+        replay.Track(connectionId, sentTick: 102, sequence: 22, new SubscriptionKey(3), PacketClass.ReliableEvent, ImmutablePayloadBuffer.CopyFrom([3]));
+        acks.TryAcknowledge(connectionId, 19, out _);
+
+        var bridge = new ConnectionRecoveryExecutionBridge(
+            new ReliableEventRetransmitPlanner(replay, acks),
+            new ConnectionRecoveryPlanner(latest, ordered));
+
+        var replayScratch = new ReliableEventReplayEntry[4];
+        var snapshotScratch = new LatestStateUpdate[4];
+        var output = new OutboundDatagram[8];
+        ConnectionRecoveryExecutionResult result = bridge.Execute(
+            connectionId,
+            nowTick: 105,
+            ReliableEventRetransmitPolicy.Default,
+            replayScratch,
+            snapshotScratch,
+            output);
+
+        Assert.Equal(ConnectionRecoveryMode.Baseline, result.Mode);
+        Assert.Equal(0, result.ReplayEntryCount);
+        Assert.Equal(3, result.DatagramCount);
+        Assert.Equal(latestSequence, result.BaselineDescriptor.HighestLatestStateSequence);
+        Assert.Equal(newestEvent, result.BaselineDescriptor.LastOrderedEventSequence);
+        Assert.Equal(latestSequence, result.NextState.LatestStateCursor.LastSeenSequence);
+        Assert.Equal(newestEvent + 1, result.NextState.OrderedEventCursor.NextSequence);
+        Assert.Equal(StateBaselineBeginPacket.PacketId, DecodeHeader(output[0]).PacketId);
+        Assert.Equal(StateBaselineCompletePacket.PacketId, DecodeHeader(output[2]).PacketId);
     }
 
     private static void OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames()

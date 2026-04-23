@@ -82,6 +82,7 @@ Current state:
 - client-side contiguous ordered-event apply now exists
 - bounded replay window now exists
 - retransmit planning policy now exists
+- retransmit execution bridge now exists at the kernel level
 - retransmit / resend is not yet wired as a live server runtime loop
 5. Snapshot / baseline / recovery path as a real runtime path
 Current state:
@@ -89,6 +90,7 @@ Current state:
 - client-side full baseline apply/reset seam now exists
 - baseline completion ack now exists
 - recovery planning now exists at the kernel level
+- full-baseline recovery execution now exists at the kernel bridge level
 - incremental delta/baseline advancement does not exist yet
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables

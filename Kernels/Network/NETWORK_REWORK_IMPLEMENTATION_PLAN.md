@@ -489,11 +489,14 @@ Current status:
     - `ReliableEventReplayBuffer`
     - `ReliableEventRetransmitPolicy`
     - `ReliableEventRetransmitPlanner`
+    - `ReliableEventRetransmitBuilder`
     - `ConnectionRecoveryPlanner`
+    - `ConnectionRecoveryExecutionBridge`
     - baseline completion is now acknowledged back to the server
     - ordered-event replay is now explicitly bounded per connection
     - recovery can now choose between normal incremental scheduling and full-baseline resync
     - retransmit planning is now threshold-based and per-connection capped
+    - retransmit execution now emits normal ordered-event state-plane datagrams
 
 ## Testing Strategy
 
@@ -547,7 +550,7 @@ Current status in this repo:
   - scheduler/assembly primitives
   - the first publish/subscription fanout bridge
   - the first higher-layer `Server/Network` publish adapter over the kernel
-  - the first ECS-facing dirty-state publication path over that adapter
+- the first ECS-facing dirty-state publication path over that adapter
 
 The next implementation target after this bridge slice should be:
 

@@ -45,6 +45,14 @@ public sealed class ConnectionRecoveryPlanner
                 OrderedEventRecoveryRequired: false);
         }
 
+        return PlanBaseline(connectionId, snapshotItems, baselineDestination);
+    }
+
+    public ConnectionRecoveryPlanResult PlanBaseline(
+        ConnectionId connectionId,
+        Span<LatestStateUpdate> snapshotItems,
+        Span<OutboundDatagram> baselineDestination)
+    {
         int itemCount = _latestState.CopySnapshot(snapshotItems);
         LatestStateSnapshot latestSnapshot = _latestState.GetSnapshot();
         OrderedEventSnapshot orderedSnapshot = _orderedEvents.GetSnapshot();

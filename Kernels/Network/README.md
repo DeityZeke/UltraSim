@@ -129,10 +129,13 @@ What now exists above the kernel:
   - `StateBaselineAckTracker`
   - `ReliableEventRetransmitPolicy`
   - `ReliableEventRetransmitPlanner`
+  - `ReliableEventRetransmitBuilder`
   - `ConnectionRecoveryPlanner`
+  - `ConnectionRecoveryExecutionBridge`
   - bounded per-connection ordered-event replay retention
   - threshold-based, per-connection capped retransmit planning
-  - explicit planner choice between normal incremental schedule and full-baseline recovery
+  - retransmit execution now reuses normal ordered-event state-plane frames
+  - explicit choice between bounded retransmit and full-baseline recovery
 
 ## Design Position
 
@@ -317,7 +320,7 @@ Current interpretation:
 - the next important question is no longer “does the widened path fundamentally work?”
 - it is “why does the `32–64` band still show non-monotonic cost behavior across multiple runs and profiles?”
 - that investigation should happen before treating the newest widened ceilings as fully settled
-- on correctness/runtime semantics, the next meaningful gap after this is now live retransmit wiring and then incremental delta/baseline advancement on top of the new explicit ack + baseline + bounded replay seams
+- on correctness/runtime semantics, the next meaningful gap after this is now host-integrated live retransmit wiring and then incremental delta/baseline advancement on top of the new explicit ack + baseline + bounded replay seams
 
 ## Parity Position
 
