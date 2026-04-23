@@ -15,6 +15,9 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private readonly Queue<InboundDatagram> _pendingInbound = new();
     private readonly Dictionary<ConnectionId, IPEndPoint> _remoteByConnection = new();
     private readonly Dictionary<string, ConnectionId> _connectionByRemote = new(StringComparer.Ordinal);
+    private readonly Dictionary<ConnectionId, List<OutboundDatagram>> _flushByConnection = new();
+    private readonly Stack<List<OutboundDatagram>> _flushListPool = new();
+    private readonly List<ImmutablePayloadBuffer> _bundlePayloadScratch = new();
     private readonly byte[] _receiveBuffer;
     private readonly object _sync = new();
     private Socket? _socket;
@@ -130,53 +133,60 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
         LastFlushWireDatagramCount = 0;
 
-        Dictionary<ConnectionId, List<OutboundDatagram>> pendingByConnection = DrainOutboundByConnection();
-        if (pendingByConnection.Count == 0)
+        DrainOutboundByConnection();
+        if (_flushByConnection.Count == 0)
             return;
 
-        foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in pendingByConnection)
+        try
         {
-            if (!TryGetRemote(connectionId, out IPEndPoint? remote))
-                continue;
-            if (remote is null)
-                continue;
-
-            int index = 0;
-            while (index < datagrams.Count)
+            foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in _flushByConnection)
             {
-                int bundleStart = index;
-                ImmutablePayloadBuffer outboundPayload;
-                int packedCount;
-                if (datagrams.Count - index == 1)
-                {
-                    outboundPayload = datagrams[index].Payload;
-                    packedCount = 1;
-                }
-                else
-                {
-                    var payloads = new List<ImmutablePayloadBuffer>(datagrams.Count - index);
-                    for (int i = index; i < datagrams.Count; i++)
-                        payloads.Add(datagrams[i].Payload);
-                    outboundPayload = TransportDatagramBundleCodec.EncodeBundle(
-                        payloads,
-                        0,
-                        _options.MaxDatagramBytes,
-                        out packedCount);
-                }
+                if (!TryGetRemote(connectionId, out IPEndPoint? remote))
+                    continue;
+                if (remote is null)
+                    continue;
 
-                try
+                int index = 0;
+                while (index < datagrams.Count)
                 {
-                    socket.SendTo(outboundPayload.Span, SocketFlags.None, remote);
-                    LastFlushWireDatagramCount++;
-                    index += packedCount;
-                }
-                catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
-                {
-                    for (int i = bundleStart; i < datagrams.Count; i++)
-                        _outbound.Enqueue(datagrams[i]);
-                    return;
+                    int bundleStart = index;
+                    ImmutablePayloadBuffer outboundPayload;
+                    int packedCount;
+                    if (datagrams.Count - index == 1)
+                    {
+                        outboundPayload = datagrams[index].Payload;
+                        packedCount = 1;
+                    }
+                    else
+                    {
+                        _bundlePayloadScratch.Clear();
+                        for (int i = index; i < datagrams.Count; i++)
+                            _bundlePayloadScratch.Add(datagrams[i].Payload);
+                        outboundPayload = TransportDatagramBundleCodec.EncodeBundle(
+                            _bundlePayloadScratch,
+                            0,
+                            _options.MaxDatagramBytes,
+                            out packedCount);
+                    }
+
+                    try
+                    {
+                        socket.SendTo(outboundPayload.Span, SocketFlags.None, remote);
+                        LastFlushWireDatagramCount++;
+                        index += packedCount;
+                    }
+                    catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
+                    {
+                        for (int i = bundleStart; i < datagrams.Count; i++)
+                            _outbound.Enqueue(datagrams[i]);
+                        return;
+                    }
                 }
             }
+        }
+        finally
+        {
+            ResetFlushScratch();
         }
     }
 
@@ -288,20 +298,29 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         _pendingInbound.Enqueue(inbound);
     }
 
-    private Dictionary<ConnectionId, List<OutboundDatagram>> DrainOutboundByConnection()
+    private void DrainOutboundByConnection()
     {
-        var byConnection = new Dictionary<ConnectionId, List<OutboundDatagram>>();
         while (_outbound.TryDequeue(out OutboundDatagram datagram))
         {
-            if (!byConnection.TryGetValue(datagram.ConnectionId, out List<OutboundDatagram>? list))
+            if (!_flushByConnection.TryGetValue(datagram.ConnectionId, out List<OutboundDatagram>? list))
             {
-                list = new List<OutboundDatagram>();
-                byConnection.Add(datagram.ConnectionId, list);
+                list = _flushListPool.Count > 0 ? _flushListPool.Pop() : new List<OutboundDatagram>();
+                _flushByConnection.Add(datagram.ConnectionId, list);
             }
 
             list.Add(datagram);
         }
+    }
 
-        return byConnection;
+    private void ResetFlushScratch()
+    {
+        foreach (List<OutboundDatagram> list in _flushByConnection.Values)
+        {
+            list.Clear();
+            _flushListPool.Push(list);
+        }
+
+        _flushByConnection.Clear();
+        _bundlePayloadScratch.Clear();
     }
 }
