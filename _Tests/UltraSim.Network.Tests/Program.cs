@@ -65,6 +65,7 @@ internal static class TestRunner
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers), SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers);
+        Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateRecipientPhasing), SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateRecipientPhasing);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems), SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems);
         Run(nameof(ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass), ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass);
         Run(nameof(ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork), ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork);
@@ -1808,6 +1809,57 @@ internal static class TestRunner
         Assert.Equal(2, eventCount);
     }
 
+    private static void SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateRecipientPhasing()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey scopeKey = new(651);
+        ConnectionId[] subscribers = [new ConnectionId(1), new ConnectionId(2), new ConnectionId(3), new ConnectionId(4)];
+        for (int i = 0; i < subscribers.Length; i++)
+            registry.Subscribe(subscribers[i], scopeKey);
+
+        ScheduledWorkItem[] items =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 82,
+                ItemKey: 810,
+                ScopeKey: scopeKey,
+                Payload: ImmutablePayloadBuffer.CopyFrom([8]),
+                DeliveryCadenceTicks: 2)
+        ];
+        var dispatcher = new SubscriptionFanoutDispatcher(
+            registry,
+            new OutboundDatagramAssembler(),
+            enableLatestStateRecipientPhasing: true);
+        var subscriberScratch = new ConnectionId[8];
+        var output = new OutboundDatagram[8];
+
+        SubscriptionFanoutDispatchResult result = dispatcher.DispatchScheduledWork(items, subscriberScratch, output);
+
+        int expectedCount = 0;
+        for (int i = 0; i < subscribers.Length; i++)
+        {
+            if (ShouldDeliverPhasedLatestStateForTest(810, 82, subscribers[i], 2))
+                expectedCount++;
+        }
+
+        Assert.Equal(1, result.FrameCount);
+        Assert.Equal(expectedCount, result.SubscriberDeliveries);
+        Assert.Equal(expectedCount, result.DatagramCount);
+
+        for (int i = 0; i < result.DatagramCount; i++)
+        {
+            Assert.True(ShouldDeliverPhasedLatestStateForTest(810, 82, output[i].ConnectionId, 2));
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            Assert.Equal(RealtimeStateFramePacket.PacketId, header.PacketId);
+            var reader = new BitReader(payload);
+            RealtimeStateFramePacket frame = RealtimeStateFramePacket.Deserialize(ref reader);
+            Assert.Equal((ulong)82, frame.Sequence);
+            Assert.Equal((ulong)810, frame.ItemKey);
+        }
+    }
+
     private static void SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems()
     {
         var registry = new ConnectionSubscriptionRegistry();
@@ -1858,6 +1910,20 @@ internal static class TestRunner
             Assert.Equal((ulong)82, batch.Items[1].Sequence);
             Assert.Equal((ulong)811, batch.Items[1].ItemKey);
             Assert.True(batch.Items[1].Payload.Span.SequenceEqual(new byte[] { 9, 10 }));
+        }
+    }
+
+    private static bool ShouldDeliverPhasedLatestStateForTest(ulong itemKey, ulong sequence, ConnectionId connectionId, uint cadenceTicks)
+    {
+        if (cadenceTicks <= 1 || !connectionId.IsValid)
+            return true;
+
+        ulong tickMod = sequence % cadenceTicks;
+        unchecked
+        {
+            ulong hash = itemKey * 11400714819323198485UL;
+            hash ^= (uint)connectionId.Value * 7046029254386353131UL;
+            return tickMod == (hash % cadenceTicks);
         }
     }
 

@@ -12,7 +12,7 @@ public sealed class ServerEcsWorldNetworkPublisher
     private readonly LatestStateStream _latestState;
     private readonly OrderedEventStream _orderedEvents;
     private readonly List<SubscriptionKey> _scopeScratch = new();
-    private readonly List<SubscriptionKey> _scopeKeyScratch = new();
+    private readonly List<ScopedLatestStatePublishTarget> _scopeTargetScratch = new();
     private readonly List<ChunkSubscriptionScope> _chunkScopeScratch = new();
 
     public ServerEcsWorldNetworkPublisher(
@@ -176,20 +176,27 @@ public sealed class ServerEcsWorldNetworkPublisher
                 rule.ScopeClassifier.CollectBroadcastScopes(rule.PositionSelector(entity, value), _chunkScopeScratch);
                 ulong baseItemKey = rule.ItemKeySelector(entity, value);
                 ImmutablePayloadBuffer payload = rule.PayloadSelector(entity, value);
-                _scopeKeyScratch.Clear();
+                _scopeTargetScratch.Clear();
                 ReadOnlySpan<ChunkSubscriptionScope> scopes = CollectionsMarshal.AsSpan(_chunkScopeScratch);
                 for (int scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
                 {
                     ChunkSubscriptionScope scope = scopes[scopeIndex];
-                    if (rule.RingCadence is not null && !rule.RingCadence.ShouldPublish(publishTick, scope.RingIndex))
-                        continue;
+                    uint deliveryCadenceTicks = 1;
+                    if (rule.RingCadence is not null)
+                    {
+                        deliveryCadenceTicks = rule.RingCadence.GetCadenceTicks(scope.RingIndex);
+                        if (!rule.RecipientPhasing && !rule.RingCadence.ShouldPublish(publishTick, scope.RingIndex))
+                            continue;
+                    }
 
-                    _scopeKeyScratch.Add(scope.Key);
+                    _scopeTargetScratch.Add(new ScopedLatestStatePublishTarget(
+                        scope.Key,
+                        rule.RecipientPhasing ? deliveryCadenceTicks : 1));
                     published++;
                 }
 
-                if (_scopeKeyScratch.Count != 0)
-                    _latestState.PublishScopedCopies(baseItemKey, CollectionsMarshal.AsSpan(_scopeKeyScratch), rule.PacketClass, payload);
+                if (_scopeTargetScratch.Count != 0)
+                    _latestState.PublishScopedCopies(baseItemKey, CollectionsMarshal.AsSpan(_scopeTargetScratch), rule.PacketClass, payload);
             }
 
             return published;

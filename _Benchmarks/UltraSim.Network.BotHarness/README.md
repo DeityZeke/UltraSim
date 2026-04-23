@@ -46,6 +46,8 @@ Useful options:
 - `--observer-event-every-ticks <n>`
 - `--enable-latest-state-batching`
 - `--disable-latest-state-batching`
+- `--enable-latest-state-recipient-phasing`
+- `--disable-latest-state-recipient-phasing`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
@@ -104,6 +106,10 @@ The widened harness now reports:
 - `flush_bundle_p95_ms`
 - `flush_send_avg_ms`
 - `flush_send_p95_ms`
+- `flush_connections_avg`
+- `flush_connections_p95`
+- `flush_wire_datagrams_avg`
+- `flush_wire_datagrams_p95`
 - `client_pump_avg_ms`
 - `client_pump_p95_ms`
 - `client_observer_state_decode_avg_ms`
@@ -178,6 +184,17 @@ The widened harness now also enables a first batched realtime latest-state envel
 - current intent is to reduce the hot per-item realtime envelope encode cost in the widened observer path without changing higher-level runtime semantics
 - current harness default: batching disabled
 - use `--enable-latest-state-batching` for an A/B comparison on the same widened profile
+
+The widened harness also has an experimental latest-state recipient-phasing seam:
+
+- current harness default: recipient phasing disabled
+- use `--enable-latest-state-recipient-phasing` for an A/B comparison on the same widened profile
+- current intent:
+  - replace synchronized outer-ring observer sends with per-recipient phased delivery
+  - reduce same-tick flush/send bursts without touching owner-critical traffic
+- current read:
+  - it can reduce server-side dispatch/flush cost on dense runs
+  - but it currently worsens ping tail enough that it should stay experimental, not default
 
 The widened harness can now also include a first `Bulk` observer family:
 

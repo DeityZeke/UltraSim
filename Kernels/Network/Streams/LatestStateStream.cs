@@ -10,6 +10,7 @@ public sealed class LatestStateStream
         public ulong Sequence;
         public SubscriptionKey ScopeKey;
         public PacketClass PacketClass;
+        public uint DeliveryCadenceTicks;
         public ImmutablePayloadBuffer Payload = default!;
     }
 
@@ -20,27 +21,29 @@ public sealed class LatestStateStream
     private bool _orderedSnapshotDirty = true;
     private ulong _nextSequence = 1;
 
-    public ulong Publish(ulong itemKey, ImmutablePayloadBuffer payload)
+    public ulong Publish(ulong itemKey, ImmutablePayloadBuffer payload, uint deliveryCadenceTicks = 1)
     {
-        return Publish(itemKey, default, PacketClass.Realtime, payload);
+        return Publish(itemKey, default, PacketClass.Realtime, payload, deliveryCadenceTicks);
     }
 
-    public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, ImmutablePayloadBuffer payload)
+    public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, ImmutablePayloadBuffer payload, uint deliveryCadenceTicks = 1)
     {
-        return Publish(itemKey, scopeKey, PacketClass.Realtime, payload);
+        return Publish(itemKey, scopeKey, PacketClass.Realtime, payload, deliveryCadenceTicks);
     }
 
-    public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload)
+    public ulong Publish(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, uint deliveryCadenceTicks = 1)
     {
         if (itemKey == 0)
             throw new ArgumentOutOfRangeException(nameof(itemKey));
         if (packetClass is not PacketClass.Realtime and not PacketClass.Bulk)
             throw new ArgumentOutOfRangeException(nameof(packetClass), "Latest-state stream only supports Realtime or Bulk packet classes.");
+        if (deliveryCadenceTicks == 0)
+            throw new ArgumentOutOfRangeException(nameof(deliveryCadenceTicks));
 
         lock (_sync)
         {
             ulong sequence = _nextSequence++;
-            PublishCore(itemKey, scopeKey, packetClass, payload, sequence);
+            PublishCore(itemKey, scopeKey, packetClass, payload, sequence, deliveryCadenceTicks);
             return sequence;
         }
     }
@@ -63,7 +66,34 @@ public sealed class LatestStateStream
                 if (!scopeKey.IsValid)
                     throw new ArgumentOutOfRangeException(nameof(scopeKeys));
 
-                PublishCore(itemKey, scopeKey, packetClass, payload, sequence);
+                PublishCore(itemKey, scopeKey, packetClass, payload, sequence, 1);
+            }
+
+            return sequence;
+        }
+    }
+
+    public ulong PublishScopedCopies(ulong itemKey, ReadOnlySpan<ScopedLatestStatePublishTarget> targets, PacketClass packetClass, ImmutablePayloadBuffer payload)
+    {
+        if (itemKey == 0)
+            throw new ArgumentOutOfRangeException(nameof(itemKey));
+        if (packetClass is not PacketClass.Realtime and not PacketClass.Bulk)
+            throw new ArgumentOutOfRangeException(nameof(packetClass), "Latest-state stream only supports Realtime or Bulk packet classes.");
+        if (targets.Length == 0)
+            throw new ArgumentOutOfRangeException(nameof(targets));
+
+        lock (_sync)
+        {
+            ulong sequence = _nextSequence++;
+            for (int i = 0; i < targets.Length; i++)
+            {
+                ScopedLatestStatePublishTarget target = targets[i];
+                if (!target.ScopeKey.IsValid)
+                    throw new ArgumentOutOfRangeException(nameof(targets));
+                if (target.DeliveryCadenceTicks == 0)
+                    throw new ArgumentOutOfRangeException(nameof(targets));
+
+                PublishCore(itemKey, target.ScopeKey, packetClass, payload, sequence, target.DeliveryCadenceTicks);
             }
 
             return sequence;
@@ -97,7 +127,7 @@ public sealed class LatestStateStream
             for (int i = 0; i < count; i++)
             {
                 Entry entry = _orderedSnapshot[start + i];
-                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload);
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload, entry.DeliveryCadenceTicks);
                 lastSequence = entry.Sequence;
             }
 
@@ -120,7 +150,7 @@ public sealed class LatestStateStream
             for (int i = 0; i < count; i++)
             {
                 Entry entry = _orderedSnapshot[i];
-                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload);
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload, entry.DeliveryCadenceTicks);
             }
 
             return count;
@@ -150,14 +180,15 @@ public sealed class LatestStateStream
                     entry.Sequence,
                     entry.ScopeKey,
                     entry.PacketClass,
-                    entry.Payload);
+                    entry.Payload,
+                    entry.DeliveryCadenceTicks);
             }
 
             return count;
         }
     }
 
-    private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence)
+    private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence, uint deliveryCadenceTicks)
     {
         EntryKey key = new(itemKey, scopeKey);
         if (_entriesByKey.TryGetValue(key, out Entry? entry))
@@ -165,6 +196,7 @@ public sealed class LatestStateStream
             entry.Sequence = sequence;
             entry.ScopeKey = scopeKey;
             entry.PacketClass = packetClass;
+            entry.DeliveryCadenceTicks = deliveryCadenceTicks;
             entry.Payload = payload;
         }
         else
@@ -175,6 +207,7 @@ public sealed class LatestStateStream
                 Sequence = sequence,
                 ScopeKey = scopeKey,
                 PacketClass = packetClass,
+                DeliveryCadenceTicks = deliveryCadenceTicks,
                 Payload = payload,
             });
         }

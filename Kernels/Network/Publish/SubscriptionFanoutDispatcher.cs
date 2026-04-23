@@ -7,15 +7,18 @@ public sealed class SubscriptionFanoutDispatcher
     private readonly ConnectionSubscriptionRegistry _subscriptions;
     private readonly OutboundDatagramAssembler _assembler;
     private readonly bool _enableLatestStateBatching;
+    private readonly bool _enableLatestStateRecipientPhasing;
 
     public SubscriptionFanoutDispatcher(
         ConnectionSubscriptionRegistry subscriptions,
         OutboundDatagramAssembler assembler,
-        bool enableLatestStateBatching = false)
+        bool enableLatestStateBatching = false,
+        bool enableLatestStateRecipientPhasing = false)
     {
         _subscriptions = subscriptions ?? throw new ArgumentNullException(nameof(subscriptions));
         _assembler = assembler ?? throw new ArgumentNullException(nameof(assembler));
         _enableLatestStateBatching = enableLatestStateBatching;
+        _enableLatestStateRecipientPhasing = enableLatestStateRecipientPhasing;
     }
 
     public SubscriptionFanoutDispatchResult Dispatch(
@@ -72,7 +75,7 @@ public sealed class SubscriptionFanoutDispatcher
         bool allowSegmentation = true)
     {
         if (!_assembler.HasTransforms)
-            return DispatchScheduledWorkWithoutTransforms(items, destination);
+            return DispatchScheduledWorkWithoutTransforms(items, subscriberScratch, destination);
 
         int frameCount = 0;
         int subscriberDeliveries = 0;
@@ -88,6 +91,7 @@ public sealed class SubscriptionFanoutDispatcher
                 throw new ArgumentOutOfRangeException(nameof(items));
 
             int subscriberCount = _subscriptions.CopySubscribers(scopeKey, subscriberScratch);
+            subscriberCount = ApplyLatestStateRecipientPhasing(item, subscriberScratch[..subscriberCount]);
             if (subscriberCount == 0)
                 continue;
 
@@ -159,6 +163,7 @@ public sealed class SubscriptionFanoutDispatcher
 
     private SubscriptionFanoutDispatchResult DispatchScheduledWorkWithoutTransforms(
         ReadOnlySpan<ScheduledWorkItem> items,
+        Span<ConnectionId> subscriberScratch,
         Span<OutboundDatagram> destination)
     {
         int frameCount = 0;
@@ -176,7 +181,8 @@ public sealed class SubscriptionFanoutDispatcher
 
             if (_enableLatestStateBatching &&
                 item.Kind == ScheduledWorkKind.LatestState &&
-                item.PacketClass == PacketClass.Realtime)
+                item.PacketClass == PacketClass.Realtime &&
+                item.DeliveryCadenceTicks <= 1)
             {
                 int batchCount = CountRealtimeBatch(items[i..]);
                 if (batchCount > 1)
@@ -202,6 +208,11 @@ public sealed class SubscriptionFanoutDispatcher
                     continue;
                 }
             }
+
+            int subscriberCount = _subscriptions.CopySubscribers(scopeKey, subscriberScratch);
+            subscriberCount = ApplyLatestStateRecipientPhasing(item, subscriberScratch[..subscriberCount]);
+            if (subscriberCount == 0)
+                continue;
 
             NetworkPlane plane;
             PacketClass packetClass = item.PacketClass;
@@ -230,19 +241,23 @@ public sealed class SubscriptionFanoutDispatcher
                     throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}.");
             }
 
-            int written = _subscriptions.WriteDatagramsForSubscribers(
-                scopeKey,
-                plane,
-                packetClass,
-                channel,
-                envelope,
-                destination[datagramCount..]);
-            if (written == 0)
+            int writable = Math.Min(subscriberCount, destination.Length - datagramCount);
+            for (int subscriberIndex = 0; subscriberIndex < writable; subscriberIndex++)
+            {
+                destination[datagramCount + subscriberIndex] = new OutboundDatagram(
+                    subscriberScratch[subscriberIndex],
+                    plane,
+                    packetClass,
+                    channel,
+                    envelope);
+            }
+
+            if (writable == 0)
                 continue;
 
             frameCount++;
-            subscriberDeliveries += written;
-            datagramCount += written;
+            subscriberDeliveries += writable;
+            datagramCount += writable;
         }
 
         return new SubscriptionFanoutDispatchResult(
@@ -251,6 +266,50 @@ public sealed class SubscriptionFanoutDispatcher
             DatagramCount: datagramCount,
             CompressedCount: compressedCount,
             EncryptedCount: encryptedCount);
+    }
+
+    private int ApplyLatestStateRecipientPhasing(in ScheduledWorkItem item, Span<ConnectionId> subscribers)
+    {
+        if (!_enableLatestStateRecipientPhasing ||
+            item.Kind != ScheduledWorkKind.LatestState ||
+            item.DeliveryCadenceTicks <= 1)
+        {
+            return subscribers.Length;
+        }
+
+        int written = 0;
+        for (int i = 0; i < subscribers.Length; i++)
+        {
+            ConnectionId connectionId = subscribers[i];
+            if (!ShouldDeliverPhasedLatestState(item.ItemKey, item.Sequence, connectionId, item.DeliveryCadenceTicks))
+                continue;
+
+            subscribers[written++] = connectionId;
+        }
+
+        return written;
+    }
+
+    private static bool ShouldDeliverPhasedLatestState(ulong itemKey, ulong sequence, ConnectionId connectionId, uint cadenceTicks)
+    {
+        if (cadenceTicks <= 1 || !connectionId.IsValid)
+            return true;
+
+        ulong tickMod = sequence % cadenceTicks;
+        return tickMod == ComputeObserverRecipientPhase(itemKey, connectionId, cadenceTicks);
+    }
+
+    private static uint ComputeObserverRecipientPhase(ulong itemKey, ConnectionId connectionId, uint cadenceTicks)
+    {
+        if (cadenceTicks <= 1)
+            return 0;
+
+        unchecked
+        {
+            ulong hash = itemKey * 11400714819323198485UL;
+            hash ^= (uint)connectionId.Value * 7046029254386353131UL;
+            return (uint)(hash % cadenceTicks);
+        }
     }
 
     private static int CountRealtimeBatch(ReadOnlySpan<ScheduledWorkItem> items)
@@ -265,7 +324,8 @@ public sealed class SubscriptionFanoutDispatcher
             ref readonly ScheduledWorkItem item = ref items[i];
             if (item.Kind != ScheduledWorkKind.LatestState ||
                 item.PacketClass != PacketClass.Realtime ||
-                item.ScopeKey != scopeKey)
+                item.ScopeKey != scopeKey ||
+                item.DeliveryCadenceTicks != first.DeliveryCadenceTicks)
                 break;
 
             int nextPayloadBytes = payloadBytes + sizeof(ulong) + sizeof(ulong) + sizeof(ushort) + item.Payload.Length;

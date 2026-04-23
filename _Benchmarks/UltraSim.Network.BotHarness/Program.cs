@@ -164,6 +164,8 @@ internal sealed class MovementRampHarness : IDisposable
         var flushDrainSamplesMs = new List<double>(measuredTicks);
         var flushBundleSamplesMs = new List<double>(measuredTicks);
         var flushSendSamplesMs = new List<double>(measuredTicks);
+        var flushConnectionSamples = new List<double>(measuredTicks);
+        var flushWireDatagramSamples = new List<double>(measuredTicks);
         var clientPumpSamplesMs = new List<double>(measuredTicks);
         var clientPollSamplesMs = new List<double>(measuredTicks);
         var clientControlSamplesMs = new List<double>(measuredTicks);
@@ -230,6 +232,8 @@ internal sealed class MovementRampHarness : IDisposable
                         out double flushDrainMs,
                         out double flushBundleMs,
                         out double flushSendMs,
+                        out int flushConnectionCount,
+                        out int flushWireDatagramCount,
                         out int bundledWireDatagrams,
                         out int singleWireDatagrams);
                     long dispatchEnd = Stopwatch.GetTimestamp();
@@ -244,6 +248,8 @@ internal sealed class MovementRampHarness : IDisposable
                     flushDrainSamplesMs.Add(flushDrainMs);
                     flushBundleSamplesMs.Add(flushBundleMs);
                     flushSendSamplesMs.Add(flushSendMs);
+                    flushConnectionSamples.Add(flushConnectionCount);
+                    flushWireDatagramSamples.Add(flushWireDatagramCount);
                 }
                 else
                 {
@@ -254,6 +260,8 @@ internal sealed class MovementRampHarness : IDisposable
                     flushDrainSamplesMs.Add(0d);
                     flushBundleSamplesMs.Add(0d);
                     flushSendSamplesMs.Add(0d);
+                    flushConnectionSamples.Add(0d);
+                    flushWireDatagramSamples.Add(0d);
                 }
             }
             else
@@ -266,6 +274,8 @@ internal sealed class MovementRampHarness : IDisposable
                 flushDrainSamplesMs.Add(0d);
                 flushBundleSamplesMs.Add(0d);
                 flushSendSamplesMs.Add(0d);
+                flushConnectionSamples.Add(0d);
+                flushWireDatagramSamples.Add(0d);
             }
             long clientNowTicks = _clockTicks + 1;
             long clientPumpStart = Stopwatch.GetTimestamp();
@@ -330,6 +340,8 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats flushDrainStats = new TickWindowStats(flushDrainSamplesMs);
         TickWindowStats flushBundleStats = new TickWindowStats(flushBundleSamplesMs);
         TickWindowStats flushSendStats = new TickWindowStats(flushSendSamplesMs);
+        TickWindowStats flushConnectionStats = new TickWindowStats(flushConnectionSamples);
+        TickWindowStats flushWireDatagramStats = new TickWindowStats(flushWireDatagramSamples);
         TickWindowStats clientPumpStats = new TickWindowStats(clientPumpSamplesMs);
         TickWindowStats clientPollStats = new TickWindowStats(clientPollSamplesMs);
         TickWindowStats clientControlStats = new TickWindowStats(clientControlSamplesMs);
@@ -387,6 +399,10 @@ internal sealed class MovementRampHarness : IDisposable
             FlushBundleP95Ms: flushBundleStats.P95Ms,
             FlushSendAverageMs: flushSendStats.AverageMs,
             FlushSendP95Ms: flushSendStats.P95Ms,
+            FlushConnectionsAverage: flushConnectionStats.AverageMs,
+            FlushConnectionsP95: flushConnectionStats.P95Ms,
+            FlushWireDatagramsAverage: flushWireDatagramStats.AverageMs,
+            FlushWireDatagramsP95: flushWireDatagramStats.P95Ms,
             ClientPumpAverageMs: clientPumpStats.AverageMs,
             ClientPumpP95Ms: clientPumpStats.P95Ms,
             ClientPollAverageMs: clientPollStats.AverageMs,
@@ -582,7 +598,10 @@ internal sealed class MovementRampHarness : IDisposable
         var publisher = new ServerEcsWorldNetworkPublisher(_world);
         var subscriptions = new ConnectionSubscriptionRegistry();
         var scheduler = new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream);
-        var fanout = new ScheduledWorkFanoutBridge(subscriptions, enableLatestStateBatching: _options.LatestStateBatching);
+        var fanout = new ScheduledWorkFanoutBridge(
+            subscriptions,
+            enableLatestStateBatching: _options.LatestStateBatching,
+            enableLatestStateRecipientPhasing: _options.LatestStateRecipientPhasing);
         return new StageReplicationContext(
             new ServerEcsChunkAoiScopeClassifier(policy),
             new ChunkAoiSubscriptionMaintainer(policy),
@@ -622,7 +641,8 @@ internal sealed class MovementRampHarness : IDisposable
                 static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                 static (_, body) => HarnessPayloadCodec.Encode(body),
                 static (entity, _) => ComposeHarnessMovementItemKey(entity),
-                ringCadence: replication.RingCadence),
+                ringCadence: replication.RingCadence,
+                recipientPhasing: _options.LatestStateRecipientPhasing),
             publishTick);
 
         if (_options.ObserverVisualState)
@@ -633,7 +653,8 @@ internal sealed class MovementRampHarness : IDisposable
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                     static (_, body) => HarnessPayloadCodec.Encode(body),
                     static (entity, _) => ComposeHarnessVisualItemKey(entity),
-                    ringCadence: replication.RingCadence),
+                    ringCadence: replication.RingCadence,
+                    recipientPhasing: _options.LatestStateRecipientPhasing),
                 publishTick);
         }
 
@@ -646,7 +667,8 @@ internal sealed class MovementRampHarness : IDisposable
                     static (_, body) => HarnessPayloadCodec.Encode(body),
                     static (entity, _) => ComposeHarnessBulkItemKey(entity),
                     ringCadence: replication.RingCadence,
-                    packetClass: PacketClass.Bulk),
+                    packetClass: PacketClass.Bulk,
+                    recipientPhasing: _options.LatestStateRecipientPhasing),
                 publishTick);
         }
 
@@ -671,6 +693,8 @@ internal sealed class MovementRampHarness : IDisposable
         out double flushDrainMs,
         out double flushBundleMs,
         out double flushSendMs,
+        out int flushConnectionCount,
+        out int flushWireDatagramCount,
         out int bundledWireDatagrams,
         out int singleWireDatagrams)
     {
@@ -716,6 +740,8 @@ internal sealed class MovementRampHarness : IDisposable
             flushDrainMs = flushProfile.DrainElapsedTicks * 1000.0 / Stopwatch.Frequency;
             flushBundleMs = flushProfile.BundleElapsedTicks * 1000.0 / Stopwatch.Frequency;
             flushSendMs = flushProfile.SendElapsedTicks * 1000.0 / Stopwatch.Frequency;
+            flushConnectionCount = flushProfile.ConnectionCount;
+            flushWireDatagramCount = flushProfile.WireDatagramCount;
             bundledWireDatagrams = flushProfile.BundledWireDatagramCount;
             singleWireDatagrams = flushProfile.SingleWireDatagramCount;
             return result.Fanout.DatagramCount;
@@ -1129,6 +1155,7 @@ internal sealed class HarnessArgs
     public bool ObserverBulkState { get; set; }
     public bool ObserverEvents { get; set; }
     public bool LatestStateBatching { get; set; }
+    public bool LatestStateRecipientPhasing { get; set; }
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1171,6 +1198,8 @@ internal sealed class HarnessArgs
             else if (arg == "--observer-events") options.ObserverEvents = true;
             else if (arg == "--disable-latest-state-batching") options.LatestStateBatching = false;
             else if (arg == "--enable-latest-state-batching") options.LatestStateBatching = true;
+            else if (arg == "--disable-latest-state-recipient-phasing") options.LatestStateRecipientPhasing = false;
+            else if (arg == "--enable-latest-state-recipient-phasing") options.LatestStateRecipientPhasing = true;
             else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1245,6 +1274,7 @@ internal sealed class HarnessArgs
             ["observer_events"] = ObserverEvents,
             ["observer_event_every_ticks"] = ObserverEventEveryTicks,
             ["latest_state_batching"] = LatestStateBatching,
+            ["latest_state_recipient_phasing"] = LatestStateRecipientPhasing,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
@@ -1329,6 +1359,10 @@ internal readonly record struct StageResult(
     double FlushBundleP95Ms,
     double FlushSendAverageMs,
     double FlushSendP95Ms,
+    double FlushConnectionsAverage,
+    double FlushConnectionsP95,
+    double FlushWireDatagramsAverage,
+    double FlushWireDatagramsP95,
     double ClientPumpAverageMs,
     double ClientPumpP95Ms,
     double ClientPollAverageMs,
@@ -1411,6 +1445,10 @@ internal readonly record struct StageResult(
             ["flush_bundle_p95_ms"] = Math.Round(FlushBundleP95Ms, 3),
             ["flush_send_avg_ms"] = Math.Round(FlushSendAverageMs, 3),
             ["flush_send_p95_ms"] = Math.Round(FlushSendP95Ms, 3),
+            ["flush_connections_avg"] = Math.Round(FlushConnectionsAverage, 3),
+            ["flush_connections_p95"] = Math.Round(FlushConnectionsP95, 3),
+            ["flush_wire_datagrams_avg"] = Math.Round(FlushWireDatagramsAverage, 3),
+            ["flush_wire_datagrams_p95"] = Math.Round(FlushWireDatagramsP95, 3),
             ["client_pump_avg_ms"] = Math.Round(ClientPumpAverageMs, 3),
             ["client_pump_p95_ms"] = Math.Round(ClientPumpP95Ms, 3),
             ["client_poll_avg_ms"] = Math.Round(ClientPollAverageMs, 3),

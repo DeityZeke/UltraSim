@@ -7,13 +7,15 @@ public sealed class ScheduledWorkFanoutBridge
     public ScheduledWorkFanoutBridge(
         ConnectionSubscriptionRegistry subscriptions,
         OutboundDatagramAssembler? assembler = null,
-        bool enableLatestStateBatching = false)
+        bool enableLatestStateBatching = false,
+        bool enableLatestStateRecipientPhasing = false)
     {
         ArgumentNullException.ThrowIfNull(subscriptions);
         _dispatcher = new SubscriptionFanoutDispatcher(
             subscriptions,
             assembler ?? new OutboundDatagramAssembler(),
-            enableLatestStateBatching);
+            enableLatestStateBatching,
+            enableLatestStateRecipientPhasing);
     }
 
     public ScheduledWorkFanoutResult Dispatch(

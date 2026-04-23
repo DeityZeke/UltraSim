@@ -12,7 +12,8 @@ public sealed class ServerEcsChunkAoiLatestStateRule<T>
         Func<Entity, T, ImmutablePayloadBuffer> payloadSelector,
         Func<Entity, T, ulong>? itemKeySelector = null,
         ServerEcsChunkAoiRingCadencePolicy? ringCadence = null,
-        PacketClass packetClass = PacketClass.Realtime)
+        PacketClass packetClass = PacketClass.Realtime,
+        bool recipientPhasing = false)
     {
         if (packetClass is not PacketClass.Realtime and not PacketClass.Bulk)
             throw new ArgumentOutOfRangeException(nameof(packetClass), "Chunk-AOI latest-state rules only support Realtime or Bulk packet classes.");
@@ -23,6 +24,7 @@ public sealed class ServerEcsChunkAoiLatestStateRule<T>
         ItemKeySelector = itemKeySelector ?? (static (entity, _) => ServerEcsNetworkItemKeys.GetComponentItemKey<T>(entity));
         RingCadence = ringCadence;
         PacketClass = packetClass;
+        RecipientPhasing = recipientPhasing;
     }
 
     public ServerEcsChunkAoiScopeClassifier ScopeClassifier { get; }
@@ -31,4 +33,5 @@ public sealed class ServerEcsChunkAoiLatestStateRule<T>
     public Func<Entity, T, ulong> ItemKeySelector { get; }
     public ServerEcsChunkAoiRingCadencePolicy? RingCadence { get; }
     public PacketClass PacketClass { get; }
+    public bool RecipientPhasing { get; }
 }

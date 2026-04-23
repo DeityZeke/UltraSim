@@ -8,4 +8,9 @@ public readonly record struct TransportFlushProfileSnapshot(
     int LogicalDatagramCount,
     int WireDatagramCount,
     int BundledWireDatagramCount,
-    int SingleWireDatagramCount);
+    int SingleWireDatagramCount,
+    bool AsyncEnabled,
+    bool AsyncStaged,
+    int AsyncPendingBatchCount,
+    int AsyncMaxPendingBatchCount,
+    int AsyncInlineFallbackCount);

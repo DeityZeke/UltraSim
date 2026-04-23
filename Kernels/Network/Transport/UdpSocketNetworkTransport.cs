@@ -150,7 +150,12 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 LogicalDatagramCount: 0,
                 WireDatagramCount: 0,
                 BundledWireDatagramCount: 0,
-                SingleWireDatagramCount: 0);
+                SingleWireDatagramCount: 0,
+                AsyncEnabled: false,
+                AsyncStaged: false,
+                AsyncPendingBatchCount: 0,
+                AsyncMaxPendingBatchCount: 0,
+                AsyncInlineFallbackCount: 0);
             return;
         }
 
@@ -266,7 +271,12 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 LogicalDatagramCount: logicalDatagramCount,
                 WireDatagramCount: LastFlushWireDatagramCount,
                 BundledWireDatagramCount: bundledWireDatagramCount,
-                SingleWireDatagramCount: singleWireDatagramCount);
+                SingleWireDatagramCount: singleWireDatagramCount,
+                AsyncEnabled: false,
+                AsyncStaged: false,
+                AsyncPendingBatchCount: 0,
+                AsyncMaxPendingBatchCount: 0,
+                AsyncInlineFallbackCount: 0);
             ResetFlushScratch();
         }
     }
