@@ -48,6 +48,8 @@ Useful options:
 - `--disable-latest-state-batching`
 - `--enable-latest-state-recipient-phasing`
 - `--disable-latest-state-recipient-phasing`
+- `--enable-async-server-flush`
+- `--disable-async-server-flush`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
@@ -195,6 +197,15 @@ The widened harness also has an experimental latest-state recipient-phasing seam
 - current read:
   - it can reduce server-side dispatch/flush cost on dense runs
   - but it currently worsens ping tail enough that it should stay experimental, not default
+
+The widened harness also has an experimental async server flush seam:
+
+- current harness default: async server flush disabled
+- use `--enable-async-server-flush` for an A/B comparison on the same widened profile
+- current intent:
+  - keep normal publish/schedule/fanout on the tick thread
+  - hand the final UDP bundle/send pass to one bounded background flush set
+  - preserve bounded backlog instead of introducing unbounded writer queues
 
 The widened harness can now also include a first `Bulk` observer family:
 

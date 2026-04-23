@@ -8,4 +8,5 @@ public sealed record UdpSocketNetworkTransportOptions(
     IPEndPoint? DefaultRemoteEndPoint = null,
     ConnectionId DefaultConnectionId = default,
     bool AllowDynamicConnections = true,
-    int MaxDatagramBytes = 2048);
+    int MaxDatagramBytes = 2048,
+    bool EnableAsyncFlush = false);

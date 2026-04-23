@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading.Tasks;
 
 namespace UltraSim.Network;
 
@@ -11,6 +12,52 @@ namespace UltraSim.Network;
 /// </summary>
 public sealed class UdpSocketNetworkTransport : INetworkTransport
 {
+    private sealed class FlushBatchState
+    {
+        public readonly Dictionary<ConnectionId, List<OutboundDatagram>> ByConnection = new();
+        public readonly Stack<List<OutboundDatagram>> ListPool = new();
+
+        public int ConnectionCount => ByConnection.Count;
+
+        public void DrainFrom(ConcurrentQueue<OutboundDatagram> source)
+        {
+            while (source.TryDequeue(out OutboundDatagram datagram))
+            {
+                if (!ByConnection.TryGetValue(datagram.ConnectionId, out List<OutboundDatagram>? list))
+                {
+                    list = ListPool.Count > 0 ? ListPool.Pop() : new List<OutboundDatagram>();
+                    ByConnection.Add(datagram.ConnectionId, list);
+                }
+
+                list.Add(datagram);
+            }
+        }
+
+        public void Reset()
+        {
+            foreach (List<OutboundDatagram> list in ByConnection.Values)
+            {
+                list.Clear();
+                ListPool.Push(list);
+            }
+
+            ByConnection.Clear();
+        }
+
+        public void DisposeContents()
+        {
+            foreach (List<OutboundDatagram> list in ByConnection.Values)
+            {
+                for (int i = 0; i < list.Count; i++)
+                    list[i].Dispose();
+                list.Clear();
+                ListPool.Push(list);
+            }
+
+            ByConnection.Clear();
+        }
+    }
+
     private readonly UdpSocketNetworkTransportOptions _options;
     private readonly PacketMetadataRegistry _packetMetadata;
     private readonly ConcurrentQueue<OutboundDatagram> _outbound = new();
@@ -20,9 +67,16 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private readonly Dictionary<ConnectionId, List<OutboundDatagram>> _flushByConnection = new();
     private readonly Stack<List<OutboundDatagram>> _flushListPool = new();
     private readonly List<ImmutablePayloadBuffer> _bundlePayloadScratch = new();
+    private readonly FlushBatchState _asyncFlushBatchA = new();
+    private readonly FlushBatchState _asyncFlushBatchB = new();
     private readonly byte[] _receiveBuffer;
     private readonly object _sync = new();
     private Socket? _socket;
+    private Task _pendingAsyncFlushTask = Task.CompletedTask;
+    private FlushBatchState? _buildFlushBatch;
+    private FlushBatchState? _sendFlushBatch;
+    private int _asyncMaxPendingBatchCount;
+    private int _asyncInlineFallbackCount = 0;
     private volatile bool _disposed;
     private volatile bool _running;
     private int _nextDynamicConnectionId;
@@ -36,6 +90,8 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         _receiveBuffer = new byte[options.MaxDatagramBytes];
         _nextDynamicConnectionId = 1;
+        _buildFlushBatch = _asyncFlushBatchA;
+        _sendFlushBatch = _asyncFlushBatchB;
 
         if (options.DefaultRemoteEndPoint is not null)
         {
@@ -132,6 +188,12 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     {
         if (!IsRunning)
             return;
+
+        if (_options.EnableAsyncFlush)
+        {
+            FlushOutboundAsyncStaged();
+            return;
+        }
 
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
         LastFlushWireDatagramCount = 0;
@@ -289,6 +351,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         _disposed = true;
         _running = false;
 
+        try
+        {
+            _pendingAsyncFlushTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
         Socket? socket = _socket;
         _socket = null;
         socket?.Dispose();
@@ -297,6 +367,9 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         {
             outbound.Dispose();
         }
+
+        _asyncFlushBatchA.DisposeContents();
+        _asyncFlushBatchB.DisposeContents();
     }
 
     private bool TryGetOrAssignConnectionId(IPEndPoint remoteEndPoint, out ConnectionId connectionId)
@@ -414,5 +487,156 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         _flushByConnection.Clear();
         _bundlePayloadScratch.Clear();
+    }
+
+    private void FlushOutboundAsyncStaged()
+    {
+        Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
+        LastFlushWireDatagramCount = 0;
+        LastFlushProfile = default;
+
+        FlushBatchState buildBatch = _buildFlushBatch ?? throw new InvalidOperationException("Async flush build batch is not initialized.");
+        long drainStart = Stopwatch.GetTimestamp();
+        buildBatch.DrainFrom(_outbound);
+        long drainEnd = Stopwatch.GetTimestamp();
+
+        if (buildBatch.ConnectionCount == 0)
+        {
+            LastFlushProfile = new TransportFlushProfileSnapshot(
+                DrainElapsedTicks: drainEnd - drainStart,
+                BundleElapsedTicks: 0,
+                SendElapsedTicks: 0,
+                ConnectionCount: 0,
+                LogicalDatagramCount: 0,
+                WireDatagramCount: 0,
+                BundledWireDatagramCount: 0,
+                SingleWireDatagramCount: 0,
+                AsyncEnabled: true,
+                AsyncStaged: false,
+                AsyncPendingBatchCount: _pendingAsyncFlushTask.IsCompleted ? 0 : 1,
+                AsyncMaxPendingBatchCount: _asyncMaxPendingBatchCount,
+                AsyncInlineFallbackCount: _asyncInlineFallbackCount);
+            return;
+        }
+
+        int pendingBatchCount = _pendingAsyncFlushTask.IsCompleted ? 0 : 1;
+        if (pendingBatchCount > _asyncMaxPendingBatchCount)
+            _asyncMaxPendingBatchCount = pendingBatchCount;
+
+        _pendingAsyncFlushTask.GetAwaiter().GetResult();
+
+        FlushBatchState sendBatch = buildBatch;
+        _buildFlushBatch = _sendFlushBatch;
+        _sendFlushBatch = sendBatch;
+        _pendingAsyncFlushTask = Task.Run(() => ExecuteAsyncFlushBatch(socket, sendBatch));
+
+        int logicalDatagramCount = CountLogicalDatagrams(sendBatch.ByConnection);
+        LastFlushProfile = new TransportFlushProfileSnapshot(
+            DrainElapsedTicks: drainEnd - drainStart,
+            BundleElapsedTicks: 0,
+            SendElapsedTicks: 0,
+            ConnectionCount: sendBatch.ConnectionCount,
+            LogicalDatagramCount: logicalDatagramCount,
+            WireDatagramCount: 0,
+            BundledWireDatagramCount: 0,
+            SingleWireDatagramCount: 0,
+            AsyncEnabled: true,
+            AsyncStaged: true,
+            AsyncPendingBatchCount: 1,
+            AsyncMaxPendingBatchCount: _asyncMaxPendingBatchCount,
+            AsyncInlineFallbackCount: _asyncInlineFallbackCount);
+    }
+
+    private void ExecuteAsyncFlushBatch(Socket socket, FlushBatchState batch)
+    {
+        try
+        {
+            ExecuteFlushBatch(socket, batch.ByConnection, clearAfterSend: true);
+        }
+        finally
+        {
+            batch.Reset();
+        }
+    }
+
+    private void ExecuteFlushBatch(Socket socket, Dictionary<ConnectionId, List<OutboundDatagram>> flushByConnection, bool clearAfterSend)
+    {
+        int wireDatagramCount = 0;
+        int bundledWireDatagramCount = 0;
+        int singleWireDatagramCount = 0;
+
+        foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in flushByConnection)
+        {
+            if (!TryGetRemote(connectionId, out IPEndPoint? remote) || remote is null)
+            {
+                for (int i = 0; i < datagrams.Count; i++)
+                    datagrams[i].Dispose();
+                continue;
+            }
+
+            int index = 0;
+            while (index < datagrams.Count)
+            {
+                int bundleStart = index;
+                if (datagrams.Count - index == 1)
+                {
+                    socket.SendTo(datagrams[index].Payload.Span, SocketFlags.None, remote);
+                    datagrams[index].Dispose();
+                    index++;
+                    wireDatagramCount++;
+                    singleWireDatagramCount++;
+                    continue;
+                }
+
+                _bundlePayloadScratch.Clear();
+                for (int i = index; i < datagrams.Count; i++)
+                    _bundlePayloadScratch.Add(datagrams[i].Payload);
+                int bundleBytes = TransportDatagramBundleCodec.MeasureBundle(
+                    _bundlePayloadScratch,
+                    0,
+                    _options.MaxDatagramBytes,
+                    out int packedCount);
+                byte[] rented = ArrayPool<byte>.Shared.Rent(bundleBytes);
+                try
+                {
+                    TransportDatagramBundleCodec.WriteBundle(
+                        _bundlePayloadScratch,
+                        0,
+                        packedCount,
+                        rented.AsSpan(0, bundleBytes));
+                    socket.SendTo(rented.AsSpan(0, bundleBytes), SocketFlags.None, remote);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(rented);
+                }
+
+                wireDatagramCount++;
+                bundledWireDatagramCount++;
+                for (int i = bundleStart; i < bundleStart + packedCount; i++)
+                    datagrams[i].Dispose();
+                index += packedCount;
+            }
+        }
+
+        if (!clearAfterSend)
+            ResetFlushScratch();
+
+        LastFlushWireDatagramCount = wireDatagramCount;
+        LastFlushProfile = LastFlushProfile with
+        {
+            WireDatagramCount = wireDatagramCount,
+            BundledWireDatagramCount = bundledWireDatagramCount,
+            SingleWireDatagramCount = singleWireDatagramCount
+        };
+        _bundlePayloadScratch.Clear();
+    }
+
+    private static int CountLogicalDatagrams(Dictionary<ConnectionId, List<OutboundDatagram>> flushByConnection)
+    {
+        int total = 0;
+        foreach (List<OutboundDatagram> list in flushByConnection.Values)
+            total += list.Count;
+        return total;
     }
 }
