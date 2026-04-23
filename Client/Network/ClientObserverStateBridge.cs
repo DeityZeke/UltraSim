@@ -14,6 +14,7 @@ public sealed class ClientObserverStateBridge
     private readonly ConnectionId _connectionId;
     private readonly Dictionary<ulong, ulong> _latestSequenceByItemKey = new();
     private readonly ClientLatestStateFrameApplier? _applyLatestState;
+    private readonly ClientLatestStateFrameSpanApplier? _applyLatestStateSpan;
     private readonly Action? _resetLatestState;
     private bool _hasActiveBaseline;
     private StateBaselineDescriptor _activeBaseline;
@@ -24,17 +25,36 @@ public sealed class ClientObserverStateBridge
     private long _decodeElapsedTicks;
     private long _applyElapsedTicks;
 
-    public ClientObserverStateBridge(
+    private ClientObserverStateBridge(
         ConnectionId connectionId,
-        ClientLatestStateFrameApplier? applyLatestState = null,
-        Action? resetLatestState = null)
+        ClientLatestStateFrameApplier? applyLatestState,
+        ClientLatestStateFrameSpanApplier? applyLatestStateSpan,
+        Action? resetLatestState)
     {
         if (!connectionId.IsValid)
             throw new ArgumentOutOfRangeException(nameof(connectionId));
 
         _connectionId = connectionId;
         _applyLatestState = applyLatestState;
+        _applyLatestStateSpan = applyLatestStateSpan;
         _resetLatestState = resetLatestState;
+    }
+
+    public ClientObserverStateBridge(
+        ConnectionId connectionId,
+        ClientLatestStateFrameApplier? applyLatestState = null,
+        Action? resetLatestState = null)
+        : this(connectionId, applyLatestState, null, resetLatestState)
+    {
+    }
+
+    public static ClientObserverStateBridge CreateSpanFastPath(
+        ConnectionId connectionId,
+        ClientLatestStateFrameSpanApplier applyLatestStateSpan,
+        Action? resetLatestState = null)
+    {
+        ArgumentNullException.ThrowIfNull(applyLatestStateSpan);
+        return new ClientObserverStateBridge(connectionId, null, applyLatestStateSpan, resetLatestState);
     }
 
     public ConnectionId ConnectionId => _connectionId;
@@ -86,10 +106,13 @@ public sealed class ClientObserverStateBridge
         {
             long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
-            RealtimeStateFramePacket packet = RealtimeStateFramePacket.Deserialize(ref reader);
+            ulong sequence = reader.ReadUInt64();
+            ulong itemKey = reader.ReadUInt64();
+            ushort payloadLength = reader.ReadUInt16();
+            ReadOnlySpan<byte> statePayload = reader.ReadBytes(payloadLength);
             _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
             long applyStart = Stopwatch.GetTimestamp();
-            OnRealtimeStateFrame(packet);
+            OnRealtimeStateFrame(sequence, itemKey, statePayload);
             _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
             UpdateProfile();
             return true;
@@ -99,13 +122,16 @@ public sealed class ClientObserverStateBridge
         {
             long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
-            RealtimeStateBatchPacket packet = RealtimeStateBatchPacket.Deserialize(ref reader);
+            ushort count = reader.ReadUInt16();
             _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
-            for (int i = 0; i < packet.Items.Length; i++)
+            for (int i = 0; i < count; i++)
             {
-                RealtimeStateBatchItem item = packet.Items[i];
+                ulong sequence = reader.ReadUInt64();
+                ulong itemKey = reader.ReadUInt64();
+                ushort payloadLength = reader.ReadUInt16();
+                ReadOnlySpan<byte> statePayload = reader.ReadBytes(payloadLength);
                 long applyStart = Stopwatch.GetTimestamp();
-                OnRealtimeStateFrame(new RealtimeStateFramePacket(item.Sequence, item.ItemKey, item.Payload));
+                OnRealtimeStateFrame(sequence, itemKey, statePayload);
                 _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
             }
 
@@ -128,10 +154,14 @@ public sealed class ClientObserverStateBridge
         {
             long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
-            StateBaselineFramePacket packet = StateBaselineFramePacket.Deserialize(ref reader);
+            uint baselineId = reader.ReadUInt32();
+            ulong itemKey = reader.ReadUInt64();
+            ulong sequence = reader.ReadUInt64();
+            ushort payloadLength = reader.ReadUInt16();
+            ReadOnlySpan<byte> statePayload = reader.ReadBytes(payloadLength);
             _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
             long applyStart = Stopwatch.GetTimestamp();
-            OnBaselineFrame(packet);
+            OnBaselineFrame(baselineId, itemKey, sequence, statePayload);
             _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
             UpdateProfile();
             return true;
@@ -152,10 +182,14 @@ public sealed class ClientObserverStateBridge
         {
             long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
-            StateDeltaFramePacket packet = StateDeltaFramePacket.Deserialize(ref reader);
+            uint baselineId = reader.ReadUInt32();
+            ulong itemKey = reader.ReadUInt64();
+            ulong sequence = reader.ReadUInt64();
+            ushort payloadLength = reader.ReadUInt16();
+            ReadOnlySpan<byte> statePayload = reader.ReadBytes(payloadLength);
             _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
             long applyStart = Stopwatch.GetTimestamp();
-            OnDeltaFrame(packet);
+            OnDeltaFrame(baselineId, itemKey, sequence, statePayload);
             _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
             UpdateProfile();
             return true;
@@ -164,21 +198,21 @@ public sealed class ClientObserverStateBridge
         return false;
     }
 
-    private void OnRealtimeStateFrame(in RealtimeStateFramePacket packet)
+    private void OnRealtimeStateFrame(ulong sequence, ulong itemKey, ReadOnlySpan<byte> payload)
     {
         LastReceivedFrameCount++;
         ref ulong previousSequence = ref CollectionsMarshal.GetValueRefOrAddDefault(
             _latestSequenceByItemKey,
-            packet.ItemKey,
+            itemKey,
             out bool exists);
 
-        if (exists && packet.Sequence <= previousSequence)
+        if (exists && sequence <= previousSequence)
         {
             return;
         }
 
-        previousSequence = packet.Sequence;
-        _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
+        previousSequence = sequence;
+        ApplyLatestState(itemKey, sequence, payload);
         LastAppliedFrameCount++;
     }
 
@@ -217,14 +251,14 @@ public sealed class ClientObserverStateBridge
         _resetLatestState?.Invoke();
     }
 
-    private void OnBaselineFrame(in StateBaselineFramePacket packet)
+    private void OnBaselineFrame(uint baselineId, ulong itemKey, ulong sequence, ReadOnlySpan<byte> payload)
     {
-        if (!_hasActiveBaseline || packet.BaselineId != _activeBaseline.BaselineId)
+        if (!_hasActiveBaseline || baselineId != _activeBaseline.BaselineId)
             return;
 
         LastReceivedBaselineFrameCount++;
-        _latestSequenceByItemKey[packet.ItemKey] = packet.Sequence;
-        _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
+        _latestSequenceByItemKey[itemKey] = sequence;
+        ApplyLatestState(itemKey, sequence, payload);
         _activeBaselineAppliedCount++;
         LastAppliedBaselineFrameCount++;
     }
@@ -242,26 +276,38 @@ public sealed class ClientObserverStateBridge
         _activeBaselineAppliedCount = 0;
     }
 
-    private void OnDeltaFrame(in StateDeltaFramePacket packet)
+    private void OnDeltaFrame(uint baselineId, ulong itemKey, ulong sequence, ReadOnlySpan<byte> payload)
     {
         LastReceivedDeltaFrameCount++;
 
         if (_hasActiveBaseline)
             return;
-        if (_lastCompletedBaselineId == 0 || packet.BaselineId > _lastCompletedBaselineId)
+        if (_lastCompletedBaselineId == 0 || baselineId > _lastCompletedBaselineId)
             return;
 
         ref ulong previousSequence = ref CollectionsMarshal.GetValueRefOrAddDefault(
             _latestSequenceByItemKey,
-            packet.ItemKey,
+            itemKey,
             out bool exists);
 
-        if (exists && packet.Sequence <= previousSequence)
+        if (exists && sequence <= previousSequence)
             return;
 
-        previousSequence = packet.Sequence;
-        _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
+        previousSequence = sequence;
+        ApplyLatestState(itemKey, sequence, payload);
         LastAppliedDeltaFrameCount++;
+    }
+
+    private void ApplyLatestState(ulong itemKey, ulong sequence, ReadOnlySpan<byte> payload)
+    {
+        if (_applyLatestStateSpan is not null)
+        {
+            _applyLatestStateSpan(itemKey, sequence, payload);
+            return;
+        }
+
+        if (_applyLatestState is not null)
+            _applyLatestState(itemKey, sequence, ImmutablePayloadBuffer.CopyFrom(payload));
     }
 
     private void UpdateProfile()

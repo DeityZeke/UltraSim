@@ -586,7 +586,7 @@ internal sealed class MovementRampHarness : IDisposable
             transport.Start();
 
             ClientHandle? handle = null;
-            var observerState = new ClientObserverStateBridge(
+            var observerState = ClientObserverStateBridge.CreateSpanFastPath(
                 new ConnectionId(1),
                 (itemKey, _, payload) => handle!.ApplyObserverState(itemKey, payload));
             var observerEvents = new ClientObserverEventBridge(
@@ -1107,7 +1107,7 @@ internal sealed class MovementRampHarness : IDisposable
             Transport.Dispose();
         }
 
-        public void ApplyObserverState(ulong itemKey, ImmutablePayloadBuffer payload)
+        public void ApplyObserverState(ulong itemKey, ReadOnlySpan<byte> payload)
         {
             ulong familyTag = itemKey & 0xFFFF_0000_0000_0000UL;
             int slot = checked((int)(itemKey & 0x0000_0000_FFFF_FFFFUL));
@@ -1121,7 +1121,7 @@ internal sealed class MovementRampHarness : IDisposable
                     _observerBulkStateCount++;
                 }
 
-                _observerBulkStates[slot] = HarnessPayloadCodec.DecodeBulk(payload);
+                HarnessPayloadCodec.DecodeBulkInto(payload, ref _observerBulkStates[slot]);
                 return;
             }
 
@@ -1133,7 +1133,7 @@ internal sealed class MovementRampHarness : IDisposable
                     _observerVisualStateCount++;
                 }
 
-                _observerVisualStates[slot] = HarnessPayloadCodec.DecodeVisual(payload);
+                HarnessPayloadCodec.DecodeVisualInto(payload, ref _observerVisualStates[slot]);
                 return;
             }
 
@@ -1143,7 +1143,7 @@ internal sealed class MovementRampHarness : IDisposable
                 _observerStateCount++;
             }
 
-            _observerStates[slot] = HarnessPayloadCodec.DecodeMovement(payload);
+            HarnessPayloadCodec.DecodeMovementInto(payload, ref _observerStates[slot]);
         }
 
         public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
@@ -1776,6 +1776,15 @@ internal static class HarnessPayloadCodec
             ReadSingle(span, 12));
     }
 
+    public static void DecodeMovementInto(ReadOnlySpan<byte> span, ref BenchMovementBody destination)
+    {
+        destination = new BenchMovementBody(
+            ReadSingle(span, 0),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            ReadSingle(span, 12));
+    }
+
     public static BenchMovementVisualBody DecodeVisual(ImmutablePayloadBuffer payload)
     {
         ReadOnlySpan<byte> span = payload.Span;
@@ -1786,10 +1795,37 @@ internal static class HarnessPayloadCodec
             ReadSingle(span, 12));
     }
 
+    public static void DecodeVisualInto(ReadOnlySpan<byte> span, ref BenchMovementVisualBody destination)
+    {
+        destination = new BenchMovementVisualBody(
+            ReadSingle(span, 0),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            ReadSingle(span, 12));
+    }
+
     public static BenchMovementBulkBody DecodeBulk(ImmutablePayloadBuffer payload)
     {
         ReadOnlySpan<byte> span = payload.Span;
         return new BenchMovementBulkBody(
+            ReadSingle(span, 0),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            ReadSingle(span, 12),
+            BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(16, 4)),
+            ReadSingle(span, 20),
+            ReadSingle(span, 24),
+            ReadSingle(span, 28),
+            ReadSingle(span, 32),
+            ReadSingle(span, 36),
+            ReadSingle(span, 40),
+            ReadSingle(span, 44),
+            ReadSingle(span, 48));
+    }
+
+    public static void DecodeBulkInto(ReadOnlySpan<byte> span, ref BenchMovementBulkBody destination)
+    {
+        destination = new BenchMovementBulkBody(
             ReadSingle(span, 0),
             ReadSingle(span, 4),
             ReadSingle(span, 8),
