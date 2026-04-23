@@ -169,13 +169,38 @@ public sealed class SubscriptionFanoutDispatcher
             if (!scopeKey.IsValid)
                 throw new ArgumentOutOfRangeException(nameof(items));
 
-            PublishedFrame frame = SharedFramePublisher.Publish(item);
-            ImmutablePayloadBuffer envelope = PacketCodec.EncodeEnvelope(frame.PacketId, frame.Body, frame.DefaultHeaderFlags);
+            NetworkPlane plane;
+            PacketClass packetClass = item.PacketClass;
+            ChannelType channel;
+            ImmutablePayloadBuffer envelope;
+            switch (item.Kind)
+            {
+                case ScheduledWorkKind.LatestState:
+                {
+                    PacketHeaderFlags flags = item.PacketClass == PacketClass.Bulk
+                        ? PacketHeaderFlags.None
+                        : PacketHeaderFlags.HighPriorityHint;
+                    plane = RealtimeStateFramePacket.Plane;
+                    channel = item.PacketClass == PacketClass.Bulk
+                        ? ChannelType.ReliableOrdered
+                        : RealtimeStateFramePacket.Channel;
+                    envelope = PacketCodec.EncodeRealtimeStateFrameEnvelope(item.Sequence, item.ItemKey, item.Payload, flags);
+                    break;
+                }
+                case ScheduledWorkKind.OrderedEvent:
+                    plane = ReliableEventFramePacket.Plane;
+                    channel = ReliableEventFramePacket.Channel;
+                    envelope = PacketCodec.EncodeReliableEventFrameEnvelope(item.Sequence, item.Payload);
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}.");
+            }
+
             int written = _subscriptions.WriteDatagramsForSubscribers(
                 scopeKey,
-                frame.Plane,
-                frame.PacketClass,
-                frame.Channel,
+                plane,
+                packetClass,
+                channel,
                 envelope,
                 destination[datagramCount..]);
             if (written == 0)
@@ -184,10 +209,6 @@ public sealed class SubscriptionFanoutDispatcher
             frameCount++;
             subscriberDeliveries += written;
             datagramCount += written;
-            if ((frame.DefaultHeaderFlags & PacketHeaderFlags.Compressed) != 0)
-                compressedCount += written;
-            if ((frame.DefaultHeaderFlags & PacketHeaderFlags.Encrypted) != 0)
-                encryptedCount += written;
         }
 
         return new SubscriptionFanoutDispatchResult(

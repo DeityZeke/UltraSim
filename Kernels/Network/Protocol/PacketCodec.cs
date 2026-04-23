@@ -10,8 +10,30 @@ public static class PacketCodec
         int initialCapacity = DefaultInitialCapacity)
         where TPacket : struct, IPacket<TPacket>
     {
-        ImmutablePayloadBuffer payload = EncodePayload(packet, initialCapacity);
-        return EncodeEnvelope(TPacket.PacketId, payload, flags);
+        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + 1, initialCapacity);
+        while (true)
+        {
+            byte[] buffer = new byte[capacity];
+            try
+            {
+                var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
+                packet.Serialize(ref payloadWriter);
+
+                var headerWriter = new BitWriter(buffer);
+                new PacketEnvelopeHeader(
+                    TPacket.PacketId,
+                    flags,
+                    checked((ushort)payloadWriter.Position))
+                    .Serialize(ref headerWriter);
+
+                Array.Resize(ref buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
+                return ImmutablePayloadBuffer.FromOwned(buffer);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
+            {
+                capacity *= 2;
+            }
+        }
     }
 
     public static ImmutablePayloadBuffer EncodePayload<TPacket>(
@@ -53,6 +75,80 @@ public static class PacketCodec
         writer.WriteUInt16((ushort)payload.Length);
         writer.WriteBytes(payload.Span);
         return ImmutablePayloadBuffer.FromOwned(buffer);
+    }
+
+    public static ImmutablePayloadBuffer EncodeRealtimeStateFrameEnvelope(
+        ulong sequence,
+        ulong itemKey,
+        ImmutablePayloadBuffer payload,
+        PacketHeaderFlags flags,
+        int initialCapacity = DefaultInitialCapacity)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        int payloadCapacity = sizeof(ulong) + sizeof(ulong) + sizeof(ushort) + payload.Length;
+        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
+        while (true)
+        {
+            byte[] buffer = new byte[capacity];
+            try
+            {
+                var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
+                payloadWriter.WriteUInt64(sequence);
+                payloadWriter.WriteUInt64(itemKey);
+                payloadWriter.WriteUInt16(checked((ushort)payload.Length));
+                payloadWriter.WriteBytes(payload.Span);
+
+                var headerWriter = new BitWriter(buffer);
+                new PacketEnvelopeHeader(
+                    RealtimeStateFramePacket.PacketId,
+                    flags,
+                    checked((ushort)payloadWriter.Position))
+                    .Serialize(ref headerWriter);
+
+                Array.Resize(ref buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
+                return ImmutablePayloadBuffer.FromOwned(buffer);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
+            {
+                capacity *= 2;
+            }
+        }
+    }
+
+    public static ImmutablePayloadBuffer EncodeReliableEventFrameEnvelope(
+        ulong sequence,
+        ImmutablePayloadBuffer payload,
+        PacketHeaderFlags flags = PacketHeaderFlags.None,
+        int initialCapacity = DefaultInitialCapacity)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        int payloadCapacity = sizeof(ulong) + sizeof(ushort) + payload.Length;
+        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
+        while (true)
+        {
+            byte[] buffer = new byte[capacity];
+            try
+            {
+                var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
+                payloadWriter.WriteUInt64(sequence);
+                payloadWriter.WriteUInt16(checked((ushort)payload.Length));
+                payloadWriter.WriteBytes(payload.Span);
+
+                var headerWriter = new BitWriter(buffer);
+                new PacketEnvelopeHeader(
+                    ReliableEventFramePacket.PacketId,
+                    flags,
+                    checked((ushort)payloadWriter.Position))
+                    .Serialize(ref headerWriter);
+
+                Array.Resize(ref buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
+                return ImmutablePayloadBuffer.FromOwned(buffer);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
+            {
+                capacity *= 2;
+            }
+        }
     }
 
     public static bool TryDecodeEnvelope(

@@ -25,6 +25,8 @@ public sealed class ReliableEventRetransmitBuilder
             throw new ArgumentOutOfRangeException(nameof(connectionId));
         if (destination.Length == 0 || entries.Length == 0)
             return default;
+        if (!_assembler.HasTransforms)
+            return BuildWithoutTransforms(connectionId, entries, destination);
 
         int count = 0;
         int compressed = 0;
@@ -53,5 +55,25 @@ public sealed class ReliableEventRetransmitBuilder
         }
 
         return new OutboundAssemblyResult(count, compressed, encrypted);
+    }
+
+    private static OutboundAssemblyResult BuildWithoutTransforms(
+        ConnectionId connectionId,
+        ReadOnlySpan<ReliableEventReplayEntry> entries,
+        Span<OutboundDatagram> destination)
+    {
+        int count = 0;
+        for (int i = 0; i < entries.Length && count < destination.Length; i++)
+        {
+            ReliableEventReplayEntry entry = entries[i];
+            destination[count++] = new OutboundDatagram(
+                connectionId,
+                ReliableEventFramePacket.Plane,
+                entry.PacketClass,
+                ReliableEventFramePacket.Channel,
+                PacketCodec.EncodeReliableEventFrameEnvelope(entry.Sequence, entry.Payload));
+        }
+
+        return new OutboundAssemblyResult(count, 0, 0);
     }
 }

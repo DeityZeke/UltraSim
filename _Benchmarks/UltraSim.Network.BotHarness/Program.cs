@@ -27,8 +27,8 @@ internal static class HarnessProgram
         string jsonPath = Path.Combine(reportDir, $"network_bot_harness_{stamp}.json");
 
         Console.WriteLine($"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}  AoiRadii: {string.Join(",", options.AoiRadiiMeters)}");
-        Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMax  TickSLO  PingSLO");
-        Console.WriteLine("-----------------------------------------------------------------------------------------------------------------------");
+        Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMax    GC(0/1/2)  TickSLO  PingSLO");
+        Console.WriteLine("--------------------------------------------------------------------------------------------------------------------------------");
 
         var rows = new JsonArray();
         using var harness = new MovementRampHarness(options);
@@ -51,7 +51,7 @@ internal static class HarnessProgram
                 $"{stageIndex,5}  {result.TargetClients,6} {result.ActiveClients,6}  {result.ReadyClients,5}  " +
                 $"{result.TickAverageMs,7:0.000}  {result.TickP95Ms,7:0.000}  {result.TickP99Ms,7:0.000}  {result.TickMaxMs,7:0.000}  " +
                 $"{result.PingAverageMs,7:0.000}  {result.PingP95Ms,8:0.000}  {result.PingMaxMs,7:0.000}  " +
-                $"{result.PendingMax,7}  {(result.TickSloPass ? "PASS" : "FAIL"),7}  {(result.PingSloPass ? "PASS" : "FAIL"),7}");
+                $"{result.PendingMax,7}  {result.Gen0Collections,4}/{result.Gen1Collections,2}/{result.Gen2Collections,2}  {(result.TickSloPass ? "PASS" : "FAIL"),7}  {(result.PingSloPass ? "PASS" : "FAIL"),7}");
 
             if (ShouldStop(options.StopOn, result))
                 break;
@@ -179,6 +179,9 @@ internal sealed class MovementRampHarness : IDisposable
         double ownerCorrectionVelocityErrorSum = 0d;
         double ownerCorrectionVelocityErrorMax = 0d;
         long allocBefore = GC.GetTotalAllocatedBytes(true);
+        int gen0Before = GC.CollectionCount(0);
+        int gen1Before = GC.CollectionCount(1);
+        int gen2Before = GC.CollectionCount(2);
 
         StageReplicationContext? replication = _options.ObserverReplication
             ? CreateReplicationContext()
@@ -267,6 +270,9 @@ internal sealed class MovementRampHarness : IDisposable
         }
 
         long allocAfter = GC.GetTotalAllocatedBytes(false);
+        int gen0After = GC.CollectionCount(0);
+        int gen1After = GC.CollectionCount(1);
+        int gen2After = GC.CollectionCount(2);
         TickWindowStats stats = new TickWindowStats(tickSamplesMs);
         TickWindowStats serverPumpStats = new TickWindowStats(serverPumpSamplesMs);
         TickWindowStats publishStats = new TickWindowStats(publishSamplesMs);
@@ -332,6 +338,9 @@ internal sealed class MovementRampHarness : IDisposable
             PendingAverage: tickSamplesMs.Count == 0 ? 0d : pendingSum / (double)tickSamplesMs.Count,
             PendingMax: pendingMax,
             AllocatedBytes: allocAfter - allocBefore,
+            Gen0Collections: gen0After - gen0Before,
+            Gen1Collections: gen1After - gen1Before,
+            Gen2Collections: gen2After - gen2Before,
             ConnectAttempts: connectAttempts,
             ConnectSuccess: Math.Min(connectAttempts, readyClients),
             SloTickP95Ms: _options.SloTickP95Ms,
@@ -1222,6 +1231,9 @@ internal readonly record struct StageResult(
     double PendingAverage,
     int PendingMax,
     long AllocatedBytes,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections,
     int ConnectAttempts,
     int ConnectSuccess,
     double SloTickP95Ms,
@@ -1283,6 +1295,9 @@ internal readonly record struct StageResult(
             ["pending_avg"] = Math.Round(PendingAverage, 3),
             ["pending_max"] = PendingMax,
             ["alloc_bytes"] = AllocatedBytes,
+            ["gc_gen0_collections"] = Gen0Collections,
+            ["gc_gen1_collections"] = Gen1Collections,
+            ["gc_gen2_collections"] = Gen2Collections,
             ["connect_attempts"] = ConnectAttempts,
             ["connect_success"] = ConnectSuccess,
             ["connect_success_rate"] = Math.Round(ConnectSuccessRate, 4),

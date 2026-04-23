@@ -105,6 +105,10 @@ The widened harness now reports:
 - `owner_correction_avg_velocity_error`
 - `owner_correction_max_velocity_error`
 - `observer_state_items`
+- `alloc_bytes`
+- `gc_gen0_collections`
+- `gc_gen1_collections`
+- `gc_gen2_collections`
 
 That split matters:
 

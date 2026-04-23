@@ -18,6 +18,9 @@ public sealed class OutboundDatagramAssembler
         bool allowCompression = true,
         bool allowSegmentation = true)
     {
+        if (_transforms.Length == 0)
+            return AssembleScheduledWithoutTransforms(connectionId, items, destination);
+
         int count = 0;
         int compressed = 0;
         int encrypted = 0;
@@ -146,5 +149,48 @@ public sealed class OutboundDatagramAssembler
             Count: count,
             CompressedCount: (frame.DefaultHeaderFlags & PacketHeaderFlags.Compressed) != 0 ? count : 0,
             EncryptedCount: (frame.DefaultHeaderFlags & PacketHeaderFlags.Encrypted) != 0 ? count : 0);
+    }
+
+    private static OutboundAssemblyResult AssembleScheduledWithoutTransforms(
+        ConnectionId connectionId,
+        ReadOnlySpan<ScheduledWorkItem> items,
+        Span<OutboundDatagram> destination)
+    {
+        int count = 0;
+        for (int i = 0; i < items.Length && count < destination.Length; i++)
+        {
+            ScheduledWorkItem item = items[i];
+            switch (item.Kind)
+            {
+                case ScheduledWorkKind.LatestState:
+                {
+                    PacketHeaderFlags flags = item.PacketClass == PacketClass.Bulk
+                        ? PacketHeaderFlags.None
+                        : PacketHeaderFlags.HighPriorityHint;
+                    ChannelType channel = item.PacketClass == PacketClass.Bulk
+                        ? ChannelType.ReliableOrdered
+                        : RealtimeStateFramePacket.Channel;
+                    destination[count++] = new OutboundDatagram(
+                        connectionId,
+                        RealtimeStateFramePacket.Plane,
+                        item.PacketClass,
+                        channel,
+                        PacketCodec.EncodeRealtimeStateFrameEnvelope(item.Sequence, item.ItemKey, item.Payload, flags));
+                    break;
+                }
+                case ScheduledWorkKind.OrderedEvent:
+                    destination[count++] = new OutboundDatagram(
+                        connectionId,
+                        ReliableEventFramePacket.Plane,
+                        item.PacketClass,
+                        ReliableEventFramePacket.Channel,
+                        PacketCodec.EncodeReliableEventFrameEnvelope(item.Sequence, item.Payload));
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unsupported scheduled work kind: {item.Kind}.");
+            }
+        }
+
+        return new OutboundAssemblyResult(count, 0, 0);
     }
 }
