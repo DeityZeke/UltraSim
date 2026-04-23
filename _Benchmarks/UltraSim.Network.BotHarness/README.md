@@ -39,6 +39,8 @@ Useful options:
 - `--ping-interval-s <n>`
 - `--stop-on either|tick|ping|none`
 - `--observer-replication`
+- `--observer-events`
+- `--observer-event-every-ticks <n>`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
@@ -77,6 +79,8 @@ The widened harness now reports:
 - `replication_wire_datagrams`
 - `observer_frames_received`
 - `observer_frames_applied`
+- `observer_events_received`
+- `observer_events_applied`
 - `observer_state_items`
 
 That split matters:
@@ -94,6 +98,13 @@ The widened harness AOI policy is now configurable:
   - `--aoi-radii-m 7.5,23.5,39.5`
 
 This is intended to let the same live path broaden naturally as replication families grow, without forking into a separate parity-only harness.
+
+The widened harness can now also include a first ordered observer-event family on top of latest-state:
+
+- enable with `--observer-events`
+- control cadence with `--observer-event-every-ticks <n>`
+
+That path uses the same live session hosts, AOI subscriptions, fanout bridge, and client-side decode/apply flow as the latest-state path.
 
 Current first read with actual client consume:
 

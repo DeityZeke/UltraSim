@@ -1,0 +1,1758 @@
+{
+  "timestamp_utc": "2026-04-23T00:47:08.7508288Z",
+  "harness": "udp-session-host-ramp",
+  "args": {
+    "stages": "32,48,56,64",
+    "stage_mode": "independent",
+    "stage_duration_seconds": 5,
+    "settle_seconds": 1,
+    "tick_hz": 62,
+    "active_ratio": 0.4,
+    "port": 0,
+    "slo_tick_p95_ms": 4,
+    "slo_ping_p95_ms": 50,
+    "slo_pending_max": 128,
+    "ping_interval_seconds": 1,
+    "stop_on": "none",
+    "observer_replication": true,
+    "observer_events": true,
+    "observer_event_every_ticks": 8,
+    "spawn_spacing_m": 12,
+    "spawn_grid_width": 32,
+    "aoi_radii_m": [
+      7.5,
+      23.5,
+      39.5
+    ]
+  },
+  "stages": [
+    {
+      "stage_index": 0,
+      "target_clients": 32,
+      "active_clients": 32,
+      "ready_clients": 32,
+      "tick_avg_ms": 1.355,
+      "tick_p95_ms": 1.61,
+      "tick_p99_ms": 2.027,
+      "tick_max_ms": 43.696,
+      "ping_avg_ms": 1.777,
+      "ping_p95_ms": 3.317,
+      "ping_max_ms": 12.125,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 136743664,
+      "connect_attempts": 32,
+      "connect_success": 32,
+      "connect_success_rate": 1,
+      "tick_slo_pass": true,
+      "ping_slo_pass": true,
+      "per_client_ping": [
+        {
+          "client_index": 0,
+          "sample_count": 5,
+          "ping_avg_ms": 3.702,
+          "ping_p95_ms": 10.072,
+          "ping_p99_ms": 11.714,
+          "ping_max_ms": 12.125
+        },
+        {
+          "client_index": 1,
+          "sample_count": 5,
+          "ping_avg_ms": 1.963,
+          "ping_p95_ms": 3.153,
+          "ping_p99_ms": 3.418,
+          "ping_max_ms": 3.484
+        },
+        {
+          "client_index": 2,
+          "sample_count": 5,
+          "ping_avg_ms": 1.907,
+          "ping_p95_ms": 3.117,
+          "ping_p99_ms": 3.378,
+          "ping_max_ms": 3.444
+        },
+        {
+          "client_index": 3,
+          "sample_count": 5,
+          "ping_avg_ms": 1.892,
+          "ping_p95_ms": 3.099,
+          "ping_p99_ms": 3.36,
+          "ping_max_ms": 3.425
+        },
+        {
+          "client_index": 4,
+          "sample_count": 5,
+          "ping_avg_ms": 1.88,
+          "ping_p95_ms": 3.079,
+          "ping_p99_ms": 3.34,
+          "ping_max_ms": 3.405
+        },
+        {
+          "client_index": 5,
+          "sample_count": 5,
+          "ping_avg_ms": 1.865,
+          "ping_p95_ms": 3.059,
+          "ping_p99_ms": 3.32,
+          "ping_max_ms": 3.386
+        },
+        {
+          "client_index": 6,
+          "sample_count": 5,
+          "ping_avg_ms": 1.85,
+          "ping_p95_ms": 3.035,
+          "ping_p99_ms": 3.296,
+          "ping_max_ms": 3.362
+        },
+        {
+          "client_index": 7,
+          "sample_count": 5,
+          "ping_avg_ms": 1.836,
+          "ping_p95_ms": 3.011,
+          "ping_p99_ms": 3.273,
+          "ping_max_ms": 3.338
+        },
+        {
+          "client_index": 8,
+          "sample_count": 5,
+          "ping_avg_ms": 1.822,
+          "ping_p95_ms": 2.989,
+          "ping_p99_ms": 3.25,
+          "ping_max_ms": 3.316
+        },
+        {
+          "client_index": 9,
+          "sample_count": 5,
+          "ping_avg_ms": 1.806,
+          "ping_p95_ms": 2.963,
+          "ping_p99_ms": 3.224,
+          "ping_max_ms": 3.289
+        },
+        {
+          "client_index": 10,
+          "sample_count": 5,
+          "ping_avg_ms": 1.787,
+          "ping_p95_ms": 2.934,
+          "ping_p99_ms": 3.194,
+          "ping_max_ms": 3.258
+        },
+        {
+          "client_index": 11,
+          "sample_count": 5,
+          "ping_avg_ms": 1.774,
+          "ping_p95_ms": 2.913,
+          "ping_p99_ms": 3.173,
+          "ping_max_ms": 3.238
+        },
+        {
+          "client_index": 12,
+          "sample_count": 5,
+          "ping_avg_ms": 1.758,
+          "ping_p95_ms": 2.884,
+          "ping_p99_ms": 3.141,
+          "ping_max_ms": 3.206
+        },
+        {
+          "client_index": 13,
+          "sample_count": 5,
+          "ping_avg_ms": 1.741,
+          "ping_p95_ms": 2.853,
+          "ping_p99_ms": 3.107,
+          "ping_max_ms": 3.171
+        },
+        {
+          "client_index": 14,
+          "sample_count": 5,
+          "ping_avg_ms": 1.726,
+          "ping_p95_ms": 2.823,
+          "ping_p99_ms": 3.075,
+          "ping_max_ms": 3.138
+        },
+        {
+          "client_index": 15,
+          "sample_count": 5,
+          "ping_avg_ms": 1.714,
+          "ping_p95_ms": 2.799,
+          "ping_p99_ms": 3.048,
+          "ping_max_ms": 3.11
+        },
+        {
+          "client_index": 16,
+          "sample_count": 5,
+          "ping_avg_ms": 1.7,
+          "ping_p95_ms": 2.77,
+          "ping_p99_ms": 3.015,
+          "ping_max_ms": 3.077
+        },
+        {
+          "client_index": 17,
+          "sample_count": 5,
+          "ping_avg_ms": 1.684,
+          "ping_p95_ms": 2.739,
+          "ping_p99_ms": 2.98,
+          "ping_max_ms": 3.041
+        },
+        {
+          "client_index": 18,
+          "sample_count": 5,
+          "ping_avg_ms": 1.672,
+          "ping_p95_ms": 2.709,
+          "ping_p99_ms": 2.945,
+          "ping_max_ms": 3.004
+        },
+        {
+          "client_index": 19,
+          "sample_count": 5,
+          "ping_avg_ms": 1.662,
+          "ping_p95_ms": 2.682,
+          "ping_p99_ms": 2.913,
+          "ping_max_ms": 2.971
+        },
+        {
+          "client_index": 20,
+          "sample_count": 5,
+          "ping_avg_ms": 1.651,
+          "ping_p95_ms": 2.651,
+          "ping_p99_ms": 2.877,
+          "ping_max_ms": 2.934
+        },
+        {
+          "client_index": 21,
+          "sample_count": 5,
+          "ping_avg_ms": 1.638,
+          "ping_p95_ms": 2.621,
+          "ping_p99_ms": 2.842,
+          "ping_max_ms": 2.897
+        },
+        {
+          "client_index": 22,
+          "sample_count": 5,
+          "ping_avg_ms": 1.627,
+          "ping_p95_ms": 2.591,
+          "ping_p99_ms": 2.808,
+          "ping_max_ms": 2.862
+        },
+        {
+          "client_index": 23,
+          "sample_count": 5,
+          "ping_avg_ms": 1.615,
+          "ping_p95_ms": 2.562,
+          "ping_p99_ms": 2.774,
+          "ping_max_ms": 2.826
+        },
+        {
+          "client_index": 24,
+          "sample_count": 5,
+          "ping_avg_ms": 1.603,
+          "ping_p95_ms": 2.531,
+          "ping_p99_ms": 2.737,
+          "ping_max_ms": 2.789
+        },
+        {
+          "client_index": 25,
+          "sample_count": 5,
+          "ping_avg_ms": 1.592,
+          "ping_p95_ms": 2.501,
+          "ping_p99_ms": 2.702,
+          "ping_max_ms": 2.753
+        },
+        {
+          "client_index": 26,
+          "sample_count": 5,
+          "ping_avg_ms": 1.58,
+          "ping_p95_ms": 2.473,
+          "ping_p99_ms": 2.669,
+          "ping_max_ms": 2.718
+        },
+        {
+          "client_index": 27,
+          "sample_count": 5,
+          "ping_avg_ms": 1.58,
+          "ping_p95_ms": 2.446,
+          "ping_p99_ms": 2.638,
+          "ping_max_ms": 2.686
+        },
+        {
+          "client_index": 28,
+          "sample_count": 5,
+          "ping_avg_ms": 1.569,
+          "ping_p95_ms": 2.415,
+          "ping_p99_ms": 2.602,
+          "ping_max_ms": 2.649
+        },
+        {
+          "client_index": 29,
+          "sample_count": 5,
+          "ping_avg_ms": 1.559,
+          "ping_p95_ms": 2.385,
+          "ping_p99_ms": 2.566,
+          "ping_max_ms": 2.612
+        },
+        {
+          "client_index": 30,
+          "sample_count": 5,
+          "ping_avg_ms": 1.552,
+          "ping_p95_ms": 2.361,
+          "ping_p99_ms": 2.537,
+          "ping_max_ms": 2.58
+        },
+        {
+          "client_index": 31,
+          "sample_count": 5,
+          "ping_avg_ms": 1.544,
+          "ping_p95_ms": 2.34,
+          "ping_p99_ms": 2.512,
+          "ping_max_ms": 2.555
+        }
+      ],
+      "observer_replication": true,
+      "replication_published_items": 13725,
+      "replication_datagrams": 33642,
+      "replication_wire_datagrams": 5285,
+      "observer_frames_received": 29774,
+      "observer_frames_applied": 29774,
+      "observer_events_received": 3868,
+      "observer_events_applied": 3868,
+      "observer_state_items": 283
+    },
+    {
+      "stage_index": 1,
+      "target_clients": 48,
+      "active_clients": 48,
+      "ready_clients": 48,
+      "tick_avg_ms": 2.176,
+      "tick_p95_ms": 3.238,
+      "tick_p99_ms": 3.721,
+      "tick_max_ms": 8.233,
+      "ping_avg_ms": 2.993,
+      "ping_p95_ms": 5.547,
+      "ping_max_ms": 6.196,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 179107912,
+      "connect_attempts": 48,
+      "connect_success": 48,
+      "connect_success_rate": 1,
+      "tick_slo_pass": true,
+      "ping_slo_pass": true,
+      "per_client_ping": [
+        {
+          "client_index": 0,
+          "sample_count": 5,
+          "ping_avg_ms": 3.478,
+          "ping_p95_ms": 5.66,
+          "ping_p99_ms": 6.089,
+          "ping_max_ms": 6.196
+        },
+        {
+          "client_index": 1,
+          "sample_count": 5,
+          "ping_avg_ms": 3.473,
+          "ping_p95_ms": 5.633,
+          "ping_p99_ms": 6.047,
+          "ping_max_ms": 6.15
+        },
+        {
+          "client_index": 2,
+          "sample_count": 5,
+          "ping_avg_ms": 3.403,
+          "ping_p95_ms": 5.533,
+          "ping_p99_ms": 5.984,
+          "ping_max_ms": 6.096
+        },
+        {
+          "client_index": 3,
+          "sample_count": 5,
+          "ping_avg_ms": 3.383,
+          "ping_p95_ms": 5.493,
+          "ping_p99_ms": 5.941,
+          "ping_max_ms": 6.052
+        },
+        {
+          "client_index": 4,
+          "sample_count": 5,
+          "ping_avg_ms": 3.364,
+          "ping_p95_ms": 5.446,
+          "ping_p99_ms": 5.888,
+          "ping_max_ms": 5.999
+        },
+        {
+          "client_index": 5,
+          "sample_count": 5,
+          "ping_avg_ms": 3.343,
+          "ping_p95_ms": 5.4,
+          "ping_p99_ms": 5.837,
+          "ping_max_ms": 5.947
+        },
+        {
+          "client_index": 6,
+          "sample_count": 5,
+          "ping_avg_ms": 3.335,
+          "ping_p95_ms": 5.353,
+          "ping_p99_ms": 5.784,
+          "ping_max_ms": 5.892
+        },
+        {
+          "client_index": 7,
+          "sample_count": 5,
+          "ping_avg_ms": 3.314,
+          "ping_p95_ms": 5.304,
+          "ping_p99_ms": 5.73,
+          "ping_max_ms": 5.837
+        },
+        {
+          "client_index": 8,
+          "sample_count": 5,
+          "ping_avg_ms": 3.3,
+          "ping_p95_ms": 5.258,
+          "ping_p99_ms": 5.673,
+          "ping_max_ms": 5.777
+        },
+        {
+          "client_index": 9,
+          "sample_count": 5,
+          "ping_avg_ms": 3.295,
+          "ping_p95_ms": 5.223,
+          "ping_p99_ms": 5.62,
+          "ping_max_ms": 5.719
+        },
+        {
+          "client_index": 10,
+          "sample_count": 5,
+          "ping_avg_ms": 3.273,
+          "ping_p95_ms": 5.169,
+          "ping_p99_ms": 5.558,
+          "ping_max_ms": 5.656
+        },
+        {
+          "client_index": 11,
+          "sample_count": 5,
+          "ping_avg_ms": 3.254,
+          "ping_p95_ms": 5.125,
+          "ping_p99_ms": 5.51,
+          "ping_max_ms": 5.606
+        },
+        {
+          "client_index": 12,
+          "sample_count": 5,
+          "ping_avg_ms": 3.234,
+          "ping_p95_ms": 5.072,
+          "ping_p99_ms": 5.45,
+          "ping_max_ms": 5.544
+        },
+        {
+          "client_index": 13,
+          "sample_count": 5,
+          "ping_avg_ms": 3.212,
+          "ping_p95_ms": 5.019,
+          "ping_p99_ms": 5.391,
+          "ping_max_ms": 5.484
+        },
+        {
+          "client_index": 14,
+          "sample_count": 5,
+          "ping_avg_ms": 3.194,
+          "ping_p95_ms": 4.977,
+          "ping_p99_ms": 5.344,
+          "ping_max_ms": 5.436
+        },
+        {
+          "client_index": 15,
+          "sample_count": 5,
+          "ping_avg_ms": 3.177,
+          "ping_p95_ms": 4.937,
+          "ping_p99_ms": 5.299,
+          "ping_max_ms": 5.39
+        },
+        {
+          "client_index": 16,
+          "sample_count": 5,
+          "ping_avg_ms": 3.159,
+          "ping_p95_ms": 4.896,
+          "ping_p99_ms": 5.254,
+          "ping_max_ms": 5.343
+        },
+        {
+          "client_index": 17,
+          "sample_count": 5,
+          "ping_avg_ms": 3.137,
+          "ping_p95_ms": 4.848,
+          "ping_p99_ms": 5.202,
+          "ping_max_ms": 5.29
+        },
+        {
+          "client_index": 18,
+          "sample_count": 5,
+          "ping_avg_ms": 3.119,
+          "ping_p95_ms": 4.811,
+          "ping_p99_ms": 5.16,
+          "ping_max_ms": 5.248
+        },
+        {
+          "client_index": 19,
+          "sample_count": 5,
+          "ping_avg_ms": 3.106,
+          "ping_p95_ms": 4.782,
+          "ping_p99_ms": 5.129,
+          "ping_max_ms": 5.216
+        },
+        {
+          "client_index": 20,
+          "sample_count": 5,
+          "ping_avg_ms": 3.094,
+          "ping_p95_ms": 4.749,
+          "ping_p99_ms": 5.09,
+          "ping_max_ms": 5.176
+        },
+        {
+          "client_index": 21,
+          "sample_count": 5,
+          "ping_avg_ms": 3.081,
+          "ping_p95_ms": 4.716,
+          "ping_p99_ms": 5.05,
+          "ping_max_ms": 5.133
+        },
+        {
+          "client_index": 22,
+          "sample_count": 5,
+          "ping_avg_ms": 3.065,
+          "ping_p95_ms": 4.681,
+          "ping_p99_ms": 5.009,
+          "ping_max_ms": 5.091
+        },
+        {
+          "client_index": 23,
+          "sample_count": 5,
+          "ping_avg_ms": 3.058,
+          "ping_p95_ms": 4.655,
+          "ping_p99_ms": 4.976,
+          "ping_max_ms": 5.056
+        },
+        {
+          "client_index": 24,
+          "sample_count": 5,
+          "ping_avg_ms": 3.046,
+          "ping_p95_ms": 4.622,
+          "ping_p99_ms": 4.937,
+          "ping_max_ms": 5.016
+        },
+        {
+          "client_index": 25,
+          "sample_count": 5,
+          "ping_avg_ms": 3.039,
+          "ping_p95_ms": 4.592,
+          "ping_p99_ms": 4.899,
+          "ping_max_ms": 4.975
+        },
+        {
+          "client_index": 26,
+          "sample_count": 5,
+          "ping_avg_ms": 3.027,
+          "ping_p95_ms": 4.559,
+          "ping_p99_ms": 4.86,
+          "ping_max_ms": 4.935
+        },
+        {
+          "client_index": 27,
+          "sample_count": 5,
+          "ping_avg_ms": 3.016,
+          "ping_p95_ms": 4.53,
+          "ping_p99_ms": 4.826,
+          "ping_max_ms": 4.9
+        },
+        {
+          "client_index": 28,
+          "sample_count": 5,
+          "ping_avg_ms": 3.005,
+          "ping_p95_ms": 4.498,
+          "ping_p99_ms": 4.789,
+          "ping_max_ms": 4.862
+        },
+        {
+          "client_index": 29,
+          "sample_count": 5,
+          "ping_avg_ms": 2.994,
+          "ping_p95_ms": 4.468,
+          "ping_p99_ms": 4.753,
+          "ping_max_ms": 4.824
+        },
+        {
+          "client_index": 30,
+          "sample_count": 5,
+          "ping_avg_ms": 2.981,
+          "ping_p95_ms": 4.437,
+          "ping_p99_ms": 4.719,
+          "ping_max_ms": 4.79
+        },
+        {
+          "client_index": 31,
+          "sample_count": 5,
+          "ping_avg_ms": 2.969,
+          "ping_p95_ms": 4.412,
+          "ping_p99_ms": 4.693,
+          "ping_max_ms": 4.764
+        },
+        {
+          "client_index": 32,
+          "sample_count": 5,
+          "ping_avg_ms": 2.969,
+          "ping_p95_ms": 4.399,
+          "ping_p99_ms": 4.677,
+          "ping_max_ms": 4.746
+        },
+        {
+          "client_index": 33,
+          "sample_count": 5,
+          "ping_avg_ms": 2.957,
+          "ping_p95_ms": 4.374,
+          "ping_p99_ms": 4.648,
+          "ping_max_ms": 4.717
+        },
+        {
+          "client_index": 34,
+          "sample_count": 5,
+          "ping_avg_ms": 2.644,
+          "ping_p95_ms": 3.143,
+          "ping_p99_ms": 3.173,
+          "ping_max_ms": 3.18
+        },
+        {
+          "client_index": 35,
+          "sample_count": 5,
+          "ping_avg_ms": 2.647,
+          "ping_p95_ms": 3.103,
+          "ping_p99_ms": 3.126,
+          "ping_max_ms": 3.131
+        },
+        {
+          "client_index": 36,
+          "sample_count": 5,
+          "ping_avg_ms": 2.63,
+          "ping_p95_ms": 3.053,
+          "ping_p99_ms": 3.066,
+          "ping_max_ms": 3.069
+        },
+        {
+          "client_index": 37,
+          "sample_count": 5,
+          "ping_avg_ms": 2.611,
+          "ping_p95_ms": 3.006,
+          "ping_p99_ms": 3.01,
+          "ping_max_ms": 3.011
+        },
+        {
+          "client_index": 38,
+          "sample_count": 5,
+          "ping_avg_ms": 2.591,
+          "ping_p95_ms": 2.971,
+          "ping_p99_ms": 2.975,
+          "ping_max_ms": 2.976
+        },
+        {
+          "client_index": 39,
+          "sample_count": 5,
+          "ping_avg_ms": 2.583,
+          "ping_p95_ms": 2.99,
+          "ping_p99_ms": 2.998,
+          "ping_max_ms": 3
+        },
+        {
+          "client_index": 40,
+          "sample_count": 5,
+          "ping_avg_ms": 2.568,
+          "ping_p95_ms": 2.996,
+          "ping_p99_ms": 3.005,
+          "ping_max_ms": 3.008
+        },
+        {
+          "client_index": 41,
+          "sample_count": 5,
+          "ping_avg_ms": 2.554,
+          "ping_p95_ms": 2.991,
+          "ping_p99_ms": 3,
+          "ping_max_ms": 3.003
+        },
+        {
+          "client_index": 42,
+          "sample_count": 5,
+          "ping_avg_ms": 2.534,
+          "ping_p95_ms": 2.984,
+          "ping_p99_ms": 2.993,
+          "ping_max_ms": 2.996
+        },
+        {
+          "client_index": 43,
+          "sample_count": 5,
+          "ping_avg_ms": 2.522,
+          "ping_p95_ms": 2.983,
+          "ping_p99_ms": 2.992,
+          "ping_max_ms": 2.994
+        },
+        {
+          "client_index": 44,
+          "sample_count": 5,
+          "ping_avg_ms": 2.506,
+          "ping_p95_ms": 2.978,
+          "ping_p99_ms": 2.987,
+          "ping_max_ms": 2.989
+        },
+        {
+          "client_index": 45,
+          "sample_count": 5,
+          "ping_avg_ms": 2.489,
+          "ping_p95_ms": 2.974,
+          "ping_p99_ms": 2.983,
+          "ping_max_ms": 2.985
+        },
+        {
+          "client_index": 46,
+          "sample_count": 5,
+          "ping_avg_ms": 2.471,
+          "ping_p95_ms": 2.967,
+          "ping_p99_ms": 2.976,
+          "ping_max_ms": 2.978
+        },
+        {
+          "client_index": 47,
+          "sample_count": 5,
+          "ping_avg_ms": 2.459,
+          "ping_p95_ms": 2.965,
+          "ping_p99_ms": 2.974,
+          "ping_max_ms": 2.976
+        }
+      ],
+      "observer_replication": true,
+      "replication_published_items": 20067,
+      "replication_datagrams": 90761,
+      "replication_wire_datagrams": 11821,
+      "observer_frames_received": 80367,
+      "observer_frames_applied": 80367,
+      "observer_events_received": 10394,
+      "observer_events_applied": 10394,
+      "observer_state_items": 682
+    },
+    {
+      "stage_index": 2,
+      "target_clients": 56,
+      "active_clients": 56,
+      "ready_clients": 56,
+      "tick_avg_ms": 1.324,
+      "tick_p95_ms": 2.051,
+      "tick_p99_ms": 2.772,
+      "tick_max_ms": 4.362,
+      "ping_avg_ms": 1.833,
+      "ping_p95_ms": 3.408,
+      "ping_max_ms": 3.907,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 197895136,
+      "connect_attempts": 56,
+      "connect_success": 56,
+      "connect_success_rate": 1,
+      "tick_slo_pass": true,
+      "ping_slo_pass": true,
+      "per_client_ping": [
+        {
+          "client_index": 0,
+          "sample_count": 5,
+          "ping_avg_ms": 2.129,
+          "ping_p95_ms": 3.52,
+          "ping_p99_ms": 3.83,
+          "ping_max_ms": 3.907
+        },
+        {
+          "client_index": 1,
+          "sample_count": 5,
+          "ping_avg_ms": 2.115,
+          "ping_p95_ms": 3.487,
+          "ping_p99_ms": 3.793,
+          "ping_max_ms": 3.869
+        },
+        {
+          "client_index": 2,
+          "sample_count": 5,
+          "ping_avg_ms": 2.108,
+          "ping_p95_ms": 3.464,
+          "ping_p99_ms": 3.762,
+          "ping_max_ms": 3.837
+        },
+        {
+          "client_index": 3,
+          "sample_count": 5,
+          "ping_avg_ms": 2.098,
+          "ping_p95_ms": 3.44,
+          "ping_p99_ms": 3.734,
+          "ping_max_ms": 3.807
+        },
+        {
+          "client_index": 4,
+          "sample_count": 5,
+          "ping_avg_ms": 2.087,
+          "ping_p95_ms": 3.412,
+          "ping_p99_ms": 3.701,
+          "ping_max_ms": 3.773
+        },
+        {
+          "client_index": 5,
+          "sample_count": 5,
+          "ping_avg_ms": 2.077,
+          "ping_p95_ms": 3.384,
+          "ping_p99_ms": 3.668,
+          "ping_max_ms": 3.739
+        },
+        {
+          "client_index": 6,
+          "sample_count": 5,
+          "ping_avg_ms": 2.063,
+          "ping_p95_ms": 3.348,
+          "ping_p99_ms": 3.626,
+          "ping_max_ms": 3.695
+        },
+        {
+          "client_index": 7,
+          "sample_count": 5,
+          "ping_avg_ms": 2.052,
+          "ping_p95_ms": 3.32,
+          "ping_p99_ms": 3.592,
+          "ping_max_ms": 3.66
+        },
+        {
+          "client_index": 8,
+          "sample_count": 5,
+          "ping_avg_ms": 2.04,
+          "ping_p95_ms": 3.289,
+          "ping_p99_ms": 3.556,
+          "ping_max_ms": 3.622
+        },
+        {
+          "client_index": 9,
+          "sample_count": 5,
+          "ping_avg_ms": 2.028,
+          "ping_p95_ms": 3.258,
+          "ping_p99_ms": 3.519,
+          "ping_max_ms": 3.585
+        },
+        {
+          "client_index": 10,
+          "sample_count": 5,
+          "ping_avg_ms": 2.017,
+          "ping_p95_ms": 3.228,
+          "ping_p99_ms": 3.484,
+          "ping_max_ms": 3.548
+        },
+        {
+          "client_index": 11,
+          "sample_count": 5,
+          "ping_avg_ms": 2.006,
+          "ping_p95_ms": 3.201,
+          "ping_p99_ms": 3.453,
+          "ping_max_ms": 3.516
+        },
+        {
+          "client_index": 12,
+          "sample_count": 5,
+          "ping_avg_ms": 1.994,
+          "ping_p95_ms": 3.17,
+          "ping_p99_ms": 3.416,
+          "ping_max_ms": 3.478
+        },
+        {
+          "client_index": 13,
+          "sample_count": 5,
+          "ping_avg_ms": 1.983,
+          "ping_p95_ms": 3.141,
+          "ping_p99_ms": 3.382,
+          "ping_max_ms": 3.442
+        },
+        {
+          "client_index": 14,
+          "sample_count": 5,
+          "ping_avg_ms": 1.971,
+          "ping_p95_ms": 3.111,
+          "ping_p99_ms": 3.347,
+          "ping_max_ms": 3.406
+        },
+        {
+          "client_index": 15,
+          "sample_count": 5,
+          "ping_avg_ms": 1.96,
+          "ping_p95_ms": 3.086,
+          "ping_p99_ms": 3.318,
+          "ping_max_ms": 3.376
+        },
+        {
+          "client_index": 16,
+          "sample_count": 5,
+          "ping_avg_ms": 1.948,
+          "ping_p95_ms": 3.054,
+          "ping_p99_ms": 3.28,
+          "ping_max_ms": 3.337
+        },
+        {
+          "client_index": 17,
+          "sample_count": 5,
+          "ping_avg_ms": 1.936,
+          "ping_p95_ms": 3.024,
+          "ping_p99_ms": 3.245,
+          "ping_max_ms": 3.301
+        },
+        {
+          "client_index": 18,
+          "sample_count": 5,
+          "ping_avg_ms": 1.924,
+          "ping_p95_ms": 2.994,
+          "ping_p99_ms": 3.21,
+          "ping_max_ms": 3.264
+        },
+        {
+          "client_index": 19,
+          "sample_count": 5,
+          "ping_avg_ms": 1.913,
+          "ping_p95_ms": 2.966,
+          "ping_p99_ms": 3.177,
+          "ping_max_ms": 3.23
+        },
+        {
+          "client_index": 20,
+          "sample_count": 5,
+          "ping_avg_ms": 1.902,
+          "ping_p95_ms": 2.936,
+          "ping_p99_ms": 3.142,
+          "ping_max_ms": 3.194
+        },
+        {
+          "client_index": 21,
+          "sample_count": 5,
+          "ping_avg_ms": 1.889,
+          "ping_p95_ms": 2.903,
+          "ping_p99_ms": 3.103,
+          "ping_max_ms": 3.153
+        },
+        {
+          "client_index": 22,
+          "sample_count": 5,
+          "ping_avg_ms": 1.877,
+          "ping_p95_ms": 2.873,
+          "ping_p99_ms": 3.069,
+          "ping_max_ms": 3.118
+        },
+        {
+          "client_index": 23,
+          "sample_count": 5,
+          "ping_avg_ms": 1.867,
+          "ping_p95_ms": 2.846,
+          "ping_p99_ms": 3.037,
+          "ping_max_ms": 3.085
+        },
+        {
+          "client_index": 24,
+          "sample_count": 5,
+          "ping_avg_ms": 1.856,
+          "ping_p95_ms": 2.819,
+          "ping_p99_ms": 3.005,
+          "ping_max_ms": 3.052
+        },
+        {
+          "client_index": 25,
+          "sample_count": 5,
+          "ping_avg_ms": 1.844,
+          "ping_p95_ms": 2.789,
+          "ping_p99_ms": 2.971,
+          "ping_max_ms": 3.017
+        },
+        {
+          "client_index": 26,
+          "sample_count": 5,
+          "ping_avg_ms": 1.835,
+          "ping_p95_ms": 2.768,
+          "ping_p99_ms": 2.947,
+          "ping_max_ms": 2.991
+        },
+        {
+          "client_index": 27,
+          "sample_count": 5,
+          "ping_avg_ms": 1.827,
+          "ping_p95_ms": 2.746,
+          "ping_p99_ms": 2.921,
+          "ping_max_ms": 2.965
+        },
+        {
+          "client_index": 28,
+          "sample_count": 5,
+          "ping_avg_ms": 1.817,
+          "ping_p95_ms": 2.722,
+          "ping_p99_ms": 2.893,
+          "ping_max_ms": 2.936
+        },
+        {
+          "client_index": 29,
+          "sample_count": 5,
+          "ping_avg_ms": 1.81,
+          "ping_p95_ms": 2.703,
+          "ping_p99_ms": 2.872,
+          "ping_max_ms": 2.914
+        },
+        {
+          "client_index": 30,
+          "sample_count": 5,
+          "ping_avg_ms": 1.802,
+          "ping_p95_ms": 2.684,
+          "ping_p99_ms": 2.85,
+          "ping_max_ms": 2.891
+        },
+        {
+          "client_index": 31,
+          "sample_count": 5,
+          "ping_avg_ms": 1.796,
+          "ping_p95_ms": 2.67,
+          "ping_p99_ms": 2.833,
+          "ping_max_ms": 2.874
+        },
+        {
+          "client_index": 32,
+          "sample_count": 5,
+          "ping_avg_ms": 1.792,
+          "ping_p95_ms": 2.66,
+          "ping_p99_ms": 2.821,
+          "ping_max_ms": 2.862
+        },
+        {
+          "client_index": 33,
+          "sample_count": 5,
+          "ping_avg_ms": 1.785,
+          "ping_p95_ms": 2.644,
+          "ping_p99_ms": 2.803,
+          "ping_max_ms": 2.842
+        },
+        {
+          "client_index": 34,
+          "sample_count": 5,
+          "ping_avg_ms": 1.775,
+          "ping_p95_ms": 2.619,
+          "ping_p99_ms": 2.775,
+          "ping_max_ms": 2.813
+        },
+        {
+          "client_index": 35,
+          "sample_count": 5,
+          "ping_avg_ms": 1.765,
+          "ping_p95_ms": 2.595,
+          "ping_p99_ms": 2.746,
+          "ping_max_ms": 2.784
+        },
+        {
+          "client_index": 36,
+          "sample_count": 5,
+          "ping_avg_ms": 1.756,
+          "ping_p95_ms": 2.57,
+          "ping_p99_ms": 2.717,
+          "ping_max_ms": 2.753
+        },
+        {
+          "client_index": 37,
+          "sample_count": 5,
+          "ping_avg_ms": 1.744,
+          "ping_p95_ms": 2.541,
+          "ping_p99_ms": 2.683,
+          "ping_max_ms": 2.718
+        },
+        {
+          "client_index": 38,
+          "sample_count": 5,
+          "ping_avg_ms": 1.731,
+          "ping_p95_ms": 2.509,
+          "ping_p99_ms": 2.646,
+          "ping_max_ms": 2.68
+        },
+        {
+          "client_index": 39,
+          "sample_count": 5,
+          "ping_avg_ms": 1.721,
+          "ping_p95_ms": 2.483,
+          "ping_p99_ms": 2.616,
+          "ping_max_ms": 2.649
+        },
+        {
+          "client_index": 40,
+          "sample_count": 5,
+          "ping_avg_ms": 1.71,
+          "ping_p95_ms": 2.454,
+          "ping_p99_ms": 2.581,
+          "ping_max_ms": 2.613
+        },
+        {
+          "client_index": 41,
+          "sample_count": 5,
+          "ping_avg_ms": 1.697,
+          "ping_p95_ms": 2.423,
+          "ping_p99_ms": 2.544,
+          "ping_max_ms": 2.575
+        },
+        {
+          "client_index": 42,
+          "sample_count": 5,
+          "ping_avg_ms": 1.687,
+          "ping_p95_ms": 2.391,
+          "ping_p99_ms": 2.508,
+          "ping_max_ms": 2.537
+        },
+        {
+          "client_index": 43,
+          "sample_count": 5,
+          "ping_avg_ms": 1.677,
+          "ping_p95_ms": 2.365,
+          "ping_p99_ms": 2.478,
+          "ping_max_ms": 2.506
+        },
+        {
+          "client_index": 44,
+          "sample_count": 5,
+          "ping_avg_ms": 1.665,
+          "ping_p95_ms": 2.336,
+          "ping_p99_ms": 2.443,
+          "ping_max_ms": 2.47
+        },
+        {
+          "client_index": 45,
+          "sample_count": 5,
+          "ping_avg_ms": 1.653,
+          "ping_p95_ms": 2.304,
+          "ping_p99_ms": 2.406,
+          "ping_max_ms": 2.432
+        },
+        {
+          "client_index": 46,
+          "sample_count": 5,
+          "ping_avg_ms": 1.64,
+          "ping_p95_ms": 2.274,
+          "ping_p99_ms": 2.371,
+          "ping_max_ms": 2.396
+        },
+        {
+          "client_index": 47,
+          "sample_count": 5,
+          "ping_avg_ms": 1.63,
+          "ping_p95_ms": 2.249,
+          "ping_p99_ms": 2.341,
+          "ping_max_ms": 2.364
+        },
+        {
+          "client_index": 48,
+          "sample_count": 5,
+          "ping_avg_ms": 1.618,
+          "ping_p95_ms": 2.218,
+          "ping_p99_ms": 2.306,
+          "ping_max_ms": 2.328
+        },
+        {
+          "client_index": 49,
+          "sample_count": 5,
+          "ping_avg_ms": 1.609,
+          "ping_p95_ms": 2.189,
+          "ping_p99_ms": 2.271,
+          "ping_max_ms": 2.292
+        },
+        {
+          "client_index": 50,
+          "sample_count": 5,
+          "ping_avg_ms": 1.597,
+          "ping_p95_ms": 2.157,
+          "ping_p99_ms": 2.234,
+          "ping_max_ms": 2.253
+        },
+        {
+          "client_index": 51,
+          "sample_count": 5,
+          "ping_avg_ms": 1.586,
+          "ping_p95_ms": 2.129,
+          "ping_p99_ms": 2.201,
+          "ping_max_ms": 2.219
+        },
+        {
+          "client_index": 52,
+          "sample_count": 5,
+          "ping_avg_ms": 1.574,
+          "ping_p95_ms": 2.1,
+          "ping_p99_ms": 2.167,
+          "ping_max_ms": 2.184
+        },
+        {
+          "client_index": 53,
+          "sample_count": 5,
+          "ping_avg_ms": 1.561,
+          "ping_p95_ms": 2.067,
+          "ping_p99_ms": 2.129,
+          "ping_max_ms": 2.145
+        },
+        {
+          "client_index": 54,
+          "sample_count": 5,
+          "ping_avg_ms": 1.549,
+          "ping_p95_ms": 2.035,
+          "ping_p99_ms": 2.092,
+          "ping_max_ms": 2.106
+        },
+        {
+          "client_index": 55,
+          "sample_count": 5,
+          "ping_avg_ms": 1.539,
+          "ping_p95_ms": 2.009,
+          "ping_p99_ms": 2.062,
+          "ping_max_ms": 2.076
+        }
+      ],
+      "observer_replication": true,
+      "replication_published_items": 23238,
+      "replication_datagrams": 115347,
+      "replication_wire_datagrams": 15306,
+      "observer_frames_received": 102117,
+      "observer_frames_applied": 102117,
+      "observer_events_received": 13230,
+      "observer_events_applied": 13230,
+      "observer_state_items": 898
+    },
+    {
+      "stage_index": 3,
+      "target_clients": 64,
+      "active_clients": 64,
+      "ready_clients": 64,
+      "tick_avg_ms": 1.174,
+      "tick_p95_ms": 1.429,
+      "tick_p99_ms": 2.833,
+      "tick_max_ms": 18.16,
+      "ping_avg_ms": 1.539,
+      "ping_p95_ms": 2.333,
+      "ping_max_ms": 2.721,
+      "pending_avg": 0,
+      "pending_max": 0,
+      "alloc_bytes": 216440864,
+      "connect_attempts": 64,
+      "connect_success": 64,
+      "connect_success_rate": 1,
+      "tick_slo_pass": true,
+      "ping_slo_pass": true,
+      "per_client_ping": [
+        {
+          "client_index": 0,
+          "sample_count": 5,
+          "ping_avg_ms": 1.824,
+          "ping_p95_ms": 2.535,
+          "ping_p99_ms": 2.684,
+          "ping_max_ms": 2.721
+        },
+        {
+          "client_index": 1,
+          "sample_count": 5,
+          "ping_avg_ms": 1.813,
+          "ping_p95_ms": 2.508,
+          "ping_p99_ms": 2.654,
+          "ping_max_ms": 2.691
+        },
+        {
+          "client_index": 2,
+          "sample_count": 5,
+          "ping_avg_ms": 1.803,
+          "ping_p95_ms": 2.481,
+          "ping_p99_ms": 2.623,
+          "ping_max_ms": 2.658
+        },
+        {
+          "client_index": 3,
+          "sample_count": 5,
+          "ping_avg_ms": 1.793,
+          "ping_p95_ms": 2.453,
+          "ping_p99_ms": 2.591,
+          "ping_max_ms": 2.626
+        },
+        {
+          "client_index": 4,
+          "sample_count": 5,
+          "ping_avg_ms": 1.774,
+          "ping_p95_ms": 2.393,
+          "ping_p99_ms": 2.52,
+          "ping_max_ms": 2.552
+        },
+        {
+          "client_index": 5,
+          "sample_count": 5,
+          "ping_avg_ms": 1.762,
+          "ping_p95_ms": 2.359,
+          "ping_p99_ms": 2.482,
+          "ping_max_ms": 2.512
+        },
+        {
+          "client_index": 6,
+          "sample_count": 5,
+          "ping_avg_ms": 1.753,
+          "ping_p95_ms": 2.34,
+          "ping_p99_ms": 2.46,
+          "ping_max_ms": 2.49
+        },
+        {
+          "client_index": 7,
+          "sample_count": 5,
+          "ping_avg_ms": 1.745,
+          "ping_p95_ms": 2.325,
+          "ping_p99_ms": 2.445,
+          "ping_max_ms": 2.475
+        },
+        {
+          "client_index": 8,
+          "sample_count": 5,
+          "ping_avg_ms": 1.737,
+          "ping_p95_ms": 2.31,
+          "ping_p99_ms": 2.429,
+          "ping_max_ms": 2.458
+        },
+        {
+          "client_index": 9,
+          "sample_count": 5,
+          "ping_avg_ms": 1.728,
+          "ping_p95_ms": 2.295,
+          "ping_p99_ms": 2.413,
+          "ping_max_ms": 2.442
+        },
+        {
+          "client_index": 10,
+          "sample_count": 5,
+          "ping_avg_ms": 1.72,
+          "ping_p95_ms": 2.28,
+          "ping_p99_ms": 2.396,
+          "ping_max_ms": 2.425
+        },
+        {
+          "client_index": 11,
+          "sample_count": 5,
+          "ping_avg_ms": 1.712,
+          "ping_p95_ms": 2.267,
+          "ping_p99_ms": 2.382,
+          "ping_max_ms": 2.41
+        },
+        {
+          "client_index": 12,
+          "sample_count": 5,
+          "ping_avg_ms": 1.705,
+          "ping_p95_ms": 2.252,
+          "ping_p99_ms": 2.366,
+          "ping_max_ms": 2.395
+        },
+        {
+          "client_index": 13,
+          "sample_count": 5,
+          "ping_avg_ms": 1.697,
+          "ping_p95_ms": 2.238,
+          "ping_p99_ms": 2.351,
+          "ping_max_ms": 2.379
+        },
+        {
+          "client_index": 14,
+          "sample_count": 5,
+          "ping_avg_ms": 1.688,
+          "ping_p95_ms": 2.222,
+          "ping_p99_ms": 2.333,
+          "ping_max_ms": 2.361
+        },
+        {
+          "client_index": 15,
+          "sample_count": 5,
+          "ping_avg_ms": 1.681,
+          "ping_p95_ms": 2.208,
+          "ping_p99_ms": 2.319,
+          "ping_max_ms": 2.347
+        },
+        {
+          "client_index": 16,
+          "sample_count": 5,
+          "ping_avg_ms": 1.674,
+          "ping_p95_ms": 2.196,
+          "ping_p99_ms": 2.305,
+          "ping_max_ms": 2.333
+        },
+        {
+          "client_index": 17,
+          "sample_count": 5,
+          "ping_avg_ms": 1.647,
+          "ping_p95_ms": 2.108,
+          "ping_p99_ms": 2.202,
+          "ping_max_ms": 2.226
+        },
+        {
+          "client_index": 18,
+          "sample_count": 5,
+          "ping_avg_ms": 1.639,
+          "ping_p95_ms": 2.091,
+          "ping_p99_ms": 2.183,
+          "ping_max_ms": 2.206
+        },
+        {
+          "client_index": 19,
+          "sample_count": 5,
+          "ping_avg_ms": 1.631,
+          "ping_p95_ms": 2.077,
+          "ping_p99_ms": 2.169,
+          "ping_max_ms": 2.191
+        },
+        {
+          "client_index": 20,
+          "sample_count": 5,
+          "ping_avg_ms": 1.624,
+          "ping_p95_ms": 2.062,
+          "ping_p99_ms": 2.152,
+          "ping_max_ms": 2.175
+        },
+        {
+          "client_index": 21,
+          "sample_count": 5,
+          "ping_avg_ms": 1.616,
+          "ping_p95_ms": 2.046,
+          "ping_p99_ms": 2.135,
+          "ping_max_ms": 2.157
+        },
+        {
+          "client_index": 22,
+          "sample_count": 5,
+          "ping_avg_ms": 1.608,
+          "ping_p95_ms": 2.033,
+          "ping_p99_ms": 2.12,
+          "ping_max_ms": 2.142
+        },
+        {
+          "client_index": 23,
+          "sample_count": 5,
+          "ping_avg_ms": 1.6,
+          "ping_p95_ms": 2.019,
+          "ping_p99_ms": 2.105,
+          "ping_max_ms": 2.127
+        },
+        {
+          "client_index": 24,
+          "sample_count": 5,
+          "ping_avg_ms": 1.593,
+          "ping_p95_ms": 2.003,
+          "ping_p99_ms": 2.089,
+          "ping_max_ms": 2.11
+        },
+        {
+          "client_index": 25,
+          "sample_count": 5,
+          "ping_avg_ms": 1.577,
+          "ping_p95_ms": 1.957,
+          "ping_p99_ms": 2.035,
+          "ping_max_ms": 2.054
+        },
+        {
+          "client_index": 26,
+          "sample_count": 5,
+          "ping_avg_ms": 1.565,
+          "ping_p95_ms": 1.924,
+          "ping_p99_ms": 1.997,
+          "ping_max_ms": 2.015
+        },
+        {
+          "client_index": 27,
+          "sample_count": 5,
+          "ping_avg_ms": 1.559,
+          "ping_p95_ms": 1.911,
+          "ping_p99_ms": 1.983,
+          "ping_max_ms": 2
+        },
+        {
+          "client_index": 28,
+          "sample_count": 5,
+          "ping_avg_ms": 1.551,
+          "ping_p95_ms": 1.897,
+          "ping_p99_ms": 1.966,
+          "ping_max_ms": 1.984
+        },
+        {
+          "client_index": 29,
+          "sample_count": 5,
+          "ping_avg_ms": 1.542,
+          "ping_p95_ms": 1.878,
+          "ping_p99_ms": 1.944,
+          "ping_max_ms": 1.961
+        },
+        {
+          "client_index": 30,
+          "sample_count": 5,
+          "ping_avg_ms": 1.535,
+          "ping_p95_ms": 1.861,
+          "ping_p99_ms": 1.926,
+          "ping_max_ms": 1.942
+        },
+        {
+          "client_index": 31,
+          "sample_count": 5,
+          "ping_avg_ms": 1.529,
+          "ping_p95_ms": 1.85,
+          "ping_p99_ms": 1.912,
+          "ping_max_ms": 1.928
+        },
+        {
+          "client_index": 32,
+          "sample_count": 5,
+          "ping_avg_ms": 1.527,
+          "ping_p95_ms": 1.842,
+          "ping_p99_ms": 1.902,
+          "ping_max_ms": 1.917
+        },
+        {
+          "client_index": 33,
+          "sample_count": 5,
+          "ping_avg_ms": 1.522,
+          "ping_p95_ms": 1.833,
+          "ping_p99_ms": 1.892,
+          "ping_max_ms": 1.907
+        },
+        {
+          "client_index": 34,
+          "sample_count": 5,
+          "ping_avg_ms": 1.516,
+          "ping_p95_ms": 1.82,
+          "ping_p99_ms": 1.878,
+          "ping_max_ms": 1.893
+        },
+        {
+          "client_index": 35,
+          "sample_count": 5,
+          "ping_avg_ms": 1.503,
+          "ping_p95_ms": 1.786,
+          "ping_p99_ms": 1.839,
+          "ping_max_ms": 1.853
+        },
+        {
+          "client_index": 36,
+          "sample_count": 5,
+          "ping_avg_ms": 1.496,
+          "ping_p95_ms": 1.773,
+          "ping_p99_ms": 1.825,
+          "ping_max_ms": 1.838
+        },
+        {
+          "client_index": 37,
+          "sample_count": 5,
+          "ping_avg_ms": 1.489,
+          "ping_p95_ms": 1.758,
+          "ping_p99_ms": 1.809,
+          "ping_max_ms": 1.822
+        },
+        {
+          "client_index": 38,
+          "sample_count": 5,
+          "ping_avg_ms": 1.48,
+          "ping_p95_ms": 1.743,
+          "ping_p99_ms": 1.793,
+          "ping_max_ms": 1.805
+        },
+        {
+          "client_index": 39,
+          "sample_count": 5,
+          "ping_avg_ms": 1.473,
+          "ping_p95_ms": 1.73,
+          "ping_p99_ms": 1.778,
+          "ping_max_ms": 1.791
+        },
+        {
+          "client_index": 40,
+          "sample_count": 5,
+          "ping_avg_ms": 1.465,
+          "ping_p95_ms": 1.715,
+          "ping_p99_ms": 1.762,
+          "ping_max_ms": 1.774
+        },
+        {
+          "client_index": 41,
+          "sample_count": 5,
+          "ping_avg_ms": 1.457,
+          "ping_p95_ms": 1.7,
+          "ping_p99_ms": 1.747,
+          "ping_max_ms": 1.758
+        },
+        {
+          "client_index": 42,
+          "sample_count": 5,
+          "ping_avg_ms": 1.449,
+          "ping_p95_ms": 1.685,
+          "ping_p99_ms": 1.73,
+          "ping_max_ms": 1.742
+        },
+        {
+          "client_index": 43,
+          "sample_count": 5,
+          "ping_avg_ms": 1.442,
+          "ping_p95_ms": 1.671,
+          "ping_p99_ms": 1.715,
+          "ping_max_ms": 1.726
+        },
+        {
+          "client_index": 44,
+          "sample_count": 5,
+          "ping_avg_ms": 1.435,
+          "ping_p95_ms": 1.656,
+          "ping_p99_ms": 1.7,
+          "ping_max_ms": 1.71
+        },
+        {
+          "client_index": 45,
+          "sample_count": 5,
+          "ping_avg_ms": 1.427,
+          "ping_p95_ms": 1.642,
+          "ping_p99_ms": 1.684,
+          "ping_max_ms": 1.694
+        },
+        {
+          "client_index": 46,
+          "sample_count": 5,
+          "ping_avg_ms": 1.419,
+          "ping_p95_ms": 1.626,
+          "ping_p99_ms": 1.667,
+          "ping_max_ms": 1.677
+        },
+        {
+          "client_index": 47,
+          "sample_count": 5,
+          "ping_avg_ms": 1.413,
+          "ping_p95_ms": 1.613,
+          "ping_p99_ms": 1.653,
+          "ping_max_ms": 1.663
+        },
+        {
+          "client_index": 48,
+          "sample_count": 5,
+          "ping_avg_ms": 1.405,
+          "ping_p95_ms": 1.6,
+          "ping_p99_ms": 1.639,
+          "ping_max_ms": 1.648
+        },
+        {
+          "client_index": 49,
+          "sample_count": 5,
+          "ping_avg_ms": 1.397,
+          "ping_p95_ms": 1.58,
+          "ping_p99_ms": 1.617,
+          "ping_max_ms": 1.626
+        },
+        {
+          "client_index": 50,
+          "sample_count": 5,
+          "ping_avg_ms": 1.386,
+          "ping_p95_ms": 1.562,
+          "ping_p99_ms": 1.598,
+          "ping_max_ms": 1.608
+        },
+        {
+          "client_index": 51,
+          "sample_count": 5,
+          "ping_avg_ms": 1.38,
+          "ping_p95_ms": 1.548,
+          "ping_p99_ms": 1.583,
+          "ping_max_ms": 1.591
+        },
+        {
+          "client_index": 52,
+          "sample_count": 5,
+          "ping_avg_ms": 1.372,
+          "ping_p95_ms": 1.531,
+          "ping_p99_ms": 1.565,
+          "ping_max_ms": 1.573
+        },
+        {
+          "client_index": 53,
+          "sample_count": 5,
+          "ping_avg_ms": 1.364,
+          "ping_p95_ms": 1.517,
+          "ping_p99_ms": 1.549,
+          "ping_max_ms": 1.558
+        },
+        {
+          "client_index": 54,
+          "sample_count": 5,
+          "ping_avg_ms": 1.356,
+          "ping_p95_ms": 1.497,
+          "ping_p99_ms": 1.529,
+          "ping_max_ms": 1.537
+        },
+        {
+          "client_index": 55,
+          "sample_count": 5,
+          "ping_avg_ms": 1.351,
+          "ping_p95_ms": 1.485,
+          "ping_p99_ms": 1.514,
+          "ping_max_ms": 1.521
+        },
+        {
+          "client_index": 56,
+          "sample_count": 5,
+          "ping_avg_ms": 1.343,
+          "ping_p95_ms": 1.469,
+          "ping_p99_ms": 1.496,
+          "ping_max_ms": 1.502
+        },
+        {
+          "client_index": 57,
+          "sample_count": 5,
+          "ping_avg_ms": 1.335,
+          "ping_p95_ms": 1.453,
+          "ping_p99_ms": 1.477,
+          "ping_max_ms": 1.483
+        },
+        {
+          "client_index": 58,
+          "sample_count": 5,
+          "ping_avg_ms": 1.329,
+          "ping_p95_ms": 1.446,
+          "ping_p99_ms": 1.47,
+          "ping_max_ms": 1.476
+        },
+        {
+          "client_index": 59,
+          "sample_count": 5,
+          "ping_avg_ms": 1.321,
+          "ping_p95_ms": 1.432,
+          "ping_p99_ms": 1.453,
+          "ping_max_ms": 1.458
+        },
+        {
+          "client_index": 60,
+          "sample_count": 5,
+          "ping_avg_ms": 1.314,
+          "ping_p95_ms": 1.415,
+          "ping_p99_ms": 1.434,
+          "ping_max_ms": 1.438
+        },
+        {
+          "client_index": 61,
+          "sample_count": 5,
+          "ping_avg_ms": 1.304,
+          "ping_p95_ms": 1.395,
+          "ping_p99_ms": 1.412,
+          "ping_max_ms": 1.416
+        },
+        {
+          "client_index": 62,
+          "sample_count": 5,
+          "ping_avg_ms": 1.297,
+          "ping_p95_ms": 1.38,
+          "ping_p99_ms": 1.394,
+          "ping_max_ms": 1.397
+        },
+        {
+          "client_index": 63,
+          "sample_count": 5,
+          "ping_avg_ms": 1.29,
+          "ping_p95_ms": 1.367,
+          "ping_p99_ms": 1.379,
+          "ping_max_ms": 1.382
+        }
+      ],
+      "observer_replication": true,
+      "replication_published_items": 27450,
+      "replication_datagrams": 138140,
+      "replication_wire_datagrams": 18168,
+      "observer_frames_received": 122280,
+      "observer_frames_applied": 122280,
+      "observer_events_received": 15860,
+      "observer_events_applied": 15860,
+      "observer_state_items": 1097
+    }
+  ]
+}

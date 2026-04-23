@@ -540,6 +540,10 @@ The next implementation target after this bridge slice should be:
   - the live harness AOI policy is now configurable, so the same runtime path can be exercised with either:
     - the current narrow single-ring slice
     - broader multi-ring policies such as `7.5,23.5,39.5`
+  - the widened live path now also has its first observer-event family:
+    - client-side ordered-event decode/apply
+    - harness-side AOI-scoped ordered-event publication on top of the same movement entities
+    - configurable event cadence for widening runs
 
 Current recommendation:
 

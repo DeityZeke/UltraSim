@@ -13,6 +13,7 @@ internal static class TestRunner
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
         Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
+        Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
 
         Console.WriteLine("All Client scaffold tests passed.");
@@ -147,6 +148,42 @@ internal static class TestRunner
         Assert.True(lastPayload is not null);
         Assert.Equal((byte)5, lastPayload![0]);
         Assert.Equal(1, bridge.LatestItemCount);
+    }
+
+    private static void ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly()
+    {
+        int applyCount = 0;
+        ulong lastSequence = 0;
+        byte[]? lastPayload = null;
+
+        var bridge = new ClientObserverEventBridge(
+            new ConnectionId(9),
+            (sequence, payload) =>
+            {
+                applyCount++;
+                lastSequence = sequence;
+                lastPayload = payload.Span.ToArray();
+            });
+
+        ImmutablePayloadBuffer frame1 = PacketCodec.Encode(new ReliableEventFramePacket(10, ImmutablePayloadBuffer.CopyFrom([1, 2])));
+        ImmutablePayloadBuffer frame2 = PacketCodec.Encode(new ReliableEventFramePacket(9, ImmutablePayloadBuffer.CopyFrom([3, 4])));
+        ImmutablePayloadBuffer frame3 = PacketCodec.Encode(new ReliableEventFramePacket(11, ImmutablePayloadBuffer.CopyFrom([5, 6])));
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, frame1.Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, frame2.Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, frame3.Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(3, processed);
+        Assert.Equal(3, bridge.LastReceivedEventCount);
+        Assert.Equal(2, bridge.LastAppliedEventCount);
+        Assert.Equal(2, applyCount);
+        Assert.Equal((ulong)11, lastSequence);
+        Assert.True(lastPayload is not null);
+        Assert.Equal((byte)5, lastPayload![0]);
     }
 
     private static void ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState()

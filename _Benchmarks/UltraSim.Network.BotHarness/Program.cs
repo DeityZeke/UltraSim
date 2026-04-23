@@ -119,8 +119,9 @@ internal sealed class MovementRampHarness : IDisposable
 
         var builder = new EcsSchemaBuilder();
         ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
+        ComponentId movementEventId = builder.RegisterComponent<BenchMovementEventBody>();
         _world = new World(builder.Build());
-        _movementSignature = new ArchetypeSignature([movementId]);
+        _movementSignature = new ArchetypeSignature([movementId, movementEventId]);
 
         var handshakePolicy = new HandshakePolicy(
             ProtocolVersion: 3,
@@ -155,6 +156,8 @@ internal sealed class MovementRampHarness : IDisposable
         long replicationPublishedItems = 0;
         long observerFramesReceived = 0;
         long observerFramesApplied = 0;
+        long observerEventsReceived = 0;
+        long observerEventsApplied = 0;
         long allocBefore = GC.GetTotalAllocatedBytes(true);
 
         StageReplicationContext? replication = _options.ObserverReplication
@@ -215,6 +218,8 @@ internal sealed class MovementRampHarness : IDisposable
                 readyClients++;
             observerFramesReceived += _clients[i].ObserverFramesReceived;
             observerFramesApplied += _clients[i].ObserverFramesApplied;
+            observerEventsReceived += _clients[i].ObserverEventsReceived;
+            observerEventsApplied += _clients[i].ObserverEventsApplied;
             perClientPing.Add(_clients[i].BuildPingJson());
         }
 
@@ -245,6 +250,8 @@ internal sealed class MovementRampHarness : IDisposable
             ReplicationWireDatagrams: replicationWireDatagrams,
             ObserverFramesReceived: observerFramesReceived,
             ObserverFramesApplied: observerFramesApplied,
+            ObserverEventsReceived: observerEventsReceived,
+            ObserverEventsApplied: observerEventsApplied,
             ObserverStateItems: CountObserverStateItems());
     }
 
@@ -294,11 +301,15 @@ internal sealed class MovementRampHarness : IDisposable
             var observerState = new ClientObserverStateBridge(
                 new ConnectionId(1),
                 (itemKey, _, payload) => handle!.ApplyObserverState(itemKey, payload));
+            var observerEvents = new ClientObserverEventBridge(
+                new ConnectionId(1),
+                (_, payload) => handle!.ApplyObserverEvent(payload));
             var host = new ClientMovementSessionHost(
                 transport,
                 new ConnectionId(1),
                 new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
-                observerState: observerState);
+                observerState: observerState,
+                observerEvents: observerEvents);
             host.Start();
             handle = new ClientHandle(clientIndex, transport, host);
             host.BeginHandshake(_clockTicks + 100 + clientIndex);
@@ -366,6 +377,7 @@ internal sealed class MovementRampHarness : IDisposable
 
         Entity entity = movementWorld.CreateDefault(_movementSignature);
         movementWorld.SetComponent(entity, new BenchMovementBody(startX, startY, 0f, 0f));
+        movementWorld.SetComponent(entity, new BenchMovementEventBody(startX, startY, 0, 0, 0, 0));
         _spawnedEntities.Add(entity);
         return new ServerMovementSessionSpawn(entity, _nextNetworkEntityId++);
     }
@@ -409,12 +421,22 @@ internal sealed class MovementRampHarness : IDisposable
 
     private int PublishObserverReplication(StageReplicationContext replication)
     {
-        return replication.Publisher.PublishDirtyLatestState<BenchMovementBody>(
-            scopeSelector: (entity, body) => ChunkSubscriptionKey.Create(
-                ringIndex: 0,
-                chunk: replication.Classifier.GetChunk(new WorldPosition2(body.PositionX, body.PositionY))),
-            payloadSelector: static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
-            itemKeySelector: static (entity, _) => ServerEcsNetworkItemKeys.GetComponentItemKey<BenchMovementBody>(entity));
+        int published = replication.Publisher.PublishChunkAoiLatestState(
+            new ServerEcsChunkAoiLatestStateRule<BenchMovementBody>(
+                replication.Classifier,
+                static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
+                static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body)));
+
+        if (_options.ObserverEvents)
+        {
+            published += replication.Publisher.PublishChunkAoiOrderedEvents(
+                new ServerEcsChunkAoiOrderedEventRule<BenchMovementEventBody>(
+                    replication.Classifier,
+                    static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
+                    static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body)));
+        }
+
+        return published;
     }
 
     private int DispatchObserverReplication(StageReplicationContext replication, out int wireDatagrams)
@@ -450,7 +472,7 @@ internal sealed class MovementRampHarness : IDisposable
         }
     }
 
-    private static void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+    private void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
     {
         if (!movementWorld.TryGetComponent(movementEntity, out BenchMovementBody body))
             return;
@@ -465,6 +487,18 @@ internal sealed class MovementRampHarness : IDisposable
             PositionY = body.PositionY + velocityY * deltaSeconds,
         };
         movementWorld.SetComponent(movementEntity, body);
+
+        if (_options.ObserverEvents &&
+            (_options.ObserverEventEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverEventEveryTicks) == 0))
+        {
+            movementWorld.SetComponent(movementEntity, new BenchMovementEventBody(
+                body.PositionX,
+                body.PositionY,
+                input.MoveX,
+                input.MoveY,
+                input.ClientTick,
+                input.Flags));
+        }
     }
 
     private static bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
@@ -491,6 +525,7 @@ internal sealed class MovementRampHarness : IDisposable
         private readonly Dictionary<ushort, long> _pingSentAt = new();
         private readonly List<double> _pingSamplesMs = [];
         private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
+        private readonly List<BenchMovementEventBody> _observerEvents = [];
         private ushort _nextPingSequence = 1;
 
         public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host)
@@ -505,6 +540,8 @@ internal sealed class MovementRampHarness : IDisposable
         public ClientMovementSessionHost Host { get; }
         public long ObserverFramesReceived { get; private set; }
         public long ObserverFramesApplied { get; private set; }
+        public long ObserverEventsReceived { get; private set; }
+        public long ObserverEventsApplied { get; private set; }
         public int ObserverStateCount => _observerStates.Count;
 
         public void TrySendPing(uint clientTick)
@@ -542,6 +579,12 @@ internal sealed class MovementRampHarness : IDisposable
                 ObserverFramesReceived += Host.ObserverState.LastReceivedFrameCount;
                 ObserverFramesApplied += Host.ObserverState.LastAppliedFrameCount;
             }
+
+            if (Host.ObserverEvents is not null)
+            {
+                ObserverEventsReceived += Host.ObserverEvents.LastReceivedEventCount;
+                ObserverEventsApplied += Host.ObserverEvents.LastAppliedEventCount;
+            }
         }
 
         public JsonObject BuildPingJson()
@@ -567,6 +610,13 @@ internal sealed class MovementRampHarness : IDisposable
         public void ApplyObserverState(ulong itemKey, ImmutablePayloadBuffer payload)
         {
             _observerStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
+        }
+
+        public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
+        {
+            _observerEvents.Add(ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementEventBody>(payload));
+            if (_observerEvents.Count > 256)
+                _observerEvents.RemoveRange(0, _observerEvents.Count - 256);
         }
     }
 
@@ -631,6 +681,8 @@ internal sealed class HarnessArgs
     public double PingIntervalSeconds { get; set; } = 1.0;
     public string StopOn { get; set; } = "either";
     public bool ObserverReplication { get; set; }
+    public bool ObserverEvents { get; set; }
+    public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
     public int SpawnGridWidth { get; set; } = 32;
     public float[] AoiRadiiMeters { get; set; } = [7.5f];
@@ -662,6 +714,8 @@ internal sealed class HarnessArgs
             else if (arg == "--ping-interval-s") options.PingIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--stop-on") options.StopOn = Next() ?? options.StopOn;
             else if (arg == "--observer-replication") options.ObserverReplication = true;
+            else if (arg == "--observer-events") options.ObserverEvents = true;
+            else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--aoi-radii-m") options.AoiRadiiMeters = ParseFloatList(Next()!, nameof(AoiRadiiMeters));
@@ -669,6 +723,7 @@ internal sealed class HarnessArgs
 
         options.TickHz = Math.Max(1, options.TickHz);
         options.ActiveRatio = Math.Clamp(options.ActiveRatio, 0d, 1d);
+        options.ObserverEventEveryTicks = Math.Max(1, options.ObserverEventEveryTicks);
         if (options.AoiRadiiMeters.Length == 0)
             options.AoiRadiiMeters = [7.5f];
         return options;
@@ -711,6 +766,8 @@ internal sealed class HarnessArgs
             ["ping_interval_seconds"] = PingIntervalSeconds,
             ["stop_on"] = StopOn,
             ["observer_replication"] = ObserverReplication,
+            ["observer_events"] = ObserverEvents,
+            ["observer_event_every_ticks"] = ObserverEventEveryTicks,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
@@ -770,6 +827,8 @@ internal readonly record struct StageResult(
     long ReplicationWireDatagrams,
     long ObserverFramesReceived,
     long ObserverFramesApplied,
+    long ObserverEventsReceived,
+    long ObserverEventsApplied,
     int ObserverStateItems)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
@@ -806,6 +865,8 @@ internal readonly record struct StageResult(
             ["replication_wire_datagrams"] = ReplicationWireDatagrams,
             ["observer_frames_received"] = ObserverFramesReceived,
             ["observer_frames_applied"] = ObserverFramesApplied,
+            ["observer_events_received"] = ObserverEventsReceived,
+            ["observer_events_applied"] = ObserverEventsApplied,
             ["observer_state_items"] = ObserverStateItems,
         };
     }
@@ -859,3 +920,4 @@ internal readonly struct TickWindowStats
 }
 
 internal readonly record struct BenchMovementBody(float PositionX, float PositionY, float VelocityX, float VelocityY) : IComponent<BenchMovementBody>;
+internal readonly record struct BenchMovementEventBody(float PositionX, float PositionY, short MoveX, short MoveY, uint ClientTick, byte Flags) : IComponent<BenchMovementEventBody>;
