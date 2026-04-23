@@ -93,7 +93,8 @@ Current state:
 - full-baseline recovery execution now exists at the kernel bridge level
 - send-based per-connection latest-state tracking now exists as the first delta foundation
 - explicit latest-state delta packet/execution now exists at the kernel/client seam
-- full generic runtime composition of baseline + delta + recovery still does not exist yet
+- a first generic server-side runtime composition layer now exists
+- it is not yet wired into the real movement/control hosts as the primary live runtime path
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables
 

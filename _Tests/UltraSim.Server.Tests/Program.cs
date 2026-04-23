@@ -53,6 +53,8 @@ internal static class TestRunner
         Run(nameof(ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems), ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems);
         Run(nameof(ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents), ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents);
         Run(nameof(ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams), ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams);
+        Run(nameof(ServerNetworkSessionRuntime_FirstTick_SendsFilteredBaselineForUnacknowledgedConnection), ServerNetworkSessionRuntime_FirstTick_SendsFilteredBaselineForUnacknowledgedConnection);
+        Run(nameof(ServerNetworkSessionRuntime_AfterBaselineAck_SendsDeltaAndReliableEvents), ServerNetworkSessionRuntime_AfterBaselineAck_SendsDeltaAndReliableEvents);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots), ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer);
@@ -985,6 +987,156 @@ internal static class TestRunner
         Assert.Equal(1, systemSeen);
         Assert.Equal(1, playerSeen);
         Assert.Equal(1, accountSeen);
+    }
+
+    private static void ServerNetworkSessionRuntime_FirstTick_SendsFilteredBaselineForUnacknowledgedConnection()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        ConnectionId connectionId = new(41);
+        SubscriptionKey visibleScope = new(501);
+        SubscriptionKey hiddenScope = new(502);
+        subscriptions.Subscribe(connectionId, visibleScope);
+
+        latest.Publish(1001, visibleScope, ImmutablePayloadBuffer.CopyFrom([1]));
+        latest.Publish(1002, hiddenScope, ImmutablePayloadBuffer.CopyFrom([2]));
+
+        var runtime = new ServerNetworkSessionRuntime(
+            pair.Server,
+            latest,
+            ordered,
+            subscriptions,
+            new ReliableEventReplayBuffer(capacityPerConnection: 8));
+        runtime.BindConnection(connectionId);
+
+        ServerNetworkSessionRuntimeTickResult result = runtime.DispatchTick(100, ConnectionSendBudget.Unlimited);
+
+        Assert.Equal(1, result.ConnectionCount);
+        Assert.Equal(3, result.BaselineDatagramCount);
+        Assert.Equal(0, result.OrderedEventDatagramCount);
+        Assert.Equal(0, result.DeltaDatagramCount);
+
+        var inbound = new InboundDatagram[8];
+        int count = pair.Client.PollInbound(inbound);
+        Assert.Equal(3, count);
+
+        int baselineFrames = 0;
+        for (int i = 0; i < count; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            if (header.PacketId == StateBaselineFramePacket.PacketId)
+            {
+                baselineFrames++;
+                var reader = new UltraSim.Network.BitReader(payload);
+                StateBaselineFramePacket frame = StateBaselineFramePacket.Deserialize(ref reader);
+                Assert.Equal((ulong)1001, frame.ItemKey);
+            }
+        }
+
+        Assert.Equal(1, baselineFrames);
+        Assert.True(runtime.LatestStateSentTracker.TryGetLastSentSequence(connectionId, 1001, out _));
+        Assert.False(runtime.LatestStateSentTracker.TryGetLastSentSequence(connectionId, 1002, out _));
+    }
+
+    private static void ServerNetworkSessionRuntime_AfterBaselineAck_SendsDeltaAndReliableEvents()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var latest = new LatestStateStream();
+        var ordered = new OrderedEventStream(capacity: 8);
+        var subscriptions = new ConnectionSubscriptionRegistry();
+        ConnectionId connectionId = new(42);
+        SubscriptionKey scope = new(601);
+        subscriptions.Subscribe(connectionId, scope);
+
+        latest.Publish(1001, scope, ImmutablePayloadBuffer.CopyFrom([1]));
+
+        var runtime = new ServerNetworkSessionRuntime(
+            pair.Server,
+            latest,
+            ordered,
+            subscriptions,
+            new ReliableEventReplayBuffer(capacityPerConnection: 8));
+        runtime.BindConnection(connectionId);
+
+        runtime.DispatchTick(100, ConnectionSendBudget.Unlimited);
+
+        var baselineInbound = new InboundDatagram[8];
+        int baselineCount = pair.Client.PollInbound(baselineInbound);
+        Assert.Equal(3, baselineCount);
+
+        StateBaselineDescriptor descriptor = default;
+        for (int i = 0; i < baselineCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(baselineInbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            if (header.PacketId != StateBaselineBeginPacket.PacketId)
+                continue;
+
+            var reader = new UltraSim.Network.BitReader(payload);
+            StateBaselineBeginPacket begin = StateBaselineBeginPacket.Deserialize(ref reader);
+            descriptor = begin.Descriptor;
+        }
+
+        Assert.True(descriptor.BaselineId != 0);
+
+        pair.Client.EnqueueOutbound(new OutboundDatagram(
+            connectionId,
+            StateBaselineAckPacket.Plane,
+            StateBaselineAckPacket.PacketClass,
+            StateBaselineAckPacket.Channel,
+            PacketCodec.Encode(new StateBaselineAckPacket(descriptor))));
+        pair.Client.FlushOutbound();
+
+        var ackInbound = new InboundDatagram[4];
+        int ackCount = pair.Server.PollInbound(ackInbound);
+        Assert.Equal(1, ackCount);
+        Assert.Equal(1, runtime.ProcessInbound(ackInbound.AsSpan(0, ackCount)));
+
+        latest.Publish(1001, scope, ImmutablePayloadBuffer.CopyFrom([9]));
+        ordered.Publish(scope, ImmutablePayloadBuffer.CopyFrom([7, 8]));
+
+        ServerNetworkSessionRuntimeTickResult tick = runtime.DispatchTick(200, ConnectionSendBudget.Unlimited);
+
+        Assert.Equal(0, tick.BaselineDatagramCount);
+        Assert.Equal(1, tick.OrderedEventDatagramCount);
+        Assert.Equal(1, tick.DeltaDatagramCount);
+
+        var inbound = new InboundDatagram[8];
+        int count = pair.Client.PollInbound(inbound);
+        Assert.Equal(2, count);
+
+        int reliableSeen = 0;
+        int deltaSeen = 0;
+        for (int i = 0; i < count; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            if (header.PacketId == ReliableEventFramePacket.PacketId)
+            {
+                reliableSeen++;
+                var reader = new UltraSim.Network.BitReader(payload);
+                ReliableEventFramePacket frame = ReliableEventFramePacket.Deserialize(ref reader);
+                Assert.True(frame.Payload.Span.SequenceEqual(new byte[] { 7, 8 }));
+            }
+            else if (header.PacketId == StateDeltaFramePacket.PacketId)
+            {
+                deltaSeen++;
+                var reader = new UltraSim.Network.BitReader(payload);
+                StateDeltaFramePacket frame = StateDeltaFramePacket.Deserialize(ref reader);
+                Assert.Equal(descriptor.BaselineId, frame.BaselineId);
+                Assert.Equal((ulong)1001, frame.ItemKey);
+                Assert.True(frame.Payload.Span.SequenceEqual(new byte[] { 9 }));
+            }
+        }
+
+        Assert.Equal(1, reliableSeen);
+        Assert.Equal(1, deltaSeen);
     }
 
     private static void ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots()

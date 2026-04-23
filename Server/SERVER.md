@@ -63,4 +63,17 @@ Current scope guidance:
 - moment-to-moment gameplay replication should prefer player-centered AOI ring scopes
 - chunk overlap remains an indexing/maintenance mechanism, not the gameplay definition of visibility
 
+Current network-runtime composition status:
+
+- movement still has its own narrow `ServerMovementSessionHost`
+- the first generic stream/runtime composition layer now also exists in `Server/Network`:
+  - `ServerNetworkSessionRuntime`
+- that runtime currently composes:
+  - filtered baseline bootstrap
+  - baseline ack processing
+  - bounded retransmit execution
+  - ordered-event delivery
+  - latest-state delta delivery
+- it is not yet the primary live host path for movement/control traffic
+
 See [SERVER_WRAPPER_IMPLEMENTATION_PLAN.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md) for the concrete implementation plan and [AGENTS.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/AGENTS.md) for subsystem-specific engineering rules.

@@ -497,6 +497,8 @@ Current status:
     - `StateDeltaFramePacket`
     - `StateDeltaSnapshotBuilder`
     - `ConnectionLatestStateDeltaExecutionBridge`
+    - first higher-layer generic runtime composition host:
+      - `ServerNetworkSessionRuntime`
     - baseline completion is now acknowledged back to the server
     - ordered-event replay is now explicitly bounded per connection
     - recovery can now choose between normal incremental scheduling and full-baseline resync
@@ -504,6 +506,12 @@ Current status:
     - retransmit execution now emits normal ordered-event state-plane datagrams
     - latest-state incremental advancement is now explicitly heading toward send-based per-connection tracking on top of `LatestStateStream`, not a new client-driven latest-state ack protocol
     - explicit incremental latest-state delta execution now exists with a dedicated delta packet instead of overloading baseline frames
+    - the first generic server-side runtime layer now composes:
+      - filtered baseline bootstrap
+      - baseline ack processing
+      - retransmit execution
+      - ordered-event delivery
+      - latest-state delta delivery
 
 ## Testing Strategy
 

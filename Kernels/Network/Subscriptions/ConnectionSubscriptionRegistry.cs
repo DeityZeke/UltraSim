@@ -70,6 +70,20 @@ public sealed class ConnectionSubscriptionRegistry
         }
     }
 
+    public bool IsSubscribed(ConnectionId connectionId, SubscriptionKey key)
+    {
+        if (!connectionId.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(connectionId));
+        if (!key.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(key));
+
+        lock (_sync)
+        {
+            return _keysByConnection.TryGetValue(connectionId, out List<SubscriptionKey>? keys) &&
+                   Contains(keys, key);
+        }
+    }
+
     public int WriteDatagramsForSubscribers(
         SubscriptionKey key,
         NetworkPlane plane,

@@ -1,0 +1,20 @@
+using UltraSim.Network;
+
+namespace UltraSim.Server.Network;
+
+public readonly record struct ServerNetworkSessionRuntimeOptions(
+    int MaxConnections,
+    int MaxSnapshotItems,
+    int MaxScheduledItems,
+    int MaxReplayItems,
+    int MaxDatagrams,
+    ReliableEventRetransmitPolicy RetransmitPolicy)
+{
+    public static readonly ServerNetworkSessionRuntimeOptions Default = new(
+        MaxConnections: 64,
+        MaxSnapshotItems: 512,
+        MaxScheduledItems: 256,
+        MaxReplayItems: 64,
+        MaxDatagrams: 1024,
+        RetransmitPolicy: ReliableEventRetransmitPolicy.Default);
+}
