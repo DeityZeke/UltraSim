@@ -539,6 +539,7 @@ internal sealed class MovementRampHarness : IDisposable
                 replication.Classifier,
                 static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                 static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                static (entity, _) => ComposeHarnessMovementItemKey(entity),
                 ringCadence: replication.RingCadence),
             publishTick);
 
@@ -700,6 +701,14 @@ internal sealed class MovementRampHarness : IDisposable
         return key == 0 ? 1UL : key;
     }
 
+    private static ulong ComposeHarnessMovementItemKey(Entity entity)
+    {
+        const ulong familyTag = 0xA17E_0000_0000_0000UL;
+        ulong packed = entity.Packed & 0x0000_FFFF_FFFF_FFFFUL;
+        ulong key = familyTag | packed;
+        return key == 0 ? 1UL : key;
+    }
+
     private static ulong ComposeHarnessBulkItemKey(Entity entity)
     {
         const ulong familyTag = 0xC31D_0000_0000_0000UL;
@@ -720,9 +729,15 @@ internal sealed class MovementRampHarness : IDisposable
     {
         private readonly Dictionary<ushort, long> _pingSentAt = new();
         private readonly List<double> _pingSamplesMs = [];
-        private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
-        private readonly Dictionary<ulong, BenchMovementVisualBody> _observerVisualStates = [];
-        private readonly Dictionary<ulong, BenchMovementBulkBody> _observerBulkStates = [];
+        private BenchMovementBody[] _observerStates = new BenchMovementBody[128];
+        private bool[] _observerStateOccupied = new bool[128];
+        private int _observerStateCount;
+        private BenchMovementVisualBody[] _observerVisualStates = new BenchMovementVisualBody[128];
+        private bool[] _observerVisualStateOccupied = new bool[128];
+        private int _observerVisualStateCount;
+        private BenchMovementBulkBody[] _observerBulkStates = new BenchMovementBulkBody[128];
+        private bool[] _observerBulkStateOccupied = new bool[128];
+        private int _observerBulkStateCount;
         private readonly Queue<BenchMovementEventBody> _observerEvents = new(256);
         private ushort _nextPingSequence = 1;
         private ClientMovementState _predictedOwnerState;
@@ -751,7 +766,7 @@ internal sealed class MovementRampHarness : IDisposable
         public long ObserverFramesApplied { get; private set; }
         public long ObserverEventsReceived { get; private set; }
         public long ObserverEventsApplied { get; private set; }
-        public int ObserverStateCount => _observerStates.Count + _observerVisualStates.Count + _observerBulkStates.Count;
+        public int ObserverStateCount => _observerStateCount + _observerVisualStateCount + _observerBulkStateCount;
 
         public ClientMovementState PredictNextState(in ClientMovementInput input, float deltaSeconds)
         {
@@ -842,22 +857,41 @@ internal sealed class MovementRampHarness : IDisposable
 
         public void ApplyObserverState(ulong itemKey, ImmutablePayloadBuffer payload)
         {
-            if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xC31D_0000_0000_0000UL)
+            ulong familyTag = itemKey & 0xFFFF_0000_0000_0000UL;
+            int slot = checked((int)(itemKey & 0x0000_0000_FFFF_FFFFUL));
+            EnsureObserverCapacity(slot);
+
+            if (familyTag == 0xC31D_0000_0000_0000UL)
             {
-                ref BenchMovementBulkBody bulk = ref CollectionsMarshal.GetValueRefOrAddDefault(_observerBulkStates, itemKey, out _);
-                bulk = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBulkBody>(payload);
+                if (!_observerBulkStateOccupied[slot])
+                {
+                    _observerBulkStateOccupied[slot] = true;
+                    _observerBulkStateCount++;
+                }
+
+                _observerBulkStates[slot] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBulkBody>(payload);
                 return;
             }
 
-            if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xB24F_0000_0000_0000UL)
+            if (familyTag == 0xB24F_0000_0000_0000UL)
             {
-                ref BenchMovementVisualBody visual = ref CollectionsMarshal.GetValueRefOrAddDefault(_observerVisualStates, itemKey, out _);
-                visual = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
+                if (!_observerVisualStateOccupied[slot])
+                {
+                    _observerVisualStateOccupied[slot] = true;
+                    _observerVisualStateCount++;
+                }
+
+                _observerVisualStates[slot] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
                 return;
             }
 
-            ref BenchMovementBody state = ref CollectionsMarshal.GetValueRefOrAddDefault(_observerStates, itemKey, out _);
-            state = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
+            if (!_observerStateOccupied[slot])
+            {
+                _observerStateOccupied[slot] = true;
+                _observerStateCount++;
+            }
+
+            _observerStates[slot] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
         }
 
         public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
@@ -882,6 +916,24 @@ internal sealed class MovementRampHarness : IDisposable
             float unit = (value & 0xFFFF) / 65535f;
             return ((unit * 2f) - 1f) * magnitude;
         }
+
+        private void EnsureObserverCapacity(int slot)
+        {
+            if ((uint)slot < (uint)_observerStates.Length)
+                return;
+
+            int newLength = _observerStates.Length;
+            while (newLength <= slot)
+                newLength <<= 1;
+
+            Array.Resize(ref _observerStates, newLength);
+            Array.Resize(ref _observerStateOccupied, newLength);
+            Array.Resize(ref _observerVisualStates, newLength);
+            Array.Resize(ref _observerVisualStateOccupied, newLength);
+            Array.Resize(ref _observerBulkStates, newLength);
+            Array.Resize(ref _observerBulkStateOccupied, newLength);
+        }
+
     }
 
     private sealed class StageReplicationContext

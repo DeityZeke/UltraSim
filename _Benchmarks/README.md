@@ -248,7 +248,11 @@ Current interpretation:
 
 - ring-aware cadence materially improved the broadened load shape
 - the current practical ceiling for this less-dense three-lane profile is around `48` clients before crossing a `4 ms` network-tail target
-- `64` is close, but still over the target on the latest runs
+- after preserving stable latest-state item identity across AOI scopes and switching the widened harness observer store to slot-indexed arrays, the current less-dense `0.40` profile now reaches:
+  - `32`: `tick_p95 = 1.504 ms`
+  - `48`: `tick_p95 = 3.589 ms`
+  - `64`: `tick_p95 = 3.865 ms`
+- so the current broadened `0.40` / `64` profile now fits inside the `4 ms` network-tail target
 - the harness now also reports substage timing splits:
   - `server_pump_*`
   - `publish_*`
@@ -281,6 +285,13 @@ Current interpretation:
   - `dispatch_p95 = 0.776 ms`
   - `client_pump_p95 = 2.077 ms`
 - current observer storage is still dictionary-backed and keyed by scoped item keys, so there is still structural headroom beyond the current micro-optimizations
+- the latest structural widening pass changed that shape in the standalone harness:
+  - chunk-AOI latest-state now preserves stable item identity across scopes inside `LatestStateStream`
+  - widened-harness observer latest-state storage is now slot-indexed by structured item key
+  - current result at `64` clients:
+    - `client_observer_state_p95 = 1.389 ms`
+    - `dispatch_p95 = 0.785 ms`
+    - `tick_p95 = 3.865 ms`
 
 Current observer-replication read with actual client consume:
 

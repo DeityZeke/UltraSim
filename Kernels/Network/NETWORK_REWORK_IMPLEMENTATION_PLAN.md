@@ -563,12 +563,16 @@ The next implementation target after this bridge slice should be:
         - `48`: `tick_p95 = 3.387 ms`
         - `64`: `tick_p95 = 4.343 ms`
     - current read:
-      - `48` now passes under this broader shape
-      - `64` is still slightly above the `4 ms` tick-p95 target
+      - `48` passes under this broader shape
+      - after preserving stable latest-state item identity across AOI scopes and switching the widened harness observer store to slot-indexed arrays, the current less-dense `0.40` / `64` profile now reaches `tick_p95 = 3.865 ms`
+      - that puts the current broadened `0.40` / `64` profile inside the `4 ms` tick-p95 target
   - the live owner path now also has its first explicit correction-send policy seam:
     - server-side owner correction deadband
     - server-side max silent ticks
     - harness-level configuration for both
+  - chunk-AOI latest-state now preserves stable item identity across scopes inside `LatestStateStream`
+  - the widened harness now uses structured item keys for movement, visual, and bulk observer families
+  - widened-harness observer latest-state storage is now slot-indexed by structured item key instead of dictionary-backed by scoped item key
 
 Current recommendation:
 

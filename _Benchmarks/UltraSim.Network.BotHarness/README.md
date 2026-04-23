@@ -205,20 +205,20 @@ Current broader three-lane, three-ring read with ring-aware latest-state cadence
   - `--owner-max-silent-ticks 4`
   - `--owner-prediction-jitter-percent 0.05`
 - less-dense `spawn-spacing-m 12`, `3s` stages:
-  - `0.35` active:
-    - `32` clients: `tick_p95 = 1.738 ms`
-    - `48` clients: `tick_p95 = 3.037 ms`
-    - `64` clients: `tick_p95 = 4.152 ms`
-  - `0.40` active:
+  - earlier ring-cadenced `0.40` baseline:
     - `32` clients: `tick_p95 = 1.407 ms`
     - `48` clients: `tick_p95 = 3.387 ms`
     - `64` clients: `tick_p95 = 4.343 ms`
+  - current stable widened baseline:
+    - `32` clients: `tick_p95 = 1.504 ms`
+    - `48` clients: `tick_p95 = 3.589 ms`
+    - `64` clients: `tick_p95 = 3.865 ms`
 
 Current read:
 
 - ring-aware cadence materially improved the widened three-lane profile compared to the earlier all-rings-every-pass shape
-- under this broader live path, `48` clients currently pass the `4 ms` tick-p95 target at both `0.35` and `0.40` active
-- `64` clients are still slightly over the `4 ms` target on the current less-dense three-lane profile
+- under this broader live path, `48` clients pass the `4 ms` tick-p95 target comfortably
+- after preserving stable latest-state item identity across scopes and switching the harness observer store to slot-indexed arrays, `64` clients now also pass the `4 ms` tick-p95 target on the current less-dense `0.40` profile
 
 Current substage breakdown read from the same broadened `0.40` profile:
 
@@ -293,3 +293,23 @@ Current read:
 - the biggest measurable improvement in the latest run is on the event-side client sub-slice
 - the observer latest-state sub-slice is still the single largest client cost
 - current observer storage is still dictionary-backed and keyed by scoped item keys, so there is still structural headroom left above these local micro-optimizations
+
+Current stable item-identity / slot-store result:
+
+- report: `_Benchmarks/results/network_bot_harness_20260423_034433.json`
+- changes:
+  - chunk-AOI latest-state now preserves stable item identity across scopes inside `LatestStateStream`
+  - the widened harness now uses structured item keys for movement, visual, and bulk observer families
+  - harness-side observer latest-state storage is now slot-indexed by structured item key instead of dictionary-backed by scoped item key
+- `64` clients:
+  - `tick_p95 = 3.865 ms`
+  - `dispatch_p95 = 0.785 ms`
+  - `client_pump_p95 = 2.412 ms`
+  - `client_observer_state_p95 = 1.389 ms`
+  - `client_observer_event_p95 = 0.821 ms`
+
+Current interpretation:
+
+- stable latest-state item identity across scopes was the right structural direction for AOI observer state
+- the client observer latest-state path is no longer forced to treat the same logical observed item as a different key per ring
+- the current broadened `0.40` / `64` profile now sits inside the `4 ms` tick-p95 target without increasing observer payload size

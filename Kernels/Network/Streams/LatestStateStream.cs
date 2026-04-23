@@ -2,6 +2,8 @@ namespace UltraSim.Network;
 
 public sealed class LatestStateStream
 {
+    private readonly record struct EntryKey(ulong ItemKey, SubscriptionKey ScopeKey);
+
     private sealed class Entry
     {
         public ulong ItemKey;
@@ -12,7 +14,7 @@ public sealed class LatestStateStream
     }
 
     private readonly object _sync = new();
-    private readonly Dictionary<ulong, Entry> _entriesByKey = new();
+    private readonly Dictionary<EntryKey, Entry> _entriesByKey = new();
     private ulong _nextSequence = 1;
 
     public ulong Publish(ulong itemKey, ImmutablePayloadBuffer payload)
@@ -35,23 +37,30 @@ public sealed class LatestStateStream
         lock (_sync)
         {
             ulong sequence = _nextSequence++;
-            if (_entriesByKey.TryGetValue(itemKey, out Entry? entry))
+            PublishCore(itemKey, scopeKey, packetClass, payload, sequence);
+            return sequence;
+        }
+    }
+
+    public ulong PublishScopedCopies(ulong itemKey, ReadOnlySpan<SubscriptionKey> scopeKeys, PacketClass packetClass, ImmutablePayloadBuffer payload)
+    {
+        if (itemKey == 0)
+            throw new ArgumentOutOfRangeException(nameof(itemKey));
+        if (packetClass is not PacketClass.Realtime and not PacketClass.Bulk)
+            throw new ArgumentOutOfRangeException(nameof(packetClass), "Latest-state stream only supports Realtime or Bulk packet classes.");
+        if (scopeKeys.Length == 0)
+            throw new ArgumentOutOfRangeException(nameof(scopeKeys));
+
+        lock (_sync)
+        {
+            ulong sequence = _nextSequence++;
+            for (int i = 0; i < scopeKeys.Length; i++)
             {
-                entry.Sequence = sequence;
-                entry.ScopeKey = scopeKey;
-                entry.PacketClass = packetClass;
-                entry.Payload = payload;
-            }
-            else
-            {
-                _entriesByKey.Add(itemKey, new Entry
-                {
-                    ItemKey = itemKey,
-                    Sequence = sequence,
-                    ScopeKey = scopeKey,
-                    PacketClass = packetClass,
-                    Payload = payload,
-                });
+                SubscriptionKey scopeKey = scopeKeys[i];
+                if (!scopeKey.IsValid)
+                    throw new ArgumentOutOfRangeException(nameof(scopeKeys));
+
+                PublishCore(itemKey, scopeKey, packetClass, payload, sequence);
             }
 
             return sequence;
@@ -100,6 +109,29 @@ public sealed class LatestStateStream
                 Count: count,
                 NextCursor: new LatestStateCursor(lastSequence),
                 HighestPublishedSequence: _nextSequence - 1);
+        }
+    }
+
+    private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence)
+    {
+        EntryKey key = new(itemKey, scopeKey);
+        if (_entriesByKey.TryGetValue(key, out Entry? entry))
+        {
+            entry.Sequence = sequence;
+            entry.ScopeKey = scopeKey;
+            entry.PacketClass = packetClass;
+            entry.Payload = payload;
+        }
+        else
+        {
+            _entriesByKey.Add(key, new Entry
+            {
+                ItemKey = itemKey,
+                Sequence = sequence,
+                ScopeKey = scopeKey,
+                PacketClass = packetClass,
+                Payload = payload,
+            });
         }
     }
 }

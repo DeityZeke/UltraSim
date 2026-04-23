@@ -12,6 +12,7 @@ public sealed class ServerEcsWorldNetworkPublisher
     private readonly LatestStateStream _latestState;
     private readonly OrderedEventStream _orderedEvents;
     private readonly List<SubscriptionKey> _scopeScratch = new();
+    private readonly List<SubscriptionKey> _scopeKeyScratch = new();
     private readonly List<ChunkSubscriptionScope> _chunkScopeScratch = new();
 
     public ServerEcsWorldNetworkPublisher(
@@ -175,6 +176,7 @@ public sealed class ServerEcsWorldNetworkPublisher
                 rule.ScopeClassifier.CollectBroadcastScopes(rule.PositionSelector(entity, value), _chunkScopeScratch);
                 ulong baseItemKey = rule.ItemKeySelector(entity, value);
                 ImmutablePayloadBuffer payload = rule.PayloadSelector(entity, value);
+                _scopeKeyScratch.Clear();
                 ReadOnlySpan<ChunkSubscriptionScope> scopes = CollectionsMarshal.AsSpan(_chunkScopeScratch);
                 for (int scopeIndex = 0; scopeIndex < scopes.Length; scopeIndex++)
                 {
@@ -182,14 +184,12 @@ public sealed class ServerEcsWorldNetworkPublisher
                     if (rule.RingCadence is not null && !rule.RingCadence.ShouldPublish(publishTick, scope.RingIndex))
                         continue;
 
-                    SubscriptionKey scopeKey = scope.Key;
-                    _latestState.Publish(
-                        ServerEcsNetworkItemKeys.CombineWithScope(baseItemKey, scopeKey),
-                        scopeKey,
-                        rule.PacketClass,
-                        payload);
+                    _scopeKeyScratch.Add(scope.Key);
                     published++;
                 }
+
+                if (_scopeKeyScratch.Count != 0)
+                    _latestState.PublishScopedCopies(baseItemKey, CollectionsMarshal.AsSpan(_scopeKeyScratch), rule.PacketClass, payload);
             }
 
             return published;

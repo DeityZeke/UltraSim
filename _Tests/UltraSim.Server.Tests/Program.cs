@@ -1189,7 +1189,8 @@ internal static class TestRunner
         var latestBatch = new LatestStateUpdate[4];
         LatestStateDrainResult latestDrain = publisher.LatestStateStream.DrainSince(default, latestBatch);
         Assert.Equal(2, latestDrain.Count);
-        Assert.True(latestBatch[0].ItemKey != latestBatch[1].ItemKey);
+        Assert.Equal(latestBatch[0].ItemKey, latestBatch[1].ItemKey);
+        Assert.True(latestBatch[0].ScopeKey != latestBatch[1].ScopeKey);
 
         var subscriptions = new ConnectionSubscriptionRegistry();
         var maintainer = new ChunkAoiSubscriptionMaintainer(policy);

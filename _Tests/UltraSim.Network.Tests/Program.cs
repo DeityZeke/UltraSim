@@ -31,6 +31,7 @@ internal static class TestRunner
         Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
         Run(nameof(LatestStateStream_CoalescesAndDrainsByLatestVersion), LatestStateStream_CoalescesAndDrainsByLatestVersion);
+        Run(nameof(LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes), LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes);
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
         Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
@@ -727,6 +728,30 @@ internal static class TestRunner
         LatestStateDrainResult secondResult = stream.DrainSince(firstResult.NextCursor, secondBatch);
         Assert.Equal(1, secondResult.Count);
         Assert.Equal(third, secondBatch[0].Sequence);
+    }
+
+    private static void LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes()
+    {
+        var stream = new LatestStateStream();
+        SubscriptionKey[] scopes = [new SubscriptionKey(41), new SubscriptionKey(42)];
+
+        ulong sequence = stream.PublishScopedCopies(
+            77,
+            scopes,
+            PacketClass.Realtime,
+            ImmutablePayloadBuffer.CopyFrom([9]));
+
+        LatestStateSnapshot snapshot = stream.GetSnapshot();
+        Assert.Equal(2, snapshot.ItemCount);
+
+        var batch = new LatestStateUpdate[4];
+        LatestStateDrainResult drain = stream.DrainSince(default, batch);
+        Assert.Equal(2, drain.Count);
+        Assert.Equal(sequence, batch[0].Sequence);
+        Assert.Equal(sequence, batch[1].Sequence);
+        Assert.Equal((ulong)77, batch[0].ItemKey);
+        Assert.Equal((ulong)77, batch[1].ItemKey);
+        Assert.True(batch[0].ScopeKey != batch[1].ScopeKey);
     }
 
     private static void OrderedEventStream_DrainsInOrderAndAdvancesCursor()
