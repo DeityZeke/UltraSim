@@ -15,6 +15,7 @@ public sealed class ClientMovementNetworkBridge
     private readonly ClientPredictionStore<ClientMovementState> _predictionStore;
     private readonly ClientInterpolationBuffer<ClientMovementState> _interpolation;
     private readonly ClientMovementCorrectionStats _correctionStats;
+    private InboundDatagram[] _inboundScratch = new InboundDatagram[32];
     private ClientInputSample<ClientMovementInput>[] _pendingScratch = new ClientInputSample<ClientMovementInput>[64];
 
     public ClientMovementNetworkBridge(
@@ -80,9 +81,8 @@ public sealed class ClientMovementNetworkBridge
 
     public int PollInbound()
     {
-        var inbound = new InboundDatagram[32];
-        int count = _transport.PollInbound(inbound);
-        ProcessInbound(inbound.AsSpan(0, count));
+        int count = _transport.PollInbound(_inboundScratch);
+        ProcessInbound(_inboundScratch.AsSpan(0, count));
         return count;
     }
 

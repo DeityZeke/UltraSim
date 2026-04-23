@@ -4,6 +4,8 @@ public sealed class ConnectionStreamScheduler
 {
     private readonly LatestStateStream _latestState;
     private readonly OrderedEventStream _orderedEvents;
+    private LatestStateUpdate[] _latestScratch = Array.Empty<LatestStateUpdate>();
+    private OrderedEventEntry[] _eventScratch = Array.Empty<OrderedEventEntry>();
 
     public ConnectionStreamScheduler(
         LatestStateStream latestState,
@@ -21,8 +23,8 @@ public sealed class ConnectionStreamScheduler
         if (destination.Length == 0)
             return new ConnectionScheduleResult(0, state, false, 0, 0, 0, 0, 0, 0);
 
-        var latestBuffer = new LatestStateUpdate[destination.Length];
-        LatestStateDrainResult latestResult = _latestState.DrainSince(state.LatestStateCursor, latestBuffer);
+        EnsureLatestScratch(destination.Length);
+        LatestStateDrainResult latestResult = _latestState.DrainSince(state.LatestStateCursor, _latestScratch.AsSpan(0, destination.Length));
 
         int count = 0;
         int realtimeItems = 0;
@@ -35,7 +37,7 @@ public sealed class ConnectionStreamScheduler
 
         for (int i = 0; i < latestResult.Count && count < destination.Length; i++)
         {
-            LatestStateUpdate update = latestBuffer[i];
+            LatestStateUpdate update = _latestScratch[i];
             int payloadBytes = update.Payload.Length;
             if (WouldExceedBudget(update.PacketClass, realtimeItems, reliableItems, bulkItems, realtimeBytes, reliableBytes, bulkBytes, payloadBytes, budget))
                 break;
@@ -51,8 +53,9 @@ public sealed class ConnectionStreamScheduler
             Accumulate(update.PacketClass, payloadBytes, ref realtimeItems, ref reliableItems, ref bulkItems, ref realtimeBytes, ref reliableBytes, ref bulkBytes);
         }
 
-        var eventBuffer = new OrderedEventEntry[Math.Max(0, destination.Length - count)];
-        OrderedEventDrainResult eventResult = _orderedEvents.DrainSince(state.OrderedEventCursor, eventBuffer);
+        int eventCapacity = Math.Max(0, destination.Length - count);
+        EnsureEventScratch(eventCapacity);
+        OrderedEventDrainResult eventResult = _orderedEvents.DrainSince(state.OrderedEventCursor, _eventScratch.AsSpan(0, eventCapacity));
         OrderedEventCursor eventCursor = state.OrderedEventCursor;
         bool recoveryRequired = eventResult.Status == OrderedEventDrainStatus.RecoveryRequired;
 
@@ -60,7 +63,7 @@ public sealed class ConnectionStreamScheduler
         {
             for (int i = 0; i < eventResult.Count && count < destination.Length; i++)
             {
-                OrderedEventEntry entry = eventBuffer[i];
+                OrderedEventEntry entry = _eventScratch[i];
                 int payloadBytes = entry.Payload.Length;
                 if (WouldExceedBudget(entry.PacketClass, realtimeItems, reliableItems, bulkItems, realtimeBytes, reliableBytes, bulkBytes, payloadBytes, budget))
                     break;
@@ -91,6 +94,22 @@ public sealed class ConnectionStreamScheduler
             RealtimeBytesScheduled: realtimeBytes,
             ReliableEventBytesScheduled: reliableBytes,
             BulkBytesScheduled: bulkBytes);
+    }
+
+    private void EnsureLatestScratch(int requiredLength)
+    {
+        if (_latestScratch.Length >= requiredLength)
+            return;
+
+        _latestScratch = new LatestStateUpdate[requiredLength];
+    }
+
+    private void EnsureEventScratch(int requiredLength)
+    {
+        if (_eventScratch.Length >= requiredLength)
+            return;
+
+        _eventScratch = new OrderedEventEntry[requiredLength];
     }
 
     private static bool WouldExceedBudget(

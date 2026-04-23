@@ -54,6 +54,7 @@ public sealed class ConnectionRecoveryPlanner
         Span<OutboundDatagram> baselineDestination)
     {
         int itemCount = _latestState.CopySnapshot(snapshotItems);
+        int boundedItemCount = Math.Min(itemCount, ushort.MaxValue);
         LatestStateSnapshot latestSnapshot = _latestState.GetSnapshot();
         OrderedEventSnapshot orderedSnapshot = _orderedEvents.GetSnapshot();
         ulong lastOrderedEventSequence = orderedSnapshot.Count == 0 ? 0UL : orderedSnapshot.NewestAvailableSequence;
@@ -61,11 +62,11 @@ public sealed class ConnectionRecoveryPlanner
             BaselineId: _nextBaselineId++,
             HighestLatestStateSequence: latestSnapshot.HighestPublishedSequence,
             LastOrderedEventSequence: lastOrderedEventSequence,
-            ItemCount: checked((ushort)itemCount));
+            ItemCount: (ushort)boundedItemCount);
         int baselineDatagramCount = _baselineBuilder.Build(
             connectionId,
             descriptor,
-            snapshotItems.Slice(0, itemCount),
+            snapshotItems.Slice(0, boundedItemCount),
             baselineDestination);
 
         return new ConnectionRecoveryPlanResult(

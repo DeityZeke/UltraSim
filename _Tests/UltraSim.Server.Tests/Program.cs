@@ -40,6 +40,7 @@ internal static class TestRunner
         Run(nameof(ServerWrapperDefaults_Use16MillisecondTick), ServerWrapperDefaults_Use16MillisecondTick);
         Run(nameof(ServerHostLoop_Pump_TicksAtFixedStepCadence), ServerHostLoop_Pump_TicksAtFixedStepCadence);
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
+        Run(nameof(ServerHostLoop_Pump_ClampsDroppedCatchUpTicksOnHugeElapsed), ServerHostLoop_Pump_ClampsDroppedCatchUpTicksOnHugeElapsed);
         Run(nameof(ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks), ServerHostLoop_Pump_DrainsQueuedCommandsBeforeTicks);
         Run(nameof(ServerHostLoop_ForwardsApplicationEventsToSinks), ServerHostLoop_ForwardsApplicationEventsToSinks);
         Run(nameof(HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface), HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface);
@@ -580,6 +581,28 @@ internal static class TestRunner
 
         Assert.Equal(2, result.TicksProcessed);
         Assert.Equal(3, result.DroppedCatchUpTicks);
+        Assert.Equal(2, ticks);
+    }
+
+    private static void ServerHostLoop_Pump_ClampsDroppedCatchUpTicksOnHugeElapsed()
+    {
+        int ticks = 0;
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test"),
+            new ServerApplicationHooks
+            {
+                Tick = (_, _) => ticks++,
+            });
+        app.Start();
+
+        using var host = new ServerHostLoop(
+            app,
+            new ServerHostLoopOptions(TimeSpan.FromMilliseconds(50), MaxCatchUpTicksPerPump: 2));
+
+        ServerHostPumpResult result = host.Pump(TimeSpan.FromDays(5000));
+
+        Assert.Equal(2, result.TicksProcessed);
+        Assert.Equal(int.MaxValue, result.DroppedCatchUpTicks);
         Assert.Equal(2, ticks);
     }
 

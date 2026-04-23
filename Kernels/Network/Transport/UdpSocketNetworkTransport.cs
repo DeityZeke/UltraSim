@@ -88,6 +88,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             {
                 break;
             }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+            {
+                continue;
+            }
 
             if (received <= 0 || remote is not IPEndPoint remoteEndPoint)
                 continue;
@@ -207,10 +211,19 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 return false;
             }
 
-            while (_remoteByConnection.ContainsKey(new ConnectionId(_nextDynamicConnectionId)))
-                _nextDynamicConnectionId++;
+            while (true)
+            {
+                if (_nextDynamicConnectionId <= 0)
+                    throw new InvalidOperationException("Connection id space exhausted.");
 
-            connectionId = new ConnectionId(_nextDynamicConnectionId++);
+                connectionId = new ConnectionId(_nextDynamicConnectionId);
+                if (!_remoteByConnection.ContainsKey(connectionId))
+                    break;
+
+                _nextDynamicConnectionId++;
+            }
+
+            _nextDynamicConnectionId++;
             _remoteByConnection[connectionId] = Clone(remoteEndPoint);
             _connectionByRemote[remoteKey] = connectionId;
             return true;

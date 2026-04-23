@@ -55,7 +55,6 @@ public sealed class ReliableEventReplayBuffer
             throw new ArgumentOutOfRangeException(nameof(packetClass));
 
         ConnectionWindow window = GetOrCreateWindow(connectionId);
-        int slot = PhysicalIndex(window, window.Count == _capacityPerConnection ? _capacityPerConnection - 1 : window.Count);
         if (window.Count == _capacityPerConnection)
         {
             window.Start = (window.Start + 1) % _capacityPerConnection;
@@ -65,7 +64,7 @@ public sealed class ReliableEventReplayBuffer
             window.Count++;
         }
 
-        slot = PhysicalIndex(window, window.Count - 1);
+        int slot = PhysicalIndex(window, window.Count - 1);
         window.Entries[slot] = new ReliableEventReplayEntry(sequence, sentTick, scopeKey, packetClass, payload);
     }
 

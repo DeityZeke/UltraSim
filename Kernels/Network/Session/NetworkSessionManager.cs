@@ -17,6 +17,7 @@ public sealed class NetworkSessionManager
     private readonly Dictionary<ConnectionId, SessionId> _sessionIdByConnection = new();
     private readonly Queue<SessionLifecycleEvent> _lifecycleEvents = new();
     private readonly SessionAdmissionPolicy _policy;
+    private SessionEntry[] _sweepScratch;
     private uint _nextSessionId = 1;
     private int _createdSessions;
     private int _rejectedSessions;
@@ -32,6 +33,7 @@ public sealed class NetworkSessionManager
         _policy = policy.Equals(default(SessionAdmissionPolicy))
             ? SessionAdmissionPolicy.Default
             : policy;
+        _sweepScratch = new SessionEntry[Math.Max(16, _policy.MaxActiveSessions)];
     }
 
     public int Count
@@ -105,7 +107,19 @@ public sealed class NetworkSessionManager
             }
 
             if (_nextSessionId == 0)
-                throw new InvalidOperationException("Session id space exhausted.");
+            {
+                rejectReason = SessionDisconnectReason.ServerBusy;
+                _rejectedSessions++;
+                _lifecycleEvents.Enqueue(new SessionLifecycleEvent(
+                    SessionLifecycleEventKind.Rejected,
+                    SessionId.Invalid,
+                    connectionId,
+                    ConnectionSessionState.Disconnected,
+                    ConnectionSessionState.Disconnected,
+                    rejectReason,
+                    nowTicks));
+                return false;
+            }
 
             sessionId = new SessionId(_nextSessionId++);
             var entry = new SessionEntry
@@ -349,12 +363,15 @@ public sealed class NetworkSessionManager
             if (_sessionsById.Count == 0)
                 return 0;
 
-            SessionEntry[] snapshot = new SessionEntry[_sessionsById.Count];
-            _sessionsById.Values.CopyTo(snapshot, 0);
+            EnsureSweepScratchCapacity(_sessionsById.Count);
+            int snapshotCount = 0;
+            foreach (SessionEntry entry in _sessionsById.Values)
+                _sweepScratch[snapshotCount++] = entry;
+
             int count = 0;
-            for (int i = 0; i < snapshot.Length; i++)
+            for (int i = 0; i < snapshotCount; i++)
             {
-                SessionEntry entry = snapshot[i];
+                SessionEntry entry = _sweepScratch[i];
                 if (!_sessionsById.ContainsKey(entry.SessionId))
                     continue;
 
@@ -473,5 +490,13 @@ public sealed class NetworkSessionManager
                 entry.DisconnectReason,
                 nowTicks));
         }
+    }
+
+    private void EnsureSweepScratchCapacity(int requiredLength)
+    {
+        if (_sweepScratch.Length >= requiredLength)
+            return;
+
+        _sweepScratch = new SessionEntry[requiredLength];
     }
 }

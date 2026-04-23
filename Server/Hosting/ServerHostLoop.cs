@@ -73,7 +73,8 @@ public sealed class ServerHostLoop : IDisposable
         int droppedCatchUpTicks = 0;
         if (Application.IsRunning && _accumulatorSeconds >= _tickIntervalSeconds)
         {
-            droppedCatchUpTicks = (int)(_accumulatorSeconds / _tickIntervalSeconds);
+            double droppedTicks = _accumulatorSeconds / _tickIntervalSeconds;
+            droppedCatchUpTicks = droppedTicks >= int.MaxValue ? int.MaxValue : (int)droppedTicks;
             _accumulatorSeconds -= droppedCatchUpTicks * _tickIntervalSeconds;
         }
 

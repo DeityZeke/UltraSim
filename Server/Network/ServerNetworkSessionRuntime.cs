@@ -127,9 +127,12 @@ public sealed class ServerNetworkSessionRuntime
                 {
                     _reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor.LastOrderedEventSequence, out _);
                     _replayBuffer.AcknowledgeUpTo(datagram.ConnectionId, ack.Descriptor.LastOrderedEventSequence);
-                    _stateByConnection[datagram.ConnectionId] = new ConnectionScheduleState(
-                        new LatestStateCursor(ack.Descriptor.HighestLatestStateSequence),
-                        new OrderedEventCursor(ack.Descriptor.LastOrderedEventSequence + 1));
+                    if (_stateByConnection.ContainsKey(datagram.ConnectionId))
+                    {
+                        _stateByConnection[datagram.ConnectionId] = new ConnectionScheduleState(
+                            new LatestStateCursor(ack.Descriptor.HighestLatestStateSequence),
+                            new OrderedEventCursor(ack.Descriptor.LastOrderedEventSequence + 1));
+                    }
                 }
 
                 processed++;
@@ -181,7 +184,8 @@ public sealed class ServerNetworkSessionRuntime
                 retransmitDatagrams += retransmitAssembly.Count;
             }
 
-            ConnectionScheduleState state = _stateByConnection[connectionId];
+            if (!_stateByConnection.TryGetValue(connectionId, out ConnectionScheduleState state))
+                continue;
             ConnectionScheduleResult schedule = _scheduler.Schedule(
                 state,
                 WithoutLatestStateBudget(budget),
@@ -247,11 +251,12 @@ public sealed class ServerNetworkSessionRuntime
             BaselineId: _nextBaselineId++,
             HighestLatestStateSequence: highestFilteredSequence == 0 ? latestSnapshot.HighestPublishedSequence : highestFilteredSequence,
             LastOrderedEventSequence: orderedSnapshot.Count == 0 ? 0UL : orderedSnapshot.NewestAvailableSequence,
-            ItemCount: checked((ushort)filteredSnapshotCount));
+            ItemCount: (ushort)Math.Min(filteredSnapshotCount, ushort.MaxValue));
 
-        int written = _baselineBuilder.Build(connectionId, descriptor, _filteredSnapshotScratch.AsSpan(0, filteredSnapshotCount), _datagramScratch);
+        int boundedItemCount = Math.Min(filteredSnapshotCount, ushort.MaxValue);
+        int written = _baselineBuilder.Build(connectionId, descriptor, _filteredSnapshotScratch.AsSpan(0, boundedItemCount), _datagramScratch);
         Enqueue(_datagramScratch.AsSpan(0, written));
-        _latestSentTracker.MarkSent(connectionId, _filteredSnapshotScratch.AsSpan(0, filteredSnapshotCount));
+        _latestSentTracker.MarkSent(connectionId, _filteredSnapshotScratch.AsSpan(0, boundedItemCount));
         return written;
     }
 

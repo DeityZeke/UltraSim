@@ -158,7 +158,6 @@ public sealed class NetworkControlPlaneHost
         if (!Sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot) || snapshot.State != ConnectionSessionState.Ready)
             return false;
 
-        Sessions.TryTouchActivity(sessionId, clientTick);
         _pingProbesSent++;
         SendPacket(connectionId, new PingProbePacket(sequence, clientTick), PacketHeaderFlags.HighPriorityHint);
         _transport.FlushOutbound();
@@ -279,7 +278,7 @@ public sealed class NetworkControlPlaneHost
         Sessions.TryTouchActivity(sessionId, nowTicks);
         _pingProbesReceived++;
         _pongProbesSent++;
-        SendPacket(connectionId, new PongProbePacket(packet.Sequence, packet.ClientTick, checked((uint)nowTicks)), PacketHeaderFlags.HighPriorityHint);
+        SendPacket(connectionId, new PongProbePacket(packet.Sequence, packet.ClientTick, unchecked((uint)nowTicks)), PacketHeaderFlags.HighPriorityHint);
     }
 
     private void OnPongProbe(ConnectionId connectionId, long nowTicks, in PongProbePacket packet)

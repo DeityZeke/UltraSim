@@ -30,6 +30,7 @@ internal static class TestRunner
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
         Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
+        Run(nameof(NetworkSessionManager_SessionIdExhaustion_RejectsGracefully), NetworkSessionManager_SessionIdExhaustion_RejectsGracefully);
         Run(nameof(LatestStateStream_CoalescesAndDrainsByLatestVersion), LatestStateStream_CoalescesAndDrainsByLatestVersion);
         Run(nameof(LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes), LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes);
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
@@ -670,7 +671,15 @@ internal static class TestRunner
             RequiredFeatures: FeatureFlags.Compression);
         var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
         var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, pair.Server, handshakePolicy: policy);
-        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, pair.Client, clientHello: hello);
+        var client = new NetworkControlPlaneHost(
+            NetworkControlPlaneRole.Client,
+            pair.Client,
+            clientHello: hello,
+            sessionPolicy: new SessionAdmissionPolicy(
+                DuplicateSessionPolicy.RejectNew,
+                MaxActiveSessions: 0,
+                AuthTimeoutTicks: 0,
+                KeepAliveTimeoutTicks: 10));
         server.Start();
         client.Start();
 
@@ -695,6 +704,20 @@ internal static class TestRunner
         Assert.Equal(1, serverMetrics.PongProbesSent);
         Assert.Equal(1, clientMetrics.PingProbesSent);
         Assert.Equal(1, clientMetrics.PongProbesReceived);
+    }
+
+    private static void NetworkSessionManager_SessionIdExhaustion_RejectsGracefully()
+    {
+        var sessions = new NetworkSessionManager();
+        FieldInfo? field = typeof(NetworkSessionManager).GetField("_nextSessionId", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        field!.SetValue(sessions, 0u);
+
+        bool created = sessions.TryCreateSession(new ConnectionId(77), 100, out SessionId sessionId, out SessionDisconnectReason rejectReason);
+
+        Assert.False(created);
+        Assert.Equal(SessionId.Invalid, sessionId);
+        Assert.Equal(SessionDisconnectReason.ServerBusy, rejectReason);
     }
 
     private static void LatestStateStream_CoalescesAndDrainsByLatestVersion()
