@@ -78,6 +78,7 @@ public sealed class ClientMovementSessionHost
         long movementElapsedTicks = 0;
         long observerStateElapsedTicks = 0;
         long observerEventElapsedTicks = 0;
+        StateBaselineDescriptor? completedBaseline = null;
         _observerState?.BeginPump();
         _observerEvents?.BeginPump();
 
@@ -115,7 +116,10 @@ public sealed class ClientMovementSessionHost
                 {
                     observerStateElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
                     if (_observerState.TryDequeueCompletedBaseline(out StateBaselineDescriptor baseline))
+                    {
                         _observerEvents?.ResetToSequence(baseline.LastOrderedEventSequence);
+                        completedBaseline = baseline;
+                    }
                     continue;
                 }
 
@@ -142,6 +146,16 @@ public sealed class ClientMovementSessionHost
                 ReliableEventAckPacket.PacketClass,
                 ReliableEventAckPacket.Channel,
                 PacketCodec.Encode(ackPacket)));
+        }
+
+        if (completedBaseline.HasValue)
+        {
+            _transport.EnqueueOutbound(new OutboundDatagram(
+                ConnectionId,
+                StateBaselineAckPacket.Plane,
+                StateBaselineAckPacket.PacketClass,
+                StateBaselineAckPacket.Channel,
+                PacketCodec.Encode(new StateBaselineAckPacket(completedBaseline.Value))));
         }
 
         _control.FlushOutbound();

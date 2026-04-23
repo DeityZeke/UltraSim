@@ -80,12 +80,15 @@ The most important missing pieces are:
 Current state:
 - highest-contiguous ordered-event ack now exists
 - client-side contiguous ordered-event apply now exists
-- retransmit / replay / resend policy does not exist yet
+- bounded replay window now exists
+- retransmit / resend is not yet wired as a live server runtime loop
 5. Snapshot / baseline / recovery path as a real runtime path
 Current state:
 - full baseline begin/frame/complete packet contracts now exist
 - client-side full baseline apply/reset seam now exists
-- recovery resend rules and incremental baseline advancement do not exist yet
+- baseline completion ack now exists
+- recovery planning now exists at the kernel level
+- incremental delta/baseline advancement does not exist yet
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables
 

@@ -483,6 +483,14 @@ Current status:
     - `StateBaselineSnapshotBuilder`
     - client observer-state bridge can apply a full baseline and surface completion
     - client session host now resets ordered-event sequence floor immediately when a baseline completes
+  - first bounded recovery/replay seam:
+    - `StateBaselineAckPacket`
+    - `StateBaselineAckTracker`
+    - `ReliableEventReplayBuffer`
+    - `ConnectionRecoveryPlanner`
+    - baseline completion is now acknowledged back to the server
+    - ordered-event replay is now explicitly bounded per connection
+    - recovery can now choose between normal incremental scheduling and full-baseline resync
 
 ## Testing Strategy
 

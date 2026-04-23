@@ -118,10 +118,18 @@ What now exists above the kernel:
   - `StateBaselineBeginPacket`
   - `StateBaselineFramePacket`
   - `StateBaselineCompletePacket`
+  - `StateBaselineAckPacket`
   - `LatestStateStream.CopySnapshot(...)`
   - `StateBaselineSnapshotBuilder`
   - client observer-state baseline apply/reset
   - immediate ordered-event sequence-floor reset when baseline completion lands in the live client host
+  - baseline completion acknowledgement back to the server
+- the first bounded recovery/replay seam above the kernel:
+  - `ReliableEventReplayBuffer`
+  - `StateBaselineAckTracker`
+  - `ConnectionRecoveryPlanner`
+  - bounded per-connection ordered-event replay retention
+  - explicit planner choice between normal incremental schedule and full-baseline recovery
 
 ## Design Position
 
@@ -306,8 +314,7 @@ Current interpretation:
 - the next important question is no longer “does the widened path fundamentally work?”
 - it is “why does the `32–64` band still show non-monotonic cost behavior across multiple runs and profiles?”
 - that investigation should happen before treating the newest widened ceilings as fully settled
-- on correctness/runtime semantics, the next meaningful gap after this is still broader reliable ordered delivery plus snapshot/baseline/recovery, not another transport-only optimization pass
-- more specifically, the remaining gap is now recovery/replay/incremental-baseline policy on top of the new explicit ack + full-baseline seams
+- on correctness/runtime semantics, the next meaningful gap after this is now live retransmit wiring and incremental delta/baseline advancement on top of the new explicit ack + baseline + bounded replay seams
 
 ## Parity Position
 

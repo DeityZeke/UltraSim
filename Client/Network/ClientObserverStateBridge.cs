@@ -140,6 +140,18 @@ public sealed class ClientObserverStateBridge
         return true;
     }
 
+    public bool TryDequeueBaselineAckPacket(out StateBaselineAckPacket packet)
+    {
+        if (!TryDequeueCompletedBaseline(out StateBaselineDescriptor descriptor))
+        {
+            packet = default;
+            return false;
+        }
+
+        packet = new StateBaselineAckPacket(descriptor);
+        return true;
+    }
+
     private void OnBaselineBegin(in StateBaselineBeginPacket packet)
     {
         _hasActiveBaseline = true;

@@ -20,6 +20,7 @@ public sealed class ServerMovementSessionHost
     private readonly SessionLifecycleEvent[] _sessionEvents;
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
     private readonly ReliableEventAckTracker _reliableEventAcks = new();
+    private readonly StateBaselineAckTracker _stateBaselineAcks = new();
 
     public ServerMovementSessionHost(
         World world,
@@ -54,6 +55,7 @@ public sealed class ServerMovementSessionHost
     public NetworkControlPlaneHost Control => _control;
     public ServerEcsMovementNetworkBridge Movement => _movement;
     public ReliableEventAckTracker ReliableEventAcks => _reliableEventAcks;
+    public StateBaselineAckTracker StateBaselineAcks => _stateBaselineAcks;
     public int BoundConnectionCount => _entityByConnection.Count;
 
     public int CopyBoundConnections(Span<ConnectionId> destination)
@@ -91,6 +93,7 @@ public sealed class ServerMovementSessionHost
             _control.ProcessInbound(inbound, nowTicks);
             HandleControlPlaneEvents(nowTicks);
             ProcessReliableEventAcks(inbound);
+            ProcessStateBaselineAcks(inbound);
             _movement.ProcessInbound(inbound);
             totalInboundCount += inboundCount;
 
@@ -155,6 +158,7 @@ public sealed class ServerMovementSessionHost
                 _movement.Unbind(evt.ConnectionId);
                 _entityByConnection.Remove(evt.ConnectionId);
                 _reliableEventAcks.Remove(evt.ConnectionId);
+                _stateBaselineAcks.Remove(evt.ConnectionId);
                 _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
                 if (_despawnSession is null && _world.Entities.IsAlive(entity))
                     _world.Destroy(entity);
@@ -165,6 +169,11 @@ public sealed class ServerMovementSessionHost
     public bool TryGetLastReliableEventAck(ConnectionId connectionId, out ulong sequence)
     {
         return _reliableEventAcks.TryGetLastAcknowledged(connectionId, out sequence);
+    }
+
+    public bool TryGetLastStateBaselineAck(ConnectionId connectionId, out StateBaselineDescriptor descriptor)
+    {
+        return _stateBaselineAcks.TryGetLastAcknowledged(connectionId, out descriptor);
     }
 
     private void ProcessReliableEventAcks(ReadOnlySpan<InboundDatagram> inbound)
@@ -183,6 +192,25 @@ public sealed class ServerMovementSessionHost
             var reader = new UltraSim.Network.BitReader(payload);
             ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
             _reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Sequence, out _);
+        }
+    }
+
+    private void ProcessStateBaselineAcks(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            ref readonly InboundDatagram datagram = ref inbound[i];
+            if (datagram.ConnectionId == ConnectionId.Invalid || datagram.Plane != NetworkPlane.State)
+                continue;
+
+            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
+                continue;
+            if (header.PacketId != StateBaselineAckPacket.PacketId)
+                continue;
+
+            var reader = new UltraSim.Network.BitReader(payload);
+            StateBaselineAckPacket ack = StateBaselineAckPacket.Deserialize(ref reader);
+            _stateBaselineAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor, out _);
         }
     }
 }

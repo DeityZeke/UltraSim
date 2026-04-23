@@ -18,6 +18,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
+        Run(nameof(ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes), ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes);
         Run(nameof(ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor), ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor);
         Run(nameof(ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches), ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches);
 
@@ -299,6 +300,54 @@ internal static class TestRunner
         var reader = new BitReader(payload);
         ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
         Assert.Equal((ulong)21, ack.Sequence);
+    }
+
+    private static void ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Client.Start();
+        pair.Server.Start();
+
+        var observerState = new ClientObserverStateBridge(new ConnectionId(1));
+        var host = new ClientMovementSessionHost(
+            pair.Client,
+            new ConnectionId(1),
+            default,
+            observerState: observerState,
+            maxPollBatch: 8);
+
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineBeginPacket.Plane,
+            StateBaselineBeginPacket.PacketClass,
+            StateBaselineBeginPacket.Channel,
+            PacketCodec.Encode(new StateBaselineBeginPacket(new StateBaselineDescriptor(9, 50, 42, 1)))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineFramePacket.Plane,
+            StateBaselineFramePacket.PacketClass,
+            StateBaselineFramePacket.Channel,
+            PacketCodec.Encode(new StateBaselineFramePacket(9, 1001, 50, ImmutablePayloadBuffer.CopyFrom([2])))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineCompletePacket.Plane,
+            StateBaselineCompletePacket.PacketClass,
+            StateBaselineCompletePacket.Channel,
+            PacketCodec.Encode(new StateBaselineCompletePacket(9))));
+        pair.Server.FlushOutbound();
+
+        Assert.Equal(3, host.Pump(1000));
+
+        var ackInbound = new InboundDatagram[4];
+        int ackCount = pair.Server.PollInbound(ackInbound);
+        Assert.Equal(1, ackCount);
+        Assert.True(PacketCodec.TryDecodeEnvelope(ackInbound[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(StateBaselineAckPacket.PacketId, header.PacketId);
+        var reader = new BitReader(payload);
+        StateBaselineAckPacket ack = StateBaselineAckPacket.Deserialize(ref reader);
+        Assert.Equal((uint)9, ack.Descriptor.BaselineId);
+        Assert.Equal((ulong)50, ack.Descriptor.HighestLatestStateSequence);
+        Assert.Equal((ulong)42, ack.Descriptor.LastOrderedEventSequence);
     }
 
     private static void ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor()
