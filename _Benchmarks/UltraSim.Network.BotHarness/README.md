@@ -50,6 +50,8 @@ Useful options:
 - `--disable-latest-state-recipient-phasing`
 - `--enable-async-server-flush`
 - `--disable-async-server-flush`
+- `--enable-async-client-receive`
+- `--disable-async-client-receive`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
@@ -134,6 +136,10 @@ The widened harness now reports:
 - `client_poll_payload_copy_p95_ms`
 - `client_poll_envelope_parse_avg_ms`
 - `client_poll_envelope_parse_p95_ms`
+- `client_poll_async_receive_avg_ms`
+- `client_poll_async_receive_p95_ms`
+- `client_poll_async_queued_avg`
+- `client_poll_async_queued_p95`
 - `client_observer_state_decode_avg_ms`
 - `client_observer_state_decode_p95_ms`
 - `client_observer_state_apply_avg_ms`
@@ -217,6 +223,18 @@ The widened harness also has an experimental latest-state recipient-phasing seam
 - current read:
   - it can reduce server-side dispatch/flush cost on dense runs
   - but it currently worsens ping tail enough that it should stay experimental, not default
+
+The harness also has an experimental async client receive seam:
+
+- current harness default: disabled
+- use `--enable-async-client-receive` for a focused A/B on the same widened profile
+- current intent:
+  - move UDP receive + bundle unpack off the client pump thread
+  - let `PollInbound()` drain already-decoded queued datagrams
+- current read:
+  - not a clean win on the widened dense profile
+  - queue growth and GC pressure can outweigh the tick-thread poll savings
+  - keep this off unless a specific experiment is targeting receive-thread policy/backpressure
 
 The widened harness also has an experimental async server flush seam:
 

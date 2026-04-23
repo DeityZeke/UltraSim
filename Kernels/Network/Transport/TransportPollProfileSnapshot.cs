@@ -6,4 +6,7 @@ public readonly record struct TransportPollProfileSnapshot(
     long BundleUnpackElapsedTicks,
     long PayloadCopyElapsedTicks,
     long EnvelopeParseElapsedTicks,
-    int QueuedDatagramCount);
+    int QueuedDatagramCount,
+    bool AsyncEnabled,
+    int AsyncQueuedDatagramCount,
+    long AsyncReceiveElapsedTicks);

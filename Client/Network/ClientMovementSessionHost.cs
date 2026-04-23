@@ -79,6 +79,8 @@ public sealed class ClientMovementSessionHost
         long pollBundleUnpackElapsedTicks = 0;
         long pollPayloadCopyElapsedTicks = 0;
         long pollEnvelopeParseElapsedTicks = 0;
+        long pollAsyncReceiveElapsedTicks = 0;
+        int pollAsyncQueuedDatagramCount = 0;
         long controlElapsedTicks = 0;
         long movementElapsedTicks = 0;
         long observerStateElapsedTicks = 0;
@@ -102,6 +104,8 @@ public sealed class ClientMovementSessionHost
                 pollBundleUnpackElapsedTicks += pollProfile.BundleUnpackElapsedTicks;
                 pollPayloadCopyElapsedTicks += pollProfile.PayloadCopyElapsedTicks;
                 pollEnvelopeParseElapsedTicks += pollProfile.EnvelopeParseElapsedTicks;
+                pollAsyncReceiveElapsedTicks += pollProfile.AsyncReceiveElapsedTicks;
+                pollAsyncQueuedDatagramCount += pollProfile.AsyncQueuedDatagramCount;
             }
             if (count <= 0)
                 break;
@@ -184,6 +188,8 @@ public sealed class ClientMovementSessionHost
             pollBundleUnpackElapsedTicks,
             pollPayloadCopyElapsedTicks,
             pollEnvelopeParseElapsedTicks,
+            pollAsyncReceiveElapsedTicks,
+            pollAsyncQueuedDatagramCount,
             controlElapsedTicks,
             movementElapsedTicks,
             observerStateElapsedTicks,

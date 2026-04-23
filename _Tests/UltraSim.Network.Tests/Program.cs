@@ -75,6 +75,7 @@ internal static class TestRunner
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
         Run(nameof(UdpSocketTransport_FlushOutbound_BundlesSameConnectionPackets), UdpSocketTransport_FlushOutbound_BundlesSameConnectionPackets);
         Run(nameof(UdpSocketTransport_AsyncFlushOutbound_BundlesSameConnectionPackets), UdpSocketTransport_AsyncFlushOutbound_BundlesSameConnectionPackets);
+        Run(nameof(UdpSocketTransport_AsyncReceive_RoundTripsDatagrams), UdpSocketTransport_AsyncReceive_RoundTripsDatagrams);
         Run(nameof(UdpSocketTransport_RoundTripsDatagrams), UdpSocketTransport_RoundTripsDatagrams);
 
         Console.WriteLine("All Network scaffold tests passed.");
@@ -351,6 +352,48 @@ internal static class TestRunner
             Assert.Equal((ushort)(i + 1), packet.Sequence);
             Assert.Equal((uint)((i + 1) * 10), packet.ClientTick);
         }
+    }
+
+    private static void UdpSocketTransport_AsyncReceive_RoundTripsDatagrams()
+    {
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        using var server = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata,
+            EnableAsyncReceive: true));
+        server.Start();
+
+        var serverEndPoint = (IPEndPoint)Assert.NotNull(server.LocalEndPoint);
+        using var client = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata,
+            serverEndPoint,
+            new ConnectionId(1),
+            AllowDynamicConnections: false));
+        client.Start();
+
+        ImmutablePayloadBuffer payload = PacketCodec.Encode(new PingProbePacket(sequence: 11, clientTick: 2222));
+        client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            NetworkPlane.Control,
+            PacketClass.Control,
+            ChannelType.ReliableOrdered,
+            payload));
+        client.FlushOutbound();
+
+        var inbound = new InboundDatagram[4];
+        int count = PollUntilReceived(server, inbound, maxAttempts: 256);
+
+        Assert.Equal(1, count);
+        Assert.True(server.LastPollProfile.AsyncEnabled);
+        Assert.True(server.LastPollProfile.AsyncQueuedDatagramCount >= 0);
+        Assert.Equal(1, inbound[0].ConnectionId.Value);
+        Assert.True(PacketCodec.TryDecodeEnvelope(inbound[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> rawPayload));
+        Assert.Equal(PingProbePacket.PacketId, header.PacketId);
+        var reader = new BitReader(rawPayload);
+        PingProbePacket packet = PingProbePacket.Deserialize(ref reader);
+        Assert.Equal((ushort)11, packet.Sequence);
+        Assert.Equal((uint)2222, packet.ClientTick);
     }
 
     private static void Run(string name, Action test)

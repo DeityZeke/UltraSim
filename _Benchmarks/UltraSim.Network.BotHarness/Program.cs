@@ -179,6 +179,8 @@ internal sealed class MovementRampHarness : IDisposable
         var clientPollBundleUnpackSamplesMs = new List<double>(measuredTicks);
         var clientPollPayloadCopySamplesMs = new List<double>(measuredTicks);
         var clientPollEnvelopeParseSamplesMs = new List<double>(measuredTicks);
+        var clientPollAsyncReceiveSamplesMs = new List<double>(measuredTicks);
+        var clientPollAsyncQueuedSamples = new List<double>(measuredTicks);
         var clientControlSamplesMs = new List<double>(measuredTicks);
         var clientMovementSamplesMs = new List<double>(measuredTicks);
         var clientObserverStateSamplesMs = new List<double>(measuredTicks);
@@ -316,6 +318,8 @@ internal sealed class MovementRampHarness : IDisposable
             double clientPollBundleUnpackMs = 0d;
             double clientPollPayloadCopyMs = 0d;
             double clientPollEnvelopeParseMs = 0d;
+            double clientPollAsyncReceiveMs = 0d;
+            double clientPollAsyncQueued = 0d;
             double clientControlMs = 0d;
             double clientMovementMs = 0d;
             double clientObserverStateMs = 0d;
@@ -336,6 +340,8 @@ internal sealed class MovementRampHarness : IDisposable
                 clientPollBundleUnpackMs += profile.PollBundleUnpackElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollPayloadCopyMs += profile.PollPayloadCopyElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollEnvelopeParseMs += profile.PollEnvelopeParseElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollAsyncReceiveMs += profile.PollAsyncReceiveElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollAsyncQueued += profile.PollAsyncQueuedDatagramCount;
                 clientControlMs += profile.ControlElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientMovementMs += profile.MovementElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientObserverStateMs += profile.ObserverStateElapsedTicks * 1000.0 / Stopwatch.Frequency;
@@ -352,6 +358,8 @@ internal sealed class MovementRampHarness : IDisposable
             clientPollBundleUnpackSamplesMs.Add(clientPollBundleUnpackMs);
             clientPollPayloadCopySamplesMs.Add(clientPollPayloadCopyMs);
             clientPollEnvelopeParseSamplesMs.Add(clientPollEnvelopeParseMs);
+            clientPollAsyncReceiveSamplesMs.Add(clientPollAsyncReceiveMs);
+            clientPollAsyncQueuedSamples.Add(clientPollAsyncQueued);
             clientControlSamplesMs.Add(clientControlMs);
             clientMovementSamplesMs.Add(clientMovementMs);
             clientObserverStateSamplesMs.Add(clientObserverStateMs);
@@ -400,6 +408,8 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats clientPollBundleUnpackStats = new TickWindowStats(clientPollBundleUnpackSamplesMs);
         TickWindowStats clientPollPayloadCopyStats = new TickWindowStats(clientPollPayloadCopySamplesMs);
         TickWindowStats clientPollEnvelopeParseStats = new TickWindowStats(clientPollEnvelopeParseSamplesMs);
+        TickWindowStats clientPollAsyncReceiveStats = new TickWindowStats(clientPollAsyncReceiveSamplesMs);
+        TickWindowStats clientPollAsyncQueuedStats = new TickWindowStats(clientPollAsyncQueuedSamples);
         TickWindowStats clientControlStats = new TickWindowStats(clientControlSamplesMs);
         TickWindowStats clientMovementStats = new TickWindowStats(clientMovementSamplesMs);
         TickWindowStats clientObserverStateStats = new TickWindowStats(clientObserverStateSamplesMs);
@@ -483,6 +493,10 @@ internal sealed class MovementRampHarness : IDisposable
             ClientPollPayloadCopyP95Ms: clientPollPayloadCopyStats.P95Ms,
             ClientPollEnvelopeParseAverageMs: clientPollEnvelopeParseStats.AverageMs,
             ClientPollEnvelopeParseP95Ms: clientPollEnvelopeParseStats.P95Ms,
+            ClientPollAsyncReceiveAverageMs: clientPollAsyncReceiveStats.AverageMs,
+            ClientPollAsyncReceiveP95Ms: clientPollAsyncReceiveStats.P95Ms,
+            ClientPollAsyncQueuedAverage: clientPollAsyncQueuedStats.AverageMs,
+            ClientPollAsyncQueuedP95: clientPollAsyncQueuedStats.P95Ms,
             ClientControlAverageMs: clientControlStats.AverageMs,
             ClientControlP95Ms: clientControlStats.P95Ms,
             ClientMovementAverageMs: clientMovementStats.AverageMs,
@@ -567,7 +581,8 @@ internal sealed class MovementRampHarness : IDisposable
                 _metadata,
                 serverEndPoint,
                 new ConnectionId(1),
-                AllowDynamicConnections: false));
+                AllowDynamicConnections: false,
+                EnableAsyncReceive: _options.AsyncClientReceive));
             transport.Start();
 
             ClientHandle? handle = null;
@@ -1251,6 +1266,7 @@ internal sealed class HarnessArgs
     public bool LatestStateBatching { get; set; }
     public bool LatestStateRecipientPhasing { get; set; }
     public bool AsyncServerFlush { get; set; } = true;
+    public bool AsyncClientReceive { get; set; }
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1297,6 +1313,8 @@ internal sealed class HarnessArgs
             else if (arg == "--enable-latest-state-recipient-phasing") options.LatestStateRecipientPhasing = true;
             else if (arg == "--disable-async-server-flush") options.AsyncServerFlush = false;
             else if (arg == "--enable-async-server-flush") options.AsyncServerFlush = true;
+            else if (arg == "--disable-async-client-receive") options.AsyncClientReceive = false;
+            else if (arg == "--enable-async-client-receive") options.AsyncClientReceive = true;
             else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1373,6 +1391,7 @@ internal sealed class HarnessArgs
             ["latest_state_batching"] = LatestStateBatching,
             ["latest_state_recipient_phasing"] = LatestStateRecipientPhasing,
             ["async_server_flush"] = AsyncServerFlush,
+            ["async_client_receive"] = AsyncClientReceive,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
@@ -1485,6 +1504,10 @@ internal readonly record struct StageResult(
     double ClientPollPayloadCopyP95Ms,
     double ClientPollEnvelopeParseAverageMs,
     double ClientPollEnvelopeParseP95Ms,
+    double ClientPollAsyncReceiveAverageMs,
+    double ClientPollAsyncReceiveP95Ms,
+    double ClientPollAsyncQueuedAverage,
+    double ClientPollAsyncQueuedP95,
     double ClientControlAverageMs,
     double ClientControlP95Ms,
     double ClientMovementAverageMs,
@@ -1591,6 +1614,10 @@ internal readonly record struct StageResult(
             ["client_poll_payload_copy_p95_ms"] = Math.Round(ClientPollPayloadCopyP95Ms, 3),
             ["client_poll_envelope_parse_avg_ms"] = Math.Round(ClientPollEnvelopeParseAverageMs, 3),
             ["client_poll_envelope_parse_p95_ms"] = Math.Round(ClientPollEnvelopeParseP95Ms, 3),
+            ["client_poll_async_receive_avg_ms"] = Math.Round(ClientPollAsyncReceiveAverageMs, 3),
+            ["client_poll_async_receive_p95_ms"] = Math.Round(ClientPollAsyncReceiveP95Ms, 3),
+            ["client_poll_async_queued_avg"] = Math.Round(ClientPollAsyncQueuedAverage, 3),
+            ["client_poll_async_queued_p95"] = Math.Round(ClientPollAsyncQueuedP95, 3),
             ["client_control_avg_ms"] = Math.Round(ClientControlAverageMs, 3),
             ["client_control_p95_ms"] = Math.Round(ClientControlP95Ms, 3),
             ["client_movement_avg_ms"] = Math.Round(ClientMovementAverageMs, 3),

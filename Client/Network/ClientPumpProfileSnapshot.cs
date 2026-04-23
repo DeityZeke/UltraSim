@@ -8,6 +8,8 @@ public readonly record struct ClientPumpProfileSnapshot(
     long PollBundleUnpackElapsedTicks,
     long PollPayloadCopyElapsedTicks,
     long PollEnvelopeParseElapsedTicks,
+    long PollAsyncReceiveElapsedTicks,
+    int PollAsyncQueuedDatagramCount,
     long ControlElapsedTicks,
     long MovementElapsedTicks,
     long ObserverStateElapsedTicks,

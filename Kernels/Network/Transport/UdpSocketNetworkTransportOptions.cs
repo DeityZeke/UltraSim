@@ -9,4 +9,5 @@ public sealed record UdpSocketNetworkTransportOptions(
     ConnectionId DefaultConnectionId = default,
     bool AllowDynamicConnections = true,
     int MaxDatagramBytes = 2048,
-    bool EnableAsyncFlush = false);
+    bool EnableAsyncFlush = false,
+    bool EnableAsyncReceive = false);

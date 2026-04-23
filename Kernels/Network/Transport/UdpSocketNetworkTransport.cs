@@ -4,6 +4,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace UltraSim.Network;
@@ -70,7 +71,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private readonly UdpSocketNetworkTransportOptions _options;
     private readonly PacketMetadataRegistry _packetMetadata;
     private readonly ConcurrentQueue<OutboundDatagram> _outbound = new();
-    private readonly Queue<InboundDatagram> _pendingInbound = new();
+    private readonly ConcurrentQueue<InboundDatagram> _pendingInbound = new();
     private readonly Dictionary<ConnectionId, IPEndPoint> _remoteByConnection = new();
     private readonly Dictionary<string, ConnectionId> _connectionByRemote = new(StringComparer.Ordinal);
     private readonly Dictionary<ConnectionId, List<OutboundDatagram>> _flushByConnection = new();
@@ -83,6 +84,9 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private Task _pendingAsyncFlushTask = Task.CompletedTask;
     private FlushBatchState? _buildFlushBatch;
     private FlushBatchState? _sendFlushBatch;
+    private Task _pendingAsyncReceiveTask = Task.CompletedTask;
+    private long _asyncAccumulatedReceiveElapsedTicks;
+    private int _pendingInboundCount;
     private int _asyncMaxPendingBatchCount;
     private int _asyncInlineFallbackCount = 0;
     private long _lastAsyncCompletedFlushElapsedTicks;
@@ -138,11 +142,22 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         socket.Bind(_options.LocalEndPoint);
         _socket = socket;
         _running = true;
+        if (_options.EnableAsyncReceive)
+            _pendingAsyncReceiveTask = Task.Run(() => ExecuteAsyncReceiveLoop(socket));
     }
 
     public void Stop()
     {
         _running = false;
+        try
+        {
+            _pendingAsyncReceiveTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
+        _pendingAsyncReceiveTask = Task.CompletedTask;
     }
 
     public int PollInbound(Span<InboundDatagram> destination)
@@ -155,8 +170,24 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
         long pendingDrainStart = Stopwatch.GetTimestamp();
+        int asyncQueuedCount = Volatile.Read(ref _pendingInboundCount);
         int count = DrainPendingInbound(destination);
         long pendingDrainTicks = Stopwatch.GetTimestamp() - pendingDrainStart;
+        if (_options.EnableAsyncReceive)
+        {
+            LastPollProfile = new TransportPollProfileSnapshot(
+                PendingDrainElapsedTicks: pendingDrainTicks,
+                SocketReceiveElapsedTicks: 0,
+                BundleUnpackElapsedTicks: 0,
+                PayloadCopyElapsedTicks: 0,
+                EnvelopeParseElapsedTicks: 0,
+                QueuedDatagramCount: count,
+                AsyncEnabled: true,
+                AsyncQueuedDatagramCount: asyncQueuedCount,
+                AsyncReceiveElapsedTicks: Interlocked.Exchange(ref _asyncAccumulatedReceiveElapsedTicks, 0));
+            return count;
+        }
+
         long socketReceiveTicks = 0;
         long bundleUnpackTicks = 0;
         long payloadCopyTicks = 0;
@@ -234,7 +265,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             BundleUnpackElapsedTicks: bundleUnpackTicks,
             PayloadCopyElapsedTicks: payloadCopyTicks,
             EnvelopeParseElapsedTicks: envelopeParseTicks,
-            QueuedDatagramCount: count);
+            QueuedDatagramCount: count,
+            AsyncEnabled: false,
+            AsyncQueuedDatagramCount: 0,
+            AsyncReceiveElapsedTicks: 0);
         return count;
     }
 
@@ -429,6 +463,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         try
         {
+            _pendingAsyncReceiveTask.GetAwaiter().GetResult();
+        }
+        catch
+        {
+        }
+
+        try
+        {
             _pendingAsyncFlushTask.GetAwaiter().GetResult();
         }
         catch
@@ -442,6 +484,11 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         while (_outbound.TryDequeue(out OutboundDatagram outbound))
         {
             outbound.Dispose();
+        }
+
+        while (_pendingInbound.TryDequeue(out InboundDatagram inbound))
+        {
+            inbound.Dispose();
         }
 
         _asyncFlushBatchA.DisposeContents();
@@ -509,9 +556,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private int DrainPendingInbound(Span<InboundDatagram> destination)
     {
         int count = 0;
-        while (count < destination.Length && _pendingInbound.Count > 0)
+        while (count < destination.Length && _pendingInbound.TryDequeue(out InboundDatagram inbound))
         {
-            destination[count++] = _pendingInbound.Dequeue();
+            destination[count++] = inbound;
+            Interlocked.Decrement(ref _pendingInboundCount);
         }
 
         return count;
@@ -525,29 +573,182 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         ref long envelopeParseTicks,
         ref long payloadCopyTicks)
     {
-        long parseStart = Stopwatch.GetTimestamp();
-        if (!PacketCodec.TryDecodeEnvelope(payloadBuffer.Span, out PacketEnvelopeHeader header, out _))
-        {
-            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
-            payloadBuffer.Dispose();
+        if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks))
             return;
-        }
-        if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
-        {
-            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
-            payloadBuffer.Dispose();
-            return;
-        }
-        envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
-
-        var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, header, payloadBuffer);
         if (count < destination.Length)
         {
             destination[count++] = inbound;
             return;
         }
 
+        QueuePendingInbound(inbound);
+    }
+
+    private bool TryQueueInboundPending(
+        ConnectionId connectionId,
+        InboundPayloadBuffer payloadBuffer,
+        ref long envelopeParseTicks)
+    {
+        if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks))
+            return false;
+
+        QueuePendingInbound(inbound);
+        return true;
+    }
+
+    private bool TryCreateInboundDatagram(
+        ConnectionId connectionId,
+        InboundPayloadBuffer payloadBuffer,
+        out InboundDatagram inbound,
+        ref long envelopeParseTicks)
+    {
+        long parseStart = Stopwatch.GetTimestamp();
+        if (!PacketCodec.TryDecodeEnvelope(payloadBuffer.Span, out PacketEnvelopeHeader header, out _))
+        {
+            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+            payloadBuffer.Dispose();
+            inbound = default;
+            return false;
+        }
+
+        if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
+        {
+            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+            payloadBuffer.Dispose();
+            inbound = default;
+            return false;
+        }
+
+        envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+        inbound = new InboundDatagram(connectionId, plane, packetClass, channel, header, payloadBuffer);
+        return true;
+    }
+
+    private void QueuePendingInbound(InboundDatagram inbound)
+    {
         _pendingInbound.Enqueue(inbound);
+        Interlocked.Increment(ref _pendingInboundCount);
+    }
+
+    private void ExecuteAsyncReceiveLoop(Socket socket)
+    {
+        int idleCount = 0;
+        while (_running && !_disposed)
+        {
+            bool receivedAny = false;
+            long receiveElapsedTicks = 0;
+            while (_running && !_disposed)
+            {
+                if (!TryReceiveAndQueuePending(socket, ref receiveElapsedTicks))
+                    break;
+
+                receivedAny = true;
+            }
+
+            if (receivedAny)
+            {
+                Interlocked.Add(ref _asyncAccumulatedReceiveElapsedTicks, receiveElapsedTicks);
+                idleCount = 0;
+                continue;
+            }
+
+            if (!_running || _disposed)
+                break;
+
+            if (idleCount < 4)
+            {
+                Thread.Yield();
+                idleCount++;
+            }
+            else
+            {
+                Thread.Sleep(1);
+            }
+        }
+    }
+
+    private bool TryReceiveAndQueuePending(Socket socket, ref long totalElapsedTicks)
+    {
+        try
+        {
+            if (socket.Available <= 0)
+                return false;
+        }
+        catch (ObjectDisposedException)
+        {
+            return false;
+        }
+
+        EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
+        int received;
+        byte[] rentedReceiveBuffer = ArrayPool<byte>.Shared.Rent(_options.MaxDatagramBytes);
+        try
+        {
+            long receiveStart = Stopwatch.GetTimestamp();
+            received = socket.ReceiveFrom(rentedReceiveBuffer, 0, _options.MaxDatagramBytes, SocketFlags.None, ref remote);
+            totalElapsedTicks += Stopwatch.GetTimestamp() - receiveStart;
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.IOPending or SocketError.NoBufferSpaceAvailable)
+        {
+            ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
+            return false;
+        }
+        catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
+        {
+            ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
+            return true;
+        }
+        catch (ObjectDisposedException)
+        {
+            ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
+            return false;
+        }
+
+        if (received <= 0 || remote is not IPEndPoint remoteEndPoint)
+        {
+            ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
+            return true;
+        }
+
+        if (!TryGetOrAssignConnectionId(remoteEndPoint, out ConnectionId connectionId))
+        {
+            ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
+            return true;
+        }
+
+        long unpackStart = Stopwatch.GetTimestamp();
+        InboundPayloadBuffer wirePayload = InboundPayloadBuffer.FromPooled(rentedReceiveBuffer, received);
+        ReadOnlySpan<byte> datagramPayload = wirePayload.Span;
+        long ignoredParseTicks = 0;
+        if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> entries))
+        {
+            int remainingOffset = datagramPayload.Length - entries.Length;
+            ReadOnlySpan<byte> remaining = entries;
+            for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
+            {
+                if (remaining.Length < sizeof(ushort))
+                    break;
+
+                ushort entryLength = BinaryPrimitives.ReadUInt16LittleEndian(remaining);
+                if (remaining.Length < sizeof(ushort) + entryLength)
+                    break;
+
+                InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.Slice(
+                    wirePayload,
+                    remainingOffset + sizeof(ushort),
+                    entryLength);
+                TryQueueInboundPending(connectionId, bundledPayload, ref ignoredParseTicks);
+                remaining = remaining.Slice(sizeof(ushort) + entryLength);
+                remainingOffset += sizeof(ushort) + entryLength;
+            }
+            wirePayload.Dispose();
+            totalElapsedTicks += Stopwatch.GetTimestamp() - unpackStart;
+            return true;
+        }
+
+        TryQueueInboundPending(connectionId, wirePayload, ref ignoredParseTicks);
+        totalElapsedTicks += Stopwatch.GetTimestamp() - unpackStart;
+        return true;
     }
 
     private void DrainOutboundByConnection()
