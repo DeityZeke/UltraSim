@@ -98,6 +98,12 @@ The widened harness now reports:
 - `dispatch_fanout_p95_ms`
 - `dispatch_flush_avg_ms`
 - `dispatch_flush_p95_ms`
+- `flush_drain_avg_ms`
+- `flush_drain_p95_ms`
+- `flush_bundle_avg_ms`
+- `flush_bundle_p95_ms`
+- `flush_send_avg_ms`
+- `flush_send_p95_ms`
 - `client_pump_avg_ms`
 - `client_pump_p95_ms`
 - `client_observer_state_decode_avg_ms`

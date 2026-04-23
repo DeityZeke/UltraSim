@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Buffers;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -52,6 +53,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
     public EndPoint? LocalEndPoint => _socket?.LocalEndPoint;
     public int LastFlushWireDatagramCount { get; private set; }
+    public TransportFlushProfileSnapshot LastFlushProfile { get; private set; }
 
     public void Start()
     {
@@ -133,15 +135,38 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         Socket socket = _socket ?? throw new InvalidOperationException("Transport has not been started.");
         LastFlushWireDatagramCount = 0;
+        LastFlushProfile = default;
 
+        long drainStart = Stopwatch.GetTimestamp();
         DrainOutboundByConnection();
+        long drainEnd = Stopwatch.GetTimestamp();
         if (_flushByConnection.Count == 0)
+        {
+            LastFlushProfile = new TransportFlushProfileSnapshot(
+                DrainElapsedTicks: drainEnd - drainStart,
+                BundleElapsedTicks: 0,
+                SendElapsedTicks: 0,
+                ConnectionCount: 0,
+                LogicalDatagramCount: 0,
+                WireDatagramCount: 0,
+                BundledWireDatagramCount: 0,
+                SingleWireDatagramCount: 0);
             return;
+        }
+
+        long bundleTicks = 0;
+        long sendTicks = 0;
+        int connectionCount = 0;
+        int logicalDatagramCount = 0;
+        int bundledWireDatagramCount = 0;
+        int singleWireDatagramCount = 0;
 
         try
         {
             foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in _flushByConnection)
             {
+                connectionCount++;
+                logicalDatagramCount += datagrams.Count;
                 if (!TryGetRemote(connectionId, out IPEndPoint? remote))
                 {
                     for (int i = 0; i < datagrams.Count; i++)
@@ -169,6 +194,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                     else
                     {
                         _bundlePayloadScratch.Clear();
+                        long bundleEncodeStart = Stopwatch.GetTimestamp();
                         for (int i = index; i < datagrams.Count; i++)
                             _bundlePayloadScratch.Add(datagrams[i].Payload);
                         int bundleBytes = TransportDatagramBundleCodec.MeasureBundle(
@@ -184,8 +210,14 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                                 0,
                                 packedCount,
                                 rented.AsSpan(0, bundleBytes));
+                            long bundleEnd = Stopwatch.GetTimestamp();
+                            bundleTicks += bundleEnd - bundleEncodeStart;
+                            long sendStart = Stopwatch.GetTimestamp();
                             socket.SendTo(rented.AsSpan(0, bundleBytes), SocketFlags.None, remote);
+                            long sendEnd = Stopwatch.GetTimestamp();
+                            sendTicks += sendEnd - sendStart;
                             LastFlushWireDatagramCount++;
+                            bundledWireDatagramCount++;
                             for (int i = bundleStart; i < bundleStart + packedCount; i++)
                                 datagrams[i].Dispose();
                             index += packedCount;
@@ -206,8 +238,12 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
                     try
                     {
+                        long sendStart = Stopwatch.GetTimestamp();
                         socket.SendTo(outboundPayload.Span, SocketFlags.None, remote);
+                        long sendEnd = Stopwatch.GetTimestamp();
+                        sendTicks += sendEnd - sendStart;
                         LastFlushWireDatagramCount++;
+                        singleWireDatagramCount++;
                         datagrams[index].Dispose();
                         index += packedCount;
                     }
@@ -222,6 +258,15 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         }
         finally
         {
+            LastFlushProfile = new TransportFlushProfileSnapshot(
+                DrainElapsedTicks: drainEnd - drainStart,
+                BundleElapsedTicks: bundleTicks,
+                SendElapsedTicks: sendTicks,
+                ConnectionCount: connectionCount,
+                LogicalDatagramCount: logicalDatagramCount,
+                WireDatagramCount: LastFlushWireDatagramCount,
+                BundledWireDatagramCount: bundledWireDatagramCount,
+                SingleWireDatagramCount: singleWireDatagramCount);
             ResetFlushScratch();
         }
     }
