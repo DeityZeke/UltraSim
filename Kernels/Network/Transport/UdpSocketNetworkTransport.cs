@@ -143,9 +143,17 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             foreach ((ConnectionId connectionId, List<OutboundDatagram> datagrams) in _flushByConnection)
             {
                 if (!TryGetRemote(connectionId, out IPEndPoint? remote))
+                {
+                    for (int i = 0; i < datagrams.Count; i++)
+                        datagrams[i].Dispose();
                     continue;
+                }
                 if (remote is null)
+                {
+                    for (int i = 0; i < datagrams.Count; i++)
+                        datagrams[i].Dispose();
                     continue;
+                }
 
                 int index = 0;
                 while (index < datagrams.Count)
@@ -178,6 +186,8 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                                 rented.AsSpan(0, bundleBytes));
                             socket.SendTo(rented.AsSpan(0, bundleBytes), SocketFlags.None, remote);
                             LastFlushWireDatagramCount++;
+                            for (int i = bundleStart; i < bundleStart + packedCount; i++)
+                                datagrams[i].Dispose();
                             index += packedCount;
                         }
                         catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
@@ -198,6 +208,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                     {
                         socket.SendTo(outboundPayload.Span, SocketFlags.None, remote);
                         LastFlushWireDatagramCount++;
+                        datagrams[index].Dispose();
                         index += packedCount;
                     }
                     catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
@@ -227,8 +238,9 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         _socket = null;
         socket?.Dispose();
 
-        while (_outbound.TryDequeue(out _))
+        while (_outbound.TryDequeue(out OutboundDatagram outbound))
         {
+            outbound.Dispose();
         }
     }
 

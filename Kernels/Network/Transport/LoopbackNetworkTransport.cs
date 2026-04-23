@@ -60,8 +60,9 @@ public sealed class LoopbackNetworkTransport : INetworkTransport
         LoopbackNetworkTransport? peer = Peer;
         if (peer is null || !peer.IsRunning)
         {
-            while (_outbound.TryDequeue(out _))
+            while (_outbound.TryDequeue(out OutboundDatagram dropped))
             {
+                dropped.Dispose();
             }
 
             return;
@@ -74,7 +75,8 @@ public sealed class LoopbackNetworkTransport : INetworkTransport
                 outbound.Plane,
                 outbound.PacketClass,
                 outbound.Channel,
-                outbound.Payload.Memory));
+                InboundPayloadBuffer.FromRetained(outbound.Payload)));
+            outbound.Dispose();
         }
     }
 
@@ -86,12 +88,14 @@ public sealed class LoopbackNetworkTransport : INetworkTransport
         _disposed = true;
         _running = false;
 
-        while (_outbound.TryDequeue(out _))
+        while (_outbound.TryDequeue(out OutboundDatagram outbound))
         {
+            outbound.Dispose();
         }
 
-        while (_inbound.TryDequeue(out _))
+        while (_inbound.TryDequeue(out InboundDatagram inbound))
         {
+            inbound.Dispose();
         }
     }
 

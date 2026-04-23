@@ -1,3 +1,5 @@
+using System.Buffers;
+
 namespace UltraSim.Network;
 
 public static class PacketCodec
@@ -13,7 +15,7 @@ public static class PacketCodec
         int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + 1, initialCapacity);
         while (true)
         {
-            byte[] buffer = new byte[capacity];
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
             try
             {
                 var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
@@ -26,11 +28,11 @@ public static class PacketCodec
                     checked((ushort)payloadWriter.Position))
                     .Serialize(ref headerWriter);
 
-                Array.Resize(ref buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
-                return ImmutablePayloadBuffer.FromOwned(buffer);
+                return ImmutablePayloadBuffer.FromPooled(buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
             }
             catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
             {
+                ArrayPool<byte>.Shared.Return(buffer);
                 capacity *= 2;
             }
         }
@@ -68,13 +70,13 @@ public static class PacketCodec
         if ((uint)payload.Length > ushort.MaxValue)
             throw new InvalidOperationException($"Packet 0x{packetId:X4} exceeds ushort payload length.");
 
-        byte[] buffer = new byte[PacketEnvelopeHeader.SizeInBytes + payload.Length];
+        byte[] buffer = ArrayPool<byte>.Shared.Rent(PacketEnvelopeHeader.SizeInBytes + payload.Length);
         var writer = new BitWriter(buffer);
         writer.WriteUInt16(packetId);
         writer.WriteByte((byte)flags);
         writer.WriteUInt16((ushort)payload.Length);
         writer.WriteBytes(payload.Span);
-        return ImmutablePayloadBuffer.FromOwned(buffer);
+        return ImmutablePayloadBuffer.FromPooled(buffer, writer.Position);
     }
 
     public static ImmutablePayloadBuffer EncodeRealtimeStateFrameEnvelope(
@@ -89,7 +91,7 @@ public static class PacketCodec
         int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
         while (true)
         {
-            byte[] buffer = new byte[capacity];
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
             try
             {
                 var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
@@ -105,11 +107,11 @@ public static class PacketCodec
                     checked((ushort)payloadWriter.Position))
                     .Serialize(ref headerWriter);
 
-                Array.Resize(ref buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
-                return ImmutablePayloadBuffer.FromOwned(buffer);
+                return ImmutablePayloadBuffer.FromPooled(buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
             }
             catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
             {
+                ArrayPool<byte>.Shared.Return(buffer);
                 capacity *= 2;
             }
         }
@@ -126,7 +128,7 @@ public static class PacketCodec
         int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
         while (true)
         {
-            byte[] buffer = new byte[capacity];
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
             try
             {
                 var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
@@ -141,11 +143,11 @@ public static class PacketCodec
                     checked((ushort)payloadWriter.Position))
                     .Serialize(ref headerWriter);
 
-                Array.Resize(ref buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
-                return ImmutablePayloadBuffer.FromOwned(buffer);
+                return ImmutablePayloadBuffer.FromPooled(buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
             }
             catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
             {
+                ArrayPool<byte>.Shared.Return(buffer);
                 capacity *= 2;
             }
         }

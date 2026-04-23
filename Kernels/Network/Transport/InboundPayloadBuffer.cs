@@ -12,11 +12,13 @@ public sealed class InboundPayloadBuffer : IDisposable
     private static readonly InboundPayloadBuffer s_empty = new(ReadOnlyMemory<byte>.Empty, null);
     private readonly ReadOnlyMemory<byte> _memory;
     private byte[]? _pooledBuffer;
+    private ImmutablePayloadBuffer? _retainedPayload;
 
-    private InboundPayloadBuffer(ReadOnlyMemory<byte> memory, byte[]? pooledBuffer)
+    private InboundPayloadBuffer(ReadOnlyMemory<byte> memory, byte[]? pooledBuffer, ImmutablePayloadBuffer? retainedPayload = null)
     {
         _memory = memory;
         _pooledBuffer = pooledBuffer;
+        _retainedPayload = retainedPayload;
     }
 
     public static InboundPayloadBuffer Empty => s_empty;
@@ -28,6 +30,16 @@ public sealed class InboundPayloadBuffer : IDisposable
     public static InboundPayloadBuffer FromShared(ReadOnlyMemory<byte> memory)
     {
         return memory.Length == 0 ? Empty : new InboundPayloadBuffer(memory, null);
+    }
+
+    public static InboundPayloadBuffer FromRetained(ImmutablePayloadBuffer payload)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        if (payload.Length == 0)
+            return Empty;
+
+        payload.AddRef();
+        return new InboundPayloadBuffer(payload.Memory, null, payload);
     }
 
     public static InboundPayloadBuffer CopyFromPooled(ReadOnlySpan<byte> source)
@@ -45,6 +57,8 @@ public sealed class InboundPayloadBuffer : IDisposable
         byte[]? pooledBuffer = Interlocked.Exchange(ref _pooledBuffer, null);
         if (pooledBuffer is not null)
             ArrayPool<byte>.Shared.Return(pooledBuffer);
+        ImmutablePayloadBuffer? retainedPayload = Interlocked.Exchange(ref _retainedPayload, null);
+        retainedPayload?.Release();
 
         GC.SuppressFinalize(this);
     }
