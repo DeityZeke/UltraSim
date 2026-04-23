@@ -59,12 +59,5 @@ public sealed class InboundPayloadBuffer : IDisposable
             ArrayPool<byte>.Shared.Return(pooledBuffer);
         ImmutablePayloadBuffer? retainedPayload = Interlocked.Exchange(ref _retainedPayload, null);
         retainedPayload?.Release();
-
-        GC.SuppressFinalize(this);
-    }
-
-    ~InboundPayloadBuffer()
-    {
-        Dispose();
     }
 }
