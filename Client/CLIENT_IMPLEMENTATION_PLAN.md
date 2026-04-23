@@ -85,6 +85,8 @@ Current status:
   - first live owner-correction policy controls on the server path:
     - position deadband
     - max silent ticks
+  - first harness-only owner divergence seam:
+    - configurable prediction jitter to make correction pressure measurable without contaminating runtime code
 
 ## Phase C3: Godot Wrapper
 

@@ -46,6 +46,7 @@ Useful options:
 - `--aoi-radii-m <r0,r1,...>`
 - `--owner-deadband <meters>`
 - `--owner-max-silent-ticks <n>`
+- `--owner-prediction-jitter-percent <fraction>`
 
 Recommended run categories:
 
@@ -121,6 +122,10 @@ The owner path is now also slightly less synthetic:
 - owner correction policy is now configurable in the live harness:
   - `--owner-deadband <meters>`
   - `--owner-max-silent-ticks <n>`
+- owner prediction divergence can now be made slightly non-ideal in a controlled, repeatable way:
+  - `--owner-prediction-jitter-percent <fraction>`
+  - example: `0.05` means up to `±5%` prediction-side velocity jitter per tick
+  - this affects only harness-side predicted owner state, not the actual input sent to the server
 
 Position/correction note:
 

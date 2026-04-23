@@ -336,7 +336,12 @@ internal sealed class MovementRampHarness : IDisposable
             int width = Math.Max(1, _options.SpawnGridWidth);
             float startX = spacing <= 0f ? 0f : (clientIndex % width) * spacing;
             float startY = spacing <= 0f ? 0f : (clientIndex / width) * spacing;
-            handle = new ClientHandle(clientIndex, transport, host, new ClientMovementState(startX, startY, 0f, 0f));
+            handle = new ClientHandle(
+                clientIndex,
+                transport,
+                host,
+                new ClientMovementState(startX, startY, 0f, 0f),
+                _options.OwnerPredictionJitterPercent);
             host.BeginHandshake(_clockTicks + 100 + clientIndex);
             _clients.Add(handle);
         }
@@ -556,13 +561,21 @@ internal sealed class MovementRampHarness : IDisposable
         private ushort _nextPingSequence = 1;
         private ClientMovementState _predictedOwnerState;
         private uint _lastAuthoritativeServerTick;
+        private readonly float _predictionJitterPercent;
+        private uint _predictionStep;
 
-        public ClientHandle(int clientIndex, UdpSocketNetworkTransport transport, ClientMovementSessionHost host, ClientMovementState initialPredictedOwnerState)
+        public ClientHandle(
+            int clientIndex,
+            UdpSocketNetworkTransport transport,
+            ClientMovementSessionHost host,
+            ClientMovementState initialPredictedOwnerState,
+            float predictionJitterPercent)
         {
             ClientIndex = clientIndex;
             Transport = transport;
             Host = host;
             _predictedOwnerState = initialPredictedOwnerState;
+            _predictionJitterPercent = predictionJitterPercent;
         }
 
         public int ClientIndex { get; }
@@ -576,11 +589,16 @@ internal sealed class MovementRampHarness : IDisposable
 
         public ClientMovementState PredictNextState(in ClientMovementInput input, float deltaSeconds)
         {
-            float velocityX = input.MoveX / 100f;
-            float velocityY = input.MoveY / 100f;
+            _predictionStep++;
+            float jitterX = SampleSignedJitter(ClientIndex, _predictionStep, axisSalt: 0x51a3, _predictionJitterPercent);
+            float jitterY = SampleSignedJitter(ClientIndex, _predictionStep, axisSalt: 0x9c47, _predictionJitterPercent);
+            float velocityX = (input.MoveX / 100f) * (1f + jitterX);
+            float velocityY = (input.MoveY / 100f) * (1f + jitterY);
+            float positionBiasX = jitterX * 0.1f;
+            float positionBiasY = jitterY * 0.1f;
             _predictedOwnerState = new ClientMovementState(
-                _predictedOwnerState.PositionX + velocityX * deltaSeconds,
-                _predictedOwnerState.PositionY + velocityY * deltaSeconds,
+                _predictedOwnerState.PositionX + velocityX * deltaSeconds + positionBiasX,
+                _predictedOwnerState.PositionY + velocityY * deltaSeconds + positionBiasY,
                 velocityX,
                 velocityY);
             return _predictedOwnerState;
@@ -667,6 +685,21 @@ internal sealed class MovementRampHarness : IDisposable
             if (_observerEvents.Count > 256)
                 _observerEvents.RemoveRange(0, _observerEvents.Count - 256);
         }
+
+        private static float SampleSignedJitter(int clientIndex, uint step, int axisSalt, float magnitude)
+        {
+            if (magnitude <= 0f)
+                return 0f;
+
+            uint value = unchecked((uint)(clientIndex * 0x45d9f3b) ^ (step * 0x27d4eb2d) ^ (uint)axisSalt);
+            value ^= value >> 16;
+            value *= 0x7feb352d;
+            value ^= value >> 15;
+            value *= 0x846ca68b;
+            value ^= value >> 16;
+            float unit = (value & 0xFFFF) / 65535f;
+            return ((unit * 2f) - 1f) * magnitude;
+        }
     }
 
     private sealed class StageReplicationContext
@@ -737,6 +770,7 @@ internal sealed class HarnessArgs
     public float[] AoiRadiiMeters { get; set; } = [7.5f];
     public float OwnerCorrectionDeadband { get; set; } = 0f;
     public uint OwnerCorrectionMaxSilentTicks { get; set; } = 1;
+    public float OwnerPredictionJitterPercent { get; set; } = 0f;
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
     public int SettleTicks => Math.Max(1, (int)Math.Round(SettleSeconds * TickHz, MidpointRounding.AwayFromZero));
@@ -772,6 +806,7 @@ internal sealed class HarnessArgs
             else if (arg == "--aoi-radii-m") options.AoiRadiiMeters = ParseFloatList(Next()!, nameof(AoiRadiiMeters));
             else if (arg == "--owner-deadband") options.OwnerCorrectionDeadband = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-max-silent-ticks") options.OwnerCorrectionMaxSilentTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--owner-prediction-jitter-percent") options.OwnerPredictionJitterPercent = float.Parse(Next()!, CultureInfo.InvariantCulture);
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
@@ -783,6 +818,8 @@ internal sealed class HarnessArgs
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionDeadband));
         if (options.OwnerCorrectionMaxSilentTicks == 0)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionMaxSilentTicks));
+        if (float.IsNaN(options.OwnerPredictionJitterPercent) || float.IsInfinity(options.OwnerPredictionJitterPercent) || options.OwnerPredictionJitterPercent < 0f)
+            throw new ArgumentOutOfRangeException(nameof(options.OwnerPredictionJitterPercent));
         return options;
     }
 
@@ -830,6 +867,7 @@ internal sealed class HarnessArgs
             ["aoi_radii_m"] = aoiRadii,
             ["owner_deadband"] = OwnerCorrectionDeadband,
             ["owner_max_silent_ticks"] = OwnerCorrectionMaxSilentTicks,
+            ["owner_prediction_jitter_percent"] = OwnerPredictionJitterPercent,
         };
     }
 
