@@ -15,6 +15,9 @@ public sealed class LatestStateStream
 
     private readonly object _sync = new();
     private readonly Dictionary<EntryKey, Entry> _entriesByKey = new();
+    private Entry[] _orderedSnapshot = Array.Empty<Entry>();
+    private int _orderedSnapshotCount;
+    private bool _orderedSnapshotDirty = true;
     private ulong _nextSequence = 1;
 
     public ulong Publish(ulong itemKey, ImmutablePayloadBuffer payload)
@@ -84,23 +87,16 @@ public sealed class LatestStateStream
             if (destination.Length == 0 || _entriesByKey.Count == 0)
                 return new LatestStateDrainResult(0, cursor, _nextSequence - 1);
 
-            var updates = new List<Entry>(_entriesByKey.Count);
-            foreach (Entry entry in _entriesByKey.Values)
-            {
-                if (entry.Sequence > cursor.LastSeenSequence)
-                    updates.Add(entry);
-            }
-
-            if (updates.Count == 0)
+            EnsureOrderedSnapshot_NoLock();
+            int start = FindFirstSequenceGreaterThan_NoLock(cursor.LastSeenSequence);
+            if (start >= _orderedSnapshotCount)
                 return new LatestStateDrainResult(0, cursor, _nextSequence - 1);
 
-            updates.Sort(static (a, b) => a.Sequence.CompareTo(b.Sequence));
-
-            int count = Math.Min(destination.Length, updates.Count);
+            int count = Math.Min(destination.Length, _orderedSnapshotCount - start);
             ulong lastSequence = cursor.LastSeenSequence;
             for (int i = 0; i < count; i++)
             {
-                Entry entry = updates[i];
+                Entry entry = _orderedSnapshot[start + i];
                 destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload);
                 lastSequence = entry.Sequence;
             }
@@ -119,16 +115,11 @@ public sealed class LatestStateStream
             if (destination.Length == 0 || _entriesByKey.Count == 0)
                 return 0;
 
-            var updates = new List<Entry>(_entriesByKey.Count);
-            foreach (Entry entry in _entriesByKey.Values)
-                updates.Add(entry);
-
-            updates.Sort(static (a, b) => a.Sequence.CompareTo(b.Sequence));
-
-            int count = Math.Min(destination.Length, updates.Count);
+            EnsureOrderedSnapshot_NoLock();
+            int count = Math.Min(destination.Length, _orderedSnapshotCount);
             for (int i = 0; i < count; i++)
             {
-                Entry entry = updates[i];
+                Entry entry = _orderedSnapshot[i];
                 destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload);
             }
 
@@ -156,6 +147,59 @@ public sealed class LatestStateStream
                 PacketClass = packetClass,
                 Payload = payload,
             });
+        }
+
+        _orderedSnapshotDirty = true;
+    }
+
+    private void EnsureOrderedSnapshot_NoLock()
+    {
+        if (!_orderedSnapshotDirty)
+            return;
+
+        int required = _entriesByKey.Count;
+        if (_orderedSnapshot.Length < required)
+            _orderedSnapshot = new Entry[required];
+
+        int index = 0;
+        foreach (Entry entry in _entriesByKey.Values)
+            _orderedSnapshot[index++] = entry;
+
+        Array.Sort(_orderedSnapshot, 0, index, EntrySequenceComparer.Instance);
+        _orderedSnapshotCount = index;
+        _orderedSnapshotDirty = false;
+    }
+
+    private int FindFirstSequenceGreaterThan_NoLock(ulong sequence)
+    {
+        int low = 0;
+        int high = _orderedSnapshotCount;
+        while (low < high)
+        {
+            int mid = low + ((high - low) >> 1);
+            if (_orderedSnapshot[mid].Sequence <= sequence)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+
+        return low;
+    }
+
+    private sealed class EntrySequenceComparer : IComparer<Entry>
+    {
+        public static readonly EntrySequenceComparer Instance = new();
+
+        public int Compare(Entry? x, Entry? y)
+        {
+            if (ReferenceEquals(x, y))
+                return 0;
+            if (x is null)
+                return -1;
+            if (y is null)
+                return 1;
+
+            return x.Sequence.CompareTo(y.Sequence);
         }
     }
 }
