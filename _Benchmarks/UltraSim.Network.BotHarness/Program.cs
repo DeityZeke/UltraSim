@@ -489,7 +489,7 @@ internal sealed class MovementRampHarness : IDisposable
         movementWorld.SetComponent(entity, new BenchMovementBody(startX, startY, 0f, 0f));
         movementWorld.SetComponent(entity, new BenchMovementVisualBody(startX, startY, 0f, 0f));
         movementWorld.SetComponent(entity, new BenchMovementBulkBody(startX, startY, 0f, 0f, 0, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f));
-        movementWorld.SetComponent(entity, new BenchMovementEventBody(startX, startY, 0, 0, 0, 0));
+        movementWorld.SetComponent(entity, new BenchMovementEventBody(GetHarnessObserverSlot(entity), startX, startY, 0, 0, 0, 0));
         _spawnedEntities.Add(entity);
         return new ServerMovementSessionSpawn(entity, _nextNetworkEntityId++);
     }
@@ -665,6 +665,7 @@ internal sealed class MovementRampHarness : IDisposable
             (_options.ObserverEventEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverEventEveryTicks) == 0))
         {
             movementWorld.SetComponent(movementEntity, new BenchMovementEventBody(
+                GetHarnessObserverSlot(movementEntity),
                 body.PositionX,
                 body.PositionY,
                 input.MoveX,
@@ -717,6 +718,11 @@ internal sealed class MovementRampHarness : IDisposable
         return key == 0 ? 1UL : key;
     }
 
+    private static uint GetHarnessObserverSlot(Entity entity)
+    {
+        return unchecked((uint)entity.Packed);
+    }
+
     private static uint[] ConvertRingCadence(int[] cadenceTicks)
     {
         var converted = new uint[cadenceTicks.Length];
@@ -738,7 +744,9 @@ internal sealed class MovementRampHarness : IDisposable
         private BenchMovementBulkBody[] _observerBulkStates = new BenchMovementBulkBody[128];
         private bool[] _observerBulkStateOccupied = new bool[128];
         private int _observerBulkStateCount;
-        private readonly Queue<BenchMovementEventBody> _observerEvents = new(256);
+        private BenchMovementEventBody[] _observerEvents = new BenchMovementEventBody[128];
+        private bool[] _observerEventOccupied = new bool[128];
+        private int _observerEventCount;
         private ushort _nextPingSequence = 1;
         private ClientMovementState _predictedOwnerState;
         private uint _lastAuthoritativeServerTick;
@@ -896,10 +904,16 @@ internal sealed class MovementRampHarness : IDisposable
 
         public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
         {
-            if (_observerEvents.Count == 256)
-                _observerEvents.Dequeue();
+            BenchMovementEventBody observerEvent = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementEventBody>(payload);
+            int slot = checked((int)observerEvent.ObserverSlot);
+            EnsureObserverCapacity(slot);
+            if (!_observerEventOccupied[slot])
+            {
+                _observerEventOccupied[slot] = true;
+                _observerEventCount++;
+            }
 
-            _observerEvents.Enqueue(ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementEventBody>(payload));
+            _observerEvents[slot] = observerEvent;
         }
 
         private static float SampleSignedJitter(int clientIndex, uint step, int axisSalt, float magnitude)
@@ -932,6 +946,8 @@ internal sealed class MovementRampHarness : IDisposable
             Array.Resize(ref _observerVisualStateOccupied, newLength);
             Array.Resize(ref _observerBulkStates, newLength);
             Array.Resize(ref _observerBulkStateOccupied, newLength);
+            Array.Resize(ref _observerEvents, newLength);
+            Array.Resize(ref _observerEventOccupied, newLength);
         }
 
     }
@@ -1341,4 +1357,4 @@ internal readonly struct TickWindowStats
 internal readonly record struct BenchMovementBody(float PositionX, float PositionY, float VelocityX, float VelocityY) : IComponent<BenchMovementBody>;
 internal readonly record struct BenchMovementVisualBody(float PositionX, float PositionY, float Speed, float HeadingDegrees) : IComponent<BenchMovementVisualBody>;
 internal readonly record struct BenchMovementBulkBody(float PositionX, float PositionY, float Speed, float HeadingDegrees, uint ClientTick, float SampleA, float SampleB, float SampleC, float SampleD, float SampleE, float SampleF, float SampleG, float SampleH) : IComponent<BenchMovementBulkBody>;
-internal readonly record struct BenchMovementEventBody(float PositionX, float PositionY, short MoveX, short MoveY, uint ClientTick, byte Flags) : IComponent<BenchMovementEventBody>;
+internal readonly record struct BenchMovementEventBody(uint ObserverSlot, float PositionX, float PositionY, short MoveX, short MoveY, uint ClientTick, byte Flags) : IComponent<BenchMovementEventBody>;
