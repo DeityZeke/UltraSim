@@ -13,20 +13,32 @@ public sealed class ClientObserverStateBridge
     private readonly ConnectionId _connectionId;
     private readonly Dictionary<ulong, ulong> _latestSequenceByItemKey = new();
     private readonly ClientLatestStateFrameApplier? _applyLatestState;
+    private readonly Action? _resetLatestState;
+    private bool _hasActiveBaseline;
+    private StateBaselineDescriptor _activeBaseline;
+    private int _activeBaselineAppliedCount;
+    private bool _hasCompletedBaseline;
+    private StateBaselineDescriptor _completedBaseline;
 
-    public ClientObserverStateBridge(ConnectionId connectionId, ClientLatestStateFrameApplier? applyLatestState = null)
+    public ClientObserverStateBridge(
+        ConnectionId connectionId,
+        ClientLatestStateFrameApplier? applyLatestState = null,
+        Action? resetLatestState = null)
     {
         if (!connectionId.IsValid)
             throw new ArgumentOutOfRangeException(nameof(connectionId));
 
         _connectionId = connectionId;
         _applyLatestState = applyLatestState;
+        _resetLatestState = resetLatestState;
     }
 
     public ConnectionId ConnectionId => _connectionId;
     public int LatestItemCount => _latestSequenceByItemKey.Count;
     public int LastReceivedFrameCount { get; private set; }
     public int LastAppliedFrameCount { get; private set; }
+    public int LastReceivedBaselineFrameCount { get; private set; }
+    public int LastAppliedBaselineFrameCount { get; private set; }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
@@ -55,17 +67,45 @@ public sealed class ClientObserverStateBridge
     {
         LastReceivedFrameCount = 0;
         LastAppliedFrameCount = 0;
+        LastReceivedBaselineFrameCount = 0;
+        LastAppliedBaselineFrameCount = 0;
     }
 
     public bool TryProcessEnvelope(in PacketEnvelopeHeader header, ReadOnlySpan<byte> payload)
     {
-        if (header.PacketId != RealtimeStateFramePacket.PacketId)
-            return false;
+        if (header.PacketId == RealtimeStateFramePacket.PacketId)
+        {
+            var reader = new BitReader(payload);
+            RealtimeStateFramePacket packet = RealtimeStateFramePacket.Deserialize(ref reader);
+            OnRealtimeStateFrame(packet);
+            return true;
+        }
 
-        var reader = new BitReader(payload);
-        RealtimeStateFramePacket packet = RealtimeStateFramePacket.Deserialize(ref reader);
-        OnRealtimeStateFrame(packet);
-        return true;
+        if (header.PacketId == StateBaselineBeginPacket.PacketId)
+        {
+            var reader = new BitReader(payload);
+            StateBaselineBeginPacket packet = StateBaselineBeginPacket.Deserialize(ref reader);
+            OnBaselineBegin(packet);
+            return true;
+        }
+
+        if (header.PacketId == StateBaselineFramePacket.PacketId)
+        {
+            var reader = new BitReader(payload);
+            StateBaselineFramePacket packet = StateBaselineFramePacket.Deserialize(ref reader);
+            OnBaselineFrame(packet);
+            return true;
+        }
+
+        if (header.PacketId == StateBaselineCompletePacket.PacketId)
+        {
+            var reader = new BitReader(payload);
+            StateBaselineCompletePacket packet = StateBaselineCompletePacket.Deserialize(ref reader);
+            OnBaselineComplete(packet);
+            return true;
+        }
+
+        return false;
     }
 
     private void OnRealtimeStateFrame(in RealtimeStateFramePacket packet)
@@ -84,5 +124,52 @@ public sealed class ClientObserverStateBridge
         previousSequence = packet.Sequence;
         _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
         LastAppliedFrameCount++;
+    }
+
+    public bool TryDequeueCompletedBaseline(out StateBaselineDescriptor descriptor)
+    {
+        if (!_hasCompletedBaseline)
+        {
+            descriptor = default;
+            return false;
+        }
+
+        descriptor = _completedBaseline;
+        _completedBaseline = default;
+        _hasCompletedBaseline = false;
+        return true;
+    }
+
+    private void OnBaselineBegin(in StateBaselineBeginPacket packet)
+    {
+        _hasActiveBaseline = true;
+        _activeBaseline = packet.Descriptor;
+        _activeBaselineAppliedCount = 0;
+        _latestSequenceByItemKey.Clear();
+        _resetLatestState?.Invoke();
+    }
+
+    private void OnBaselineFrame(in StateBaselineFramePacket packet)
+    {
+        if (!_hasActiveBaseline || packet.BaselineId != _activeBaseline.BaselineId)
+            return;
+
+        LastReceivedBaselineFrameCount++;
+        _latestSequenceByItemKey[packet.ItemKey] = packet.Sequence;
+        _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
+        _activeBaselineAppliedCount++;
+        LastAppliedBaselineFrameCount++;
+    }
+
+    private void OnBaselineComplete(in StateBaselineCompletePacket packet)
+    {
+        if (!_hasActiveBaseline || packet.BaselineId != _activeBaseline.BaselineId)
+            return;
+
+        _completedBaseline = _activeBaseline;
+        _hasCompletedBaseline = true;
+        _hasActiveBaseline = false;
+        _activeBaseline = default;
+        _activeBaselineAppliedCount = 0;
     }
 }

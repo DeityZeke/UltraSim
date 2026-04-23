@@ -82,6 +82,10 @@ Current state:
 - client-side contiguous ordered-event apply now exists
 - retransmit / replay / resend policy does not exist yet
 5. Snapshot / baseline / recovery path as a real runtime path
+Current state:
+- full baseline begin/frame/complete packet contracts now exist
+- client-side full baseline apply/reset seam now exists
+- recovery resend rules and incremental baseline advancement do not exist yet
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables
 

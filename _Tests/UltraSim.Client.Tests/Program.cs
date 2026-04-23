@@ -13,10 +13,12 @@ internal static class TestRunner
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
         Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
+        Run(nameof(ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState), ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState);
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
+        Run(nameof(ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor), ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor);
         Run(nameof(ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches), ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches);
 
         Console.WriteLine("All Client scaffold tests passed.");
@@ -192,6 +194,46 @@ internal static class TestRunner
         Assert.False(bridge.TryDequeueAckPacket(out _));
     }
 
+    private static void ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState()
+    {
+        int applyCount = 0;
+        int resetCount = 0;
+        ulong lastItemKey = 0;
+        ulong lastSequence = 0;
+        var bridge = new ClientObserverStateBridge(
+            new ConnectionId(7),
+            (itemKey, sequence, _) =>
+            {
+                applyCount++;
+                lastItemKey = itemKey;
+                lastSequence = sequence;
+            },
+            () => resetCount++);
+
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineBeginPacket(new StateBaselineDescriptor(5, 22, 41, 2))).Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineFramePacket(5, 1001, 21, ImmutablePayloadBuffer.CopyFrom([1]))).Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineFramePacket(5, 1002, 22, ImmutablePayloadBuffer.CopyFrom([2]))).Memory),
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Bulk, ChannelType.ReliableOrdered, PacketCodec.Encode(new StateBaselineCompletePacket(5)).Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(4, processed);
+        Assert.Equal(1, resetCount);
+        Assert.Equal(2, bridge.LastReceivedBaselineFrameCount);
+        Assert.Equal(2, bridge.LastAppliedBaselineFrameCount);
+        Assert.Equal(2, applyCount);
+        Assert.Equal((ulong)1002, lastItemKey);
+        Assert.Equal((ulong)22, lastSequence);
+        Assert.Equal(2, bridge.LatestItemCount);
+        Assert.True(bridge.TryDequeueCompletedBaseline(out StateBaselineDescriptor baseline));
+        Assert.Equal((uint)5, baseline.BaselineId);
+        Assert.Equal((ulong)41, baseline.LastOrderedEventSequence);
+        Assert.False(bridge.TryDequeueCompletedBaseline(out _));
+    }
+
     private static void ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses()
     {
         var applied = new List<ulong>();
@@ -257,6 +299,66 @@ internal static class TestRunner
         var reader = new BitReader(payload);
         ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
         Assert.Equal((ulong)21, ack.Sequence);
+    }
+
+    private static void ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Client.Start();
+        pair.Server.Start();
+
+        var appliedEvents = new List<ulong>();
+        var observerState = new ClientObserverStateBridge(new ConnectionId(1));
+        var observerEvents = new ClientObserverEventBridge(
+            new ConnectionId(1),
+            (sequence, _) => appliedEvents.Add(sequence));
+        var host = new ClientMovementSessionHost(
+            pair.Client,
+            new ConnectionId(1),
+            default,
+            observerState: observerState,
+            observerEvents: observerEvents,
+            maxPollBatch: 8);
+
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventFramePacket.Plane,
+            ReliableEventFramePacket.PacketClass,
+            ReliableEventFramePacket.Channel,
+            PacketCodec.Encode(new ReliableEventFramePacket(10, ImmutablePayloadBuffer.CopyFrom([1])))));
+        pair.Server.FlushOutbound();
+        Assert.Equal(1, host.Pump(1000));
+        Assert.Equal((ulong)10, observerEvents.LastAppliedSequence);
+
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineBeginPacket.Plane,
+            StateBaselineBeginPacket.PacketClass,
+            StateBaselineBeginPacket.Channel,
+            PacketCodec.Encode(new StateBaselineBeginPacket(new StateBaselineDescriptor(9, 50, 42, 1)))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineFramePacket.Plane,
+            StateBaselineFramePacket.PacketClass,
+            StateBaselineFramePacket.Channel,
+            PacketCodec.Encode(new StateBaselineFramePacket(9, 1001, 50, ImmutablePayloadBuffer.CopyFrom([2])))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineCompletePacket.Plane,
+            StateBaselineCompletePacket.PacketClass,
+            StateBaselineCompletePacket.Channel,
+            PacketCodec.Encode(new StateBaselineCompletePacket(9))));
+        pair.Server.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            ReliableEventFramePacket.Plane,
+            ReliableEventFramePacket.PacketClass,
+            ReliableEventFramePacket.Channel,
+            PacketCodec.Encode(new ReliableEventFramePacket(43, ImmutablePayloadBuffer.CopyFrom([3])))));
+        pair.Server.FlushOutbound();
+
+        Assert.Equal(4, host.Pump(1002));
+        Assert.Equal((ulong)43, observerEvents.LastAppliedSequence);
+        Assert.SequenceEqual([10UL, 43UL], appliedEvents);
     }
 
     private static void ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState()

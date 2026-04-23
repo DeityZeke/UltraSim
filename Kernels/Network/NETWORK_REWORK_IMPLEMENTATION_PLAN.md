@@ -458,6 +458,9 @@ Current status:
   - `MovementInputPacket`
   - `MovementStatePacket`
   - `ReliableEventAckPacket`
+  - `StateBaselineBeginPacket`
+  - `StateBaselineFramePacket`
+  - `StateBaselineCompletePacket`
   - `Client/Core` sequencing/prediction/interpolation primitives
   - `Client/Network` movement send/receive bridge
   - `ClientMovementSessionHost`
@@ -474,6 +477,12 @@ Current status:
     - client buffers out-of-order reliable-event frames until the gap closes
     - client emits highest-contiguous `ReliableEventAckPacket` acknowledgements
     - server session host now tracks highest acknowledged reliable-event sequence per connection
+  - first explicit baseline snapshot seam:
+    - full-state baseline descriptor and begin/frame/complete packets
+    - `LatestStateStream.CopySnapshot(...)`
+    - `StateBaselineSnapshotBuilder`
+    - client observer-state bridge can apply a full baseline and surface completion
+    - client session host now resets ordered-event sequence floor immediately when a baseline completes
 
 ## Testing Strategy
 

@@ -123,6 +123,14 @@ public sealed class ClientObserverEventBridge
         return true;
     }
 
+    public void ResetToSequence(ulong sequence)
+    {
+        _pendingBySequence.Clear();
+        _lastAppliedSequence = sequence;
+        _nextExpectedSequence = sequence + 1;
+        _pendingAckSequence = 0;
+    }
+
     private void DrainBufferedContiguous()
     {
         while (_pendingBySequence.Remove(_nextExpectedSequence, out ImmutablePayloadBuffer? payload))

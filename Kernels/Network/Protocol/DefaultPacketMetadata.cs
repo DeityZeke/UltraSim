@@ -15,6 +15,9 @@ public static class DefaultPacketMetadata
         registry.Register<RealtimeStateFramePacket>();
         registry.Register<ReliableEventFramePacket>();
         registry.Register<ReliableEventAckPacket>();
+        registry.Register<StateBaselineBeginPacket>();
+        registry.Register<StateBaselineFramePacket>();
+        registry.Register<StateBaselineCompletePacket>();
         registry.Register<MovementInputPacket>();
         registry.Register<MovementStatePacket>();
         registry.Seal();

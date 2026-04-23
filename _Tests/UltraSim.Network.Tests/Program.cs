@@ -33,6 +33,7 @@ internal static class TestRunner
         Run(nameof(LatestStateStream_CoalescesAndDrainsByLatestVersion), LatestStateStream_CoalescesAndDrainsByLatestVersion);
         Run(nameof(LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes), LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes);
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
+        Run(nameof(LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted), LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
         Run(nameof(OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind), OrderedEventStream_RequiresRecoveryWhenCursorFallsBehind);
         Run(nameof(StreamPrimitives_PreserveBulkPacketClassMetadata), StreamPrimitives_PreserveBulkPacketClassMetadata);
@@ -44,6 +45,7 @@ internal static class TestRunner
         Run(nameof(OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags), OutboundDatagramAssembler_AppliesTransformsAndHeaderFlags);
         Run(nameof(ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals), ConnectionSubscriptionRegistry_TracksSubscriptionsAndRemovals);
         Run(nameof(SharedFramePublisher_CreatesTypedPublishedFrames), SharedFramePublisher_CreatesTypedPublishedFrames);
+        Run(nameof(StateBaselineSnapshotBuilder_EmitsBeginFramesAndComplete), StateBaselineSnapshotBuilder_EmitsBeginFramesAndComplete);
         Run(nameof(ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames), ScheduledWorkPublishedFrameProjector_ProjectsScopedFrames);
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
@@ -783,6 +785,22 @@ internal static class TestRunner
         Assert.Equal(third, nextBatch[0].Sequence);
     }
 
+    private static void LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted()
+    {
+        var stream = new LatestStateStream();
+        ulong first = stream.Publish(100, new SubscriptionKey(1), ImmutablePayloadBuffer.CopyFrom([1]));
+        ulong second = stream.Publish(200, new SubscriptionKey(2), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([2]));
+
+        var batch = new LatestStateUpdate[4];
+        int count = stream.CopySnapshot(batch);
+
+        Assert.Equal(2, count);
+        Assert.Equal(first, batch[0].Sequence);
+        Assert.Equal((ulong)100, batch[0].ItemKey);
+        Assert.Equal(second, batch[1].Sequence);
+        Assert.Equal(PacketClass.Bulk, batch[1].PacketClass);
+    }
+
     private static void StreamPrimitives_PreserveBulkPacketClassMetadata()
     {
         var latest = new LatestStateStream();
@@ -941,6 +959,47 @@ internal static class TestRunner
         Assert.Equal(newestEvent - 1, result.NextState.OrderedEventCursor.NextSequence);
         Assert.Equal(0, result.ReliableEventItemsScheduled);
         Assert.Equal(0, result.BulkItemsScheduled);
+    }
+
+    private static void StateBaselineSnapshotBuilder_EmitsBeginFramesAndComplete()
+    {
+        var builder = new StateBaselineSnapshotBuilder();
+        LatestStateUpdate[] items =
+        [
+            new(1001, 10, new SubscriptionKey(11), PacketClass.Realtime, ImmutablePayloadBuffer.CopyFrom([1, 2])),
+            new(1002, 11, new SubscriptionKey(12), PacketClass.Bulk, ImmutablePayloadBuffer.CopyFrom([3, 4, 5])),
+        ];
+        StateBaselineDescriptor descriptor = new(
+            BaselineId: 7,
+            HighestLatestStateSequence: 11,
+            LastOrderedEventSequence: 42,
+            ItemCount: 2);
+        var output = new OutboundDatagram[8];
+
+        int written = builder.Build(new ConnectionId(9), descriptor, items, output);
+
+        Assert.Equal(4, written);
+        Assert.Equal(StateBaselineBeginPacket.PacketId, DecodeHeader(output[0]).PacketId);
+        Assert.Equal(StateBaselineFramePacket.PacketId, DecodeHeader(output[1]).PacketId);
+        Assert.Equal(StateBaselineFramePacket.PacketId, DecodeHeader(output[2]).PacketId);
+        Assert.Equal(StateBaselineCompletePacket.PacketId, DecodeHeader(output[3]).PacketId);
+
+        ReadOnlySpan<byte> beginPayload = DecodePayload(output[0]);
+        var beginReader = new BitReader(beginPayload);
+        StateBaselineBeginPacket begin = StateBaselineBeginPacket.Deserialize(ref beginReader);
+        Assert.Equal(descriptor, begin.Descriptor);
+
+        ReadOnlySpan<byte> framePayload = DecodePayload(output[1]);
+        var frameReader = new BitReader(framePayload);
+        StateBaselineFramePacket frame = StateBaselineFramePacket.Deserialize(ref frameReader);
+        Assert.Equal((uint)7, frame.BaselineId);
+        Assert.Equal((ulong)1001, frame.ItemKey);
+        Assert.Equal((ulong)10, frame.Sequence);
+
+        ReadOnlySpan<byte> completePayload = DecodePayload(output[3]);
+        var completeReader = new BitReader(completePayload);
+        StateBaselineCompletePacket complete = StateBaselineCompletePacket.Deserialize(ref completeReader);
+        Assert.Equal((uint)7, complete.BaselineId);
     }
 
     private static void OutboundDatagramAssembler_EncodesScheduledWorkIntoTypedFrames()
@@ -1450,6 +1509,18 @@ internal static class TestRunner
         }
 
         return 0;
+    }
+
+    private static PacketEnvelopeHeader DecodeHeader(in OutboundDatagram datagram)
+    {
+        Assert.True(PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out _));
+        return header;
+    }
+
+    private static ReadOnlySpan<byte> DecodePayload(in OutboundDatagram datagram)
+    {
+        Assert.True(PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out _, out ReadOnlySpan<byte> payload));
+        return payload;
     }
 
 }

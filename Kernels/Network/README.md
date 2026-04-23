@@ -114,6 +114,14 @@ What now exists above the kernel:
   - out-of-order ordered-event buffering on the client
   - highest-contiguous `ReliableEventAckPacket` emission back to the server
   - per-connection ordered-event acknowledgement tracking in the live server session host
+- the first explicit baseline snapshot seam above the kernel:
+  - `StateBaselineBeginPacket`
+  - `StateBaselineFramePacket`
+  - `StateBaselineCompletePacket`
+  - `LatestStateStream.CopySnapshot(...)`
+  - `StateBaselineSnapshotBuilder`
+  - client observer-state baseline apply/reset
+  - immediate ordered-event sequence-floor reset when baseline completion lands in the live client host
 
 ## Design Position
 
@@ -299,6 +307,7 @@ Current interpretation:
 - it is “why does the `32–64` band still show non-monotonic cost behavior across multiple runs and profiles?”
 - that investigation should happen before treating the newest widened ceilings as fully settled
 - on correctness/runtime semantics, the next meaningful gap after this is still broader reliable ordered delivery plus snapshot/baseline/recovery, not another transport-only optimization pass
+- more specifically, the remaining gap is now recovery/replay/incremental-baseline policy on top of the new explicit ack + full-baseline seams
 
 ## Parity Position
 

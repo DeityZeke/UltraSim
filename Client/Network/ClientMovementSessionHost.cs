@@ -114,6 +114,8 @@ public sealed class ClientMovementSessionHost
                 if (_observerState?.TryProcessEnvelope(header, payload) == true)
                 {
                     observerStateElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
+                    if (_observerState.TryDequeueCompletedBaseline(out StateBaselineDescriptor baseline))
+                        _observerEvents?.ResetToSequence(baseline.LastOrderedEventSequence);
                     continue;
                 }
 

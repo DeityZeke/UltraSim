@@ -112,6 +112,30 @@ public sealed class LatestStateStream
         }
     }
 
+    public int CopySnapshot(Span<LatestStateUpdate> destination)
+    {
+        lock (_sync)
+        {
+            if (destination.Length == 0 || _entriesByKey.Count == 0)
+                return 0;
+
+            var updates = new List<Entry>(_entriesByKey.Count);
+            foreach (Entry entry in _entriesByKey.Values)
+                updates.Add(entry);
+
+            updates.Sort(static (a, b) => a.Sequence.CompareTo(b.Sequence));
+
+            int count = Math.Min(destination.Length, updates.Count);
+            for (int i = 0; i < count; i++)
+            {
+                Entry entry = updates[i];
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload);
+            }
+
+            return count;
+        }
+    }
+
     private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence)
     {
         EntryKey key = new(itemKey, scopeKey);
