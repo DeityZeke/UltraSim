@@ -9,15 +9,42 @@ namespace UltraSim.Network;
 /// </summary>
 public sealed class InboundPayloadBuffer : IDisposable
 {
+    private sealed class PooledLease
+    {
+        private byte[]? _buffer;
+        private int _retainCount;
+
+        public PooledLease(byte[] buffer, int retainCount)
+        {
+            _buffer = buffer;
+            _retainCount = retainCount;
+        }
+
+        public void AddRef()
+        {
+            Interlocked.Increment(ref _retainCount);
+        }
+
+        public void Release()
+        {
+            if (Interlocked.Decrement(ref _retainCount) != 0)
+                return;
+
+            byte[]? buffer = Interlocked.Exchange(ref _buffer, null);
+            if (buffer is not null)
+                ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     private static readonly InboundPayloadBuffer s_empty = new(ReadOnlyMemory<byte>.Empty, null);
     private readonly ReadOnlyMemory<byte> _memory;
-    private byte[]? _pooledBuffer;
+    private PooledLease? _pooledLease;
     private ImmutablePayloadBuffer? _retainedPayload;
 
-    private InboundPayloadBuffer(ReadOnlyMemory<byte> memory, byte[]? pooledBuffer, ImmutablePayloadBuffer? retainedPayload = null)
+    private InboundPayloadBuffer(ReadOnlyMemory<byte> memory, PooledLease? pooledLease, ImmutablePayloadBuffer? retainedPayload = null)
     {
         _memory = memory;
-        _pooledBuffer = pooledBuffer;
+        _pooledLease = pooledLease;
         _retainedPayload = retainedPayload;
     }
 
@@ -49,14 +76,41 @@ public sealed class InboundPayloadBuffer : IDisposable
 
         byte[] buffer = ArrayPool<byte>.Shared.Rent(source.Length);
         source.CopyTo(buffer);
-        return new InboundPayloadBuffer(new ReadOnlyMemory<byte>(buffer, 0, source.Length), buffer);
+        return new InboundPayloadBuffer(new ReadOnlyMemory<byte>(buffer, 0, source.Length), new PooledLease(buffer, retainCount: 1));
+    }
+
+    public static InboundPayloadBuffer FromPooled(byte[] buffer, int length)
+    {
+        ArgumentNullException.ThrowIfNull(buffer);
+        if ((uint)length > (uint)buffer.Length)
+            throw new ArgumentOutOfRangeException(nameof(length));
+        if (length == 0)
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+            return Empty;
+        }
+
+        return new InboundPayloadBuffer(new ReadOnlyMemory<byte>(buffer, 0, length), new PooledLease(buffer, retainCount: 1));
+    }
+
+    public static InboundPayloadBuffer Slice(InboundPayloadBuffer owner, int offset, int length)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        if (owner._pooledLease is null)
+            throw new InvalidOperationException("Only pooled inbound buffers support zero-copy slicing.");
+        if ((uint)offset > (uint)owner._memory.Length || (uint)length > (uint)(owner._memory.Length - offset))
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        if (length == 0)
+            return Empty;
+
+        owner._pooledLease.AddRef();
+        return new InboundPayloadBuffer(owner._memory.Slice(offset, length), owner._pooledLease);
     }
 
     public void Dispose()
     {
-        byte[]? pooledBuffer = Interlocked.Exchange(ref _pooledBuffer, null);
-        if (pooledBuffer is not null)
-            ArrayPool<byte>.Shared.Return(pooledBuffer);
+        PooledLease? pooledLease = Interlocked.Exchange(ref _pooledLease, null);
+        pooledLease?.Release();
         ImmutablePayloadBuffer? retainedPayload = Interlocked.Exchange(ref _retainedPayload, null);
         retainedPayload?.Release();
     }

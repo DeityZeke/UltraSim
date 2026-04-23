@@ -78,7 +78,6 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     private readonly List<ImmutablePayloadBuffer> _bundlePayloadScratch = new();
     private readonly FlushBatchState _asyncFlushBatchA = new();
     private readonly FlushBatchState _asyncFlushBatchB = new();
-    private readonly byte[] _receiveBuffer;
     private readonly object _sync = new();
     private Socket? _socket;
     private Task _pendingAsyncFlushTask = Task.CompletedTask;
@@ -103,7 +102,6 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         if (options.MaxDatagramBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(options));
 
-        _receiveBuffer = new byte[options.MaxDatagramBytes];
         _nextDynamicConnectionId = 1;
         _buildFlushBatch = _asyncFlushBatchA;
         _sendFlushBatch = _asyncFlushBatchB;
@@ -167,31 +165,43 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         {
             EndPoint remote = new IPEndPoint(IPAddress.Any, 0);
             int received;
+            byte[] rentedReceiveBuffer = ArrayPool<byte>.Shared.Rent(_options.MaxDatagramBytes);
             try
             {
                 long receiveStart = Stopwatch.GetTimestamp();
-                received = socket.ReceiveFrom(_receiveBuffer, 0, _receiveBuffer.Length, SocketFlags.None, ref remote);
+                received = socket.ReceiveFrom(rentedReceiveBuffer, 0, _options.MaxDatagramBytes, SocketFlags.None, ref remote);
                 socketReceiveTicks += Stopwatch.GetTimestamp() - receiveStart;
             }
             catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.IOPending or SocketError.NoBufferSpaceAvailable)
             {
+                ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
                 break;
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.ConnectionReset)
             {
+                ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
                 continue;
             }
 
             if (received <= 0 || remote is not IPEndPoint remoteEndPoint)
+            {
+                ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
                 continue;
+            }
 
             if (!TryGetOrAssignConnectionId(remoteEndPoint, out ConnectionId connectionId))
+            {
+                ArrayPool<byte>.Shared.Return(rentedReceiveBuffer);
                 continue;
+            }
 
-            ReadOnlySpan<byte> datagramPayload = _receiveBuffer.AsSpan(0, received);
+            InboundPayloadBuffer wirePayload = InboundPayloadBuffer.FromPooled(rentedReceiveBuffer, received);
+            ReadOnlySpan<byte> datagramPayload = wirePayload.Span;
             if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> entries))
             {
                 long bundleStart = Stopwatch.GetTimestamp();
+                int entryOffset = datagramPayload.Length - entries.Length;
+                int remainingOffset = entryOffset;
                 ReadOnlySpan<byte> remaining = entries;
                 for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
                 {
@@ -202,15 +212,20 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                     if (remaining.Length < sizeof(ushort) + entryLength)
                         break;
 
-                    ReadOnlySpan<byte> bundledPayload = remaining.Slice(sizeof(ushort), entryLength);
+                    InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.Slice(
+                        wirePayload,
+                        remainingOffset + sizeof(ushort),
+                        entryLength);
                     TryQueueInbound(connectionId, bundledPayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
                     remaining = remaining.Slice(sizeof(ushort) + entryLength);
+                    remainingOffset += sizeof(ushort) + entryLength;
                 }
+                wirePayload.Dispose();
                 bundleUnpackTicks += Stopwatch.GetTimestamp() - bundleStart;
                 continue;
             }
 
-            TryQueueInbound(connectionId, datagramPayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
+            TryQueueInbound(connectionId, wirePayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
         }
 
         LastPollProfile = new TransportPollProfileSnapshot(
@@ -504,28 +519,27 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
     private void TryQueueInbound(
         ConnectionId connectionId,
-        ReadOnlySpan<byte> payload,
+        InboundPayloadBuffer payloadBuffer,
         Span<InboundDatagram> destination,
         ref int count,
         ref long envelopeParseTicks,
         ref long payloadCopyTicks)
     {
         long parseStart = Stopwatch.GetTimestamp();
-        if (!PacketCodec.TryDecodeEnvelope(payload, out PacketEnvelopeHeader header, out _))
+        if (!PacketCodec.TryDecodeEnvelope(payloadBuffer.Span, out PacketEnvelopeHeader header, out _))
         {
             envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+            payloadBuffer.Dispose();
             return;
         }
         if (!_packetMetadata.TryGet(header.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel))
         {
             envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+            payloadBuffer.Dispose();
             return;
         }
         envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
 
-        long copyStart = Stopwatch.GetTimestamp();
-        InboundPayloadBuffer payloadBuffer = InboundPayloadBuffer.CopyFromPooled(payload);
-        payloadCopyTicks += Stopwatch.GetTimestamp() - copyStart;
         var inbound = new InboundDatagram(connectionId, plane, packetClass, channel, header, payloadBuffer);
         if (count < destination.Length)
         {
