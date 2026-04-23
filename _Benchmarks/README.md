@@ -302,6 +302,14 @@ Current interpretation:
     - `client_observer_event_p95 = 0.181 ms`
 - the event-side client path is therefore materially cheaper, but the non-monotonic `32–64` band is now even more obvious, so the next benchmark step should be a focused geometry/subscription-shape investigation rather than more blind widening
 
+- the later transport/runtime tuning passes also added explicit stage-level allocation and GC reporting to the widened harness:
+  - `alloc_bytes`
+  - `gc_gen0_collections`
+  - `gc_gen1_collections`
+  - `gc_gen2_collections`
+- current widened `64/256/512` GC reads still show super-linear allocation pressure, even after the transport pooling work
+- the first realtime latest-state batching experiment now exists too, but current A/B runs do not justify leaving it enabled by default on the widened harness path
+
 Current observer-replication read with actual client consume:
 
 - dense profile (`spawn-spacing-m 4`, `10s` stages):

@@ -77,6 +77,8 @@ public sealed class ClientMovementSessionHost
         long controlElapsedTicks = 0;
         long movementElapsedTicks = 0;
         long observerStateElapsedTicks = 0;
+        long observerStateDecodeElapsedTicks = 0;
+        long observerStateApplyElapsedTicks = 0;
         long observerEventElapsedTicks = 0;
         StateBaselineDescriptor? completedBaseline = null;
         _observerState?.BeginPump();
@@ -115,6 +117,9 @@ public sealed class ClientMovementSessionHost
                 if (_observerState?.TryProcessEnvelope(header, payload) == true)
                 {
                     observerStateElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
+                    ClientObserverStateProfileSnapshot observerProfile = _observerState.LastProfile;
+                    observerStateDecodeElapsedTicks = observerProfile.DecodeElapsedTicks;
+                    observerStateApplyElapsedTicks = observerProfile.ApplyElapsedTicks;
                     if (_observerState.TryDequeueCompletedBaseline(out StateBaselineDescriptor baseline))
                     {
                         _observerEvents?.ResetToSequence(baseline.LastOrderedEventSequence);
@@ -166,6 +171,8 @@ public sealed class ClientMovementSessionHost
             controlElapsedTicks,
             movementElapsedTicks,
             observerStateElapsedTicks,
+            observerStateDecodeElapsedTicks,
+            observerStateApplyElapsedTicks,
             observerEventElapsedTicks);
         return totalCount;
     }

@@ -516,6 +516,7 @@ Current status:
       - retransmit execution
       - ordered-event delivery
       - latest-state delta delivery
+    - that runtime layer is now wired into `ServerMovementSessionHost` rather than living only as an isolated server-side seam
 
 ## Testing Strategy
 
@@ -623,6 +624,15 @@ The next implementation target after this bridge slice should be:
   - the widened harness now uses structured item keys for movement, visual, and bulk observer families
   - widened-harness observer latest-state storage is now slot-indexed by structured item key instead of dictionary-backed by scoped item key
   - the widened harness now also enables the first batched realtime latest-state envelope path for contiguous scheduled-work fanout items
+  - that batched realtime envelope path is now explicitly treated as experimental:
+    - it remains available as an opt-in harness switch
+    - current A/B runs do not justify making it the default widened path
+  - later tuning and audit work materially improved the live path without changing parity conclusions:
+    - transport/control-plane correctness fixes from the audit landed
+    - `ConnectionSubscriptionRegistry` membership checks are no longer linear hot-path scans
+    - `LatestStateStream` now reuses cached ordered snapshots instead of rebuilding/sorting per drain
+    - inbound and outbound transport payload ownership now use explicit pooled lifetime seams
+    - the widened harness now reports allocation and GC counts per stage
 
 Current recommendation:
 

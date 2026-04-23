@@ -24,6 +24,9 @@ The new stack is already past scaffold stage:
 - ring-aware AOI latest-state cadence exists
 - widened `Realtime + ReliableEvent + Bulk` observer paths exist
 - widened `0.40` multi-ring profile now has a passing `64`-client `tick_p95 < 4 ms` run
+- ordered-event ack / replay / retransmit / recovery seams now exist
+- baseline / ack / delta seams now exist
+- a generic runtime composition layer now exists and is wired into the live movement host path
 
 But the new stack is not yet at old-network parity.
 
@@ -83,7 +86,8 @@ Current state:
 - bounded replay window now exists
 - retransmit planning policy now exists
 - retransmit execution bridge now exists at the kernel level
-- retransmit / resend is not yet wired as a live server runtime loop
+- retransmit / resend now exists in the generic runtime layer and is wired into the live movement host path
+- what is still missing is broader stressed validation through more gameplay-real mixed traffic
 5. Snapshot / baseline / recovery path as a real runtime path
 Current state:
 - full baseline begin/frame/complete packet contracts now exist
@@ -94,13 +98,18 @@ Current state:
 - send-based per-connection latest-state tracking now exists as the first delta foundation
 - explicit latest-state delta packet/execution now exists at the kernel/client seam
 - a first generic server-side runtime composition layer now exists
-- it is not yet wired into the real movement/control hosts as the primary live runtime path
+- that runtime layer is now wired into the real movement host path
+- what is still missing is broader end-to-end gameplay/runtime breadth and stressed recovery validation
 6. Dense-area degradation policy broad enough to compare with the old hotspot behavior
 7. Harness/runtime metrics for build/flush/send slices comparable to the old telemetry tables
 
 Additional important gap:
 
 8. Delta/baseline packet flow instead of the current mostly full-state observer payload path
+Current state:
+- explicit delta packets now exist
+- per-connection latest-state send tracking now exists
+- but observer payloads are still mostly full payload bodies rather than deeper field-level diff encoding
 
 ## Important Non-Goal
 

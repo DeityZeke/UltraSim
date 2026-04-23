@@ -149,6 +149,7 @@ What now exists above the kernel:
     - `RealtimeStateBatchPacket`
     - `PacketCodec.EncodeRealtimeStateBatchEnvelope(...)`
     - batching is currently used only on the no-transform scheduled-work fanout path where higher layers opt into it
+  - the generic runtime composition layer is now also wired into `ServerMovementSessionHost`, not just tested in isolation
 
 ## Design Position
 

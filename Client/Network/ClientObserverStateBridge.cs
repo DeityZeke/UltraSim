@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 using UltraSim.Network;
 
@@ -20,6 +21,8 @@ public sealed class ClientObserverStateBridge
     private bool _hasCompletedBaseline;
     private StateBaselineDescriptor _completedBaseline;
     private uint _lastCompletedBaselineId;
+    private long _decodeElapsedTicks;
+    private long _applyElapsedTicks;
 
     public ClientObserverStateBridge(
         ConnectionId connectionId,
@@ -42,6 +45,7 @@ public sealed class ClientObserverStateBridge
     public int LastAppliedBaselineFrameCount { get; private set; }
     public int LastReceivedDeltaFrameCount { get; private set; }
     public int LastAppliedDeltaFrameCount { get; private set; }
+    public ClientObserverStateProfileSnapshot LastProfile { get; private set; }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
@@ -74,60 +78,89 @@ public sealed class ClientObserverStateBridge
         LastAppliedBaselineFrameCount = 0;
         LastReceivedDeltaFrameCount = 0;
         LastAppliedDeltaFrameCount = 0;
+        _decodeElapsedTicks = 0;
+        _applyElapsedTicks = 0;
+        LastProfile = default;
     }
 
     public bool TryProcessEnvelope(in PacketEnvelopeHeader header, ReadOnlySpan<byte> payload)
     {
         if (header.PacketId == RealtimeStateFramePacket.PacketId)
         {
+            long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
             RealtimeStateFramePacket packet = RealtimeStateFramePacket.Deserialize(ref reader);
+            _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
+            long applyStart = Stopwatch.GetTimestamp();
             OnRealtimeStateFrame(packet);
+            _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
+            UpdateProfile();
             return true;
         }
 
         if (header.PacketId == RealtimeStateBatchPacket.PacketId)
         {
+            long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
             RealtimeStateBatchPacket packet = RealtimeStateBatchPacket.Deserialize(ref reader);
+            _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
             for (int i = 0; i < packet.Items.Length; i++)
             {
                 RealtimeStateBatchItem item = packet.Items[i];
+                long applyStart = Stopwatch.GetTimestamp();
                 OnRealtimeStateFrame(new RealtimeStateFramePacket(item.Sequence, item.ItemKey, item.Payload));
+                _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
             }
 
+            UpdateProfile();
             return true;
         }
 
         if (header.PacketId == StateBaselineBeginPacket.PacketId)
         {
+            long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
             StateBaselineBeginPacket packet = StateBaselineBeginPacket.Deserialize(ref reader);
+            _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
             OnBaselineBegin(packet);
+            UpdateProfile();
             return true;
         }
 
         if (header.PacketId == StateBaselineFramePacket.PacketId)
         {
+            long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
             StateBaselineFramePacket packet = StateBaselineFramePacket.Deserialize(ref reader);
+            _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
+            long applyStart = Stopwatch.GetTimestamp();
             OnBaselineFrame(packet);
+            _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
+            UpdateProfile();
             return true;
         }
 
         if (header.PacketId == StateBaselineCompletePacket.PacketId)
         {
+            long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
             StateBaselineCompletePacket packet = StateBaselineCompletePacket.Deserialize(ref reader);
+            _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
             OnBaselineComplete(packet);
+            UpdateProfile();
             return true;
         }
 
         if (header.PacketId == StateDeltaFramePacket.PacketId)
         {
+            long decodeStart = Stopwatch.GetTimestamp();
             var reader = new BitReader(payload);
             StateDeltaFramePacket packet = StateDeltaFramePacket.Deserialize(ref reader);
+            _decodeElapsedTicks += Stopwatch.GetTimestamp() - decodeStart;
+            long applyStart = Stopwatch.GetTimestamp();
             OnDeltaFrame(packet);
+            _applyElapsedTicks += Stopwatch.GetTimestamp() - applyStart;
+            UpdateProfile();
             return true;
         }
 
@@ -232,5 +265,18 @@ public sealed class ClientObserverStateBridge
         previousSequence = packet.Sequence;
         _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
         LastAppliedDeltaFrameCount++;
+    }
+
+    private void UpdateProfile()
+    {
+        LastProfile = new ClientObserverStateProfileSnapshot(
+            _decodeElapsedTicks,
+            _applyElapsedTicks,
+            LastReceivedFrameCount,
+            LastAppliedFrameCount,
+            LastReceivedBaselineFrameCount,
+            LastAppliedBaselineFrameCount,
+            LastReceivedDeltaFrameCount,
+            LastAppliedDeltaFrameCount);
     }
 }

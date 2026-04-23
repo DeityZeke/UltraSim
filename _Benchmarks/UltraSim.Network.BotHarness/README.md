@@ -44,6 +44,8 @@ Useful options:
 - `--observer-bulk-every-ticks <n>`
 - `--observer-events`
 - `--observer-event-every-ticks <n>`
+- `--enable-latest-state-batching`
+- `--disable-latest-state-batching`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
@@ -92,6 +94,10 @@ The widened harness now reports:
 - `dispatch_p95_ms`
 - `client_pump_avg_ms`
 - `client_pump_p95_ms`
+- `client_observer_state_decode_avg_ms`
+- `client_observer_state_decode_p95_ms`
+- `client_observer_state_apply_avg_ms`
+- `client_observer_state_apply_p95_ms`
 - `replication_published_items`
 - `replication_datagrams`
 - `replication_wire_datagrams`
@@ -158,6 +164,8 @@ The widened harness now also enables a first batched realtime latest-state envel
 - contiguous realtime latest-state scheduled-work items in the same scope can be emitted as one `RealtimeStateBatchPacket`
 - this is currently a fanout-side aggregation optimization, not a new general delta/baseline path
 - current intent is to reduce the hot per-item realtime envelope encode cost in the widened observer path without changing higher-level runtime semantics
+- current harness default: batching disabled
+- use `--enable-latest-state-batching` for an A/B comparison on the same widened profile
 
 The widened harness can now also include a first `Bulk` observer family:
 

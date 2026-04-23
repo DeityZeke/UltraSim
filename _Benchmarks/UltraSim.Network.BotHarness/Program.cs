@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Runtime.InteropServices;
+using System.Buffers.Binary;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
@@ -162,6 +163,8 @@ internal sealed class MovementRampHarness : IDisposable
         var clientControlSamplesMs = new List<double>(measuredTicks);
         var clientMovementSamplesMs = new List<double>(measuredTicks);
         var clientObserverStateSamplesMs = new List<double>(measuredTicks);
+        var clientObserverStateDecodeSamplesMs = new List<double>(measuredTicks);
+        var clientObserverStateApplySamplesMs = new List<double>(measuredTicks);
         var clientObserverEventSamplesMs = new List<double>(measuredTicks);
         long pendingSum = 0;
         int pendingMax = 0;
@@ -232,6 +235,8 @@ internal sealed class MovementRampHarness : IDisposable
             double clientControlMs = 0d;
             double clientMovementMs = 0d;
             double clientObserverStateMs = 0d;
+            double clientObserverStateDecodeMs = 0d;
+            double clientObserverStateApplyMs = 0d;
             double clientObserverEventMs = 0d;
             for (int i = 0; i < _clients.Count; i++)
             {
@@ -245,6 +250,8 @@ internal sealed class MovementRampHarness : IDisposable
                 clientControlMs += profile.ControlElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientMovementMs += profile.MovementElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientObserverStateMs += profile.ObserverStateElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientObserverStateDecodeMs += profile.ObserverStateDecodeElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientObserverStateApplyMs += profile.ObserverStateApplyElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientObserverEventMs += profile.ObserverEventElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 client.CollectPongSamples(clientNowTicks, _pongScratch, pingSamplesMs);
             }
@@ -254,6 +261,8 @@ internal sealed class MovementRampHarness : IDisposable
             clientControlSamplesMs.Add(clientControlMs);
             clientMovementSamplesMs.Add(clientMovementMs);
             clientObserverStateSamplesMs.Add(clientObserverStateMs);
+            clientObserverStateDecodeSamplesMs.Add(clientObserverStateDecodeMs);
+            clientObserverStateApplySamplesMs.Add(clientObserverStateApplyMs);
             clientObserverEventSamplesMs.Add(clientObserverEventMs);
             long end = Stopwatch.GetTimestamp();
 
@@ -282,6 +291,8 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats clientControlStats = new TickWindowStats(clientControlSamplesMs);
         TickWindowStats clientMovementStats = new TickWindowStats(clientMovementSamplesMs);
         TickWindowStats clientObserverStateStats = new TickWindowStats(clientObserverStateSamplesMs);
+        TickWindowStats clientObserverStateDecodeStats = new TickWindowStats(clientObserverStateDecodeSamplesMs);
+        TickWindowStats clientObserverStateApplyStats = new TickWindowStats(clientObserverStateApplySamplesMs);
         TickWindowStats clientObserverEventStats = new TickWindowStats(clientObserverEventSamplesMs);
         TickWindowStats pingStats = new TickWindowStats(pingSamplesMs);
         int readyClients = 0;
@@ -330,6 +341,10 @@ internal sealed class MovementRampHarness : IDisposable
             ClientMovementP95Ms: clientMovementStats.P95Ms,
             ClientObserverStateAverageMs: clientObserverStateStats.AverageMs,
             ClientObserverStateP95Ms: clientObserverStateStats.P95Ms,
+            ClientObserverStateDecodeAverageMs: clientObserverStateDecodeStats.AverageMs,
+            ClientObserverStateDecodeP95Ms: clientObserverStateDecodeStats.P95Ms,
+            ClientObserverStateApplyAverageMs: clientObserverStateApplyStats.AverageMs,
+            ClientObserverStateApplyP95Ms: clientObserverStateApplyStats.P95Ms,
             ClientObserverEventAverageMs: clientObserverEventStats.AverageMs,
             ClientObserverEventP95Ms: clientObserverEventStats.P95Ms,
             PingAverageMs: pingStats.AverageMs,
@@ -509,7 +524,7 @@ internal sealed class MovementRampHarness : IDisposable
         var publisher = new ServerEcsWorldNetworkPublisher(_world);
         var subscriptions = new ConnectionSubscriptionRegistry();
         var scheduler = new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream);
-        var fanout = new ScheduledWorkFanoutBridge(subscriptions, enableLatestStateBatching: true);
+        var fanout = new ScheduledWorkFanoutBridge(subscriptions, enableLatestStateBatching: _options.LatestStateBatching);
         return new StageReplicationContext(
             new ServerEcsChunkAoiScopeClassifier(policy),
             new ChunkAoiSubscriptionMaintainer(policy),
@@ -547,7 +562,7 @@ internal sealed class MovementRampHarness : IDisposable
             new ServerEcsChunkAoiLatestStateRule<BenchMovementBody>(
                 replication.Classifier,
                 static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
-                static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                static (_, body) => HarnessPayloadCodec.Encode(body),
                 static (entity, _) => ComposeHarnessMovementItemKey(entity),
                 ringCadence: replication.RingCadence),
             publishTick);
@@ -558,7 +573,7 @@ internal sealed class MovementRampHarness : IDisposable
                 new ServerEcsChunkAoiLatestStateRule<BenchMovementVisualBody>(
                     replication.Classifier,
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
-                    static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                    static (_, body) => HarnessPayloadCodec.Encode(body),
                     static (entity, _) => ComposeHarnessVisualItemKey(entity),
                     ringCadence: replication.RingCadence),
                 publishTick);
@@ -570,7 +585,7 @@ internal sealed class MovementRampHarness : IDisposable
                 new ServerEcsChunkAoiLatestStateRule<BenchMovementBulkBody>(
                     replication.Classifier,
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
-                    static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body),
+                    static (_, body) => HarnessPayloadCodec.Encode(body),
                     static (entity, _) => ComposeHarnessBulkItemKey(entity),
                     ringCadence: replication.RingCadence,
                     packetClass: PacketClass.Bulk),
@@ -583,7 +598,7 @@ internal sealed class MovementRampHarness : IDisposable
                 new ServerEcsChunkAoiOrderedEventRule<BenchMovementEventBody>(
                     replication.Classifier,
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
-                    static (_, body) => ServerRuntimeNetworkPayloadCodec.Encode(body)));
+                    static (_, body) => HarnessPayloadCodec.Encode(body)));
         }
 
         return published;
@@ -886,7 +901,7 @@ internal sealed class MovementRampHarness : IDisposable
                     _observerBulkStateCount++;
                 }
 
-                _observerBulkStates[slot] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBulkBody>(payload);
+                _observerBulkStates[slot] = HarnessPayloadCodec.DecodeBulk(payload);
                 return;
             }
 
@@ -898,7 +913,7 @@ internal sealed class MovementRampHarness : IDisposable
                     _observerVisualStateCount++;
                 }
 
-                _observerVisualStates[slot] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
+                _observerVisualStates[slot] = HarnessPayloadCodec.DecodeVisual(payload);
                 return;
             }
 
@@ -908,12 +923,12 @@ internal sealed class MovementRampHarness : IDisposable
                 _observerStateCount++;
             }
 
-            _observerStates[slot] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
+            _observerStates[slot] = HarnessPayloadCodec.DecodeMovement(payload);
         }
 
         public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
         {
-            BenchMovementEventBody observerEvent = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementEventBody>(payload);
+            BenchMovementEventBody observerEvent = HarnessPayloadCodec.DecodeEvent(payload);
             int slot = checked((int)observerEvent.ObserverSlot);
             EnsureObserverCapacity(slot);
             if (!_observerEventOccupied[slot])
@@ -1028,6 +1043,7 @@ internal sealed class HarnessArgs
     public bool ObserverVisualState { get; set; }
     public bool ObserverBulkState { get; set; }
     public bool ObserverEvents { get; set; }
+    public bool LatestStateBatching { get; set; }
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1068,6 +1084,8 @@ internal sealed class HarnessArgs
             else if (arg == "--observer-visual-state") options.ObserverVisualState = true;
             else if (arg == "--observer-bulk-state") options.ObserverBulkState = true;
             else if (arg == "--observer-events") options.ObserverEvents = true;
+            else if (arg == "--disable-latest-state-batching") options.LatestStateBatching = false;
+            else if (arg == "--enable-latest-state-batching") options.LatestStateBatching = true;
             else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1141,6 +1159,7 @@ internal sealed class HarnessArgs
             ["observer_bulk_every_ticks"] = ObserverBulkEveryTicks,
             ["observer_events"] = ObserverEvents,
             ["observer_event_every_ticks"] = ObserverEventEveryTicks,
+            ["latest_state_batching"] = LatestStateBatching,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
@@ -1223,6 +1242,10 @@ internal readonly record struct StageResult(
     double ClientMovementP95Ms,
     double ClientObserverStateAverageMs,
     double ClientObserverStateP95Ms,
+    double ClientObserverStateDecodeAverageMs,
+    double ClientObserverStateDecodeP95Ms,
+    double ClientObserverStateApplyAverageMs,
+    double ClientObserverStateApplyP95Ms,
     double ClientObserverEventAverageMs,
     double ClientObserverEventP95Ms,
     double PingAverageMs,
@@ -1287,6 +1310,10 @@ internal readonly record struct StageResult(
             ["client_movement_p95_ms"] = Math.Round(ClientMovementP95Ms, 3),
             ["client_observer_state_avg_ms"] = Math.Round(ClientObserverStateAverageMs, 3),
             ["client_observer_state_p95_ms"] = Math.Round(ClientObserverStateP95Ms, 3),
+            ["client_observer_state_decode_avg_ms"] = Math.Round(ClientObserverStateDecodeAverageMs, 3),
+            ["client_observer_state_decode_p95_ms"] = Math.Round(ClientObserverStateDecodeP95Ms, 3),
+            ["client_observer_state_apply_avg_ms"] = Math.Round(ClientObserverStateApplyAverageMs, 3),
+            ["client_observer_state_apply_p95_ms"] = Math.Round(ClientObserverStateApplyP95Ms, 3),
             ["client_observer_event_avg_ms"] = Math.Round(ClientObserverEventAverageMs, 3),
             ["client_observer_event_p95_ms"] = Math.Round(ClientObserverEventP95Ms, 3),
             ["ping_avg_ms"] = Math.Round(PingAverageMs, 3),
@@ -1366,6 +1393,123 @@ internal readonly struct TickWindowStats
 
         double weight = rank - lower;
         return (sorted[lower] * (1.0 - weight)) + (sorted[upper] * weight);
+    }
+}
+
+internal static class HarnessPayloadCodec
+{
+    public static ImmutablePayloadBuffer Encode(BenchMovementBody value)
+    {
+        byte[] bytes = new byte[16];
+        WriteSingle(bytes, 0, value.PositionX);
+        WriteSingle(bytes, 4, value.PositionY);
+        WriteSingle(bytes, 8, value.VelocityX);
+        WriteSingle(bytes, 12, value.VelocityY);
+        return ImmutablePayloadBuffer.FromOwned(bytes);
+    }
+
+    public static ImmutablePayloadBuffer Encode(BenchMovementVisualBody value)
+    {
+        byte[] bytes = new byte[16];
+        WriteSingle(bytes, 0, value.PositionX);
+        WriteSingle(bytes, 4, value.PositionY);
+        WriteSingle(bytes, 8, value.Speed);
+        WriteSingle(bytes, 12, value.HeadingDegrees);
+        return ImmutablePayloadBuffer.FromOwned(bytes);
+    }
+
+    public static ImmutablePayloadBuffer Encode(BenchMovementBulkBody value)
+    {
+        byte[] bytes = new byte[52];
+        WriteSingle(bytes, 0, value.PositionX);
+        WriteSingle(bytes, 4, value.PositionY);
+        WriteSingle(bytes, 8, value.Speed);
+        WriteSingle(bytes, 12, value.HeadingDegrees);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16, 4), value.ClientTick);
+        WriteSingle(bytes, 20, value.SampleA);
+        WriteSingle(bytes, 24, value.SampleB);
+        WriteSingle(bytes, 28, value.SampleC);
+        WriteSingle(bytes, 32, value.SampleD);
+        WriteSingle(bytes, 36, value.SampleE);
+        WriteSingle(bytes, 40, value.SampleF);
+        WriteSingle(bytes, 44, value.SampleG);
+        WriteSingle(bytes, 48, value.SampleH);
+        return ImmutablePayloadBuffer.FromOwned(bytes);
+    }
+
+    public static ImmutablePayloadBuffer Encode(BenchMovementEventBody value)
+    {
+        byte[] bytes = new byte[21];
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(0, 4), value.ObserverSlot);
+        WriteSingle(bytes, 4, value.PositionX);
+        WriteSingle(bytes, 8, value.PositionY);
+        BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(12, 2), value.MoveX);
+        BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(14, 2), value.MoveY);
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(16, 4), value.ClientTick);
+        bytes[20] = value.Flags;
+        return ImmutablePayloadBuffer.FromOwned(bytes);
+    }
+
+    public static BenchMovementBody DecodeMovement(ImmutablePayloadBuffer payload)
+    {
+        ReadOnlySpan<byte> span = payload.Span;
+        return new BenchMovementBody(
+            ReadSingle(span, 0),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            ReadSingle(span, 12));
+    }
+
+    public static BenchMovementVisualBody DecodeVisual(ImmutablePayloadBuffer payload)
+    {
+        ReadOnlySpan<byte> span = payload.Span;
+        return new BenchMovementVisualBody(
+            ReadSingle(span, 0),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            ReadSingle(span, 12));
+    }
+
+    public static BenchMovementBulkBody DecodeBulk(ImmutablePayloadBuffer payload)
+    {
+        ReadOnlySpan<byte> span = payload.Span;
+        return new BenchMovementBulkBody(
+            ReadSingle(span, 0),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            ReadSingle(span, 12),
+            BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(16, 4)),
+            ReadSingle(span, 20),
+            ReadSingle(span, 24),
+            ReadSingle(span, 28),
+            ReadSingle(span, 32),
+            ReadSingle(span, 36),
+            ReadSingle(span, 40),
+            ReadSingle(span, 44),
+            ReadSingle(span, 48));
+    }
+
+    public static BenchMovementEventBody DecodeEvent(ImmutablePayloadBuffer payload)
+    {
+        ReadOnlySpan<byte> span = payload.Span;
+        return new BenchMovementEventBody(
+            BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(0, 4)),
+            ReadSingle(span, 4),
+            ReadSingle(span, 8),
+            BinaryPrimitives.ReadInt16LittleEndian(span.Slice(12, 2)),
+            BinaryPrimitives.ReadInt16LittleEndian(span.Slice(14, 2)),
+            BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(16, 4)),
+            span[20]);
+    }
+
+    private static void WriteSingle(byte[] bytes, int offset, float value)
+    {
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset, 4), unchecked((uint)BitConverter.SingleToInt32Bits(value)));
+    }
+
+    private static float ReadSingle(ReadOnlySpan<byte> span, int offset)
+    {
+        return BitConverter.Int32BitsToSingle(unchecked((int)BinaryPrimitives.ReadUInt32LittleEndian(span.Slice(offset, 4))));
     }
 }
 

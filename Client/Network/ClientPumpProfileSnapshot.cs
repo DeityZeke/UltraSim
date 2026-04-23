@@ -6,4 +6,6 @@ public readonly record struct ClientPumpProfileSnapshot(
     long ControlElapsedTicks,
     long MovementElapsedTicks,
     long ObserverStateElapsedTicks,
+    long ObserverStateDecodeElapsedTicks,
+    long ObserverStateApplyElapsedTicks,
     long ObserverEventElapsedTicks);
