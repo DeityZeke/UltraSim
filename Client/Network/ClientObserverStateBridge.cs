@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 using UltraSim.Network;
 
 namespace UltraSim.Client;
@@ -69,13 +71,17 @@ public sealed class ClientObserverStateBridge
     private void OnRealtimeStateFrame(in RealtimeStateFramePacket packet)
     {
         LastReceivedFrameCount++;
-        if (_latestSequenceByItemKey.TryGetValue(packet.ItemKey, out ulong previousSequence) &&
-            packet.Sequence <= previousSequence)
+        ref ulong previousSequence = ref CollectionsMarshal.GetValueRefOrAddDefault(
+            _latestSequenceByItemKey,
+            packet.ItemKey,
+            out bool exists);
+
+        if (exists && packet.Sequence <= previousSequence)
         {
             return;
         }
 
-        _latestSequenceByItemKey[packet.ItemKey] = packet.Sequence;
+        previousSequence = packet.Sequence;
         _applyLatestState?.Invoke(packet.ItemKey, packet.Sequence, packet.Payload);
         LastAppliedFrameCount++;
     }

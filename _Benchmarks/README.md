@@ -265,6 +265,22 @@ Current interpretation:
   - `client_pump_p95` moved from `2.570 ms` to `2.147 ms`
   - `dispatch_p95` stayed about the same at `0.803 ms`
 - that confirms the first useful optimization after cadence was on the client consume path, not on publish policy
+- finer client breakdown is now in place too:
+  - on the current broadened `0.40` / `64` profile:
+    - `client_poll_p95 = 0.447 ms`
+    - `client_control_p95 = 0.009 ms`
+    - `client_movement_p95 = 0.020 ms`
+    - `client_observer_state_p95 = 1.422 ms`
+    - `client_observer_event_p95 = 0.871 ms`
+- that makes the current client hot slices explicit:
+  - observer latest-state consume/apply/store
+  - observer-event consume/apply/store
+  - then dispatch/fanout
+- a further local client-store tightening pass brought the latest widened run to:
+  - `tick_p95 = 4.213 ms`
+  - `dispatch_p95 = 0.776 ms`
+  - `client_pump_p95 = 2.077 ms`
+- current observer storage is still dictionary-backed and keyed by scoped item keys, so there is still structural headroom beyond the current micro-optimizations
 
 Current observer-replication read with actual client consume:
 

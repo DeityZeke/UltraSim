@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UltraSim.Network;
 
 namespace UltraSim.Client;
@@ -43,6 +44,7 @@ public sealed class ClientMovementSessionHost
     public ClientMovementNetworkBridge Movement => _movement;
     public ClientObserverStateBridge? ObserverState => _observerState;
     public ClientObserverEventBridge? ObserverEvents => _observerEvents;
+    public ClientPumpProfileSnapshot LastPumpProfile { get; private set; }
     public SessionId SessionId => _sessionId;
     public bool IsRunning => _transport.IsRunning;
 
@@ -71,17 +73,26 @@ public sealed class ClientMovementSessionHost
     public int Pump(long nowTicks)
     {
         int totalCount = 0;
+        long pollElapsedTicks = 0;
+        long controlElapsedTicks = 0;
+        long movementElapsedTicks = 0;
+        long observerStateElapsedTicks = 0;
+        long observerEventElapsedTicks = 0;
         _observerState?.BeginPump();
         _observerEvents?.BeginPump();
 
         while (true)
         {
+            long pollStart = Stopwatch.GetTimestamp();
             int count = _transport.PollInbound(_inboundScratch);
+            pollElapsedTicks += Stopwatch.GetTimestamp() - pollStart;
             if (count <= 0)
                 break;
 
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, count);
+            long controlStart = Stopwatch.GetTimestamp();
             _control.ProcessInbound(inbound, nowTicks);
+            controlElapsedTicks += Stopwatch.GetTimestamp() - controlStart;
 
             for (int i = 0; i < count; i++)
             {
@@ -92,13 +103,23 @@ public sealed class ClientMovementSessionHost
                 if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
                     continue;
 
+                long dispatchStart = Stopwatch.GetTimestamp();
                 if (_movement.TryProcessEnvelope(header, payload))
+                {
+                    movementElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
                     continue;
+                }
 
+                dispatchStart = Stopwatch.GetTimestamp();
                 if (_observerState?.TryProcessEnvelope(header, payload) == true)
+                {
+                    observerStateElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
                     continue;
+                }
 
-                _observerEvents?.TryProcessEnvelope(header, payload);
+                dispatchStart = Stopwatch.GetTimestamp();
+                if (_observerEvents?.TryProcessEnvelope(header, payload) == true)
+                    observerEventElapsedTicks += Stopwatch.GetTimestamp() - dispatchStart;
             }
 
             totalCount += count;
@@ -108,6 +129,13 @@ public sealed class ClientMovementSessionHost
         }
 
         _control.FlushOutbound();
+        LastPumpProfile = new ClientPumpProfileSnapshot(
+            totalCount,
+            pollElapsedTicks,
+            controlElapsedTicks,
+            movementElapsedTicks,
+            observerStateElapsedTicks,
+            observerEventElapsedTicks);
         return totalCount;
     }
 

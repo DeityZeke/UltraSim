@@ -254,3 +254,42 @@ Current read:
 
 - the client-side single-pass change materially reduced the largest measured substage
 - the next hot slice is now more clearly dispatch / fanout plus the remaining client consume/apply work
+
+Current finer client breakdown:
+
+- report: `_Benchmarks/results/observer_bulk_ringcad_clientbreakdown_040/network_bot_harness_20260423_024405.json`
+- `64` clients:
+  - `tick_p95 = 4.216 ms`
+  - `dispatch_p95 = 0.783 ms`
+  - `client_pump_p95 = 2.281 ms`
+  - `client_poll_p95 = 0.447 ms`
+  - `client_control_p95 = 0.009 ms`
+  - `client_movement_p95 = 0.020 ms`
+  - `client_observer_state_p95 = 1.422 ms`
+  - `client_observer_event_p95 = 0.871 ms`
+
+Current interpretation:
+
+- inside the client pump, the dominant sub-slices are observer latest-state and observer events
+- transport poll / bundle receive is measurable but secondary
+- owner movement handling is negligible in this broadened observer-heavy profile
+
+Current observer-state store-path tightening result:
+
+- report: `_Benchmarks/results/observer_bulk_ringcad_clientstore_040/network_bot_harness_20260423_024512.json`
+- change:
+  - harness-side observer latest-state storage now uses `CollectionsMarshal.GetValueRefOrAddDefault(...)`
+  - observer event retention remains bounded without front-trimming a list
+- `64` clients:
+  - `tick_p95 = 4.213 ms`
+  - `dispatch_p95 = 0.776 ms`
+  - `client_pump_p95 = 2.077 ms`
+  - `client_poll_p95 = 0.406 ms`
+  - `client_observer_state_p95 = 1.437 ms`
+  - `client_observer_event_p95 = 0.764 ms`
+
+Current read:
+
+- the biggest measurable improvement in the latest run is on the event-side client sub-slice
+- the observer latest-state sub-slice is still the single largest client cost
+- current observer storage is still dictionary-backed and keyed by scoped item keys, so there is still structural headroom left above these local micro-optimizations

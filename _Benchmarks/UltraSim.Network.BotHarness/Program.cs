@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
@@ -157,6 +158,11 @@ internal sealed class MovementRampHarness : IDisposable
         var publishSamplesMs = new List<double>(measuredTicks);
         var dispatchSamplesMs = new List<double>(measuredTicks);
         var clientPumpSamplesMs = new List<double>(measuredTicks);
+        var clientPollSamplesMs = new List<double>(measuredTicks);
+        var clientControlSamplesMs = new List<double>(measuredTicks);
+        var clientMovementSamplesMs = new List<double>(measuredTicks);
+        var clientObserverStateSamplesMs = new List<double>(measuredTicks);
+        var clientObserverEventSamplesMs = new List<double>(measuredTicks);
         long pendingSum = 0;
         int pendingMax = 0;
         var pingSamplesMs = new List<double>(Math.Max(32, _clients.Count * Math.Max(1, measuredTicks / Math.Max(1, _options.PingIntervalTicks))));
@@ -219,6 +225,11 @@ internal sealed class MovementRampHarness : IDisposable
             }
             long clientNowTicks = _clockTicks + 1;
             long clientPumpStart = Stopwatch.GetTimestamp();
+            double clientPollMs = 0d;
+            double clientControlMs = 0d;
+            double clientMovementMs = 0d;
+            double clientObserverStateMs = 0d;
+            double clientObserverEventMs = 0d;
             for (int i = 0; i < _clients.Count; i++)
             {
                 ClientHandle client = _clients[i];
@@ -226,10 +237,21 @@ internal sealed class MovementRampHarness : IDisposable
                     client.TrySendPing((uint)tick);
 
                 client.Host.Pump(clientNowTicks);
+                ClientPumpProfileSnapshot profile = client.Host.LastPumpProfile;
+                clientPollMs += profile.PollElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientControlMs += profile.ControlElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientMovementMs += profile.MovementElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientObserverStateMs += profile.ObserverStateElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientObserverEventMs += profile.ObserverEventElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 client.CollectPongSamples(clientNowTicks, _pongScratch, pingSamplesMs);
             }
             long clientPumpEnd = Stopwatch.GetTimestamp();
             clientPumpSamplesMs.Add((clientPumpEnd - clientPumpStart) * 1000.0 / Stopwatch.Frequency);
+            clientPollSamplesMs.Add(clientPollMs);
+            clientControlSamplesMs.Add(clientControlMs);
+            clientMovementSamplesMs.Add(clientMovementMs);
+            clientObserverStateSamplesMs.Add(clientObserverStateMs);
+            clientObserverEventSamplesMs.Add(clientObserverEventMs);
             long end = Stopwatch.GetTimestamp();
 
             double elapsedMs = (end - start) * 1000.0 / Stopwatch.Frequency;
@@ -250,6 +272,11 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats publishStats = new TickWindowStats(publishSamplesMs);
         TickWindowStats dispatchStats = new TickWindowStats(dispatchSamplesMs);
         TickWindowStats clientPumpStats = new TickWindowStats(clientPumpSamplesMs);
+        TickWindowStats clientPollStats = new TickWindowStats(clientPollSamplesMs);
+        TickWindowStats clientControlStats = new TickWindowStats(clientControlSamplesMs);
+        TickWindowStats clientMovementStats = new TickWindowStats(clientMovementSamplesMs);
+        TickWindowStats clientObserverStateStats = new TickWindowStats(clientObserverStateSamplesMs);
+        TickWindowStats clientObserverEventStats = new TickWindowStats(clientObserverEventSamplesMs);
         TickWindowStats pingStats = new TickWindowStats(pingSamplesMs);
         int readyClients = 0;
         var perClientPing = new JsonArray();
@@ -289,6 +316,16 @@ internal sealed class MovementRampHarness : IDisposable
             DispatchP95Ms: dispatchStats.P95Ms,
             ClientPumpAverageMs: clientPumpStats.AverageMs,
             ClientPumpP95Ms: clientPumpStats.P95Ms,
+            ClientPollAverageMs: clientPollStats.AverageMs,
+            ClientPollP95Ms: clientPollStats.P95Ms,
+            ClientControlAverageMs: clientControlStats.AverageMs,
+            ClientControlP95Ms: clientControlStats.P95Ms,
+            ClientMovementAverageMs: clientMovementStats.AverageMs,
+            ClientMovementP95Ms: clientMovementStats.P95Ms,
+            ClientObserverStateAverageMs: clientObserverStateStats.AverageMs,
+            ClientObserverStateP95Ms: clientObserverStateStats.P95Ms,
+            ClientObserverEventAverageMs: clientObserverEventStats.AverageMs,
+            ClientObserverEventP95Ms: clientObserverEventStats.P95Ms,
             PingAverageMs: pingStats.AverageMs,
             PingP95Ms: pingStats.P95Ms,
             PingMaxMs: pingStats.MaxMs,
@@ -686,7 +723,7 @@ internal sealed class MovementRampHarness : IDisposable
         private readonly Dictionary<ulong, BenchMovementBody> _observerStates = [];
         private readonly Dictionary<ulong, BenchMovementVisualBody> _observerVisualStates = [];
         private readonly Dictionary<ulong, BenchMovementBulkBody> _observerBulkStates = [];
-        private readonly List<BenchMovementEventBody> _observerEvents = [];
+        private readonly Queue<BenchMovementEventBody> _observerEvents = new(256);
         private ushort _nextPingSequence = 1;
         private ClientMovementState _predictedOwnerState;
         private uint _lastAuthoritativeServerTick;
@@ -807,24 +844,28 @@ internal sealed class MovementRampHarness : IDisposable
         {
             if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xC31D_0000_0000_0000UL)
             {
-                _observerBulkStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBulkBody>(payload);
+                ref BenchMovementBulkBody bulk = ref CollectionsMarshal.GetValueRefOrAddDefault(_observerBulkStates, itemKey, out _);
+                bulk = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBulkBody>(payload);
                 return;
             }
 
             if ((itemKey & 0xFFFF_0000_0000_0000UL) == 0xB24F_0000_0000_0000UL)
             {
-                _observerVisualStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
+                ref BenchMovementVisualBody visual = ref CollectionsMarshal.GetValueRefOrAddDefault(_observerVisualStates, itemKey, out _);
+                visual = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementVisualBody>(payload);
                 return;
             }
 
-            _observerStates[itemKey] = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
+            ref BenchMovementBody state = ref CollectionsMarshal.GetValueRefOrAddDefault(_observerStates, itemKey, out _);
+            state = ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementBody>(payload);
         }
 
         public void ApplyObserverEvent(ImmutablePayloadBuffer payload)
         {
-            _observerEvents.Add(ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementEventBody>(payload));
-            if (_observerEvents.Count > 256)
-                _observerEvents.RemoveRange(0, _observerEvents.Count - 256);
+            if (_observerEvents.Count == 256)
+                _observerEvents.Dequeue();
+
+            _observerEvents.Enqueue(ServerRuntimeNetworkPayloadCodec.Decode<BenchMovementEventBody>(payload));
         }
 
         private static float SampleSignedJitter(int clientIndex, uint step, int axisSalt, float magnitude)
@@ -1097,6 +1138,16 @@ internal readonly record struct StageResult(
     double DispatchP95Ms,
     double ClientPumpAverageMs,
     double ClientPumpP95Ms,
+    double ClientPollAverageMs,
+    double ClientPollP95Ms,
+    double ClientControlAverageMs,
+    double ClientControlP95Ms,
+    double ClientMovementAverageMs,
+    double ClientMovementP95Ms,
+    double ClientObserverStateAverageMs,
+    double ClientObserverStateP95Ms,
+    double ClientObserverEventAverageMs,
+    double ClientObserverEventP95Ms,
     double PingAverageMs,
     double PingP95Ms,
     double PingMaxMs,
@@ -1148,6 +1199,16 @@ internal readonly record struct StageResult(
             ["dispatch_p95_ms"] = Math.Round(DispatchP95Ms, 3),
             ["client_pump_avg_ms"] = Math.Round(ClientPumpAverageMs, 3),
             ["client_pump_p95_ms"] = Math.Round(ClientPumpP95Ms, 3),
+            ["client_poll_avg_ms"] = Math.Round(ClientPollAverageMs, 3),
+            ["client_poll_p95_ms"] = Math.Round(ClientPollP95Ms, 3),
+            ["client_control_avg_ms"] = Math.Round(ClientControlAverageMs, 3),
+            ["client_control_p95_ms"] = Math.Round(ClientControlP95Ms, 3),
+            ["client_movement_avg_ms"] = Math.Round(ClientMovementAverageMs, 3),
+            ["client_movement_p95_ms"] = Math.Round(ClientMovementP95Ms, 3),
+            ["client_observer_state_avg_ms"] = Math.Round(ClientObserverStateAverageMs, 3),
+            ["client_observer_state_p95_ms"] = Math.Round(ClientObserverStateP95Ms, 3),
+            ["client_observer_event_avg_ms"] = Math.Round(ClientObserverEventAverageMs, 3),
+            ["client_observer_event_p95_ms"] = Math.Round(ClientObserverEventP95Ms, 3),
             ["ping_avg_ms"] = Math.Round(PingAverageMs, 3),
             ["ping_p95_ms"] = Math.Round(PingP95Ms, 3),
             ["ping_max_ms"] = Math.Round(PingMaxMs, 3),
