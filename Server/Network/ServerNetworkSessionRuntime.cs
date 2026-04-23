@@ -25,6 +25,7 @@ public sealed class ServerNetworkSessionRuntime
     private readonly ConnectionLatestStateDeltaExecutionBridge _deltaExecution;
     private readonly Dictionary<ConnectionId, ConnectionScheduleState> _stateByConnection = new();
     private readonly ConnectionId[] _connectionScratch;
+    private readonly SubscriptionKey[] _subscriptionScratch;
     private readonly LatestStateUpdate[] _snapshotScratch;
     private readonly LatestStateUpdate[] _filteredSnapshotScratch;
     private readonly LatestStateUpdate[] _deltaScratch;
@@ -64,6 +65,7 @@ public sealed class ServerNetworkSessionRuntime
             new ConnectionLatestStateDeltaPlanner(_latestSentTracker),
             new StateDeltaSnapshotBuilder(_latestSentTracker));
         _connectionScratch = new ConnectionId[options.MaxConnections];
+        _subscriptionScratch = new SubscriptionKey[options.MaxSnapshotItems];
         _snapshotScratch = new LatestStateUpdate[options.MaxSnapshotItems];
         _filteredSnapshotScratch = new LatestStateUpdate[options.MaxSnapshotItems];
         _deltaScratch = new LatestStateUpdate[options.MaxSnapshotItems];
@@ -153,12 +155,14 @@ public sealed class ServerNetworkSessionRuntime
         for (int connectionIndex = 0; connectionIndex < connectionCount; connectionIndex++)
         {
             ConnectionId connectionId = _connectionScratch[connectionIndex];
-            if (!_subscriptions.HasSubscriptions(connectionId))
+            int subscriptionCount = _subscriptions.CopySubscriptions(connectionId, _subscriptionScratch);
+            if (subscriptionCount == 0)
                 continue;
+            ReadOnlySpan<SubscriptionKey> subscriptions = _subscriptionScratch.AsSpan(0, subscriptionCount);
 
             if (!_baselineAcks.TryGetLastAcknowledged(connectionId, out StateBaselineDescriptor baselineDescriptor))
             {
-                baselineDatagrams += SendFilteredBaseline(connectionId, out _);
+                baselineDatagrams += SendFilteredBaseline(subscriptions, connectionId, out _);
                 continue;
             }
 
@@ -170,7 +174,7 @@ public sealed class ServerNetworkSessionRuntime
 
             if (retransmitPlan.RecoveryRequired)
             {
-                baselineDatagrams += SendFilteredBaseline(connectionId, out _);
+                baselineDatagrams += SendFilteredBaseline(subscriptions, connectionId, out _);
                 continue;
             }
 
@@ -192,7 +196,7 @@ public sealed class ServerNetworkSessionRuntime
                 _scheduledScratch);
             _stateByConnection[connectionId] = schedule.NextState;
 
-            int orderedCount = FilterOrderedEventsForConnection(connectionId, _scheduledScratch.AsSpan(0, schedule.Count), _orderedEventScratch);
+            int orderedCount = FilterOrderedEventsForConnection(subscriptions, _scheduledScratch.AsSpan(0, schedule.Count), _orderedEventScratch);
             if (orderedCount > 0)
             {
                 OutboundAssemblyResult orderedAssembly = _assembler.Assemble(
@@ -209,7 +213,7 @@ public sealed class ServerNetworkSessionRuntime
                 }
             }
 
-            int filteredSnapshotCount = CopyFilteredLatestSnapshot(connectionId, _filteredSnapshotScratch);
+            int filteredSnapshotCount = CopyFilteredLatestSnapshot(subscriptions, _filteredSnapshotScratch);
             if (filteredSnapshotCount > 0)
             {
                 ConnectionLatestStateDeltaExecutionResult delta = _deltaExecution.Execute(
@@ -235,9 +239,9 @@ public sealed class ServerNetworkSessionRuntime
             totalDatagrams);
     }
 
-    private int SendFilteredBaseline(ConnectionId connectionId, out StateBaselineDescriptor descriptor)
+    private int SendFilteredBaseline(ReadOnlySpan<SubscriptionKey> subscriptions, ConnectionId connectionId, out StateBaselineDescriptor descriptor)
     {
-        int filteredSnapshotCount = CopyFilteredLatestSnapshot(connectionId, _filteredSnapshotScratch);
+        int filteredSnapshotCount = CopyFilteredLatestSnapshot(subscriptions, _filteredSnapshotScratch);
         LatestStateSnapshot latestSnapshot = _latestState.GetSnapshot();
         OrderedEventSnapshot orderedSnapshot = _orderedEvents.GetSnapshot();
         ulong highestFilteredSequence = 0;
@@ -273,14 +277,14 @@ public sealed class ServerNetworkSessionRuntime
         return count;
     }
 
-    private int CopyFilteredLatestSnapshot(ConnectionId connectionId, Span<LatestStateUpdate> destination)
+    private int CopyFilteredLatestSnapshot(ReadOnlySpan<SubscriptionKey> subscriptions, Span<LatestStateUpdate> destination)
     {
         int snapshotCount = _latestState.CopySnapshot(_snapshotScratch);
         int count = 0;
         for (int i = 0; i < snapshotCount && count < destination.Length; i++)
         {
             LatestStateUpdate update = _snapshotScratch[i];
-            if (!_subscriptions.IsSubscribed(connectionId, update.ScopeKey))
+            if (!Contains(subscriptions, update.ScopeKey))
                 continue;
 
             destination[count++] = update;
@@ -290,7 +294,7 @@ public sealed class ServerNetworkSessionRuntime
     }
 
     private int FilterOrderedEventsForConnection(
-        ConnectionId connectionId,
+        ReadOnlySpan<SubscriptionKey> subscriptions,
         ReadOnlySpan<ScheduledWorkItem> source,
         Span<ScheduledWorkItem> destination)
     {
@@ -300,7 +304,7 @@ public sealed class ServerNetworkSessionRuntime
             ScheduledWorkItem item = source[i];
             if (item.Kind != ScheduledWorkKind.OrderedEvent)
                 continue;
-            if (!_subscriptions.IsSubscribed(connectionId, item.ScopeKey))
+            if (!Contains(subscriptions, item.ScopeKey))
                 continue;
 
             destination[count++] = item;
@@ -321,5 +325,16 @@ public sealed class ServerNetworkSessionRuntime
             new PacketClassBudget(MaxItems: 0, MaxPayloadBytes: 0),
             budget.ReliableEvent,
             budget.Bulk);
+    }
+
+    private static bool Contains(ReadOnlySpan<SubscriptionKey> keys, SubscriptionKey key)
+    {
+        for (int i = 0; i < keys.Length; i++)
+        {
+            if (keys[i] == key)
+                return true;
+        }
+
+        return false;
     }
 }

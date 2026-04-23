@@ -108,6 +108,22 @@ public sealed class ConnectionSubscriptionRegistry
         }
     }
 
+    public int CopySubscriptions(ConnectionId connectionId, Span<SubscriptionKey> destination)
+    {
+        if (!connectionId.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(connectionId));
+
+        lock (_sync)
+        {
+            if (!_keysByConnection.TryGetValue(connectionId, out SubscriptionList? keys) || destination.Length == 0)
+                return 0;
+
+            int count = Math.Min(keys.Ordered.Count, destination.Length);
+            CollectionsMarshal.AsSpan(keys.Ordered)[..count].CopyTo(destination);
+            return count;
+        }
+    }
+
     public int WriteDatagramsForSubscribers(
         SubscriptionKey key,
         NetworkPlane plane,
