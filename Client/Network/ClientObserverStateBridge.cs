@@ -86,6 +86,19 @@ public sealed class ClientObserverStateBridge
             return true;
         }
 
+        if (header.PacketId == RealtimeStateBatchPacket.PacketId)
+        {
+            var reader = new BitReader(payload);
+            RealtimeStateBatchPacket packet = RealtimeStateBatchPacket.Deserialize(ref reader);
+            for (int i = 0; i < packet.Items.Length; i++)
+            {
+                RealtimeStateBatchItem item = packet.Items[i];
+                OnRealtimeStateFrame(new RealtimeStateFramePacket(item.Sequence, item.ItemKey, item.Payload));
+            }
+
+            return true;
+        }
+
         if (header.PacketId == StateBaselineBeginPacket.PacketId)
         {
             var reader = new BitReader(payload);

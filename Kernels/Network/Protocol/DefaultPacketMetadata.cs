@@ -13,6 +13,7 @@ public static class DefaultPacketMetadata
         registry.Register<PingProbePacket>();
         registry.Register<PongProbePacket>();
         registry.Register<RealtimeStateFramePacket>();
+        registry.Register<RealtimeStateBatchPacket>();
         registry.Register<ReliableEventFramePacket>();
         registry.Register<ReliableEventAckPacket>();
         registry.Register<StateBaselineBeginPacket>();

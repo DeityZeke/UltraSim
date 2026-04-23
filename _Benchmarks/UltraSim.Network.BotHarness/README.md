@@ -153,6 +153,12 @@ The widened harness can now also include a second observer-visible latest-state 
 
 This keeps the “broaden the live path” work honest: observer cost no longer comes from only one latest-state family.
 
+The widened harness now also enables a first batched realtime latest-state envelope seam:
+
+- contiguous realtime latest-state scheduled-work items in the same scope can be emitted as one `RealtimeStateBatchPacket`
+- this is currently a fanout-side aggregation optimization, not a new general delta/baseline path
+- current intent is to reduce the hot per-item realtime envelope encode cost in the widened observer path without changing higher-level runtime semantics
+
 The widened harness can now also include a first `Bulk` observer family:
 
 - enable with `--observer-bulk-state`

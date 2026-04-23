@@ -2,15 +2,20 @@ namespace UltraSim.Network;
 
 public sealed class SubscriptionFanoutDispatcher
 {
+    private const int MaxRealtimeBatchItems = 8;
+    private const int MaxRealtimeBatchPayloadBytes = 1200;
     private readonly ConnectionSubscriptionRegistry _subscriptions;
     private readonly OutboundDatagramAssembler _assembler;
+    private readonly bool _enableLatestStateBatching;
 
     public SubscriptionFanoutDispatcher(
         ConnectionSubscriptionRegistry subscriptions,
-        OutboundDatagramAssembler assembler)
+        OutboundDatagramAssembler assembler,
+        bool enableLatestStateBatching = false)
     {
         _subscriptions = subscriptions ?? throw new ArgumentNullException(nameof(subscriptions));
         _assembler = assembler ?? throw new ArgumentNullException(nameof(assembler));
+        _enableLatestStateBatching = enableLatestStateBatching;
     }
 
     public SubscriptionFanoutDispatchResult Dispatch(
@@ -169,6 +174,35 @@ public sealed class SubscriptionFanoutDispatcher
             if (!scopeKey.IsValid)
                 throw new ArgumentOutOfRangeException(nameof(items));
 
+            if (_enableLatestStateBatching &&
+                item.Kind == ScheduledWorkKind.LatestState &&
+                item.PacketClass == PacketClass.Realtime)
+            {
+                int batchCount = CountRealtimeBatch(items[i..]);
+                if (batchCount > 1)
+                {
+                    ImmutablePayloadBuffer batchEnvelope = PacketCodec.EncodeRealtimeStateBatchEnvelope(
+                        items.Slice(i, batchCount),
+                        PacketHeaderFlags.HighPriorityHint);
+                    int writtenBatch = _subscriptions.WriteDatagramsForSubscribers(
+                        scopeKey,
+                        RealtimeStateBatchPacket.Plane,
+                        PacketClass.Realtime,
+                        RealtimeStateBatchPacket.Channel,
+                        batchEnvelope,
+                        destination[datagramCount..]);
+                    if (writtenBatch != 0)
+                    {
+                        frameCount++;
+                        subscriberDeliveries += writtenBatch;
+                        datagramCount += writtenBatch;
+                    }
+
+                    i += batchCount - 1;
+                    continue;
+                }
+            }
+
             NetworkPlane plane;
             PacketClass packetClass = item.PacketClass;
             ChannelType channel;
@@ -217,5 +251,31 @@ public sealed class SubscriptionFanoutDispatcher
             DatagramCount: datagramCount,
             CompressedCount: compressedCount,
             EncryptedCount: encryptedCount);
+    }
+
+    private static int CountRealtimeBatch(ReadOnlySpan<ScheduledWorkItem> items)
+    {
+        ref readonly ScheduledWorkItem first = ref items[0];
+        SubscriptionKey scopeKey = first.ScopeKey;
+        int count = 0;
+        int payloadBytes = sizeof(ushort);
+
+        for (int i = 0; i < items.Length && count < MaxRealtimeBatchItems; i++)
+        {
+            ref readonly ScheduledWorkItem item = ref items[i];
+            if (item.Kind != ScheduledWorkKind.LatestState ||
+                item.PacketClass != PacketClass.Realtime ||
+                item.ScopeKey != scopeKey)
+                break;
+
+            int nextPayloadBytes = payloadBytes + sizeof(ulong) + sizeof(ulong) + sizeof(ushort) + item.Payload.Length;
+            if (count > 0 && nextPayloadBytes > MaxRealtimeBatchPayloadBytes)
+                break;
+
+            payloadBytes = nextPayloadBytes;
+            count++;
+        }
+
+        return count;
     }
 }

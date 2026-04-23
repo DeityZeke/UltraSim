@@ -506,6 +506,10 @@ Current status:
     - retransmit execution now emits normal ordered-event state-plane datagrams
     - latest-state incremental advancement is now explicitly heading toward send-based per-connection tracking on top of `LatestStateStream`, not a new client-driven latest-state ack protocol
     - explicit incremental latest-state delta execution now exists with a dedicated delta packet instead of overloading baseline frames
+    - the shared scheduled-work latest-state fanout path now has a first opt-in batching seam:
+      - `RealtimeStateBatchPacket`
+      - `PacketCodec.EncodeRealtimeStateBatchEnvelope(...)`
+      - `SubscriptionFanoutDispatcher(enableLatestStateBatching: true)`
     - the first generic server-side runtime layer now composes:
       - filtered baseline bootstrap
       - baseline ack processing
@@ -618,6 +622,7 @@ The next implementation target after this bridge slice should be:
   - chunk-AOI latest-state now preserves stable item identity across scopes inside `LatestStateStream`
   - the widened harness now uses structured item keys for movement, visual, and bulk observer families
   - widened-harness observer latest-state storage is now slot-indexed by structured item key instead of dictionary-backed by scoped item key
+  - the widened harness now also enables the first batched realtime latest-state envelope path for contiguous scheduled-work fanout items
 
 Current recommendation:
 

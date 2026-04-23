@@ -4,10 +4,16 @@ public sealed class ScheduledWorkFanoutBridge
 {
     private readonly SubscriptionFanoutDispatcher _dispatcher;
 
-    public ScheduledWorkFanoutBridge(ConnectionSubscriptionRegistry subscriptions, OutboundDatagramAssembler? assembler = null)
+    public ScheduledWorkFanoutBridge(
+        ConnectionSubscriptionRegistry subscriptions,
+        OutboundDatagramAssembler? assembler = null,
+        bool enableLatestStateBatching = false)
     {
         ArgumentNullException.ThrowIfNull(subscriptions);
-        _dispatcher = new SubscriptionFanoutDispatcher(subscriptions, assembler ?? new OutboundDatagramAssembler());
+        _dispatcher = new SubscriptionFanoutDispatcher(
+            subscriptions,
+            assembler ?? new OutboundDatagramAssembler(),
+            enableLatestStateBatching);
     }
 
     public ScheduledWorkFanoutResult Dispatch(

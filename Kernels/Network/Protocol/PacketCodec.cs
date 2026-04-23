@@ -153,6 +153,55 @@ public static class PacketCodec
         }
     }
 
+    public static ImmutablePayloadBuffer EncodeRealtimeStateBatchEnvelope(
+        ReadOnlySpan<ScheduledWorkItem> items,
+        PacketHeaderFlags flags,
+        int initialCapacity = DefaultInitialCapacity)
+    {
+        if (items.Length == 0)
+            throw new ArgumentOutOfRangeException(nameof(items));
+
+        int payloadCapacity = sizeof(ushort);
+        for (int i = 0; i < items.Length; i++)
+        {
+            ref readonly ScheduledWorkItem item = ref items[i];
+            payloadCapacity += sizeof(ulong) + sizeof(ulong) + sizeof(ushort) + item.Payload.Length;
+        }
+
+        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
+        while (true)
+        {
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
+            try
+            {
+                var payloadWriter = new BitWriter(buffer.AsSpan(PacketEnvelopeHeader.SizeInBytes));
+                payloadWriter.WriteUInt16(checked((ushort)items.Length));
+                for (int i = 0; i < items.Length; i++)
+                {
+                    ref readonly ScheduledWorkItem item = ref items[i];
+                    payloadWriter.WriteUInt64(item.Sequence);
+                    payloadWriter.WriteUInt64(item.ItemKey);
+                    payloadWriter.WriteUInt16(checked((ushort)item.Payload.Length));
+                    payloadWriter.WriteBytes(item.Payload.Span);
+                }
+
+                var headerWriter = new BitWriter(buffer);
+                new PacketEnvelopeHeader(
+                    RealtimeStateBatchPacket.PacketId,
+                    flags,
+                    checked((ushort)payloadWriter.Position))
+                    .Serialize(ref headerWriter);
+
+                return ImmutablePayloadBuffer.FromPooled(buffer, PacketEnvelopeHeader.SizeInBytes + payloadWriter.Position);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("BitWriter overflow:", StringComparison.Ordinal))
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+                capacity *= 2;
+            }
+        }
+    }
+
     public static bool TryDecodeEnvelope(
         ReadOnlySpan<byte> source,
         out PacketEnvelopeHeader header,

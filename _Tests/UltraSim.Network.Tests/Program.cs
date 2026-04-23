@@ -18,6 +18,7 @@ internal static class TestRunner
         Run(nameof(IOutboundTransform_ExposesExplicitTransformHook), IOutboundTransform_ExposesExplicitTransformHook);
         Run(nameof(PacketEnvelopeHeader_RoundTripsExpectedFields), PacketEnvelopeHeader_RoundTripsExpectedFields);
         Run(nameof(PacketCodec_EncodesAndDecodesHandshakeHello), PacketCodec_EncodesAndDecodesHandshakeHello);
+        Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
         Run(nameof(PacketMetadataRegistry_ResolvesRegisteredPacketMetadata), PacketMetadataRegistry_ResolvesRegisteredPacketMetadata);
         Run(nameof(HandshakeGate_AcceptsAndRejectsExpectedReasons), HandshakeGate_AcceptsAndRejectsExpectedReasons);
@@ -64,6 +65,7 @@ internal static class TestRunner
         Run(nameof(OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers), OutboundDatagramAssembler_Fanout_AssemblesSharedFrameForSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers), SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers);
+        Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems), SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems);
         Run(nameof(ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass), ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass);
         Run(nameof(ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork), ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork);
         Run(nameof(ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap), ChunkAoiPolicy_AssignsUniqueNearestRingsByWorldSpaceOverlap);
@@ -353,6 +355,31 @@ internal static class TestRunner
         Assert.Equal((ulong)11, decoded.SchemaHash);
         Assert.Equal((ulong)13, decoded.ContentHash);
         Assert.Equal(FeatureFlags.Compression | FeatureFlags.SharedPayloadFanout, decoded.Features);
+    }
+
+    private static void RealtimeStateBatchPacket_RoundTripsExpectedItems()
+    {
+        RealtimeStateBatchItem[] items =
+        [
+            new(10, 1001, ImmutablePayloadBuffer.CopyFrom([1, 2])),
+            new(11, 1002, ImmutablePayloadBuffer.CopyFrom([3, 4, 5]))
+        ];
+
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new RealtimeStateBatchPacket(items));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(RealtimeStateBatchPacket.PacketId, header.PacketId);
+
+        var reader = new BitReader(payload);
+        RealtimeStateBatchPacket decoded = RealtimeStateBatchPacket.Deserialize(ref reader);
+
+        Assert.Equal(2, decoded.Items.Length);
+        Assert.Equal((ulong)10, decoded.Items[0].Sequence);
+        Assert.Equal((ulong)1001, decoded.Items[0].ItemKey);
+        Assert.True(decoded.Items[0].Payload.Span.SequenceEqual(new byte[] { 1, 2 }));
+        Assert.Equal((ulong)11, decoded.Items[1].Sequence);
+        Assert.Equal((ulong)1002, decoded.Items[1].ItemKey);
+        Assert.True(decoded.Items[1].Payload.Span.SequenceEqual(new byte[] { 3, 4, 5 }));
     }
 
     private static void PacketRegistry_DispatchesTypedPacketAndMetadata()
@@ -1779,6 +1806,59 @@ internal static class TestRunner
 
         Assert.Equal(2, latestCount);
         Assert.Equal(2, eventCount);
+    }
+
+    private static void SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey scopeKey = new(652);
+        registry.Subscribe(new ConnectionId(1), scopeKey);
+        registry.Subscribe(new ConnectionId(2), scopeKey);
+
+        ScheduledWorkItem[] items =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 81,
+                ItemKey: 810,
+                ScopeKey: scopeKey,
+                Payload: ImmutablePayloadBuffer.CopyFrom([8])),
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 82,
+                ItemKey: 811,
+                ScopeKey: scopeKey,
+                Payload: ImmutablePayloadBuffer.CopyFrom([9, 10])),
+        ];
+        var dispatcher = new SubscriptionFanoutDispatcher(
+            registry,
+            new OutboundDatagramAssembler(),
+            enableLatestStateBatching: true);
+        var subscriberScratch = new ConnectionId[8];
+        var output = new OutboundDatagram[8];
+
+        SubscriptionFanoutDispatchResult result = dispatcher.DispatchScheduledWork(items, subscriberScratch, output);
+
+        Assert.Equal(1, result.FrameCount);
+        Assert.Equal(2, result.SubscriberDeliveries);
+        Assert.Equal(2, result.DatagramCount);
+
+        for (int i = 0; i < result.DatagramCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(output[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            Assert.Equal(RealtimeStateBatchPacket.PacketId, header.PacketId);
+            var reader = new BitReader(payload);
+            RealtimeStateBatchPacket batch = RealtimeStateBatchPacket.Deserialize(ref reader);
+            Assert.Equal(2, batch.Items.Length);
+            Assert.Equal((ulong)81, batch.Items[0].Sequence);
+            Assert.Equal((ulong)810, batch.Items[0].ItemKey);
+            Assert.True(batch.Items[0].Payload.Span.SequenceEqual(new byte[] { 8 }));
+            Assert.Equal((ulong)82, batch.Items[1].Sequence);
+            Assert.Equal((ulong)811, batch.Items[1].ItemKey);
+            Assert.True(batch.Items[1].Payload.Span.SequenceEqual(new byte[] { 9, 10 }));
+        }
     }
 
     private static void ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass()

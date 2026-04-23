@@ -13,6 +13,7 @@ internal static class TestRunner
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
         Run(nameof(ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly), ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly);
+        Run(nameof(ClientObserverStateBridge_AppliesRealtimeStateBatchFrames), ClientObserverStateBridge_AppliesRealtimeStateBatchFrames);
         Run(nameof(ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState), ClientObserverStateBridge_AppliesFullBaselineAndResetsLocalState);
         Run(nameof(ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline), ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline);
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
@@ -155,6 +156,47 @@ internal static class TestRunner
         Assert.True(lastPayload is not null);
         Assert.Equal((byte)5, lastPayload![0]);
         Assert.Equal(1, bridge.LatestItemCount);
+    }
+
+    private static void ClientObserverStateBridge_AppliesRealtimeStateBatchFrames()
+    {
+        int applyCount = 0;
+        ulong lastItemKey = 0;
+        ulong lastSequence = 0;
+        byte[]? lastPayload = null;
+
+        var bridge = new ClientObserverStateBridge(
+            new ConnectionId(7),
+            (itemKey, sequence, payload) =>
+            {
+                applyCount++;
+                lastItemKey = itemKey;
+                lastSequence = sequence;
+                lastPayload = payload.Span.ToArray();
+            });
+
+        RealtimeStateBatchItem[] items =
+        [
+            new(10, 1001, ImmutablePayloadBuffer.CopyFrom([1, 2])),
+            new(11, 1002, ImmutablePayloadBuffer.CopyFrom([3, 4]))
+        ];
+        ImmutablePayloadBuffer batch = PacketCodec.Encode(new RealtimeStateBatchPacket(items));
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(7), NetworkPlane.State, PacketClass.Realtime, ChannelType.UnreliableSequenced, batch.Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(1, processed);
+        Assert.Equal(2, bridge.LastReceivedFrameCount);
+        Assert.Equal(2, bridge.LastAppliedFrameCount);
+        Assert.Equal(2, applyCount);
+        Assert.Equal((ulong)1002, lastItemKey);
+        Assert.Equal((ulong)11, lastSequence);
+        Assert.True(lastPayload is not null);
+        Assert.Equal((byte)3, lastPayload![0]);
+        Assert.Equal(2, bridge.LatestItemCount);
     }
 
     private static void ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly()

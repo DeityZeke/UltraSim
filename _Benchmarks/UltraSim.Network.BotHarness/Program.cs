@@ -509,7 +509,7 @@ internal sealed class MovementRampHarness : IDisposable
         var publisher = new ServerEcsWorldNetworkPublisher(_world);
         var subscriptions = new ConnectionSubscriptionRegistry();
         var scheduler = new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream);
-        var fanout = new ScheduledWorkFanoutBridge(subscriptions);
+        var fanout = new ScheduledWorkFanoutBridge(subscriptions, enableLatestStateBatching: true);
         return new StageReplicationContext(
             new ServerEcsChunkAoiScopeClassifier(policy),
             new ChunkAoiSubscriptionMaintainer(policy),

@@ -145,6 +145,10 @@ What now exists above the kernel:
   - explicit choice between bounded retransmit and full-baseline recovery
   - the first send-based per-connection latest-state coherence seam for future incremental baseline/delta advancement
   - explicit incremental latest-state delta frames now exist and the client can apply them after a completed baseline
+  - an opt-in batched realtime latest-state envelope now exists for scheduled-work fanout:
+    - `RealtimeStateBatchPacket`
+    - `PacketCodec.EncodeRealtimeStateBatchEnvelope(...)`
+    - batching is currently used only on the no-transform scheduled-work fanout path where higher layers opt into it
 
 ## Design Position
 
