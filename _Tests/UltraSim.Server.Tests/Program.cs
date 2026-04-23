@@ -69,6 +69,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_TracksReliableEventAcksFromClient), ServerMovementSessionHost_TracksReliableEventAcksFromClient);
         Run(nameof(ServerMovementSessionHost_TracksStateBaselineAcksFromClient), ServerMovementSessionHost_TracksStateBaselineAcksFromClient);
         Run(nameof(ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor), ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor);
+        Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
         Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
 
         Console.WriteLine("All Server contract tests passed.");
@@ -2141,6 +2142,105 @@ internal static class TestRunner
         Assert.Equal(1, host.Pump(nowTicks: 1000, deltaSeconds: 0.016f, serverTick: 1));
         Assert.True(host.TryGetLastReliableEventAck(new ConnectionId(1), out ulong acknowledgedSequence));
         Assert.Equal((ulong)55, acknowledgedSequence);
+    }
+
+    private static void ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        ArchetypeSignature signature = new([movementId]);
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            body = body with
+            {
+                VelocityX = input.MoveX / 100f,
+                VelocityY = input.MoveY / 100f,
+                PositionX = body.PositionX + (input.MoveX / 100f) * deltaSeconds,
+                PositionY = body.PositionY + (input.MoveY / 100f) * deltaSeconds,
+            };
+            Assert.True(movementWorld.SetComponent(movementEntity, body));
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            packet = new MovementStatePacket(
+                networkEntityId,
+                serverTick,
+                lastProcessedInputSequence,
+                body.PositionX,
+                body.PositionY,
+                body.VelocityX,
+                body.VelocityY);
+            return true;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var host = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession);
+        host.SessionRuntime.BindConnection(new ConnectionId(1));
+        Assert.Equal(1, host.SessionRuntime.ConnectionCount);
+
+        host.Subscriptions.Subscribe(new ConnectionId(1), ServerEcsNetworkScopes.OperatorWorld);
+        ServerEcsWorldPublishResult published = host.WorldPublisher.PublishRuntimeState();
+        Assert.Equal(1, published.WorldCount);
+
+        Assert.True(host.Subscriptions.HasSubscriptions(new ConnectionId(1)));
+
+        host.Pump(400, 0.016f, 50);
+        var inbound = new InboundDatagram[8];
+        int inboundCount = pair.Client.PollInbound(inbound);
+        Assert.Equal(3, inboundCount);
+
+        StateBaselineDescriptor descriptor = default;
+        int baselineFrames = 0;
+        for (int i = 0; i < inboundCount; i++)
+        {
+            Assert.True(PacketCodec.TryDecodeEnvelope(inbound[i].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+            if (header.PacketId == StateBaselineBeginPacket.PacketId)
+            {
+                var reader = new UltraSim.Network.BitReader(payload);
+                StateBaselineBeginPacket begin = StateBaselineBeginPacket.Deserialize(ref reader);
+                descriptor = begin.Descriptor;
+            }
+            else if (header.PacketId == StateBaselineFramePacket.PacketId)
+            {
+                baselineFrames++;
+            }
+        }
+
+        Assert.True(descriptor.BaselineId != 0);
+        Assert.Equal(1, baselineFrames);
+
+        pair.Client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            StateBaselineAckPacket.Plane,
+            StateBaselineAckPacket.PacketClass,
+            StateBaselineAckPacket.Channel,
+            PacketCodec.Encode(new StateBaselineAckPacket(descriptor))));
+        pair.Client.FlushOutbound();
+
+        host.Pump(402, 0.016f, 51);
+        Assert.True(host.TryGetLastStateBaselineAck(new ConnectionId(1), out StateBaselineDescriptor acknowledged));
+        Assert.Equal(descriptor, acknowledged);
+        Assert.True(descriptor.BaselineId != 0);
     }
 
     private static void ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates()

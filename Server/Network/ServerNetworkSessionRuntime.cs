@@ -139,7 +139,7 @@ public sealed class ServerNetworkSessionRuntime
         return processed;
     }
 
-    public ServerNetworkSessionRuntimeTickResult DispatchTick(long nowTick, ConnectionSendBudget budget)
+    public ServerNetworkSessionRuntimeTickResult DispatchTick(long nowTick, ConnectionSendBudget budget, bool flushOutbound = true)
     {
         int connectionCount = CopyConnections(_connectionScratch);
         int baselineDatagrams = 0;
@@ -150,6 +150,9 @@ public sealed class ServerNetworkSessionRuntime
         for (int connectionIndex = 0; connectionIndex < connectionCount; connectionIndex++)
         {
             ConnectionId connectionId = _connectionScratch[connectionIndex];
+            if (!_subscriptions.HasSubscriptions(connectionId))
+                continue;
+
             if (!_baselineAcks.TryGetLastAcknowledged(connectionId, out StateBaselineDescriptor baselineDescriptor))
             {
                 baselineDatagrams += SendFilteredBaseline(connectionId, out _);
@@ -216,7 +219,8 @@ public sealed class ServerNetworkSessionRuntime
             }
         }
 
-        _transport.FlushOutbound();
+        if (flushOutbound)
+            _transport.FlushOutbound();
         int totalDatagrams = baselineDatagrams + retransmitDatagrams + orderedEventDatagrams + deltaDatagrams;
         return new ServerNetworkSessionRuntimeTickResult(
             connectionCount,

@@ -68,12 +68,19 @@ Current network-runtime composition status:
 - movement still has its own narrow `ServerMovementSessionHost`
 - the first generic stream/runtime composition layer now also exists in `Server/Network`:
   - `ServerNetworkSessionRuntime`
+- `ServerMovementSessionHost` now owns:
+  - `ConnectionSubscriptionRegistry`
+  - `ServerEcsWorldNetworkPublisher`
+  - `ServerNetworkSessionRuntime`
 - that runtime currently composes:
   - filtered baseline bootstrap
   - baseline ack processing
   - bounded retransmit execution
   - ordered-event delivery
   - latest-state delta delivery
+- gameplay/AOI policy still stays outside the runtime:
+  - the host (or a higher gameplay layer) decides which subscriptions exist
+  - the runtime only consumes that subscription state
 - it is not yet the primary live host path for movement/control traffic
 
 See [SERVER_WRAPPER_IMPLEMENTATION_PLAN.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md) for the concrete implementation plan and [AGENTS.md](/d:/MEGA/Godot%20Projects/UltraSim/Server/AGENTS.md) for subsystem-specific engineering rules.

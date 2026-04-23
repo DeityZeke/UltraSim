@@ -13,14 +13,15 @@ public sealed class ServerMovementSessionHost
     private readonly INetworkTransport _transport;
     private readonly NetworkControlPlaneHost _control;
     private readonly ServerEcsMovementNetworkBridge _movement;
+    private readonly ServerEcsWorldNetworkPublisher _worldPublisher;
+    private readonly ConnectionSubscriptionRegistry _subscriptions;
+    private readonly ServerNetworkSessionRuntime _sessionRuntime;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly InboundDatagram[] _inboundScratch;
     private readonly ControlPlaneEvent[] _controlEvents;
     private readonly SessionLifecycleEvent[] _sessionEvents;
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
-    private readonly ReliableEventAckTracker _reliableEventAcks = new();
-    private readonly StateBaselineAckTracker _stateBaselineAcks = new();
 
     public ServerMovementSessionHost(
         World world,
@@ -32,6 +33,7 @@ public sealed class ServerMovementSessionHost
         HandshakePolicy handshakePolicy = default,
         SessionAdmissionPolicy sessionPolicy = default,
         ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
+        ServerNetworkSessionRuntimeOptions runtimeOptions = default,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
@@ -45,6 +47,17 @@ public sealed class ServerMovementSessionHost
             handshakePolicy: handshakePolicy,
             sessionPolicy: sessionPolicy);
         _movement = new ServerEcsMovementNetworkBridge(world, transport, applyInput, projectState, ownerCorrectionPolicy);
+        var latestState = new LatestStateStream();
+        var orderedEvents = new OrderedEventStream(capacity: 256);
+        _worldPublisher = new ServerEcsWorldNetworkPublisher(world, latestState, orderedEvents);
+        _subscriptions = new ConnectionSubscriptionRegistry();
+        _sessionRuntime = new ServerNetworkSessionRuntime(
+            transport,
+            latestState,
+            orderedEvents,
+            _subscriptions,
+            new ReliableEventReplayBuffer(capacityPerConnection: 64),
+            runtimeOptions);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _inboundScratch = new InboundDatagram[maxPollBatch];
@@ -54,8 +67,11 @@ public sealed class ServerMovementSessionHost
 
     public NetworkControlPlaneHost Control => _control;
     public ServerEcsMovementNetworkBridge Movement => _movement;
-    public ReliableEventAckTracker ReliableEventAcks => _reliableEventAcks;
-    public StateBaselineAckTracker StateBaselineAcks => _stateBaselineAcks;
+    public ServerEcsWorldNetworkPublisher WorldPublisher => _worldPublisher;
+    public ConnectionSubscriptionRegistry Subscriptions => _subscriptions;
+    public ServerNetworkSessionRuntime SessionRuntime => _sessionRuntime;
+    public ReliableEventAckTracker ReliableEventAcks => _sessionRuntime.ReliableEventAcks;
+    public StateBaselineAckTracker StateBaselineAcks => _sessionRuntime.BaselineAcks;
     public int BoundConnectionCount => _entityByConnection.Count;
 
     public int CopyBoundConnections(Span<ConnectionId> destination)
@@ -92,8 +108,7 @@ public sealed class ServerMovementSessionHost
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, inboundCount);
             _control.ProcessInbound(inbound, nowTicks);
             HandleControlPlaneEvents(nowTicks);
-            ProcessReliableEventAcks(inbound);
-            ProcessStateBaselineAcks(inbound);
+            _sessionRuntime.ProcessInbound(inbound);
             _movement.ProcessInbound(inbound);
             totalInboundCount += inboundCount;
 
@@ -107,7 +122,8 @@ public sealed class ServerMovementSessionHost
         }
 
         HandleSessionLifecycleEvents(nowTicks);
-        _movement.AdvanceAndSend(deltaSeconds, serverTick);
+        _movement.AdvanceAndSend(deltaSeconds, serverTick, flushOutbound: false);
+        _sessionRuntime.DispatchTick(nowTicks, ConnectionSendBudget.Unlimited, flushOutbound: false);
         _control.FlushOutbound();
         return totalInboundCount;
     }
@@ -130,6 +146,7 @@ public sealed class ServerMovementSessionHost
 
                 ServerMovementSessionSpawn spawn = _spawnSession(_world, evt.ConnectionId);
                 _movement.Bind(evt.ConnectionId, spawn.Entity, spawn.NetworkEntityId);
+                _sessionRuntime.BindConnection(evt.ConnectionId);
                 _entityByConnection[evt.ConnectionId] = spawn.Entity;
             }
         }
@@ -156,9 +173,9 @@ public sealed class ServerMovementSessionHost
                     continue;
 
                 _movement.Unbind(evt.ConnectionId);
+                _sessionRuntime.UnbindConnection(evt.ConnectionId);
+                _subscriptions.RemoveConnection(evt.ConnectionId);
                 _entityByConnection.Remove(evt.ConnectionId);
-                _reliableEventAcks.Remove(evt.ConnectionId);
-                _stateBaselineAcks.Remove(evt.ConnectionId);
                 _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
                 if (_despawnSession is null && _world.Entities.IsAlive(entity))
                     _world.Destroy(entity);
@@ -168,50 +185,11 @@ public sealed class ServerMovementSessionHost
 
     public bool TryGetLastReliableEventAck(ConnectionId connectionId, out ulong sequence)
     {
-        return _reliableEventAcks.TryGetLastAcknowledged(connectionId, out sequence);
+        return _sessionRuntime.ReliableEventAcks.TryGetLastAcknowledged(connectionId, out sequence);
     }
 
     public bool TryGetLastStateBaselineAck(ConnectionId connectionId, out StateBaselineDescriptor descriptor)
     {
-        return _stateBaselineAcks.TryGetLastAcknowledged(connectionId, out descriptor);
-    }
-
-    private void ProcessReliableEventAcks(ReadOnlySpan<InboundDatagram> inbound)
-    {
-        for (int i = 0; i < inbound.Length; i++)
-        {
-            ref readonly InboundDatagram datagram = ref inbound[i];
-            if (datagram.ConnectionId == ConnectionId.Invalid || datagram.Plane != NetworkPlane.State)
-                continue;
-
-            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                continue;
-            if (header.PacketId != ReliableEventAckPacket.PacketId)
-                continue;
-
-            var reader = new UltraSim.Network.BitReader(payload);
-            ReliableEventAckPacket ack = ReliableEventAckPacket.Deserialize(ref reader);
-            _reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Sequence, out _);
-        }
-    }
-
-    private void ProcessStateBaselineAcks(ReadOnlySpan<InboundDatagram> inbound)
-    {
-        for (int i = 0; i < inbound.Length; i++)
-        {
-            ref readonly InboundDatagram datagram = ref inbound[i];
-            if (datagram.ConnectionId == ConnectionId.Invalid || datagram.Plane != NetworkPlane.State)
-                continue;
-
-            if (!PacketCodec.TryDecodeEnvelope(datagram.Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload))
-                continue;
-            if (header.PacketId != StateBaselineAckPacket.PacketId)
-                continue;
-
-            var reader = new UltraSim.Network.BitReader(payload);
-            StateBaselineAckPacket ack = StateBaselineAckPacket.Deserialize(ref reader);
-            _stateBaselineAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor, out _);
-            _reliableEventAcks.TryAcknowledge(datagram.ConnectionId, ack.Descriptor.LastOrderedEventSequence, out _);
-        }
+        return _sessionRuntime.BaselineAcks.TryGetLastAcknowledged(connectionId, out descriptor);
     }
 }

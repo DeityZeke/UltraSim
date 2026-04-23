@@ -131,7 +131,7 @@ public sealed class ServerEcsMovementNetworkBridge
         return processed;
     }
 
-    public int AdvanceAndSend(float deltaSeconds, uint serverTick)
+    public int AdvanceAndSend(float deltaSeconds, uint serverTick, bool flushOutbound = true)
     {
         if (float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds) || deltaSeconds < 0f)
             throw new ArgumentOutOfRangeException(nameof(deltaSeconds));
@@ -187,7 +187,8 @@ public sealed class ServerEcsMovementNetworkBridge
             _bindings[connectionId] = state;
         }
 
-        _transport.FlushOutbound();
+        if (flushOutbound)
+            _transport.FlushOutbound();
         LastSentStateCount = sent;
         return sent;
     }
