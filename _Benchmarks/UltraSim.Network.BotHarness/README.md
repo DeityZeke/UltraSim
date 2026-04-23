@@ -84,6 +84,14 @@ It is the intended checkpoint before a broader external-process or gameplay-rich
 
 The widened harness now reports:
 
+- `server_pump_avg_ms`
+- `server_pump_p95_ms`
+- `publish_avg_ms`
+- `publish_p95_ms`
+- `dispatch_avg_ms`
+- `dispatch_p95_ms`
+- `client_pump_avg_ms`
+- `client_pump_p95_ms`
 - `replication_published_items`
 - `replication_datagrams`
 - `replication_wire_datagrams`
@@ -211,3 +219,21 @@ Current read:
 - ring-aware cadence materially improved the widened three-lane profile compared to the earlier all-rings-every-pass shape
 - under this broader live path, `48` clients currently pass the `4 ms` tick-p95 target at both `0.35` and `0.40` active
 - `64` clients are still slightly over the `4 ms` target on the current less-dense three-lane profile
+
+Current substage breakdown read from the same broadened `0.40` profile:
+
+- report: `_Benchmarks/results/observer_bulk_ringcad_breakdown_040/network_bot_harness_20260423_020740.json`
+- `64` clients:
+  - `tick_p95 = 4.367 ms`
+  - `server_pump_p95 = 0.365 ms`
+  - `publish_p95 = 0.198 ms`
+  - `dispatch_p95 = 0.803 ms`
+  - `client_pump_p95 = 2.570 ms`
+
+Current interpretation:
+
+- the remaining cost is not primarily in server-side latest-state publication
+- the larger current slices are:
+  - client pump / observer apply
+  - dispatch / fanout
+- so the next worthwhile tuning work should focus there before trying more policy changes to the same widened profile

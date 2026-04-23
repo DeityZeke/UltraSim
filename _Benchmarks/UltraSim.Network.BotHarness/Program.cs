@@ -153,6 +153,10 @@ internal sealed class MovementRampHarness : IDisposable
 
         int measuredTicks = _options.StageTicks;
         var tickSamplesMs = new List<double>(measuredTicks);
+        var serverPumpSamplesMs = new List<double>(measuredTicks);
+        var publishSamplesMs = new List<double>(measuredTicks);
+        var dispatchSamplesMs = new List<double>(measuredTicks);
+        var clientPumpSamplesMs = new List<double>(measuredTicks);
         long pendingSum = 0;
         int pendingMax = 0;
         var pingSamplesMs = new List<double>(Math.Max(32, _clients.Count * Math.Max(1, measuredTicks / Math.Max(1, _options.PingIntervalTicks))));
@@ -181,20 +185,40 @@ internal sealed class MovementRampHarness : IDisposable
             long start = Stopwatch.GetTimestamp();
             _clockTicks += 2;
             uint publishTick = (uint)(stageIndex * 100_000 + tick + 1);
+            long serverPumpStart = Stopwatch.GetTimestamp();
             _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick);
+            long serverPumpEnd = Stopwatch.GetTimestamp();
+            serverPumpSamplesMs.Add((serverPumpEnd - serverPumpStart) * 1000.0 / Stopwatch.Frequency);
+
             if (replication is not null)
             {
                 UpdateObserverSubscriptions(replication);
+                long publishStart = Stopwatch.GetTimestamp();
                 int published = PublishObserverReplication(replication, publishTick);
+                long publishEnd = Stopwatch.GetTimestamp();
+                publishSamplesMs.Add((publishEnd - publishStart) * 1000.0 / Stopwatch.Frequency);
                 if (published > 0)
                 {
                     replicationPublishedItems += published;
+                    long dispatchStart = Stopwatch.GetTimestamp();
                     int dispatched = DispatchObserverReplication(replication, out int wireDatagrams);
+                    long dispatchEnd = Stopwatch.GetTimestamp();
                     replicationDatagrams += dispatched;
                     replicationWireDatagrams += wireDatagrams;
+                    dispatchSamplesMs.Add((dispatchEnd - dispatchStart) * 1000.0 / Stopwatch.Frequency);
+                }
+                else
+                {
+                    dispatchSamplesMs.Add(0d);
                 }
             }
+            else
+            {
+                publishSamplesMs.Add(0d);
+                dispatchSamplesMs.Add(0d);
+            }
             long clientNowTicks = _clockTicks + 1;
+            long clientPumpStart = Stopwatch.GetTimestamp();
             for (int i = 0; i < _clients.Count; i++)
             {
                 ClientHandle client = _clients[i];
@@ -204,6 +228,8 @@ internal sealed class MovementRampHarness : IDisposable
                 client.Host.Pump(clientNowTicks);
                 client.CollectPongSamples(clientNowTicks, _pongScratch, pingSamplesMs);
             }
+            long clientPumpEnd = Stopwatch.GetTimestamp();
+            clientPumpSamplesMs.Add((clientPumpEnd - clientPumpStart) * 1000.0 / Stopwatch.Frequency);
             long end = Stopwatch.GetTimestamp();
 
             double elapsedMs = (end - start) * 1000.0 / Stopwatch.Frequency;
@@ -220,6 +246,10 @@ internal sealed class MovementRampHarness : IDisposable
 
         long allocAfter = GC.GetTotalAllocatedBytes(false);
         TickWindowStats stats = new TickWindowStats(tickSamplesMs);
+        TickWindowStats serverPumpStats = new TickWindowStats(serverPumpSamplesMs);
+        TickWindowStats publishStats = new TickWindowStats(publishSamplesMs);
+        TickWindowStats dispatchStats = new TickWindowStats(dispatchSamplesMs);
+        TickWindowStats clientPumpStats = new TickWindowStats(clientPumpSamplesMs);
         TickWindowStats pingStats = new TickWindowStats(pingSamplesMs);
         int readyClients = 0;
         var perClientPing = new JsonArray();
@@ -251,6 +281,14 @@ internal sealed class MovementRampHarness : IDisposable
             TickP95Ms: stats.P95Ms,
             TickP99Ms: stats.P99Ms,
             TickMaxMs: stats.MaxMs,
+            ServerPumpAverageMs: serverPumpStats.AverageMs,
+            ServerPumpP95Ms: serverPumpStats.P95Ms,
+            PublishAverageMs: publishStats.AverageMs,
+            PublishP95Ms: publishStats.P95Ms,
+            DispatchAverageMs: dispatchStats.AverageMs,
+            DispatchP95Ms: dispatchStats.P95Ms,
+            ClientPumpAverageMs: clientPumpStats.AverageMs,
+            ClientPumpP95Ms: clientPumpStats.P95Ms,
             PingAverageMs: pingStats.AverageMs,
             PingP95Ms: pingStats.P95Ms,
             PingMaxMs: pingStats.MaxMs,
@@ -1051,6 +1089,14 @@ internal readonly record struct StageResult(
     double TickP95Ms,
     double TickP99Ms,
     double TickMaxMs,
+    double ServerPumpAverageMs,
+    double ServerPumpP95Ms,
+    double PublishAverageMs,
+    double PublishP95Ms,
+    double DispatchAverageMs,
+    double DispatchP95Ms,
+    double ClientPumpAverageMs,
+    double ClientPumpP95Ms,
     double PingAverageMs,
     double PingP95Ms,
     double PingMaxMs,
@@ -1094,6 +1140,14 @@ internal readonly record struct StageResult(
             ["tick_p95_ms"] = Math.Round(TickP95Ms, 3),
             ["tick_p99_ms"] = Math.Round(TickP99Ms, 3),
             ["tick_max_ms"] = Math.Round(TickMaxMs, 3),
+            ["server_pump_avg_ms"] = Math.Round(ServerPumpAverageMs, 3),
+            ["server_pump_p95_ms"] = Math.Round(ServerPumpP95Ms, 3),
+            ["publish_avg_ms"] = Math.Round(PublishAverageMs, 3),
+            ["publish_p95_ms"] = Math.Round(PublishP95Ms, 3),
+            ["dispatch_avg_ms"] = Math.Round(DispatchAverageMs, 3),
+            ["dispatch_p95_ms"] = Math.Round(DispatchP95Ms, 3),
+            ["client_pump_avg_ms"] = Math.Round(ClientPumpAverageMs, 3),
+            ["client_pump_p95_ms"] = Math.Round(ClientPumpP95Ms, 3),
             ["ping_avg_ms"] = Math.Round(PingAverageMs, 3),
             ["ping_p95_ms"] = Math.Round(PingP95Ms, 3),
             ["ping_max_ms"] = Math.Round(PingMaxMs, 3),

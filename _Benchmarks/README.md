@@ -249,6 +249,17 @@ Current interpretation:
 - ring-aware cadence materially improved the broadened load shape
 - the current practical ceiling for this less-dense three-lane profile is around `48` clients before crossing a `4 ms` network-tail target
 - `64` is close, but still over the target on the latest runs
+- the harness now also reports substage timing splits:
+  - `server_pump_*`
+  - `publish_*`
+  - `dispatch_*`
+  - `client_pump_*`
+- on the latest broadened `0.40` / `64` run:
+  - `server_pump_p95 = 0.365 ms`
+  - `publish_p95 = 0.198 ms`
+  - `dispatch_p95 = 0.803 ms`
+  - `client_pump_p95 = 2.570 ms`
+- so the next likely tuning targets are client consume/apply and dispatch/fanout, not server-side publish policy again
 
 Current observer-replication read with actual client consume:
 
