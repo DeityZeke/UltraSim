@@ -26,6 +26,12 @@ Use the old network as:
 
 Do not use it as a direct architecture template.
 
+Parity note:
+
+- old-network parity is a comparison target, not the implementation order
+- track that comparison in `NETWORK_PARITY_CHECKLIST.md`
+- keep building the new architecture in the current direction and only judge parity once the runtime shapes are actually comparable
+
 ## What The Audit Says
 
 The old stack had useful pieces, but the main architectural problem was shape:
@@ -89,6 +95,7 @@ Bridge code that uses both ECS and Network belongs later in:
 Kernels/Network/
   AGENTS.md
   README.md
+  NETWORK_PARITY_CHECKLIST.md
   NETWORK_REWORK_IMPLEMENTATION_PLAN.md
   UltraSim.Network.csproj
   Core/
@@ -458,6 +465,8 @@ Current status:
   - first paired server/client authoritative movement round-trip over loopback through `Server/Network`
   - first paired server/client authoritative movement round-trip over real UDP socket transport after handshake
   - first small live multi-client UDP movement ramp benchmark over the shared session-host pump path
+  - first widened observer-replication ramp path with actual client-side observer latest-state decode/apply
+  - transport-level same-connection UDP envelope bundling in the widened live path
 
 ## Testing Strategy
 
@@ -525,5 +534,18 @@ The next implementation target after this bridge slice should be:
 - that broader standalone bot runner now exists in first form under `_Benchmarks/UltraSim.Network.BotHarness`; the next step is scaling/stressing it, not inventing a third temporary harness path
 - first scaling/stress passes now exist too, and the current narrow movement-only slice is landing around a practical `~500` active-client ceiling at `62 Hz` before a `4 ms` p95 network-tail budget is crossed
 - the harness now also tracks ping RTT, and the same narrow slice is currently landing around a separate latency-limited ceiling of roughly `~2048` active clients before `ping_p95` crosses `50 ms`
+- the widened standalone harness now also supports the first honest observer-replication read with actual client consume:
+  - dense `spawn-spacing = 4m`: practical current ceiling about `64`
+  - less-dense `spawn-spacing = 12m`: practical current ceiling about `128`
+  - the live harness AOI policy is now configurable, so the same runtime path can be exercised with either:
+    - the current narrow single-ring slice
+    - broader multi-ring policies such as `7.5,23.5,39.5`
+
+Current recommendation:
+
+- do not pivot into a parity-only branch
+- keep implementing the broader real runtime slices
+- keep widening the live harness as those slices land
+- use `NETWORK_PARITY_CHECKLIST.md` only to judge when an old-vs-new comparison is finally fair
 
 not full replication yet.

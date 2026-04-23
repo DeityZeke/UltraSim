@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization.Metadata;
 using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Network;
@@ -24,7 +25,7 @@ internal static class HarnessProgram
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         string jsonPath = Path.Combine(reportDir, $"network_bot_harness_{stamp}.json");
 
-        Console.WriteLine($"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}");
+        Console.WriteLine($"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}  AoiRadii: {string.Join(",", options.AoiRadiiMeters)}");
         Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMax  TickSLO  PingSLO");
         Console.WriteLine("-----------------------------------------------------------------------------------------------------------------------");
 
@@ -63,7 +64,11 @@ internal static class HarnessProgram
             ["stages"] = rows,
         };
 
-        File.WriteAllText(jsonPath, report.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(jsonPath, report.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        }));
         Console.WriteLine($"Wrote harness report to {jsonPath}");
         return 0;
     }
@@ -367,7 +372,7 @@ internal sealed class MovementRampHarness : IDisposable
 
     private StageReplicationContext CreateReplicationContext()
     {
-        var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, 7.5f);
+        var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, _options.AoiRadiiMeters);
         var publisher = new ServerEcsWorldNetworkPublisher(_world);
         var subscriptions = new ConnectionSubscriptionRegistry();
         var scheduler = new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream);
@@ -628,6 +633,7 @@ internal sealed class HarnessArgs
     public bool ObserverReplication { get; set; }
     public float SpawnSpacingMeters { get; set; } = 4f;
     public int SpawnGridWidth { get; set; } = 32;
+    public float[] AoiRadiiMeters { get; set; } = [7.5f];
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
     public int SettleTicks => Math.Max(1, (int)Math.Round(SettleSeconds * TickHz, MidpointRounding.AwayFromZero));
@@ -658,10 +664,13 @@ internal sealed class HarnessArgs
             else if (arg == "--observer-replication") options.ObserverReplication = true;
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--aoi-radii-m") options.AoiRadiiMeters = ParseFloatList(Next()!, nameof(AoiRadiiMeters));
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
         options.ActiveRatio = Math.Clamp(options.ActiveRatio, 0d, 1d);
+        if (options.AoiRadiiMeters.Length == 0)
+            options.AoiRadiiMeters = [7.5f];
         return options;
     }
 
@@ -683,6 +692,10 @@ internal sealed class HarnessArgs
 
     public JsonObject ToJson()
     {
+        var aoiRadii = new JsonArray();
+        for (int i = 0; i < AoiRadiiMeters.Length; i++)
+            aoiRadii.Add(JsonValue.Create(AoiRadiiMeters[i]));
+
         return new JsonObject
         {
             ["stages"] = Stages,
@@ -700,7 +713,33 @@ internal sealed class HarnessArgs
             ["observer_replication"] = ObserverReplication,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
+            ["aoi_radii_m"] = aoiRadii,
         };
+    }
+
+    private static float[] ParseFloatList(string raw, string name)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            throw new ArgumentException("Value cannot be empty.", name);
+
+        string[] parts = raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length == 0)
+            throw new ArgumentException("Value cannot be empty.", name);
+
+        var values = new float[parts.Length];
+        float previous = 0f;
+        for (int i = 0; i < parts.Length; i++)
+        {
+            float value = float.Parse(parts[i], CultureInfo.InvariantCulture);
+            if (value <= 0f || float.IsNaN(value) || float.IsInfinity(value))
+                throw new ArgumentOutOfRangeException(name, "AOI radii must be positive finite numbers.");
+            if (i > 0 && value <= previous)
+                throw new ArgumentException("AOI radii must be strictly increasing.", name);
+            values[i] = value;
+            previous = value;
+        }
+
+        return values;
     }
 }
 

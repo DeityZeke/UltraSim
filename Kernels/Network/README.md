@@ -14,6 +14,7 @@ What exists today:
 
 - network-specific rules in [AGENTS.md](./AGENTS.md)
 - a concrete rebuild plan in [NETWORK_REWORK_IMPLEMENTATION_PLAN.md](./NETWORK_REWORK_IMPLEMENTATION_PLAN.md)
+- an old-vs-new comparison guardrail in [NETWORK_PARITY_CHECKLIST.md](./NETWORK_PARITY_CHECKLIST.md)
 - first foundation contracts for:
   - planes
   - packet classes
@@ -270,3 +271,15 @@ Current higher-layer policy direction:
 - `ReliableEvent` is the preferred lane for discrete gameplay events that must preserve order/reliability
 - `Bulk` is the preferred lane for large or compression-friendly world payloads that must stay isolated from combat/movement
 - player-centered AOI rings are now the preferred gameplay scope model for that higher layer; chunk keys remain the maintenance/indexing primitive underneath
+
+## Parity Position
+
+The new stack is broad enough for honest movement-only and first observer-replication ramp results.
+
+It is not yet broad enough to claim direct parity with the old network runtime.
+
+The parity question is now tracked explicitly in:
+
+- [NETWORK_PARITY_CHECKLIST.md](./NETWORK_PARITY_CHECKLIST.md)
+
+That checklist is not a separate implementation branch. It exists to make sure later old-vs-new comparisons are fair once the new feature surface naturally catches up.

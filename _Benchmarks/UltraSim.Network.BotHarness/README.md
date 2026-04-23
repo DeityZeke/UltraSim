@@ -41,6 +41,7 @@ Useful options:
 - `--observer-replication`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
+- `--aoi-radii-m <r0,r1,...>`
 
 Recommended run categories:
 
@@ -55,6 +56,9 @@ Recommended run categories:
 
 4. Less-dense observer-replication read
    `--observer-replication --spawn-spacing-m 12`
+
+5. Broader multi-ring observer read without changing the code path
+   `--observer-replication --spawn-spacing-m 12 --aoi-radii-m 7.5,23.5,39.5`
 
 ## Current Role
 
@@ -81,6 +85,15 @@ That split matters:
   logical per-recipient fanout before transport aggregation
 - `replication_wire_datagrams`
   actual UDP datagrams sent after transport-level same-connection bundling
+
+The widened harness AOI policy is now configurable:
+
+- default:
+  - `--aoi-radii-m 7.5`
+- broader gameplay-shaped profile:
+  - `--aoi-radii-m 7.5,23.5,39.5`
+
+This is intended to let the same live path broaden naturally as replication families grow, without forking into a separate parity-only harness.
 
 Current first read with actual client consume:
 

@@ -214,6 +214,9 @@ The harness has now also been widened with the first observer-replication load:
   - `observer_frames_received`
   - `observer_frames_applied`
   - `observer_state_items`
+- configurable live AOI ring radii via:
+  - `--aoi-radii-m 7.5`
+  - or broader gameplay-shaped policies such as `--aoi-radii-m 7.5,23.5,39.5`
 
 Current observer-replication read with actual client consume:
 
