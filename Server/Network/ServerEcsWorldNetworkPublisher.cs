@@ -18,11 +18,14 @@ public sealed class ServerEcsWorldNetworkPublisher
     public ServerEcsWorldNetworkPublisher(
         World world,
         LatestStateStream? latestState = null,
-        OrderedEventStream? orderedEvents = null)
+        OrderedEventStream? orderedEvents = null,
+        int orderedEventCapacity = 1024)
     {
         _world = world ?? throw new ArgumentNullException(nameof(world));
+        if (orderedEventCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(orderedEventCapacity));
         _latestState = latestState ?? new LatestStateStream();
-        _orderedEvents = orderedEvents ?? new OrderedEventStream(capacity: 256);
+        _orderedEvents = orderedEvents ?? new OrderedEventStream(capacity: orderedEventCapacity);
     }
 
     public LatestStateStream LatestStateStream => _latestState;

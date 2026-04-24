@@ -12,11 +12,14 @@ public sealed class ServerRuntimeNetworkPublisher : IDisposable
     public ServerRuntimeNetworkPublisher(
         IServerApplication application,
         LatestStateStream? latestState = null,
-        OrderedEventStream? orderedEvents = null)
+        OrderedEventStream? orderedEvents = null,
+        int orderedEventCapacity = 1024)
     {
         _application = application ?? throw new ArgumentNullException(nameof(application));
+        if (orderedEventCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(orderedEventCapacity));
         _latestState = latestState ?? new LatestStateStream();
-        _orderedEvents = orderedEvents ?? new OrderedEventStream(capacity: 256);
+        _orderedEvents = orderedEvents ?? new OrderedEventStream(capacity: orderedEventCapacity);
         _application.EventRaised += HandleApplicationEvent;
     }
 

@@ -48,7 +48,9 @@ public sealed class ServerMovementSessionHost
             sessionPolicy: sessionPolicy);
         _movement = new ServerEcsMovementNetworkBridge(world, transport, applyInput, projectState, ownerCorrectionPolicy);
         var latestState = new LatestStateStream();
-        var orderedEvents = new OrderedEventStream(capacity: 256);
+        if (runtimeOptions == default)
+            runtimeOptions = ServerNetworkSessionRuntimeOptions.Default;
+        var orderedEvents = new OrderedEventStream(capacity: runtimeOptions.OrderedEventCapacity);
         _worldPublisher = new ServerEcsWorldNetworkPublisher(world, latestState, orderedEvents);
         _subscriptions = new ConnectionSubscriptionRegistry();
         _sessionRuntime = new ServerNetworkSessionRuntime(
@@ -56,7 +58,7 @@ public sealed class ServerMovementSessionHost
             latestState,
             orderedEvents,
             _subscriptions,
-            new ReliableEventReplayBuffer(capacityPerConnection: 64),
+            new ReliableEventReplayBuffer(capacityPerConnection: runtimeOptions.ReplayBufferCapacityPerConnection),
             runtimeOptions);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;

@@ -52,7 +52,8 @@ public sealed class ServerNetworkSessionRuntime
         if (options == default)
             options = ServerNetworkSessionRuntimeOptions.Default;
         if (options.MaxConnections <= 0 || options.MaxSnapshotItems <= 0 || options.MaxScheduledItems <= 0 ||
-            options.MaxReplayItems <= 0 || options.MaxDatagrams <= 0)
+            options.MaxReplayItems <= 0 || options.MaxDatagrams <= 0 || options.OrderedEventCapacity <= 0 ||
+            options.ReplayBufferCapacityPerConnection <= 0)
             throw new ArgumentOutOfRangeException(nameof(options));
 
         _scheduler = new ConnectionStreamScheduler(_latestState, _orderedEvents);
@@ -79,6 +80,7 @@ public sealed class ServerNetworkSessionRuntime
     public ReliableEventAckTracker ReliableEventAcks => _reliableEventAcks;
     public ConnectionLatestStateSentTracker LatestStateSentTracker => _latestSentTracker;
     public int ConnectionCount => _stateByConnection.Count;
+    public int ReplayBufferCapacityPerConnection => _replayBuffer.CapacityPerConnection;
 
     public void BindConnection(ConnectionId connectionId)
     {

@@ -16,6 +16,8 @@ public sealed class OrderedEventStream
         _ring = new OrderedEventEntry[capacity];
     }
 
+    public int Capacity => _ring.Length;
+
     public ulong Publish(ImmutablePayloadBuffer payload)
     {
         return Publish(default, PacketClass.ReliableEvent, payload);

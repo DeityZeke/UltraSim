@@ -8,6 +8,8 @@ public readonly record struct ServerNetworkSessionRuntimeOptions(
     int MaxScheduledItems,
     int MaxReplayItems,
     int MaxDatagrams,
+    int OrderedEventCapacity,
+    int ReplayBufferCapacityPerConnection,
     ReliableEventRetransmitPolicy RetransmitPolicy)
 {
     public static readonly ServerNetworkSessionRuntimeOptions Default = new(
@@ -16,5 +18,7 @@ public readonly record struct ServerNetworkSessionRuntimeOptions(
         MaxScheduledItems: 256,
         MaxReplayItems: 64,
         MaxDatagrams: 1024,
+        OrderedEventCapacity: 1024,
+        ReplayBufferCapacityPerConnection: 256,
         RetransmitPolicy: ReliableEventRetransmitPolicy.Default);
 }

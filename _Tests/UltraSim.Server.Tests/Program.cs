@@ -53,10 +53,12 @@ internal static class TestRunner
         Run(nameof(GodotServerShellController_ExposesSharedControlSurface), GodotServerShellController_ExposesSharedControlSurface);
         Run(nameof(ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems), ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems);
         Run(nameof(ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents), ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents);
+        Run(nameof(ServerRuntimeNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream), ServerRuntimeNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream);
         Run(nameof(ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams), ServerRuntimeNetworkPublisher_ScheduleAndDispatch_ProducesOperatorDatagrams);
         Run(nameof(ServerNetworkSessionRuntime_FirstTick_SendsFilteredBaselineForUnacknowledgedConnection), ServerNetworkSessionRuntime_FirstTick_SendsFilteredBaselineForUnacknowledgedConnection);
         Run(nameof(ServerNetworkSessionRuntime_AfterBaselineAck_SendsDeltaAndReliableEvents), ServerNetworkSessionRuntime_AfterBaselineAck_SendsDeltaAndReliableEvents);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots), ServerEcsWorldNetworkPublisher_PublishRuntimeState_EmitsWorldAndSystemSnapshots);
+        Run(nameof(ServerEcsWorldNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream), ServerEcsWorldNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates);
         Run(nameof(ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer), ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_DoesNotDropBeyondInitialBuffer);
         Run(nameof(ServerEcsWorldNetworkPublisher_Rules_ClassifyBulkLatestStateAndBulkOrderedEvents), ServerEcsWorldNetworkPublisher_Rules_ClassifyBulkLatestStateAndBulkOrderedEvents);
@@ -72,6 +74,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_TracksStateBaselineAcksFromClient), ServerMovementSessionHost_TracksStateBaselineAcksFromClient);
         Run(nameof(ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor), ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor);
         Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
+        Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
         Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
 
         Console.WriteLine("All Server contract tests passed.");
@@ -911,6 +914,15 @@ internal static class TestRunner
         Assert.Equal("acct-7", account.AccountId);
     }
 
+    private static void ServerRuntimeNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream()
+    {
+        var app = new ServerApplication(new ServerApplicationOptions("capacity-test"));
+
+        using var publisher = new ServerRuntimeNetworkPublisher(app, orderedEventCapacity: 1536);
+
+        Assert.Equal(1536, publisher.OrderedEventStream.Capacity);
+    }
+
     private static void ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents()
     {
         var app = new ServerApplication(new ServerApplicationOptions("event-test"));
@@ -1188,6 +1200,15 @@ internal static class TestRunner
         Assert.Equal((ulong)ServerEcsNetworkScopes.OperatorSystems.Value, updates[1].ScopeKey.Value);
         SystemRuntimeSnapshot systemSnapshot = ServerRuntimeNetworkPayloadCodec.Decode<SystemRuntimeSnapshot>(updates[1].Payload);
         Assert.Equal("ServerEcsTestSystem", systemSnapshot.Name);
+    }
+
+    private static void ServerEcsWorldNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream()
+    {
+        World world = CreateEcsTestWorld(enableProfiling: false, registerSystems: false);
+
+        var publisher = new ServerEcsWorldNetworkPublisher(world, orderedEventCapacity: 2048);
+
+        Assert.Equal(2048, publisher.OrderedEventStream.Capacity);
     }
 
     private static void ServerEcsWorldNetworkPublisher_PublishDirtyLatestState_EmitsScopedComponentUpdates()
@@ -2298,6 +2319,50 @@ internal static class TestRunner
         Assert.True(host.TryGetLastStateBaselineAck(new ConnectionId(1), out StateBaselineDescriptor acknowledged));
         Assert.Equal(descriptor, acknowledged);
         Assert.True(descriptor.BaselineId != 0);
+    }
+
+    private static void ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(new ArchetypeSignature([movementId]));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var host = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            runtimeOptions: new ServerNetworkSessionRuntimeOptions(
+                MaxConnections: 64,
+                MaxSnapshotItems: 512,
+                MaxScheduledItems: 256,
+                MaxReplayItems: 64,
+                MaxDatagrams: 1024,
+                OrderedEventCapacity: 1536,
+                ReplayBufferCapacityPerConnection: 192,
+                RetransmitPolicy: ReliableEventRetransmitPolicy.Default));
+
+        Assert.Equal(1536, host.WorldPublisher.OrderedEventStream.Capacity);
+        Assert.Equal(192, host.SessionRuntime.ReplayBufferCapacityPerConnection);
     }
 
     private static void ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates()
