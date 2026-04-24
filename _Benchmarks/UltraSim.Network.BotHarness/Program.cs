@@ -125,6 +125,7 @@ internal sealed class MovementRampHarness : IRampHarness
     private readonly ServerMovementSessionHost? _serverHost;
     private readonly List<ClientHandle> _clients = [];
     private readonly List<Entity> _spawnedEntities = [];
+    private readonly List<PendingChatSubmission> _pendingChatSubmissions = [];
     private uint _nextNetworkEntityId = 1;
     private long _clockTicks;
     private readonly PongProbePacket[] _pongScratch = new PongProbePacket[256];
@@ -272,6 +273,9 @@ internal sealed class MovementRampHarness : IRampHarness
         long observerFramesApplied = 0;
         long observerEventsReceived = 0;
         long observerEventsApplied = 0;
+        long chatMessagesSubmitted = 0;
+        long chatMessagesReceived = 0;
+        long chatMessagesApplied = 0;
         long ownerCorrectionSamples = 0;
         double ownerCorrectionPositionErrorSum = 0d;
         double ownerCorrectionPositionErrorMax = 0d;
@@ -290,6 +294,7 @@ internal sealed class MovementRampHarness : IRampHarness
         for (int tick = 0; tick < measuredTicks; tick++)
         {
             QueueInputsForTick((uint)tick);
+            QueueChatForTick((uint)tick, syntheticReplication: replication is not null);
 
             long start = Stopwatch.GetTimestamp();
             _clockTicks += 2;
@@ -622,6 +627,9 @@ internal sealed class MovementRampHarness : IRampHarness
             observerFramesApplied += _clients[i].ObserverFramesApplied;
             observerEventsReceived += _clients[i].ObserverEventsReceived;
             observerEventsApplied += _clients[i].ObserverEventsApplied;
+            chatMessagesSubmitted += _clients[i].ChatMessagesSubmitted;
+            chatMessagesReceived += _clients[i].ChatMessagesReceived;
+            chatMessagesApplied += _clients[i].ChatMessagesApplied;
             ClientMovementCorrectionSnapshot correction = _clients[i].Host.Movement.CorrectionStats.Snapshot();
             ownerCorrectionSamples += correction.SampleCount;
             ownerCorrectionPositionErrorSum += correction.AveragePositionError * correction.SampleCount;
@@ -799,6 +807,9 @@ internal sealed class MovementRampHarness : IRampHarness
             ObserverFramesApplied: observerFramesApplied,
             ObserverEventsReceived: observerEventsReceived,
             ObserverEventsApplied: observerEventsApplied,
+            ChatMessagesSubmitted: chatMessagesSubmitted,
+            ChatMessagesReceived: chatMessagesReceived,
+            ChatMessagesApplied: chatMessagesApplied,
             OwnerCorrectionSamples: ownerCorrectionSamples,
             OwnerCorrectionAveragePositionError: ownerCorrectionSamples == 0 ? 0d : ownerCorrectionPositionErrorSum / ownerCorrectionSamples,
             OwnerCorrectionMaxPositionError: ownerCorrectionPositionErrorMax,
@@ -820,6 +831,7 @@ internal sealed class MovementRampHarness : IRampHarness
         }
 
         _spawnedEntities.Clear();
+        _pendingChatSubmissions.Clear();
         _nextNetworkEntityId = 1;
         _clockTicks = 0;
     }
@@ -857,15 +869,21 @@ internal sealed class MovementRampHarness : IRampHarness
             var observerState = ClientObserverStateBridge.CreateSpanFastPath(
                 new ConnectionId(1),
                 (itemKey, _, payload) => handle!.ApplyObserverState(itemKey, payload));
+            var chatEvents = _options.ChatEnabled
+                ? new ClientChatEventBridge(_ => handle!.ApplyChatMessage())
+                : null;
             var observerEvents = ClientObserverEventBridge.CreateSpanFastPath(
                 new ConnectionId(1),
                 (_, payload) => handle!.ApplyObserverEvent(payload));
+            if (chatEvents is not null)
+                observerEvents.ChatEvents = chatEvents;
             var host = new ClientMovementSessionHost(
                 transport,
                 new ConnectionId(1),
                 new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
                 observerState: observerState,
-                observerEvents: observerEvents);
+                observerEvents: observerEvents,
+                chatEvents: chatEvents);
             host.Start();
             float spacing = _options.SpawnSpacingMeters;
             int width = Math.Max(1, _options.SpawnGridWidth);
@@ -937,6 +955,30 @@ internal sealed class MovementRampHarness : IRampHarness
         }
     }
 
+    private void QueueChatForTick(uint clientTick, bool syntheticReplication)
+    {
+        if (!_options.ChatEnabled)
+            return;
+
+        int activeLimit = Math.Max(0, Math.Min(_clients.Count, (int)Math.Round(_clients.Count * _options.ChatActiveRatio, MidpointRounding.AwayFromZero)));
+        for (int i = 0; i < activeLimit; i++)
+        {
+            ClientHandle client = _clients[i];
+            if (!client.Host.IsReady)
+                continue;
+
+            if (syntheticReplication)
+            {
+                if (client.TryBuildChatMessage(clientTick, _options, out string text))
+                    _pendingChatSubmissions.Add(new PendingChatSubmission(client.ClientIndex, text));
+            }
+            else
+            {
+                client.TrySendChat(clientTick, _options);
+            }
+        }
+    }
+
     private ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
     {
         int spawnIndex = _spawnedEntities.Count;
@@ -986,6 +1028,7 @@ internal sealed class MovementRampHarness : IRampHarness
         for (int i = 0; i < count; i++)
         {
             ConnectionId connectionId = replication.BoundConnections[i];
+            replication.Subscriptions.Subscribe(connectionId, ServerChatScopes.System);
             if (!_serverHost.TryGetBoundEntity(connectionId, out Entity entity))
                 continue;
             if (!_world!.TryGetComponent(entity, out BenchMovementBody body))
@@ -1041,6 +1084,28 @@ internal sealed class MovementRampHarness : IRampHarness
                     replication.Classifier,
                     static (_, body) => new WorldPosition2(body.PositionX, body.PositionY),
                     static (_, body) => HarnessPayloadCodec.Encode(body)));
+        }
+
+        if (_pendingChatSubmissions.Count > 0)
+        {
+            for (int i = 0; i < _pendingChatSubmissions.Count; i++)
+            {
+                PendingChatSubmission submission = _pendingChatSubmissions[i];
+                replication.Publisher.OrderedEventStream.Publish(
+                    ServerChatScopes.System,
+                    PacketClass.ReliableEvent,
+                    PacketCodec.Encode(new ChatMessageEventPacket(
+                        MessageId: unchecked(((ulong)publishTick << 32) | (uint)i),
+                        ChannelId: ServerChatChannelIds.System,
+                        SenderEntityId: (ulong)(submission.ClientIndex + 1),
+                        SenderName: $"bot {submission.ClientIndex}",
+                        Text: submission.Text,
+                        ServerTick: publishTick,
+                        Flags: ChatMessageFlags.System)));
+                published++;
+            }
+
+            _pendingChatSubmissions.Clear();
         }
 
         return published;
@@ -1294,6 +1359,8 @@ internal sealed class MovementRampHarness : IRampHarness
         private uint _lastAuthoritativeServerTick;
         private readonly float _predictionJitterPercent;
         private uint _predictionStep;
+        private uint _nextChatTick;
+        private uint _chatSequence;
 
         public ClientHandle(
             int clientIndex,
@@ -1316,6 +1383,9 @@ internal sealed class MovementRampHarness : IRampHarness
         public long ObserverFramesApplied { get; private set; }
         public long ObserverEventsReceived { get; private set; }
         public long ObserverEventsApplied { get; private set; }
+        public long ChatMessagesSubmitted { get; private set; }
+        public long ChatMessagesReceived { get; private set; }
+        public long ChatMessagesApplied { get; private set; }
         public int ObserverStateCount => _observerStateCount + _observerVisualStateCount + _observerBulkStateCount;
 
         public ClientMovementState PredictNextState(in ClientMovementInput input, float deltaSeconds)
@@ -1375,6 +1445,12 @@ internal sealed class MovementRampHarness : IRampHarness
             {
                 ObserverEventsReceived += Host.ObserverEvents.LastReceivedEventCount;
                 ObserverEventsApplied += Host.ObserverEvents.LastAppliedEventCount;
+            }
+
+            if (Host.ChatEvents is not null)
+            {
+                ChatMessagesReceived += Host.ChatEvents.LastReceivedMessageCount;
+                ChatMessagesApplied += Host.ChatEvents.LastAppliedMessageCount;
             }
 
             ClientMovementStateReceiveResult ownerResult = Host.Movement.LastReceiveResult;
@@ -1458,6 +1534,47 @@ internal sealed class MovementRampHarness : IRampHarness
             _observerEvents[slot] = observerEvent;
         }
 
+        public void ApplyChatMessage()
+        {
+        }
+
+        public void TrySendChat(uint clientTick, HarnessArgs options)
+        {
+            if (TryBuildChatMessage(clientTick, options, out string text))
+                Host.TrySendChat(text);
+        }
+
+        public bool TryBuildChatMessage(uint clientTick, HarnessArgs options, out string text)
+        {
+            if (_nextChatTick == 0)
+                _nextChatTick = clientTick + SampleChatDelayTicks(options, unchecked((uint)ClientIndex));
+            if (clientTick < _nextChatTick)
+            {
+                text = string.Empty;
+                return false;
+            }
+
+            text = $"hello from bot {ClientIndex} #{_chatSequence}";
+            ChatMessagesSubmitted++;
+            _chatSequence++;
+            _nextChatTick = clientTick + SampleChatDelayTicks(options, unchecked((uint)(ClientIndex * 397) ^ _chatSequence));
+            return true;
+        }
+
+        private static uint SampleChatDelayTicks(HarnessArgs options, uint salt)
+        {
+            int minTicks = Math.Max(1, (int)Math.Round(options.ChatMinIntervalSeconds * options.TickHz, MidpointRounding.AwayFromZero));
+            int maxTicks = Math.Max(minTicks, (int)Math.Round(options.ChatMaxIntervalSeconds * options.TickHz, MidpointRounding.AwayFromZero));
+            uint range = checked((uint)(maxTicks - minTicks + 1));
+            uint value = salt ^ 0x9E37_79B9u;
+            value ^= value >> 16;
+            value *= 0x7FEB_352Du;
+            value ^= value >> 15;
+            value *= 0x846C_A68Bu;
+            value ^= value >> 16;
+            return checked((uint)minTicks) + (value % range);
+        }
+
         private static float SampleSignedJitter(int clientIndex, uint step, int axisSalt, float magnitude)
         {
             if (magnitude <= 0f)
@@ -1533,6 +1650,10 @@ internal sealed class MovementRampHarness : IRampHarness
         public OutboundDatagram[] Output { get; set; }
     }
 
+    private readonly record struct PendingChatSubmission(
+        int ClientIndex,
+        string Text);
+
     private int CountObserverStateItems()
     {
         int total = 0;
@@ -1572,6 +1693,10 @@ internal sealed class HarnessArgs
     public bool AsyncClientReceive { get; set; }
     public bool TransportPollProfiling { get; set; }
     public bool RealtimePacing { get; set; }
+    public bool ChatEnabled { get; set; }
+    public double ChatActiveRatio { get; set; } = 1.0;
+    public double ChatMinIntervalSeconds { get; set; } = 2.0;
+    public double ChatMaxIntervalSeconds { get; set; } = 5.0;
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1631,6 +1756,10 @@ internal sealed class HarnessArgs
             else if (arg == "--enable-transport-poll-profiling") options.TransportPollProfiling = true;
             else if (arg == "--disable-realtime-pacing") options.RealtimePacing = false;
             else if (arg == "--enable-realtime-pacing") options.RealtimePacing = true;
+            else if (arg == "--chat-enabled") options.ChatEnabled = true;
+            else if (arg == "--chat-active-ratio") options.ChatActiveRatio = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--chat-min-interval-s") options.ChatMinIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--chat-max-interval-s") options.ChatMaxIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1646,6 +1775,9 @@ internal sealed class HarnessArgs
 
         options.TickHz = Math.Max(1, options.TickHz);
         options.ActiveRatio = Math.Clamp(options.ActiveRatio, 0d, 1d);
+        options.ChatActiveRatio = Math.Clamp(options.ChatActiveRatio, 0d, 1d);
+        options.ChatMinIntervalSeconds = Math.Max(0.001d, options.ChatMinIntervalSeconds);
+        options.ChatMaxIntervalSeconds = Math.Max(options.ChatMinIntervalSeconds, options.ChatMaxIntervalSeconds);
         options.ObserverBulkEveryTicks = Math.Max(1, options.ObserverBulkEveryTicks);
         options.ObserverEventEveryTicks = Math.Max(1, options.ObserverEventEveryTicks);
         if (options.AoiRadiiMeters.Length == 0)
@@ -1721,6 +1853,10 @@ internal sealed class HarnessArgs
             ["async_client_receive"] = AsyncClientReceive,
             ["transport_poll_profiling"] = TransportPollProfiling,
             ["realtime_pacing"] = RealtimePacing,
+            ["chat_enabled"] = ChatEnabled,
+            ["chat_active_ratio"] = ChatActiveRatio,
+            ["chat_min_interval_seconds"] = ChatMinIntervalSeconds,
+            ["chat_max_interval_seconds"] = ChatMaxIntervalSeconds,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
@@ -1946,6 +2082,9 @@ internal readonly record struct StageResult(
     long ObserverFramesApplied,
     long ObserverEventsReceived,
     long ObserverEventsApplied,
+    long ChatMessagesSubmitted,
+    long ChatMessagesReceived,
+    long ChatMessagesApplied,
     long OwnerCorrectionSamples,
     double OwnerCorrectionAveragePositionError,
     double OwnerCorrectionMaxPositionError,
@@ -2126,6 +2265,9 @@ internal readonly record struct StageResult(
             ["observer_frames_applied"] = ObserverFramesApplied,
             ["observer_events_received"] = ObserverEventsReceived,
             ["observer_events_applied"] = ObserverEventsApplied,
+            ["chat_messages_submitted"] = ChatMessagesSubmitted,
+            ["chat_messages_received"] = ChatMessagesReceived,
+            ["chat_messages_applied"] = ChatMessagesApplied,
             ["owner_correction_samples"] = OwnerCorrectionSamples,
             ["owner_correction_avg_position_error"] = Math.Round(OwnerCorrectionAveragePositionError, 6),
             ["owner_correction_max_position_error"] = Math.Round(OwnerCorrectionMaxPositionError, 6),

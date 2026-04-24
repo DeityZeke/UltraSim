@@ -19,6 +19,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
         Run(nameof(ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull), ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull);
+        Run(nameof(ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes), ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes);
@@ -355,6 +356,39 @@ internal static class TestRunner
         Assert.Equal(3, processed);
         Assert.Equal(1, bridge.BufferedEventCount);
         Assert.Equal(1L, bridge.DroppedBufferedEventCount);
+    }
+
+    private static void ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply()
+    {
+        ChatMessageEventPacket? applied = null;
+        int genericApplyCount = 0;
+        var chat = new ClientChatEventBridge(packet => applied = packet);
+        var bridge = ClientObserverEventBridge.CreateSpanFastPath(
+            new ConnectionId(9),
+            (_, _) => genericApplyCount++);
+        bridge.ChatEvents = chat;
+
+        ImmutablePayloadBuffer chatPayload = PacketCodec.Encode(new ChatMessageEventPacket(
+            MessageId: 7,
+            ChannelId: 1,
+            SenderEntityId: 22,
+            SenderName: "Player 9",
+            Text: "hello",
+            ServerTick: 123,
+            Flags: ChatMessageFlags.Local | ChatMessageFlags.Overhead));
+        ImmutablePayloadBuffer frame = PacketCodec.Encode(new ReliableEventFramePacket(10, chatPayload));
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, frame.Memory),
+        ];
+
+        Assert.Equal(1, bridge.ProcessInbound(inbound));
+        Assert.Equal(1, chat.LastReceivedMessageCount);
+        Assert.Equal(1, chat.LastAppliedMessageCount);
+        Assert.Equal(7UL, chat.LastMessageId);
+        Assert.True(applied.HasValue);
+        Assert.Equal("hello", applied.GetValueOrDefault().Text);
+        Assert.Equal(0, genericApplyCount);
     }
 
     private static void ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents()

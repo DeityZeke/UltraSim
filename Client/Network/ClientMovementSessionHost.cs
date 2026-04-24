@@ -14,6 +14,7 @@ public sealed class ClientMovementSessionHost
     private readonly ClientMovementNetworkBridge _movement;
     private readonly ClientObserverStateBridge? _observerState;
     private readonly ClientObserverEventBridge? _observerEvents;
+    private readonly ClientChatEventBridge? _chatEvents;
     private readonly InboundDatagram[] _inboundScratch;
     private SessionId _sessionId;
 
@@ -26,6 +27,7 @@ public sealed class ClientMovementSessionHost
         ClientInterpolationBuffer<ClientMovementState>? interpolation = null,
         ClientObserverStateBridge? observerState = null,
         ClientObserverEventBridge? observerEvents = null,
+        ClientChatEventBridge? chatEvents = null,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
@@ -35,7 +37,12 @@ public sealed class ClientMovementSessionHost
         _control = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, transport, clientHello: clientHello);
         _movement = new ClientMovementNetworkBridge(transport, connectionId, sequencer, predictionStore, interpolation);
         _observerState = observerState;
-        _observerEvents = observerEvents;
+        _observerEvents = observerEvents ?? (chatEvents is null
+            ? null
+            : ClientObserverEventBridge.CreateSpanFastPath(connectionId, (_, payload) => chatEvents.TryProcessEventPayload(payload)));
+        if (_observerEvents is not null && chatEvents is not null)
+            _observerEvents.ChatEvents = chatEvents;
+        _chatEvents = chatEvents;
         _inboundScratch = new InboundDatagram[maxPollBatch];
     }
 
@@ -44,6 +51,7 @@ public sealed class ClientMovementSessionHost
     public ClientMovementNetworkBridge Movement => _movement;
     public ClientObserverStateBridge? ObserverState => _observerState;
     public ClientObserverEventBridge? ObserverEvents => _observerEvents;
+    public ClientChatEventBridge? ChatEvents => _chatEvents;
     public ClientPumpProfileSnapshot LastPumpProfile { get; private set; }
     public SessionId SessionId => _sessionId;
     public bool IsRunning => _transport.IsRunning;
@@ -95,6 +103,7 @@ public sealed class ClientMovementSessionHost
         StateBaselineDescriptor? completedBaseline = null;
         _observerState?.BeginPump();
         _observerEvents?.BeginPump();
+        _chatEvents?.BeginPump();
 
         while (true)
         {
@@ -236,5 +245,20 @@ public sealed class ClientMovementSessionHost
         if (sent)
             _transport.FlushOutbound();
         return sent;
+    }
+
+    public bool TrySendChat(string text)
+    {
+        if (!IsReady)
+            return false;
+
+        _transport.EnqueueOutbound(new OutboundDatagram(
+            ConnectionId,
+            ChatSubmitPacket.Plane,
+            ChatSubmitPacket.PacketClass,
+            ChatSubmitPacket.Channel,
+            PacketCodec.Encode(new ChatSubmitPacket(text))));
+        _transport.FlushOutbound();
+        return true;
     }
 }

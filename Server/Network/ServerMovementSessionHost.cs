@@ -17,12 +17,14 @@ public sealed class ServerMovementSessionHost
     private readonly ServerEcsWorldNetworkPublisher _worldPublisher;
     private readonly ConnectionSubscriptionRegistry _subscriptions;
     private readonly ServerNetworkSessionRuntime _sessionRuntime;
+    private readonly ServerChatService _chat;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly InboundDatagram[] _inboundScratch;
     private readonly ControlPlaneEvent[] _controlEvents;
     private readonly SessionLifecycleEvent[] _sessionEvents;
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
+    private readonly Dictionary<ConnectionId, uint> _networkEntityIdByConnection = new();
 
     public ServerMovementSessionHost(
         World world,
@@ -61,6 +63,8 @@ public sealed class ServerMovementSessionHost
             _subscriptions,
             new ReliableEventReplayBuffer(capacityPerConnection: runtimeOptions.ReplayBufferCapacityPerConnection),
             runtimeOptions);
+        _chat = new ServerChatService(orderedEvents);
+        ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _inboundScratch = new InboundDatagram[maxPollBatch];
@@ -73,6 +77,7 @@ public sealed class ServerMovementSessionHost
     public ServerEcsWorldNetworkPublisher WorldPublisher => _worldPublisher;
     public ConnectionSubscriptionRegistry Subscriptions => _subscriptions;
     public ServerNetworkSessionRuntime SessionRuntime => _sessionRuntime;
+    public ServerChatService Chat => _chat;
     public ReliableEventAckTracker ReliableEventAcks => _sessionRuntime.ReliableEventAcks;
     public StateBaselineAckTracker StateBaselineAcks => _sessionRuntime.BaselineAcks;
     public ServerPumpProfileSnapshot LastPumpProfile { get; private set; }
@@ -169,6 +174,8 @@ public sealed class ServerMovementSessionHost
             long runtimeInboundStart = Stopwatch.GetTimestamp();
             _sessionRuntime.ProcessInbound(inbound);
             runtimeInboundElapsedTicks += Stopwatch.GetTimestamp() - runtimeInboundStart;
+
+            ProcessChatInbound(inbound, nowTicks, serverTick);
 
             long movementInboundStart = Stopwatch.GetTimestamp();
             _movement.ProcessInbound(inbound);
@@ -273,7 +280,9 @@ public sealed class ServerMovementSessionHost
                 ServerMovementSessionSpawn spawn = _spawnSession(_world, evt.ConnectionId);
                 _movement.Bind(evt.ConnectionId, spawn.Entity, spawn.NetworkEntityId);
                 _sessionRuntime.BindConnection(evt.ConnectionId);
+                _subscriptions.Subscribe(evt.ConnectionId, ServerChatScopes.System);
                 _entityByConnection[evt.ConnectionId] = spawn.Entity;
+                _networkEntityIdByConnection[evt.ConnectionId] = spawn.NetworkEntityId;
             }
         }
     }
@@ -302,10 +311,48 @@ public sealed class ServerMovementSessionHost
                 _sessionRuntime.UnbindConnection(evt.ConnectionId);
                 _subscriptions.RemoveConnection(evt.ConnectionId);
                 _entityByConnection.Remove(evt.ConnectionId);
+                _networkEntityIdByConnection.Remove(evt.ConnectionId);
                 _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
                 if (_despawnSession is null && _world.Entities.IsAlive(entity))
                     _world.Destroy(entity);
             }
+        }
+    }
+
+    private void ProcessChatInbound(ReadOnlySpan<InboundDatagram> inbound, long nowTicks, uint serverTick)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            ref readonly InboundDatagram datagram = ref inbound[i];
+            if (datagram.PacketId != ChatSubmitPacket.PacketId ||
+                datagram.Plane != ChatSubmitPacket.Plane ||
+                datagram.PacketClass != ChatSubmitPacket.PacketClass)
+            {
+                continue;
+            }
+
+            if (!_control.Sessions.TryGetSessionIdByConnection(datagram.ConnectionId, out SessionId sessionId) ||
+                !_control.Sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot) ||
+                snapshot.State != ConnectionSessionState.Ready)
+            {
+                continue;
+            }
+
+            var reader = new UltraSim.Network.BitReader(datagram.EnvelopePayloadSpan);
+            ChatSubmitPacket packet = ChatSubmitPacket.Deserialize(ref reader);
+            _networkEntityIdByConnection.TryGetValue(datagram.ConnectionId, out uint networkEntityId);
+            var sender = new ServerChatSenderContext(
+                sessionId.Value,
+                datagram.ConnectionId.Value,
+                networkEntityId,
+                $"Player {datagram.ConnectionId.Value}");
+
+            _chat.TryHandleSubmit(
+                sender,
+                packet.Text,
+                ServerChatScopes.System,
+                nowTicks,
+                serverTick);
         }
     }
 

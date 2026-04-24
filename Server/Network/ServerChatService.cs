@@ -168,7 +168,9 @@ public sealed class ServerChatService
             serverTick,
             flags);
 
-        _orderedEvents.Publish(scope, PacketClass.ReliableEvent, PacketCodec.EncodePayload(packet));
+        // Reliable-event payloads are shared by gameplay events and chat, so chat keeps
+        // its own packet envelope inside the ordered-event body for client-side routing.
+        _orderedEvents.Publish(scope, PacketClass.ReliableEvent, PacketCodec.Encode(packet));
         PublishedMessages++;
         return true;
     }

@@ -500,7 +500,9 @@ internal static class TestRunner
         Assert.Equal(1, drain.Count);
         Assert.Equal(ServerChatScopes.System, entries[0].ScopeKey);
 
-        var reader = new UltraSim.Network.BitReader(entries[0].Payload.Span);
+        Assert.True(PacketCodec.TryDecodeEnvelope(entries[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(ChatMessageEventPacket.PacketId, header.PacketId);
+        var reader = new UltraSim.Network.BitReader(payload);
         ChatMessageEventPacket packet = ChatMessageEventPacket.Deserialize(ref reader);
         Assert.Equal(ServerChatChannelIds.System, packet.ChannelId);
         Assert.Equal("Maintenance in 10 minutes", packet.Text);
