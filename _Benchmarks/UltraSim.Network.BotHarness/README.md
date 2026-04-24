@@ -56,6 +56,8 @@ Useful options:
 - `--disable-async-server-flush`
 - `--enable-async-client-receive`
 - `--disable-async-client-receive`
+- `--enable-transport-poll-profiling`
+- `--disable-transport-poll-profiling`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`

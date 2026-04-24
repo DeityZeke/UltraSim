@@ -10,4 +10,5 @@ public sealed record UdpSocketNetworkTransportOptions(
     bool AllowDynamicConnections = true,
     int MaxDatagramBytes = 2048,
     bool EnableAsyncFlush = false,
-    bool EnableAsyncReceive = false);
+    bool EnableAsyncReceive = false,
+    bool EnablePollProfiling = false);

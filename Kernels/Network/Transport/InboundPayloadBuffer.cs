@@ -64,6 +64,7 @@ public sealed class InboundPayloadBuffer : IDisposable
     private readonly ReadOnlyMemory<byte> _memory;
     private PooledLease? _pooledLease;
     private ImmutablePayloadBuffer? _retainedPayload;
+    private int _disposeState;
 
     private InboundPayloadBuffer(ReadOnlyMemory<byte> memory, PooledLease? pooledLease, ImmutablePayloadBuffer? retainedPayload = null)
     {
@@ -160,11 +161,17 @@ public sealed class InboundPayloadBuffer : IDisposable
         _pooledLease.ReleaseRefs(count);
     }
 
+    internal void ReleaseRetainedSlice()
+    {
+        _pooledLease?.Release();
+    }
+
     public void Dispose()
     {
-        PooledLease? pooledLease = Interlocked.Exchange(ref _pooledLease, null);
-        pooledLease?.Release();
-        ImmutablePayloadBuffer? retainedPayload = Interlocked.Exchange(ref _retainedPayload, null);
-        retainedPayload?.Release();
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
+            return;
+
+        _pooledLease?.Release();
+        _retainedPayload?.Release();
     }
 }

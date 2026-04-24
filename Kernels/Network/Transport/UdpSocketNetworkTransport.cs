@@ -193,6 +193,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             return count;
         }
 
+        bool profilePoll = _options.EnablePollProfiling;
         long socketReceiveTicks = 0;
         long bundleUnpackTicks = 0;
         long bundleIndexTicks = 0;
@@ -209,9 +210,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             byte[] rentedReceiveBuffer = ArrayPool<byte>.Shared.Rent(_options.MaxDatagramBytes);
             try
             {
-                long receiveStart = Stopwatch.GetTimestamp();
+                long receiveStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
                 received = socket.ReceiveFrom(rentedReceiveBuffer, 0, _options.MaxDatagramBytes, SocketFlags.None, ref remote);
-                socketReceiveTicks += Stopwatch.GetTimestamp() - receiveStart;
+                if (profilePoll)
+                    socketReceiveTicks += Stopwatch.GetTimestamp() - receiveStart;
             }
             catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.IOPending or SocketError.NoBufferSpaceAvailable)
             {
@@ -240,30 +242,58 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             ReadOnlySpan<byte> datagramPayload = wirePayload.Span;
             if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> offsets, out ReadOnlySpan<byte> payloads))
             {
-                long bundleStart = Stopwatch.GetTimestamp();
+                long bundleStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
                 wirePayload.AddRefs(entryCount);
                 int createdSlices = 0;
                 for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
                 {
-                    long entryIndexStart = Stopwatch.GetTimestamp();
+                    long entryIndexStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
                     int currentStart = BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice(entryIndex * sizeof(ushort)));
                     int nextStart = entryIndex + 1 < entryCount
                         ? BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice((entryIndex + 1) * sizeof(ushort)))
                         : payloads.Length;
-                    bundleIndexTicks += Stopwatch.GetTimestamp() - entryIndexStart;
+                    if (profilePoll)
+                        bundleIndexTicks += Stopwatch.GetTimestamp() - entryIndexStart;
                     if ((uint)currentStart > (uint)payloads.Length || (uint)nextStart > (uint)payloads.Length || nextStart < currentStart)
                         break;
 
                     int entryLength = nextStart - currentStart;
-                    long materializeStart = Stopwatch.GetTimestamp();
+                    long materializeStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
+                    int absoluteOffset = datagramPayload.Length - payloads.Length + currentStart;
+                    if (count < destination.Length)
+                    {
+                        ReadOnlySpan<byte> entryPayloadSpan = payloads.Slice(currentStart, entryLength);
+                        if (TryDecodeInboundMetadata(entryPayloadSpan, out PacketEnvelopeHeader header, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel, ref envelopeParseTicks))
+                        {
+                            long sliceStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
+                            ReadOnlyMemory<byte> entryPayloadMemory = wirePayload.Memory.Slice(absoluteOffset, entryLength);
+                            if (profilePoll)
+                                bundleSliceTicks += Stopwatch.GetTimestamp() - sliceStart;
+                            if (entryLength > 0)
+                                createdSlices++;
+                            long createStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
+                            InboundDatagram inbound = new(connectionId, plane, packetClass, channel, header, wirePayload, entryPayloadMemory);
+                            if (profilePoll)
+                                bundleDatagramCreateTicks += Stopwatch.GetTimestamp() - createStart;
+                            long enqueueStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
+                            destination[count++] = inbound;
+                            if (profilePoll)
+                                bundleEnqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
+                        }
+                        if (profilePoll)
+                            bundleMaterializeTicks += Stopwatch.GetTimestamp() - materializeStart;
+                        continue;
+                    }
+
                     try
                     {
-                        long sliceStart = Stopwatch.GetTimestamp();
+                        long sliceStart = profilePoll ? Stopwatch.GetTimestamp() : 0;
                         InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.SliceRetained(
                             wirePayload,
-                            datagramPayload.Length - payloads.Length + currentStart,
+                            absoluteOffset,
                             entryLength);
-                        bundleSliceTicks += Stopwatch.GetTimestamp() - sliceStart;
+                        if (profilePoll)
+                            bundleSliceTicks += Stopwatch.GetTimestamp() - sliceStart;
                         if (entryLength > 0)
                             createdSlices++;
                         TryQueueInbound(
@@ -275,7 +305,8 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                             ref payloadCopyTicks,
                             ref bundleDatagramCreateTicks,
                             ref bundleEnqueueTicks);
-                        bundleMaterializeTicks += Stopwatch.GetTimestamp() - materializeStart;
+                        if (profilePoll)
+                            bundleMaterializeTicks += Stopwatch.GetTimestamp() - materializeStart;
                     }
                     catch
                     {
@@ -290,7 +321,8 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 if (unusedSliceRefs > 0)
                     wirePayload.ReleaseRefs(unusedSliceRefs);
                 wirePayload.Dispose();
-                bundleUnpackTicks += Stopwatch.GetTimestamp() - bundleStart;
+                if (profilePoll)
+                    bundleUnpackTicks += Stopwatch.GetTimestamp() - bundleStart;
                 continue;
             }
 
@@ -642,16 +674,18 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks, ref datagramCreateTicks))
             return;
 
-        long enqueueStart = Stopwatch.GetTimestamp();
+        long enqueueStart = _options.EnablePollProfiling ? Stopwatch.GetTimestamp() : 0;
         if (count < destination.Length)
         {
             destination[count++] = inbound;
-            enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
+            if (_options.EnablePollProfiling)
+                enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
             return;
         }
 
         QueuePendingInbound(inbound);
-        enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
+        if (_options.EnablePollProfiling)
+            enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
     }
 
     private bool TryQueueInboundPending(
@@ -679,9 +713,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks, ref datagramCreateTicks))
             return false;
 
-        long enqueueStart = Stopwatch.GetTimestamp();
+        long enqueueStart = _options.EnablePollProfiling ? Stopwatch.GetTimestamp() : 0;
         QueuePendingInbound(inbound);
-        enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
+        if (_options.EnablePollProfiling)
+            enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
         return true;
     }
 
@@ -709,9 +744,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             return false;
         }
 
-        long createStart = Stopwatch.GetTimestamp();
+        long createStart = _options.EnablePollProfiling ? Stopwatch.GetTimestamp() : 0;
         inbound = new InboundDatagram(connectionId, plane, packetClass, channel, header, payloadBuffer);
-        datagramCreateTicks += Stopwatch.GetTimestamp() - createStart;
+        if (_options.EnablePollProfiling)
+            datagramCreateTicks += Stopwatch.GetTimestamp() - createStart;
         return true;
     }
 
@@ -723,10 +759,11 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         out ChannelType channel,
         ref long envelopeParseTicks)
     {
-        long parseStart = Stopwatch.GetTimestamp();
+        long parseStart = _options.EnablePollProfiling ? Stopwatch.GetTimestamp() : 0;
         if (!PacketCodec.TryDecodeEnvelope(payload, out header, out _))
         {
-            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+            if (_options.EnablePollProfiling)
+                envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
             plane = default;
             packetClass = default;
             channel = default;
@@ -735,11 +772,13 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         if (!_packetMetadata.TryGet(header.PacketId, out plane, out packetClass, out channel))
         {
-            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+            if (_options.EnablePollProfiling)
+                envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
             return false;
         }
 
-        envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
+        if (_options.EnablePollProfiling)
+            envelopeParseTicks += Stopwatch.GetTimestamp() - parseStart;
         return true;
     }
 

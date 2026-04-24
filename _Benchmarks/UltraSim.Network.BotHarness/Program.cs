@@ -119,7 +119,8 @@ internal sealed class MovementRampHarness : IDisposable
         _serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
             new IPEndPoint(IPAddress.Loopback, options.Port),
             _metadata,
-            EnableAsyncFlush: options.AsyncServerFlush));
+            EnableAsyncFlush: options.AsyncServerFlush,
+            EnablePollProfiling: options.TransportPollProfiling));
         _serverTransport.Start();
 
         var builder = new EcsSchemaBuilder();
@@ -628,7 +629,8 @@ internal sealed class MovementRampHarness : IDisposable
                 serverEndPoint,
                 new ConnectionId(1),
                 AllowDynamicConnections: false,
-                EnableAsyncReceive: _options.AsyncClientReceive));
+                EnableAsyncReceive: _options.AsyncClientReceive,
+                EnablePollProfiling: _options.TransportPollProfiling));
             transport.Start();
 
             ClientHandle? handle = null;
@@ -1313,6 +1315,7 @@ internal sealed class HarnessArgs
     public bool LatestStateRecipientPhasing { get; set; }
     public bool AsyncServerFlush { get; set; } = true;
     public bool AsyncClientReceive { get; set; }
+    public bool TransportPollProfiling { get; set; }
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1363,6 +1366,8 @@ internal sealed class HarnessArgs
             else if (arg == "--enable-async-server-flush") options.AsyncServerFlush = true;
             else if (arg == "--disable-async-client-receive") options.AsyncClientReceive = false;
             else if (arg == "--enable-async-client-receive") options.AsyncClientReceive = true;
+            else if (arg == "--disable-transport-poll-profiling") options.TransportPollProfiling = false;
+            else if (arg == "--enable-transport-poll-profiling") options.TransportPollProfiling = true;
             else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1446,6 +1451,7 @@ internal sealed class HarnessArgs
             ["latest_state_recipient_phasing"] = LatestStateRecipientPhasing,
             ["async_server_flush"] = AsyncServerFlush,
             ["async_client_receive"] = AsyncClientReceive,
+            ["transport_poll_profiling"] = TransportPollProfiling,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
