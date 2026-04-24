@@ -30,6 +30,10 @@ dotnet build .\_Benchmarks\UltraSim.Network.BotHarness\UltraSim.Network.BotHarne
 dotnet .\_Benchmarks\UltraSim.Network.BotHarness\bin\Release\net8.0\UltraSim.Network.BotHarness.dll --stages 32,64,128,256 --stage-duration 30 --settle-seconds 3 --tick-hz 62
 ```
 
+Useful runtime-capacity flags:
+- `--ordered-event-capacity 1024`
+- `--replay-buffer-capacity 256`
+
 Reports are written to `_Benchmarks/results/network_bot_harness_*.json`.
 
 Useful options:

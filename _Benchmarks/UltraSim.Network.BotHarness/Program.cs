@@ -27,7 +27,9 @@ internal static class HarnessProgram
         string stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture);
         string jsonPath = Path.Combine(reportDir, $"network_bot_harness_{stamp}.json");
 
-        Console.WriteLine($"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}  AoiRadii: {string.Join(",", options.AoiRadiiMeters)}");
+        Console.WriteLine(
+            $"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}  " +
+            $"AoiRadii: {string.Join(",", options.AoiRadiiMeters)}  EventCap: {options.OrderedEventCapacity}  ReplayCap: {options.ReplayBufferCapacityPerConnection}");
         Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMax    GC(0/1/2)  TickSLO  PingSLO");
         Console.WriteLine("--------------------------------------------------------------------------------------------------------------------------------");
 
@@ -141,6 +143,15 @@ internal sealed class MovementRampHarness : IDisposable
             ProjectMovementState,
             SpawnSession,
             handshakePolicy: handshakePolicy,
+            runtimeOptions: new ServerNetworkSessionRuntimeOptions(
+                MaxConnections: ServerNetworkSessionRuntimeOptions.Default.MaxConnections,
+                MaxSnapshotItems: ServerNetworkSessionRuntimeOptions.Default.MaxSnapshotItems,
+                MaxScheduledItems: ServerNetworkSessionRuntimeOptions.Default.MaxScheduledItems,
+                MaxReplayItems: ServerNetworkSessionRuntimeOptions.Default.MaxReplayItems,
+                MaxDatagrams: ServerNetworkSessionRuntimeOptions.Default.MaxDatagrams,
+                OrderedEventCapacity: options.OrderedEventCapacity,
+                ReplayBufferCapacityPerConnection: options.ReplayBufferCapacityPerConnection,
+                RetransmitPolicy: ServerNetworkSessionRuntimeOptions.Default.RetransmitPolicy),
             ownerCorrectionPolicy: new ServerMovementOwnerCorrectionPolicy(
                 _options.OwnerCorrectionDeadband,
                 _options.OwnerCorrectionMaxSilentTicks));
@@ -1273,6 +1284,8 @@ internal sealed class HarnessArgs
     public int SpawnGridWidth { get; set; } = 32;
     public float[] AoiRadiiMeters { get; set; } = [7.5f];
     public int[] RingCadenceTicks { get; set; } = [1, 2, 3];
+    public int OrderedEventCapacity { get; set; } = ServerNetworkSessionRuntimeOptions.Default.OrderedEventCapacity;
+    public int ReplayBufferCapacityPerConnection { get; set; } = ServerNetworkSessionRuntimeOptions.Default.ReplayBufferCapacityPerConnection;
     public float OwnerCorrectionDeadband { get; set; } = 0f;
     public uint OwnerCorrectionMaxSilentTicks { get; set; } = 1;
     public float OwnerPredictionJitterPercent { get; set; } = 0f;
@@ -1321,6 +1334,8 @@ internal sealed class HarnessArgs
             else if (arg == "--spawn-grid-width") options.SpawnGridWidth = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--aoi-radii-m") options.AoiRadiiMeters = ParseFloatList(Next()!, nameof(AoiRadiiMeters));
             else if (arg == "--ring-cadence-ticks") options.RingCadenceTicks = ParseIntList(Next()!, nameof(RingCadenceTicks));
+            else if (arg == "--ordered-event-capacity") options.OrderedEventCapacity = int.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--replay-buffer-capacity") options.ReplayBufferCapacityPerConnection = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-deadband") options.OwnerCorrectionDeadband = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-max-silent-ticks") options.OwnerCorrectionMaxSilentTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-prediction-jitter-percent") options.OwnerPredictionJitterPercent = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1334,6 +1349,10 @@ internal sealed class HarnessArgs
             options.AoiRadiiMeters = [7.5f];
         if (options.RingCadenceTicks.Length == 0)
             options.RingCadenceTicks = [1, 2, 3];
+        if (options.OrderedEventCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(options.OrderedEventCapacity));
+        if (options.ReplayBufferCapacityPerConnection <= 0)
+            throw new ArgumentOutOfRangeException(nameof(options.ReplayBufferCapacityPerConnection));
         if (float.IsNaN(options.OwnerCorrectionDeadband) || float.IsInfinity(options.OwnerCorrectionDeadband) || options.OwnerCorrectionDeadband < 0f)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionDeadband));
         if (options.OwnerCorrectionMaxSilentTicks == 0)
@@ -1396,6 +1415,8 @@ internal sealed class HarnessArgs
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,
             ["ring_cadence_ticks"] = ringCadence,
+            ["ordered_event_capacity"] = OrderedEventCapacity,
+            ["replay_buffer_capacity"] = ReplayBufferCapacityPerConnection,
             ["owner_deadband"] = OwnerCorrectionDeadband,
             ["owner_max_silent_ticks"] = OwnerCorrectionMaxSilentTicks,
             ["owner_prediction_jitter_percent"] = OwnerPredictionJitterPercent,
