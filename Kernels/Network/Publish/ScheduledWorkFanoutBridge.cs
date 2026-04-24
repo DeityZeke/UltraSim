@@ -8,14 +8,16 @@ public sealed class ScheduledWorkFanoutBridge
         ConnectionSubscriptionRegistry subscriptions,
         OutboundDatagramAssembler? assembler = null,
         bool enableLatestStateBatching = false,
-        bool enableLatestStateRecipientPhasing = false)
+        bool enableLatestStateRecipientPhasing = false,
+        uint latestStateConnectionPhasingCadenceTicks = 1)
     {
         ArgumentNullException.ThrowIfNull(subscriptions);
         _dispatcher = new SubscriptionFanoutDispatcher(
             subscriptions,
             assembler ?? new OutboundDatagramAssembler(),
             enableLatestStateBatching,
-            enableLatestStateRecipientPhasing);
+            enableLatestStateRecipientPhasing,
+            latestStateConnectionPhasingCadenceTicks);
     }
 
     public ScheduledWorkFanoutResult Dispatch(

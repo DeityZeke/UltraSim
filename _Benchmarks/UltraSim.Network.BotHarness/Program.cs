@@ -181,7 +181,8 @@ internal sealed class MovementRampHarness : IRampHarness
                     RetransmitPolicy: ServerNetworkSessionRuntimeOptions.Default.RetransmitPolicy),
                 ownerCorrectionPolicy: new ServerMovementOwnerCorrectionPolicy(
                     _options.OwnerCorrectionDeadband,
-                    _options.OwnerCorrectionMaxSilentTicks));
+                    _options.OwnerCorrectionMaxSilentTicks,
+                    _options.OwnerCorrectionPhaseCadenceTicks));
             _serverHost.Start();
         }
     }
@@ -276,6 +277,7 @@ internal sealed class MovementRampHarness : IRampHarness
         long chatMessagesSubmitted = 0;
         long chatMessagesReceived = 0;
         long chatMessagesApplied = 0;
+        long ownerCorrectionSent = 0;
         long ownerCorrectionSamples = 0;
         double ownerCorrectionPositionErrorSum = 0d;
         double ownerCorrectionPositionErrorMax = 0d;
@@ -337,6 +339,7 @@ internal sealed class MovementRampHarness : IRampHarness
                 serverControlFlushAsyncHandoffWaitSamplesMs.Add(serverProfile.ControlFlushAsyncHandoffWaitElapsedTicks * 1000.0 / Stopwatch.Frequency);
                 serverControlFlushAsyncPendingSamples.Add(serverProfile.ControlFlushAsyncPendingBatchCount);
                 serverControlFlushWireDatagramSamples.Add(serverProfile.ControlFlushWireDatagramCount);
+                ownerCorrectionSent += _serverHost.Movement.LastSentStateCount;
             }
             else
             {
@@ -810,6 +813,7 @@ internal sealed class MovementRampHarness : IRampHarness
             ChatMessagesSubmitted: chatMessagesSubmitted,
             ChatMessagesReceived: chatMessagesReceived,
             ChatMessagesApplied: chatMessagesApplied,
+            OwnerCorrectionSent: ownerCorrectionSent,
             OwnerCorrectionSamples: ownerCorrectionSamples,
             OwnerCorrectionAveragePositionError: ownerCorrectionSamples == 0 ? 0d : ownerCorrectionPositionErrorSum / ownerCorrectionSamples,
             OwnerCorrectionMaxPositionError: ownerCorrectionPositionErrorMax,
@@ -1006,7 +1010,8 @@ internal sealed class MovementRampHarness : IRampHarness
         var fanout = new ScheduledWorkFanoutBridge(
             subscriptions,
             enableLatestStateBatching: _options.LatestStateBatching,
-            enableLatestStateRecipientPhasing: _options.LatestStateRecipientPhasing);
+            enableLatestStateRecipientPhasing: _options.LatestStateRecipientPhasing,
+            latestStateConnectionPhasingCadenceTicks: checked((uint)_options.LatestStateConnectionPhasingCadenceTicks));
         return new StageReplicationContext(
             new ServerEcsChunkAoiScopeClassifier(policy),
             new ChunkAoiSubscriptionMaintainer(policy),
@@ -1690,6 +1695,7 @@ internal sealed class HarnessArgs
     public bool ObserverEventsSuppressPublish { get; set; }
     public bool LatestStateBatching { get; set; }
     public bool LatestStateRecipientPhasing { get; set; }
+    public int LatestStateConnectionPhasingCadenceTicks { get; set; } = 1;
     public bool AsyncServerFlush { get; set; } = true;
     public bool AsyncClientReceive { get; set; }
     public bool TransportPollProfiling { get; set; }
@@ -1708,6 +1714,7 @@ internal sealed class HarnessArgs
     public int ReplayBufferCapacityPerConnection { get; set; } = ServerNetworkSessionRuntimeOptions.Default.ReplayBufferCapacityPerConnection;
     public float OwnerCorrectionDeadband { get; set; } = 0f;
     public uint OwnerCorrectionMaxSilentTicks { get; set; } = 1;
+    public uint OwnerCorrectionPhaseCadenceTicks { get; set; } = 1;
     public float OwnerPredictionJitterPercent { get; set; } = 0f;
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
@@ -1749,6 +1756,7 @@ internal sealed class HarnessArgs
             else if (arg == "--enable-latest-state-batching") options.LatestStateBatching = true;
             else if (arg == "--disable-latest-state-recipient-phasing") options.LatestStateRecipientPhasing = false;
             else if (arg == "--enable-latest-state-recipient-phasing") options.LatestStateRecipientPhasing = true;
+            else if (arg == "--latest-state-connection-phasing-cadence-ticks") options.LatestStateConnectionPhasingCadenceTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--disable-async-server-flush") options.AsyncServerFlush = false;
             else if (arg == "--enable-async-server-flush") options.AsyncServerFlush = true;
             else if (arg == "--disable-async-client-receive") options.AsyncClientReceive = false;
@@ -1771,11 +1779,13 @@ internal sealed class HarnessArgs
             else if (arg == "--replay-buffer-capacity") options.ReplayBufferCapacityPerConnection = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-deadband") options.OwnerCorrectionDeadband = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-max-silent-ticks") options.OwnerCorrectionMaxSilentTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--owner-phase-cadence-ticks") options.OwnerCorrectionPhaseCadenceTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-prediction-jitter-percent") options.OwnerPredictionJitterPercent = float.Parse(Next()!, CultureInfo.InvariantCulture);
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
         options.ActiveRatio = Math.Clamp(options.ActiveRatio, 0d, 1d);
+        options.LatestStateConnectionPhasingCadenceTicks = Math.Max(1, options.LatestStateConnectionPhasingCadenceTicks);
         options.ChatActiveRatio = Math.Clamp(options.ChatActiveRatio, 0d, 1d);
         options.ChatMinIntervalSeconds = Math.Max(0.001d, options.ChatMinIntervalSeconds);
         options.ChatMaxIntervalSeconds = Math.Max(options.ChatMinIntervalSeconds, options.ChatMaxIntervalSeconds);
@@ -1793,6 +1803,8 @@ internal sealed class HarnessArgs
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionDeadband));
         if (options.OwnerCorrectionMaxSilentTicks == 0)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionMaxSilentTicks));
+        if (options.OwnerCorrectionPhaseCadenceTicks == 0)
+            throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionPhaseCadenceTicks));
         if (float.IsNaN(options.OwnerPredictionJitterPercent) || float.IsInfinity(options.OwnerPredictionJitterPercent) || options.OwnerPredictionJitterPercent < 0f)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerPredictionJitterPercent));
         return options;
@@ -1850,6 +1862,7 @@ internal sealed class HarnessArgs
             ["observer_event_every_ticks"] = ObserverEventEveryTicks,
             ["latest_state_batching"] = LatestStateBatching,
             ["latest_state_recipient_phasing"] = LatestStateRecipientPhasing,
+            ["latest_state_connection_phasing_cadence_ticks"] = LatestStateConnectionPhasingCadenceTicks,
             ["async_server_flush"] = AsyncServerFlush,
             ["async_client_receive"] = AsyncClientReceive,
             ["transport_poll_profiling"] = TransportPollProfiling,
@@ -1866,6 +1879,7 @@ internal sealed class HarnessArgs
             ["replay_buffer_capacity"] = ReplayBufferCapacityPerConnection,
             ["owner_deadband"] = OwnerCorrectionDeadband,
             ["owner_max_silent_ticks"] = OwnerCorrectionMaxSilentTicks,
+            ["owner_phase_cadence_ticks"] = OwnerCorrectionPhaseCadenceTicks,
             ["owner_prediction_jitter_percent"] = OwnerPredictionJitterPercent,
         };
     }
@@ -2086,6 +2100,7 @@ internal readonly record struct StageResult(
     long ChatMessagesSubmitted,
     long ChatMessagesReceived,
     long ChatMessagesApplied,
+    long OwnerCorrectionSent,
     long OwnerCorrectionSamples,
     double OwnerCorrectionAveragePositionError,
     double OwnerCorrectionMaxPositionError,
@@ -2269,6 +2284,7 @@ internal readonly record struct StageResult(
             ["chat_messages_submitted"] = ChatMessagesSubmitted,
             ["chat_messages_received"] = ChatMessagesReceived,
             ["chat_messages_applied"] = ChatMessagesApplied,
+            ["owner_correction_sent"] = OwnerCorrectionSent,
             ["owner_correction_samples"] = OwnerCorrectionSamples,
             ["owner_correction_avg_position_error"] = Math.Round(OwnerCorrectionAveragePositionError, 6),
             ["owner_correction_max_position_error"] = Math.Round(OwnerCorrectionMaxPositionError, 6),

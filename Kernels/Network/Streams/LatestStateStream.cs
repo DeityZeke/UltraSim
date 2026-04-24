@@ -11,6 +11,7 @@ public sealed class LatestStateStream
         public SubscriptionKey ScopeKey;
         public PacketClass PacketClass;
         public uint DeliveryCadenceTicks;
+        public uint PublishTick;
         public ImmutablePayloadBuffer Payload = default!;
     }
 
@@ -43,7 +44,7 @@ public sealed class LatestStateStream
         lock (_sync)
         {
             ulong sequence = _nextSequence++;
-            PublishCore(itemKey, scopeKey, packetClass, payload, sequence, deliveryCadenceTicks);
+            PublishCore(itemKey, scopeKey, packetClass, payload, sequence, deliveryCadenceTicks, 0);
             return sequence;
         }
     }
@@ -66,7 +67,7 @@ public sealed class LatestStateStream
                 if (!scopeKey.IsValid)
                     throw new ArgumentOutOfRangeException(nameof(scopeKeys));
 
-                PublishCore(itemKey, scopeKey, packetClass, payload, sequence, 1);
+                PublishCore(itemKey, scopeKey, packetClass, payload, sequence, 1, 0);
             }
 
             return sequence;
@@ -93,7 +94,7 @@ public sealed class LatestStateStream
                 if (target.DeliveryCadenceTicks == 0)
                     throw new ArgumentOutOfRangeException(nameof(targets));
 
-                PublishCore(itemKey, target.ScopeKey, packetClass, payload, sequence, target.DeliveryCadenceTicks);
+                PublishCore(itemKey, target.ScopeKey, packetClass, payload, sequence, target.DeliveryCadenceTicks, target.PublishTick);
             }
 
             return sequence;
@@ -127,7 +128,7 @@ public sealed class LatestStateStream
             for (int i = 0; i < count; i++)
             {
                 Entry entry = _orderedSnapshot[start + i];
-                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload, entry.DeliveryCadenceTicks);
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload, entry.DeliveryCadenceTicks, entry.PublishTick);
                 lastSequence = entry.Sequence;
             }
 
@@ -150,7 +151,7 @@ public sealed class LatestStateStream
             for (int i = 0; i < count; i++)
             {
                 Entry entry = _orderedSnapshot[i];
-                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload, entry.DeliveryCadenceTicks);
+                destination[i] = new LatestStateUpdate(entry.ItemKey, entry.Sequence, entry.ScopeKey, entry.PacketClass, entry.Payload, entry.DeliveryCadenceTicks, entry.PublishTick);
             }
 
             return count;
@@ -181,14 +182,15 @@ public sealed class LatestStateStream
                     entry.ScopeKey,
                     entry.PacketClass,
                     entry.Payload,
-                    entry.DeliveryCadenceTicks);
+                    entry.DeliveryCadenceTicks,
+                    entry.PublishTick);
             }
 
             return count;
         }
     }
 
-    private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence, uint deliveryCadenceTicks)
+    private void PublishCore(ulong itemKey, SubscriptionKey scopeKey, PacketClass packetClass, ImmutablePayloadBuffer payload, ulong sequence, uint deliveryCadenceTicks, uint publishTick)
     {
         EntryKey key = new(itemKey, scopeKey);
         if (_entriesByKey.TryGetValue(key, out Entry? entry))
@@ -197,6 +199,7 @@ public sealed class LatestStateStream
             entry.ScopeKey = scopeKey;
             entry.PacketClass = packetClass;
             entry.DeliveryCadenceTicks = deliveryCadenceTicks;
+            entry.PublishTick = publishTick;
             entry.Payload = payload;
         }
         else
@@ -208,6 +211,7 @@ public sealed class LatestStateStream
                 ScopeKey = scopeKey,
                 PacketClass = packetClass,
                 DeliveryCadenceTicks = deliveryCadenceTicks,
+                PublishTick = publishTick,
                 Payload = payload,
             });
         }

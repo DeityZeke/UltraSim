@@ -7,7 +7,8 @@ public readonly record struct ScheduledWorkItem(
     ulong ItemKey,
     SubscriptionKey ScopeKey,
     ImmutablePayloadBuffer Payload,
-    uint DeliveryCadenceTicks = 1)
+    uint DeliveryCadenceTicks = 1,
+    uint PublishTick = 0)
 {
     public ScheduledWorkItem(
         ScheduledWorkKind kind,
@@ -16,7 +17,7 @@ public readonly record struct ScheduledWorkItem(
         ulong itemKey,
         SubscriptionKey scopeKey,
         ImmutablePayloadBuffer payload)
-        : this(kind, packetClass, sequence, itemKey, scopeKey, payload, 1)
+        : this(kind, packetClass, sequence, itemKey, scopeKey, payload, 1, 0)
     {
     }
 }

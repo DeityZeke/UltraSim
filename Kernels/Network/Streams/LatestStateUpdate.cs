@@ -6,7 +6,8 @@ public readonly record struct LatestStateUpdate(
     SubscriptionKey ScopeKey,
     PacketClass PacketClass,
     ImmutablePayloadBuffer Payload,
-    uint DeliveryCadenceTicks = 1)
+    uint DeliveryCadenceTicks = 1,
+    uint PublishTick = 0)
 {
     public LatestStateUpdate(
         ulong itemKey,
@@ -14,7 +15,7 @@ public readonly record struct LatestStateUpdate(
         SubscriptionKey scopeKey,
         PacketClass packetClass,
         ImmutablePayloadBuffer payload)
-        : this(itemKey, sequence, scopeKey, packetClass, payload, 1)
+        : this(itemKey, sequence, scopeKey, packetClass, payload, 1, 0)
     {
     }
 }

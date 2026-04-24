@@ -194,7 +194,8 @@ public sealed class ServerEcsWorldNetworkPublisher
 
                     _scopeTargetScratch.Add(new ScopedLatestStatePublishTarget(
                         scope.Key,
-                        rule.RecipientPhasing ? deliveryCadenceTicks : 1));
+                        rule.RecipientPhasing ? deliveryCadenceTicks : 1,
+                        publishTick));
                     published++;
                 }
 

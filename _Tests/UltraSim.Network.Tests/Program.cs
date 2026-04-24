@@ -68,6 +68,7 @@ internal static class TestRunner
         Run(nameof(SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers), SubscriptionFanoutDispatcher_DispatchesScopedFramesToSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers), SubscriptionFanoutDispatcher_DispatchScheduledWork_ToSubscribers);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateRecipientPhasing), SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateRecipientPhasing);
+        Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateConnectionPhasing), SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateConnectionPhasing);
         Run(nameof(SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems), SubscriptionFanoutDispatcher_DispatchScheduledWork_BatchesContiguousRealtimeLatestStateItems);
         Run(nameof(ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass), ScheduledWorkFanoutBridge_ProjectsAndDispatchesInOnePass);
         Run(nameof(ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork), ConnectionStreamFanoutBridge_SchedulesAndDispatchesScopedStreamWork);
@@ -2047,6 +2048,68 @@ internal static class TestRunner
             Assert.Equal((ulong)82, batch.Items[1].Sequence);
             Assert.Equal((ulong)811, batch.Items[1].ItemKey);
             Assert.True(batch.Items[1].Payload.Span.SequenceEqual(new byte[] { 9, 10 }));
+        }
+    }
+
+    private static void SubscriptionFanoutDispatcher_DispatchScheduledWork_AppliesLatestStateConnectionPhasing()
+    {
+        var registry = new ConnectionSubscriptionRegistry();
+        SubscriptionKey scopeKey = new(653);
+        const int subscriberCount = 16;
+        for (int i = 1; i <= subscriberCount; i++)
+            registry.Subscribe(new ConnectionId(i), scopeKey);
+
+        var dispatcher = new SubscriptionFanoutDispatcher(
+            registry,
+            new OutboundDatagramAssembler(),
+            latestStateConnectionPhasingCadenceTicks: 2);
+        var subscriberScratch = new ConnectionId[subscriberCount];
+        var tickZeroOutput = new OutboundDatagram[subscriberCount];
+        var tickOneOutput = new OutboundDatagram[subscriberCount];
+
+        ScheduledWorkItem[] tickZeroItems =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 91,
+                ItemKey: 910,
+                ScopeKey: scopeKey,
+                Payload: ImmutablePayloadBuffer.CopyFrom([9]),
+                PublishTick: 0)
+        ];
+        ScheduledWorkItem[] tickOneItems =
+        [
+            new(
+                ScheduledWorkKind.LatestState,
+                PacketClass.Realtime,
+                Sequence: 92,
+                ItemKey: 910,
+                ScopeKey: scopeKey,
+                Payload: ImmutablePayloadBuffer.CopyFrom([9]),
+                PublishTick: 1)
+        ];
+
+        SubscriptionFanoutDispatchResult tickZero = dispatcher.DispatchScheduledWork(tickZeroItems, subscriberScratch, tickZeroOutput);
+        SubscriptionFanoutDispatchResult tickOne = dispatcher.DispatchScheduledWork(tickOneItems, subscriberScratch, tickOneOutput);
+
+        Assert.True(tickZero.DatagramCount > 0);
+        Assert.True(tickZero.DatagramCount < subscriberCount);
+        Assert.True(tickOne.DatagramCount > 0);
+        Assert.True(tickOne.DatagramCount < subscriberCount);
+        Assert.Equal(subscriberCount, tickZero.DatagramCount + tickOne.DatagramCount);
+
+        var delivered = new HashSet<int>();
+        for (int i = 0; i < tickZero.DatagramCount; i++)
+        {
+            Assert.True(delivered.Add(tickZeroOutput[i].ConnectionId.Value));
+            tickZeroOutput[i].Dispose();
+        }
+
+        for (int i = 0; i < tickOne.DatagramCount; i++)
+        {
+            Assert.True(delivered.Add(tickOneOutput[i].ConnectionId.Value));
+            tickOneOutput[i].Dispose();
         }
     }
 

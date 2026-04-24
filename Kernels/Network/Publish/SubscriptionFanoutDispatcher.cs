@@ -8,17 +8,20 @@ public sealed class SubscriptionFanoutDispatcher
     private readonly OutboundDatagramAssembler _assembler;
     private readonly bool _enableLatestStateBatching;
     private readonly bool _enableLatestStateRecipientPhasing;
+    private readonly uint _latestStateConnectionPhasingCadenceTicks;
 
     public SubscriptionFanoutDispatcher(
         ConnectionSubscriptionRegistry subscriptions,
         OutboundDatagramAssembler assembler,
         bool enableLatestStateBatching = false,
-        bool enableLatestStateRecipientPhasing = false)
+        bool enableLatestStateRecipientPhasing = false,
+        uint latestStateConnectionPhasingCadenceTicks = 1)
     {
         _subscriptions = subscriptions ?? throw new ArgumentNullException(nameof(subscriptions));
         _assembler = assembler ?? throw new ArgumentNullException(nameof(assembler));
         _enableLatestStateBatching = enableLatestStateBatching;
         _enableLatestStateRecipientPhasing = enableLatestStateRecipientPhasing;
+        _latestStateConnectionPhasingCadenceTicks = Math.Max(1, latestStateConnectionPhasingCadenceTicks);
     }
 
     public SubscriptionFanoutDispatchResult Dispatch(
@@ -91,7 +94,7 @@ public sealed class SubscriptionFanoutDispatcher
                 throw new ArgumentOutOfRangeException(nameof(items));
 
             int subscriberCount = _subscriptions.CopySubscribers(scopeKey, subscriberScratch);
-            subscriberCount = ApplyLatestStateRecipientPhasing(item, subscriberScratch[..subscriberCount]);
+            subscriberCount = ApplyLatestStatePhasing(item, subscriberScratch[..subscriberCount]);
             if (subscriberCount == 0)
                 continue;
 
@@ -210,7 +213,7 @@ public sealed class SubscriptionFanoutDispatcher
             }
 
             int subscriberCount = _subscriptions.CopySubscribers(scopeKey, subscriberScratch);
-            subscriberCount = ApplyLatestStateRecipientPhasing(item, subscriberScratch[..subscriberCount]);
+            subscriberCount = ApplyLatestStatePhasing(item, subscriberScratch[..subscriberCount]);
             if (subscriberCount == 0)
                 continue;
 
@@ -268,11 +271,9 @@ public sealed class SubscriptionFanoutDispatcher
             EncryptedCount: encryptedCount);
     }
 
-    private int ApplyLatestStateRecipientPhasing(in ScheduledWorkItem item, Span<ConnectionId> subscribers)
+    private int ApplyLatestStatePhasing(in ScheduledWorkItem item, Span<ConnectionId> subscribers)
     {
-        if (!_enableLatestStateRecipientPhasing ||
-            item.Kind != ScheduledWorkKind.LatestState ||
-            item.DeliveryCadenceTicks <= 1)
+        if (item.Kind != ScheduledWorkKind.LatestState)
         {
             return subscribers.Length;
         }
@@ -281,13 +282,48 @@ public sealed class SubscriptionFanoutDispatcher
         for (int i = 0; i < subscribers.Length; i++)
         {
             ConnectionId connectionId = subscribers[i];
-            if (!ShouldDeliverPhasedLatestState(item.ItemKey, item.Sequence, connectionId, item.DeliveryCadenceTicks))
+            if (_latestStateConnectionPhasingCadenceTicks > 1 &&
+                !ShouldDeliverConnectionPhasedLatestState(item.PublishTick, connectionId, _latestStateConnectionPhasingCadenceTicks))
+            {
                 continue;
+            }
+
+            if (_enableLatestStateRecipientPhasing &&
+                item.DeliveryCadenceTicks > 1 &&
+                !ShouldDeliverPhasedLatestState(item.ItemKey, item.Sequence, connectionId, item.DeliveryCadenceTicks))
+            {
+                continue;
+            }
 
             subscribers[written++] = connectionId;
         }
 
         return written;
+    }
+
+    private static bool ShouldDeliverConnectionPhasedLatestState(uint publishTick, ConnectionId connectionId, uint cadenceTicks)
+    {
+        if (cadenceTicks <= 1 || !connectionId.IsValid)
+            return true;
+
+        return (publishTick % cadenceTicks) == ComputeConnectionPhase(connectionId, cadenceTicks);
+    }
+
+    private static uint ComputeConnectionPhase(ConnectionId connectionId, uint cadenceTicks)
+    {
+        if (cadenceTicks <= 1)
+            return 0;
+
+        unchecked
+        {
+            uint hash = (uint)connectionId.Value;
+            hash ^= hash >> 16;
+            hash *= 0x7feb352d;
+            hash ^= hash >> 15;
+            hash *= 0x846ca68b;
+            hash ^= hash >> 16;
+            return hash % cadenceTicks;
+        }
     }
 
     private static bool ShouldDeliverPhasedLatestState(ulong itemKey, ulong sequence, ConnectionId connectionId, uint cadenceTicks)

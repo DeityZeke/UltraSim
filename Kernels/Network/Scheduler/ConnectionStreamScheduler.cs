@@ -49,7 +49,8 @@ public sealed class ConnectionStreamScheduler
                 update.ItemKey,
                 update.ScopeKey,
                 update.Payload,
-                update.DeliveryCadenceTicks);
+                update.DeliveryCadenceTicks,
+                update.PublishTick);
             latestCursor = new LatestStateCursor(update.Sequence);
             Accumulate(update.PacketClass, payloadBytes, ref realtimeItems, ref reliableItems, ref bulkItems, ref realtimeBytes, ref reliableBytes, ref bulkBytes);
         }
