@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
 
@@ -74,6 +75,7 @@ public sealed class ServerMovementSessionHost
     public ServerNetworkSessionRuntime SessionRuntime => _sessionRuntime;
     public ReliableEventAckTracker ReliableEventAcks => _sessionRuntime.ReliableEventAcks;
     public StateBaselineAckTracker StateBaselineAcks => _sessionRuntime.BaselineAcks;
+    public ServerPumpProfileSnapshot LastPumpProfile { get; private set; }
     public int BoundConnectionCount => _entityByConnection.Count;
 
     public int CopyBoundConnections(Span<ConnectionId> destination)
@@ -98,20 +100,79 @@ public sealed class ServerMovementSessionHost
 
     public void Stop() => _control.Stop();
 
-    public int Pump(long nowTicks, float deltaSeconds, uint serverTick)
+    public int Pump(long nowTicks, float deltaSeconds, uint serverTick, bool flushOutbound = true)
     {
         int totalInboundCount = 0;
+        long pollElapsedTicks = 0;
+        long pollPendingDrainElapsedTicks = 0;
+        long pollSocketReceiveElapsedTicks = 0;
+        long pollBundleUnpackElapsedTicks = 0;
+        long pollBundleIndexElapsedTicks = 0;
+        long pollBundleMaterializeElapsedTicks = 0;
+        long pollBundleSliceElapsedTicks = 0;
+        long pollBundleDatagramCreateElapsedTicks = 0;
+        long pollBundleEnqueueElapsedTicks = 0;
+        long pollPayloadCopyElapsedTicks = 0;
+        long pollEnvelopeParseElapsedTicks = 0;
+        long pollAsyncReceiveElapsedTicks = 0;
+        int pollAsyncQueuedDatagramCount = 0;
+        long controlElapsedTicks = 0;
+        long controlEventElapsedTicks = 0;
+        long runtimeInboundElapsedTicks = 0;
+        long movementInboundElapsedTicks = 0;
+        long sweepElapsedTicks = 0;
+        long lifecycleElapsedTicks = 0;
+        long movementAdvanceElapsedTicks = 0;
+        long runtimeDispatchElapsedTicks = 0;
+        long controlFlushElapsedTicks = 0;
+        long controlFlushDrainElapsedTicks = 0;
+        long controlFlushBundleElapsedTicks = 0;
+        long controlFlushSendElapsedTicks = 0;
+        long controlFlushAsyncPreviousElapsedTicks = 0;
+        long controlFlushAsyncPreviousSendElapsedTicks = 0;
+        long controlFlushAsyncHandoffWaitElapsedTicks = 0;
+        int controlFlushAsyncPendingBatchCount = 0;
+        int controlFlushWireDatagramCount = 0;
         while (true)
         {
+            long pollStart = Stopwatch.GetTimestamp();
             int inboundCount = _transport.PollInbound(_inboundScratch);
+            pollElapsedTicks += Stopwatch.GetTimestamp() - pollStart;
+            if (_transport is UdpSocketNetworkTransport udpTransport)
+            {
+                TransportPollProfileSnapshot pollProfile = udpTransport.LastPollProfile;
+                pollPendingDrainElapsedTicks += pollProfile.PendingDrainElapsedTicks;
+                pollSocketReceiveElapsedTicks += pollProfile.SocketReceiveElapsedTicks;
+                pollBundleUnpackElapsedTicks += pollProfile.BundleUnpackElapsedTicks;
+                pollBundleIndexElapsedTicks += pollProfile.BundleIndexElapsedTicks;
+                pollBundleMaterializeElapsedTicks += pollProfile.BundleMaterializeElapsedTicks;
+                pollBundleSliceElapsedTicks += pollProfile.BundleSliceElapsedTicks;
+                pollBundleDatagramCreateElapsedTicks += pollProfile.BundleDatagramCreateElapsedTicks;
+                pollBundleEnqueueElapsedTicks += pollProfile.BundleEnqueueElapsedTicks;
+                pollPayloadCopyElapsedTicks += pollProfile.PayloadCopyElapsedTicks;
+                pollEnvelopeParseElapsedTicks += pollProfile.EnvelopeParseElapsedTicks;
+                pollAsyncReceiveElapsedTicks += pollProfile.AsyncReceiveElapsedTicks;
+                pollAsyncQueuedDatagramCount += pollProfile.AsyncQueuedDatagramCount;
+            }
             if (inboundCount <= 0)
                 break;
 
             ReadOnlySpan<InboundDatagram> inbound = _inboundScratch.AsSpan(0, inboundCount);
+            long controlStart = Stopwatch.GetTimestamp();
             _control.ProcessInbound(inbound, nowTicks);
+            controlElapsedTicks += Stopwatch.GetTimestamp() - controlStart;
+
+            long controlEventsStart = Stopwatch.GetTimestamp();
             HandleControlPlaneEvents(nowTicks);
+            controlEventElapsedTicks += Stopwatch.GetTimestamp() - controlEventsStart;
+
+            long runtimeInboundStart = Stopwatch.GetTimestamp();
             _sessionRuntime.ProcessInbound(inbound);
+            runtimeInboundElapsedTicks += Stopwatch.GetTimestamp() - runtimeInboundStart;
+
+            long movementInboundStart = Stopwatch.GetTimestamp();
             _movement.ProcessInbound(inbound);
+            movementInboundElapsedTicks += Stopwatch.GetTimestamp() - movementInboundStart;
             totalInboundCount += inboundCount;
             DisposeInbound(inbound);
 
@@ -121,13 +182,75 @@ public sealed class ServerMovementSessionHost
 
         if (totalInboundCount == 0)
         {
+            long sweepStart = Stopwatch.GetTimestamp();
             _control.Sessions.SweepTimeouts(nowTicks);
+            sweepElapsedTicks += Stopwatch.GetTimestamp() - sweepStart;
         }
 
+        long lifecycleStart = Stopwatch.GetTimestamp();
         HandleSessionLifecycleEvents(nowTicks);
+        lifecycleElapsedTicks += Stopwatch.GetTimestamp() - lifecycleStart;
+
+        long movementAdvanceStart = Stopwatch.GetTimestamp();
         _movement.AdvanceAndSend(deltaSeconds, serverTick, flushOutbound: false);
+        movementAdvanceElapsedTicks += Stopwatch.GetTimestamp() - movementAdvanceStart;
+
+        long runtimeDispatchStart = Stopwatch.GetTimestamp();
         _sessionRuntime.DispatchTick(nowTicks, ConnectionSendBudget.Unlimited, flushOutbound: false);
-        _control.FlushOutbound();
+        runtimeDispatchElapsedTicks += Stopwatch.GetTimestamp() - runtimeDispatchStart;
+
+        if (flushOutbound)
+        {
+            long controlFlushStart = Stopwatch.GetTimestamp();
+            _control.FlushOutbound();
+            controlFlushElapsedTicks += Stopwatch.GetTimestamp() - controlFlushStart;
+            if (_transport is UdpSocketNetworkTransport flushTransport)
+            {
+                TransportFlushProfileSnapshot flushProfile = flushTransport.LastFlushProfile;
+                controlFlushDrainElapsedTicks += flushProfile.DrainElapsedTicks;
+                controlFlushBundleElapsedTicks += flushProfile.BundleElapsedTicks;
+                controlFlushSendElapsedTicks += flushProfile.SendElapsedTicks;
+                controlFlushAsyncPreviousElapsedTicks += flushProfile.AsyncPreviousFlushElapsedTicks;
+                controlFlushAsyncPreviousSendElapsedTicks += flushProfile.AsyncPreviousSendElapsedTicks;
+                controlFlushAsyncHandoffWaitElapsedTicks += flushProfile.AsyncHandoffWaitElapsedTicks;
+                controlFlushAsyncPendingBatchCount = flushProfile.AsyncPendingBatchCount;
+                controlFlushWireDatagramCount = flushProfile.AsyncEnabled
+                    ? flushProfile.AsyncPreviousWireDatagramCount
+                    : flushProfile.WireDatagramCount;
+            }
+        }
+        LastPumpProfile = new ServerPumpProfileSnapshot(
+            totalInboundCount,
+            pollElapsedTicks,
+            pollPendingDrainElapsedTicks,
+            pollSocketReceiveElapsedTicks,
+            pollBundleUnpackElapsedTicks,
+            pollBundleIndexElapsedTicks,
+            pollBundleMaterializeElapsedTicks,
+            pollBundleSliceElapsedTicks,
+            pollBundleDatagramCreateElapsedTicks,
+            pollBundleEnqueueElapsedTicks,
+            pollPayloadCopyElapsedTicks,
+            pollEnvelopeParseElapsedTicks,
+            pollAsyncReceiveElapsedTicks,
+            pollAsyncQueuedDatagramCount,
+            controlElapsedTicks,
+            controlEventElapsedTicks,
+            runtimeInboundElapsedTicks,
+            movementInboundElapsedTicks,
+            sweepElapsedTicks,
+            lifecycleElapsedTicks,
+            movementAdvanceElapsedTicks,
+            runtimeDispatchElapsedTicks,
+            controlFlushElapsedTicks,
+            controlFlushDrainElapsedTicks,
+            controlFlushBundleElapsedTicks,
+            controlFlushSendElapsedTicks,
+            controlFlushAsyncPreviousElapsedTicks,
+            controlFlushAsyncPreviousSendElapsedTicks,
+            controlFlushAsyncHandoffWaitElapsedTicks,
+            controlFlushAsyncPendingBatchCount,
+            controlFlushWireDatagramCount);
         return totalInboundCount;
     }
 

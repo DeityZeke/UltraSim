@@ -195,6 +195,36 @@ internal sealed class MovementRampHarness : IRampHarness
         int measuredTicks = _options.StageTicks;
         var tickSamplesMs = new List<double>(measuredTicks);
         var serverPumpSamplesMs = new List<double>(measuredTicks);
+        var serverPollSamplesMs = new List<double>(measuredTicks);
+        var serverPollPendingDrainSamplesMs = new List<double>(measuredTicks);
+        var serverPollSocketReceiveSamplesMs = new List<double>(measuredTicks);
+        var serverPollBundleUnpackSamplesMs = new List<double>(measuredTicks);
+        var serverPollBundleIndexSamplesMs = new List<double>(measuredTicks);
+        var serverPollBundleMaterializeSamplesMs = new List<double>(measuredTicks);
+        var serverPollBundleSliceSamplesMs = new List<double>(measuredTicks);
+        var serverPollBundleDatagramCreateSamplesMs = new List<double>(measuredTicks);
+        var serverPollBundleEnqueueSamplesMs = new List<double>(measuredTicks);
+        var serverPollPayloadCopySamplesMs = new List<double>(measuredTicks);
+        var serverPollEnvelopeParseSamplesMs = new List<double>(measuredTicks);
+        var serverPollAsyncReceiveSamplesMs = new List<double>(measuredTicks);
+        var serverPollAsyncQueuedSamples = new List<double>(measuredTicks);
+        var serverControlSamplesMs = new List<double>(measuredTicks);
+        var serverControlEventsSamplesMs = new List<double>(measuredTicks);
+        var serverRuntimeInboundSamplesMs = new List<double>(measuredTicks);
+        var serverMovementInboundSamplesMs = new List<double>(measuredTicks);
+        var serverSweepSamplesMs = new List<double>(measuredTicks);
+        var serverLifecycleSamplesMs = new List<double>(measuredTicks);
+        var serverMovementAdvanceSamplesMs = new List<double>(measuredTicks);
+        var serverRuntimeDispatchSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushDrainSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushBundleSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushSendSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushAsyncPreviousSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushAsyncPreviousSendSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushAsyncHandoffWaitSamplesMs = new List<double>(measuredTicks);
+        var serverControlFlushAsyncPendingSamples = new List<double>(measuredTicks);
+        var serverControlFlushWireDatagramSamples = new List<double>(measuredTicks);
         var publishSamplesMs = new List<double>(measuredTicks);
         var dispatchSamplesMs = new List<double>(measuredTicks);
         var dispatchScheduleSamplesMs = new List<double>(measuredTicks);
@@ -264,10 +294,78 @@ internal sealed class MovementRampHarness : IRampHarness
             long start = Stopwatch.GetTimestamp();
             _clockTicks += 2;
             uint publishTick = (uint)(stageIndex * 100_000 + tick + 1);
+            bool deferServerFlush = replication is not null;
             long serverPumpStart = Stopwatch.GetTimestamp();
-            _serverHost?.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick);
+            _serverHost?.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick, flushOutbound: !deferServerFlush);
             long serverPumpEnd = Stopwatch.GetTimestamp();
             serverPumpSamplesMs.Add((serverPumpEnd - serverPumpStart) * 1000.0 / Stopwatch.Frequency);
+            if (_serverHost is not null)
+            {
+                ServerPumpProfileSnapshot serverProfile = _serverHost.LastPumpProfile;
+                serverPollSamplesMs.Add(serverProfile.PollElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollPendingDrainSamplesMs.Add(serverProfile.PollPendingDrainElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollSocketReceiveSamplesMs.Add(serverProfile.PollSocketReceiveElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollBundleUnpackSamplesMs.Add(serverProfile.PollBundleUnpackElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollBundleIndexSamplesMs.Add(serverProfile.PollBundleIndexElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollBundleMaterializeSamplesMs.Add(serverProfile.PollBundleMaterializeElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollBundleSliceSamplesMs.Add(serverProfile.PollBundleSliceElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollBundleDatagramCreateSamplesMs.Add(serverProfile.PollBundleDatagramCreateElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollBundleEnqueueSamplesMs.Add(serverProfile.PollBundleEnqueueElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollPayloadCopySamplesMs.Add(serverProfile.PollPayloadCopyElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollEnvelopeParseSamplesMs.Add(serverProfile.PollEnvelopeParseElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollAsyncReceiveSamplesMs.Add(serverProfile.PollAsyncReceiveElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverPollAsyncQueuedSamples.Add(serverProfile.PollAsyncQueuedDatagramCount);
+                serverControlSamplesMs.Add(serverProfile.ControlElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlEventsSamplesMs.Add(serverProfile.ControlEventElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverRuntimeInboundSamplesMs.Add(serverProfile.RuntimeInboundElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverMovementInboundSamplesMs.Add(serverProfile.MovementInboundElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverSweepSamplesMs.Add(serverProfile.SweepElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverLifecycleSamplesMs.Add(serverProfile.LifecycleElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverMovementAdvanceSamplesMs.Add(serverProfile.MovementAdvanceElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverRuntimeDispatchSamplesMs.Add(serverProfile.RuntimeDispatchElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushSamplesMs.Add(serverProfile.ControlFlushElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushDrainSamplesMs.Add(serverProfile.ControlFlushDrainElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushBundleSamplesMs.Add(serverProfile.ControlFlushBundleElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushSendSamplesMs.Add(serverProfile.ControlFlushSendElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushAsyncPreviousSamplesMs.Add(serverProfile.ControlFlushAsyncPreviousElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushAsyncPreviousSendSamplesMs.Add(serverProfile.ControlFlushAsyncPreviousSendElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushAsyncHandoffWaitSamplesMs.Add(serverProfile.ControlFlushAsyncHandoffWaitElapsedTicks * 1000.0 / Stopwatch.Frequency);
+                serverControlFlushAsyncPendingSamples.Add(serverProfile.ControlFlushAsyncPendingBatchCount);
+                serverControlFlushWireDatagramSamples.Add(serverProfile.ControlFlushWireDatagramCount);
+            }
+            else
+            {
+                serverPollSamplesMs.Add(0d);
+                serverPollPendingDrainSamplesMs.Add(0d);
+                serverPollSocketReceiveSamplesMs.Add(0d);
+                serverPollBundleUnpackSamplesMs.Add(0d);
+                serverPollBundleIndexSamplesMs.Add(0d);
+                serverPollBundleMaterializeSamplesMs.Add(0d);
+                serverPollBundleSliceSamplesMs.Add(0d);
+                serverPollBundleDatagramCreateSamplesMs.Add(0d);
+                serverPollBundleEnqueueSamplesMs.Add(0d);
+                serverPollPayloadCopySamplesMs.Add(0d);
+                serverPollEnvelopeParseSamplesMs.Add(0d);
+                serverPollAsyncReceiveSamplesMs.Add(0d);
+                serverPollAsyncQueuedSamples.Add(0d);
+                serverControlSamplesMs.Add(0d);
+                serverControlEventsSamplesMs.Add(0d);
+                serverRuntimeInboundSamplesMs.Add(0d);
+                serverMovementInboundSamplesMs.Add(0d);
+                serverSweepSamplesMs.Add(0d);
+                serverLifecycleSamplesMs.Add(0d);
+                serverMovementAdvanceSamplesMs.Add(0d);
+                serverRuntimeDispatchSamplesMs.Add(0d);
+                serverControlFlushSamplesMs.Add(0d);
+                serverControlFlushDrainSamplesMs.Add(0d);
+                serverControlFlushBundleSamplesMs.Add(0d);
+                serverControlFlushSendSamplesMs.Add(0d);
+                serverControlFlushAsyncPreviousSamplesMs.Add(0d);
+                serverControlFlushAsyncPreviousSendSamplesMs.Add(0d);
+                serverControlFlushAsyncHandoffWaitSamplesMs.Add(0d);
+                serverControlFlushAsyncPendingSamples.Add(0d);
+                serverControlFlushWireDatagramSamples.Add(0d);
+            }
 
             if (replication is not null)
             {
@@ -297,7 +395,8 @@ internal sealed class MovementRampHarness : IRampHarness
                         out int asyncFlushPendingCount,
                         out int asyncFlushPreviousWireDatagramCount,
                         out int bundledWireDatagrams,
-                        out int singleWireDatagrams);
+                        out int singleWireDatagrams,
+                        flushOutbound: true);
                     long dispatchEnd = Stopwatch.GetTimestamp();
                     replicationDatagrams += dispatched;
                     replicationWireDatagrams += wireDatagrams;
@@ -447,6 +546,36 @@ internal sealed class MovementRampHarness : IRampHarness
         int gen2After = GC.CollectionCount(2);
         TickWindowStats stats = new TickWindowStats(tickSamplesMs);
         TickWindowStats serverPumpStats = new TickWindowStats(serverPumpSamplesMs);
+        TickWindowStats serverPollStats = new TickWindowStats(serverPollSamplesMs);
+        TickWindowStats serverPollPendingDrainStats = new TickWindowStats(serverPollPendingDrainSamplesMs);
+        TickWindowStats serverPollSocketReceiveStats = new TickWindowStats(serverPollSocketReceiveSamplesMs);
+        TickWindowStats serverPollBundleUnpackStats = new TickWindowStats(serverPollBundleUnpackSamplesMs);
+        TickWindowStats serverPollBundleIndexStats = new TickWindowStats(serverPollBundleIndexSamplesMs);
+        TickWindowStats serverPollBundleMaterializeStats = new TickWindowStats(serverPollBundleMaterializeSamplesMs);
+        TickWindowStats serverPollBundleSliceStats = new TickWindowStats(serverPollBundleSliceSamplesMs);
+        TickWindowStats serverPollBundleDatagramCreateStats = new TickWindowStats(serverPollBundleDatagramCreateSamplesMs);
+        TickWindowStats serverPollBundleEnqueueStats = new TickWindowStats(serverPollBundleEnqueueSamplesMs);
+        TickWindowStats serverPollPayloadCopyStats = new TickWindowStats(serverPollPayloadCopySamplesMs);
+        TickWindowStats serverPollEnvelopeParseStats = new TickWindowStats(serverPollEnvelopeParseSamplesMs);
+        TickWindowStats serverPollAsyncReceiveStats = new TickWindowStats(serverPollAsyncReceiveSamplesMs);
+        TickWindowStats serverPollAsyncQueuedStats = new TickWindowStats(serverPollAsyncQueuedSamples);
+        TickWindowStats serverControlStats = new TickWindowStats(serverControlSamplesMs);
+        TickWindowStats serverControlEventsStats = new TickWindowStats(serverControlEventsSamplesMs);
+        TickWindowStats serverRuntimeInboundStats = new TickWindowStats(serverRuntimeInboundSamplesMs);
+        TickWindowStats serverMovementInboundStats = new TickWindowStats(serverMovementInboundSamplesMs);
+        TickWindowStats serverSweepStats = new TickWindowStats(serverSweepSamplesMs);
+        TickWindowStats serverLifecycleStats = new TickWindowStats(serverLifecycleSamplesMs);
+        TickWindowStats serverMovementAdvanceStats = new TickWindowStats(serverMovementAdvanceSamplesMs);
+        TickWindowStats serverRuntimeDispatchStats = new TickWindowStats(serverRuntimeDispatchSamplesMs);
+        TickWindowStats serverControlFlushStats = new TickWindowStats(serverControlFlushSamplesMs);
+        TickWindowStats serverControlFlushDrainStats = new TickWindowStats(serverControlFlushDrainSamplesMs);
+        TickWindowStats serverControlFlushBundleStats = new TickWindowStats(serverControlFlushBundleSamplesMs);
+        TickWindowStats serverControlFlushSendStats = new TickWindowStats(serverControlFlushSendSamplesMs);
+        TickWindowStats serverControlFlushAsyncPreviousStats = new TickWindowStats(serverControlFlushAsyncPreviousSamplesMs);
+        TickWindowStats serverControlFlushAsyncPreviousSendStats = new TickWindowStats(serverControlFlushAsyncPreviousSendSamplesMs);
+        TickWindowStats serverControlFlushAsyncHandoffWaitStats = new TickWindowStats(serverControlFlushAsyncHandoffWaitSamplesMs);
+        TickWindowStats serverControlFlushAsyncPendingStats = new TickWindowStats(serverControlFlushAsyncPendingSamples);
+        TickWindowStats serverControlFlushWireDatagramStats = new TickWindowStats(serverControlFlushWireDatagramSamples);
         TickWindowStats publishStats = new TickWindowStats(publishSamplesMs);
         TickWindowStats dispatchStats = new TickWindowStats(dispatchSamplesMs);
         TickWindowStats dispatchScheduleStats = new TickWindowStats(dispatchScheduleSamplesMs);
@@ -515,6 +644,66 @@ internal sealed class MovementRampHarness : IRampHarness
             TickMaxMs: stats.MaxMs,
             ServerPumpAverageMs: serverPumpStats.AverageMs,
             ServerPumpP95Ms: serverPumpStats.P95Ms,
+            ServerPollAverageMs: serverPollStats.AverageMs,
+            ServerPollP95Ms: serverPollStats.P95Ms,
+            ServerPollPendingDrainAverageMs: serverPollPendingDrainStats.AverageMs,
+            ServerPollPendingDrainP95Ms: serverPollPendingDrainStats.P95Ms,
+            ServerPollSocketReceiveAverageMs: serverPollSocketReceiveStats.AverageMs,
+            ServerPollSocketReceiveP95Ms: serverPollSocketReceiveStats.P95Ms,
+            ServerPollBundleUnpackAverageMs: serverPollBundleUnpackStats.AverageMs,
+            ServerPollBundleUnpackP95Ms: serverPollBundleUnpackStats.P95Ms,
+            ServerPollBundleIndexAverageMs: serverPollBundleIndexStats.AverageMs,
+            ServerPollBundleIndexP95Ms: serverPollBundleIndexStats.P95Ms,
+            ServerPollBundleMaterializeAverageMs: serverPollBundleMaterializeStats.AverageMs,
+            ServerPollBundleMaterializeP95Ms: serverPollBundleMaterializeStats.P95Ms,
+            ServerPollBundleSliceAverageMs: serverPollBundleSliceStats.AverageMs,
+            ServerPollBundleSliceP95Ms: serverPollBundleSliceStats.P95Ms,
+            ServerPollBundleDatagramCreateAverageMs: serverPollBundleDatagramCreateStats.AverageMs,
+            ServerPollBundleDatagramCreateP95Ms: serverPollBundleDatagramCreateStats.P95Ms,
+            ServerPollBundleEnqueueAverageMs: serverPollBundleEnqueueStats.AverageMs,
+            ServerPollBundleEnqueueP95Ms: serverPollBundleEnqueueStats.P95Ms,
+            ServerPollPayloadCopyAverageMs: serverPollPayloadCopyStats.AverageMs,
+            ServerPollPayloadCopyP95Ms: serverPollPayloadCopyStats.P95Ms,
+            ServerPollEnvelopeParseAverageMs: serverPollEnvelopeParseStats.AverageMs,
+            ServerPollEnvelopeParseP95Ms: serverPollEnvelopeParseStats.P95Ms,
+            ServerPollAsyncReceiveAverageMs: serverPollAsyncReceiveStats.AverageMs,
+            ServerPollAsyncReceiveP95Ms: serverPollAsyncReceiveStats.P95Ms,
+            ServerPollAsyncQueuedAverage: serverPollAsyncQueuedStats.AverageMs,
+            ServerPollAsyncQueuedP95: serverPollAsyncQueuedStats.P95Ms,
+            ServerControlAverageMs: serverControlStats.AverageMs,
+            ServerControlP95Ms: serverControlStats.P95Ms,
+            ServerControlEventsAverageMs: serverControlEventsStats.AverageMs,
+            ServerControlEventsP95Ms: serverControlEventsStats.P95Ms,
+            ServerRuntimeInboundAverageMs: serverRuntimeInboundStats.AverageMs,
+            ServerRuntimeInboundP95Ms: serverRuntimeInboundStats.P95Ms,
+            ServerMovementInboundAverageMs: serverMovementInboundStats.AverageMs,
+            ServerMovementInboundP95Ms: serverMovementInboundStats.P95Ms,
+            ServerSweepAverageMs: serverSweepStats.AverageMs,
+            ServerSweepP95Ms: serverSweepStats.P95Ms,
+            ServerLifecycleAverageMs: serverLifecycleStats.AverageMs,
+            ServerLifecycleP95Ms: serverLifecycleStats.P95Ms,
+            ServerMovementAdvanceAverageMs: serverMovementAdvanceStats.AverageMs,
+            ServerMovementAdvanceP95Ms: serverMovementAdvanceStats.P95Ms,
+            ServerRuntimeDispatchAverageMs: serverRuntimeDispatchStats.AverageMs,
+            ServerRuntimeDispatchP95Ms: serverRuntimeDispatchStats.P95Ms,
+            ServerControlFlushAverageMs: serverControlFlushStats.AverageMs,
+            ServerControlFlushP95Ms: serverControlFlushStats.P95Ms,
+            ServerControlFlushDrainAverageMs: serverControlFlushDrainStats.AverageMs,
+            ServerControlFlushDrainP95Ms: serverControlFlushDrainStats.P95Ms,
+            ServerControlFlushBundleAverageMs: serverControlFlushBundleStats.AverageMs,
+            ServerControlFlushBundleP95Ms: serverControlFlushBundleStats.P95Ms,
+            ServerControlFlushSendAverageMs: serverControlFlushSendStats.AverageMs,
+            ServerControlFlushSendP95Ms: serverControlFlushSendStats.P95Ms,
+            ServerControlFlushAsyncPreviousAverageMs: serverControlFlushAsyncPreviousStats.AverageMs,
+            ServerControlFlushAsyncPreviousP95Ms: serverControlFlushAsyncPreviousStats.P95Ms,
+            ServerControlFlushAsyncPreviousSendAverageMs: serverControlFlushAsyncPreviousSendStats.AverageMs,
+            ServerControlFlushAsyncPreviousSendP95Ms: serverControlFlushAsyncPreviousSendStats.P95Ms,
+            ServerControlFlushAsyncHandoffWaitAverageMs: serverControlFlushAsyncHandoffWaitStats.AverageMs,
+            ServerControlFlushAsyncHandoffWaitP95Ms: serverControlFlushAsyncHandoffWaitStats.P95Ms,
+            ServerControlFlushAsyncPendingAverage: serverControlFlushAsyncPendingStats.AverageMs,
+            ServerControlFlushAsyncPendingP95: serverControlFlushAsyncPendingStats.P95Ms,
+            ServerControlFlushWireDatagramsAverage: serverControlFlushWireDatagramStats.AverageMs,
+            ServerControlFlushWireDatagramsP95: serverControlFlushWireDatagramStats.P95Ms,
             PublishAverageMs: publishStats.AverageMs,
             PublishP95Ms: publishStats.P95Ms,
             DispatchAverageMs: dispatchStats.AverageMs,
@@ -874,7 +1063,8 @@ internal sealed class MovementRampHarness : IRampHarness
         out int asyncFlushPendingCount,
         out int asyncFlushPreviousWireDatagramCount,
         out int bundledWireDatagrams,
-        out int singleWireDatagrams)
+        out int singleWireDatagrams,
+        bool flushOutbound = true)
     {
         wireDatagrams = 0;
         long dispatchScheduleTicks = 0;
@@ -907,10 +1097,11 @@ internal sealed class MovementRampHarness : IRampHarness
             long flushStart = Stopwatch.GetTimestamp();
             for (int i = 0; i < result.Fanout.DatagramCount; i++)
                 _serverTransport!.EnqueueOutbound(replication.Output[i]);
-            _serverTransport!.FlushOutbound();
+            if (flushOutbound)
+                _serverTransport!.FlushOutbound();
             long flushEnd = Stopwatch.GetTimestamp();
             dispatchFlushTicks += flushEnd - flushStart;
-            TransportFlushProfileSnapshot flushProfile = _serverTransport.LastFlushProfile;
+            TransportFlushProfileSnapshot flushProfile = _serverTransport!.LastFlushProfile;
             wireDatagrams = flushProfile.AsyncEnabled
                 ? flushProfile.AsyncPreviousWireDatagramCount
                 : _serverTransport.LastFlushWireDatagramCount;
@@ -1589,6 +1780,66 @@ internal readonly record struct StageResult(
     double TickMaxMs,
     double ServerPumpAverageMs,
     double ServerPumpP95Ms,
+    double ServerPollAverageMs,
+    double ServerPollP95Ms,
+    double ServerPollPendingDrainAverageMs,
+    double ServerPollPendingDrainP95Ms,
+    double ServerPollSocketReceiveAverageMs,
+    double ServerPollSocketReceiveP95Ms,
+    double ServerPollBundleUnpackAverageMs,
+    double ServerPollBundleUnpackP95Ms,
+    double ServerPollBundleIndexAverageMs,
+    double ServerPollBundleIndexP95Ms,
+    double ServerPollBundleMaterializeAverageMs,
+    double ServerPollBundleMaterializeP95Ms,
+    double ServerPollBundleSliceAverageMs,
+    double ServerPollBundleSliceP95Ms,
+    double ServerPollBundleDatagramCreateAverageMs,
+    double ServerPollBundleDatagramCreateP95Ms,
+    double ServerPollBundleEnqueueAverageMs,
+    double ServerPollBundleEnqueueP95Ms,
+    double ServerPollPayloadCopyAverageMs,
+    double ServerPollPayloadCopyP95Ms,
+    double ServerPollEnvelopeParseAverageMs,
+    double ServerPollEnvelopeParseP95Ms,
+    double ServerPollAsyncReceiveAverageMs,
+    double ServerPollAsyncReceiveP95Ms,
+    double ServerPollAsyncQueuedAverage,
+    double ServerPollAsyncQueuedP95,
+    double ServerControlAverageMs,
+    double ServerControlP95Ms,
+    double ServerControlEventsAverageMs,
+    double ServerControlEventsP95Ms,
+    double ServerRuntimeInboundAverageMs,
+    double ServerRuntimeInboundP95Ms,
+    double ServerMovementInboundAverageMs,
+    double ServerMovementInboundP95Ms,
+    double ServerSweepAverageMs,
+    double ServerSweepP95Ms,
+    double ServerLifecycleAverageMs,
+    double ServerLifecycleP95Ms,
+    double ServerMovementAdvanceAverageMs,
+    double ServerMovementAdvanceP95Ms,
+    double ServerRuntimeDispatchAverageMs,
+    double ServerRuntimeDispatchP95Ms,
+    double ServerControlFlushAverageMs,
+    double ServerControlFlushP95Ms,
+    double ServerControlFlushDrainAverageMs,
+    double ServerControlFlushDrainP95Ms,
+    double ServerControlFlushBundleAverageMs,
+    double ServerControlFlushBundleP95Ms,
+    double ServerControlFlushSendAverageMs,
+    double ServerControlFlushSendP95Ms,
+    double ServerControlFlushAsyncPreviousAverageMs,
+    double ServerControlFlushAsyncPreviousP95Ms,
+    double ServerControlFlushAsyncPreviousSendAverageMs,
+    double ServerControlFlushAsyncPreviousSendP95Ms,
+    double ServerControlFlushAsyncHandoffWaitAverageMs,
+    double ServerControlFlushAsyncHandoffWaitP95Ms,
+    double ServerControlFlushAsyncPendingAverage,
+    double ServerControlFlushAsyncPendingP95,
+    double ServerControlFlushWireDatagramsAverage,
+    double ServerControlFlushWireDatagramsP95,
     double PublishAverageMs,
     double PublishP95Ms,
     double DispatchAverageMs,
@@ -1709,6 +1960,66 @@ internal readonly record struct StageResult(
             ["tick_max_ms"] = Math.Round(TickMaxMs, 3),
             ["server_pump_avg_ms"] = Math.Round(ServerPumpAverageMs, 3),
             ["server_pump_p95_ms"] = Math.Round(ServerPumpP95Ms, 3),
+            ["server_poll_avg_ms"] = Math.Round(ServerPollAverageMs, 3),
+            ["server_poll_p95_ms"] = Math.Round(ServerPollP95Ms, 3),
+            ["server_poll_pending_drain_avg_ms"] = Math.Round(ServerPollPendingDrainAverageMs, 3),
+            ["server_poll_pending_drain_p95_ms"] = Math.Round(ServerPollPendingDrainP95Ms, 3),
+            ["server_poll_socket_recv_avg_ms"] = Math.Round(ServerPollSocketReceiveAverageMs, 3),
+            ["server_poll_socket_recv_p95_ms"] = Math.Round(ServerPollSocketReceiveP95Ms, 3),
+            ["server_poll_bundle_unpack_avg_ms"] = Math.Round(ServerPollBundleUnpackAverageMs, 3),
+            ["server_poll_bundle_unpack_p95_ms"] = Math.Round(ServerPollBundleUnpackP95Ms, 3),
+            ["server_poll_bundle_index_avg_ms"] = Math.Round(ServerPollBundleIndexAverageMs, 3),
+            ["server_poll_bundle_index_p95_ms"] = Math.Round(ServerPollBundleIndexP95Ms, 3),
+            ["server_poll_bundle_materialize_avg_ms"] = Math.Round(ServerPollBundleMaterializeAverageMs, 3),
+            ["server_poll_bundle_materialize_p95_ms"] = Math.Round(ServerPollBundleMaterializeP95Ms, 3),
+            ["server_poll_bundle_slice_avg_ms"] = Math.Round(ServerPollBundleSliceAverageMs, 3),
+            ["server_poll_bundle_slice_p95_ms"] = Math.Round(ServerPollBundleSliceP95Ms, 3),
+            ["server_poll_bundle_datagram_create_avg_ms"] = Math.Round(ServerPollBundleDatagramCreateAverageMs, 3),
+            ["server_poll_bundle_datagram_create_p95_ms"] = Math.Round(ServerPollBundleDatagramCreateP95Ms, 3),
+            ["server_poll_bundle_enqueue_avg_ms"] = Math.Round(ServerPollBundleEnqueueAverageMs, 3),
+            ["server_poll_bundle_enqueue_p95_ms"] = Math.Round(ServerPollBundleEnqueueP95Ms, 3),
+            ["server_poll_payload_copy_avg_ms"] = Math.Round(ServerPollPayloadCopyAverageMs, 3),
+            ["server_poll_payload_copy_p95_ms"] = Math.Round(ServerPollPayloadCopyP95Ms, 3),
+            ["server_poll_envelope_parse_avg_ms"] = Math.Round(ServerPollEnvelopeParseAverageMs, 3),
+            ["server_poll_envelope_parse_p95_ms"] = Math.Round(ServerPollEnvelopeParseP95Ms, 3),
+            ["server_poll_async_receive_avg_ms"] = Math.Round(ServerPollAsyncReceiveAverageMs, 3),
+            ["server_poll_async_receive_p95_ms"] = Math.Round(ServerPollAsyncReceiveP95Ms, 3),
+            ["server_poll_async_queued_avg"] = Math.Round(ServerPollAsyncQueuedAverage, 3),
+            ["server_poll_async_queued_p95"] = Math.Round(ServerPollAsyncQueuedP95, 3),
+            ["server_control_avg_ms"] = Math.Round(ServerControlAverageMs, 3),
+            ["server_control_p95_ms"] = Math.Round(ServerControlP95Ms, 3),
+            ["server_control_events_avg_ms"] = Math.Round(ServerControlEventsAverageMs, 3),
+            ["server_control_events_p95_ms"] = Math.Round(ServerControlEventsP95Ms, 3),
+            ["server_runtime_inbound_avg_ms"] = Math.Round(ServerRuntimeInboundAverageMs, 3),
+            ["server_runtime_inbound_p95_ms"] = Math.Round(ServerRuntimeInboundP95Ms, 3),
+            ["server_movement_inbound_avg_ms"] = Math.Round(ServerMovementInboundAverageMs, 3),
+            ["server_movement_inbound_p95_ms"] = Math.Round(ServerMovementInboundP95Ms, 3),
+            ["server_sweep_avg_ms"] = Math.Round(ServerSweepAverageMs, 3),
+            ["server_sweep_p95_ms"] = Math.Round(ServerSweepP95Ms, 3),
+            ["server_lifecycle_avg_ms"] = Math.Round(ServerLifecycleAverageMs, 3),
+            ["server_lifecycle_p95_ms"] = Math.Round(ServerLifecycleP95Ms, 3),
+            ["server_movement_advance_avg_ms"] = Math.Round(ServerMovementAdvanceAverageMs, 3),
+            ["server_movement_advance_p95_ms"] = Math.Round(ServerMovementAdvanceP95Ms, 3),
+            ["server_runtime_dispatch_avg_ms"] = Math.Round(ServerRuntimeDispatchAverageMs, 3),
+            ["server_runtime_dispatch_p95_ms"] = Math.Round(ServerRuntimeDispatchP95Ms, 3),
+            ["server_control_flush_avg_ms"] = Math.Round(ServerControlFlushAverageMs, 3),
+            ["server_control_flush_p95_ms"] = Math.Round(ServerControlFlushP95Ms, 3),
+            ["server_control_flush_drain_avg_ms"] = Math.Round(ServerControlFlushDrainAverageMs, 3),
+            ["server_control_flush_drain_p95_ms"] = Math.Round(ServerControlFlushDrainP95Ms, 3),
+            ["server_control_flush_bundle_avg_ms"] = Math.Round(ServerControlFlushBundleAverageMs, 3),
+            ["server_control_flush_bundle_p95_ms"] = Math.Round(ServerControlFlushBundleP95Ms, 3),
+            ["server_control_flush_send_avg_ms"] = Math.Round(ServerControlFlushSendAverageMs, 3),
+            ["server_control_flush_send_p95_ms"] = Math.Round(ServerControlFlushSendP95Ms, 3),
+            ["server_control_flush_async_previous_avg_ms"] = Math.Round(ServerControlFlushAsyncPreviousAverageMs, 3),
+            ["server_control_flush_async_previous_p95_ms"] = Math.Round(ServerControlFlushAsyncPreviousP95Ms, 3),
+            ["server_control_flush_async_previous_send_avg_ms"] = Math.Round(ServerControlFlushAsyncPreviousSendAverageMs, 3),
+            ["server_control_flush_async_previous_send_p95_ms"] = Math.Round(ServerControlFlushAsyncPreviousSendP95Ms, 3),
+            ["server_control_flush_async_handoff_wait_avg_ms"] = Math.Round(ServerControlFlushAsyncHandoffWaitAverageMs, 3),
+            ["server_control_flush_async_handoff_wait_p95_ms"] = Math.Round(ServerControlFlushAsyncHandoffWaitP95Ms, 3),
+            ["server_control_flush_async_pending_avg"] = Math.Round(ServerControlFlushAsyncPendingAverage, 3),
+            ["server_control_flush_async_pending_p95"] = Math.Round(ServerControlFlushAsyncPendingP95, 3),
+            ["server_control_flush_wire_datagrams_avg"] = Math.Round(ServerControlFlushWireDatagramsAverage, 3),
+            ["server_control_flush_wire_datagrams_p95"] = Math.Round(ServerControlFlushWireDatagramsP95, 3),
             ["publish_avg_ms"] = Math.Round(PublishAverageMs, 3),
             ["publish_p95_ms"] = Math.Round(PublishP95Ms, 3),
             ["dispatch_avg_ms"] = Math.Round(DispatchAverageMs, 3),
