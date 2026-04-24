@@ -66,8 +66,9 @@ public sealed class HostedServerRuntime : IDisposable
         {
             Application.Stop();
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine(ex);
         }
     }
 

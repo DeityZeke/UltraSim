@@ -18,6 +18,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline), ClientObserverStateBridge_AppliesDeltaFramesAfterCompletedBaseline);
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
+        Run(nameof(ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull), ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes), ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes);
@@ -336,6 +337,24 @@ internal static class TestRunner
         Assert.SequenceEqual([10UL, 11UL, 12UL], applied);
         Assert.True(bridge.TryDequeueAckPacket(out ReliableEventAckPacket ack));
         Assert.Equal((ulong)12, ack.Sequence);
+    }
+
+    private static void ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull()
+    {
+        var bridge = new ClientObserverEventBridge(new ConnectionId(9), maxBufferedEvents: 1);
+
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(10, ImmutablePayloadBuffer.CopyFrom([1]))).Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(12, ImmutablePayloadBuffer.CopyFrom([2]))).Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(14, ImmutablePayloadBuffer.CopyFrom([3]))).Memory),
+        ];
+
+        int processed = bridge.ProcessInbound(inbound);
+
+        Assert.Equal(3, processed);
+        Assert.Equal(1, bridge.BufferedEventCount);
+        Assert.Equal(1L, bridge.DroppedBufferedEventCount);
     }
 
     private static void ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents()

@@ -65,6 +65,7 @@ public sealed class ClientObserverEventBridge
     public int BufferedEventCount => _pendingBySequence.Count;
     public ulong LastAppliedSequence => _lastAppliedSequence;
     public ulong LastAcknowledgedSequence => _pendingAckSequence;
+    public long DroppedBufferedEventCount { get; private set; }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
@@ -131,7 +132,10 @@ public sealed class ClientObserverEventBridge
         if (_pendingBySequence.ContainsKey(sequence))
             return;
         if (_pendingBySequence.Count >= _maxBufferedEvents)
+        {
+            DroppedBufferedEventCount++;
             return;
+        }
 
         _pendingBySequence.Add(sequence, ImmutablePayloadBuffer.CopyFrom(payload));
     }
