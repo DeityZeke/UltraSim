@@ -77,6 +77,11 @@ public sealed class ClientMovementSessionHost
         long pollPendingDrainElapsedTicks = 0;
         long pollSocketReceiveElapsedTicks = 0;
         long pollBundleUnpackElapsedTicks = 0;
+        long pollBundleIndexElapsedTicks = 0;
+        long pollBundleMaterializeElapsedTicks = 0;
+        long pollBundleSliceElapsedTicks = 0;
+        long pollBundleDatagramCreateElapsedTicks = 0;
+        long pollBundleEnqueueElapsedTicks = 0;
         long pollPayloadCopyElapsedTicks = 0;
         long pollEnvelopeParseElapsedTicks = 0;
         long pollAsyncReceiveElapsedTicks = 0;
@@ -102,6 +107,11 @@ public sealed class ClientMovementSessionHost
                 pollPendingDrainElapsedTicks += pollProfile.PendingDrainElapsedTicks;
                 pollSocketReceiveElapsedTicks += pollProfile.SocketReceiveElapsedTicks;
                 pollBundleUnpackElapsedTicks += pollProfile.BundleUnpackElapsedTicks;
+                pollBundleIndexElapsedTicks += pollProfile.BundleIndexElapsedTicks;
+                pollBundleMaterializeElapsedTicks += pollProfile.BundleMaterializeElapsedTicks;
+                pollBundleSliceElapsedTicks += pollProfile.BundleSliceElapsedTicks;
+                pollBundleDatagramCreateElapsedTicks += pollProfile.BundleDatagramCreateElapsedTicks;
+                pollBundleEnqueueElapsedTicks += pollProfile.BundleEnqueueElapsedTicks;
                 pollPayloadCopyElapsedTicks += pollProfile.PayloadCopyElapsedTicks;
                 pollEnvelopeParseElapsedTicks += pollProfile.EnvelopeParseElapsedTicks;
                 pollAsyncReceiveElapsedTicks += pollProfile.AsyncReceiveElapsedTicks;
@@ -186,6 +196,11 @@ public sealed class ClientMovementSessionHost
             pollPendingDrainElapsedTicks,
             pollSocketReceiveElapsedTicks,
             pollBundleUnpackElapsedTicks,
+            pollBundleIndexElapsedTicks,
+            pollBundleMaterializeElapsedTicks,
+            pollBundleSliceElapsedTicks,
+            pollBundleDatagramCreateElapsedTicks,
+            pollBundleEnqueueElapsedTicks,
             pollPayloadCopyElapsedTicks,
             pollEnvelopeParseElapsedTicks,
             pollAsyncReceiveElapsedTicks,

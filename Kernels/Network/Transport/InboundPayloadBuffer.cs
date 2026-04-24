@@ -25,9 +25,33 @@ public sealed class InboundPayloadBuffer : IDisposable
             Interlocked.Increment(ref _retainCount);
         }
 
+        public void AddRefs(int count)
+        {
+            if (count <= 0)
+                return;
+
+            Interlocked.Add(ref _retainCount, count);
+        }
+
         public void Release()
         {
             if (Interlocked.Decrement(ref _retainCount) != 0)
+                return;
+
+            byte[]? buffer = Interlocked.Exchange(ref _buffer, null);
+            if (buffer is not null)
+                ArrayPool<byte>.Shared.Return(buffer);
+        }
+
+        public void ReleaseRefs(int count)
+        {
+            if (count <= 0)
+                return;
+
+            int remaining = Interlocked.Add(ref _retainCount, -count);
+            if (remaining < 0)
+                throw new InvalidOperationException("Inbound pooled lease ref count underflow.");
+            if (remaining != 0)
                 return;
 
             byte[]? buffer = Interlocked.Exchange(ref _buffer, null);
@@ -105,6 +129,35 @@ public sealed class InboundPayloadBuffer : IDisposable
 
         owner._pooledLease.AddRef();
         return new InboundPayloadBuffer(owner._memory.Slice(offset, length), owner._pooledLease);
+    }
+
+    internal static InboundPayloadBuffer SliceRetained(InboundPayloadBuffer owner, int offset, int length)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        if (owner._pooledLease is null)
+            throw new InvalidOperationException("Only pooled inbound buffers support zero-copy slicing.");
+        if ((uint)offset > (uint)owner._memory.Length || (uint)length > (uint)(owner._memory.Length - offset))
+            throw new ArgumentOutOfRangeException(nameof(offset));
+        if (length == 0)
+            return Empty;
+
+        return new InboundPayloadBuffer(owner._memory.Slice(offset, length), owner._pooledLease);
+    }
+
+    internal void AddRefs(int count)
+    {
+        if (count <= 0 || _pooledLease is null)
+            return;
+
+        _pooledLease.AddRefs(count);
+    }
+
+    internal void ReleaseRefs(int count)
+    {
+        if (count <= 0 || _pooledLease is null)
+            return;
+
+        _pooledLease.ReleaseRefs(count);
     }
 
     public void Dispose()

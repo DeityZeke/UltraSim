@@ -179,6 +179,11 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 PendingDrainElapsedTicks: pendingDrainTicks,
                 SocketReceiveElapsedTicks: 0,
                 BundleUnpackElapsedTicks: 0,
+                BundleIndexElapsedTicks: 0,
+                BundleMaterializeElapsedTicks: 0,
+                BundleSliceElapsedTicks: 0,
+                BundleDatagramCreateElapsedTicks: 0,
+                BundleEnqueueElapsedTicks: 0,
                 PayloadCopyElapsedTicks: 0,
                 EnvelopeParseElapsedTicks: 0,
                 QueuedDatagramCount: count,
@@ -190,6 +195,11 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
         long socketReceiveTicks = 0;
         long bundleUnpackTicks = 0;
+        long bundleIndexTicks = 0;
+        long bundleMaterializeTicks = 0;
+        long bundleSliceTicks = 0;
+        long bundleDatagramCreateTicks = 0;
+        long bundleEnqueueTicks = 0;
         long payloadCopyTicks = 0;
         long envelopeParseTicks = 0;
         while (count < destination.Length && socket.Available > 0)
@@ -231,22 +241,54 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> offsets, out ReadOnlySpan<byte> payloads))
             {
                 long bundleStart = Stopwatch.GetTimestamp();
+                wirePayload.AddRefs(entryCount);
+                int createdSlices = 0;
                 for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
                 {
+                    long entryIndexStart = Stopwatch.GetTimestamp();
                     int currentStart = BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice(entryIndex * sizeof(ushort)));
                     int nextStart = entryIndex + 1 < entryCount
                         ? BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice((entryIndex + 1) * sizeof(ushort)))
                         : payloads.Length;
+                    bundleIndexTicks += Stopwatch.GetTimestamp() - entryIndexStart;
                     if ((uint)currentStart > (uint)payloads.Length || (uint)nextStart > (uint)payloads.Length || nextStart < currentStart)
                         break;
 
                     int entryLength = nextStart - currentStart;
-                    InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.Slice(
-                        wirePayload,
-                        datagramPayload.Length - payloads.Length + currentStart,
-                        entryLength);
-                    TryQueueInbound(connectionId, bundledPayload, destination, ref count, ref envelopeParseTicks, ref payloadCopyTicks);
+                    long materializeStart = Stopwatch.GetTimestamp();
+                    try
+                    {
+                        long sliceStart = Stopwatch.GetTimestamp();
+                        InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.SliceRetained(
+                            wirePayload,
+                            datagramPayload.Length - payloads.Length + currentStart,
+                            entryLength);
+                        bundleSliceTicks += Stopwatch.GetTimestamp() - sliceStart;
+                        if (entryLength > 0)
+                            createdSlices++;
+                        TryQueueInbound(
+                            connectionId,
+                            bundledPayload,
+                            destination,
+                            ref count,
+                            ref envelopeParseTicks,
+                            ref payloadCopyTicks,
+                            ref bundleDatagramCreateTicks,
+                            ref bundleEnqueueTicks);
+                        bundleMaterializeTicks += Stopwatch.GetTimestamp() - materializeStart;
+                    }
+                    catch
+                    {
+                        int unusedRefs = entryCount - createdSlices;
+                        if (unusedRefs > 0)
+                            wirePayload.ReleaseRefs(unusedRefs);
+                        wirePayload.Dispose();
+                        throw;
+                    }
                 }
+                int unusedSliceRefs = entryCount - createdSlices;
+                if (unusedSliceRefs > 0)
+                    wirePayload.ReleaseRefs(unusedSliceRefs);
                 wirePayload.Dispose();
                 bundleUnpackTicks += Stopwatch.GetTimestamp() - bundleStart;
                 continue;
@@ -259,6 +301,11 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
             PendingDrainElapsedTicks: pendingDrainTicks,
             SocketReceiveElapsedTicks: socketReceiveTicks,
             BundleUnpackElapsedTicks: bundleUnpackTicks,
+            BundleIndexElapsedTicks: bundleIndexTicks,
+            BundleMaterializeElapsedTicks: bundleMaterializeTicks,
+            BundleSliceElapsedTicks: bundleSliceTicks,
+            BundleDatagramCreateElapsedTicks: bundleDatagramCreateTicks,
+            BundleEnqueueElapsedTicks: bundleEnqueueTicks,
             PayloadCopyElapsedTicks: payloadCopyTicks,
             EnvelopeParseElapsedTicks: envelopeParseTicks,
             QueuedDatagramCount: count,
@@ -569,15 +616,42 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         ref long envelopeParseTicks,
         ref long payloadCopyTicks)
     {
-        if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks))
+        long ignoredCreateTicks = 0;
+        long ignoredEnqueueTicks = 0;
+        TryQueueInbound(
+            connectionId,
+            payloadBuffer,
+            destination,
+            ref count,
+            ref envelopeParseTicks,
+            ref payloadCopyTicks,
+            ref ignoredCreateTicks,
+            ref ignoredEnqueueTicks);
+    }
+
+    private void TryQueueInbound(
+        ConnectionId connectionId,
+        InboundPayloadBuffer payloadBuffer,
+        Span<InboundDatagram> destination,
+        ref int count,
+        ref long envelopeParseTicks,
+        ref long payloadCopyTicks,
+        ref long datagramCreateTicks,
+        ref long enqueueTicks)
+    {
+        if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks, ref datagramCreateTicks))
             return;
+
+        long enqueueStart = Stopwatch.GetTimestamp();
         if (count < destination.Length)
         {
             destination[count++] = inbound;
+            enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
             return;
         }
 
         QueuePendingInbound(inbound);
+        enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
     }
 
     private bool TryQueueInboundPending(
@@ -585,10 +659,29 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         InboundPayloadBuffer payloadBuffer,
         ref long envelopeParseTicks)
     {
-        if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks))
+        long ignoredCreateTicks = 0;
+        long ignoredEnqueueTicks = 0;
+        return TryQueueInboundPending(
+            connectionId,
+            payloadBuffer,
+            ref envelopeParseTicks,
+            ref ignoredCreateTicks,
+            ref ignoredEnqueueTicks);
+    }
+
+    private bool TryQueueInboundPending(
+        ConnectionId connectionId,
+        InboundPayloadBuffer payloadBuffer,
+        ref long envelopeParseTicks,
+        ref long datagramCreateTicks,
+        ref long enqueueTicks)
+    {
+        if (!TryCreateInboundDatagram(connectionId, payloadBuffer, out InboundDatagram inbound, ref envelopeParseTicks, ref datagramCreateTicks))
             return false;
 
+        long enqueueStart = Stopwatch.GetTimestamp();
         QueuePendingInbound(inbound);
+        enqueueTicks += Stopwatch.GetTimestamp() - enqueueStart;
         return true;
     }
 
@@ -598,13 +691,27 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         out InboundDatagram inbound,
         ref long envelopeParseTicks)
     {
+        long ignoredCreateTicks = 0;
+        return TryCreateInboundDatagram(connectionId, payloadBuffer, out inbound, ref envelopeParseTicks, ref ignoredCreateTicks);
+    }
+
+    private bool TryCreateInboundDatagram(
+        ConnectionId connectionId,
+        InboundPayloadBuffer payloadBuffer,
+        out InboundDatagram inbound,
+        ref long envelopeParseTicks,
+        ref long datagramCreateTicks)
+    {
         if (!TryDecodeInboundMetadata(payloadBuffer.Span, out PacketEnvelopeHeader header, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel, ref envelopeParseTicks))
         {
             payloadBuffer.Dispose();
             inbound = default;
             return false;
         }
+
+        long createStart = Stopwatch.GetTimestamp();
         inbound = new InboundDatagram(connectionId, plane, packetClass, channel, header, payloadBuffer);
+        datagramCreateTicks += Stopwatch.GetTimestamp() - createStart;
         return true;
     }
 
@@ -734,6 +841,8 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         long ignoredParseTicks = 0;
         if (TransportDatagramBundleCodec.TryBeginReadBundle(datagramPayload, out ushort entryCount, out ReadOnlySpan<byte> offsets, out ReadOnlySpan<byte> payloads))
         {
+            wirePayload.AddRefs(entryCount);
+            int createdSlices = 0;
             for (int entryIndex = 0; entryIndex < entryCount; entryIndex++)
             {
                 int currentStart = BinaryPrimitives.ReadUInt16LittleEndian(offsets.Slice(entryIndex * sizeof(ushort)));
@@ -744,12 +853,17 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                     break;
 
                 int entryLength = nextStart - currentStart;
-                InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.Slice(
+                InboundPayloadBuffer bundledPayload = InboundPayloadBuffer.SliceRetained(
                     wirePayload,
                     datagramPayload.Length - payloads.Length + currentStart,
                     entryLength);
+                if (entryLength > 0)
+                    createdSlices++;
                 TryQueueInboundPending(connectionId, bundledPayload, ref ignoredParseTicks);
             }
+            int unusedSliceRefs = entryCount - createdSlices;
+            if (unusedSliceRefs > 0)
+                wirePayload.ReleaseRefs(unusedSliceRefs);
             wirePayload.Dispose();
             totalElapsedTicks += Stopwatch.GetTimestamp() - unpackStart;
             return true;

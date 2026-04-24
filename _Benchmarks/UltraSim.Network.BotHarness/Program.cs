@@ -188,6 +188,11 @@ internal sealed class MovementRampHarness : IDisposable
         var clientPollPendingDrainSamplesMs = new List<double>(measuredTicks);
         var clientPollSocketReceiveSamplesMs = new List<double>(measuredTicks);
         var clientPollBundleUnpackSamplesMs = new List<double>(measuredTicks);
+        var clientPollBundleIndexSamplesMs = new List<double>(measuredTicks);
+        var clientPollBundleMaterializeSamplesMs = new List<double>(measuredTicks);
+        var clientPollBundleSliceSamplesMs = new List<double>(measuredTicks);
+        var clientPollBundleDatagramCreateSamplesMs = new List<double>(measuredTicks);
+        var clientPollBundleEnqueueSamplesMs = new List<double>(measuredTicks);
         var clientPollPayloadCopySamplesMs = new List<double>(measuredTicks);
         var clientPollEnvelopeParseSamplesMs = new List<double>(measuredTicks);
         var clientPollAsyncReceiveSamplesMs = new List<double>(measuredTicks);
@@ -327,6 +332,11 @@ internal sealed class MovementRampHarness : IDisposable
             double clientPollPendingDrainMs = 0d;
             double clientPollSocketReceiveMs = 0d;
             double clientPollBundleUnpackMs = 0d;
+            double clientPollBundleIndexMs = 0d;
+            double clientPollBundleMaterializeMs = 0d;
+            double clientPollBundleSliceMs = 0d;
+            double clientPollBundleDatagramCreateMs = 0d;
+            double clientPollBundleEnqueueMs = 0d;
             double clientPollPayloadCopyMs = 0d;
             double clientPollEnvelopeParseMs = 0d;
             double clientPollAsyncReceiveMs = 0d;
@@ -349,6 +359,11 @@ internal sealed class MovementRampHarness : IDisposable
                 clientPollPendingDrainMs += profile.PollPendingDrainElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollSocketReceiveMs += profile.PollSocketReceiveElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollBundleUnpackMs += profile.PollBundleUnpackElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollBundleIndexMs += profile.PollBundleIndexElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollBundleMaterializeMs += profile.PollBundleMaterializeElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollBundleSliceMs += profile.PollBundleSliceElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollBundleDatagramCreateMs += profile.PollBundleDatagramCreateElapsedTicks * 1000.0 / Stopwatch.Frequency;
+                clientPollBundleEnqueueMs += profile.PollBundleEnqueueElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollPayloadCopyMs += profile.PollPayloadCopyElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollEnvelopeParseMs += profile.PollEnvelopeParseElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 clientPollAsyncReceiveMs += profile.PollAsyncReceiveElapsedTicks * 1000.0 / Stopwatch.Frequency;
@@ -367,6 +382,11 @@ internal sealed class MovementRampHarness : IDisposable
             clientPollPendingDrainSamplesMs.Add(clientPollPendingDrainMs);
             clientPollSocketReceiveSamplesMs.Add(clientPollSocketReceiveMs);
             clientPollBundleUnpackSamplesMs.Add(clientPollBundleUnpackMs);
+            clientPollBundleIndexSamplesMs.Add(clientPollBundleIndexMs);
+            clientPollBundleMaterializeSamplesMs.Add(clientPollBundleMaterializeMs);
+            clientPollBundleSliceSamplesMs.Add(clientPollBundleSliceMs);
+            clientPollBundleDatagramCreateSamplesMs.Add(clientPollBundleDatagramCreateMs);
+            clientPollBundleEnqueueSamplesMs.Add(clientPollBundleEnqueueMs);
             clientPollPayloadCopySamplesMs.Add(clientPollPayloadCopyMs);
             clientPollEnvelopeParseSamplesMs.Add(clientPollEnvelopeParseMs);
             clientPollAsyncReceiveSamplesMs.Add(clientPollAsyncReceiveMs);
@@ -417,6 +437,11 @@ internal sealed class MovementRampHarness : IDisposable
         TickWindowStats clientPollPendingDrainStats = new TickWindowStats(clientPollPendingDrainSamplesMs);
         TickWindowStats clientPollSocketReceiveStats = new TickWindowStats(clientPollSocketReceiveSamplesMs);
         TickWindowStats clientPollBundleUnpackStats = new TickWindowStats(clientPollBundleUnpackSamplesMs);
+        TickWindowStats clientPollBundleIndexStats = new TickWindowStats(clientPollBundleIndexSamplesMs);
+        TickWindowStats clientPollBundleMaterializeStats = new TickWindowStats(clientPollBundleMaterializeSamplesMs);
+        TickWindowStats clientPollBundleSliceStats = new TickWindowStats(clientPollBundleSliceSamplesMs);
+        TickWindowStats clientPollBundleDatagramCreateStats = new TickWindowStats(clientPollBundleDatagramCreateSamplesMs);
+        TickWindowStats clientPollBundleEnqueueStats = new TickWindowStats(clientPollBundleEnqueueSamplesMs);
         TickWindowStats clientPollPayloadCopyStats = new TickWindowStats(clientPollPayloadCopySamplesMs);
         TickWindowStats clientPollEnvelopeParseStats = new TickWindowStats(clientPollEnvelopeParseSamplesMs);
         TickWindowStats clientPollAsyncReceiveStats = new TickWindowStats(clientPollAsyncReceiveSamplesMs);
@@ -500,6 +525,16 @@ internal sealed class MovementRampHarness : IDisposable
             ClientPollSocketReceiveP95Ms: clientPollSocketReceiveStats.P95Ms,
             ClientPollBundleUnpackAverageMs: clientPollBundleUnpackStats.AverageMs,
             ClientPollBundleUnpackP95Ms: clientPollBundleUnpackStats.P95Ms,
+            ClientPollBundleIndexAverageMs: clientPollBundleIndexStats.AverageMs,
+            ClientPollBundleIndexP95Ms: clientPollBundleIndexStats.P95Ms,
+            ClientPollBundleMaterializeAverageMs: clientPollBundleMaterializeStats.AverageMs,
+            ClientPollBundleMaterializeP95Ms: clientPollBundleMaterializeStats.P95Ms,
+            ClientPollBundleSliceAverageMs: clientPollBundleSliceStats.AverageMs,
+            ClientPollBundleSliceP95Ms: clientPollBundleSliceStats.P95Ms,
+            ClientPollBundleDatagramCreateAverageMs: clientPollBundleDatagramCreateStats.AverageMs,
+            ClientPollBundleDatagramCreateP95Ms: clientPollBundleDatagramCreateStats.P95Ms,
+            ClientPollBundleEnqueueAverageMs: clientPollBundleEnqueueStats.AverageMs,
+            ClientPollBundleEnqueueP95Ms: clientPollBundleEnqueueStats.P95Ms,
             ClientPollPayloadCopyAverageMs: clientPollPayloadCopyStats.AverageMs,
             ClientPollPayloadCopyP95Ms: clientPollPayloadCopyStats.P95Ms,
             ClientPollEnvelopeParseAverageMs: clientPollEnvelopeParseStats.AverageMs,
@@ -1521,6 +1556,16 @@ internal readonly record struct StageResult(
     double ClientPollSocketReceiveP95Ms,
     double ClientPollBundleUnpackAverageMs,
     double ClientPollBundleUnpackP95Ms,
+    double ClientPollBundleIndexAverageMs,
+    double ClientPollBundleIndexP95Ms,
+    double ClientPollBundleMaterializeAverageMs,
+    double ClientPollBundleMaterializeP95Ms,
+    double ClientPollBundleSliceAverageMs,
+    double ClientPollBundleSliceP95Ms,
+    double ClientPollBundleDatagramCreateAverageMs,
+    double ClientPollBundleDatagramCreateP95Ms,
+    double ClientPollBundleEnqueueAverageMs,
+    double ClientPollBundleEnqueueP95Ms,
     double ClientPollPayloadCopyAverageMs,
     double ClientPollPayloadCopyP95Ms,
     double ClientPollEnvelopeParseAverageMs,
@@ -1631,6 +1676,16 @@ internal readonly record struct StageResult(
             ["client_poll_socket_recv_p95_ms"] = Math.Round(ClientPollSocketReceiveP95Ms, 3),
             ["client_poll_bundle_unpack_avg_ms"] = Math.Round(ClientPollBundleUnpackAverageMs, 3),
             ["client_poll_bundle_unpack_p95_ms"] = Math.Round(ClientPollBundleUnpackP95Ms, 3),
+            ["client_poll_bundle_index_avg_ms"] = Math.Round(ClientPollBundleIndexAverageMs, 3),
+            ["client_poll_bundle_index_p95_ms"] = Math.Round(ClientPollBundleIndexP95Ms, 3),
+            ["client_poll_bundle_materialize_avg_ms"] = Math.Round(ClientPollBundleMaterializeAverageMs, 3),
+            ["client_poll_bundle_materialize_p95_ms"] = Math.Round(ClientPollBundleMaterializeP95Ms, 3),
+            ["client_poll_bundle_slice_avg_ms"] = Math.Round(ClientPollBundleSliceAverageMs, 3),
+            ["client_poll_bundle_slice_p95_ms"] = Math.Round(ClientPollBundleSliceP95Ms, 3),
+            ["client_poll_bundle_datagram_create_avg_ms"] = Math.Round(ClientPollBundleDatagramCreateAverageMs, 3),
+            ["client_poll_bundle_datagram_create_p95_ms"] = Math.Round(ClientPollBundleDatagramCreateP95Ms, 3),
+            ["client_poll_bundle_enqueue_avg_ms"] = Math.Round(ClientPollBundleEnqueueAverageMs, 3),
+            ["client_poll_bundle_enqueue_p95_ms"] = Math.Round(ClientPollBundleEnqueueP95Ms, 3),
             ["client_poll_payload_copy_avg_ms"] = Math.Round(ClientPollPayloadCopyAverageMs, 3),
             ["client_poll_payload_copy_p95_ms"] = Math.Round(ClientPollPayloadCopyP95Ms, 3),
             ["client_poll_envelope_parse_avg_ms"] = Math.Round(ClientPollEnvelopeParseAverageMs, 3),

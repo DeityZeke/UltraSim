@@ -60,6 +60,8 @@ Useful options:
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
 - `--ring-cadence-ticks <t0,t1,t2,...>`
+- `--ordered-event-capacity <n>`
+- `--replay-buffer-capacity <n>`
 - `--owner-deadband <meters>`
 - `--owner-max-silent-ticks <n>`
 - `--owner-prediction-jitter-percent <fraction>`
@@ -136,6 +138,16 @@ The widened harness now reports:
 - `client_poll_socket_recv_p95_ms`
 - `client_poll_bundle_unpack_avg_ms`
 - `client_poll_bundle_unpack_p95_ms`
+- `client_poll_bundle_index_avg_ms`
+- `client_poll_bundle_index_p95_ms`
+- `client_poll_bundle_materialize_avg_ms`
+- `client_poll_bundle_materialize_p95_ms`
+- `client_poll_bundle_slice_avg_ms`
+- `client_poll_bundle_slice_p95_ms`
+- `client_poll_bundle_datagram_create_avg_ms`
+- `client_poll_bundle_datagram_create_p95_ms`
+- `client_poll_bundle_enqueue_avg_ms`
+- `client_poll_bundle_enqueue_p95_ms`
 - `client_poll_payload_copy_avg_ms`
 - `client_poll_payload_copy_p95_ms`
 - `client_poll_envelope_parse_avg_ms`
