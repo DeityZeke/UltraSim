@@ -19,6 +19,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly), ClientObserverEventBridge_AppliesIncreasingReliableEventFramesOnly);
         Run(nameof(ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses), ClientObserverEventBridge_BuffersOutOfOrderFramesUntilGapCloses);
         Run(nameof(ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull), ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull);
+        Run(nameof(ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps), ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps);
         Run(nameof(ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
@@ -356,6 +357,28 @@ internal static class TestRunner
         Assert.Equal(3, processed);
         Assert.Equal(1, bridge.BufferedEventCount);
         Assert.Equal(1L, bridge.DroppedBufferedEventCount);
+    }
+
+    private static void ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps()
+    {
+        var applied = new List<ulong>();
+        var bridge = new ClientObserverEventBridge(
+            new ConnectionId(9),
+            (sequence, _) => applied.Add(sequence))
+        {
+            AllowSequenceGaps = true,
+        };
+
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(10, ImmutablePayloadBuffer.CopyFrom([1]))).Memory),
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, PacketCodec.Encode(new ReliableEventFramePacket(12, ImmutablePayloadBuffer.CopyFrom([2]))).Memory),
+        ];
+
+        Assert.Equal(2, bridge.ProcessInbound(inbound));
+        Assert.Equal(2, bridge.LastAppliedEventCount);
+        Assert.Equal(0, bridge.BufferedEventCount);
+        Assert.SequenceEqual([10UL, 12UL], applied);
     }
 
     private static void ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply()

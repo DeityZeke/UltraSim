@@ -875,6 +875,7 @@ internal sealed class MovementRampHarness : IRampHarness
             var observerEvents = ClientObserverEventBridge.CreateSpanFastPath(
                 new ConnectionId(1),
                 (_, payload) => handle!.ApplyObserverEvent(payload));
+            observerEvents.AllowSequenceGaps = _options.ObserverReplication;
             if (chatEvents is not null)
                 observerEvents.ChatEvents = chatEvents;
             var host = new ClientMovementSessionHost(
@@ -1028,13 +1029,13 @@ internal sealed class MovementRampHarness : IRampHarness
         for (int i = 0; i < count; i++)
         {
             ConnectionId connectionId = replication.BoundConnections[i];
-            replication.Subscriptions.Subscribe(connectionId, ServerChatScopes.System);
             if (!_serverHost.TryGetBoundEntity(connectionId, out Entity entity))
                 continue;
             if (!_world!.TryGetComponent(entity, out BenchMovementBody body))
                 continue;
 
             replication.Maintainer.UpdateConnection(connectionId, new WorldPosition2(body.PositionX, body.PositionY), replication.Subscriptions);
+            replication.Subscriptions.Subscribe(connectionId, ServerChatScopes.System);
         }
     }
 

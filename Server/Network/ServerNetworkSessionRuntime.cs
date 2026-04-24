@@ -24,6 +24,8 @@ public sealed class ServerNetworkSessionRuntime
     private readonly ConnectionLatestStateSentTracker _latestSentTracker = new();
     private readonly ConnectionLatestStateDeltaExecutionBridge _deltaExecution;
     private readonly Dictionary<ConnectionId, ConnectionScheduleState> _stateByConnection = new();
+    private readonly Dictionary<ConnectionId, ulong> _nextReliableEventSequenceByConnection = new();
+    private readonly Dictionary<ConnectionId, ulong> _baselineOrderedGlobalSequenceByConnection = new();
     private readonly ConnectionId[] _connectionScratch;
     private readonly SubscriptionKey[] _subscriptionScratch;
     private readonly LatestStateUpdate[] _filteredSnapshotScratch;
@@ -88,6 +90,7 @@ public sealed class ServerNetworkSessionRuntime
             throw new ArgumentOutOfRangeException(nameof(connectionId));
 
         _stateByConnection.TryAdd(connectionId, default);
+        _nextReliableEventSequenceByConnection.TryAdd(connectionId, 1);
     }
 
     public bool UnbindConnection(ConnectionId connectionId)
@@ -96,6 +99,8 @@ public sealed class ServerNetworkSessionRuntime
         _reliableEventAcks.Remove(connectionId);
         _latestSentTracker.Remove(connectionId);
         _replayBuffer.AcknowledgeUpTo(connectionId, ulong.MaxValue);
+        _nextReliableEventSequenceByConnection.Remove(connectionId);
+        _baselineOrderedGlobalSequenceByConnection.Remove(connectionId);
         return _stateByConnection.Remove(connectionId);
     }
 
@@ -128,9 +133,12 @@ public sealed class ServerNetworkSessionRuntime
                     _replayBuffer.AcknowledgeUpTo(datagram.ConnectionId, ack.Descriptor.LastOrderedEventSequence);
                     if (_stateByConnection.ContainsKey(datagram.ConnectionId))
                     {
+                        ulong globalOrderedSequence = _baselineOrderedGlobalSequenceByConnection.TryGetValue(datagram.ConnectionId, out ulong baselineGlobalSequence)
+                            ? baselineGlobalSequence
+                            : ack.Descriptor.LastOrderedEventSequence;
                         _stateByConnection[datagram.ConnectionId] = new ConnectionScheduleState(
                             new LatestStateCursor(ack.Descriptor.HighestLatestStateSequence),
-                            new OrderedEventCursor(ack.Descriptor.LastOrderedEventSequence + 1));
+                            new OrderedEventCursor(globalOrderedSequence + 1));
                     }
                 }
 
@@ -196,6 +204,7 @@ public sealed class ServerNetworkSessionRuntime
             int orderedCount = FilterOrderedEventsForConnection(subscriptions, _scheduledScratch.AsSpan(0, schedule.Count), _orderedEventScratch);
             if (orderedCount > 0)
             {
+                RenumberOrderedEventsForConnection(connectionId, _orderedEventScratch.AsSpan(0, orderedCount));
                 OutboundAssemblyResult orderedAssembly = _assembler.Assemble(
                     connectionId,
                     _orderedEventScratch.AsSpan(0, orderedCount),
@@ -241,6 +250,7 @@ public sealed class ServerNetworkSessionRuntime
         int filteredSnapshotCount = CopyFilteredLatestSnapshot(subscriptions, _filteredSnapshotScratch);
         LatestStateSnapshot latestSnapshot = _latestState.GetSnapshot();
         OrderedEventSnapshot orderedSnapshot = _orderedEvents.GetSnapshot();
+        _baselineOrderedGlobalSequenceByConnection[connectionId] = orderedSnapshot.NewestAvailableSequence;
         ulong highestFilteredSequence = 0;
         for (int i = 0; i < filteredSnapshotCount; i++)
         {
@@ -251,7 +261,7 @@ public sealed class ServerNetworkSessionRuntime
         descriptor = new StateBaselineDescriptor(
             BaselineId: _nextBaselineId++,
             HighestLatestStateSequence: highestFilteredSequence == 0 ? latestSnapshot.HighestPublishedSequence : highestFilteredSequence,
-            LastOrderedEventSequence: orderedSnapshot.Count == 0 ? 0UL : orderedSnapshot.NewestAvailableSequence,
+            LastOrderedEventSequence: GetLastAssignedReliableEventSequence(connectionId),
             ItemCount: (ushort)Math.Min(filteredSnapshotCount, ushort.MaxValue));
 
         int boundedItemCount = Math.Min(filteredSnapshotCount, ushort.MaxValue);
@@ -297,6 +307,39 @@ public sealed class ServerNetworkSessionRuntime
         }
 
         return count;
+    }
+
+    private void RenumberOrderedEventsForConnection(ConnectionId connectionId, Span<ScheduledWorkItem> items)
+    {
+        ulong nextSequence = GetNextReliableEventSequence(connectionId);
+        for (int i = 0; i < items.Length; i++)
+        {
+            ScheduledWorkItem item = items[i];
+            if (item.Kind != ScheduledWorkKind.OrderedEvent)
+                continue;
+
+            items[i] = item with { Sequence = nextSequence++ };
+        }
+
+        _nextReliableEventSequenceByConnection[connectionId] = nextSequence;
+    }
+
+    private ulong GetNextReliableEventSequence(ConnectionId connectionId)
+    {
+        if (_nextReliableEventSequenceByConnection.TryGetValue(connectionId, out ulong nextSequence) &&
+            nextSequence != 0)
+        {
+            return nextSequence;
+        }
+
+        _nextReliableEventSequenceByConnection[connectionId] = 1;
+        return 1;
+    }
+
+    private ulong GetLastAssignedReliableEventSequence(ConnectionId connectionId)
+    {
+        ulong nextSequence = GetNextReliableEventSequence(connectionId);
+        return nextSequence == 0 ? 0 : nextSequence - 1;
     }
 
     private void Enqueue(ReadOnlySpan<OutboundDatagram> datagrams)

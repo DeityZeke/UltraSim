@@ -67,6 +67,7 @@ public sealed class ClientObserverEventBridge
     public ulong LastAcknowledgedSequence => _pendingAckSequence;
     public long DroppedBufferedEventCount { get; private set; }
     public ClientChatEventBridge? ChatEvents { get; set; }
+    public bool AllowSequenceGaps { get; set; }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
     {
@@ -126,6 +127,14 @@ public sealed class ClientObserverEventBridge
         {
             Apply(sequence, payload);
             _nextExpectedSequence++;
+            DrainBufferedContiguous();
+            return;
+        }
+
+        if (AllowSequenceGaps)
+        {
+            Apply(sequence, payload);
+            _nextExpectedSequence = sequence + 1;
             DrainBufferedContiguous();
             return;
         }
