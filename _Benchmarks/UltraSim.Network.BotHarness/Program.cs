@@ -6,6 +6,7 @@ using System.Buffers.Binary;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization.Metadata;
+using System.Threading;
 using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Network;
@@ -34,7 +35,7 @@ internal static class HarnessProgram
         Console.WriteLine("--------------------------------------------------------------------------------------------------------------------------------");
 
         var rows = new JsonArray();
-        using var harness = new MovementRampHarness(options);
+        using var harness = CreateHarness(options);
 
         for (int stageIndex = 0; stageIndex < stages.Count; stageIndex++)
         {
@@ -95,68 +96,93 @@ internal static class HarnessProgram
             _ => !result.TickSloPass || !result.PingSloPass,
         };
     }
+
+    private static IRampHarness CreateHarness(HarnessArgs options)
+    {
+        return options.Role.ToLowerInvariant() switch
+        {
+            "client" => new MovementRampHarness(options, clientOnly: true),
+            _ => new MovementRampHarness(options, clientOnly: false),
+        };
+    }
 }
 
-internal sealed class MovementRampHarness : IDisposable
+internal interface IRampHarness : IDisposable
+{
+    int ActiveClientCount { get; }
+    void Reset();
+    StageResult RunStage(int stageIndex, int targetClients);
+}
+
+internal sealed class MovementRampHarness : IRampHarness
 {
     private readonly HarnessArgs _options;
+    private readonly bool _clientOnly;
     private readonly PacketMetadataRegistry _metadata;
-    private readonly UdpSocketNetworkTransport _serverTransport;
-    private readonly World _world;
+    private readonly UdpSocketNetworkTransport? _serverTransport;
+    private readonly World? _world;
     private readonly ArchetypeSignature _movementSignature;
-    private readonly ServerMovementSessionHost _serverHost;
+    private readonly ServerMovementSessionHost? _serverHost;
     private readonly List<ClientHandle> _clients = [];
     private readonly List<Entity> _spawnedEntities = [];
     private uint _nextNetworkEntityId = 1;
     private long _clockTicks;
     private readonly PongProbePacket[] _pongScratch = new PongProbePacket[256];
+    private readonly long _realtimeTickIntervalStopwatchTicks;
 
-    public MovementRampHarness(HarnessArgs options)
+    public MovementRampHarness(HarnessArgs options, bool clientOnly)
     {
         _options = options;
+        _clientOnly = clientOnly;
+        _realtimeTickIntervalStopwatchTicks = options.RealtimePacing
+            ? Math.Max(1L, (long)Math.Round(Stopwatch.Frequency / (double)options.TickHz, MidpointRounding.AwayFromZero))
+            : 0L;
         _metadata = DefaultPacketMetadata.Create();
-
-        _serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
-            new IPEndPoint(IPAddress.Loopback, options.Port),
-            _metadata,
-            EnableAsyncFlush: options.AsyncServerFlush,
-            EnablePollProfiling: options.TransportPollProfiling));
-        _serverTransport.Start();
 
         var builder = new EcsSchemaBuilder();
         ComponentId movementId = builder.RegisterComponent<BenchMovementBody>();
         ComponentId movementVisualId = builder.RegisterComponent<BenchMovementVisualBody>();
         ComponentId movementBulkId = builder.RegisterComponent<BenchMovementBulkBody>();
         ComponentId movementEventId = builder.RegisterComponent<BenchMovementEventBody>();
-        _world = new World(builder.Build());
+        _world = clientOnly ? null : new World(builder.Build());
         _movementSignature = new ArchetypeSignature([movementId, movementVisualId, movementBulkId, movementEventId]);
 
-        var handshakePolicy = new HandshakePolicy(
-            ProtocolVersion: 3,
-            SchemaHash: 4,
-            ContentHash: 5,
-            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        if (!clientOnly)
+        {
+            _serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+                new IPEndPoint(IPAddress.Loopback, options.Port),
+                _metadata,
+                EnableAsyncFlush: options.AsyncServerFlush,
+                EnablePollProfiling: options.TransportPollProfiling));
+            _serverTransport.Start();
 
-        _serverHost = new ServerMovementSessionHost(
-            _world,
-            _serverTransport,
-            ApplyMovementInput,
-            ProjectMovementState,
-            SpawnSession,
-            handshakePolicy: handshakePolicy,
-            runtimeOptions: new ServerNetworkSessionRuntimeOptions(
-                MaxConnections: ServerNetworkSessionRuntimeOptions.Default.MaxConnections,
-                MaxSnapshotItems: ServerNetworkSessionRuntimeOptions.Default.MaxSnapshotItems,
-                MaxScheduledItems: ServerNetworkSessionRuntimeOptions.Default.MaxScheduledItems,
-                MaxReplayItems: ServerNetworkSessionRuntimeOptions.Default.MaxReplayItems,
-                MaxDatagrams: ServerNetworkSessionRuntimeOptions.Default.MaxDatagrams,
-                OrderedEventCapacity: options.OrderedEventCapacity,
-                ReplayBufferCapacityPerConnection: options.ReplayBufferCapacityPerConnection,
-                RetransmitPolicy: ServerNetworkSessionRuntimeOptions.Default.RetransmitPolicy),
-            ownerCorrectionPolicy: new ServerMovementOwnerCorrectionPolicy(
-                _options.OwnerCorrectionDeadband,
-                _options.OwnerCorrectionMaxSilentTicks));
-        _serverHost.Start();
+            var handshakePolicy = new HandshakePolicy(
+                ProtocolVersion: 3,
+                SchemaHash: 4,
+                ContentHash: 5,
+                RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+
+            _serverHost = new ServerMovementSessionHost(
+                _world!,
+                _serverTransport,
+                ApplyMovementInput,
+                ProjectMovementState,
+                SpawnSession,
+                handshakePolicy: handshakePolicy,
+                runtimeOptions: new ServerNetworkSessionRuntimeOptions(
+                    MaxConnections: ServerNetworkSessionRuntimeOptions.Default.MaxConnections,
+                    MaxSnapshotItems: ServerNetworkSessionRuntimeOptions.Default.MaxSnapshotItems,
+                    MaxScheduledItems: ServerNetworkSessionRuntimeOptions.Default.MaxScheduledItems,
+                    MaxReplayItems: ServerNetworkSessionRuntimeOptions.Default.MaxReplayItems,
+                    MaxDatagrams: ServerNetworkSessionRuntimeOptions.Default.MaxDatagrams,
+                    OrderedEventCapacity: options.OrderedEventCapacity,
+                    ReplayBufferCapacityPerConnection: options.ReplayBufferCapacityPerConnection,
+                    RetransmitPolicy: ServerNetworkSessionRuntimeOptions.Default.RetransmitPolicy),
+                ownerCorrectionPolicy: new ServerMovementOwnerCorrectionPolicy(
+                    _options.OwnerCorrectionDeadband,
+                    _options.OwnerCorrectionMaxSilentTicks));
+            _serverHost.Start();
+        }
     }
 
     public int ActiveClientCount => _clients.Count;
@@ -226,9 +252,10 @@ internal sealed class MovementRampHarness : IDisposable
         int gen1Before = GC.CollectionCount(1);
         int gen2Before = GC.CollectionCount(2);
 
-        StageReplicationContext? replication = _options.ObserverReplication
+        StageReplicationContext? replication = !_clientOnly && _options.ObserverReplication
             ? CreateReplicationContext()
             : null;
+        long nextTickDeadline = Stopwatch.GetTimestamp();
 
         for (int tick = 0; tick < measuredTicks; tick++)
         {
@@ -238,7 +265,7 @@ internal sealed class MovementRampHarness : IDisposable
             _clockTicks += 2;
             uint publishTick = (uint)(stageIndex * 100_000 + tick + 1);
             long serverPumpStart = Stopwatch.GetTimestamp();
-            _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick);
+            _serverHost?.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick);
             long serverPumpEnd = Stopwatch.GetTimestamp();
             serverPumpSamplesMs.Add((serverPumpEnd - serverPumpStart) * 1000.0 / Stopwatch.Frequency);
 
@@ -410,6 +437,8 @@ internal sealed class MovementRampHarness : IDisposable
             pendingSum += pending;
             if (pending > pendingMax)
                 pendingMax = pending;
+
+            WaitForRealtimeTick(ref nextTickDeadline);
         }
 
         long allocAfter = GC.GetTotalAllocatedBytes(false);
@@ -597,7 +626,7 @@ internal sealed class MovementRampHarness : IDisposable
 
         for (int i = 0; i < _spawnedEntities.Count; i++)
         {
-            if (_world.Entities.IsAlive(_spawnedEntities[i]))
+            if (_world is not null && _world.Entities.IsAlive(_spawnedEntities[i]))
                 _world.Destroy(_spawnedEntities[i]);
         }
 
@@ -609,8 +638,8 @@ internal sealed class MovementRampHarness : IDisposable
     public void Dispose()
     {
         Reset();
-        _serverHost.Stop();
-        _serverTransport.Dispose();
+        _serverHost?.Stop();
+        _serverTransport?.Dispose();
     }
 
     private int EnsureClientCount(int targetClients)
@@ -618,7 +647,9 @@ internal sealed class MovementRampHarness : IDisposable
         if (targetClients < _clients.Count)
             Reset();
 
-        IPEndPoint serverEndPoint = (IPEndPoint)_serverTransport.LocalEndPoint!;
+        IPEndPoint serverEndPoint = _clientOnly
+            ? new IPEndPoint(IPAddress.Parse(_options.Host), _options.Port)
+            : (IPEndPoint)_serverTransport!.LocalEndPoint!;
         int before = _clients.Count;
         while (_clients.Count < targetClients)
         {
@@ -666,14 +697,15 @@ internal sealed class MovementRampHarness : IDisposable
 
     private void PumpUntilReady(int settleTicks)
     {
+        long nextTickDeadline = Stopwatch.GetTimestamp();
         for (int step = 0; step < settleTicks; step++)
         {
             _clockTicks += 2;
-            _serverHost.Pump(_clockTicks, _options.TickDeltaSeconds, (uint)(10_000 + step));
+            _serverHost?.Pump(_clockTicks, _options.TickDeltaSeconds, (uint)(10_000 + step));
             for (int i = 0; i < _clients.Count; i++)
                 _clients[i].Host.Pump(_clockTicks + 1);
 
-            bool allReady = _serverHost.BoundConnectionCount == _clients.Count;
+            bool allReady = _clientOnly || _serverHost!.BoundConnectionCount == _clients.Count;
             if (allReady)
             {
                 for (int i = 0; i < _clients.Count; i++)
@@ -688,6 +720,8 @@ internal sealed class MovementRampHarness : IDisposable
 
             if (allReady)
                 return;
+
+            WaitForRealtimeTick(ref nextTickDeadline);
         }
     }
 
@@ -734,7 +768,7 @@ internal sealed class MovementRampHarness : IDisposable
     private StageReplicationContext CreateReplicationContext()
     {
         var policy = new ChunkAoiPolicy(chunkSizeMeters: 16f, _options.AoiRadiiMeters);
-        var publisher = new ServerEcsWorldNetworkPublisher(_world);
+        var publisher = new ServerEcsWorldNetworkPublisher(_world!);
         var subscriptions = new ConnectionSubscriptionRegistry();
         var scheduler = new ConnectionStreamScheduler(publisher.LatestStateStream, publisher.OrderedEventStream);
         var fanout = new ScheduledWorkFanoutBridge(
@@ -756,7 +790,7 @@ internal sealed class MovementRampHarness : IDisposable
 
     private void UpdateObserverSubscriptions(StageReplicationContext replication)
     {
-        if (replication.BoundConnections.Length < _serverHost.BoundConnectionCount)
+        if (replication.BoundConnections.Length < _serverHost!.BoundConnectionCount)
             replication.BoundConnections = new ConnectionId[_serverHost.BoundConnectionCount];
 
         int count = _serverHost.CopyBoundConnections(replication.BoundConnections);
@@ -765,7 +799,7 @@ internal sealed class MovementRampHarness : IDisposable
             ConnectionId connectionId = replication.BoundConnections[i];
             if (!_serverHost.TryGetBoundEntity(connectionId, out Entity entity))
                 continue;
-            if (!_world.TryGetComponent(entity, out BenchMovementBody body))
+            if (!_world!.TryGetComponent(entity, out BenchMovementBody body))
                 continue;
 
             replication.Maintainer.UpdateConnection(connectionId, new WorldPosition2(body.PositionX, body.PositionY), replication.Subscriptions);
@@ -872,8 +906,8 @@ internal sealed class MovementRampHarness : IDisposable
             replication.ScheduleState = result.Schedule.NextState;
             long flushStart = Stopwatch.GetTimestamp();
             for (int i = 0; i < result.Fanout.DatagramCount; i++)
-                _serverTransport.EnqueueOutbound(replication.Output[i]);
-            _serverTransport.FlushOutbound();
+                _serverTransport!.EnqueueOutbound(replication.Output[i]);
+            _serverTransport!.FlushOutbound();
             long flushEnd = Stopwatch.GetTimestamp();
             dispatchFlushTicks += flushEnd - flushStart;
             TransportFlushProfileSnapshot flushProfile = _serverTransport.LastFlushProfile;
@@ -1021,6 +1055,29 @@ internal sealed class MovementRampHarness : IDisposable
         for (int i = 0; i < cadenceTicks.Length; i++)
             converted[i] = checked((uint)cadenceTicks[i]);
         return converted;
+    }
+
+    private void WaitForRealtimeTick(ref long nextTickDeadline)
+    {
+        if (_realtimeTickIntervalStopwatchTicks <= 0)
+            return;
+
+        nextTickDeadline += _realtimeTickIntervalStopwatchTicks;
+        while (true)
+        {
+            long remaining = nextTickDeadline - Stopwatch.GetTimestamp();
+            if (remaining <= 0)
+                return;
+
+            if (remaining > Stopwatch.Frequency / 200)
+            {
+                int sleepMs = (int)Math.Max(1, ((remaining * 1000) / Stopwatch.Frequency) - 1);
+                Thread.Sleep(sleepMs);
+                continue;
+            }
+
+            Thread.SpinWait(64);
+        }
     }
 
     private sealed class ClientHandle : IDisposable
@@ -1294,6 +1351,8 @@ internal sealed class MovementRampHarness : IDisposable
 
 internal sealed class HarnessArgs
 {
+    public string Role { get; set; } = "combined";
+    public string Host { get; set; } = "127.0.0.1";
     public string Stages { get; set; } = "32,64,128,256";
     public string StageMode { get; set; } = "independent";
     public double StageDurationSeconds { get; set; } = 30.0;
@@ -1316,6 +1375,7 @@ internal sealed class HarnessArgs
     public bool AsyncServerFlush { get; set; } = true;
     public bool AsyncClientReceive { get; set; }
     public bool TransportPollProfiling { get; set; }
+    public bool RealtimePacing { get; set; }
     public int ObserverBulkEveryTicks { get; set; } = 16;
     public int ObserverEventEveryTicks { get; set; } = 8;
     public float SpawnSpacingMeters { get; set; } = 4f;
@@ -1341,7 +1401,9 @@ internal sealed class HarnessArgs
             string arg = args[i];
             string? Next() => i + 1 < args.Length ? args[++i] : null;
 
-            if (arg == "--stages") options.Stages = Next() ?? options.Stages;
+            if (arg == "--role") options.Role = Next() ?? options.Role;
+            else if (arg == "--host") options.Host = Next() ?? options.Host;
+            else if (arg == "--stages") options.Stages = Next() ?? options.Stages;
             else if (arg == "--stage-mode") options.StageMode = Next() ?? options.StageMode;
             else if (arg == "--stage-duration") options.StageDurationSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--settle-seconds") options.SettleSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1368,6 +1430,8 @@ internal sealed class HarnessArgs
             else if (arg == "--enable-async-client-receive") options.AsyncClientReceive = true;
             else if (arg == "--disable-transport-poll-profiling") options.TransportPollProfiling = false;
             else if (arg == "--enable-transport-poll-profiling") options.TransportPollProfiling = true;
+            else if (arg == "--disable-realtime-pacing") options.RealtimePacing = false;
+            else if (arg == "--enable-realtime-pacing") options.RealtimePacing = true;
             else if (arg == "--observer-bulk-every-ticks") options.ObserverBulkEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--observer-event-every-ticks") options.ObserverEventEveryTicks = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--spawn-spacing-m") options.SpawnSpacingMeters = float.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1429,6 +1493,8 @@ internal sealed class HarnessArgs
 
         return new JsonObject
         {
+            ["role"] = Role,
+            ["host"] = Host,
             ["stages"] = Stages,
             ["stage_mode"] = StageMode,
             ["stage_duration_seconds"] = StageDurationSeconds,
@@ -1452,6 +1518,7 @@ internal sealed class HarnessArgs
             ["async_server_flush"] = AsyncServerFlush,
             ["async_client_receive"] = AsyncClientReceive,
             ["transport_poll_profiling"] = TransportPollProfiling,
+            ["realtime_pacing"] = RealtimePacing,
             ["spawn_spacing_m"] = SpawnSpacingMeters,
             ["spawn_grid_width"] = SpawnGridWidth,
             ["aoi_radii_m"] = aoiRadii,

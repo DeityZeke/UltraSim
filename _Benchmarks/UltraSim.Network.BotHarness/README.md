@@ -58,6 +58,8 @@ Useful options:
 - `--disable-async-client-receive`
 - `--enable-transport-poll-profiling`
 - `--disable-transport-poll-profiling`
+- `--enable-realtime-pacing`
+- `--disable-realtime-pacing`
 - `--spawn-spacing-m <n>`
 - `--spawn-grid-width <n>`
 - `--aoi-radii-m <r0,r1,...>`
@@ -95,6 +97,8 @@ This tool exists to answer the question:
 - does the real socket/session/movement path still look healthy once many clients are connected at once?
 
 It is the intended checkpoint before a broader external-process or gameplay-richer harness.
+
+For sharded/external-process runs, `--enable-realtime-pacing` is important. The standalone harness normally advances ticks as fast as possible for local in-process measurement; sharded server/client processes need wall-clock pacing so their stage windows actually overlap.
 
 ## Current Observer-Replication Note
 

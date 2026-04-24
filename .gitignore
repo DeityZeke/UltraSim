@@ -13,3 +13,4 @@ _tmp_perf_probe/
 **/bin/
 **/obj/
 .codex-temp/
+_Benchmarks/results/
