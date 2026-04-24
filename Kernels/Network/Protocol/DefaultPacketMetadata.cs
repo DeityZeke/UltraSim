@@ -12,6 +12,8 @@ public static class DefaultPacketMetadata
         registry.Register<HandshakeResultPacket>();
         registry.Register<PingProbePacket>();
         registry.Register<PongProbePacket>();
+        registry.Register<ChatSubmitPacket>();
+        registry.Register<ChatMessageEventPacket>();
         registry.Register<RealtimeStateFramePacket>();
         registry.Register<RealtimeStateBatchPacket>();
         registry.Register<ReliableEventFramePacket>();

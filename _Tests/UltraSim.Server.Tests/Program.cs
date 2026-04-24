@@ -33,6 +33,9 @@ internal static class TestRunner
         Run(nameof(ServerApplication_Stop_FromCreated_MovesDirectlyToStopped), ServerApplication_Stop_FromCreated_MovesDirectlyToStopped);
         Run(nameof(ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook), ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook);
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
+        Run(nameof(ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs), ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs);
+        Run(nameof(ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat), ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat);
+        Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
         Run(nameof(ServerApplication_SystemRuntimeSnapshots_ReflectHookData), ServerApplication_SystemRuntimeSnapshots_ReflectHookData);
@@ -414,6 +417,94 @@ internal static class TestRunner
         Assert.True(app.TryExecuteCommand(ServerControlCommand.Stop(), out ServerCommandResult stopResult));
         Assert.Equal(ServerCommandResultKind.Accepted, stopResult.Kind);
         Assert.Equal(ServerApplicationState.Stopped, app.State);
+    }
+
+    private static void ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs()
+    {
+        var registry = new ServerCommandRegistry();
+        bool invoked = false;
+        string? hue = null;
+        string? name = null;
+        string? itemType = null;
+
+        registry.Register(
+            "add",
+            (in ServerCommandRequest _, ServerTextCommandInvocation invocation) =>
+            {
+                invoked = true;
+                itemType = invocation.Arguments[0];
+                hue = invocation.NamedArguments["hue"];
+                name = invocation.NamedArguments["name"];
+            },
+            prefix: "[",
+            minAccessLevel: 10);
+
+        var request = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "[add item hue=0x200, name=\"The Sword of Awesome\"",
+            AccessLevel: 10);
+
+        Assert.True(registry.TryDispatch(in request, out ServerCommandDispatchResult result));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, result.Status);
+        Assert.True(invoked);
+        Assert.Equal("item", itemType!);
+        Assert.Equal("0x200", hue!);
+        Assert.Equal("The Sword of Awesome", name!);
+    }
+
+    private static void ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat()
+    {
+        var registry = new ServerCommandRegistry();
+        bool invoked = false;
+        registry.Register(
+            "announce",
+            (in ServerCommandRequest _, ServerTextCommandInvocation _) => invoked = true,
+            prefix: "",
+            minAccessLevel: 100);
+
+        var chatRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "announce hello",
+            AccessLevel: 100);
+        Assert.False(registry.TryDispatch(in chatRequest, out _));
+        Assert.False(invoked);
+
+        var consoleRequest = new ServerCommandRequest(
+            ServerCommandSource.ServerConsole,
+            "announce hello",
+            AccessLevel: 100);
+        Assert.True(registry.TryDispatch(in consoleRequest, out ServerCommandDispatchResult result));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, result.Status);
+        Assert.True(invoked);
+    }
+
+    private static void ServerChatService_AnnounceCommandPublishesSystemEvent()
+    {
+        var orderedEvents = new OrderedEventStream(capacity: 8);
+        var registry = new ServerCommandRegistry();
+        var chat = new ServerChatService(orderedEvents, registry);
+        ServerChatCommandBootstrap.RegisterDefaults(registry, chat);
+
+        var request = new ServerCommandRequest(
+            ServerCommandSource.ServerConsole,
+            "announce \"Maintenance in 10 minutes\"",
+            AccessLevel: 100);
+
+        Assert.True(registry.TryDispatch(in request, out ServerCommandDispatchResult result));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, result.Status);
+        Assert.Equal(1L, chat.PublishedMessages);
+
+        OrderedEventEntry[] entries = new OrderedEventEntry[4];
+        OrderedEventDrainResult drain = orderedEvents.DrainSince(new OrderedEventCursor(0), entries);
+        Assert.Equal(OrderedEventDrainStatus.Success, drain.Status);
+        Assert.Equal(1, drain.Count);
+        Assert.Equal(ServerChatScopes.System, entries[0].ScopeKey);
+
+        var reader = new UltraSim.Network.BitReader(entries[0].Payload.Span);
+        ChatMessageEventPacket packet = ChatMessageEventPacket.Deserialize(ref reader);
+        Assert.Equal(ServerChatChannelIds.System, packet.ChannelId);
+        Assert.Equal("Maintenance in 10 minutes", packet.Text);
+        Assert.Equal(ChatMessageFlags.System | ChatMessageFlags.Announcement, packet.Flags);
     }
 
     private static void ServerApplication_Faults_WhenHookThrows()

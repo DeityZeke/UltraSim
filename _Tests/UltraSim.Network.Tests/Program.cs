@@ -18,6 +18,8 @@ internal static class TestRunner
         Run(nameof(IOutboundTransform_ExposesExplicitTransformHook), IOutboundTransform_ExposesExplicitTransformHook);
         Run(nameof(PacketEnvelopeHeader_RoundTripsExpectedFields), PacketEnvelopeHeader_RoundTripsExpectedFields);
         Run(nameof(PacketCodec_EncodesAndDecodesHandshakeHello), PacketCodec_EncodesAndDecodesHandshakeHello);
+        Run(nameof(ChatSubmitPacket_RoundTripsSubmittedText), ChatSubmitPacket_RoundTripsSubmittedText);
+        Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
         Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
         Run(nameof(PacketMetadataRegistry_ResolvesRegisteredPacketMetadata), PacketMetadataRegistry_ResolvesRegisteredPacketMetadata);
@@ -450,6 +452,47 @@ internal static class TestRunner
         Assert.Equal((ulong)11, decoded.SchemaHash);
         Assert.Equal((ulong)13, decoded.ContentHash);
         Assert.Equal(FeatureFlags.Compression | FeatureFlags.SharedPayloadFanout, decoded.Features);
+    }
+
+    private static void ChatSubmitPacket_RoundTripsSubmittedText()
+    {
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new ChatSubmitPacket("[add dagger"));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(ChatSubmitPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(ChatSubmitPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.Input, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        ChatSubmitPacket decoded = ChatSubmitPacket.Deserialize(ref reader);
+        Assert.Equal("[add dagger", decoded.Text);
+    }
+
+    private static void ChatMessageEventPacket_RoundTripsMessageMetadata()
+    {
+        var packet = new ChatMessageEventPacket(
+            MessageId: 99,
+            ChannelId: 2,
+            SenderEntityId: 1234,
+            SenderName: "server",
+            Text: "Maintenance in 10 minutes.",
+            ServerTick: 77,
+            Flags: ChatMessageFlags.System | ChatMessageFlags.Announcement);
+
+        ImmutablePayloadBuffer encoded = PacketCodec.EncodePayload(packet);
+        var reader = new BitReader(encoded.Span);
+        ChatMessageEventPacket decoded = ChatMessageEventPacket.Deserialize(ref reader);
+
+        Assert.Equal((ulong)99, decoded.MessageId);
+        Assert.Equal((ushort)2, decoded.ChannelId);
+        Assert.Equal((ulong)1234, decoded.SenderEntityId);
+        Assert.Equal("server", decoded.SenderName);
+        Assert.Equal("Maintenance in 10 minutes.", decoded.Text);
+        Assert.Equal((uint)77, decoded.ServerTick);
+        Assert.Equal(ChatMessageFlags.System | ChatMessageFlags.Announcement, decoded.Flags);
     }
 
     private static void RealtimeStateBatchPacket_RoundTripsExpectedItems()

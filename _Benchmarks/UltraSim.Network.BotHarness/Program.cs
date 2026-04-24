@@ -1007,7 +1007,7 @@ internal sealed class MovementRampHarness : IRampHarness
                 recipientPhasing: _options.LatestStateRecipientPhasing),
             publishTick);
 
-        if (_options.ObserverVisualState)
+        if (_options.ObserverVisualState && !_options.ObserverVisualStateSuppressPublish)
         {
             published += replication.Publisher.PublishChunkAoiLatestState(
                 new ServerEcsChunkAoiLatestStateRule<BenchMovementVisualBody>(
@@ -1020,7 +1020,7 @@ internal sealed class MovementRampHarness : IRampHarness
                 publishTick);
         }
 
-        if (_options.ObserverBulkState)
+        if (_options.ObserverBulkState && !_options.ObserverBulkStateSuppressPublish)
         {
             published += replication.Publisher.PublishChunkAoiLatestState(
                 new ServerEcsChunkAoiLatestStateRule<BenchMovementBulkBody>(
@@ -1034,7 +1034,7 @@ internal sealed class MovementRampHarness : IRampHarness
                 publishTick);
         }
 
-        if (_options.ObserverEvents)
+        if (_options.ObserverEvents && !_options.ObserverEventsSuppressPublish)
         {
             published += replication.Publisher.PublishChunkAoiOrderedEvents(
                 new ServerEcsChunkAoiOrderedEventRule<BenchMovementEventBody>(
@@ -1146,7 +1146,7 @@ internal sealed class MovementRampHarness : IRampHarness
         };
         movementWorld.SetComponent(movementEntity, body);
 
-        if (_options.ObserverVisualState)
+        if (_options.ObserverVisualState && !_options.ObserverVisualStateSuppressPublish)
         {
             float headingDegrees = MathF.Atan2(velocityY, velocityX) * (180f / MathF.PI);
             float speed = MathF.Sqrt((velocityX * velocityX) + (velocityY * velocityY));
@@ -1158,6 +1158,7 @@ internal sealed class MovementRampHarness : IRampHarness
         }
 
         if (_options.ObserverBulkState &&
+            !_options.ObserverBulkStateSuppressPublish &&
             (_options.ObserverBulkEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverBulkEveryTicks) == 0))
         {
             float speed = MathF.Sqrt((velocityX * velocityX) + (velocityY * velocityY));
@@ -1179,6 +1180,7 @@ internal sealed class MovementRampHarness : IRampHarness
         }
 
         if (_options.ObserverEvents &&
+            !_options.ObserverEventsSuppressPublish &&
             (_options.ObserverEventEveryTicks <= 1 || (input.ClientTick % (uint)_options.ObserverEventEveryTicks) == 0))
         {
             movementWorld.SetComponent(movementEntity, new BenchMovementEventBody(
@@ -1561,6 +1563,9 @@ internal sealed class HarnessArgs
     public bool ObserverVisualState { get; set; }
     public bool ObserverBulkState { get; set; }
     public bool ObserverEvents { get; set; }
+    public bool ObserverVisualStateSuppressPublish { get; set; }
+    public bool ObserverBulkStateSuppressPublish { get; set; }
+    public bool ObserverEventsSuppressPublish { get; set; }
     public bool LatestStateBatching { get; set; }
     public bool LatestStateRecipientPhasing { get; set; }
     public bool AsyncServerFlush { get; set; } = true;
@@ -1611,6 +1616,9 @@ internal sealed class HarnessArgs
             else if (arg == "--observer-visual-state") options.ObserverVisualState = true;
             else if (arg == "--observer-bulk-state") options.ObserverBulkState = true;
             else if (arg == "--observer-events") options.ObserverEvents = true;
+            else if (arg == "--observer-visual-state-suppress-publish") options.ObserverVisualStateSuppressPublish = true;
+            else if (arg == "--observer-bulk-state-suppress-publish") options.ObserverBulkStateSuppressPublish = true;
+            else if (arg == "--observer-events-suppress-publish") options.ObserverEventsSuppressPublish = true;
             else if (arg == "--disable-latest-state-batching") options.LatestStateBatching = false;
             else if (arg == "--enable-latest-state-batching") options.LatestStateBatching = true;
             else if (arg == "--disable-latest-state-recipient-phasing") options.LatestStateRecipientPhasing = false;
@@ -1700,9 +1708,12 @@ internal sealed class HarnessArgs
             ["stop_on"] = StopOn,
             ["observer_replication"] = ObserverReplication,
             ["observer_visual_state"] = ObserverVisualState,
+            ["observer_visual_state_suppress_publish"] = ObserverVisualStateSuppressPublish,
             ["observer_bulk_state"] = ObserverBulkState,
+            ["observer_bulk_state_suppress_publish"] = ObserverBulkStateSuppressPublish,
             ["observer_bulk_every_ticks"] = ObserverBulkEveryTicks,
             ["observer_events"] = ObserverEvents,
+            ["observer_events_suppress_publish"] = ObserverEventsSuppressPublish,
             ["observer_event_every_ticks"] = ObserverEventEveryTicks,
             ["latest_state_batching"] = LatestStateBatching,
             ["latest_state_recipient_phasing"] = LatestStateRecipientPhasing,

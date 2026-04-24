@@ -1,0 +1,148 @@
+# Chat And Command System Plan
+
+## Goal
+
+UltraSim should have one text input model that covers local speech, chat channels, and server commands.
+
+The target feel is RunUO-like:
+
+- press Enter to focus the input line
+- submit plain text to speak locally
+- local speech appears in the chat feed and as an overhead bubble
+- command-prefixed input runs server commands
+- the command prefix is configurable and can be more than one character, such as `[`, `/`, `.`, or `command:`
+
+The target UI grows toward a Knives Chat-style panel:
+
+- bottom-left chat panel
+- browser-like tabs
+- each tab filters message categories independently
+- channels can have their own colors, display names, history, and visibility rules
+
+## Core Boundary
+
+Commands and chat are related, but they are not the same service.
+
+The shared path is command execution:
+
+- chat input can dispatch a command
+- server console can dispatch a command
+- visual wrappers can dispatch a command
+- scripts/plugins can register and dispatch commands
+
+All command sources should route through the same registry, parser, permission checks, result model, and audit surface.
+
+The source stays explicit:
+
+- `ChatInput`
+- `ServerConsole`
+- `VisualWrapper`
+- `Script`
+- `System`
+
+This lets commands enforce source-specific rules when needed. A visual wrapper should not fake a chat message. It should create a command request that carries its source, access level, optional session/entity context, and optional target context.
+
+## Input Interpretation
+
+Server-side interpretation order:
+
+1. If input starts with a configured command prefix, dispatch as a command.
+2. Else if input starts with a configured channel alias, route to that channel.
+3. Else route as default local speech.
+
+Command prefixes are strings and use longest-prefix matching. This allows `command:` to coexist with shorter prefixes.
+
+Channel aliases should usually be command handlers:
+
+- `/p hello` routes to party chat
+- `/g hello` routes to guild chat
+- `/w name hello` routes to whisper
+- plain `hello` routes to local speech
+
+This keeps command parsing and permission handling in one place.
+
+## Server Components
+
+Planned modules:
+
+- `ServerCommandRegistry`
+  - source-neutral command registration and dispatch
+  - string prefixes
+  - quoted argument parsing
+  - `key=value` named argument extraction
+  - access checks
+  - reply callback
+- `ServerChatService`
+  - validates submitted chat
+  - rate limits
+  - routes local/channel/system messages
+  - emits chat message events through the ordered event stream
+  - owns chat metrics
+- `ChatChannelRegistry`
+  - channel id/name/aliases
+  - recipient provider
+  - default display settings
+- `IChatRecipientProvider`
+  - local AOI recipients
+  - party recipients
+  - guild recipients
+  - staff/system recipients
+- `IChatCommandModule`
+  - script/plugin registration hook for commands
+
+## Network Shape
+
+Client to server:
+
+- `ChatSubmitPacket`
+- plane: `Input`
+- class: `ReliableEvent`
+- channel: `ReliableOrdered`
+- payload: raw submitted text
+
+Server to client:
+
+- `ChatMessageEventPayload`
+- carried as a payload inside the existing ordered event stream
+- delivered through the client ordered-event bridge
+
+The reliable ordered event lane is appropriate for server chat delivery because chat is low volume and should not silently disappear.
+
+## Message Metadata
+
+A delivered chat message should carry metadata, not just a string:
+
+- message id
+- channel id
+- sender entity id
+- sender display name
+- text
+- server tick
+- flags
+
+Flags include:
+
+- `System`
+- `Local`
+- `Party`
+- `Guild`
+- `Whisper`
+- `Staff`
+- `Error`
+- `Overhead`
+- `Announcement`
+
+Tabs are client display filters over these fields. Channels are server routing concepts; tabs are client presentation concepts.
+
+## First Implementation Slice
+
+The first useful slice should be intentionally small:
+
+- command registry with string prefixes
+- shared request/source/result model
+- `help`, `ping`, and `announce` style registration support
+- chat submit packet
+- chat message event payload
+- tests for command parsing/dispatch and packet round trips
+
+The next slice can wire `ServerChatService` into `ServerMovementSessionHost`, add harness bot chat, and rerun the single-family parity ramp with chat enabled.
