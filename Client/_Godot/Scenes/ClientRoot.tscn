@@ -79,7 +79,6 @@ shadow_enabled = true
 
 [node name="UILayers" type="Node" parent="." unique_id=2127180535]
 script = ExtResource("8")
-WorldCanvasPath = NodePath("World")
 HudCanvasPath = NodePath("HUD")
 MenuCanvasPath = NodePath("Menus")
 DebugCanvasPath = NodePath("Debug")

@@ -31,6 +31,11 @@ public partial class UiManager : Node
         Debug?.SetStatusText(text);
     }
 
+    public void SetNetworkSummaryText(string text)
+    {
+        Hud?.SetNetworkSummaryText(text);
+    }
+
     private TNode? ResolveNode<TNode>(NodePath? path)
         where TNode : Node
     {

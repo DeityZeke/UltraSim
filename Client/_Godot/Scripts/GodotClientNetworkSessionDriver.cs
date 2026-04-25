@@ -13,11 +13,15 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     private readonly Action? _observerStateReset;
     private ClientMovementSessionHost? _host;
     private UdpSocketNetworkTransport? _transport;
+    private readonly PongProbePacket[] _pongScratch = new PongProbePacket[8];
+    private readonly Dictionary<ushort, long> _pingSentAtTicks = new();
     private bool _disposed;
     private uint _clientTick;
     private bool _lastReady;
     private uint _lastOwnerServerTick;
     private ushort _lastOwnerInputSequence;
+    private ushort _nextPingSequence;
+    private long _nextPingTicks;
 
     public GodotClientNetworkSessionDriver(
         Action<string> statusSink,
@@ -35,6 +39,9 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 
     public bool IsRunning => _host?.IsRunning == true;
     public bool IsReady => _host?.IsReady == true;
+    public ClientPumpProfileSnapshot LastPumpProfile => _host?.LastPumpProfile ?? default;
+    public SessionId SessionId => _host?.SessionId ?? default;
+    public double LastPingRoundTripMilliseconds { get; private set; } = -1.0;
     public ClientMovementSessionHost? Host => _host;
 
     public bool TryConnect(ClientDirectConnectRequest request, out string error)
@@ -96,8 +103,11 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
             return;
         }
 
-        _host.Pump(Stopwatch.GetTimestamp());
+        long nowTicks = Stopwatch.GetTimestamp();
+        _host.Pump(nowTicks);
         _clientTick++;
+        DrainPongs(nowTicks);
+        MaybeSendPingProbe(nowTicks);
         ApplyOwnerMovementIfChanged();
 
         if (_host.IsReady)
@@ -136,6 +146,10 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _lastReady = false;
         _lastOwnerServerTick = 0;
         _lastOwnerInputSequence = 0;
+        _nextPingSequence = 0;
+        _nextPingTicks = 0;
+        _pingSentAtTicks.Clear();
+        LastPingRoundTripMilliseconds = -1.0;
         _statusSink(status);
     }
 
@@ -180,5 +194,57 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _lastOwnerServerTick = result.ServerTick;
         _lastOwnerInputSequence = result.LastProcessedInputSequence;
         _ownerMovementSink(result);
+    }
+
+    private void DrainPongs(long nowTicks)
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        while (true)
+        {
+            int count = _host.Control.DrainReceivedPongs(_pongScratch);
+            if (count <= 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                ushort sequence = _pongScratch[i].Sequence;
+                if (!_pingSentAtTicks.Remove(sequence, out long sentTicks))
+                {
+                    continue;
+                }
+
+                LastPingRoundTripMilliseconds = (nowTicks - sentTicks) * 1000.0 / Stopwatch.Frequency;
+            }
+
+            if (count < _pongScratch.Length)
+            {
+                return;
+            }
+        }
+    }
+
+    private void MaybeSendPingProbe(long nowTicks)
+    {
+        if (_host is null || !_host.IsReady || nowTicks < _nextPingTicks)
+        {
+            return;
+        }
+
+        ushort sequence = _nextPingSequence++;
+        _pingSentAtTicks[sequence] = nowTicks;
+        _host.Control.SendPingProbe(_host.ConnectionId, sequence, unchecked((uint)nowTicks));
+        _host.Control.FlushOutbound();
+        _nextPingTicks = nowTicks + Stopwatch.Frequency;
+
+        if (_pingSentAtTicks.Count > 32)
+        {
+            _pingSentAtTicks.Clear();
+        }
     }
 }
