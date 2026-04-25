@@ -157,7 +157,7 @@ public sealed class ServerEcsMovementNetworkBridge
                 serverTick,
                 out MovementStatePacket packet))
             {
-                if (!ShouldSendOwnerCorrection(connectionId, state, packet, serverTick))
+                if (!ShouldSendOwnerCorrection(state, packet, serverTick))
                 {
                     _bindings[connectionId] = state;
                     continue;
@@ -216,49 +216,20 @@ public sealed class ServerEcsMovementNetworkBridge
         return unchecked((short)(left - right)) > 0;
     }
 
-    private bool ShouldSendOwnerCorrection(ConnectionId connectionId, in BindingState state, in MovementStatePacket packet, uint serverTick)
+    private bool ShouldSendOwnerCorrection(in BindingState state, in MovementStatePacket packet, uint serverTick)
     {
         if (!state.HasLastSentState)
             return true;
 
         uint silentTicks = serverTick - state.LastSentServerTick;
+        if (silentTicks >= _ownerCorrectionPolicy.MaxSilentTicks)
+            return true;
+
         float dx = packet.PositionX - state.LastSentState.PositionX;
         float dy = packet.PositionY - state.LastSentState.PositionY;
         float distanceSquared = (dx * dx) + (dy * dy);
         float deadband = _ownerCorrectionPolicy.PositionDeadband;
-        bool shouldSend = silentTicks >= _ownerCorrectionPolicy.MaxSilentTicks ||
-            distanceSquared > (deadband * deadband);
-        if (!shouldSend)
-            return false;
-
-        uint phaseCadenceTicks = _ownerCorrectionPolicy.PhaseCadenceTicks;
-        return phaseCadenceTicks <= 1 ||
-            ShouldDeliverPhasedOwnerCorrection(serverTick, connectionId, phaseCadenceTicks);
-    }
-
-    private static bool ShouldDeliverPhasedOwnerCorrection(uint serverTick, ConnectionId connectionId, uint cadenceTicks)
-    {
-        if (cadenceTicks <= 1 || !connectionId.IsValid)
-            return true;
-
-        return (serverTick % cadenceTicks) == ComputeConnectionPhase(connectionId, cadenceTicks);
-    }
-
-    private static uint ComputeConnectionPhase(ConnectionId connectionId, uint cadenceTicks)
-    {
-        if (cadenceTicks <= 1)
-            return 0;
-
-        unchecked
-        {
-            uint hash = (uint)connectionId.Value;
-            hash ^= hash >> 16;
-            hash *= 0x7feb352d;
-            hash ^= hash >> 15;
-            hash *= 0x846ca68b;
-            hash ^= hash >> 16;
-            return hash % cadenceTicks;
-        }
+        return distanceSquared > (deadband * deadband);
     }
 
     private static void DisposeInbound(ReadOnlySpan<InboundDatagram> inbound)

@@ -74,7 +74,6 @@ internal static class TestRunner
         Run(nameof(ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement), ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement);
         Run(nameof(ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement), ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement);
         Run(nameof(ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates), ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates);
-        Run(nameof(ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_PhasesEligibleCorrections), ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_PhasesEligibleCorrections);
         Run(nameof(ServerMovementSessionHost_TracksReliableEventAcksFromClient), ServerMovementSessionHost_TracksReliableEventAcksFromClient);
         Run(nameof(ServerMovementSessionHost_TracksStateBaselineAcksFromClient), ServerMovementSessionHost_TracksStateBaselineAcksFromClient);
         Run(nameof(ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor), ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor);
@@ -2590,58 +2589,6 @@ internal static class TestRunner
 
         Assert.Equal(1, server.AdvanceAndSend(0.016f, serverTick: 4));
         Assert.Equal(1, server.LastSentStateCount);
-    }
-
-    private static void ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_PhasesEligibleCorrections()
-    {
-        using var pair = new LoopbackTransportPair();
-        pair.Server.Start();
-        var builder = new EcsSchemaBuilder();
-        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
-        World world = new(builder.Build());
-        ArchetypeSignature signature = new([movementId]);
-        const int connectionCount = 16;
-
-        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
-        {
-        }
-
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
-        {
-            packet = new MovementStatePacket(
-                networkEntityId,
-                serverTick,
-                lastProcessedInputSequence,
-                PositionX: serverTick * 0.01f,
-                PositionY: 0f,
-                VelocityX: 0f,
-                VelocityY: 0f);
-            return true;
-        }
-
-        var server = new ServerEcsMovementNetworkBridge(
-            world,
-            pair.Server,
-            ApplyMovementInput,
-            ProjectMovementState,
-            new ServerMovementOwnerCorrectionPolicy(positionDeadband: 0f, maxSilentTicks: 1, phaseCadenceTicks: 2));
-
-        for (int i = 1; i <= connectionCount; i++)
-        {
-            Entity entity = world.CreateDefault(signature);
-            Assert.True(world.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
-            server.Bind(new ConnectionId(i), entity, networkEntityId: (uint)i);
-        }
-
-        Assert.Equal(connectionCount, server.AdvanceAndSend(0.016f, serverTick: 1));
-        int tickTwoCount = server.AdvanceAndSend(0.016f, serverTick: 2);
-        int tickThreeCount = server.AdvanceAndSend(0.016f, serverTick: 3);
-
-        Assert.True(tickTwoCount > 0);
-        Assert.True(tickTwoCount < connectionCount);
-        Assert.True(tickThreeCount > 0);
-        Assert.True(tickThreeCount < connectionCount);
-        Assert.Equal(connectionCount, tickTwoCount + tickThreeCount);
     }
 
     private static World CreateEcsTestWorld(bool enableProfiling, bool registerSystems = true)

@@ -181,8 +181,7 @@ internal sealed class MovementRampHarness : IRampHarness
                     RetransmitPolicy: ServerNetworkSessionRuntimeOptions.Default.RetransmitPolicy),
                 ownerCorrectionPolicy: new ServerMovementOwnerCorrectionPolicy(
                     _options.OwnerCorrectionDeadband,
-                    _options.OwnerCorrectionMaxSilentTicks,
-                    _options.OwnerCorrectionPhaseCadenceTicks));
+                    _options.OwnerCorrectionMaxSilentTicks));
             _serverHost.Start();
         }
     }
@@ -485,7 +484,7 @@ internal sealed class MovementRampHarness : IRampHarness
             for (int i = 0; i < _clients.Count; i++)
             {
                 ClientHandle client = _clients[i];
-                if (client.Host.IsReady && _options.PingIntervalTicks > 0 && (tick % _options.PingIntervalTicks) == 0)
+                if (client.Host.IsReady && ShouldSendPingProbeThisTick(client, tick))
                     client.TrySendPing((uint)tick);
 
                 client.Host.Pump(clientNowTicks);
@@ -787,6 +786,7 @@ internal sealed class MovementRampHarness : IRampHarness
             ClientObserverEventP95Ms: clientObserverEventStats.P95Ms,
             PingAverageMs: pingStats.AverageMs,
             PingP95Ms: pingStats.P95Ms,
+            PingP99Ms: pingStats.P99Ms,
             PingMaxMs: pingStats.MaxMs,
             PendingAverage: tickSamplesMs.Count == 0 ? 0d : pendingSum / (double)tickSamplesMs.Count,
             PendingMax: pendingMax,
@@ -820,6 +820,30 @@ internal sealed class MovementRampHarness : IRampHarness
             OwnerCorrectionAverageVelocityError: ownerCorrectionSamples == 0 ? 0d : ownerCorrectionVelocityErrorSum / ownerCorrectionSamples,
             OwnerCorrectionMaxVelocityError: ownerCorrectionVelocityErrorMax,
             ObserverStateItems: CountObserverStateItems());
+    }
+
+    private bool ShouldSendInputThisTick(ClientHandle client, int tick)
+    {
+        int intervalTicks = _options.InputIntervalTicks;
+        if (intervalTicks <= 1)
+            return true;
+
+        int phase = _options.PhaseInputSends
+            ? client.ClientIndex % intervalTicks
+            : 0;
+        return (tick % intervalTicks) == phase;
+    }
+
+    private bool ShouldSendPingProbeThisTick(ClientHandle client, int tick)
+    {
+        int intervalTicks = _options.PingIntervalTicks;
+        if (intervalTicks <= 0)
+            return false;
+
+        int phase = _options.PhasePingProbes
+            ? client.ClientIndex % intervalTicks
+            : 0;
+        return (tick % intervalTicks) == phase;
     }
 
     public void Reset()
@@ -946,6 +970,8 @@ internal sealed class MovementRampHarness : IRampHarness
             if (!client.Host.IsReady)
                 continue;
             if (i >= activeLimit)
+                continue;
+            if (!ShouldSendInputThisTick(client, (int)clientTick))
                 continue;
 
             short moveX = (short)(80 + ((int)clientTick + i) % 40);
@@ -1679,12 +1705,15 @@ internal sealed class HarnessArgs
     public double SettleSeconds { get; set; } = 3.0;
     public int TickHz { get; set; } = 62;
     public double ActiveRatio { get; set; } = 1.0;
+    public double InputHz { get; set; } = 0.0;
+    public bool PhaseInputSends { get; set; }
     public int Port { get; set; } = 0;
     public string ReportDir { get; set; } = "_Benchmarks/results";
     public double SloTickP95Ms { get; set; } = 4.0;
     public double SloPingP95Ms { get; set; } = 50.0;
     public int SloPendingMax { get; set; } = 128;
     public double PingIntervalSeconds { get; set; } = 1.0;
+    public bool PhasePingProbes { get; set; }
     public string StopOn { get; set; } = "either";
     public bool ObserverReplication { get; set; }
     public bool ObserverVisualState { get; set; }
@@ -1714,11 +1743,13 @@ internal sealed class HarnessArgs
     public int ReplayBufferCapacityPerConnection { get; set; } = ServerNetworkSessionRuntimeOptions.Default.ReplayBufferCapacityPerConnection;
     public float OwnerCorrectionDeadband { get; set; } = 0f;
     public uint OwnerCorrectionMaxSilentTicks { get; set; } = 1;
-    public uint OwnerCorrectionPhaseCadenceTicks { get; set; } = 1;
     public float OwnerPredictionJitterPercent { get; set; } = 0f;
 
     public int StageTicks => Math.Max(1, (int)Math.Round(StageDurationSeconds * TickHz, MidpointRounding.AwayFromZero));
     public int SettleTicks => Math.Max(1, (int)Math.Round(SettleSeconds * TickHz, MidpointRounding.AwayFromZero));
+    public int InputIntervalTicks => InputHz <= 0d
+        ? 1
+        : Math.Max(1, (int)Math.Round(TickHz / Math.Max(1.0, InputHz), MidpointRounding.AwayFromZero));
     public int PingIntervalTicks => Math.Max(1, (int)Math.Round(PingIntervalSeconds * TickHz, MidpointRounding.AwayFromZero));
     public float TickDeltaSeconds => 1f / TickHz;
 
@@ -1738,12 +1769,15 @@ internal sealed class HarnessArgs
             else if (arg == "--settle-seconds") options.SettleSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--tick-hz") options.TickHz = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--active-ratio") options.ActiveRatio = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--input-hz") options.InputHz = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--phase-input-sends") options.PhaseInputSends = true;
             else if (arg == "--port") options.Port = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--report-dir") options.ReportDir = Next() ?? options.ReportDir;
             else if (arg == "--slo-tick-p95-ms") options.SloTickP95Ms = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--slo-ping-p95-ms") options.SloPingP95Ms = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--slo-pending-max") options.SloPendingMax = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--ping-interval-s") options.PingIntervalSeconds = double.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--phase-ping-probes") options.PhasePingProbes = true;
             else if (arg == "--stop-on") options.StopOn = Next() ?? options.StopOn;
             else if (arg == "--observer-replication") options.ObserverReplication = true;
             else if (arg == "--observer-visual-state") options.ObserverVisualState = true;
@@ -1779,12 +1813,13 @@ internal sealed class HarnessArgs
             else if (arg == "--replay-buffer-capacity") options.ReplayBufferCapacityPerConnection = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-deadband") options.OwnerCorrectionDeadband = float.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-max-silent-ticks") options.OwnerCorrectionMaxSilentTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
-            else if (arg == "--owner-phase-cadence-ticks") options.OwnerCorrectionPhaseCadenceTicks = uint.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--owner-prediction-jitter-percent") options.OwnerPredictionJitterPercent = float.Parse(Next()!, CultureInfo.InvariantCulture);
         }
 
         options.TickHz = Math.Max(1, options.TickHz);
         options.ActiveRatio = Math.Clamp(options.ActiveRatio, 0d, 1d);
+        if (double.IsNaN(options.InputHz) || double.IsInfinity(options.InputHz) || options.InputHz < 0d)
+            throw new ArgumentOutOfRangeException(nameof(options.InputHz));
         options.LatestStateConnectionPhasingCadenceTicks = Math.Max(1, options.LatestStateConnectionPhasingCadenceTicks);
         options.ChatActiveRatio = Math.Clamp(options.ChatActiveRatio, 0d, 1d);
         options.ChatMinIntervalSeconds = Math.Max(0.001d, options.ChatMinIntervalSeconds);
@@ -1803,8 +1838,6 @@ internal sealed class HarnessArgs
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionDeadband));
         if (options.OwnerCorrectionMaxSilentTicks == 0)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionMaxSilentTicks));
-        if (options.OwnerCorrectionPhaseCadenceTicks == 0)
-            throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionPhaseCadenceTicks));
         if (float.IsNaN(options.OwnerPredictionJitterPercent) || float.IsInfinity(options.OwnerPredictionJitterPercent) || options.OwnerPredictionJitterPercent < 0f)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerPredictionJitterPercent));
         return options;
@@ -1845,11 +1878,15 @@ internal sealed class HarnessArgs
             ["settle_seconds"] = SettleSeconds,
             ["tick_hz"] = TickHz,
             ["active_ratio"] = ActiveRatio,
+            ["input_hz"] = InputHz,
+            ["input_interval_ticks"] = InputIntervalTicks,
+            ["phase_input_sends"] = PhaseInputSends,
             ["port"] = Port,
             ["slo_tick_p95_ms"] = SloTickP95Ms,
             ["slo_ping_p95_ms"] = SloPingP95Ms,
             ["slo_pending_max"] = SloPendingMax,
             ["ping_interval_seconds"] = PingIntervalSeconds,
+            ["phase_ping_probes"] = PhasePingProbes,
             ["stop_on"] = StopOn,
             ["observer_replication"] = ObserverReplication,
             ["observer_visual_state"] = ObserverVisualState,
@@ -1879,7 +1916,6 @@ internal sealed class HarnessArgs
             ["replay_buffer_capacity"] = ReplayBufferCapacityPerConnection,
             ["owner_deadband"] = OwnerCorrectionDeadband,
             ["owner_max_silent_ticks"] = OwnerCorrectionMaxSilentTicks,
-            ["owner_phase_cadence_ticks"] = OwnerCorrectionPhaseCadenceTicks,
             ["owner_prediction_jitter_percent"] = OwnerPredictionJitterPercent,
         };
     }
@@ -2074,6 +2110,7 @@ internal readonly record struct StageResult(
     double ClientObserverEventP95Ms,
     double PingAverageMs,
     double PingP95Ms,
+    double PingP99Ms,
     double PingMaxMs,
     double PendingAverage,
     int PendingMax,
@@ -2258,6 +2295,7 @@ internal readonly record struct StageResult(
             ["client_observer_event_p95_ms"] = Math.Round(ClientObserverEventP95Ms, 3),
             ["ping_avg_ms"] = Math.Round(PingAverageMs, 3),
             ["ping_p95_ms"] = Math.Round(PingP95Ms, 3),
+            ["ping_p99_ms"] = Math.Round(PingP99Ms, 3),
             ["ping_max_ms"] = Math.Round(PingMaxMs, 3),
             ["pending_avg"] = Math.Round(PendingAverage, 3),
             ["pending_max"] = PendingMax,
