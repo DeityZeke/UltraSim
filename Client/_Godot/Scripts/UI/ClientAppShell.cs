@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Client;
+using UltraSim.Discovery;
 
 namespace UltraSim.Client.Godot.UI;
 
@@ -8,6 +9,7 @@ public partial class ClientAppShell : Control
 {
     public event Action<ClientAppScreen>? ScreenRequested;
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
+    public event Action? ServerBrowserRefreshRequested;
     public event Action? PreviewRequested;
     public event Action? ResumeRequested;
     public event Action? BackRequested;
@@ -19,6 +21,8 @@ public partial class ClientAppShell : Control
     private VBoxContainer? _buttonColumn;
     private LineEdit? _hostField;
     private LineEdit? _portField;
+    private ClientAppScreen _currentScreen = ClientAppScreen.Start;
+    private ServerBrowserSnapshot? _serverBrowserSnapshot;
     private string _lastHostText = "127.0.0.1";
     private string _lastPortText = "42042";
 
@@ -41,6 +45,7 @@ public partial class ClientAppShell : Control
     {
         EnsureInterface();
         ClearButtons();
+        _currentScreen = screen;
 
         switch (screen)
         {
@@ -52,8 +57,9 @@ public partial class ClientAppShell : Control
                 AddButton("Settings", () => ScreenRequested?.Invoke(ClientAppScreen.Settings));
                 break;
             case ClientAppScreen.ServerBrowser:
-                SetText("Server Browser", "Discovery providers are not wired yet. Direct connect remains the fallback.");
+                ShowServerBrowser();
                 AddButton("Direct Connect", () => ScreenRequested?.Invoke(ClientAppScreen.DirectConnect));
+                AddButton("Refresh", () => ServerBrowserRefreshRequested?.Invoke());
                 AddBackButton();
                 break;
             case ClientAppScreen.DirectConnect:
@@ -87,6 +93,15 @@ public partial class ClientAppShell : Control
                 SetText("Error", "A client error occurred.");
                 AddButton("Back To Start", () => ScreenRequested?.Invoke(ClientAppScreen.Start));
                 break;
+        }
+    }
+
+    public void SetServerBrowserSnapshot(ServerBrowserSnapshot snapshot)
+    {
+        _serverBrowserSnapshot = snapshot;
+        if (_currentScreen == ClientAppScreen.ServerBrowser)
+        {
+            ShowScreen(ClientAppScreen.ServerBrowser);
         }
     }
 
@@ -225,6 +240,91 @@ public partial class ClientAppShell : Control
     private void AddBackButton()
     {
         AddButton("Back", () => BackRequested?.Invoke());
+    }
+
+    private void ShowServerBrowser()
+    {
+        ServerBrowserSnapshot? snapshot = _serverBrowserSnapshot;
+        if (snapshot is null)
+        {
+            SetText("Server Browser", "No discovery providers are configured yet. Direct connect remains available.");
+            return;
+        }
+
+        string providerName = snapshot.Providers.Count == 0
+            ? snapshot.ActiveProviderId
+            : ResolveActiveProviderName(snapshot);
+        string status = snapshot.IsRefreshing
+            ? "refreshing"
+            : snapshot.LastError is not null
+                ? $"error: {snapshot.LastError}"
+                : $"{snapshot.Rows.Count} server(s)";
+
+        SetText("Server Browser", $"{providerName} - {status}");
+
+        for (int i = 0; i < snapshot.Rows.Count; i++)
+        {
+            ServerDiscoveryRow row = snapshot.Rows[i];
+            AddButton(FormatServerRow(row), () => SubmitServerBrowserRow(row));
+        }
+
+        if (snapshot.Rows.Count == 0 && snapshot.LastError is null && !snapshot.IsRefreshing)
+        {
+            AddDisabledButton("No servers found");
+        }
+    }
+
+    private static string ResolveActiveProviderName(ServerBrowserSnapshot snapshot)
+    {
+        for (int i = 0; i < snapshot.Providers.Count; i++)
+        {
+            if (snapshot.Providers[i].IsSelected)
+            {
+                return snapshot.Providers[i].DisplayName;
+            }
+        }
+
+        return snapshot.ActiveProviderId;
+    }
+
+    private static string FormatServerRow(ServerDiscoveryRow row)
+    {
+        string users = row.CurrentUsers.HasValue && row.MaxUsers.HasValue
+            ? $" {row.CurrentUsers}/{row.MaxUsers}"
+            : string.Empty;
+        string ping = row.PingMs.HasValue
+            ? $" {row.PingMs}ms"
+            : string.Empty;
+        return $"{row.DisplayName} - {row.Host}:{row.Port}{users}{ping}";
+    }
+
+    private void AddDisabledButton(string text)
+    {
+        if (_buttonColumn is null)
+        {
+            return;
+        }
+
+        var button = new Button
+        {
+            Text = text,
+            Disabled = true,
+            CustomMinimumSize = new Vector2(0, 36)
+        };
+        _buttonColumn.AddChild(button);
+    }
+
+    private void SubmitServerBrowserRow(ServerDiscoveryRow row)
+    {
+        if (!ClientDirectConnectRequest.TryCreate(row, out ClientDirectConnectRequest request, out string error))
+        {
+            SetText("Server Browser", error);
+            return;
+        }
+
+        _lastHostText = request.Host;
+        _lastPortText = request.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        DirectConnectRequested?.Invoke(request);
     }
 
     private LineEdit? AddTextField(string label, string value)

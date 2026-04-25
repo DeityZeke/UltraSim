@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Client;
+using UltraSim.Discovery;
 
 namespace UltraSim.Client.Godot.UI;
 
@@ -7,6 +8,7 @@ namespace UltraSim.Client.Godot.UI;
 public partial class MenuCanvasManager : CanvasLayer
 {
     private readonly ClientAppShellNavigation _navigation = new();
+    private readonly ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser();
 
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
     public event Action? DisconnectRequested;
@@ -110,6 +112,7 @@ public partial class MenuCanvasManager : CanvasLayer
     {
         appShell.ScreenRequested += HandleScreenRequested;
         appShell.DirectConnectRequested += HandleDirectConnectRequested;
+        appShell.ServerBrowserRefreshRequested += HandleServerBrowserRefreshRequested;
         appShell.PreviewRequested += HandlePreviewRequested;
         appShell.ResumeRequested += HandleResumeRequested;
         appShell.BackRequested += HandleBackRequested;
@@ -160,11 +163,21 @@ public partial class MenuCanvasManager : CanvasLayer
         }
 
         ApplyNavigation();
+
+        if (screen == ClientAppScreen.ServerBrowser)
+        {
+            _ = RefreshServerBrowserAsync();
+        }
     }
 
     private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
     {
         DirectConnectRequested?.Invoke(request);
+    }
+
+    private void HandleServerBrowserRefreshRequested()
+    {
+        _ = RefreshServerBrowserAsync();
     }
 
     private void HandlePreviewRequested()
@@ -194,6 +207,7 @@ public partial class MenuCanvasManager : CanvasLayer
         if (_appShell is not null)
         {
             _appShell.Visible = _navigation.IsMenuVisible;
+            _appShell.SetServerBrowserSnapshot(_serverBrowser.GetSnapshot());
             _appShell.ShowScreen(_navigation.CurrentScreen);
         }
 
@@ -216,5 +230,36 @@ public partial class MenuCanvasManager : CanvasLayer
         }
 
         return key.Keycode is Key.Enter or Key.KpEnter || key.PhysicalKeycode is Key.Enter or Key.KpEnter;
+    }
+
+    private async Task RefreshServerBrowserAsync()
+    {
+        _appShell?.SetServerBrowserSnapshot(_serverBrowser.GetSnapshot());
+        ServerBrowserSnapshot snapshot = await _serverBrowser.RefreshAsync();
+        _appShell?.SetServerBrowserSnapshot(snapshot);
+    }
+
+    private static ClientServerBrowserService CreateDefaultServerBrowser()
+    {
+        var localRow = new ServerDiscoveryRow(
+            ProviderId: "manual",
+            ProviderKind: ServerDiscoveryProviderKind.Manual,
+            ServerId: "local-dev",
+            DisplayName: "Local Dev Server",
+            Host: "127.0.0.1",
+            Port: 42042,
+            Region: "local",
+            CurrentUsers: 0,
+            MaxUsers: 64,
+            CompatibilityId: "current");
+
+        return new ClientServerBrowserService(
+        [
+            new ServerBrowserProviderDefinition(
+                "manual",
+                "Manual",
+                ServerDiscoveryProviderKind.Manual,
+                new InMemoryServerDiscoveryQuery([localRow]))
+        ]);
     }
 }

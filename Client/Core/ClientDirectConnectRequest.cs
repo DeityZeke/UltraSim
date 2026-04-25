@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
+using UltraSim.Discovery;
 
 namespace UltraSim.Client;
 
@@ -31,6 +32,18 @@ public readonly record struct ClientDirectConnectRequest(string Host, int Port)
         request = new ClientDirectConnectRequest(normalizedHost, port);
         error = string.Empty;
         return true;
+    }
+
+    public static bool TryCreate(ServerDiscoveryRow row, out ClientDirectConnectRequest request, out string error)
+    {
+        if (row.ConnectTargetKind != ConnectTargetKind.Direct)
+        {
+            request = default;
+            error = $"Server '{row.DisplayName}' does not expose a direct connect target.";
+            return false;
+        }
+
+        return TryCreate(row.Host, row.Port.ToString(CultureInfo.InvariantCulture), out request, out error);
     }
 
     public bool TryResolve(out IPEndPoint endPoint, out string error)

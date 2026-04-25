@@ -248,6 +248,32 @@ internal static class TestRunner
 
         Assert.False(ClientDirectConnectRequest.TryCreate("127.0.0.1", "99999", out _, out error));
         Assert.Equal("Port must be between 0 and 65535.", error);
+
+        Assert.True(ClientDirectConnectRequest.TryCreate(
+            new ServerDiscoveryRow(
+                ProviderId: "manual",
+                ProviderKind: ServerDiscoveryProviderKind.Manual,
+                ServerId: "local",
+                DisplayName: "Local",
+                Host: "127.0.0.1",
+                Port: 42042),
+            out request,
+            out error));
+        Assert.Equal("127.0.0.1", request.Host);
+        Assert.Equal(42042, request.Port);
+
+        Assert.False(ClientDirectConnectRequest.TryCreate(
+            new ServerDiscoveryRow(
+                ProviderId: "relay",
+                ProviderKind: ServerDiscoveryProviderKind.Custom,
+                ServerId: "relay",
+                DisplayName: "Relay",
+                Host: "relay.example",
+                Port: 1,
+                ConnectTargetKind: ConnectTargetKind.Relay),
+            out _,
+            out error));
+        Assert.Equal("Server 'Relay' does not expose a direct connect target.", error);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()
