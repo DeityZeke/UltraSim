@@ -8,6 +8,10 @@ public partial class MenuCanvasManager : CanvasLayer
 {
     private readonly ClientAppShellNavigation _navigation = new();
 
+    public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
+    public event Action? DisconnectRequested;
+    public event Action<string>? ChatSubmitted;
+
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
 
@@ -18,6 +22,7 @@ public partial class MenuCanvasManager : CanvasLayer
     {
         _appShell = GetNodeOrNull<ClientAppShell>("AppShell") ?? CreateAppShell();
         _chatPanel = GetNodeOrNull<ClientChatPanel>("ChatPanel") ?? CreateChatPanel();
+        _chatPanel.ChatSubmitted += text => ChatSubmitted?.Invoke(text);
 
         WireAppShell(_appShell);
         ApplyNavigation();
@@ -83,8 +88,32 @@ public partial class MenuCanvasManager : CanvasLayer
     private void WireAppShell(ClientAppShell appShell)
     {
         appShell.ScreenRequested += HandleScreenRequested;
+        appShell.DirectConnectRequested += HandleDirectConnectRequested;
         appShell.PreviewRequested += EnterPreviewSession;
         appShell.BackRequested += HandleBackRequested;
+    }
+
+    public void ShowSessionStatus()
+    {
+        _navigation.EnterSession();
+        _navigation.ShowInSessionOptions();
+        ApplyNavigation();
+    }
+
+    public void ShowConnectionError()
+    {
+        _navigation.LeaveSession(ClientAppScreen.Error);
+        ApplyNavigation();
+    }
+
+    public void AppendSystemChatLine(string text)
+    {
+        _chatPanel?.AppendSystemLine(text);
+    }
+
+    public void AppendChatLine(string senderName, string text)
+    {
+        _chatPanel?.AppendChatLine(senderName, text);
     }
 
     private void HandleScreenRequested(ClientAppScreen screen)
@@ -100,6 +129,7 @@ public partial class MenuCanvasManager : CanvasLayer
         }
         else if (screen == ClientAppScreen.Disconnected)
         {
+            DisconnectRequested?.Invoke();
             _navigation.LeaveSession();
         }
         else
@@ -108,6 +138,11 @@ public partial class MenuCanvasManager : CanvasLayer
         }
 
         ApplyNavigation();
+    }
+
+    private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
+    {
+        DirectConnectRequested?.Invoke(request);
     }
 
     private void HandleBackRequested()

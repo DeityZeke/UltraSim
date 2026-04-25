@@ -20,6 +20,8 @@ public partial class GodotClientRuntimeRoot : Node
     public OrbitFollowCameraRig? CameraRig { get; private set; }
     public UiManager? UiManager { get; private set; }
 
+    private GodotClientNetworkSessionDriver? _sessionDriver;
+
     public override void _Ready()
     {
         CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
@@ -32,30 +34,100 @@ public partial class GodotClientRuntimeRoot : Node
             LocalPlayerController.SetCameraRig(CameraRig);
         }
 
+        _sessionDriver = new GodotClientNetworkSessionDriver(SetStatusText, HandleChatMessage);
+        if (UiManager?.Menus is not null)
+        {
+            UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
+            UiManager.Menus.DisconnectRequested += HandleDisconnectRequested;
+            UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
+        }
+
         if (StartPreviewOnReady)
         {
-            EnterPreviewMode();
+            CharacterWorld?.SpawnPreviewActor();
+            SetStatusText("Preview shell ready");
         }
     }
 
     public override void _Process(double delta)
     {
+        _sessionDriver?.Pump();
+
         if (LocalPlayerController is not null)
         {
             LocalPlayerController.GameplayInputBlocked = UiManager?.BlocksGameplayInput == true;
         }
     }
 
+    public override void _ExitTree()
+    {
+        if (UiManager?.Menus is not null)
+        {
+            UiManager.Menus.DirectConnectRequested -= HandleDirectConnectRequested;
+            UiManager.Menus.DisconnectRequested -= HandleDisconnectRequested;
+            UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
+        }
+
+        _sessionDriver?.Dispose();
+        _sessionDriver = null;
+    }
+
     public void EnterPreviewMode()
     {
         CharacterWorld?.SpawnPreviewActor();
-        UiManager?.SetStatusText("Preview shell ready");
+        UiManager?.Menus?.EnterPreviewSession();
+        SetStatusText("Preview shell ready");
     }
 
     public void ClearSessionWorld()
     {
         CharacterWorld?.ClearAllActors();
-        UiManager?.SetStatusText("Session cleared");
+        SetStatusText("Session cleared");
+    }
+
+    private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
+    {
+        if (_sessionDriver is null)
+        {
+            SetStatusText("Network driver is unavailable.");
+            UiManager?.Menus?.ShowConnectionError();
+            return;
+        }
+
+        if (!_sessionDriver.TryConnect(request, out string error))
+        {
+            SetStatusText(error);
+            UiManager?.Menus?.ShowConnectionError();
+            return;
+        }
+
+        UiManager?.Menus?.ShowSessionStatus();
+    }
+
+    private void HandleDisconnectRequested()
+    {
+        _sessionDriver?.Disconnect();
+        ClearSessionWorld();
+    }
+
+    private void HandleChatSubmitted(string text)
+    {
+        if (_sessionDriver?.TrySendChat(text) == true)
+        {
+            return;
+        }
+
+        UiManager?.Menus?.AppendSystemChatLine("Chat is not connected yet.");
+    }
+
+    private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
+    {
+        UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
+    }
+
+    private void SetStatusText(string text)
+    {
+        UiManager?.SetStatusText(text);
     }
 
     private TNode? ResolveNode<TNode>(NodePath? path)

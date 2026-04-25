@@ -5,6 +5,8 @@ namespace UltraSim.Client.Godot.UI;
 [GlobalClass]
 public partial class ClientChatPanel : PanelContainer
 {
+    public event Action<string>? ChatSubmitted;
+
     private RichTextLabel? _history;
     private LineEdit? _input;
 
@@ -19,6 +21,11 @@ public partial class ClientChatPanel : PanelContainer
     public void AppendSystemLine(string text)
     {
         _history?.AppendText($"[system] {text}\n");
+    }
+
+    public void AppendChatLine(string senderName, string text)
+    {
+        _history?.AppendText($"{senderName}: {text}\n");
     }
 
     private void BuildInterface()
@@ -66,6 +73,7 @@ public partial class ClientChatPanel : PanelContainer
         }
 
         _history?.AppendText($"> {text}\n");
+        ChatSubmitted?.Invoke(text);
         if (_input is not null)
         {
             _input.Text = string.Empty;

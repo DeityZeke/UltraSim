@@ -7,12 +7,17 @@ namespace UltraSim.Client.Godot.UI;
 public partial class ClientAppShell : Control
 {
     public event Action<ClientAppScreen>? ScreenRequested;
+    public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
     public event Action? PreviewRequested;
     public event Action? BackRequested;
 
     private Label? _title;
     private Label? _body;
     private VBoxContainer? _buttonColumn;
+    private LineEdit? _hostField;
+    private LineEdit? _portField;
+    private string _lastHostText = "127.0.0.1";
+    private string _lastPortText = "42042";
 
     public override void _Ready()
     {
@@ -40,10 +45,10 @@ public partial class ClientAppShell : Control
                 AddBackButton();
                 break;
             case ClientAppScreen.DirectConnect:
-                SetText("Direct Connect", "Connection fields and session driver wiring land in G3.");
-                AddTextField("Host", "127.0.0.1");
-                AddTextField("Port", "42042");
-                AddButton("Connect Placeholder", () => ScreenRequested?.Invoke(ClientAppScreen.SessionStatus));
+                SetText("Direct Connect", "Connect to a current UltraSim UDP server.");
+                _hostField = AddTextField("Host", _lastHostText);
+                _portField = AddTextField("Port", _lastPortText);
+                AddButton("Connect", SubmitDirectConnect);
                 AddBackButton();
                 break;
             case ClientAppScreen.Settings:
@@ -160,6 +165,9 @@ public partial class ClientAppShell : Control
         {
             child.QueueFree();
         }
+
+        _hostField = null;
+        _portField = null;
     }
 
     private void AddButton(string text, Action pressed)
@@ -183,11 +191,11 @@ public partial class ClientAppShell : Control
         AddButton("Back", () => BackRequested?.Invoke());
     }
 
-    private void AddTextField(string label, string value)
+    private LineEdit? AddTextField(string label, string value)
     {
         if (_buttonColumn is null)
         {
-            return;
+            return null;
         }
 
         var field = new LineEdit
@@ -196,5 +204,25 @@ public partial class ClientAppShell : Control
             Text = value
         };
         _buttonColumn.AddChild(field);
+        return field;
+    }
+
+    private void SubmitDirectConnect()
+    {
+        if (!ClientDirectConnectRequest.TryCreate(
+            _hostField?.Text,
+            _portField?.Text,
+            out ClientDirectConnectRequest request,
+            out string error))
+        {
+            _lastHostText = _hostField?.Text ?? _lastHostText;
+            _lastPortText = _portField?.Text ?? _lastPortText;
+            SetText("Direct Connect", error);
+            return;
+        }
+
+        _lastHostText = request.Host;
+        _lastPortText = request.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        DirectConnectRequested?.Invoke(request);
     }
 }

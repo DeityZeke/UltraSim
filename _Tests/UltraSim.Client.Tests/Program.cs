@@ -11,6 +11,7 @@ internal static class TestRunner
         Run(nameof(ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs), ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs);
         Run(nameof(ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture), ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture);
         Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
+        Run(nameof(ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields), ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -129,6 +130,26 @@ internal static class TestRunner
         Assert.False(navigation.IsInSession);
         Assert.True(navigation.IsMenuVisible);
         Assert.Equal(ClientAppScreen.Disconnected, navigation.CurrentScreen);
+    }
+
+    private static void ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields()
+    {
+        Assert.True(ClientDirectConnectRequest.TryCreate(
+            " 127.0.0.1 ",
+            "42042",
+            out ClientDirectConnectRequest request,
+            out string error));
+        Assert.Equal("127.0.0.1", request.Host);
+        Assert.Equal(42042, request.Port);
+        Assert.Equal(string.Empty, error);
+        Assert.True(request.TryResolve(out System.Net.IPEndPoint endPoint, out error));
+        Assert.Equal(42042, endPoint.Port);
+
+        Assert.False(ClientDirectConnectRequest.TryCreate("", "42042", out _, out error));
+        Assert.Equal("Host is required.", error);
+
+        Assert.False(ClientDirectConnectRequest.TryCreate("127.0.0.1", "99999", out _, out error));
+        Assert.Equal("Port must be between 0 and 65535.", error);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()
