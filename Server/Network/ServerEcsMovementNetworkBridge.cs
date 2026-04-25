@@ -47,6 +47,7 @@ public sealed class ServerEcsMovementNetworkBridge
     public int LastReceivedInputCount { get; private set; }
     public int LastIgnoredInputCount { get; private set; }
     public int LastSentStateCount { get; private set; }
+    public int LastPublishedObserverStateCount { get; private set; }
 
     public void Bind(ConnectionId connectionId, Entity entity, uint networkEntityId)
     {
@@ -186,6 +187,49 @@ public sealed class ServerEcsMovementNetworkBridge
             _transport.FlushOutbound();
         LastSentStateCount = sent;
         return sent;
+    }
+
+    public int PublishObserverMovementStates(
+        ServerEcsWorldNetworkPublisher publisher,
+        SubscriptionKey scopeKey,
+        uint serverTick)
+    {
+        ArgumentNullException.ThrowIfNull(publisher);
+        if (!scopeKey.IsValid)
+            throw new ArgumentOutOfRangeException(nameof(scopeKey));
+
+        _connectionScratch.Clear();
+        foreach (ConnectionId connectionId in _bindings.Keys)
+            _connectionScratch.Add(connectionId);
+
+        int published = 0;
+        for (int i = 0; i < _connectionScratch.Count; i++)
+        {
+            ConnectionId connectionId = _connectionScratch[i];
+            BindingState state = _bindings[connectionId];
+            if (!_world.Entities.IsAlive(state.Entity))
+                continue;
+
+            if (!_projectState(
+                _world,
+                state.Entity,
+                state.NetworkEntityId,
+                state.LastProcessedInputSequence,
+                serverTick,
+                out MovementStatePacket packet))
+            {
+                continue;
+            }
+
+            publisher.LatestStateStream.Publish(
+                ServerEcsNetworkItemKeys.GetObservedMovementItemKey(state.NetworkEntityId),
+                scopeKey,
+                PacketCodec.EncodePayload(packet));
+            published++;
+        }
+
+        LastPublishedObserverStateCount = published;
+        return published;
     }
 
     private void OnMovementInput(ConnectionId connectionId, in MovementInputPacket packet)

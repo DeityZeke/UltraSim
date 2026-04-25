@@ -1,4 +1,5 @@
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Network;
 
 namespace UltraSim.Server.Godot;
 
@@ -85,9 +86,14 @@ public sealed class GodotServerShellController : IDisposable
     }
 
     private static IServerApplication CreateDefaultApplication(GodotServerShellOptions options) =>
-        new ServerApplication(new ServerApplicationOptions(
-            options.ProfileName,
-            SaveOnStop: options.SaveOnStop));
+        options.EnableMovementWorld
+            ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+                options.ProfileName,
+                Port: options.NetworkPort,
+                SaveOnStop: options.SaveOnStop))
+            : new ServerApplication(new ServerApplicationOptions(
+                options.ProfileName,
+                SaveOnStop: options.SaveOnStop));
 
     private void HandleEvent(ServerApplicationEvent evt)
     {

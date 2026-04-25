@@ -20,6 +20,14 @@ public static class ServerEcsNetworkItemKeys
         return hash == 0 ? 1UL : hash;
     }
 
+    public static ulong GetObservedMovementItemKey(uint networkEntityId)
+    {
+        if (networkEntityId == 0)
+            throw new ArgumentOutOfRangeException(nameof(networkEntityId));
+
+        return (0x4D4F5645UL << 32) | networkEntityId;
+    }
+
     public static ulong CombineWithScope(ulong itemKey, SubscriptionKey scopeKey)
     {
         if (itemKey == 0)

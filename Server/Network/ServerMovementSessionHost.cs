@@ -20,6 +20,8 @@ public sealed class ServerMovementSessionHost
     private readonly ServerChatService _chat;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
+    private readonly bool _enableGlobalMovementObserverState;
+    private readonly SubscriptionKey _globalMovementObserverScope;
     private readonly InboundDatagram[] _inboundScratch;
     private readonly ControlPlaneEvent[] _controlEvents;
     private readonly SessionLifecycleEvent[] _sessionEvents;
@@ -37,6 +39,8 @@ public sealed class ServerMovementSessionHost
         SessionAdmissionPolicy sessionPolicy = default,
         ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
         ServerNetworkSessionRuntimeOptions runtimeOptions = default,
+        bool enableGlobalMovementObserverState = false,
+        SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
@@ -67,6 +71,10 @@ public sealed class ServerMovementSessionHost
         ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
+        _enableGlobalMovementObserverState = enableGlobalMovementObserverState;
+        _globalMovementObserverScope = globalMovementObserverScope.IsValid
+            ? globalMovementObserverScope
+            : ServerEcsNetworkScopes.SimulationGlobal;
         _inboundScratch = new InboundDatagram[maxPollBatch];
         _controlEvents = new ControlPlaneEvent[maxPollBatch];
         _sessionEvents = new SessionLifecycleEvent[maxPollBatch];
@@ -200,6 +208,8 @@ public sealed class ServerMovementSessionHost
 
         long movementAdvanceStart = Stopwatch.GetTimestamp();
         _movement.AdvanceAndSend(deltaSeconds, serverTick, flushOutbound: false);
+        if (_enableGlobalMovementObserverState)
+            _movement.PublishObserverMovementStates(_worldPublisher, _globalMovementObserverScope, serverTick);
         movementAdvanceElapsedTicks += Stopwatch.GetTimestamp() - movementAdvanceStart;
 
         long runtimeDispatchStart = Stopwatch.GetTimestamp();
@@ -281,6 +291,8 @@ public sealed class ServerMovementSessionHost
                 _movement.Bind(evt.ConnectionId, spawn.Entity, spawn.NetworkEntityId);
                 _sessionRuntime.BindConnection(evt.ConnectionId);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerChatScopes.System);
+                if (_enableGlobalMovementObserverState)
+                    _subscriptions.Subscribe(evt.ConnectionId, _globalMovementObserverScope);
                 _entityByConnection[evt.ConnectionId] = spawn.Entity;
                 _networkEntityIdByConnection[evt.ConnectionId] = spawn.NetworkEntityId;
             }

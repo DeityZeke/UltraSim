@@ -12,7 +12,18 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Hosting\UltraSim.Server.Hosting.csproj" />
+    <Reference Include="UltraSim.Server.Network">
+      <HintPath>..\Network\bin\$(Configuration)\net8.0\UltraSim.Server.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
+
+  <Target Name="BuildServerGodotNetworkDependencies" BeforeTargets="PrepareForBuild">
+    <MSBuild
+      Projects="..\Network\UltraSim.Server.Network.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
 
   <ItemGroup>
     <Compile Remove="obj\**\*.cs" />
