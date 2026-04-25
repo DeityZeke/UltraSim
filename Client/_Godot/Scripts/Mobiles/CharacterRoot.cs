@@ -98,12 +98,12 @@ public partial class CharacterRoot : Node3D
             Name = "FallbackBody",
             Mesh = new CapsuleMesh
             {
-                Radius = 0.32f,
-                Height = 1.45f,
+                Radius = 0.24f,
+                Height = 1.8f,
                 RadialSegments = 16,
                 Rings = 4
             },
-            Position = new Vector3(0.0f, 0.72f, 0.0f),
+            Position = new Vector3(0.0f, 0.9f, 0.0f),
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = definition.FallbackBodyColor,

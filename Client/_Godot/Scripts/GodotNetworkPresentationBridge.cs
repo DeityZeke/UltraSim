@@ -24,7 +24,7 @@ public sealed class GodotNetworkPresentationBridge
         ulong actorId = result.NetworkEntityId;
         Vector3 position = ToGodotPosition(result.AuthoritativeState.PositionX, result.AuthoritativeState.PositionY);
         float yawDegrees = ResolveYawDegrees(result.AuthoritativeState.VelocityX, result.AuthoritativeState.VelocityY);
-        _characterWorld.SetActorPose(actorId, position, yawDegrees);
+        _characterWorld.CorrectActorPose(actorId, position, yawDegrees);
         _characterWorld.SetLocalControlledEntityId(actorId);
     }
 

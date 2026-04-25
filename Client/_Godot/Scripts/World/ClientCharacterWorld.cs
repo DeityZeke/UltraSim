@@ -76,6 +76,16 @@ public partial class ClientCharacterWorld : Node3D
         character.SetPresentationFacingYawDegrees(yawDegrees);
     }
 
+    public void CorrectActorPose(ulong entityId, Vector3 position, float yawDegrees, float snapDistance = 1.5f, float blend = 0.18f)
+    {
+        CharacterRoot character = GetOrCreateCharacter(entityId);
+        float distance = character.GlobalPosition.DistanceTo(position);
+        character.GlobalPosition = distance > snapDistance
+            ? position
+            : character.GlobalPosition.Lerp(position, Mathf.Clamp(blend, 0.0f, 1.0f));
+        character.SetPresentationFacingYawDegrees(yawDegrees);
+    }
+
     public void SetActorDefinition(ulong entityId, string definitionId)
     {
         CharacterRoot character = GetOrCreateCharacter(entityId, definitionId);

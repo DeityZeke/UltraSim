@@ -1,6 +1,7 @@
 using Godot;
 using UltraSim.Client.Godot.Camera;
 using UltraSim.Client.Godot.Controllers;
+using UltraSim.Client.Godot.Mobiles;
 using UltraSim.Client.Godot.UI;
 using UltraSim.Client.Godot.World;
 
@@ -189,14 +190,10 @@ public partial class GodotClientRuntimeRoot : Node
             return;
         }
 
-        if (!LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection))
-        {
-            return;
-        }
-
+        bool hasMoveInput = LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection);
         var input = new ClientMovementInput(
-            MoveX: (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f),
-            MoveY: (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f),
+            MoveX: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f) : (short)0,
+            MoveY: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f) : (short)0,
             Flags: 0);
 
         global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
@@ -208,8 +205,28 @@ public partial class GodotClientRuntimeRoot : Node
             velocityX,
             velocityY);
 
+        ApplyLocalPredictedMovement(predicted, hasMoveInput);
+
         _localClientTick++;
         _sessionDriver.TrySendMovementInput(input, predicted);
+    }
+
+    private void ApplyLocalPredictedMovement(in ClientMovementState predicted, bool isMoving)
+    {
+        if (LocalPlayerController?.ControlledCharacter is null)
+        {
+            return;
+        }
+
+        CharacterRoot character = LocalPlayerController.ControlledCharacter;
+        character.GlobalPosition = new Vector3(predicted.PositionX, 0.0f, predicted.PositionY);
+        if (isMoving)
+        {
+            float yawDegrees = Mathf.RadToDeg(Mathf.Atan2(predicted.VelocityX, predicted.VelocityY));
+            character.SetPresentationFacingYawDegrees(yawDegrees);
+        }
+
+        character.SetPresentationMoving(isMoving);
     }
 
     private void UpdateReadySessionTransition()
