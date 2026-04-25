@@ -15,7 +15,16 @@ public partial class ClientChatPanel : PanelContainer
     public override void _Ready()
     {
         BuildInterface();
+        ApplyViewportLayout();
         AppendSystemLine("Chat shell ready. Server chat wiring lands in G3.");
+    }
+
+    public override void _Notification(int what)
+    {
+        if (what == NotificationResized)
+        {
+            ApplyViewportLayout();
+        }
     }
 
     public void AppendSystemLine(string text)
@@ -28,13 +37,22 @@ public partial class ClientChatPanel : PanelContainer
         _history?.AppendText($"{senderName}: {text}\n");
     }
 
+    public void FocusInput()
+    {
+        _input?.GrabFocus();
+    }
+
+    public void ReleaseInputFocus()
+    {
+        if (_input?.HasFocus() == true)
+        {
+            _input.ReleaseFocus();
+        }
+    }
+
     private void BuildInterface()
     {
         CustomMinimumSize = new Vector2(420, 180);
-        OffsetLeft = 16;
-        OffsetTop = 520;
-        OffsetRight = 436;
-        OffsetBottom = 704;
 
         var margin = new MarginContainer();
         margin.AddThemeConstantOverride("margin_left", 8);
@@ -65,6 +83,14 @@ public partial class ClientChatPanel : PanelContainer
         column.AddChild(_input);
     }
 
+    private void ApplyViewportLayout()
+    {
+        Vector2 panelSize = CustomMinimumSize;
+        Vector2 viewportSize = GetViewportRect().Size;
+        Position = new Vector2(16.0f, Mathf.Max(16.0f, viewportSize.Y - panelSize.Y - 16.0f));
+        Size = panelSize;
+    }
+
     private void HandleTextSubmitted(string text)
     {
         if (string.IsNullOrWhiteSpace(text))
@@ -78,5 +104,7 @@ public partial class ClientChatPanel : PanelContainer
         {
             _input.Text = string.Empty;
         }
+
+        ReleaseInputFocus();
     }
 }

@@ -10,6 +10,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
     public event Action? DisconnectRequested;
+    public event Action? PreviewRequested;
     public event Action<string>? ChatSubmitted;
 
     private ClientAppShell? _appShell;
@@ -32,7 +33,21 @@ public partial class MenuCanvasManager : CanvasLayer
     {
         if (@event.IsActionPressed("ui_cancel"))
         {
+            if (_chatPanel?.HasInputFocus == true)
+            {
+                _chatPanel.ReleaseInputFocus();
+                GetViewport().SetInputAsHandled();
+                return;
+            }
+
             ToggleInSessionMenu();
+            GetViewport().SetInputAsHandled();
+            return;
+        }
+
+        if (ShouldFocusChat(@event))
+        {
+            _chatPanel?.FocusInput();
             GetViewport().SetInputAsHandled();
         }
     }
@@ -95,7 +110,8 @@ public partial class MenuCanvasManager : CanvasLayer
     {
         appShell.ScreenRequested += HandleScreenRequested;
         appShell.DirectConnectRequested += HandleDirectConnectRequested;
-        appShell.PreviewRequested += EnterPreviewSession;
+        appShell.PreviewRequested += HandlePreviewRequested;
+        appShell.ResumeRequested += HandleResumeRequested;
         appShell.BackRequested += HandleBackRequested;
     }
 
@@ -151,6 +167,18 @@ public partial class MenuCanvasManager : CanvasLayer
         DirectConnectRequested?.Invoke(request);
     }
 
+    private void HandlePreviewRequested()
+    {
+        EnterPreviewSession();
+        PreviewRequested?.Invoke();
+    }
+
+    private void HandleResumeRequested()
+    {
+        _navigation.HideMenuIfInSession();
+        ApplyNavigation();
+    }
+
     private void HandleBackRequested()
     {
         if (!_navigation.TryGoBack())
@@ -173,5 +201,20 @@ public partial class MenuCanvasManager : CanvasLayer
         {
             _chatPanel.Visible = _navigation.IsInSession;
         }
+    }
+
+    private bool ShouldFocusChat(InputEvent @event)
+    {
+        if (!_navigation.IsInSession || _navigation.IsMenuVisible || _chatPanel?.HasInputFocus == true)
+        {
+            return false;
+        }
+
+        if (@event is not InputEventKey key || !key.Pressed || key.Echo)
+        {
+            return false;
+        }
+
+        return key.Keycode is Key.Enter or Key.KpEnter || key.PhysicalKeycode is Key.Enter or Key.KpEnter;
     }
 }

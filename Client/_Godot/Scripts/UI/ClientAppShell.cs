@@ -9,10 +9,13 @@ public partial class ClientAppShell : Control
     public event Action<ClientAppScreen>? ScreenRequested;
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
     public event Action? PreviewRequested;
+    public event Action? ResumeRequested;
     public event Action? BackRequested;
 
     private Label? _title;
     private Label? _body;
+    private ColorRect? _shade;
+    private PanelContainer? _frame;
     private VBoxContainer? _buttonColumn;
     private LineEdit? _hostField;
     private LineEdit? _portField;
@@ -22,7 +25,16 @@ public partial class ClientAppShell : Control
     public override void _Ready()
     {
         BuildInterface();
+        ApplyViewportLayout();
         ShowScreen(ClientAppScreen.Start);
+    }
+
+    public override void _Notification(int what)
+    {
+        if (what == NotificationResized)
+        {
+            ApplyViewportLayout();
+        }
     }
 
     public void ShowScreen(ClientAppScreen screen)
@@ -58,17 +70,17 @@ public partial class ClientAppShell : Control
                 break;
             case ClientAppScreen.SessionStatus:
                 SetText("Session", "Preview session active. Remote session state will replace this in G3.");
-                AddButton("Resume", () => PreviewRequested?.Invoke());
+                AddButton("Resume", () => ResumeRequested?.Invoke());
                 AddButton("Options", () => ScreenRequested?.Invoke(ClientAppScreen.InSessionOptions));
                 break;
             case ClientAppScreen.InSessionOptions:
                 SetText("Options", "In-session menu placeholder.");
-                AddButton("Resume", () => PreviewRequested?.Invoke());
+                AddButton("Resume", () => ResumeRequested?.Invoke());
                 AddButton("Settings", () => ScreenRequested?.Invoke(ClientAppScreen.Settings));
-                AddButton("Disconnect Placeholder", () => ScreenRequested?.Invoke(ClientAppScreen.Disconnected));
+                AddButton("Disconnect", () => ScreenRequested?.Invoke(ClientAppScreen.Disconnected));
                 break;
             case ClientAppScreen.Disconnected:
-                SetText("Disconnected", "Session-owned world state should be cleared here once networking is attached.");
+                SetText("Disconnected", "Session-owned world state has been cleared.");
                 AddButton("Back To Start", () => ScreenRequested?.Invoke(ClientAppScreen.Start));
                 break;
             case ClientAppScreen.Error:
@@ -83,30 +95,25 @@ public partial class ClientAppShell : Control
         SetAnchorsPreset(LayoutPreset.FullRect);
         MouseFilter = MouseFilterEnum.Stop;
 
-        var shade = new ColorRect
+        _shade = new ColorRect
         {
             Color = new Color(0.02f, 0.025f, 0.03f, 0.72f)
         };
-        shade.SetAnchorsPreset(LayoutPreset.FullRect);
-        AddChild(shade);
+        _shade.SetAnchorsPreset(LayoutPreset.FullRect);
+        AddChild(_shade);
 
-        var frame = new PanelContainer
+        _frame = new PanelContainer
         {
             CustomMinimumSize = new Vector2(460, 360)
         };
-        frame.SetAnchorsPreset(LayoutPreset.Center);
-        frame.OffsetLeft = -230;
-        frame.OffsetTop = -180;
-        frame.OffsetRight = 230;
-        frame.OffsetBottom = 180;
-        AddChild(frame);
+        AddChild(_frame);
 
         var margin = new MarginContainer();
         margin.AddThemeConstantOverride("margin_left", 24);
         margin.AddThemeConstantOverride("margin_top", 24);
         margin.AddThemeConstantOverride("margin_right", 24);
         margin.AddThemeConstantOverride("margin_bottom", 24);
-        frame.AddChild(margin);
+        _frame.AddChild(margin);
 
         var column = new VBoxContainer();
         column.AddThemeConstantOverride("separation", 14);
@@ -131,6 +138,28 @@ public partial class ClientAppShell : Control
         _buttonColumn = new VBoxContainer();
         _buttonColumn.AddThemeConstantOverride("separation", 8);
         column.AddChild(_buttonColumn);
+    }
+
+    private void ApplyViewportLayout()
+    {
+        Vector2 viewportSize = GetViewportRect().Size;
+        Position = Vector2.Zero;
+        Size = viewportSize;
+
+        if (_shade is not null)
+        {
+            _shade.Position = Vector2.Zero;
+            _shade.Size = viewportSize;
+        }
+
+        if (_frame is not null)
+        {
+            Vector2 frameSize = _frame.CustomMinimumSize;
+            _frame.Position = new Vector2(
+                Mathf.Round((viewportSize.X - frameSize.X) * 0.5f),
+                Mathf.Round((viewportSize.Y - frameSize.Y) * 0.5f));
+            _frame.Size = frameSize;
+        }
     }
 
     private void EnsureInterface()

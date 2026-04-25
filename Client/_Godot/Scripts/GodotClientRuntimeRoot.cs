@@ -52,6 +52,7 @@ public partial class GodotClientRuntimeRoot : Node
         {
             UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
             UiManager.Menus.DisconnectRequested += HandleDisconnectRequested;
+            UiManager.Menus.PreviewRequested += HandlePreviewRequested;
             UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
         }
 
@@ -80,6 +81,7 @@ public partial class GodotClientRuntimeRoot : Node
         {
             UiManager.Menus.DirectConnectRequested -= HandleDirectConnectRequested;
             UiManager.Menus.DisconnectRequested -= HandleDisconnectRequested;
+            UiManager.Menus.PreviewRequested -= HandlePreviewRequested;
             UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
         }
 
@@ -139,6 +141,11 @@ public partial class GodotClientRuntimeRoot : Node
         ClearSessionWorld();
     }
 
+    private void HandlePreviewRequested()
+    {
+        EnterPreviewMode();
+    }
+
     private void HandleChatSubmitted(string text)
     {
         if (_sessionDriver?.TrySendChat(text) == true)
@@ -152,6 +159,7 @@ public partial class GodotClientRuntimeRoot : Node
     private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
     {
         UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
+        UiManager?.World?.ShowOverheadChat(packet.SenderEntityId, packet.Text);
     }
 
     private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)

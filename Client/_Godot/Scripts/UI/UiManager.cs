@@ -6,9 +6,11 @@ namespace UltraSim.Client.Godot.UI;
 public partial class UiManager : Node
 {
     [Export] public NodePath? HudCanvasPath { get; set; }
+    [Export] public NodePath? WorldCanvasPath { get; set; }
     [Export] public NodePath? MenuCanvasPath { get; set; }
     [Export] public NodePath? DebugCanvasPath { get; set; }
 
+    public WorldCanvasManager? World { get; private set; }
     public HudCanvasManager? Hud { get; private set; }
     public MenuCanvasManager? Menus { get; private set; }
     public DebugCanvasManager? Debug { get; private set; }
@@ -16,6 +18,7 @@ public partial class UiManager : Node
 
     public override void _Ready()
     {
+        World = ResolveNode<WorldCanvasManager>(WorldCanvasPath);
         Hud = ResolveNode<HudCanvasManager>(HudCanvasPath);
         Menus = ResolveNode<MenuCanvasManager>(MenuCanvasPath);
         Debug = ResolveNode<DebugCanvasManager>(DebugCanvasPath);

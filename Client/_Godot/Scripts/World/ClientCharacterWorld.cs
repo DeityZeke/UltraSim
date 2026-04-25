@@ -21,6 +21,7 @@ public partial class ClientCharacterWorld : Node3D
     private LocalPlayerController? _localPlayerController;
     private MobileCatalogNode? _mobileCatalogNode;
 
+    public IReadOnlyDictionary<ulong, CharacterRoot> Characters => _characters;
     public ulong LocalControlledEntityId { get; private set; }
 
     public override void _Ready()
