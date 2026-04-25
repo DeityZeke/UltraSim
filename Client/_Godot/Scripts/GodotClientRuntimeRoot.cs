@@ -21,6 +21,8 @@ public partial class GodotClientRuntimeRoot : Node
     public UiManager? UiManager { get; private set; }
 
     private GodotClientNetworkSessionDriver? _sessionDriver;
+    private GodotNetworkPresentationBridge? _presentationBridge;
+    private uint _localClientTick;
 
     public override void _Ready()
     {
@@ -34,7 +36,17 @@ public partial class GodotClientRuntimeRoot : Node
             LocalPlayerController.SetCameraRig(CameraRig);
         }
 
-        _sessionDriver = new GodotClientNetworkSessionDriver(SetStatusText, HandleChatMessage);
+        if (CharacterWorld is not null)
+        {
+            _presentationBridge = new GodotNetworkPresentationBridge(CharacterWorld);
+        }
+
+        _sessionDriver = new GodotClientNetworkSessionDriver(
+            SetStatusText,
+            HandleChatMessage,
+            HandleOwnerMovementState,
+            HandleObserverState,
+            HandleObserverStateReset);
         if (UiManager?.Menus is not null)
         {
             UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
@@ -52,6 +64,7 @@ public partial class GodotClientRuntimeRoot : Node
     public override void _Process(double delta)
     {
         _sessionDriver?.Pump();
+        SendMovementInputIfReady(delta);
 
         if (LocalPlayerController is not null)
         {
@@ -70,6 +83,7 @@ public partial class GodotClientRuntimeRoot : Node
 
         _sessionDriver?.Dispose();
         _sessionDriver = null;
+        _presentationBridge = null;
     }
 
     public void EnterPreviewMode()
@@ -123,6 +137,50 @@ public partial class GodotClientRuntimeRoot : Node
     private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
     {
         UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
+    }
+
+    private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)
+    {
+        _presentationBridge?.ApplyOwnerMovement(result);
+    }
+
+    private void HandleObserverState(ulong itemKey, ulong sequence, ReadOnlySpan<byte> payload)
+    {
+        _presentationBridge?.ApplyObserverState(itemKey, sequence, payload);
+    }
+
+    private void HandleObserverStateReset()
+    {
+        _presentationBridge?.ResetObserverState();
+    }
+
+    private void SendMovementInputIfReady(double delta)
+    {
+        if (_sessionDriver is null ||
+            !_sessionDriver.IsReady ||
+            LocalPlayerController is null ||
+            LocalPlayerController.ControlledCharacter is null)
+        {
+            return;
+        }
+
+        Vector2 axes = LocalPlayerController.ReadMoveInputAxes();
+        var input = new ClientMovementInput(
+            MoveX: (short)Mathf.RoundToInt(Mathf.Clamp(axes.X, -1.0f, 1.0f) * 100.0f),
+            MoveY: (short)Mathf.RoundToInt(Mathf.Clamp(-axes.Y, -1.0f, 1.0f) * 100.0f),
+            Flags: 0);
+
+        global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
+        float velocityX = input.MoveX / 100.0f;
+        float velocityY = input.MoveY / 100.0f;
+        var predicted = new ClientMovementState(
+            position.X + velocityX * (float)delta,
+            position.Z + velocityY * (float)delta,
+            velocityX,
+            velocityY);
+
+        _localClientTick++;
+        _sessionDriver.TrySendMovementInput(input, predicted);
     }
 
     private void SetStatusText(string text)

@@ -8,16 +8,29 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 {
     private readonly Action<string> _statusSink;
     private readonly Action<ChatMessageEventPacket> _chatSink;
+    private readonly Action<ClientMovementStateReceiveResult> _ownerMovementSink;
+    private readonly ClientLatestStateFrameSpanApplier? _observerStateSink;
+    private readonly Action? _observerStateReset;
     private ClientMovementSessionHost? _host;
     private UdpSocketNetworkTransport? _transport;
     private bool _disposed;
     private uint _clientTick;
     private bool _lastReady;
+    private uint _lastOwnerServerTick;
+    private ushort _lastOwnerInputSequence;
 
-    public GodotClientNetworkSessionDriver(Action<string> statusSink, Action<ChatMessageEventPacket> chatSink)
+    public GodotClientNetworkSessionDriver(
+        Action<string> statusSink,
+        Action<ChatMessageEventPacket> chatSink,
+        Action<ClientMovementStateReceiveResult> ownerMovementSink,
+        ClientLatestStateFrameSpanApplier? observerStateSink = null,
+        Action? observerStateReset = null)
     {
         _statusSink = statusSink ?? throw new ArgumentNullException(nameof(statusSink));
         _chatSink = chatSink ?? throw new ArgumentNullException(nameof(chatSink));
+        _ownerMovementSink = ownerMovementSink ?? throw new ArgumentNullException(nameof(ownerMovementSink));
+        _observerStateSink = observerStateSink;
+        _observerStateReset = observerStateReset;
     }
 
     public bool IsRunning => _host?.IsRunning == true;
@@ -46,6 +59,12 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         {
             _chatSink(packet);
         });
+        ClientObserverStateBridge? observerState = _observerStateSink is null
+            ? null
+            : ClientObserverStateBridge.CreateSpanFastPath(
+                new ConnectionId(1),
+                _observerStateSink,
+                _observerStateReset);
         var observerEvents = ClientObserverEventBridge.CreateSpanFastPath(
             new ConnectionId(1),
             (_, _) => { });
@@ -55,6 +74,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
             transport,
             new ConnectionId(1),
             new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+            observerState: observerState,
             observerEvents: observerEvents,
             chatEvents: chatEvents);
 
@@ -78,6 +98,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 
         _host.Pump(Stopwatch.GetTimestamp());
         _clientTick++;
+        ApplyOwnerMovementIfChanged();
 
         if (_host.IsReady)
         {
@@ -95,6 +116,16 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         return _host?.TrySendChat(text) == true;
     }
 
+    public bool TrySendMovementInput(ClientMovementInput input, ClientMovementState predictedState)
+    {
+        if (_host is null || !_host.IsReady)
+        {
+            return false;
+        }
+
+        return _host.TrySendInput(input, _clientTick, predictedState, out _);
+    }
+
     public void Disconnect(string status = "Disconnected.")
     {
         _host?.Stop();
@@ -103,6 +134,8 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _transport = null;
         _clientTick = 0;
         _lastReady = false;
+        _lastOwnerServerTick = 0;
+        _lastOwnerInputSequence = 0;
         _statusSink(status);
     }
 
@@ -123,5 +156,29 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         {
             throw new ObjectDisposedException(nameof(GodotClientNetworkSessionDriver));
         }
+    }
+
+    private void ApplyOwnerMovementIfChanged()
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        ClientMovementStateReceiveResult result = _host.Movement.LastReceiveResult;
+        if (result.NetworkEntityId == 0)
+        {
+            return;
+        }
+
+        if (result.ServerTick == _lastOwnerServerTick &&
+            result.LastProcessedInputSequence == _lastOwnerInputSequence)
+        {
+            return;
+        }
+
+        _lastOwnerServerTick = result.ServerTick;
+        _lastOwnerInputSequence = result.LastProcessedInputSequence;
+        _ownerMovementSink(result);
     }
 }
