@@ -17,6 +17,7 @@ public partial class ClientCharacterWorld : Node3D
     [Export] public Vector3 PreviewSpawnPosition { get; set; } = Vector3.Zero;
 
     private readonly Dictionary<ulong, CharacterRoot> _characters = new();
+    private readonly List<ulong> _remoteRemovalScratch = new();
     private LocalPlayerController? _localPlayerController;
     private MobileCatalogNode? _mobileCatalogNode;
 
@@ -127,6 +128,31 @@ public partial class ClientCharacterWorld : Node3D
         _characters.Clear();
         LocalControlledEntityId = 0;
         _localPlayerController?.SetControlledCharacter(null);
+    }
+
+    public void ClearRemoteActors()
+    {
+        if (LocalControlledEntityId == 0)
+        {
+            ClearAllActors();
+            return;
+        }
+
+        _remoteRemovalScratch.Clear();
+        foreach (ulong entityId in _characters.Keys)
+        {
+            if (entityId != LocalControlledEntityId)
+            {
+                _remoteRemovalScratch.Add(entityId);
+            }
+        }
+
+        for (int i = 0; i < _remoteRemovalScratch.Count; i++)
+        {
+            DespawnActor(_remoteRemovalScratch[i]);
+        }
+
+        _remoteRemovalScratch.Clear();
     }
 
     private CharacterRoot InstantiateCharacterRoot()

@@ -90,6 +90,11 @@ public partial class GodotClientRuntimeRoot : Node
 
     public void EnterPreviewMode()
     {
+        if (LocalPlayerController is not null)
+        {
+            LocalPlayerController.EnablePreviewControls = true;
+        }
+
         CharacterWorld?.SpawnPreviewActor();
         UiManager?.Menus?.EnterPreviewSession();
         SetStatusText("Preview shell ready");
@@ -97,6 +102,11 @@ public partial class GodotClientRuntimeRoot : Node
 
     public void ClearSessionWorld()
     {
+        if (LocalPlayerController is not null)
+        {
+            LocalPlayerController.EnablePreviewControls = true;
+        }
+
         CharacterWorld?.ClearAllActors();
         SetStatusText("Session cleared");
     }
@@ -203,6 +213,11 @@ public partial class GodotClientRuntimeRoot : Node
         }
 
         _wasSessionReady = true;
+        if (LocalPlayerController is not null)
+        {
+            LocalPlayerController.EnablePreviewControls = false;
+        }
+
         UiManager?.Menus?.EnterConnectedSession();
         UiManager?.Menus?.AppendSystemChatLine("Connected.");
     }

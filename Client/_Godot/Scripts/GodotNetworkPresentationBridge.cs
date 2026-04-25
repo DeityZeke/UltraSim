@@ -64,12 +64,7 @@ public sealed class GodotNetworkPresentationBridge
 
     public void ResetObserverState()
     {
-        ulong localActorId = _characterWorld.LocalControlledEntityId;
-        _characterWorld.ClearAllActors();
-        if (localActorId != 0)
-        {
-            _characterWorld.SetLocalControlledEntityId(localActorId);
-        }
+        _characterWorld.ClearRemoteActors();
     }
 
     private static Vector3 ToGodotPosition(float x, float y)
