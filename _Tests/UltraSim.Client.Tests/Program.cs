@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using UltraSim.Client;
+using UltraSim.Discovery;
 using UltraSim.Network;
 
 TestRunner.Run();
@@ -13,6 +14,7 @@ internal static class TestRunner
         Run(nameof(ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture), ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture);
         Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
         Run(nameof(ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary), ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary);
+        Run(nameof(ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure), ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure);
         Run(nameof(ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields), ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
@@ -27,6 +29,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps), ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps);
         Run(nameof(ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
+        Run(nameof(ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip), ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes), ClientMovementSessionHost_Pump_EmitsStateBaselineAckWhenBaselineCompletes);
         Run(nameof(ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor), ClientMovementSessionHost_BaselineCompletion_ResetsObserverEventSequenceFloor);
@@ -175,6 +178,56 @@ internal static class TestRunner
         Assert.True(summary.Contains("move:1.00ms", StringComparison.Ordinal), summary);
         Assert.True(summary.Contains("obs:1.50ms", StringComparison.Ordinal), summary);
         Assert.True(summary.Contains("evt:2.00ms", StringComparison.Ordinal), summary);
+    }
+
+    private static void ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure()
+    {
+        var localRow = new ServerDiscoveryRow(
+            ProviderId: "manual",
+            ProviderKind: ServerDiscoveryProviderKind.Manual,
+            ServerId: "local-dev",
+            DisplayName: "Local Dev",
+            Host: "127.0.0.1",
+            Port: 42042,
+            Region: "local",
+            CurrentUsers: 1,
+            MaxUsers: 64);
+        var service = new ClientServerBrowserService(
+        [
+            new ServerBrowserProviderDefinition(
+                "manual",
+                "Manual",
+                ServerDiscoveryProviderKind.Manual,
+                new InMemoryServerDiscoveryQuery([localRow])),
+            new ServerBrowserProviderDefinition(
+                "broken",
+                "Broken",
+                ServerDiscoveryProviderKind.Custom,
+                new ThrowingDiscoveryQuery("registry unavailable"))
+        ]);
+
+        ServerBrowserSnapshot initial = service.GetSnapshot();
+        Assert.Equal("manual", initial.ActiveProviderId);
+        Assert.Equal(2, initial.Providers.Count);
+        Assert.True(initial.Providers[0].IsSelected);
+        Assert.Equal(0, initial.Rows.Count);
+
+        ServerBrowserSnapshot refreshed = service.RefreshAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal(1, refreshed.Rows.Count);
+        Assert.Equal("Local Dev", refreshed.Rows[0].DisplayName);
+        Assert.Equal("127.0.0.1", refreshed.Rows[0].Host);
+        Assert.Equal(42042, refreshed.Rows[0].Port);
+        Assert.True(refreshed.LastError is null);
+        Assert.True(refreshed.LastRefreshUtc.HasValue);
+
+        Assert.True(service.SelectProvider("broken"));
+        ServerBrowserSnapshot failed = service.RefreshAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal("broken", failed.ActiveProviderId);
+        Assert.Equal(0, failed.Rows.Count);
+        Assert.True(string.Equals("registry unavailable", failed.LastError, StringComparison.Ordinal));
+
+        Assert.False(service.SelectProvider("missing"));
+        Assert.Equal("broken", service.ActiveProviderId);
     }
 
     private static void ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields()
@@ -766,6 +819,56 @@ internal static class TestRunner
         Assert.Equal(new ClientMovementState(15f, 25f, 2.25f, 3.25f), interpolated);
     }
 
+    private static void ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip()
+    {
+        using var pair = new LoopbackTransportPair();
+        var hello = new HandshakeHelloPacket(
+            protocolVersion: 3,
+            schemaHash: 4,
+            contentHash: 5,
+            features: FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression);
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.None);
+        var server = new NetworkControlPlaneHost(
+            NetworkControlPlaneRole.Server,
+            pair.Server,
+            handshakePolicy: policy);
+        var client = new ClientMovementSessionHost(
+            pair.Client,
+            new ConnectionId(1),
+            hello,
+            maxPollBatch: 8);
+
+        server.Start();
+        client.Start();
+        SessionId sessionId = client.BeginHandshake(1000);
+        Assert.True(sessionId.IsValid);
+
+        Assert.Equal(1, server.Pump(1001));
+        Assert.Equal(1, client.Pump(1002));
+        Assert.True(client.IsReady);
+
+        Assert.True(client.Control.SendPingProbe(new ConnectionId(1), sequence: 77, clientTick: 12345));
+        Assert.Equal(1, server.Pump(1003));
+        Assert.Equal(1, client.Pump(1004));
+
+        Span<PongProbePacket> pongs = stackalloc PongProbePacket[2];
+        int pongCount = client.Control.DrainReceivedPongs(pongs);
+        Assert.Equal(1, pongCount);
+        Assert.Equal((ushort)77, pongs[0].Sequence);
+        Assert.Equal((uint)12345, pongs[0].ClientTick);
+
+        ControlPlaneMetricsSnapshot serverMetrics = server.GetMetricsSnapshot();
+        ControlPlaneMetricsSnapshot clientMetrics = client.Control.GetMetricsSnapshot();
+        Assert.Equal(1, serverMetrics.PingProbesReceived);
+        Assert.Equal(1, serverMetrics.PongProbesSent);
+        Assert.Equal(1, clientMetrics.PingProbesSent);
+        Assert.Equal(1, clientMetrics.PongProbesReceived);
+    }
+
     private static void ClientMovementSessionHost_Pump_AggregatesObserverCountsAcrossPollBatches()
     {
         using var pair = new LoopbackTransportPair();
@@ -872,5 +975,20 @@ internal static class Assert
             if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
                 throw new InvalidOperationException(message ?? $"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
         }
+    }
+}
+
+internal sealed class ThrowingDiscoveryQuery : IServerDiscoveryQuery
+{
+    private readonly string _message;
+
+    public ThrowingDiscoveryQuery(string message)
+    {
+        _message = message;
+    }
+
+    public ValueTask<IReadOnlyList<ServerDiscoveryRow>> QueryAsync(CancellationToken cancellationToken = default)
+    {
+        throw new InvalidOperationException(_message);
     }
 }

@@ -6,6 +6,10 @@
     <LangVersion>latest</LangVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="UltraSim.Discovery">
+      <HintPath>..\..\Discovery\bin\$(Configuration)\net8.0\UltraSim.Discovery.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="UltraSim.Client.Core">
       <HintPath>..\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
       <Private>true</Private>
@@ -17,8 +21,8 @@
   </ItemGroup>
   <Target Name="BuildClientNetworkDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\Core\UltraSim.Client.Core.csproj;..\..\Kernels\Network\UltraSim.Network.csproj"
-      Targets="Build"
+      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\Core\UltraSim.Client.Core.csproj;..\..\Kernels\Network\UltraSim.Network.csproj"
+      Targets="Restore;Build"
       Properties="Configuration=$(Configuration)" />
   </Target>
 </Project>
