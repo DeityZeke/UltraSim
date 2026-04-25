@@ -12,6 +12,7 @@ public partial class UiManager : Node
     public HudCanvasManager? Hud { get; private set; }
     public MenuCanvasManager? Menus { get; private set; }
     public DebugCanvasManager? Debug { get; private set; }
+    public bool BlocksGameplayInput => Menus?.BlocksGameplayInput == true;
 
     public override void _Ready()
     {

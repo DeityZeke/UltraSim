@@ -10,6 +10,7 @@ internal static class TestRunner
         Run(nameof(ClientConnectionState_PreservesExpectedValues), ClientConnectionState_PreservesExpectedValues);
         Run(nameof(ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs), ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs);
         Run(nameof(ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture), ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture);
+        Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -95,6 +96,39 @@ internal static class TestRunner
             MenuOpen: false,
             ModalInputCaptured: false,
             ExplicitGameplayBlock: true).BlocksGameplayMovement);
+    }
+
+    private static void ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu()
+    {
+        var navigation = new ClientAppShellNavigation();
+
+        Assert.Equal(ClientAppScreen.Start, navigation.CurrentScreen);
+        Assert.True(navigation.IsMenuVisible);
+
+        navigation.NavigateTo(ClientAppScreen.ServerBrowser);
+        navigation.NavigateTo(ClientAppScreen.DirectConnect);
+        Assert.Equal(ClientAppScreen.DirectConnect, navigation.CurrentScreen);
+        Assert.Equal(2, navigation.BackStackCount);
+
+        Assert.True(navigation.TryGoBack());
+        Assert.Equal(ClientAppScreen.ServerBrowser, navigation.CurrentScreen);
+
+        navigation.EnterSession();
+        Assert.True(navigation.IsInSession);
+        Assert.False(navigation.IsMenuVisible);
+        Assert.Equal(ClientAppScreen.SessionStatus, navigation.CurrentScreen);
+
+        navigation.ShowInSessionOptions();
+        Assert.True(navigation.IsMenuVisible);
+        Assert.Equal(ClientAppScreen.InSessionOptions, navigation.CurrentScreen);
+
+        navigation.HideMenuIfInSession();
+        Assert.False(navigation.IsMenuVisible);
+
+        navigation.LeaveSession();
+        Assert.False(navigation.IsInSession);
+        Assert.True(navigation.IsMenuVisible);
+        Assert.Equal(ClientAppScreen.Disconnected, navigation.CurrentScreen);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()

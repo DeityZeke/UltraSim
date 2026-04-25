@@ -12,17 +12,17 @@ config_version=5
 
 config/name="UltraSim_Client"
 run/main_scene="res://Scenes/ClientRoot.tscn"
-config/features=PackedStringArray("4.6", "Forward Plus")
+config/features=PackedStringArray("4.6", "C#", "Forward Plus")
 config/icon="res://icon.svg"
-
-[dotnet]
-
-project/assembly_name="UltraSim.Client.Godot"
 
 [display]
 
 window/size/viewport_width=1280
 window/size/viewport_height=720
+
+[dotnet]
+
+project/assembly_name="UltraSim.Client.Godot"
 
 [physics]
 

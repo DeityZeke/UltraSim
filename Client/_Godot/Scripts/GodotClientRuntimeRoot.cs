@@ -38,6 +38,14 @@ public partial class GodotClientRuntimeRoot : Node
         }
     }
 
+    public override void _Process(double delta)
+    {
+        if (LocalPlayerController is not null)
+        {
+            LocalPlayerController.GameplayInputBlocked = UiManager?.BlocksGameplayInput == true;
+        }
+    }
+
     public void EnterPreviewMode()
     {
         CharacterWorld?.SpawnPreviewActor();

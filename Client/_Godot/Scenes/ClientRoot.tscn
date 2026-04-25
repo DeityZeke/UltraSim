@@ -1,10 +1,9 @@
-[gd_scene load_steps=18 format=3]
+[gd_scene load_steps=16 format=3]
 
 [ext_resource type="Script" path="res://Scripts/GodotClientRuntimeRoot.cs" id="1"]
 [ext_resource type="Script" path="res://Scripts/Controllers/LocalPlayerController.cs" id="2"]
 [ext_resource type="Script" path="res://Scripts/World/ClientCharacterWorld.cs" id="3"]
 [ext_resource type="Script" path="res://Scripts/Mobiles/MobileCatalogNode.cs" id="4"]
-[ext_resource type="Script" path="res://Scripts/Mobiles/MobileDefinition.cs" id="5"]
 [ext_resource type="PackedScene" path="res://Scenes/CharacterRoot.tscn" id="6"]
 [ext_resource type="PackedScene" path="res://Scenes/OrbitFollowCameraRig.tscn" id="7"]
 [ext_resource type="Script" path="res://Scripts/UI/UiManager.cs" id="8"]
@@ -12,11 +11,6 @@
 [ext_resource type="Script" path="res://Scripts/UI/HudCanvasManager.cs" id="10"]
 [ext_resource type="Script" path="res://Scripts/UI/MenuCanvasManager.cs" id="11"]
 [ext_resource type="Script" path="res://Scripts/UI/DebugCanvasManager.cs" id="12"]
-
-[sub_resource type="Resource" script=ExtResource("5") id="1"]
-DefinitionId = "default"
-DisplayName = "Traveler"
-FallbackBodyColor = Color(0.25, 0.62, 0.86, 1)
 
 [sub_resource type="ProceduralSkyMaterial" id="2"]
 sky_horizon_color = Color(0.58, 0.64, 0.70, 1)
@@ -52,7 +46,6 @@ EnablePreviewControls = true
 
 [node name="MobileCatalog" type="Node" parent="."]
 script = ExtResource("4")
-DefaultDefinition = SubResource("1")
 
 [node name="World" type="Node3D" parent="."]
 
@@ -71,7 +64,6 @@ mesh = SubResource("6")
 [node name="DynamicEntities" type="Node3D" parent="World"]
 script = ExtResource("3")
 CharacterRootScene = ExtResource("6")
-DefaultMobileDefinition = SubResource("1")
 MobileCatalogNodePath = NodePath("../../MobileCatalog")
 LocalPlayerControllerPath = NodePath("../../Controller")
 DefaultLocalControlledEntityId = 1
@@ -111,18 +103,6 @@ text = "UltraSim"
 
 [node name="Menus" type="CanvasLayer" parent="UILayers"]
 script = ExtResource("11")
-
-[node name="PreviewPanel" type="PanelContainer" parent="UILayers/Menus"]
-visible = false
-offset_left = 420.0
-offset_top = 220.0
-offset_right = 860.0
-offset_bottom = 500.0
-
-[node name="PreviewText" type="Label" parent="UILayers/Menus/PreviewPanel"]
-text = "Preview shell\n\nWASD moves the local avatar.\nEsc toggles this placeholder menu."
-horizontal_alignment = 1
-vertical_alignment = 1
 
 [node name="Debug" type="CanvasLayer" parent="UILayers"]
 script = ExtResource("12")
