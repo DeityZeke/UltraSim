@@ -1,0 +1,42 @@
+<Project Sdk="Godot.NET.Sdk/4.6.2">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>UltraSim.Client.Godot</AssemblyName>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;obj/**;.godot\**;.godot/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UltraSim.Client.Core">
+      <HintPath>..\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Network">
+      <HintPath>..\Network\bin\$(Configuration)\net8.0\UltraSim.Client.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Network">
+      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="obj/**" />
+    <Compile Remove=".godot\**\*.cs" />
+    <Compile Remove=".godot/**" />
+  </ItemGroup>
+
+  <Target Name="BuildClientGodotDependencies" BeforeTargets="PrepareForBuild">
+    <MSBuild
+      Projects="..\..\Kernels\Network\UltraSim.Network.csproj;..\Core\UltraSim.Client.Core.csproj;..\Network\UltraSim.Client.Network.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
+
+</Project>

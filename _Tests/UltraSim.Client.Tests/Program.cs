@@ -9,6 +9,7 @@ internal static class TestRunner
     {
         Run(nameof(ClientConnectionState_PreservesExpectedValues), ClientConnectionState_PreservesExpectedValues);
         Run(nameof(ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs), ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs);
+        Run(nameof(ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture), ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -61,6 +62,39 @@ internal static class TestRunner
         copied = sequencer.CopyPendingTo(scratch);
         Assert.Equal(1, copied);
         Assert.Equal(second, scratch[0]);
+    }
+
+    private static void ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture()
+    {
+        Assert.False(new ClientInputFocusState(
+            TextInputFocused: false,
+            MenuOpen: false,
+            ModalInputCaptured: false,
+            ExplicitGameplayBlock: false).BlocksGameplayMovement);
+
+        Assert.True(new ClientInputFocusState(
+            TextInputFocused: true,
+            MenuOpen: false,
+            ModalInputCaptured: false,
+            ExplicitGameplayBlock: false).BlocksGameplayMovement);
+
+        Assert.True(new ClientInputFocusState(
+            TextInputFocused: false,
+            MenuOpen: true,
+            ModalInputCaptured: false,
+            ExplicitGameplayBlock: false).BlocksGameplayMovement);
+
+        Assert.True(new ClientInputFocusState(
+            TextInputFocused: false,
+            MenuOpen: false,
+            ModalInputCaptured: true,
+            ExplicitGameplayBlock: false).BlocksGameplayMovement);
+
+        Assert.True(new ClientInputFocusState(
+            TextInputFocused: false,
+            MenuOpen: false,
+            ModalInputCaptured: false,
+            ExplicitGameplayBlock: true).BlocksGameplayMovement);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()
