@@ -43,6 +43,12 @@ public partial class MenuCanvasManager : CanvasLayer
         ApplyNavigation();
     }
 
+    public void EnterConnectedSession()
+    {
+        _navigation.EnterSession();
+        ApplyNavigation();
+    }
+
     public void ToggleInSessionMenu()
     {
         if (!_navigation.IsInSession)

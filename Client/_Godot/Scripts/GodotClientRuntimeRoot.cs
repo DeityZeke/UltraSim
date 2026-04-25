@@ -23,6 +23,7 @@ public partial class GodotClientRuntimeRoot : Node
     private GodotClientNetworkSessionDriver? _sessionDriver;
     private GodotNetworkPresentationBridge? _presentationBridge;
     private uint _localClientTick;
+    private bool _wasSessionReady;
 
     public override void _Ready()
     {
@@ -64,6 +65,7 @@ public partial class GodotClientRuntimeRoot : Node
     public override void _Process(double delta)
     {
         _sessionDriver?.Pump();
+        UpdateReadySessionTransition();
         SendMovementInputIfReady(delta);
 
         if (LocalPlayerController is not null)
@@ -115,12 +117,15 @@ public partial class GodotClientRuntimeRoot : Node
             return;
         }
 
+        _wasSessionReady = false;
+        CharacterWorld?.ClearAllActors();
         UiManager?.Menus?.ShowSessionStatus();
     }
 
     private void HandleDisconnectRequested()
     {
         _sessionDriver?.Disconnect();
+        _wasSessionReady = false;
         ClearSessionWorld();
     }
 
@@ -181,6 +186,25 @@ public partial class GodotClientRuntimeRoot : Node
 
         _localClientTick++;
         _sessionDriver.TrySendMovementInput(input, predicted);
+    }
+
+    private void UpdateReadySessionTransition()
+    {
+        bool isReady = _sessionDriver?.IsReady == true;
+        if (!isReady)
+        {
+            _wasSessionReady = false;
+            return;
+        }
+
+        if (_wasSessionReady)
+        {
+            return;
+        }
+
+        _wasSessionReady = true;
+        UiManager?.Menus?.EnterConnectedSession();
+        UiManager?.Menus?.AppendSystemChatLine("Connected.");
     }
 
     private void SetStatusText(string text)
