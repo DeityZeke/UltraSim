@@ -14,6 +14,7 @@ public partial class GodotClientRuntimeRoot : Node
     [Export] public NodePath? CameraRigPath { get; set; }
     [Export] public NodePath? UiManagerPath { get; set; }
     [Export] public bool StartPreviewOnReady { get; set; } = true;
+    [Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
 
     public ClientCharacterWorld? CharacterWorld { get; private set; }
     public LocalPlayerController? LocalPlayerController { get; private set; }
@@ -188,15 +189,19 @@ public partial class GodotClientRuntimeRoot : Node
             return;
         }
 
-        Vector2 axes = LocalPlayerController.ReadMoveInputAxes();
+        if (!LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection))
+        {
+            return;
+        }
+
         var input = new ClientMovementInput(
-            MoveX: (short)Mathf.RoundToInt(Mathf.Clamp(axes.X, -1.0f, 1.0f) * 100.0f),
-            MoveY: (short)Mathf.RoundToInt(Mathf.Clamp(-axes.Y, -1.0f, 1.0f) * 100.0f),
+            MoveX: (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f),
+            MoveY: (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f),
             Flags: 0);
 
         global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
-        float velocityX = input.MoveX / 100.0f;
-        float velocityY = input.MoveY / 100.0f;
+        float velocityX = input.MoveX / 100.0f * LiveMoveSpeed;
+        float velocityY = input.MoveY / 100.0f * LiveMoveSpeed;
         var predicted = new ClientMovementState(
             position.X + velocityX * (float)delta,
             position.Z + velocityY * (float)delta,

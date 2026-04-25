@@ -31,26 +31,41 @@ public partial class LocalPlayerController : Node
             return;
         }
 
-        Vector2 input = ReadMoveInputAxes();
-        if (input.LengthSquared() <= 0.0001f)
+        if (!TryReadMoveDirection(out Vector3 moveDirection))
         {
             ControlledCharacter.SetPresentationMoving(false);
             return;
         }
 
-        Vector3 moveDirection = ResolveMoveDirection(input);
-        if (moveDirection.LengthSquared() <= 0.0001f)
-        {
-            ControlledCharacter.SetPresentationMoving(false);
-            return;
-        }
-
-        moveDirection = moveDirection.Normalized();
         ControlledCharacter.GlobalPosition += moveDirection * PreviewMoveSpeed * (float)delta;
 
         float facingYawDegrees = Mathf.RadToDeg(Mathf.Atan2(moveDirection.X, moveDirection.Z));
         ControlledCharacter.SetPresentationFacingYawDegrees(facingYawDegrees);
         ControlledCharacter.SetPresentationMoving(true);
+    }
+
+    public bool TryReadMoveDirection(out Vector3 moveDirection)
+    {
+        return TryResolveMoveDirection(ReadMoveInputAxes(), out moveDirection);
+    }
+
+    public bool TryResolveMoveDirection(Vector2 input, out Vector3 moveDirection)
+    {
+        if (input.LengthSquared() <= 0.0001f)
+        {
+            moveDirection = Vector3.Zero;
+            return false;
+        }
+
+        moveDirection = ResolveMoveDirection(input);
+        if (moveDirection.LengthSquared() <= 0.0001f)
+        {
+            moveDirection = Vector3.Zero;
+            return false;
+        }
+
+        moveDirection = moveDirection.Normalized();
+        return true;
     }
 
     public Vector2 ReadMoveInputAxes()

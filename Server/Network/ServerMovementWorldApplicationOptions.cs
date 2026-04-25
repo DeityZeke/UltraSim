@@ -5,7 +5,8 @@ public sealed record ServerMovementWorldApplicationOptions(
     int Port = 42042,
     bool SaveOnStop = false,
     bool EnableGlobalMovementObserverState = true,
-    bool EnableAsyncFlush = true)
+    bool EnableAsyncFlush = true,
+    float MovementSpeed = 4.0f)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");
 }

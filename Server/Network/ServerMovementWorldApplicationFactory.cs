@@ -154,13 +154,13 @@ public static class ServerMovementWorldApplicationFactory
             return players;
         }
 
-        private static void ApplyMovementInput(World world, Entity entity, in MovementInputPacket input, float deltaSeconds)
+        private void ApplyMovementInput(World world, Entity entity, in MovementInputPacket input, float deltaSeconds)
         {
             if (!world.TryGetComponent(entity, out ServerMovementBody body))
                 return;
 
-            float velocityX = input.MoveX / 100f;
-            float velocityY = input.MoveY / 100f;
+            float velocityX = input.MoveX / 100f * _options.MovementSpeed;
+            float velocityY = input.MoveY / 100f * _options.MovementSpeed;
             body = body with
             {
                 VelocityX = velocityX,
