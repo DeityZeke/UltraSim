@@ -32,6 +32,21 @@ The current Godot client shell is essentially empty:
 
 That makes `Client/_Godot` the next platform bottleneck. Discovery UI, UI schema rendering, avatar presentation, chat UX, camera feel, map/environment swapping, and persistence/reconnect validation all need a real client shell.
 
+## Testing Posture
+
+Tests should land early and often.
+
+The first implementation slice should avoid putting substantial behavior directly into Godot scripts if that behavior can reasonably live in `Client/Core`, `Client/Network`, or a shared content/UI library. Godot-specific scene glue still needs build/smoke validation, but most policy and state-machine behavior should be testable without launching Godot.
+
+Expected coverage pattern:
+
+- each `Client/Core` behavior gets focused unit tests
+- each `Client/Network` behavior gets packet/session/bridge tests
+- shared UI/content/cache behavior gets codec/validation/cache tests
+- Godot scene work gets compile/build validation and a small manual smoke checklist until there is a practical automation harness
+
+Do not defer testability until the shell is "done." The old ECS/network approach paid off because each slice stayed measurable and regression-tested.
+
 ## Old Client Pieces Inspected
 
 Primary old code references:
@@ -126,6 +141,22 @@ Godot should not own:
 - server-driven UI state-machine semantics
 - discovery registry service behavior
 
+### Preserve Modularity For Future Content Systems
+
+The client is expected to support three different extension classes:
+
+- user-selected texture/resource packs
+- server-specific streamed content patches
+- explicit user-installed client mods
+
+These are not the same thing and must not collapse into one generic "mod" bucket.
+
+Texture/resource packs are local visual remaps. They can override textures, UI skinning, icons, and local presentation mappings through the content resolver. They should not execute code or change protocol behavior.
+
+Server content patches are server-specific data/assets cached under that server's namespace. They can provide models, textures, materials, sounds, UI schemas, item visuals, map/static chunks, and visual remaps. They must not provide executable code or runtime injection.
+
+Client mods live in an explicit `Mods` folder and may eventually use versioned client API hooks and runtime/script injection. They are user-installed, opt-in, and "use at your own risk." They are not silently installed by servers.
+
 ### Preserve Local App Shell vs Server-Driven UI Split
 
 `ClientAppShell` is for client-local app flow:
@@ -139,6 +170,31 @@ Godot should not own:
 Server-driven panels are not `ClientAppShell` screens. They are sibling windows under the menu layer, owned by `MenuCanvasManager`.
 
 This split matters because login, character select/create/delete, admin panels, vendors, crafting, inventory, etc. should use the server-driven schema path, while local menus remain client-owned.
+
+### Preserve UI Schema Cold/Hot Paths
+
+Server-driven UI is RunUO-gump-like in concept: the server builds a UI/menu in code, sends an engine-neutral schema/model to the client, and the client renders it.
+
+There are two client paths:
+
+- cold path:
+  - server opens a panel with type/revision/hash and payload
+  - client does not have the schema cached
+  - server sends or responds with the full schema definition
+  - client validates the schema, renders it with the payload, and caches the schema in the server-specific appdata cache
+- hot path:
+  - server opens a panel with type/revision/hash and payload or delta
+  - client has the exact matching schema cached
+  - client renders the cached schema with only payload/delta data
+
+Rules:
+
+- schema definition and payload data stay separate
+- exact identity matching only; do not accept a "close enough" schema
+- cache identity includes server identity, panel type, revision, and schema hash/version
+- server sends schema/data, never executable UI code
+- schema validation is mandatory before render/cache
+- cache quota/eviction hooks should exist even if initially simple
 
 ### Preserve Persistent UI Categories
 
@@ -190,6 +246,45 @@ Current map shape:
 
 Map swaps should not clear replicated actor state unless the app/session state explicitly requires it.
 
+### Preserve Animation, Sound, And VFX Hooks
+
+The shell should keep semantic presentation hooks for:
+
+- animation cues
+- sound cues
+- VFX cues
+- actor definition changes
+- material/texture remaps
+- UI/icon/theme remaps
+
+The first shell does not need final content for these, but the adapter shape should make them normal presentation commands, not one-off scene calls.
+
+### Preserve Terrain/Static Streaming Hooks
+
+Terrain and static content should support a UO/Minecraft-style hybrid:
+
+- dynamic gameplay remains server-authoritative
+- frozen/static chunks can be rendered client-side from cached content
+- server can stream an updated chunk/static patch
+- housing or map edits can produce updated static content
+- clients hot-patch cached map/static content without treating it as replicated actors
+
+This is a content/bulk/static pipeline, not the same as realtime actor replication.
+
+### Remember Server Script Compiler Boundary
+
+Server-side RunUO-style scripting belongs to the server startup/plugin system, not the client patch stream.
+
+The old server startup flow had the intended shape:
+
+- `Core: Initializing... - done`
+- `Core: Starting... - done`
+- `Scripts: Compiling C# scripts... - done (0 warnings, 0 errors)`
+- `World: Loading...`
+- discovery/listening startup
+
+The client should expose stable protocol/UI/content/presentation hooks that server scripts can target. It should not accept executable scripts from streamed server content.
+
 ## Target App Flow
 
 Minimum platform loop:
@@ -228,6 +323,12 @@ Done when:
 - shell can enter preview state
 - UI layers exist and can be toggled without replacing the root
 
+Validation:
+
+- project build succeeds
+- root scene load smoke test/manual run succeeds
+- non-Godot app-state helper logic has unit tests if any is introduced
+
 ### Phase G1 - Actor Presentation Spine
 
 Goal: display and control a current avatar without involving networking yet.
@@ -250,6 +351,12 @@ Done when:
 - WASD/camera-relative movement works in preview
 - camera follows the actor
 - actor definition can be swapped by logical id
+
+Validation:
+
+- actor definition catalog resolution is unit-tested outside Godot where practical
+- controller input mapping helpers are unit-tested if kept engine-neutral
+- Godot preview run verifies actor spawn, movement, and camera follow
 
 ### Phase G2 - UI Layer Spine
 
@@ -276,6 +383,12 @@ Done when:
 - chat panel focus blocks movement input
 - nameplates/overhead labels project from actor anchors
 
+Validation:
+
+- menu navigation state/back-stack logic is unit-tested if extracted
+- world UI visibility/cap/prioritization policy is unit-tested outside Godot where practical
+- Godot manual smoke verifies Esc, focus, HUD/menu/chat layering
+
 ### Phase G3 - Current Network Session Driver
 
 Goal: connect the Godot shell to current rebuilt `Client/Network`, not old TCP runtime code.
@@ -299,6 +412,12 @@ Done when:
 - ping/status updates in HUD
 - disconnect clears session-owned world state without killing the shell
 
+Validation:
+
+- `Client/Network` bridge tests cover send/receive paths
+- local integration test covers one client and loopback/UDP session where practical
+- Godot manual smoke covers direct connect, move, observe, chat, disconnect
+
 ### Phase G4 - Discovery Contracts And Browser
 
 Goal: restore server selection without rebuilding the whole registry/portal.
@@ -320,7 +439,45 @@ Done when:
 - registry failure shows friendly UI, not raw socket errors
 - selected server row resolves to a connect target
 
-### Phase G5 - Server-Driven UI Schema Path
+Validation:
+
+- discovery row/query formatting tests
+- direct-connect parse/validation tests
+- provider snapshot/controller tests
+- registry unavailable behavior test with fake query provider
+
+### Phase G5 - Content Resolver And Cache Spine
+
+Goal: add the minimal content/cache shape before schema caching and real content patching.
+
+This phase intentionally comes before server-driven UI because UI schema caching depends on the same server identity, cache namespace, path safety, and hash validation rules as later streamed content.
+
+Deliver:
+
+- content resolver interfaces for logical ids
+- resource-pack override order
+- server-specific cache namespace/path policy
+- patch manifest model
+- schema cache path model
+- asset hash/size validation primitives
+- no executable content in server patch manifests
+- explicit future `Mods` root shape kept separate from streamed content
+
+Done when:
+
+- texture/resource pack remap can be represented even if only one default pack exists
+- server cache path can be resolved safely
+- schema definitions can be associated with server identity
+- path traversal/hash validation behavior is tested
+
+Validation:
+
+- cache path tests
+- manifest validation tests
+- resolver precedence tests
+- "server patch cannot contain executable/script entries" test
+
+### Phase G6 - Server-Driven UI Schema Path
 
 Goal: bring back the schema/cache UI path once there is a shell to render it.
 
@@ -344,7 +501,15 @@ Done when:
 - character selection enters game
 - session loss clears active/pending server-driven panels
 
-### Phase G6 - Persistence/Reconnect Validation
+Validation:
+
+- schema codec round-trip tests
+- schema validation limit tests
+- cache hit/miss tests
+- panel ack/response tests
+- login challenge packet-binding tests
+
+### Phase G7 - Persistence/Reconnect Validation
 
 Goal: prove the current rebuilt stack has the same user-facing persistence loop the old docs described.
 
@@ -365,7 +530,13 @@ Done when:
 - user can enter game, move, disconnect, reconnect, and return to the expected character state
 - current persistence gaps are documented with tests or explicit defers
 
-### Phase G7 - Presentation Polish Hooks
+Validation:
+
+- focused server/client integration tests for reconnect and character position policy
+- manual Godot smoke for visible reconnect flow
+- regression test for disconnect during character select
+
+### Phase G8 - Presentation Polish Hooks
 
 Goal: fill the shell hooks needed before authoritative physics and richer gameplay.
 
@@ -383,12 +554,46 @@ Done when:
 - server/client presentation commands can be visibly tested in Godot
 - physics work can validate camera/controller/correction feel in-client
 
-### Phase G8 - Pre-Physics Gate
+Validation:
+
+- semantic command dispatch tests outside Godot where practical
+- Godot manual smoke for animation/SFX/VFX hook visibility
+
+### Phase G9 - Local Single-Player Loopback And Pre-Physics Gate
+
+Goal: prove the client can run the same server-authoritative game path in local single-player before major physics work starts.
+
+Single-player should not become a separate gameplay architecture. It should launch or attach an embedded/local server, connect the normal client over loopback, and use the same login/session/world/persistence path as remote play with only the hosting/bootstrap policy changed.
+
+Deliver:
+
+- local embedded/headless server bootstrap option from the Godot shell or launcher
+- loopback connect flow that reuses the normal network session driver
+- local-world/server-profile selection hook
+- clean shutdown/restart behavior for the embedded server
+- save/cache namespace separation between local worlds and remote servers
+- diagnostic UI that makes local-server state visible enough to debug startup failures
+
+Done when:
+
+- client can start a local server and connect to it over loopback
+- local single-player reaches the same in-game shell as remote play
+- local disconnect/reconnect uses the same persistence rules as remote play
+- local server shutdown does not leave the client shell in a broken state
+- physics can rely on a running authoritative server for world bounds and entity truth
+
+Validation:
+
+- server bootstrap option parsing tests
+- cache/save namespace tests for local world identity
+- loopback session integration test where practical
+- manual Godot smoke for start local game, enter world, move, disconnect, restart
 
 Do not start major authoritative physics work until:
 
 - Godot client shell runs
 - direct connect works
+- local single-player loopback works enough to validate the same authoritative path
 - discovery/menu path is usable enough
 - login/character flow is usable enough
 - avatar/world presentation exists
@@ -407,7 +612,7 @@ These are not first-pass blockers:
 - favorites/history persistence
 - portal DB migration
 - full inventory/vendor/crafting schemas
-- mod asset patch/signing pipeline
+- full mod asset patch/signing pipeline
 - terrain chunk streaming
 - final character customization
 - full audio/VFX content library
@@ -420,7 +625,13 @@ Keep these seams available even if they are empty in the first pass:
 - current environment/lighting injection
 - current avatar/mobile definition injection
 - content resolver/pack stack
+- texture/resource pack remaps
+- per-server content patch/cache namespace
+- explicit opt-in client mod root
 - server-driven UI cache by server identity
+- UI schema cold/hot cache path
+- animation/SFX/VFX semantic presentation commands
+- static chunk/map patch rendering path
 - projected world UI cap/prioritization
 - shared vs exclusive menu/window policy
 - command-input chat path
