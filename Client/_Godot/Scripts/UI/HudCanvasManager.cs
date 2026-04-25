@@ -22,8 +22,7 @@ public partial class HudCanvasManager : CanvasLayer
             AddChild(_statusLabel);
         }
 
-        _statusLabel.Position = new Vector2(16, 16);
-        _statusLabel.Size = new Vector2(560, 22);
+        PlaceLabel(_statusLabel, new Vector2(16, 16), new Vector2(560, 22));
 
         _networkSummaryLabel = GetNodeOrNull<Label>("NetworkSummaryLabel");
         if (_networkSummaryLabel is null)
@@ -37,8 +36,7 @@ public partial class HudCanvasManager : CanvasLayer
             AddChild(_networkSummaryLabel);
         }
 
-        _networkSummaryLabel.Position = new Vector2(16, 40);
-        _networkSummaryLabel.Size = new Vector2(760, 22);
+        PlaceLabel(_networkSummaryLabel, new Vector2(16, 40), new Vector2(760, 22));
     }
 
     public void SetStatusText(string text)
@@ -55,5 +53,14 @@ public partial class HudCanvasManager : CanvasLayer
         {
             _networkSummaryLabel.Text = text;
         }
+    }
+
+    private static void PlaceLabel(Label label, Vector2 position, Vector2 size)
+    {
+        label.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
+        label.OffsetLeft = position.X;
+        label.OffsetTop = position.Y;
+        label.OffsetRight = position.X + size.X;
+        label.OffsetBottom = position.Y + size.Y;
     }
 }

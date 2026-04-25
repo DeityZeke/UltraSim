@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Godot;
 using UltraSim.Client.Godot.Camera;
 using UltraSim.Client.Godot.Controllers;
@@ -246,29 +245,15 @@ public partial class GodotClientRuntimeRoot : Node
 
         if (_sessionDriver is null || !_sessionDriver.IsRunning)
         {
-            UiManager.SetNetworkSummaryText("Network: offline");
+            UiManager.SetNetworkSummaryText(ClientNetworkSummaryFormatter.FormatOffline());
             return;
         }
 
-        ClientPumpProfileSnapshot profile = _sessionDriver.LastPumpProfile;
-        string state = _sessionDriver.IsReady ? "ready" : "connecting";
-        string ping = _sessionDriver.LastPingRoundTripMilliseconds >= 0.0
-            ? $"{_sessionDriver.LastPingRoundTripMilliseconds:0.0}ms"
-            : "--";
-        UiManager.SetNetworkSummaryText(
-            $"Network: {state} session:{_sessionDriver.SessionId.Value} " +
-            $"ping:{ping} " +
-            $"in:{profile.InboundDatagramCount} poll:{TicksToMilliseconds(profile.PollElapsedTicks):0.00}ms " +
-            $"move:{TicksToMilliseconds(profile.MovementElapsedTicks):0.00}ms " +
-            $"obs:{TicksToMilliseconds(profile.ObserverStateElapsedTicks):0.00}ms " +
-            $"evt:{TicksToMilliseconds(profile.ObserverEventElapsedTicks):0.00}ms");
-    }
-
-    private static double TicksToMilliseconds(long ticks)
-    {
-        return ticks <= 0
-            ? 0.0
-            : ticks * 1000.0 / Stopwatch.Frequency;
+        UiManager.SetNetworkSummaryText(ClientNetworkSummaryFormatter.Format(
+            _sessionDriver.IsReady,
+            _sessionDriver.SessionId,
+            _sessionDriver.LastPingRoundTripMilliseconds,
+            _sessionDriver.LastPumpProfile));
     }
 
     private TNode? ResolveNode<TNode>(NodePath? path)

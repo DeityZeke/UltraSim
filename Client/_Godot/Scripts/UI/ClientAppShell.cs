@@ -144,22 +144,29 @@ public partial class ClientAppShell : Control
     {
         Vector2 viewportSize = GetViewportRect().Size;
         Position = Vector2.Zero;
-        Size = viewportSize;
 
         if (_shade is not null)
         {
             _shade.Position = Vector2.Zero;
-            _shade.Size = viewportSize;
         }
 
         if (_frame is not null)
         {
             Vector2 frameSize = _frame.CustomMinimumSize;
-            _frame.Position = new Vector2(
+            Vector2 framePosition = new(
                 Mathf.Round((viewportSize.X - frameSize.X) * 0.5f),
                 Mathf.Round((viewportSize.Y - frameSize.Y) * 0.5f));
-            _frame.Size = frameSize;
+            SetControlRect(_frame, framePosition, frameSize);
         }
+    }
+
+    private static void SetControlRect(Control control, Vector2 position, Vector2 size)
+    {
+        control.SetAnchorsPreset(LayoutPreset.TopLeft);
+        control.OffsetLeft = position.X;
+        control.OffsetTop = position.Y;
+        control.OffsetRight = position.X + size.X;
+        control.OffsetBottom = position.Y + size.Y;
     }
 
     private void EnsureInterface()

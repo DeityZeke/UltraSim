@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using UltraSim.Client;
 using UltraSim.Network;
 
@@ -11,6 +12,7 @@ internal static class TestRunner
         Run(nameof(ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs), ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs);
         Run(nameof(ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture), ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture);
         Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
+        Run(nameof(ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary), ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary);
         Run(nameof(ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields), ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
@@ -130,6 +132,49 @@ internal static class TestRunner
         Assert.False(navigation.IsInSession);
         Assert.True(navigation.IsMenuVisible);
         Assert.Equal(ClientAppScreen.Disconnected, navigation.CurrentScreen);
+    }
+
+    private static void ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary()
+    {
+        Assert.Equal("Network: offline", ClientNetworkSummaryFormatter.FormatOffline());
+
+        long halfMillisecondTicks = Stopwatch.Frequency / 2000;
+        var profile = new ClientPumpProfileSnapshot(
+            InboundDatagramCount: 12,
+            PollElapsedTicks: halfMillisecondTicks,
+            PollPendingDrainElapsedTicks: 0,
+            PollSocketReceiveElapsedTicks: 0,
+            PollBundleUnpackElapsedTicks: 0,
+            PollBundleIndexElapsedTicks: 0,
+            PollBundleMaterializeElapsedTicks: 0,
+            PollBundleSliceElapsedTicks: 0,
+            PollBundleDatagramCreateElapsedTicks: 0,
+            PollBundleEnqueueElapsedTicks: 0,
+            PollPayloadCopyElapsedTicks: 0,
+            PollEnvelopeParseElapsedTicks: 0,
+            PollAsyncReceiveElapsedTicks: 0,
+            PollAsyncQueuedDatagramCount: 0,
+            ControlElapsedTicks: 0,
+            MovementElapsedTicks: halfMillisecondTicks * 2,
+            ObserverStateElapsedTicks: halfMillisecondTicks * 3,
+            ObserverStateDecodeElapsedTicks: 0,
+            ObserverStateApplyElapsedTicks: 0,
+            ObserverEventElapsedTicks: halfMillisecondTicks * 4);
+
+        string summary = ClientNetworkSummaryFormatter.Format(
+            isReady: true,
+            sessionId: new SessionId(42),
+            lastPingRoundTripMilliseconds: 12.34,
+            profile);
+
+        Assert.True(summary.Contains("Network: ready", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("session:42", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("ping:12.3ms", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("in:12", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("poll:0.50ms", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("move:1.00ms", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("obs:1.50ms", StringComparison.Ordinal), summary);
+        Assert.True(summary.Contains("evt:2.00ms", StringComparison.Ordinal), summary);
     }
 
     private static void ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields()
