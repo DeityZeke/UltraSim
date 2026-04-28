@@ -8,4 +8,5 @@ public enum ControlPlaneEventKind : byte
     SessionAdmissionRejected = 3,
     PongReceived = 4,
     ServerDisconnected = 5,
+    ClientDisconnected = 6,
 }

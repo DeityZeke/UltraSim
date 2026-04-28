@@ -170,7 +170,18 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 
     public void Disconnect(string status = "Disconnected.")
     {
-        _host?.Stop();
+        Disconnect(status, notifyServer: true);
+    }
+
+    private void Disconnect(string status, bool notifyServer)
+    {
+        ClientMovementSessionHost? host = _host;
+        if (notifyServer && host is not null && host.IsReady)
+        {
+            host.SendDisconnectNotice(SessionDisconnectReason.Closed, Stopwatch.GetTimestamp());
+        }
+
+        host?.Stop();
         _host = null;
         _transport?.Dispose();
         _transport = null;
@@ -347,7 +358,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         }
 
         _sessionFailed = true;
-        Disconnect(status);
+        Disconnect(status, notifyServer: false);
         _sessionFailed = true;
         _sessionFailedSink?.Invoke(status);
     }

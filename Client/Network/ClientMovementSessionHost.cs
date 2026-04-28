@@ -72,6 +72,11 @@ public sealed class ClientMovementSessionHost
 
     public void Stop() => _control.Stop();
 
+    public bool SendDisconnectNotice(SessionDisconnectReason reason, long nowTicks)
+    {
+        return _control.SendClientDisconnectNotice(ConnectionId, reason, nowTicks);
+    }
+
     public SessionId BeginHandshake(long nowTicks)
     {
         _sessionId = _control.BeginClientHandshake(ConnectionId, nowTicks);

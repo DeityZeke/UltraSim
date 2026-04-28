@@ -13,6 +13,7 @@ public static class DefaultPacketMetadata
         registry.Register<PingProbePacket>();
         registry.Register<PongProbePacket>();
         registry.Register<ServerDisconnectPacket>();
+        registry.Register<ClientDisconnectPacket>();
         registry.Register<ChatSubmitPacket>();
         registry.Register<ChatMessageEventPacket>();
         registry.Register<RealtimeStateFramePacket>();

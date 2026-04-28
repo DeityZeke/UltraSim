@@ -40,7 +40,7 @@ What exists today:
   - timeout sweep support
   - control-plane metrics and typed control-plane events
   - a first post-handshake control message family (`PingProbe` / `PongProbe`)
-  - explicit server disconnect notices for graceful shutdown/kick-style closes
+  - explicit server/client disconnect notices for graceful shutdown, kick-style closes, and local client exits
 - first stream-model contracts for:
   - `LatestStateStream`
   - `OrderedEventStream`

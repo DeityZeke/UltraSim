@@ -480,6 +480,7 @@ Done when:
 - graceful server stop is reported immediately by control-plane disconnect notice
 - server crash/loss is detected by client keepalive timeout and clears session-owned world state
 - silent UDP clients are eventually unbound and removed from the server movement shell
+- local client disconnect sends a close notice so the server unbinds/despawns immediately
 - disconnect clears session-owned world state without killing the shell
 
 Validation:
