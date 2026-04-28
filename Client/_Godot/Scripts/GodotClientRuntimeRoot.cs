@@ -33,18 +33,26 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawConnected;
 	private bool _smokeRequireDisconnected;
 	private bool _smokeSawDisconnected;
+	private bool _smokeRequireChatReceived;
 	private double _smokeReconnectAfterSeconds = -1.0;
+	private double _smokeChatAfterSeconds = -1.0;
 	private double _smokeElapsedSeconds;
 	private bool _smokeReconnectRequested;
+	private bool _smokeChatRequested;
+	private string _smokeChatText = "hello from smoke";
 	private int _smokeConnectedCount;
 	private int _smokeRequiredConnectedCount;
+	private int _smokeChatReceivedCount;
 	private int _nextSmokeDisconnectIndex;
 
 	public override void _Ready()
 	{
 		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
 		_smokeRequireDisconnected = HasUserArg("--us-smoke-require-disconnected");
+		_smokeRequireChatReceived = HasUserArg("--us-smoke-require-chat-received");
 		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
+		_smokeChatAfterSeconds = ReadPositiveUserArg("--us-smoke-chat-after=");
+		_smokeChatText = ReadStringUserArg("--us-smoke-chat-text=") ?? _smokeChatText;
 		_smokeRequiredConnectedCount = ReadPositiveIntUserArg("--us-smoke-require-connected-count=");
 		ReadSmokeDisconnectSchedule();
 		CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
@@ -259,6 +267,11 @@ public partial class GodotClientRuntimeRoot : Node
 
 	private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
 	{
+		if (string.Equals(packet.Text, _smokeChatText, StringComparison.Ordinal))
+		{
+			_smokeChatReceivedCount++;
+		}
+
 		UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
 		UiManager?.World?.ShowOverheadChat(packet.SenderEntityId, packet.Text);
 	}
@@ -396,6 +409,13 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (_smokeRequireChatReceived && _smokeChatReceivedCount <= 0)
+		{
+			GD.PushError($"UltraSim client smoke failed: expected chat echo '{_smokeChatText}' but received none.");
+			GetTree().Quit(1);
+			return;
+		}
+
 		if (_smokeRequireDisconnected)
 		{
 			if (!_smokeSawDisconnected)
@@ -425,6 +445,27 @@ public partial class GodotClientRuntimeRoot : Node
 			_nextSmokeDisconnectIndex++;
 			SetStatusText("Smoke disconnect requested.");
 			HandleDisconnectRequested();
+		}
+
+		if (!_smokeChatRequested &&
+			_smokeChatAfterSeconds > 0.0 &&
+			_smokeElapsedSeconds >= _smokeChatAfterSeconds)
+		{
+			if (_sessionDriver?.IsReady != true)
+			{
+				return;
+			}
+
+			_smokeChatRequested = true;
+			SetStatusText("Smoke chat requested.");
+			if (_sessionDriver.TrySendChat(_smokeChatText))
+			{
+				UiManager?.Menus?.AppendSystemChatLine($"Smoke chat sent: {_smokeChatText}");
+			}
+			else
+			{
+				GD.PushWarning("Smoke chat send failed.");
+			}
 		}
 
 		if (!_smokeReconnectRequested &&
@@ -540,6 +581,22 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		return 0;
+	}
+
+	private static string? ReadStringUserArg(string prefix)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string value = arg[prefix.Length..];
+			return string.IsNullOrWhiteSpace(value) ? null : value;
+		}
+
+		return null;
 	}
 
 	private void UpdateNetworkSummary()

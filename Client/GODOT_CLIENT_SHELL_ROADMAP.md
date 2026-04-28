@@ -90,6 +90,9 @@ Current Godot smoke hooks:
   - `--us-smoke-final-disconnect-after=seconds`
   - `--us-smoke-reconnect-after=seconds`
   - `--us-smoke-require-disconnected`
+  - `--us-smoke-chat-after=seconds`
+  - `--us-smoke-chat-text=text`
+  - `--us-smoke-require-chat-received`
   - direct-connect failure policy: 5 handshake attempts, 0.5s apart, then an error screen/status
   - graceful server shutdown policy: explicit disconnect notice clears session-owned world state immediately
   - crash/loss fallback policy: 5s without server pongs clears session-owned world state and reports connection loss
