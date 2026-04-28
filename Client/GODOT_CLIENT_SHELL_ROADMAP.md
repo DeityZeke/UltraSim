@@ -85,6 +85,8 @@ Current Godot smoke hooks:
   - `--us-connect-port=port`
   - `--us-smoke-quit-after=seconds`
   - `--us-smoke-require-connected`
+  - `--us-smoke-disconnect-after=seconds`
+  - `--us-smoke-require-disconnected`
   - direct-connect failure policy: 5 handshake attempts, 0.5s apart, then an error screen/status
   - graceful server shutdown policy: explicit disconnect notice clears session-owned world state immediately
   - crash/loss fallback policy: 5s without server pongs clears session-owned world state and reports connection loss
@@ -98,6 +100,7 @@ Current Godot smoke hooks:
   - `--us-server-session-keepalive-timeout-seconds=seconds`
   - `--us-server-no-movement-world`
   - `--us-smoke-quit-after=seconds`
+  - `--us-smoke-require-empty-sessions`
 
 These are smoke/test hooks only. Normal interactive flow still goes through the local app shell and server operator shell.
 

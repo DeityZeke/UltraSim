@@ -28,10 +28,17 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _wasSessionReady;
 	private bool _smokeRequireConnected;
 	private bool _smokeSawConnected;
+	private bool _smokeRequireDisconnected;
+	private bool _smokeSawDisconnected;
+	private double _smokeDisconnectAfterSeconds = -1.0;
+	private double _smokeElapsedSeconds;
+	private bool _smokeDisconnectRequested;
 
 	public override void _Ready()
 	{
 		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
+		_smokeRequireDisconnected = HasUserArg("--us-smoke-require-disconnected");
+		_smokeDisconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-disconnect-after=");
 		CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
 		LocalPlayerController = ResolveNode<LocalPlayerController>(LocalPlayerControllerPath);
 		CameraRig = ResolveNode<OrbitFollowCameraRig>(CameraRigPath);
@@ -91,6 +98,7 @@ public partial class GodotClientRuntimeRoot : Node
 		UpdateReadySessionTransition();
 		SendMovementInputIfReady(delta);
 		UpdateNetworkSummary();
+		UpdateSmokeDisconnect(delta);
 
 		if (LocalPlayerController is not null)
 		{
@@ -207,6 +215,7 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		_sessionDriver?.Disconnect();
 		_wasSessionReady = false;
+		_smokeSawDisconnected = true;
 		ClearSessionWorld();
 	}
 
@@ -218,6 +227,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private void HandleSessionFailed(string status)
 	{
 		_wasSessionReady = false;
+		_smokeSawDisconnected = true;
 		CharacterWorld?.ClearAllActors();
 		if (LocalPlayerController is not null)
 		{
@@ -369,7 +379,42 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (_smokeRequireDisconnected)
+		{
+			if (!_smokeSawDisconnected)
+			{
+				GD.PushError("UltraSim client smoke failed: session never disconnected.");
+				GetTree().Quit(1);
+				return;
+			}
+
+			if (_sessionDriver?.IsRunning == true)
+			{
+				GD.PushError("UltraSim client smoke failed: network session is still running.");
+				GetTree().Quit(1);
+				return;
+			}
+		}
+
 		GetTree().Quit();
+	}
+
+	private void UpdateSmokeDisconnect(double delta)
+	{
+		if (_smokeDisconnectRequested || _smokeDisconnectAfterSeconds <= 0.0)
+		{
+			return;
+		}
+
+		_smokeElapsedSeconds += Math.Max(0.0, delta);
+		if (_smokeElapsedSeconds < _smokeDisconnectAfterSeconds)
+		{
+			return;
+		}
+
+		_smokeDisconnectRequested = true;
+		SetStatusText("Smoke disconnect requested.");
+		HandleDisconnectRequested();
 	}
 
 	private static bool HasUserArg(string expected)
@@ -383,6 +428,27 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		return false;
+	}
+
+	private static double ReadPositiveUserArg(string prefix)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (double.TryParse(arg[prefix.Length..], out double seconds) && seconds > 0.0)
+			{
+				return seconds;
+			}
+
+			GD.PushWarning($"Invalid {prefix.TrimEnd('=')} value.");
+			return -1.0;
+		}
+
+		return -1.0;
 	}
 
 	private void UpdateNetworkSummary()

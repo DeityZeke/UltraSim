@@ -28,9 +28,11 @@ public partial class ServerShellRoot : Control
 	private Button? _shutdownButton;
 	private Button? _statusButton;
 	private Button? _runButton;
+	private bool _smokeRequireEmptySessions;
 
 	public override void _Ready()
 	{
+		_smokeRequireEmptySessions = HasUserArg("--us-smoke-require-empty-sessions");
 		ConfigureWindow();
 		BuildInterface();
 
@@ -158,9 +160,38 @@ public partial class ServerShellRoot : Control
 			}
 
 			SceneTreeTimer timer = GetTree().CreateTimer(seconds);
-			timer.Timeout += () => GetTree().Quit();
+			timer.Timeout += QuitForSmoke;
 			return;
 		}
+	}
+
+	private void QuitForSmoke()
+	{
+		if (_smokeRequireEmptySessions)
+		{
+			int activeSessions = _controller?.GetStatusSnapshot().ActiveSessions ?? 0;
+			if (activeSessions != 0)
+			{
+				GD.PushError($"UltraSim server smoke failed: expected 0 active sessions, found {activeSessions}.");
+				GetTree().Quit(1);
+				return;
+			}
+		}
+
+		GetTree().Quit();
+	}
+
+	private static bool HasUserArg(string expected)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (string.Equals(arg, expected, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private void ConfigureWindow()
