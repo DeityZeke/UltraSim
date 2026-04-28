@@ -26,9 +26,12 @@ public partial class GodotClientRuntimeRoot : Node
 	private GodotNetworkPresentationBridge? _presentationBridge;
 	private uint _localClientTick;
 	private bool _wasSessionReady;
+	private bool _smokeRequireConnected;
+	private bool _smokeSawConnected;
 
 	public override void _Ready()
 	{
+		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
 		CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
 		LocalPlayerController = ResolveNode<LocalPlayerController>(LocalPlayerControllerPath);
 		CameraRig = ResolveNode<OrbitFollowCameraRig>(CameraRigPath);
@@ -306,6 +309,7 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		_wasSessionReady = true;
+		_smokeSawConnected = true;
 		if (LocalPlayerController is not null)
 		{
 			LocalPlayerController.EnablePreviewControls = false;
@@ -337,9 +341,34 @@ public partial class GodotClientRuntimeRoot : Node
 			}
 
 			SceneTreeTimer timer = GetTree().CreateTimer(seconds);
-			timer.Timeout += () => GetTree().Quit();
+			timer.Timeout += QuitForSmoke;
 			return;
 		}
+	}
+
+	private void QuitForSmoke()
+	{
+		if (_smokeRequireConnected && !_smokeSawConnected)
+		{
+			GD.PushError("UltraSim client smoke failed: session never reached Connected.");
+			GetTree().Quit(1);
+			return;
+		}
+
+		GetTree().Quit();
+	}
+
+	private static bool HasUserArg(string expected)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (string.Equals(arg, expected, StringComparison.OrdinalIgnoreCase))
+			{
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private void UpdateNetworkSummary()

@@ -70,7 +70,7 @@ Godot_v4.6.2-stable_mono_linux.x86_64 --headless --path Server/_Godot \
 # Terminal 2: direct-connect the client shell and quit after 8s.
 Godot_v4.6.2-stable_mono_linux.x86_64 --headless --path Client/_Godot \
   res://Scenes/ClientRoot.tscn -- \
-  --us-connect=127.0.0.1:42042 --us-smoke-quit-after=8
+  --us-connect=127.0.0.1:42042 --us-smoke-quit-after=8 --us-smoke-require-connected
 ```
 
-A passing client smoke prints `Connected.` before shutdown. These hooks are for validation only; user-facing connection flow remains the local app shell.
+A passing client smoke prints `Connected.` before shutdown. With `--us-smoke-require-connected`, the client exits nonzero if it never reaches the ready session state. These hooks are for validation only; user-facing connection flow remains the local app shell.

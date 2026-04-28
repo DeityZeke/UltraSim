@@ -84,6 +84,7 @@ Current Godot smoke hooks:
   - `--us-connect-host=host`
   - `--us-connect-port=port`
   - `--us-smoke-quit-after=seconds`
+  - `--us-smoke-require-connected`
 - server shell:
   - `--us-server-start`
   - `--us-server-port=port`
