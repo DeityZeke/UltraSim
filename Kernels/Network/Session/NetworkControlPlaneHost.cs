@@ -64,6 +64,8 @@ public sealed class NetworkControlPlaneHost
                 context.Host.OnHandshakeResult(context.ConnectionId, context.NowTicks, packet));
             _registry.Register<PongProbePacket>(static (DispatchContext context, in PongProbePacket packet) =>
                 context.Host.OnPongProbe(context.ConnectionId, context.NowTicks, packet));
+            _registry.Register<ServerDisconnectPacket>(static (DispatchContext context, in ServerDisconnectPacket packet) =>
+                context.Host.OnServerDisconnect(context.ConnectionId, context.NowTicks, packet));
         }
 
         _registry.Seal();
@@ -172,6 +174,21 @@ public sealed class NetworkControlPlaneHost
         _pingProbesSent++;
         SendPacket(connectionId, new PingProbePacket(sequence, clientTick), PacketHeaderFlags.HighPriorityHint);
         _transport.FlushOutbound();
+        return true;
+    }
+
+    public bool SendDisconnectNotice(ConnectionId connectionId, SessionDisconnectReason reason, long nowTicks)
+    {
+        if (_role != NetworkControlPlaneRole.Server)
+            return false;
+        if (!Sessions.TryGetSessionIdByConnection(connectionId, out SessionId sessionId))
+            return false;
+        if (!Sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot) || snapshot.State == ConnectionSessionState.Disconnected)
+            return false;
+
+        SendPacket(connectionId, new ServerDisconnectPacket(reason), PacketHeaderFlags.HighPriorityHint);
+        Sessions.TryBeginDisconnect(sessionId, reason, nowTicks);
+        Sessions.TryCompleteDisconnect(sessionId, nowTicks);
         return true;
     }
 
@@ -306,6 +323,24 @@ public sealed class NetworkControlPlaneHost
             HandshakeRejectReason.None,
             nowTicks));
         _receivedPongs.Add(packet);
+    }
+
+    private void OnServerDisconnect(ConnectionId connectionId, long nowTicks, in ServerDisconnectPacket packet)
+    {
+        if (_role != NetworkControlPlaneRole.Client)
+            return;
+        if (!Sessions.TryGetSessionIdByConnection(connectionId, out SessionId sessionId))
+            return;
+
+        Sessions.TryBeginDisconnect(sessionId, packet.Reason, nowTicks);
+        Sessions.TryCompleteDisconnect(sessionId, nowTicks);
+        _events.Enqueue(new ControlPlaneEvent(
+            ControlPlaneEventKind.ServerDisconnected,
+            connectionId,
+            sessionId,
+            packet.Reason,
+            HandshakeRejectReason.None,
+            nowTicks));
     }
 
     private static HandshakeRejectReason ToHandshakeRejectReason(SessionDisconnectReason reason)

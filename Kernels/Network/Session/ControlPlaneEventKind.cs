@@ -7,4 +7,5 @@ public enum ControlPlaneEventKind : byte
     HandshakeRejected = 2,
     SessionAdmissionRejected = 3,
     PongReceived = 4,
+    ServerDisconnected = 5,
 }

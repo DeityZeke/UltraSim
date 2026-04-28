@@ -18,6 +18,7 @@ internal static class TestRunner
         Run(nameof(IOutboundTransform_ExposesExplicitTransformHook), IOutboundTransform_ExposesExplicitTransformHook);
         Run(nameof(PacketEnvelopeHeader_RoundTripsExpectedFields), PacketEnvelopeHeader_RoundTripsExpectedFields);
         Run(nameof(PacketCodec_EncodesAndDecodesHandshakeHello), PacketCodec_EncodesAndDecodesHandshakeHello);
+        Run(nameof(ServerDisconnectPacket_RoundTripsReason), ServerDisconnectPacket_RoundTripsReason);
         Run(nameof(ChatSubmitPacket_RoundTripsSubmittedText), ChatSubmitPacket_RoundTripsSubmittedText);
         Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
         Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
@@ -34,6 +35,7 @@ internal static class TestRunner
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
         Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
+        Run(nameof(ControlPlane_ServerDisconnectNotice_DisconnectsClientSession), ControlPlane_ServerDisconnectNotice_DisconnectsClientSession);
         Run(nameof(NetworkSessionManager_SessionIdExhaustion_RejectsGracefully), NetworkSessionManager_SessionIdExhaustion_RejectsGracefully);
         Run(nameof(LatestStateStream_CoalescesAndDrainsByLatestVersion), LatestStateStream_CoalescesAndDrainsByLatestVersion);
         Run(nameof(LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes), LatestStateStream_PublishScopedCopies_PreservesSharedItemKeyAcrossScopes);
@@ -454,6 +456,23 @@ internal static class TestRunner
         Assert.Equal((ulong)11, decoded.SchemaHash);
         Assert.Equal((ulong)13, decoded.ContentHash);
         Assert.Equal(FeatureFlags.Compression | FeatureFlags.SharedPayloadFanout, decoded.Features);
+    }
+
+    private static void ServerDisconnectPacket_RoundTripsReason()
+    {
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new ServerDisconnectPacket(SessionDisconnectReason.ServerShutdown));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(ServerDisconnectPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(ServerDisconnectPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.Control, plane);
+        Assert.Equal(PacketClass.Control, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        ServerDisconnectPacket decoded = ServerDisconnectPacket.Deserialize(ref reader);
+        Assert.Equal(SessionDisconnectReason.ServerShutdown, decoded.Reason);
     }
 
     private static void ChatSubmitPacket_RoundTripsSubmittedText()
@@ -903,6 +922,41 @@ internal static class TestRunner
         Assert.Equal(1, serverMetrics.PongProbesSent);
         Assert.Equal(1, clientMetrics.PingProbesSent);
         Assert.Equal(1, clientMetrics.PongProbesReceived);
+    }
+
+    private static void ControlPlane_ServerDisconnectNotice_DisconnectsClientSession()
+    {
+        using var pair = new LoopbackTransportPair();
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
+        var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
+        var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, pair.Server, handshakePolicy: policy);
+        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, pair.Client, clientHello: hello);
+        server.Start();
+        client.Start();
+
+        SessionId clientSession = client.BeginClientHandshake(new ConnectionId(3), nowTicks: 300);
+        server.Pump(301);
+        client.Pump(302);
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot readySnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, readySnapshot.State);
+
+        Assert.True(server.SendDisconnectNotice(new ConnectionId(3), SessionDisconnectReason.ServerShutdown, 303));
+        server.FlushOutbound();
+        client.Pump(304);
+
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot disconnectedSnapshot));
+        Assert.Equal(ConnectionSessionState.Disconnected, disconnectedSnapshot.State);
+        Assert.Equal(SessionDisconnectReason.ServerShutdown, disconnectedSnapshot.DisconnectReason);
+
+        ControlPlaneEvent[] events = new ControlPlaneEvent[4];
+        int eventCount = client.DrainEvents(events);
+        Assert.True(eventCount >= 1);
+        Assert.Equal(ControlPlaneEventKind.ServerDisconnected, events[eventCount - 1].Kind);
+        Assert.Equal(SessionDisconnectReason.ServerShutdown, events[eventCount - 1].DisconnectReason);
     }
 
     private static void NetworkSessionManager_SessionIdExhaustion_RejectsGracefully()

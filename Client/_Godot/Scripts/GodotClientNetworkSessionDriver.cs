@@ -15,6 +15,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     private ClientMovementSessionHost? _host;
     private UdpSocketNetworkTransport? _transport;
     private readonly PongProbePacket[] _pongScratch = new PongProbePacket[8];
+    private readonly ControlPlaneEvent[] _controlEventScratch = new ControlPlaneEvent[8];
     private readonly Dictionary<ushort, long> _pingSentAtTicks = new();
     private bool _disposed;
     private uint _clientTick;
@@ -124,6 +125,12 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         long nowTicks = Stopwatch.GetTimestamp();
         _host.Pump(nowTicks);
         _clientTick++;
+        DrainControlEvents();
+        if (_host is null)
+        {
+            return;
+        }
+
         DrainPongs(nowTicks);
         MaybeSendPingProbe(nowTicks);
         ApplyOwnerMovementIfChanged();
@@ -226,6 +233,38 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _ownerMovementSink(result);
     }
 
+    private void DrainControlEvents()
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        while (true)
+        {
+            int count = _host.Control.DrainEvents(_controlEventScratch);
+            if (count <= 0)
+            {
+                return;
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                ControlPlaneEvent evt = _controlEventScratch[i];
+                if (evt.Kind == ControlPlaneEventKind.ServerDisconnected)
+                {
+                    FailSession(ToServerDisconnectStatus(evt.DisconnectReason));
+                    return;
+                }
+            }
+
+            if (count < _controlEventScratch.Length)
+            {
+                return;
+            }
+        }
+    }
+
     private void DrainPongs(long nowTicks)
     {
         if (_host is null)
@@ -309,7 +348,21 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 
         _sessionFailed = true;
         Disconnect(status);
+        _sessionFailed = true;
         _sessionFailedSink?.Invoke(status);
+    }
+
+    private static string ToServerDisconnectStatus(SessionDisconnectReason reason)
+    {
+        return reason switch
+        {
+            SessionDisconnectReason.ServerShutdown => "Server is shutting down.",
+            SessionDisconnectReason.Kicked => "Disconnected by server.",
+            SessionDisconnectReason.Timeout => "Server closed the session after a timeout.",
+            SessionDisconnectReason.Rejected => "Server rejected the session.",
+            SessionDisconnectReason.ServerBusy => "Server is busy.",
+            _ => "Server closed the connection.",
+        };
     }
 
     private static long SecondsToTicks(double seconds)

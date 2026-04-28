@@ -19,6 +19,7 @@ Current default host tick rate:
 - the ECS world remains host-driven, so this is the current default server/world tick cadence
 - network cadence is not locked to a separate default yet; the new network kernel is still pump-driven by higher layers until the fuller server bridge/runtime policy lands
 - movement-world session defaults are `5s` auth timeout and `10s` ready keepalive timeout; silent UDP clients are unbound and removed by the shared session host
+- graceful movement-world shutdown sends explicit server-disconnect control notices before closing transport
 
 Current `Server/Network` state:
 

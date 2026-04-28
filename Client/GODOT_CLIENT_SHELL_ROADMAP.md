@@ -86,7 +86,8 @@ Current Godot smoke hooks:
   - `--us-smoke-quit-after=seconds`
   - `--us-smoke-require-connected`
   - direct-connect failure policy: 5 handshake attempts, 0.5s apart, then an error screen/status
-  - ready-session loss policy: 5s without server pongs clears session-owned world state and reports connection loss
+  - graceful server shutdown policy: explicit disconnect notice clears session-owned world state immediately
+  - crash/loss fallback policy: 5s without server pongs clears session-owned world state and reports connection loss
 - server shell:
   - `--us-server-start`
   - `--us-server-port=port`
@@ -476,7 +477,8 @@ Done when:
 - chat sends/receives
 - ping/status updates in HUD
 - no-server direct connect retries briefly, then shows a clear error
-- server stop/crash is detected by client keepalive timeout and clears session-owned world state
+- graceful server stop is reported immediately by control-plane disconnect notice
+- server crash/loss is detected by client keepalive timeout and clears session-owned world state
 - silent UDP clients are eventually unbound and removed from the server movement shell
 - disconnect clears session-owned world state without killing the shell
 

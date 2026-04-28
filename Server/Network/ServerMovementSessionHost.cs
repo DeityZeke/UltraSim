@@ -111,7 +111,12 @@ public sealed class ServerMovementSessionHost
 
     public void Start() => _control.Start();
 
-    public void Stop() => _control.Stop();
+    public void Stop()
+    {
+        SendDisconnectNotices(SessionDisconnectReason.ServerShutdown, Stopwatch.GetTimestamp());
+        _control.FlushOutbound();
+        _control.Stop();
+    }
 
     public int Pump(long nowTicks, float deltaSeconds, uint serverTick, bool flushOutbound = true)
     {
@@ -269,6 +274,12 @@ public sealed class ServerMovementSessionHost
             controlFlushAsyncPendingBatchCount,
             controlFlushWireDatagramCount);
         return totalInboundCount;
+    }
+
+    private void SendDisconnectNotices(SessionDisconnectReason reason, long nowTicks)
+    {
+        foreach (ConnectionId connectionId in _entityByConnection.Keys)
+            _control.SendDisconnectNotice(connectionId, reason, nowTicks);
     }
 
     private void HandleControlPlaneEvents(long nowTicks)
