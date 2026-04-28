@@ -58,11 +58,27 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
 		}
 
+		ScheduleSmokeQuitIfRequested();
+
+		if (TryReadAutoConnectRequest(out ClientDirectConnectRequest autoConnectRequest, out string? autoConnectError))
+		{
+			HandleDirectConnectRequested(autoConnectRequest);
+			return;
+		}
+
+		if (!string.IsNullOrWhiteSpace(autoConnectError))
+		{
+			SetStatusText(autoConnectError);
+			UiManager?.Menus?.ShowConnectionError();
+			return;
+		}
+
 		if (StartPreviewOnReady)
 		{
 			CharacterWorld?.SpawnPreviewActor();
 			SetStatusText("Preview shell ready");
 		}
+
 	}
 
 	public override void _Process(double delta)
@@ -114,6 +130,52 @@ public partial class GodotClientRuntimeRoot : Node
 
 		CharacterWorld?.ClearAllActors();
 		SetStatusText("Session cleared");
+	}
+
+	private static bool TryReadAutoConnectRequest(out ClientDirectConnectRequest request, out string? error)
+	{
+		request = default;
+		error = null;
+		string? host = null;
+		string? port = null;
+
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (arg.StartsWith("--us-connect=", StringComparison.OrdinalIgnoreCase))
+			{
+				string value = arg["--us-connect=".Length..].Trim();
+				int separator = value.LastIndexOf(':');
+				if (separator <= 0 || separator == value.Length - 1)
+				{
+					error = "Auto-connect expects --us-connect=host:port.";
+					return false;
+				}
+
+				host = value[..separator];
+				port = value[(separator + 1)..];
+			}
+			else if (arg.StartsWith("--us-connect-host=", StringComparison.OrdinalIgnoreCase))
+			{
+				host = arg["--us-connect-host=".Length..];
+			}
+			else if (arg.StartsWith("--us-connect-port=", StringComparison.OrdinalIgnoreCase))
+			{
+				port = arg["--us-connect-port=".Length..];
+			}
+		}
+
+		if (host is null && port is null)
+		{
+			return false;
+		}
+
+		if (!ClientDirectConnectRequest.TryCreate(host, port, out request, out string validationError))
+		{
+			error = validationError;
+			return false;
+		}
+
+		return true;
 	}
 
 	private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
@@ -255,7 +317,29 @@ public partial class GodotClientRuntimeRoot : Node
 
 	private void SetStatusText(string text)
 	{
+		GD.Print($"UltraSim client: {text}");
 		UiManager?.SetStatusText(text);
+	}
+
+	private void ScheduleSmokeQuitIfRequested()
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith("--us-smoke-quit-after=", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (!double.TryParse(arg["--us-smoke-quit-after=".Length..], out double seconds) || seconds <= 0.0)
+			{
+				GD.PushWarning("Invalid --us-smoke-quit-after value.");
+				return;
+			}
+
+			SceneTreeTimer timer = GetTree().CreateTimer(seconds);
+			timer.Timeout += () => GetTree().Quit();
+			return;
+		}
 	}
 
 	private void UpdateNetworkSummary()

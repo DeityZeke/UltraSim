@@ -2,7 +2,9 @@
 
 Purpose: rebuild the Godot client shell without losing the modular shape of the old client.
 
-This is the active checklist for the rebuilt `Client/_Godot` shell. The old client remains the behavioral and scene-composition reference, but the current implementation should target the rebuilt `Client/Core`, `Client/Network`, `Kernels/Network`, `Server/Network`, and `Server/Core` boundaries.
+This is the active checklist for the rebuilt `Client/_Godot` shell. The old v2 client under `_OLD` remains the primary behavioral and scene-composition reference, but the current implementation should target the rebuilt `Client/Core`, `Client/Network`, `Kernels/Network`, `Server/Network`, and `Server/Core` boundaries.
+
+The older v1 tree under `_OLD/_OLD` is reference-only. Pull from it only when it has a specific idea worth rescuing, such as the old hybrid client render/culling experiment or the old admin control panel concepts. Do not copy its runtime shape forward.
 
 ## Current Read
 
@@ -20,17 +22,45 @@ The current rebuilt client has useful engine-agnostic pieces:
   - observer latest-state/event consume path
   - chat event bridge
 
-The current Godot client shell is essentially empty:
+The current Godot client shell now has a real thin-host spine:
 
 - `Client/_Godot/project.godot`
-- icon/import/editor metadata
-- no main scene
-- no runtime root
-- no UI layers
-- no actor presenter
-- no shell app/menu flow
+- `Client/_Godot/UltraSim.Client.Godot.csproj`
+- `Scenes/ClientRoot.tscn`
+- `GodotClientRuntimeRoot`
+- persistent world containers:
+  - `World/Map`
+  - `World/DynamicEntities`
+  - `World/Effects`
+  - `World/CameraRig`
+- persistent UI layers:
+  - `UILayers/World`
+  - `UILayers/HUD`
+  - `UILayers/Menus`
+  - `UILayers/Debug`
+- preview actor flow:
+  - `CharacterRoot`
+  - `MobileDefinition`
+  - `MobileDefinitionCatalog`
+  - `ClientCharacterWorld`
+  - `LocalPlayerController`
+  - `OrbitFollowCameraRig`
+- local app shell flow:
+  - start menu
+  - manual server browser row
+  - direct connect
+  - settings placeholder
+  - in-session options
+  - shared chat panel
+- current network shell bridge:
+  - direct UDP session driver over `ClientMovementSessionHost`
+  - movement input send path
+  - owner movement receive path
+  - observer latest-state receive path
+  - chat submit/event display path
+  - ping/status HUD summary
 
-That makes `Client/_Godot` the next platform bottleneck. Discovery UI, UI schema rendering, avatar presentation, chat UX, camera feel, map/environment swapping, and persistence/reconnect validation all need a real client shell.
+This means Phase G0 and most of G1/G2 are implemented, and G3 has an initial working bridge that still needs live direct-connect validation against the current server. The remaining client bottleneck is no longer "create a shell"; it is reintroducing the old v2 feature set on top of the rebuilt runtime shape: discovery polish, server-driven schema UI, login/character flow, content/cache identity, reconnect/persistence validation, and admin/debug panels.
 
 ## Testing Posture
 
@@ -46,6 +76,24 @@ Expected coverage pattern:
 - Godot scene work gets compile/build validation and a small manual smoke checklist until there is a practical automation harness
 
 Do not defer testability until the shell is "done." The old ECS/network approach paid off because each slice stayed measurable and regression-tested.
+
+Current Godot smoke hooks:
+
+- client shell:
+  - `--us-connect=host:port`
+  - `--us-connect-host=host`
+  - `--us-connect-port=port`
+  - `--us-smoke-quit-after=seconds`
+- server shell:
+  - `--us-server-start`
+  - `--us-server-port=port`
+  - `--us-server-profile=name`
+  - `--us-server-tick-ms=n`
+  - `--us-server-max-catchup=n`
+  - `--us-server-no-movement-world`
+  - `--us-smoke-quit-after=seconds`
+
+These are smoke/test hooks only. Normal interactive flow still goes through the local app shell and server operator shell.
 
 ## Old Client Pieces Inspected
 
@@ -71,6 +119,18 @@ Primary old code references:
 - `_OLD/Client.Godot/UI/ServerDriven/*`
 - `_OLD/UltraSim/Client/Runtime/Discovery/*`
 - `_OLD/UltraSim/UI/*`
+
+Additional v1 references to consult only when useful:
+
+- `_OLD/_OLD/Client/ECS/ControlPanel`
+  - old admin/debug control panel concepts:
+    - per-system timings
+    - per-system live settings/tuning
+    - FPS/entity/archetype counters
+    - admin-relevant runtime diagnostics
+- `_OLD/_OLD`
+  - old hybrid client render/culling concepts
+  - useful conceptually, but the implementation was brittle and should not be ported directly
 
 Primary old docs:
 
@@ -640,12 +700,19 @@ Keep these seams available even if they are empty in the first pass:
 
 ## Next Implementation Slice
 
-Start with Phase G0 + G1 together:
+The G0/G1 shell surface now exists. The next sensible slice is to validate and tighten Phase G3 before rebuilding the larger v2 UI/service features:
 
-1. Add the Godot client C# project.
-2. Add root scene and runtime root.
-3. Add world/map/dynamic/effects/camera/UI layer containers.
-4. Add preview actor presentation with `CharacterRoot`, `MobileDefinition`, local controller, and orbit camera.
-5. Validate the shell runs before any network or schema work.
+1. Run Godot build and root-scene smoke on the current Linux Godot Mono executable.
+2. Run `UltraSim.Client.Tests`.
+3. Direct-connect the Godot client shell to the current headless/server runtime.
+4. Verify:
+   - local avatar ownership
+   - movement input send
+   - owner correction receive
+   - remote observer actor presentation
+   - chat submit/receive
+   - ping/status HUD updates
+   - disconnect clears session-owned world state without replacing the shell
+5. Document any gaps before starting server-driven schema UI.
 
-This creates the surface we need for every following slice.
+After G3 is validated, move into the content/cache spine and server-driven schema UI path. The old v2 UI/schema/discovery/account docs are the main reference for that work; the rebuilt version should keep the same features but use the current runtime boundaries and cleaner packet/cache/service shape.

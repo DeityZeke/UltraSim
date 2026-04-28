@@ -34,12 +34,20 @@ public partial class ServerShellRoot : Control
 		ConfigureWindow();
 		BuildInterface();
 
-		_controller = new GodotServerShellController(new GodotServerShellOptions("godot"));
+		GodotServerShellOptions options = ReadShellOptions(out bool startOnReady);
+		_controller = new GodotServerShellController(options);
 		_controller.EventRaised += HandleServerEvent;
 
 		AppendOutput("INFO", "Godot operator shell ready.");
 		AppendOutput("INFO", "Use the right-side controls or the command field below the output pane.");
+		if (startOnReady)
+		{
+			AppendOutput("INFO", $"Auto-starting movement server on UDP port {options.NetworkPort}.");
+			_controller.Start();
+		}
+
 		RefreshStatus();
+		ScheduleSmokeQuitIfRequested();
 	}
 
 	public override void _Process(double delta)
@@ -55,6 +63,85 @@ public partial class ServerShellRoot : Control
 			_controller.EventRaised -= HandleServerEvent;
 			_controller.Dispose();
 			_controller = null;
+		}
+	}
+
+	private static GodotServerShellOptions ReadShellOptions(out bool startOnReady)
+	{
+		string profileName = GodotServerShellOptions.Default.ProfileName;
+		int tickMilliseconds = GodotServerShellOptions.Default.TickMilliseconds;
+		int maxCatchUpTicks = GodotServerShellOptions.Default.MaxCatchUpTicksPerPump;
+		int networkPort = GodotServerShellOptions.Default.NetworkPort;
+		bool enableMovementWorld = GodotServerShellOptions.Default.EnableMovementWorld;
+		startOnReady = false;
+
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (string.Equals(arg, "--us-server-start", StringComparison.OrdinalIgnoreCase))
+			{
+				startOnReady = true;
+			}
+			else if (string.Equals(arg, "--us-server-no-movement-world", StringComparison.OrdinalIgnoreCase))
+			{
+				enableMovementWorld = false;
+			}
+			else if (arg.StartsWith("--us-server-profile=", StringComparison.OrdinalIgnoreCase))
+			{
+				string value = arg["--us-server-profile=".Length..].Trim();
+				if (!string.IsNullOrWhiteSpace(value))
+				{
+					profileName = value;
+				}
+			}
+			else if (arg.StartsWith("--us-server-port=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-port=".Length..], out int parsedPort) && parsedPort > 0)
+				{
+					networkPort = parsedPort;
+				}
+			}
+			else if (arg.StartsWith("--us-server-tick-ms=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-tick-ms=".Length..], out int parsedTickMilliseconds) && parsedTickMilliseconds > 0)
+				{
+					tickMilliseconds = parsedTickMilliseconds;
+				}
+			}
+			else if (arg.StartsWith("--us-server-max-catchup=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-max-catchup=".Length..], out int parsedMaxCatchUpTicks) && parsedMaxCatchUpTicks > 0)
+				{
+					maxCatchUpTicks = parsedMaxCatchUpTicks;
+				}
+			}
+		}
+
+		return new GodotServerShellOptions(
+			profileName,
+			TickMilliseconds: tickMilliseconds,
+			MaxCatchUpTicksPerPump: maxCatchUpTicks,
+			EnableMovementWorld: enableMovementWorld,
+			NetworkPort: networkPort);
+	}
+
+	private void ScheduleSmokeQuitIfRequested()
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith("--us-smoke-quit-after=", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (!double.TryParse(arg["--us-smoke-quit-after=".Length..], out double seconds) || seconds <= 0.0)
+			{
+				GD.PushWarning("Invalid --us-smoke-quit-after value.");
+				return;
+			}
+
+			SceneTreeTimer timer = GetTree().CreateTimer(seconds);
+			timer.Timeout += () => GetTree().Quit();
+			return;
 		}
 	}
 
@@ -674,6 +761,7 @@ public partial class ServerShellRoot : Control
 	private void AppendOutput(string category, string message, DateTimeOffset? timestamp = null)
 	{
 		string line = $"{(timestamp ?? DateTimeOffset.Now):HH:mm:ss}  {category.PadRight(6)}  {message}";
+		GD.Print($"UltraSim server: {line}");
 		_outputLines.Enqueue(line);
 
 		while (_outputLines.Count > MaxOutputLines)

@@ -8,11 +8,10 @@ The client subsystem is being rebuilt with the same layering rules as the server
 
 Current focus:
 
-- first real movement vertical slice
-- input sequencing
-- prediction acknowledgement
-- interpolation-ready authoritative state buffering
-- first owner-correction metrics and correction-pressure visibility
+- Godot client shell validation on the rebuilt network/runtime shape
+- direct-connect movement/chat/observer smoke against the current server
+- restoring old v2 client features cleanly on top of the new runtime boundaries
+- preparing the content/cache and server-driven UI schema path for login and character flow
 
 What now exists:
 
@@ -21,14 +20,24 @@ What now exists:
   - prediction storage
   - interpolation buffering
   - minimal movement input/state contracts
+  - app-shell navigation and direct-connect validation helpers
+  - server-browser service snapshot model
 - `Client/Network`
   - movement input send path over `Kernels/Network`
   - authoritative movement-state receive path
   - prediction acknowledgement hook
-  - first correction-magnitude tracking against predicted owner state
+  - correction-magnitude tracking against predicted owner state
   - loopback-testable movement bridge
   - `ClientMovementSessionHost` for shared control-plane + movement polling over one live transport path
-  - the first paired server/client movement round-trip slice now exists over loopback via `Server/Network`
+  - observer latest-state/event consume path
+  - chat event bridge
+- `Client/_Godot`
+  - root scene and runtime root
+  - persistent world/map/dynamic/effects/camera containers
+  - persistent world/HUD/menu/debug UI layers
+  - preview actor, local controller, orbit camera, nameplate/overhead-chat projection
+  - local app shell, manual server browser row, direct connect, in-session menu, chat panel
+  - initial UDP session driver wiring for movement, observer state, chat, ping/status, and disconnect
 
 Current benchmark note:
 
@@ -46,4 +55,22 @@ The current client/network checkpoint is now beyond narrow loopback only:
 - the first small multi-client UDP ramp signal exists without putting protocol/runtime logic into `Client/_Godot`
 - the widened live harness now also exposes owner-correction sample counts and correction magnitudes for the first real owner path
 
-The old client networking code remains the behavioral reference for these concepts, but not the architecture template.
+The old v2 client under `_OLD` remains the main behavioral reference for these features, but not the architecture template. The older v1 tree under `_OLD/_OLD` is reference-only; consult it only for specific concepts worth rescuing, such as the hybrid render/culling experiment or the old admin control panel shape.
+
+## Godot Smoke Hooks
+
+The Godot shells have small command-line hooks for repeatable G3 smoke validation:
+
+```bash
+# Terminal 1: start the Godot movement server shell and quit after 15s.
+Godot_v4.6.2-stable_mono_linux.x86_64 --headless --path Server/_Godot \
+  res://Scenes/ServerShellRoot.tscn -- \
+  --us-server-start --us-server-port=42042 --us-smoke-quit-after=15
+
+# Terminal 2: direct-connect the client shell and quit after 8s.
+Godot_v4.6.2-stable_mono_linux.x86_64 --headless --path Client/_Godot \
+  res://Scenes/ClientRoot.tscn -- \
+  --us-connect=127.0.0.1:42042 --us-smoke-quit-after=8
+```
+
+A passing client smoke prints `Connected.` before shutdown. These hooks are for validation only; user-facing connection flow remains the local app shell.

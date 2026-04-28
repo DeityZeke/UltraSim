@@ -98,7 +98,7 @@ Recommended run categories:
 For server-side parity measurements, use the maintained sharded wrapper instead of the combined in-process runner:
 
 ```bash
-python3 _tmp/run_network_bot_harness_sharded.py \
+python3 _TMP/run_network_bot_harness_sharded.py \
   --workers 4 \
   --stages 256,300,350 \
   --stage-duration 30 \

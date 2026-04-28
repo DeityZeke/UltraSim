@@ -21,6 +21,8 @@ Client/
 
 ## Old-Code Reference
 
+Use the old v2 client under `_OLD` as the primary reference for feature behavior and scene composition. The new project exists to keep the rebuilt network/runtime shape, then reintroduce the old v2 feature set with cleaner boundaries and less coupling.
+
 Use the old client network code as reference for:
 
 - `ClientInputSendBridge`
@@ -29,7 +31,7 @@ Use the old client network code as reference for:
 - `ClientNetworkEntityMap`
 - `ClientNetworkBridge`
 
-Preserve the useful behavior. Do not preserve the old project structure by default.
+Preserve the useful behavior. Do not preserve the old project structure by default. The older v1 tree under `_OLD/_OLD` is only a secondary concept reference; likely candidates are the old hybrid render/culling idea and the old `Client/ECS/ControlPanel` admin/debug panel concepts.
 
 ## Phase C1: Core Contracts
 
@@ -101,6 +103,23 @@ Deliver:
 - bind received authoritative state to presentation/runtime hooks
 - keep `_Godot` thin
 
+Current status:
+
+- started and useful
+- current delivered Godot pieces:
+  - `Client/_Godot/UltraSim.Client.Godot.csproj`
+  - `Scenes/ClientRoot.tscn`
+  - `GodotClientRuntimeRoot`
+  - persistent world and UI layer containers
+  - preview actor/controller/camera flow
+  - local app shell with direct connect, server browser placeholder, settings placeholder, session options, and chat panel
+  - `GodotClientNetworkSessionDriver` over `ClientMovementSessionHost`
+  - owner movement, observer latest-state, chat, ping/status, and disconnect presentation hooks
+- next validation gate:
+  - Godot build and root-scene smoke
+  - `UltraSim.Client.Tests`
+  - direct-connect smoke against the current headless/server runtime
+
 ## Bot-Harness Readiness
 
 The first bot-harness checkpoint should happen after `C2`, not after a full client feature set.
@@ -117,4 +136,5 @@ Current note:
 - the repo has now reached the first meaningful pre-bot-harness checkpoint on the client side
 - the paired server-side movement ingestion/authoritative movement path now exists for one narrow loopback slice
 - a real UDP socket transport path now also exists for that slice
-- what is still missing before the harness becomes worth wiring is the next broader gameplay/server movement/runtime integration layer on top of this slice, not another transport rewrite
+- the sharded bot harness now lives under `_TMP/run_network_bot_harness_sharded.py`; `_tmp` is no longer the active harness folder
+- the network rewrite is validated enough that client work should focus on rebuilding the old v2 feature set on the current runtime shape, not another transport rewrite

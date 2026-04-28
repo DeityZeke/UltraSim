@@ -4,7 +4,7 @@
 
 Build the client as a portable runtime plus thin engine shell.
 
-The Godot client is the first host, not the client architecture itself. Preserve the old client's useful shape:
+The Godot client is the first host, not the client architecture itself. Preserve the old v2 client's useful shape while rebuilding it on the current network/runtime boundaries:
 
 - one persistent shell/root scene
 - injectable current map/world/avatar/menu/environment content
@@ -53,6 +53,12 @@ Use this split unless there is a clear reason not to:
   - patch manifests
   - cache metadata
   - validation contracts
+
+Reference rule:
+
+- `_OLD` is the main old-v2 reference for feature behavior and scene composition.
+- `_OLD/_OLD` is old-v1 reference-only; use it only for specific ideas worth rescuing, especially the hybrid render/culling concept and the old admin control panel under `_OLD/_OLD/Client/ECS/ControlPanel`.
+- Do not port old structure forward just because old code exists.
 
 Do not:
 
