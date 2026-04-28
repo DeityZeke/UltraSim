@@ -4,9 +4,7 @@ _OLD/
 /android/
 .output/
 _temp/
-_tmp/
 _tmp_perf_probe/
-*.uid
 *.db
 *.db-shm
 *.db-wal
@@ -14,3 +12,4 @@ _tmp_perf_probe/
 **/obj/
 .codex-temp/
 _Benchmarks/results/
+_TMP/
