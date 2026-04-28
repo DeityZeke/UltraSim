@@ -139,6 +139,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
         {
             Blocking = false,
         };
+        if (_options.SocketReceiveBufferBytes > 0)
+            socket.ReceiveBufferSize = _options.SocketReceiveBufferBytes;
+        if (_options.SocketSendBufferBytes > 0)
+            socket.SendBufferSize = _options.SocketSendBufferBytes;
         socket.Bind(_options.LocalEndPoint);
         _socket = socket;
         _running = true;
@@ -470,7 +474,10 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                         catch (SocketException ex) when (ex.SocketErrorCode is SocketError.WouldBlock or SocketError.NoBufferSpaceAvailable)
                         {
                             for (int i = bundleStart; i < datagrams.Count; i++)
-                                _outbound.Enqueue(datagrams[i]);
+                                lock (_sync)
+        {
+            _outbound.Enqueue(datagrams[i]);
+        }
                             return;
                         }
                         finally

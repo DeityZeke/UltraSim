@@ -88,7 +88,7 @@ public static class PacketCodec
     {
         ArgumentNullException.ThrowIfNull(payload);
         int payloadCapacity = sizeof(ulong) + sizeof(ulong) + sizeof(ushort) + payload.Length;
-        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
+        int capacity = PacketEnvelopeHeader.SizeInBytes + payloadCapacity;
         while (true)
         {
             byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
@@ -125,7 +125,7 @@ public static class PacketCodec
     {
         ArgumentNullException.ThrowIfNull(payload);
         int payloadCapacity = sizeof(ulong) + sizeof(ushort) + payload.Length;
-        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
+        int capacity = PacketEnvelopeHeader.SizeInBytes + payloadCapacity;
         while (true)
         {
             byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);
@@ -168,7 +168,7 @@ public static class PacketCodec
             payloadCapacity += sizeof(ulong) + sizeof(ulong) + sizeof(ushort) + item.Payload.Length;
         }
 
-        int capacity = Math.Max(PacketEnvelopeHeader.SizeInBytes + payloadCapacity, initialCapacity);
+        int capacity = PacketEnvelopeHeader.SizeInBytes + payloadCapacity;
         while (true)
         {
             byte[] buffer = ArrayPool<byte>.Shared.Rent(capacity);

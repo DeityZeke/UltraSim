@@ -31,7 +31,7 @@ internal static class HarnessProgram
         Console.WriteLine(
             $"Stages: {options.Stages}  Mode: {options.StageMode}  TickHz: {options.TickHz}  ActiveRatio: {options.ActiveRatio:0.##}  " +
             $"AoiRadii: {string.Join(",", options.AoiRadiiMeters)}  EventCap: {options.OrderedEventCapacity}  ReplayCap: {options.ReplayBufferCapacityPerConnection}");
-        Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMax    GC(0/1/2)  TickSLO  PingSLO");
+        Console.WriteLine("Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMaxC   GC(0/1/2)  TickSLO  PingSLO");
         Console.WriteLine("--------------------------------------------------------------------------------------------------------------------------------");
 
         var rows = new JsonArray();
@@ -55,7 +55,7 @@ internal static class HarnessProgram
                 $"{stageIndex,5}  {result.TargetClients,6} {result.ActiveClients,6}  {result.ReadyClients,5}  " +
                 $"{result.TickAverageMs,7:0.000}  {result.TickP95Ms,7:0.000}  {result.TickP99Ms,7:0.000}  {result.TickMaxMs,7:0.000}  " +
                 $"{result.PingAverageMs,7:0.000}  {result.PingP95Ms,8:0.000}  {result.PingMaxMs,7:0.000}  " +
-                $"{result.PendingMax,7}  {result.Gen0Collections,4}/{result.Gen1Collections,2}/{result.Gen2Collections,2}  {(result.TickSloPass ? "PASS" : "FAIL"),7}  {(result.PingSloPass ? "PASS" : "FAIL"),7}");
+                $"{result.PendingMaxPerClient,7}  {result.Gen0Collections,4}/{result.Gen1Collections,2}/{result.Gen2Collections,2}  {(result.TickSloPass ? "PASS" : "FAIL"),7}  {(result.PingSloPass ? "PASS" : "FAIL"),7}");
 
             if (ShouldStop(options.StopOn, result))
                 break;
@@ -101,8 +101,9 @@ internal static class HarnessProgram
     {
         return options.Role.ToLowerInvariant() switch
         {
-            "client" => new MovementRampHarness(options, clientOnly: true),
-            _ => new MovementRampHarness(options, clientOnly: false),
+            "client" => new MovementRampHarness(options, clientOnly: true, serverOnly: false),
+            "server" => new MovementRampHarness(options, clientOnly: false, serverOnly: true),
+            _ => new MovementRampHarness(options, clientOnly: false, serverOnly: false),
         };
     }
 }
@@ -118,6 +119,7 @@ internal sealed class MovementRampHarness : IRampHarness
 {
     private readonly HarnessArgs _options;
     private readonly bool _clientOnly;
+    private readonly bool _serverOnly;
     private readonly PacketMetadataRegistry _metadata;
     private readonly UdpSocketNetworkTransport? _serverTransport;
     private readonly World? _world;
@@ -131,10 +133,11 @@ internal sealed class MovementRampHarness : IRampHarness
     private readonly PongProbePacket[] _pongScratch = new PongProbePacket[256];
     private readonly long _realtimeTickIntervalStopwatchTicks;
 
-    public MovementRampHarness(HarnessArgs options, bool clientOnly)
+    public MovementRampHarness(HarnessArgs options, bool clientOnly, bool serverOnly)
     {
         _options = options;
         _clientOnly = clientOnly;
+        _serverOnly = serverOnly;
         _realtimeTickIntervalStopwatchTicks = options.RealtimePacing
             ? Math.Max(1L, (long)Math.Round(Stopwatch.Frequency / (double)options.TickHz, MidpointRounding.AwayFromZero))
             : 0L;
@@ -154,7 +157,9 @@ internal sealed class MovementRampHarness : IRampHarness
                 new IPEndPoint(IPAddress.Loopback, options.Port),
                 _metadata,
                 EnableAsyncFlush: options.AsyncServerFlush,
-                EnablePollProfiling: options.TransportPollProfiling));
+                EnablePollProfiling: options.TransportPollProfiling,
+                SocketReceiveBufferBytes: options.SocketReceiveBufferBytes,
+                SocketSendBufferBytes: options.SocketSendBufferBytes));
             _serverTransport.Start();
 
             var handshakePolicy = new HandshakePolicy(
@@ -191,7 +196,7 @@ internal sealed class MovementRampHarness : IRampHarness
     public StageResult RunStage(int stageIndex, int targetClients)
     {
         int connectAttempts = EnsureClientCount(targetClients);
-        PumpUntilReady(_options.SettleTicks);
+        PumpUntilReady(_options.SettleTicks, targetClients);
 
         int measuredTicks = _options.StageTicks;
         var tickSamplesMs = new List<double>(measuredTicks);
@@ -263,6 +268,8 @@ internal sealed class MovementRampHarness : IRampHarness
         var clientObserverEventSamplesMs = new List<double>(measuredTicks);
         long pendingSum = 0;
         int pendingMax = 0;
+        long pendingPerClientSum = 0;
+        int pendingMaxPerClient = 0;
         var pingSamplesMs = new List<double>(Math.Max(32, _clients.Count * Math.Max(1, measuredTicks / Math.Max(1, _options.PingIntervalTicks))));
         long replicationDatagrams = 0;
         long replicationWireDatagrams = 0;
@@ -283,6 +290,10 @@ internal sealed class MovementRampHarness : IRampHarness
         double ownerCorrectionVelocityErrorSum = 0d;
         double ownerCorrectionVelocityErrorMax = 0d;
         long allocBefore = GC.GetTotalAllocatedBytes(true);
+        long serverPumpAllocatedBytes = 0;
+        long publishAllocatedBytes = 0;
+        long dispatchAllocatedBytes = 0;
+        long clientPumpAllocatedBytes = 0;
         int gen0Before = GC.CollectionCount(0);
         int gen1Before = GC.CollectionCount(1);
         int gen2Before = GC.CollectionCount(2);
@@ -302,7 +313,9 @@ internal sealed class MovementRampHarness : IRampHarness
             uint publishTick = (uint)(stageIndex * 100_000 + tick + 1);
             bool deferServerFlush = replication is not null;
             long serverPumpStart = Stopwatch.GetTimestamp();
+            long serverPumpAllocBefore = GC.GetTotalAllocatedBytes(false);
             _serverHost?.Pump(_clockTicks, _options.TickDeltaSeconds, publishTick, flushOutbound: !deferServerFlush);
+            serverPumpAllocatedBytes += GC.GetTotalAllocatedBytes(false) - serverPumpAllocBefore;
             long serverPumpEnd = Stopwatch.GetTimestamp();
             serverPumpSamplesMs.Add((serverPumpEnd - serverPumpStart) * 1000.0 / Stopwatch.Frequency);
             if (_serverHost is not null)
@@ -378,13 +391,16 @@ internal sealed class MovementRampHarness : IRampHarness
             {
                 UpdateObserverSubscriptions(replication);
                 long publishStart = Stopwatch.GetTimestamp();
+                long publishAllocBefore = GC.GetTotalAllocatedBytes(false);
                 int published = PublishObserverReplication(replication, publishTick);
+                publishAllocatedBytes += GC.GetTotalAllocatedBytes(false) - publishAllocBefore;
                 long publishEnd = Stopwatch.GetTimestamp();
                 publishSamplesMs.Add((publishEnd - publishStart) * 1000.0 / Stopwatch.Frequency);
                 if (published > 0)
                 {
                     replicationPublishedItems += published;
                     long dispatchStart = Stopwatch.GetTimestamp();
+                    long dispatchAllocBefore = GC.GetTotalAllocatedBytes(false);
                     int dispatched = DispatchObserverReplication(
                         replication,
                         out int wireDatagrams,
@@ -404,6 +420,7 @@ internal sealed class MovementRampHarness : IRampHarness
                         out int bundledWireDatagrams,
                         out int singleWireDatagrams,
                         flushOutbound: true);
+                    dispatchAllocatedBytes += GC.GetTotalAllocatedBytes(false) - dispatchAllocBefore;
                     long dispatchEnd = Stopwatch.GetTimestamp();
                     replicationDatagrams += dispatched;
                     replicationWireDatagrams += wireDatagrams;
@@ -462,6 +479,7 @@ internal sealed class MovementRampHarness : IRampHarness
             }
             long clientNowTicks = _clockTicks + 1;
             long clientPumpStart = Stopwatch.GetTimestamp();
+            long clientPumpAllocBefore = GC.GetTotalAllocatedBytes(false);
             double clientPollMs = 0d;
             double clientPollPendingDrainMs = 0d;
             double clientPollSocketReceiveMs = 0d;
@@ -510,6 +528,7 @@ internal sealed class MovementRampHarness : IRampHarness
                 clientObserverEventMs += profile.ObserverEventElapsedTicks * 1000.0 / Stopwatch.Frequency;
                 client.CollectPongSamples(clientNowTicks, _pongScratch, pingSamplesMs);
             }
+            clientPumpAllocatedBytes += GC.GetTotalAllocatedBytes(false) - clientPumpAllocBefore;
             long clientPumpEnd = Stopwatch.GetTimestamp();
             clientPumpSamplesMs.Add((clientPumpEnd - clientPumpStart) * 1000.0 / Stopwatch.Frequency);
             clientPollSamplesMs.Add(clientPollMs);
@@ -537,12 +556,21 @@ internal sealed class MovementRampHarness : IRampHarness
             tickSamplesMs.Add(elapsedMs);
 
             int pending = 0;
+            int tickPendingMaxPerClient = 0;
             for (int i = 0; i < _clients.Count; i++)
-                pending += _clients[i].Host.Movement.Sequencer.PendingCount;
+            {
+                int clientPending = _clients[i].Host.Movement.Sequencer.PendingCount;
+                pending += clientPending;
+                if (clientPending > tickPendingMaxPerClient)
+                    tickPendingMaxPerClient = clientPending;
+            }
 
             pendingSum += pending;
+            pendingPerClientSum += tickPendingMaxPerClient;
             if (pending > pendingMax)
                 pendingMax = pending;
+            if (tickPendingMaxPerClient > pendingMaxPerClient)
+                pendingMaxPerClient = tickPendingMaxPerClient;
 
             WaitForRealtimeTick(ref nextTickDeadline);
         }
@@ -619,11 +647,11 @@ internal sealed class MovementRampHarness : IRampHarness
         TickWindowStats clientObserverStateApplyStats = new TickWindowStats(clientObserverStateApplySamplesMs);
         TickWindowStats clientObserverEventStats = new TickWindowStats(clientObserverEventSamplesMs);
         TickWindowStats pingStats = new TickWindowStats(pingSamplesMs);
-        int readyClients = 0;
+        int readyClients = _serverOnly ? _serverHost?.BoundConnectionCount ?? 0 : 0;
         var perClientPing = new JsonArray();
         for (int i = 0; i < _clients.Count; i++)
         {
-            if (_clients[i].Host.IsReady)
+            if (!_serverOnly && _clients[i].Host.IsReady)
                 readyClients++;
             observerFramesReceived += _clients[i].ObserverFramesReceived;
             observerFramesApplied += _clients[i].ObserverFramesApplied;
@@ -790,12 +818,18 @@ internal sealed class MovementRampHarness : IRampHarness
             PingMaxMs: pingStats.MaxMs,
             PendingAverage: tickSamplesMs.Count == 0 ? 0d : pendingSum / (double)tickSamplesMs.Count,
             PendingMax: pendingMax,
+            PendingMaxPerClientAverage: tickSamplesMs.Count == 0 ? 0d : pendingPerClientSum / (double)tickSamplesMs.Count,
+            PendingMaxPerClient: pendingMaxPerClient,
             AllocatedBytes: allocAfter - allocBefore,
+            ServerPumpAllocatedBytes: serverPumpAllocatedBytes,
+            PublishAllocatedBytes: publishAllocatedBytes,
+            DispatchAllocatedBytes: dispatchAllocatedBytes,
+            ClientPumpAllocatedBytes: clientPumpAllocatedBytes,
             Gen0Collections: gen0After - gen0Before,
             Gen1Collections: gen1After - gen1Before,
             Gen2Collections: gen2After - gen2Before,
-            ConnectAttempts: connectAttempts,
-            ConnectSuccess: Math.Min(connectAttempts, readyClients),
+            ConnectAttempts: _serverOnly ? targetClients : connectAttempts,
+            ConnectSuccess: Math.Min(_serverOnly ? targetClients : connectAttempts, readyClients),
             SloTickP95Ms: _options.SloTickP95Ms,
             SloPendingMax: _options.SloPendingMax,
             SloPingP95Ms: _options.SloPingP95Ms,
@@ -873,6 +907,9 @@ internal sealed class MovementRampHarness : IRampHarness
 
     private int EnsureClientCount(int targetClients)
     {
+        if (_serverOnly)
+            return 0;
+
         if (targetClients < _clients.Count)
             Reset();
 
@@ -882,7 +919,7 @@ internal sealed class MovementRampHarness : IRampHarness
         int before = _clients.Count;
         while (_clients.Count < targetClients)
         {
-            int clientIndex = _clients.Count;
+            int clientIndex = _options.ClientIndexOffset + _clients.Count;
             var transport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
                 new IPEndPoint(IPAddress.Loopback, 0),
                 _metadata,
@@ -890,7 +927,9 @@ internal sealed class MovementRampHarness : IRampHarness
                 new ConnectionId(1),
                 AllowDynamicConnections: false,
                 EnableAsyncReceive: _options.AsyncClientReceive,
-                EnablePollProfiling: _options.TransportPollProfiling));
+                EnablePollProfiling: _options.TransportPollProfiling,
+                SocketReceiveBufferBytes: _options.SocketReceiveBufferBytes,
+                SocketSendBufferBytes: _options.SocketSendBufferBytes));
             transport.Start();
 
             ClientHandle? handle = null;
@@ -931,7 +970,7 @@ internal sealed class MovementRampHarness : IRampHarness
         return Math.Max(0, _clients.Count - before);
     }
 
-    private void PumpUntilReady(int settleTicks)
+    private void PumpUntilReady(int settleTicks, int expectedClients)
     {
         long nextTickDeadline = Stopwatch.GetTimestamp();
         for (int step = 0; step < settleTicks; step++)
@@ -939,17 +978,30 @@ internal sealed class MovementRampHarness : IRampHarness
             _clockTicks += 2;
             _serverHost?.Pump(_clockTicks, _options.TickDeltaSeconds, (uint)(10_000 + step));
             for (int i = 0; i < _clients.Count; i++)
-                _clients[i].Host.Pump(_clockTicks + 1);
-
-            bool allReady = _clientOnly || _serverHost!.BoundConnectionCount == _clients.Count;
-            if (allReady)
             {
-                for (int i = 0; i < _clients.Count; i++)
+                ClientMovementSessionHost host = _clients[i].Host;
+                host.Pump(_clockTicks + 1);
+                if (!host.IsReady && (step % Math.Max(1, _options.TickHz / 4)) == 0)
+                    host.Control.RetryClientHandshake(host.ConnectionId, _clockTicks + 1);
+            }
+
+            bool allReady;
+            if (_serverOnly)
+            {
+                allReady = _serverHost!.BoundConnectionCount >= expectedClients;
+            }
+            else
+            {
+                allReady = _clientOnly || _serverHost!.BoundConnectionCount == _clients.Count;
+                if (allReady)
                 {
-                    if (!_clients[i].Host.IsReady)
+                    for (int i = 0; i < _clients.Count; i++)
                     {
-                        allReady = false;
-                        break;
+                        if (!_clients[i].Host.IsReady)
+                        {
+                            allReady = false;
+                            break;
+                        }
                     }
                 }
             }
@@ -1708,6 +1760,7 @@ internal sealed class HarnessArgs
     public double InputHz { get; set; } = 0.0;
     public bool PhaseInputSends { get; set; }
     public int Port { get; set; } = 0;
+    public int ClientIndexOffset { get; set; }
     public string ReportDir { get; set; } = "_Benchmarks/results";
     public double SloTickP95Ms { get; set; } = 4.0;
     public double SloPingP95Ms { get; set; } = 50.0;
@@ -1728,7 +1781,9 @@ internal sealed class HarnessArgs
     public bool AsyncServerFlush { get; set; } = true;
     public bool AsyncClientReceive { get; set; }
     public bool TransportPollProfiling { get; set; }
-    public bool RealtimePacing { get; set; }
+    public int SocketReceiveBufferBytes { get; set; } = 4 * 1024 * 1024;
+    public int SocketSendBufferBytes { get; set; } = 4 * 1024 * 1024;
+    public bool RealtimePacing { get; set; } = true;
     public bool ChatEnabled { get; set; }
     public double ChatActiveRatio { get; set; } = 1.0;
     public double ChatMinIntervalSeconds { get; set; } = 2.0;
@@ -1772,6 +1827,7 @@ internal sealed class HarnessArgs
             else if (arg == "--input-hz") options.InputHz = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--phase-input-sends") options.PhaseInputSends = true;
             else if (arg == "--port") options.Port = int.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--client-index-offset") options.ClientIndexOffset = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--report-dir") options.ReportDir = Next() ?? options.ReportDir;
             else if (arg == "--slo-tick-p95-ms") options.SloTickP95Ms = double.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--slo-ping-p95-ms") options.SloPingP95Ms = double.Parse(Next()!, CultureInfo.InvariantCulture);
@@ -1797,6 +1853,8 @@ internal sealed class HarnessArgs
             else if (arg == "--enable-async-client-receive") options.AsyncClientReceive = true;
             else if (arg == "--disable-transport-poll-profiling") options.TransportPollProfiling = false;
             else if (arg == "--enable-transport-poll-profiling") options.TransportPollProfiling = true;
+            else if (arg == "--socket-receive-buffer-bytes") options.SocketReceiveBufferBytes = int.Parse(Next()!, CultureInfo.InvariantCulture);
+            else if (arg == "--socket-send-buffer-bytes") options.SocketSendBufferBytes = int.Parse(Next()!, CultureInfo.InvariantCulture);
             else if (arg == "--disable-realtime-pacing") options.RealtimePacing = false;
             else if (arg == "--enable-realtime-pacing") options.RealtimePacing = true;
             else if (arg == "--chat-enabled") options.ChatEnabled = true;
@@ -1840,6 +1898,10 @@ internal sealed class HarnessArgs
             throw new ArgumentOutOfRangeException(nameof(options.OwnerCorrectionMaxSilentTicks));
         if (float.IsNaN(options.OwnerPredictionJitterPercent) || float.IsInfinity(options.OwnerPredictionJitterPercent) || options.OwnerPredictionJitterPercent < 0f)
             throw new ArgumentOutOfRangeException(nameof(options.OwnerPredictionJitterPercent));
+        if (options.SocketReceiveBufferBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(options.SocketReceiveBufferBytes));
+        if (options.SocketSendBufferBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(options.SocketSendBufferBytes));
         return options;
     }
 
@@ -1882,6 +1944,7 @@ internal sealed class HarnessArgs
             ["input_interval_ticks"] = InputIntervalTicks,
             ["phase_input_sends"] = PhaseInputSends,
             ["port"] = Port,
+            ["client_index_offset"] = ClientIndexOffset,
             ["slo_tick_p95_ms"] = SloTickP95Ms,
             ["slo_ping_p95_ms"] = SloPingP95Ms,
             ["slo_pending_max"] = SloPendingMax,
@@ -1903,6 +1966,8 @@ internal sealed class HarnessArgs
             ["async_server_flush"] = AsyncServerFlush,
             ["async_client_receive"] = AsyncClientReceive,
             ["transport_poll_profiling"] = TransportPollProfiling,
+            ["socket_receive_buffer_bytes"] = SocketReceiveBufferBytes,
+            ["socket_send_buffer_bytes"] = SocketSendBufferBytes,
             ["realtime_pacing"] = RealtimePacing,
             ["chat_enabled"] = ChatEnabled,
             ["chat_active_ratio"] = ChatActiveRatio,
@@ -2114,7 +2179,13 @@ internal readonly record struct StageResult(
     double PingMaxMs,
     double PendingAverage,
     int PendingMax,
+    double PendingMaxPerClientAverage,
+    int PendingMaxPerClient,
     long AllocatedBytes,
+    long ServerPumpAllocatedBytes,
+    long PublishAllocatedBytes,
+    long DispatchAllocatedBytes,
+    long ClientPumpAllocatedBytes,
     int Gen0Collections,
     int Gen1Collections,
     int Gen2Collections,
@@ -2146,7 +2217,7 @@ internal readonly record struct StageResult(
     int ObserverStateItems)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
-    public bool TickSloPass => TickP95Ms <= SloTickP95Ms && PendingMax <= SloPendingMax;
+    public bool TickSloPass => TickP95Ms <= SloTickP95Ms && PendingMaxPerClient <= SloPendingMax;
     public bool PingSloPass => PingP95Ms <= SloPingP95Ms;
 
     public JsonObject ToJson()
@@ -2299,7 +2370,14 @@ internal readonly record struct StageResult(
             ["ping_max_ms"] = Math.Round(PingMaxMs, 3),
             ["pending_avg"] = Math.Round(PendingAverage, 3),
             ["pending_max"] = PendingMax,
-            ["alloc_bytes"] = AllocatedBytes,
+            ["pending_max_per_client_avg"] = Math.Round(PendingMaxPerClientAverage, 3),
+            ["pending_max_per_client"] = PendingMaxPerClient,
+            ["pending_slo_basis"] = "per_client",
+             ["alloc_bytes"] = AllocatedBytes,
+            ["server_pump_alloc_bytes"] = ServerPumpAllocatedBytes,
+            ["publish_alloc_bytes"] = PublishAllocatedBytes,
+            ["dispatch_alloc_bytes"] = DispatchAllocatedBytes,
+            ["client_pump_alloc_bytes"] = ClientPumpAllocatedBytes,
             ["gc_gen0_collections"] = Gen0Collections,
             ["gc_gen1_collections"] = Gen1Collections,
             ["gc_gen2_collections"] = Gen2Collections,

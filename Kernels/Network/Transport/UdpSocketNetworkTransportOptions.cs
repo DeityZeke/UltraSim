@@ -11,4 +11,6 @@ public sealed record UdpSocketNetworkTransportOptions(
     int MaxDatagramBytes = 2048,
     bool EnableAsyncFlush = false,
     bool EnableAsyncReceive = false,
-    bool EnablePollProfiling = false);
+    bool EnablePollProfiling = false,
+    int SocketReceiveBufferBytes = 0,
+    int SocketSendBufferBytes = 0);

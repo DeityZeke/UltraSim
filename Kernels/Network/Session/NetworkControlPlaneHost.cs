@@ -114,6 +114,23 @@ public sealed class NetworkControlPlaneHost
         return sessionId;
     }
 
+    public bool RetryClientHandshake(ConnectionId connectionId, long nowTicks)
+    {
+        if (_role != NetworkControlPlaneRole.Client)
+            throw new InvalidOperationException("Only client hosts can retry handshakes.");
+        if (!Sessions.TryGetSessionIdByConnection(connectionId, out SessionId sessionId))
+            return false;
+        if (!Sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot))
+            return false;
+        if (snapshot.State is ConnectionSessionState.Ready or ConnectionSessionState.Disconnecting or ConnectionSessionState.Disconnected)
+            return false;
+
+        Sessions.TryMarkHandshaking(sessionId, nowTicks);
+        SendPacket(connectionId, _clientHello, PacketHeaderFlags.HighPriorityHint);
+        _transport.FlushOutbound();
+        return true;
+    }
+
     public int Pump(long nowTicks)
     {
         Sessions.SweepTimeouts(nowTicks);

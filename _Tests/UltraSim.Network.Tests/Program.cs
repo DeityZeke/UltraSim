@@ -30,6 +30,7 @@ internal static class TestRunner
         Run(nameof(NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak), NetworkSessionManager_MetricsSnapshot_TracksRejectsTimeoutsAndPeak);
         Run(nameof(ControlPlane_LoopbackHandshake_RoundTripsOverTransport), ControlPlane_LoopbackHandshake_RoundTripsOverTransport);
         Run(nameof(ControlPlane_UdpHandshake_RoundTripsOverTransport), ControlPlane_UdpHandshake_RoundTripsOverTransport);
+        Run(nameof(ControlPlane_RetryClientHandshake_ReSendsHelloWithoutDuplicateLocalSession), ControlPlane_RetryClientHandshake_ReSendsHelloWithoutDuplicateLocalSession);
         Run(nameof(ControlPlane_LoopbackHandshake_RejectsInvalidHello), ControlPlane_LoopbackHandshake_RejectsInvalidHello);
         Run(nameof(ControlPlane_AdmissionReject_ReportsReasonAndMetrics), ControlPlane_AdmissionReject_ReportsReasonAndMetrics);
         Run(nameof(ControlPlane_PingProbe_RoundTripsAfterReadyHandshake), ControlPlane_PingProbe_RoundTripsAfterReadyHandshake);
@@ -740,6 +741,37 @@ internal static class TestRunner
 
         Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
         Assert.Equal(ConnectionSessionState.Ready, clientSnapshot.State);
+    }
+
+    private static void ControlPlane_RetryClientHandshake_ReSendsHelloWithoutDuplicateLocalSession()
+    {
+        using var pair = new LoopbackTransportPair();
+        var policy = new HandshakePolicy(
+            ProtocolVersion: 9,
+            SchemaHash: 10,
+            ContentHash: 11,
+            RequiredFeatures: FeatureFlags.Compression);
+        var hello = new HandshakeHelloPacket(9, 10, 11, FeatureFlags.Compression);
+        var server = new NetworkControlPlaneHost(NetworkControlPlaneRole.Server, pair.Server, handshakePolicy: policy);
+        var client = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, pair.Client, clientHello: hello);
+        server.Start();
+        client.Start();
+
+        SessionId clientSession = client.BeginClientHandshake(new ConnectionId(1), nowTicks: 100);
+        var dropped = new InboundDatagram[1];
+        int droppedCount = pair.Server.PollInbound(dropped);
+        Assert.Equal(1, droppedCount);
+        dropped[0].Dispose();
+
+        Assert.True(client.RetryClientHandshake(new ConnectionId(1), nowTicks: 101));
+        PumpUntilHandshakeReady(server, client, serverTicksStart: 102, clientTicksStart: 103);
+
+        Assert.Equal(1, client.Sessions.Count);
+        Assert.True(client.Sessions.TryGetSnapshot(clientSession, out SessionSnapshot clientSnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, clientSnapshot.State);
+        Assert.True(server.Sessions.TryGetSessionIdByConnection(new ConnectionId(1), out SessionId serverSession));
+        Assert.True(server.Sessions.TryGetSnapshot(serverSession, out SessionSnapshot serverSnapshot));
+        Assert.Equal(ConnectionSessionState.Ready, serverSnapshot.State);
     }
 
     private static void ControlPlane_LoopbackHandshake_RejectsInvalidHello()

@@ -58,6 +58,8 @@ Useful options:
 - `--disable-async-client-receive`
 - `--enable-transport-poll-profiling`
 - `--disable-transport-poll-profiling`
+- `--socket-receive-buffer-bytes <n>`
+- `--socket-send-buffer-bytes <n>`
 - `--enable-realtime-pacing`
 - `--disable-realtime-pacing`
 - `--spawn-spacing-m <n>`
@@ -90,6 +92,31 @@ Recommended run categories:
 6. Broader multi-ring observer read with explicit ring cadence
    `--observer-replication --spawn-spacing-m 12 --aoi-radii-m 7.5,23.5,39.5 --ring-cadence-ticks 1,2,3`
 
+
+## Sharded Runner
+
+For server-side parity measurements, use the maintained sharded wrapper instead of the combined in-process runner:
+
+```bash
+python3 _tmp/run_network_bot_harness_sharded.py \
+  --workers 4 \
+  --stages 256,300,350 \
+  --stage-duration 30 \
+  --settle-seconds 5 \
+  --tick-hz 62 \
+  --active-ratio 0.35 \
+  --input-hz 20 \
+  --phase-input-sends \
+  --phase-ping-probes \
+  --observer-replication \
+  --observer-visual-state \
+  --observer-bulk-state \
+  --observer-events \
+  --enable-latest-state-recipient-phasing
+```
+
+The wrapper launches one `--role server` process plus N `--role client` worker processes, splits each stage across workers, and writes `aggregate.json` with server tick/dispatch/pump metrics separated from client poll/observer/ping metrics. It runs each stage in fresh processes to avoid stale UDP session state between independent stages.
+
 ## Current Role
 
 This tool exists to answer the question:
@@ -98,7 +125,7 @@ This tool exists to answer the question:
 
 It is the intended checkpoint before a broader external-process or gameplay-richer harness.
 
-For sharded/external-process runs, `--enable-realtime-pacing` is important. The standalone harness normally advances ticks as fast as possible for local in-process measurement; sharded server/client processes need wall-clock pacing so their stage windows actually overlap.
+Realtime pacing is enabled by default because the harness uses real UDP sockets and is meant to model the live `tick-hz` server budget. Use `--disable-realtime-pacing` only when intentionally running a faster-than-wall-clock loopback burst stress; that mode can expose OS socket-buffer saturation that is not representative of the live 62 Hz path.
 
 ## Current Observer-Replication Note
 
