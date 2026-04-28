@@ -17,6 +17,8 @@ public partial class GodotClientRuntimeRoot : Node
 	[Export] public bool StartPreviewOnReady { get; set; } = true;
 	[Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
 
+	private readonly List<double> _smokeDisconnectAtSeconds = new();
+
 	public ClientCharacterWorld? CharacterWorld { get; private set; }
 	public LocalPlayerController? LocalPlayerController { get; private set; }
 	public OrbitFollowCameraRig? CameraRig { get; private set; }
@@ -24,21 +26,27 @@ public partial class GodotClientRuntimeRoot : Node
 
 	private GodotClientNetworkSessionDriver? _sessionDriver;
 	private GodotNetworkPresentationBridge? _presentationBridge;
+	private ClientDirectConnectRequest? _lastDirectConnectRequest;
 	private uint _localClientTick;
 	private bool _wasSessionReady;
 	private bool _smokeRequireConnected;
 	private bool _smokeSawConnected;
 	private bool _smokeRequireDisconnected;
 	private bool _smokeSawDisconnected;
-	private double _smokeDisconnectAfterSeconds = -1.0;
+	private double _smokeReconnectAfterSeconds = -1.0;
 	private double _smokeElapsedSeconds;
-	private bool _smokeDisconnectRequested;
+	private bool _smokeReconnectRequested;
+	private int _smokeConnectedCount;
+	private int _smokeRequiredConnectedCount;
+	private int _nextSmokeDisconnectIndex;
 
 	public override void _Ready()
 	{
 		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
 		_smokeRequireDisconnected = HasUserArg("--us-smoke-require-disconnected");
-		_smokeDisconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-disconnect-after=");
+		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
+		_smokeRequiredConnectedCount = ReadPositiveIntUserArg("--us-smoke-require-connected-count=");
+		ReadSmokeDisconnectSchedule();
 		CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
 		LocalPlayerController = ResolveNode<LocalPlayerController>(LocalPlayerControllerPath);
 		CameraRig = ResolveNode<OrbitFollowCameraRig>(CameraRigPath);
@@ -98,7 +106,7 @@ public partial class GodotClientRuntimeRoot : Node
 		UpdateReadySessionTransition();
 		SendMovementInputIfReady(delta);
 		UpdateNetworkSummary();
-		UpdateSmokeDisconnect(delta);
+		UpdateSmokeSchedule(delta);
 
 		if (LocalPlayerController is not null)
 		{
@@ -206,6 +214,7 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		_lastDirectConnectRequest = request;
 		_wasSessionReady = false;
 		CharacterWorld?.ClearAllActors();
 		UiManager?.Menus?.ShowSessionStatus();
@@ -334,6 +343,7 @@ public partial class GodotClientRuntimeRoot : Node
 
 		_wasSessionReady = true;
 		_smokeSawConnected = true;
+		_smokeConnectedCount++;
 		if (LocalPlayerController is not null)
 		{
 			LocalPlayerController.EnablePreviewControls = false;
@@ -379,6 +389,13 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (_smokeRequiredConnectedCount > 0 && _smokeConnectedCount < _smokeRequiredConnectedCount)
+		{
+			GD.PushError($"UltraSim client smoke failed: expected {_smokeRequiredConnectedCount} connected transition(s), saw {_smokeConnectedCount}.");
+			GetTree().Quit(1);
+			return;
+		}
+
 		if (_smokeRequireDisconnected)
 		{
 			if (!_smokeSawDisconnected)
@@ -399,22 +416,75 @@ public partial class GodotClientRuntimeRoot : Node
 		GetTree().Quit();
 	}
 
-	private void UpdateSmokeDisconnect(double delta)
+	private void UpdateSmokeSchedule(double delta)
 	{
-		if (_smokeDisconnectRequested || _smokeDisconnectAfterSeconds <= 0.0)
-		{
-			return;
-		}
-
 		_smokeElapsedSeconds += Math.Max(0.0, delta);
-		if (_smokeElapsedSeconds < _smokeDisconnectAfterSeconds)
+		if (_nextSmokeDisconnectIndex < _smokeDisconnectAtSeconds.Count &&
+			_smokeElapsedSeconds >= _smokeDisconnectAtSeconds[_nextSmokeDisconnectIndex])
 		{
+			_nextSmokeDisconnectIndex++;
+			SetStatusText("Smoke disconnect requested.");
+			HandleDisconnectRequested();
+		}
+
+		if (!_smokeReconnectRequested &&
+			_smokeReconnectAfterSeconds > 0.0 &&
+			_smokeElapsedSeconds >= _smokeReconnectAfterSeconds)
+		{
+			_smokeReconnectRequested = true;
+			if (_sessionDriver?.IsRunning == true)
+			{
+				GD.PushWarning("Ignoring smoke reconnect because a network session is still running.");
+				return;
+			}
+
+			if (!_lastDirectConnectRequest.HasValue)
+			{
+				GD.PushWarning("Ignoring smoke reconnect because no direct-connect request is available.");
+				return;
+			}
+
+			SetStatusText("Smoke reconnect requested.");
+			HandleDirectConnectRequested(_lastDirectConnectRequest.Value);
+		}
+	}
+
+	private void ReadSmokeDisconnectSchedule()
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (arg.StartsWith("--us-smoke-disconnect-after=", StringComparison.OrdinalIgnoreCase))
+			{
+				AddSmokeDisconnectTimes(arg["--us-smoke-disconnect-after=".Length..], "--us-smoke-disconnect-after");
+			}
+			else if (arg.StartsWith("--us-smoke-final-disconnect-after=", StringComparison.OrdinalIgnoreCase))
+			{
+				AddSmokeDisconnectTimes(arg["--us-smoke-final-disconnect-after=".Length..], "--us-smoke-final-disconnect-after");
+			}
+		}
+
+		_smokeDisconnectAtSeconds.Sort();
+	}
+
+	private void AddSmokeDisconnectTimes(string value, string name)
+	{
+		string[] parts = value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		if (parts.Length == 0)
+		{
+			GD.PushWarning($"Invalid {name} value.");
 			return;
 		}
 
-		_smokeDisconnectRequested = true;
-		SetStatusText("Smoke disconnect requested.");
-		HandleDisconnectRequested();
+		foreach (string part in parts)
+		{
+			if (double.TryParse(part, out double seconds) && seconds > 0.0)
+			{
+				_smokeDisconnectAtSeconds.Add(seconds);
+				continue;
+			}
+
+			GD.PushWarning($"Invalid {name} value '{part}'.");
+		}
 	}
 
 	private static bool HasUserArg(string expected)
@@ -449,6 +519,27 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		return -1.0;
+	}
+
+	private static int ReadPositiveIntUserArg(string prefix)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (int.TryParse(arg[prefix.Length..], out int value) && value > 0)
+			{
+				return value;
+			}
+
+			GD.PushWarning($"Invalid {prefix.TrimEnd('=')} value.");
+			return 0;
+		}
+
+		return 0;
 	}
 
 	private void UpdateNetworkSummary()

@@ -85,7 +85,10 @@ Current Godot smoke hooks:
   - `--us-connect-port=port`
   - `--us-smoke-quit-after=seconds`
   - `--us-smoke-require-connected`
+  - `--us-smoke-require-connected-count=n`
   - `--us-smoke-disconnect-after=seconds`
+  - `--us-smoke-final-disconnect-after=seconds`
+  - `--us-smoke-reconnect-after=seconds`
   - `--us-smoke-require-disconnected`
   - direct-connect failure policy: 5 handshake attempts, 0.5s apart, then an error screen/status
   - graceful server shutdown policy: explicit disconnect notice clears session-owned world state immediately
