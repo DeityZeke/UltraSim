@@ -10,279 +10,279 @@ namespace UltraSim.Client.Godot;
 [GlobalClass]
 public partial class GodotClientRuntimeRoot : Node
 {
-    [Export] public NodePath? CharacterWorldPath { get; set; }
-    [Export] public NodePath? LocalPlayerControllerPath { get; set; }
-    [Export] public NodePath? CameraRigPath { get; set; }
-    [Export] public NodePath? UiManagerPath { get; set; }
-    [Export] public bool StartPreviewOnReady { get; set; } = true;
-    [Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
+	[Export] public NodePath? CharacterWorldPath { get; set; }
+	[Export] public NodePath? LocalPlayerControllerPath { get; set; }
+	[Export] public NodePath? CameraRigPath { get; set; }
+	[Export] public NodePath? UiManagerPath { get; set; }
+	[Export] public bool StartPreviewOnReady { get; set; } = true;
+	[Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
 
-    public ClientCharacterWorld? CharacterWorld { get; private set; }
-    public LocalPlayerController? LocalPlayerController { get; private set; }
-    public OrbitFollowCameraRig? CameraRig { get; private set; }
-    public UiManager? UiManager { get; private set; }
+	public ClientCharacterWorld? CharacterWorld { get; private set; }
+	public LocalPlayerController? LocalPlayerController { get; private set; }
+	public OrbitFollowCameraRig? CameraRig { get; private set; }
+	public UiManager? UiManager { get; private set; }
 
-    private GodotClientNetworkSessionDriver? _sessionDriver;
-    private GodotNetworkPresentationBridge? _presentationBridge;
-    private uint _localClientTick;
-    private bool _wasSessionReady;
+	private GodotClientNetworkSessionDriver? _sessionDriver;
+	private GodotNetworkPresentationBridge? _presentationBridge;
+	private uint _localClientTick;
+	private bool _wasSessionReady;
 
-    public override void _Ready()
-    {
-        CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
-        LocalPlayerController = ResolveNode<LocalPlayerController>(LocalPlayerControllerPath);
-        CameraRig = ResolveNode<OrbitFollowCameraRig>(CameraRigPath);
-        UiManager = ResolveNode<UiManager>(UiManagerPath);
+	public override void _Ready()
+	{
+		CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
+		LocalPlayerController = ResolveNode<LocalPlayerController>(LocalPlayerControllerPath);
+		CameraRig = ResolveNode<OrbitFollowCameraRig>(CameraRigPath);
+		UiManager = ResolveNode<UiManager>(UiManagerPath);
 
-        if (LocalPlayerController is not null && CameraRig is not null)
-        {
-            LocalPlayerController.SetCameraRig(CameraRig);
-        }
+		if (LocalPlayerController is not null && CameraRig is not null)
+		{
+			LocalPlayerController.SetCameraRig(CameraRig);
+		}
 
-        if (CharacterWorld is not null)
-        {
-            _presentationBridge = new GodotNetworkPresentationBridge(CharacterWorld);
-        }
+		if (CharacterWorld is not null)
+		{
+			_presentationBridge = new GodotNetworkPresentationBridge(CharacterWorld);
+		}
 
-        _sessionDriver = new GodotClientNetworkSessionDriver(
-            SetStatusText,
-            HandleChatMessage,
-            HandleOwnerMovementState,
-            HandleObserverState,
-            HandleObserverStateReset);
-        if (UiManager?.Menus is not null)
-        {
-            UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
-            UiManager.Menus.DisconnectRequested += HandleDisconnectRequested;
-            UiManager.Menus.PreviewRequested += HandlePreviewRequested;
-            UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
-        }
+		_sessionDriver = new GodotClientNetworkSessionDriver(
+			SetStatusText,
+			HandleChatMessage,
+			HandleOwnerMovementState,
+			HandleObserverState,
+			HandleObserverStateReset);
+		if (UiManager?.Menus is not null)
+		{
+			UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
+			UiManager.Menus.DisconnectRequested += HandleDisconnectRequested;
+			UiManager.Menus.PreviewRequested += HandlePreviewRequested;
+			UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
+		}
 
-        if (StartPreviewOnReady)
-        {
-            CharacterWorld?.SpawnPreviewActor();
-            SetStatusText("Preview shell ready");
-        }
-    }
+		if (StartPreviewOnReady)
+		{
+			CharacterWorld?.SpawnPreviewActor();
+			SetStatusText("Preview shell ready");
+		}
+	}
 
-    public override void _Process(double delta)
-    {
-        _sessionDriver?.Pump();
-        UpdateReadySessionTransition();
-        SendMovementInputIfReady(delta);
-        UpdateNetworkSummary();
+	public override void _Process(double delta)
+	{
+		_sessionDriver?.Pump();
+		UpdateReadySessionTransition();
+		SendMovementInputIfReady(delta);
+		UpdateNetworkSummary();
 
-        if (LocalPlayerController is not null)
-        {
-            LocalPlayerController.GameplayInputBlocked = UiManager?.BlocksGameplayInput == true;
-        }
-    }
+		if (LocalPlayerController is not null)
+		{
+			LocalPlayerController.GameplayInputBlocked = UiManager?.BlocksGameplayInput == true;
+		}
+	}
 
-    public override void _ExitTree()
-    {
-        if (UiManager?.Menus is not null)
-        {
-            UiManager.Menus.DirectConnectRequested -= HandleDirectConnectRequested;
-            UiManager.Menus.DisconnectRequested -= HandleDisconnectRequested;
-            UiManager.Menus.PreviewRequested -= HandlePreviewRequested;
-            UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
-        }
+	public override void _ExitTree()
+	{
+		if (UiManager?.Menus is not null)
+		{
+			UiManager.Menus.DirectConnectRequested -= HandleDirectConnectRequested;
+			UiManager.Menus.DisconnectRequested -= HandleDisconnectRequested;
+			UiManager.Menus.PreviewRequested -= HandlePreviewRequested;
+			UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
+		}
 
-        _sessionDriver?.Dispose();
-        _sessionDriver = null;
-        _presentationBridge = null;
-    }
+		_sessionDriver?.Dispose();
+		_sessionDriver = null;
+		_presentationBridge = null;
+	}
 
-    public void EnterPreviewMode()
-    {
-        if (LocalPlayerController is not null)
-        {
-            LocalPlayerController.EnablePreviewControls = true;
-        }
+	public void EnterPreviewMode()
+	{
+		if (LocalPlayerController is not null)
+		{
+			LocalPlayerController.EnablePreviewControls = true;
+		}
 
-        CharacterWorld?.SpawnPreviewActor();
-        UiManager?.Menus?.EnterPreviewSession();
-        SetStatusText("Preview shell ready");
-    }
+		CharacterWorld?.SpawnPreviewActor();
+		UiManager?.Menus?.EnterPreviewSession();
+		SetStatusText("Preview shell ready");
+	}
 
-    public void ClearSessionWorld()
-    {
-        if (LocalPlayerController is not null)
-        {
-            LocalPlayerController.EnablePreviewControls = true;
-        }
+	public void ClearSessionWorld()
+	{
+		if (LocalPlayerController is not null)
+		{
+			LocalPlayerController.EnablePreviewControls = true;
+		}
 
-        CharacterWorld?.ClearAllActors();
-        SetStatusText("Session cleared");
-    }
+		CharacterWorld?.ClearAllActors();
+		SetStatusText("Session cleared");
+	}
 
-    private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
-    {
-        if (_sessionDriver is null)
-        {
-            SetStatusText("Network driver is unavailable.");
-            UiManager?.Menus?.ShowConnectionError();
-            return;
-        }
+	private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
+	{
+		if (_sessionDriver is null)
+		{
+			SetStatusText("Network driver is unavailable.");
+			UiManager?.Menus?.ShowConnectionError();
+			return;
+		}
 
-        if (!_sessionDriver.TryConnect(request, out string error))
-        {
-            SetStatusText(error);
-            UiManager?.Menus?.ShowConnectionError();
-            return;
-        }
+		if (!_sessionDriver.TryConnect(request, out string error))
+		{
+			SetStatusText(error);
+			UiManager?.Menus?.ShowConnectionError();
+			return;
+		}
 
-        _wasSessionReady = false;
-        CharacterWorld?.ClearAllActors();
-        UiManager?.Menus?.ShowSessionStatus();
-    }
+		_wasSessionReady = false;
+		CharacterWorld?.ClearAllActors();
+		UiManager?.Menus?.ShowSessionStatus();
+	}
 
-    private void HandleDisconnectRequested()
-    {
-        _sessionDriver?.Disconnect();
-        _wasSessionReady = false;
-        ClearSessionWorld();
-    }
+	private void HandleDisconnectRequested()
+	{
+		_sessionDriver?.Disconnect();
+		_wasSessionReady = false;
+		ClearSessionWorld();
+	}
 
-    private void HandlePreviewRequested()
-    {
-        EnterPreviewMode();
-    }
+	private void HandlePreviewRequested()
+	{
+		EnterPreviewMode();
+	}
 
-    private void HandleChatSubmitted(string text)
-    {
-        if (_sessionDriver?.TrySendChat(text) == true)
-        {
-            return;
-        }
+	private void HandleChatSubmitted(string text)
+	{
+		if (_sessionDriver?.TrySendChat(text) == true)
+		{
+			return;
+		}
 
-        UiManager?.Menus?.AppendSystemChatLine("Chat is not connected yet.");
-    }
+		UiManager?.Menus?.AppendSystemChatLine("Chat is not connected yet.");
+	}
 
-    private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
-    {
-        UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
-        UiManager?.World?.ShowOverheadChat(packet.SenderEntityId, packet.Text);
-    }
+	private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
+	{
+		UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
+		UiManager?.World?.ShowOverheadChat(packet.SenderEntityId, packet.Text);
+	}
 
-    private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)
-    {
-        _presentationBridge?.ApplyOwnerMovement(result);
-    }
+	private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)
+	{
+		_presentationBridge?.ApplyOwnerMovement(result);
+	}
 
-    private void HandleObserverState(ulong itemKey, ulong sequence, ReadOnlySpan<byte> payload)
-    {
-        _presentationBridge?.ApplyObserverState(itemKey, sequence, payload);
-    }
+	private void HandleObserverState(ulong itemKey, ulong sequence, ReadOnlySpan<byte> payload)
+	{
+		_presentationBridge?.ApplyObserverState(itemKey, sequence, payload);
+	}
 
-    private void HandleObserverStateReset()
-    {
-        _presentationBridge?.ResetObserverState();
-    }
+	private void HandleObserverStateReset()
+	{
+		_presentationBridge?.ResetObserverState();
+	}
 
-    private void SendMovementInputIfReady(double delta)
-    {
-        if (_sessionDriver is null ||
-            !_sessionDriver.IsReady ||
-            LocalPlayerController is null ||
-            LocalPlayerController.ControlledCharacter is null)
-        {
-            return;
-        }
+	private void SendMovementInputIfReady(double delta)
+	{
+		if (_sessionDriver is null ||
+			!_sessionDriver.IsReady ||
+			LocalPlayerController is null ||
+			LocalPlayerController.ControlledCharacter is null)
+		{
+			return;
+		}
 
-        bool hasMoveInput = LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection);
-        var input = new ClientMovementInput(
-            MoveX: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f) : (short)0,
-            MoveY: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f) : (short)0,
-            Flags: 0);
+		bool hasMoveInput = LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection);
+		var input = new ClientMovementInput(
+			MoveX: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f) : (short)0,
+			MoveY: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f) : (short)0,
+			Flags: 0);
 
-        global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
-        float velocityX = input.MoveX / 100.0f * LiveMoveSpeed;
-        float velocityY = input.MoveY / 100.0f * LiveMoveSpeed;
-        var predicted = new ClientMovementState(
-            position.X + velocityX * (float)delta,
-            position.Z + velocityY * (float)delta,
-            velocityX,
-            velocityY);
+		global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
+		float velocityX = input.MoveX / 100.0f * LiveMoveSpeed;
+		float velocityY = input.MoveY / 100.0f * LiveMoveSpeed;
+		var predicted = new ClientMovementState(
+			position.X + velocityX * (float)delta,
+			position.Z + velocityY * (float)delta,
+			velocityX,
+			velocityY);
 
-        ApplyLocalPredictedMovement(predicted, hasMoveInput);
+		ApplyLocalPredictedMovement(predicted, hasMoveInput);
 
-        _localClientTick++;
-        _sessionDriver.TrySendMovementInput(input, predicted);
-    }
+		_localClientTick++;
+		_sessionDriver.TrySendMovementInput(input, predicted);
+	}
 
-    private void ApplyLocalPredictedMovement(in ClientMovementState predicted, bool isMoving)
-    {
-        if (LocalPlayerController?.ControlledCharacter is null)
-        {
-            return;
-        }
+	private void ApplyLocalPredictedMovement(in ClientMovementState predicted, bool isMoving)
+	{
+		if (LocalPlayerController?.ControlledCharacter is null)
+		{
+			return;
+		}
 
-        CharacterRoot character = LocalPlayerController.ControlledCharacter;
-        character.GlobalPosition = new Vector3(predicted.PositionX, 0.0f, predicted.PositionY);
-        if (isMoving)
-        {
-            float yawDegrees = Mathf.RadToDeg(Mathf.Atan2(predicted.VelocityX, predicted.VelocityY));
-            character.SetPresentationFacingYawDegrees(yawDegrees);
-        }
+		CharacterRoot character = LocalPlayerController.ControlledCharacter;
+		character.GlobalPosition = new Vector3(predicted.PositionX, 0.0f, predicted.PositionY);
+		if (isMoving)
+		{
+			float yawDegrees = Mathf.RadToDeg(Mathf.Atan2(predicted.VelocityX, predicted.VelocityY));
+			character.SetPresentationFacingYawDegrees(yawDegrees);
+		}
 
-        character.SetPresentationMoving(isMoving);
-    }
+		character.SetPresentationMoving(isMoving);
+	}
 
-    private void UpdateReadySessionTransition()
-    {
-        bool isReady = _sessionDriver?.IsReady == true;
-        if (!isReady)
-        {
-            _wasSessionReady = false;
-            return;
-        }
+	private void UpdateReadySessionTransition()
+	{
+		bool isReady = _sessionDriver?.IsReady == true;
+		if (!isReady)
+		{
+			_wasSessionReady = false;
+			return;
+		}
 
-        if (_wasSessionReady)
-        {
-            return;
-        }
+		if (_wasSessionReady)
+		{
+			return;
+		}
 
-        _wasSessionReady = true;
-        if (LocalPlayerController is not null)
-        {
-            LocalPlayerController.EnablePreviewControls = false;
-        }
+		_wasSessionReady = true;
+		if (LocalPlayerController is not null)
+		{
+			LocalPlayerController.EnablePreviewControls = false;
+		}
 
-        UiManager?.Menus?.EnterConnectedSession();
-        UiManager?.Menus?.AppendSystemChatLine("Connected.");
-    }
+		UiManager?.Menus?.EnterConnectedSession();
+		UiManager?.Menus?.AppendSystemChatLine("Connected.");
+	}
 
-    private void SetStatusText(string text)
-    {
-        UiManager?.SetStatusText(text);
-    }
+	private void SetStatusText(string text)
+	{
+		UiManager?.SetStatusText(text);
+	}
 
-    private void UpdateNetworkSummary()
-    {
-        if (UiManager is null)
-        {
-            return;
-        }
+	private void UpdateNetworkSummary()
+	{
+		if (UiManager is null)
+		{
+			return;
+		}
 
-        if (_sessionDriver is null || !_sessionDriver.IsRunning)
-        {
-            UiManager.SetNetworkSummaryText(ClientNetworkSummaryFormatter.FormatOffline());
-            return;
-        }
+		if (_sessionDriver is null || !_sessionDriver.IsRunning)
+		{
+			UiManager.SetNetworkSummaryText(ClientNetworkSummaryFormatter.FormatOffline());
+			return;
+		}
 
-        UiManager.SetNetworkSummaryText(ClientNetworkSummaryFormatter.Format(
-            _sessionDriver.IsReady,
-            _sessionDriver.SessionId,
-            _sessionDriver.LastPingRoundTripMilliseconds,
-            _sessionDriver.LastPumpProfile));
-    }
+		UiManager.SetNetworkSummaryText(ClientNetworkSummaryFormatter.Format(
+			_sessionDriver.IsReady,
+			_sessionDriver.SessionId,
+			_sessionDriver.LastPingRoundTripMilliseconds,
+			_sessionDriver.LastPumpProfile));
+	}
 
-    private TNode? ResolveNode<TNode>(NodePath? path)
-        where TNode : Node
-    {
-        return path is null || path.IsEmpty
-            ? null
-            : GetNodeOrNull<TNode>(path);
-    }
+	private TNode? ResolveNode<TNode>(NodePath? path)
+		where TNode : Node
+	{
+		return path is null || path.IsEmpty
+			? null
+			: GetNodeOrNull<TNode>(path);
+	}
 }

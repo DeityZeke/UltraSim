@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c5y4pjrqnxjl"]
 
-[ext_resource type="Script" uid="uid://drymomoacs5ml" path="res://Scripts/ServerShellRoot.cs" id="1"]
+[ext_resource type="Script" uid="uid://7x1vy8o2by6m" path="res://Scripts/ServerShellRoot.cs" id="1"]
 
 [node name="ServerShellRoot" type="Control" unique_id=1863102081]
 layout_mode = 3
