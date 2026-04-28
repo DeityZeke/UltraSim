@@ -72,6 +72,12 @@ public static class ServerMovementWorldApplicationFactory
                 ContentHash: 5,
                 RequiredFeatures: FeatureFlags.SharedPayloadFanout);
 
+            var sessionPolicy = new SessionAdmissionPolicy(
+                DuplicateSessionPolicy.RejectNew,
+                MaxActiveSessions: 0,
+                AuthTimeoutTicks: SecondsToTicks(_options.SessionAuthTimeoutSeconds),
+                KeepAliveTimeoutTicks: SecondsToTicks(_options.SessionKeepAliveTimeoutSeconds));
+
             _host = new ServerMovementSessionHost(
                 _world,
                 _transport,
@@ -80,6 +86,7 @@ public static class ServerMovementWorldApplicationFactory
                 SpawnSession,
                 DespawnSession,
                 handshakePolicy: handshakePolicy,
+                sessionPolicy: sessionPolicy,
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }
@@ -205,6 +212,15 @@ public static class ServerMovementWorldApplicationFactory
             float y = MathF.Floor(spawnIndex / 16) * 1.5f;
             world.SetComponent(entity, new ServerMovementBody(x, y, 0f, 0f));
             return new ServerMovementSessionSpawn(entity, networkEntityId);
+        }
+
+        private static long SecondsToTicks(double seconds)
+        {
+            if (seconds <= 0.0)
+                return 0;
+
+            double ticks = seconds * Stopwatch.Frequency;
+            return ticks >= long.MaxValue ? long.MaxValue : (long)ticks;
         }
 
         private static void DespawnSession(World world, ConnectionId connectionId, Entity entity)

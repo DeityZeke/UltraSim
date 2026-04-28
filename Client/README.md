@@ -73,4 +73,4 @@ Godot_v4.6.2-stable_mono_linux.x86_64 --headless --path Client/_Godot \
   --us-connect=127.0.0.1:42042 --us-smoke-quit-after=8 --us-smoke-require-connected
 ```
 
-A passing client smoke prints `Connected.` before shutdown. With `--us-smoke-require-connected`, the client exits nonzero if it never reaches the ready session state. These hooks are for validation only; user-facing connection flow remains the local app shell.
+A passing client smoke prints `Connected.` before shutdown. With `--us-smoke-require-connected`, the client exits nonzero if it never reaches the ready session state. The client direct-connect driver retries the UDP handshake 5 times at 0.5s intervals, then reports a connection error instead of hanging. After a ready session, missing server pongs for 5s are treated as connection loss; the shell clears session-owned world state, returns preview controls, and shows the error screen. The Godot movement server shell also uses session auth/keepalive timeouts so silent UDP clients are unbound and removed server-side. These hooks are for validation only; user-facing connection flow remains the local app shell.

@@ -6,7 +6,9 @@ public sealed record ServerMovementWorldApplicationOptions(
     bool SaveOnStop = false,
     bool EnableGlobalMovementObserverState = true,
     bool EnableAsyncFlush = true,
-    float MovementSpeed = 4.0f)
+    float MovementSpeed = 4.0f,
+    double SessionAuthTimeoutSeconds = 5.0,
+    double SessionKeepAliveTimeoutSeconds = 10.0)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");
 }

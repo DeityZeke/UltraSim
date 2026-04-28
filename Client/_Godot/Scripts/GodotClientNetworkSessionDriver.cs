@@ -11,6 +11,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     private readonly Action<ClientMovementStateReceiveResult> _ownerMovementSink;
     private readonly ClientLatestStateFrameSpanApplier? _observerStateSink;
     private readonly Action? _observerStateReset;
+    private readonly Action<string>? _sessionFailedSink;
     private ClientMovementSessionHost? _host;
     private UdpSocketNetworkTransport? _transport;
     private readonly PongProbePacket[] _pongScratch = new PongProbePacket[8];
@@ -22,19 +23,30 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     private ushort _lastOwnerInputSequence;
     private ushort _nextPingSequence;
     private long _nextPingTicks;
+    private long _nextHandshakeRetryTicks;
+    private long _connectStartedTicks;
+    private long _lastPongTicks;
+    private int _handshakeAttempts;
+    private bool _sessionFailed;
+
+    public int MaxHandshakeAttempts { get; set; } = 5;
+    public double HandshakeRetryIntervalSeconds { get; set; } = 0.5;
+    public double ReadyKeepAliveTimeoutSeconds { get; set; } = 5.0;
 
     public GodotClientNetworkSessionDriver(
         Action<string> statusSink,
         Action<ChatMessageEventPacket> chatSink,
         Action<ClientMovementStateReceiveResult> ownerMovementSink,
         ClientLatestStateFrameSpanApplier? observerStateSink = null,
-        Action? observerStateReset = null)
+        Action? observerStateReset = null,
+        Action<string>? sessionFailedSink = null)
     {
         _statusSink = statusSink ?? throw new ArgumentNullException(nameof(statusSink));
         _chatSink = chatSink ?? throw new ArgumentNullException(nameof(chatSink));
         _ownerMovementSink = ownerMovementSink ?? throw new ArgumentNullException(nameof(ownerMovementSink));
         _observerStateSink = observerStateSink;
         _observerStateReset = observerStateReset;
+        _sessionFailedSink = sessionFailedSink;
     }
 
     public bool IsRunning => _host?.IsRunning == true;
@@ -87,11 +99,17 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 
         transport.Start();
         host.Start();
-        host.BeginHandshake(Stopwatch.GetTimestamp());
+        long nowTicks = Stopwatch.GetTimestamp();
+        host.BeginHandshake(nowTicks);
 
         _transport = transport;
         _host = host;
-        _statusSink($"Connecting to {request.Host}:{request.Port}...");
+        _connectStartedTicks = nowTicks;
+        _nextHandshakeRetryTicks = nowTicks + SecondsToTicks(HandshakeRetryIntervalSeconds);
+        _handshakeAttempts = 1;
+        _sessionFailed = false;
+        _lastPongTicks = 0;
+        _statusSink($"Connecting to {request.Host}:{request.Port}... attempt 1/{Math.Max(1, MaxHandshakeAttempts)}");
         error = string.Empty;
         return true;
     }
@@ -109,11 +127,18 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         DrainPongs(nowTicks);
         MaybeSendPingProbe(nowTicks);
         ApplyOwnerMovementIfChanged();
+        CheckConnectionHealth(nowTicks);
+
+        if (_host is null)
+        {
+            return;
+        }
 
         if (_host.IsReady)
         {
             if (!_lastReady)
             {
+                _lastPongTicks = nowTicks;
                 _statusSink("Connected.");
             }
 
@@ -148,6 +173,11 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _lastOwnerInputSequence = 0;
         _nextPingSequence = 0;
         _nextPingTicks = 0;
+        _nextHandshakeRetryTicks = 0;
+        _connectStartedTicks = 0;
+        _lastPongTicks = 0;
+        _handshakeAttempts = 0;
+        _sessionFailed = false;
         _pingSentAtTicks.Clear();
         LastPingRoundTripMilliseconds = -1.0;
         _statusSink(status);
@@ -220,6 +250,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
                 }
 
                 LastPingRoundTripMilliseconds = (nowTicks - sentTicks) * 1000.0 / Stopwatch.Frequency;
+                _lastPongTicks = nowTicks;
             }
 
             if (count < _pongScratch.Length)
@@ -227,6 +258,69 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
                 return;
             }
         }
+    }
+
+    private void CheckConnectionHealth(long nowTicks)
+    {
+        if (_host is null || _sessionFailed)
+        {
+            return;
+        }
+
+        if (_host.IsReady)
+        {
+            if (_lastPongTicks > 0 &&
+                ReadyKeepAliveTimeoutSeconds > 0.0 &&
+                nowTicks - _lastPongTicks >= SecondsToTicks(ReadyKeepAliveTimeoutSeconds))
+            {
+                FailSession($"Connection lost: no server response for {ReadyKeepAliveTimeoutSeconds:0.#} seconds.");
+            }
+
+            return;
+        }
+
+        int maxAttempts = Math.Max(1, MaxHandshakeAttempts);
+        if (_handshakeAttempts >= maxAttempts)
+        {
+            FailSession($"Connection failed: no response after {_handshakeAttempts} handshake attempt(s).");
+            return;
+        }
+
+        if (nowTicks < _nextHandshakeRetryTicks)
+        {
+            return;
+        }
+
+        _handshakeAttempts++;
+        if (_host.Control.RetryClientHandshake(_host.ConnectionId, nowTicks))
+        {
+            _statusSink($"Connecting... attempt {_handshakeAttempts}/{maxAttempts}");
+        }
+
+        _nextHandshakeRetryTicks = nowTicks + SecondsToTicks(HandshakeRetryIntervalSeconds);
+    }
+
+    private void FailSession(string status)
+    {
+        if (_sessionFailed)
+        {
+            return;
+        }
+
+        _sessionFailed = true;
+        Disconnect(status);
+        _sessionFailedSink?.Invoke(status);
+    }
+
+    private static long SecondsToTicks(double seconds)
+    {
+        if (seconds <= 0.0)
+        {
+            return 0;
+        }
+
+        double ticks = seconds * Stopwatch.Frequency;
+        return ticks >= long.MaxValue ? long.MaxValue : (long)ticks;
     }
 
     private void MaybeSendPingProbe(long nowTicks)

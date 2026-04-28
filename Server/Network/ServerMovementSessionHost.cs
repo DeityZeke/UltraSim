@@ -316,17 +316,20 @@ public sealed class ServerMovementSessionHost
                     continue;
                 }
 
-                if (!_entityByConnection.TryGetValue(evt.ConnectionId, out Entity entity))
-                    continue;
+                if (_entityByConnection.TryGetValue(evt.ConnectionId, out Entity entity))
+                {
+                    _movement.Unbind(evt.ConnectionId);
+                    _sessionRuntime.UnbindConnection(evt.ConnectionId);
+                    _subscriptions.RemoveConnection(evt.ConnectionId);
+                    _entityByConnection.Remove(evt.ConnectionId);
+                    _networkEntityIdByConnection.Remove(evt.ConnectionId);
+                    _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
+                    if (_despawnSession is null && _world.Entities.IsAlive(entity))
+                        _world.Destroy(entity);
+                }
 
-                _movement.Unbind(evt.ConnectionId);
-                _sessionRuntime.UnbindConnection(evt.ConnectionId);
-                _subscriptions.RemoveConnection(evt.ConnectionId);
-                _entityByConnection.Remove(evt.ConnectionId);
-                _networkEntityIdByConnection.Remove(evt.ConnectionId);
-                _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
-                if (_despawnSession is null && _world.Entities.IsAlive(entity))
-                    _world.Destroy(entity);
+                if (evt.CurrentState == ConnectionSessionState.Disconnected)
+                    _control.Sessions.TryRemoveDisconnected(evt.SessionId, nowTicks);
             }
         }
     }

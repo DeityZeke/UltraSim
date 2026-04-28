@@ -52,7 +52,8 @@ public partial class GodotClientRuntimeRoot : Node
 			HandleChatMessage,
 			HandleOwnerMovementState,
 			HandleObserverState,
-			HandleObserverStateReset);
+			HandleObserverStateReset,
+			HandleSessionFailed);
 		if (UiManager?.Menus is not null)
 		{
 			UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
@@ -212,6 +213,19 @@ public partial class GodotClientRuntimeRoot : Node
 	private void HandlePreviewRequested()
 	{
 		EnterPreviewMode();
+	}
+
+	private void HandleSessionFailed(string status)
+	{
+		_wasSessionReady = false;
+		CharacterWorld?.ClearAllActors();
+		if (LocalPlayerController is not null)
+		{
+			LocalPlayerController.EnablePreviewControls = true;
+		}
+
+		UiManager?.Menus?.ShowConnectionError(status);
+		UiManager?.Menus?.AppendSystemChatLine(status);
 	}
 
 	private void HandleChatSubmitted(string text)

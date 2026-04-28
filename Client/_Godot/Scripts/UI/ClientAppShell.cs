@@ -96,6 +96,12 @@ public partial class ClientAppShell : Control
         }
     }
 
+    public void ShowError(string message)
+    {
+        ShowScreen(ClientAppScreen.Error);
+        SetText("Error", string.IsNullOrWhiteSpace(message) ? "A client error occurred." : message);
+    }
+
     public void SetServerBrowserSnapshot(ServerBrowserSnapshot snapshot)
     {
         _serverBrowserSnapshot = snapshot;

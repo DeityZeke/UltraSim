@@ -125,10 +125,14 @@ public partial class MenuCanvasManager : CanvasLayer
         ApplyNavigation();
     }
 
-    public void ShowConnectionError()
+    public void ShowConnectionError(string? message = null)
     {
         _navigation.LeaveSession(ClientAppScreen.Error);
         ApplyNavigation();
+        if (!string.IsNullOrWhiteSpace(message))
+        {
+            _appShell?.ShowError(message);
+        }
     }
 
     public void AppendSystemChatLine(string text)
