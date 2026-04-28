@@ -6,7 +6,9 @@ public sealed record GodotServerShellOptions(
     int MaxCatchUpTicksPerPump = 8,
     bool SaveOnStop = false,
     bool EnableMovementWorld = true,
-    int NetworkPort = 42042)
+    int NetworkPort = 42042,
+    double SessionAuthTimeoutSeconds = 5.0,
+    double SessionKeepAliveTimeoutSeconds = 10.0)
 {
     public static GodotServerShellOptions Default { get; } = new("godot");
 }

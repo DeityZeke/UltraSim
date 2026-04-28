@@ -8,7 +8,11 @@ public sealed record HeadlessServerShellOptions(
     bool SaveOnStop = false,
     bool Quiet = false,
     TimeSpan? RunFor = null,
-    TimeSpan IdleDelay = default)
+    TimeSpan IdleDelay = default,
+    bool EnableMovementWorld = true,
+    int NetworkPort = 42042,
+    double SessionAuthTimeoutSeconds = 5.0,
+    double SessionKeepAliveTimeoutSeconds = 10.0)
 {
     public static HeadlessServerShellOptions Default { get; } =
         new("headless", IdleDelay: TimeSpan.FromMilliseconds(1));

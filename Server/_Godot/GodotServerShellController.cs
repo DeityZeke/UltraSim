@@ -90,7 +90,9 @@ public sealed class GodotServerShellController : IDisposable
             ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
                 options.ProfileName,
                 Port: options.NetworkPort,
-                SaveOnStop: options.SaveOnStop))
+                SaveOnStop: options.SaveOnStop,
+                SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
+                SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds))
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,
                 SaveOnStop: options.SaveOnStop));

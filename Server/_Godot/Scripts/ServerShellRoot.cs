@@ -72,6 +72,8 @@ public partial class ServerShellRoot : Control
 		int tickMilliseconds = GodotServerShellOptions.Default.TickMilliseconds;
 		int maxCatchUpTicks = GodotServerShellOptions.Default.MaxCatchUpTicksPerPump;
 		int networkPort = GodotServerShellOptions.Default.NetworkPort;
+		double sessionAuthTimeoutSeconds = GodotServerShellOptions.Default.SessionAuthTimeoutSeconds;
+		double sessionKeepAliveTimeoutSeconds = GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
 		bool enableMovementWorld = GodotServerShellOptions.Default.EnableMovementWorld;
 		startOnReady = false;
 
@@ -107,6 +109,20 @@ public partial class ServerShellRoot : Control
 					tickMilliseconds = parsedTickMilliseconds;
 				}
 			}
+			else if (arg.StartsWith("--us-server-session-auth-timeout-seconds=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (double.TryParse(arg["--us-server-session-auth-timeout-seconds=".Length..], out double parsedAuthTimeout) && parsedAuthTimeout >= 0.0)
+				{
+					sessionAuthTimeoutSeconds = parsedAuthTimeout;
+				}
+			}
+			else if (arg.StartsWith("--us-server-session-keepalive-timeout-seconds=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (double.TryParse(arg["--us-server-session-keepalive-timeout-seconds=".Length..], out double parsedKeepAliveTimeout) && parsedKeepAliveTimeout >= 0.0)
+				{
+					sessionKeepAliveTimeoutSeconds = parsedKeepAliveTimeout;
+				}
+			}
 			else if (arg.StartsWith("--us-server-max-catchup=", StringComparison.OrdinalIgnoreCase))
 			{
 				if (int.TryParse(arg["--us-server-max-catchup=".Length..], out int parsedMaxCatchUpTicks) && parsedMaxCatchUpTicks > 0)
@@ -121,7 +137,9 @@ public partial class ServerShellRoot : Control
 			TickMilliseconds: tickMilliseconds,
 			MaxCatchUpTicksPerPump: maxCatchUpTicks,
 			EnableMovementWorld: enableMovementWorld,
-			NetworkPort: networkPort);
+			NetworkPort: networkPort,
+			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
+			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds);
 	}
 
 	private void ScheduleSmokeQuitIfRequested()

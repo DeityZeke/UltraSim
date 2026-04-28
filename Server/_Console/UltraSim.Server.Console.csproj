@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Hosting\UltraSim.Server.Hosting.csproj" />
+    <ProjectReference Include="..\Network\UltraSim.Server.Network.csproj" />
   </ItemGroup>
 
 </Project>

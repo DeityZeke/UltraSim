@@ -93,6 +93,8 @@ Current Godot smoke hooks:
   - `--us-server-profile=name`
   - `--us-server-tick-ms=n`
   - `--us-server-max-catchup=n`
+  - `--us-server-session-auth-timeout-seconds=seconds`
+  - `--us-server-session-keepalive-timeout-seconds=seconds`
   - `--us-server-no-movement-world`
   - `--us-smoke-quit-after=seconds`
 

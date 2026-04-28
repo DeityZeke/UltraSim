@@ -599,8 +599,20 @@ internal static class TestRunner
     {
         Assert.Equal(TimeSpan.FromMilliseconds(16), ServerHostLoopOptions.Default.TickInterval);
         Assert.Equal(16, HeadlessServerShellOptions.Default.TickMilliseconds);
+        Assert.True(HeadlessServerShellOptions.Default.EnableMovementWorld);
+        Assert.Equal(42042, HeadlessServerShellOptions.Default.NetworkPort);
+        Assert.Equal(5.0, HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds);
+        Assert.Equal(10.0, HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(16, ConsoleServerShellOptions.Default.TickMilliseconds);
+        Assert.True(ConsoleServerShellOptions.Default.EnableMovementWorld);
+        Assert.Equal(42042, ConsoleServerShellOptions.Default.NetworkPort);
+        Assert.Equal(5.0, ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds);
+        Assert.Equal(10.0, ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(16, GodotServerShellOptions.Default.TickMilliseconds);
+        Assert.True(GodotServerShellOptions.Default.EnableMovementWorld);
+        Assert.Equal(42042, GodotServerShellOptions.Default.NetworkPort);
+        Assert.Equal(5.0, GodotServerShellOptions.Default.SessionAuthTimeoutSeconds);
+        Assert.Equal(10.0, GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
     }
 
     private static void ServerApplication_SystemRuntimeSnapshots_ReflectHookData()
@@ -770,11 +782,15 @@ internal static class TestRunner
             "--profile=test-headless",
             "--tick-ms=16",
             "--max-catchup=4",
+            "--port=0",
+            "--session-auth-timeout-seconds=6.5",
+            "--session-keepalive-timeout-seconds=13.25",
             "--run-for-seconds=0.25",
             "--idle-delay-ms=2",
             "--no-auto-start",
             "--save-on-stop",
             "--quiet",
+            "--no-movement-world",
         };
 
         bool parsed = HeadlessServerArgumentParser.TryParse(args, out HeadlessServerShellOptions options, out string? error, out bool showHelp);
@@ -788,6 +804,10 @@ internal static class TestRunner
         Assert.False(options.AutoStart);
         Assert.True(options.SaveOnStop);
         Assert.True(options.Quiet);
+        Assert.False(options.EnableMovementWorld);
+        Assert.Equal(0, options.NetworkPort);
+        Assert.Equal(6.5, options.SessionAuthTimeoutSeconds);
+        Assert.Equal(13.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(TimeSpan.FromSeconds(0.25), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(2), options.IdleDelay);
     }
@@ -800,7 +820,8 @@ internal static class TestRunner
             "test-headless",
             TickMilliseconds: 10,
             RunFor: TimeSpan.FromMilliseconds(30),
-            IdleDelay: TimeSpan.Zero);
+            IdleDelay: TimeSpan.Zero,
+            NetworkPort: 0);
         var shell = new HeadlessServerShell(options, stdout, stderr);
 
         int exitCode = shell.RunAsync().GetAwaiter().GetResult();
@@ -845,11 +866,15 @@ internal static class TestRunner
             "--profile=test-console",
             "--tick-ms=20",
             "--max-catchup=5",
+            "--port=0",
+            "--session-auth-timeout-seconds=7.5",
+            "--session-keepalive-timeout-seconds=14.25",
             "--run-for-seconds=0.5",
             "--idle-delay-ms=3",
             "--no-auto-start",
             "--save-on-stop",
             "--no-input",
+            "--no-movement-world",
         };
 
         bool parsed = ConsoleServerArgumentParser.TryParse(args, out ConsoleServerShellOptions options, out string? error, out bool showHelp);
@@ -863,6 +888,10 @@ internal static class TestRunner
         Assert.False(options.AutoStart);
         Assert.True(options.SaveOnStop);
         Assert.False(options.EnableInput);
+        Assert.False(options.EnableMovementWorld);
+        Assert.Equal(0, options.NetworkPort);
+        Assert.Equal(7.5, options.SessionAuthTimeoutSeconds);
+        Assert.Equal(14.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(TimeSpan.FromSeconds(0.5), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(3), options.IdleDelay);
     }
@@ -886,7 +915,8 @@ internal static class TestRunner
         var options = new ConsoleServerShellOptions(
             "test-console",
             TickMilliseconds: 10,
-            IdleDelay: TimeSpan.Zero);
+            IdleDelay: TimeSpan.Zero,
+            NetworkPort: 0);
         var shell = new ConsoleServerShell(options, stdin, stdout, stderr);
 
         int exitCode = shell.RunAsync().GetAwaiter().GetResult();

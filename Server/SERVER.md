@@ -11,12 +11,14 @@ Current wrapper/runtime plan:
 - `Server/Hosting` owns shared host-loop plumbing
 - `Server/_Headless` is the canonical dedicated-server shell
 - `Server/_Console` and `Server/_Godot` are thin wrappers over the same control surface
+- all three wrappers now start the shared movement-world server by default, with `--no-movement-world`/equivalent escape hatches for skeleton operator runs
 
 Current default host tick rate:
 
 - `16 ms` fixed-step by default across `headless`, `console`, and `Godot`
 - the ECS world remains host-driven, so this is the current default server/world tick cadence
 - network cadence is not locked to a separate default yet; the new network kernel is still pump-driven by higher layers until the fuller server bridge/runtime policy lands
+- movement-world session defaults are `5s` auth timeout and `10s` ready keepalive timeout; silent UDP clients are unbound and removed by the shared session host
 
 Current `Server/Network` state:
 

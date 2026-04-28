@@ -16,6 +16,10 @@ public static class HeadlessServerArgumentParser
         bool quiet = HeadlessServerShellOptions.Default.Quiet;
         TimeSpan? runFor = HeadlessServerShellOptions.Default.RunFor;
         TimeSpan idleDelay = HeadlessServerShellOptions.Default.IdleDelay;
+        bool enableMovementWorld = HeadlessServerShellOptions.Default.EnableMovementWorld;
+        int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
+        double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
+        double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -45,6 +49,12 @@ public static class HeadlessServerArgumentParser
             if (string.Equals(arg, "--quiet", StringComparison.OrdinalIgnoreCase))
             {
                 quiet = true;
+                continue;
+            }
+
+            if (string.Equals(arg, "--no-movement-world", StringComparison.OrdinalIgnoreCase))
+            {
+                enableMovementWorld = false;
                 continue;
             }
 
@@ -85,6 +95,45 @@ public static class HeadlessServerArgumentParser
                 {
                     options = HeadlessServerShellOptions.Default;
                     error = $"Invalid max catch-up ticks '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(key, "--port", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out networkPort) || (uint)networkPort > ushort.MaxValue)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid network port '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(key, "--session-auth-timeout-seconds", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!double.TryParse(value, out sessionAuthTimeoutSeconds) || sessionAuthTimeoutSeconds < 0d)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid session auth timeout '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(key, "--session-keepalive-timeout-seconds", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!double.TryParse(value, out sessionKeepAliveTimeoutSeconds) || sessionKeepAliveTimeoutSeconds < 0d)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid session keepalive timeout '{value}'.";
                     showHelp = false;
                     return false;
                 }
@@ -142,7 +191,11 @@ public static class HeadlessServerArgumentParser
             SaveOnStop: saveOnStop,
             Quiet: quiet,
             RunFor: runFor,
-            IdleDelay: idleDelay);
+            IdleDelay: idleDelay,
+            EnableMovementWorld: enableMovementWorld,
+            NetworkPort: networkPort,
+            SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
+            SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds);
         error = null;
         showHelp = false;
         return true;
@@ -154,8 +207,12 @@ public static class HeadlessServerArgumentParser
           --profile=<name>
           --tick-ms=<n>
           --max-catchup=<n>
+          --port=<0-65535>
+          --session-auth-timeout-seconds=<seconds>
+          --session-keepalive-timeout-seconds=<seconds>
           --run-for-seconds=<seconds>
           --idle-delay-ms=<n>
+          --no-movement-world
           --no-auto-start
           --save-on-stop
           --quiet

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Network;
 
 namespace UltraSim.Server.Headless;
 
@@ -81,7 +82,14 @@ public sealed class HeadlessServerShell
     }
 
     private static IServerApplication CreateDefaultApplication(HeadlessServerShellOptions options) =>
-        new ServerApplication(new ServerApplicationOptions(
-            options.ProfileName,
-            SaveOnStop: options.SaveOnStop));
+        options.EnableMovementWorld
+            ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+                options.ProfileName,
+                Port: options.NetworkPort,
+                SaveOnStop: options.SaveOnStop,
+                SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
+                SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds))
+            : new ServerApplication(new ServerApplicationOptions(
+                options.ProfileName,
+                SaveOnStop: options.SaveOnStop));
 }

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Network;
 
 namespace UltraSim.Server.Console;
 
@@ -142,7 +143,14 @@ public sealed class ConsoleServerShell
     }
 
     private static IServerApplication CreateDefaultApplication(ConsoleServerShellOptions options) =>
-        new ServerApplication(new ServerApplicationOptions(
-            options.ProfileName,
-            SaveOnStop: options.SaveOnStop));
+        options.EnableMovementWorld
+            ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+                options.ProfileName,
+                Port: options.NetworkPort,
+                SaveOnStop: options.SaveOnStop,
+                SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
+                SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds))
+            : new ServerApplication(new ServerApplicationOptions(
+                options.ProfileName,
+                SaveOnStop: options.SaveOnStop));
 }
