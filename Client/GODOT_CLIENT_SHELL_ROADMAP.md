@@ -574,8 +574,13 @@ Current status:
   - server patch manifest validation that rejects executable/script content
   - asset size/SHA-256 validation primitive
   - content resolver trust-class contracts
+  - layered resolver stack with explicit priority ordering:
+    - built-in defaults
+    - server patch mappings
+    - user resource-pack overrides
+    - future explicit user mods
+  - resource-pack manifest -> resolver layer conversion
 - remaining G5 work:
-  - resource-pack override stack
   - persisted cache metadata/quota/eviction hooks
   - first Godot-side content resolver adapter
   - real patch/schema cache IO

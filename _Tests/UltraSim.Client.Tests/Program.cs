@@ -23,6 +23,8 @@ internal static class TestRunner
         Run(nameof(UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity), UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity);
         Run(nameof(ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths), ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths);
         Run(nameof(ContentPathValidation_ValidatesSizeAndSha256), ContentPathValidation_ValidatesSizeAndSha256);
+        Run(nameof(LayeredContentResolver_ResolvesHighestPriorityMapping), LayeredContentResolver_ResolvesHighestPriorityMapping);
+        Run(nameof(ResourcePackManifestValidator_CreatesUserOverrideLayer), ResourcePackManifestValidator_CreatesUserOverrideLayer);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -388,6 +390,82 @@ internal static class TestRunner
         Assert.True(error.Contains("size mismatch", StringComparison.OrdinalIgnoreCase), error);
         Assert.False(ContentPathValidation.ValidateSizeAndSha256(bytes, bytes.Length, new string('0', 64), out error));
         Assert.Equal("Asset SHA-256 hash mismatch.", error);
+    }
+
+    private static void LayeredContentResolver_ResolvesHighestPriorityMapping()
+    {
+        Assert.True(ContentResolverLayer.TryCreate(
+            "builtin.default",
+            ContentTrustClass.BuiltIn,
+            ContentResolverPriority.BuiltIn,
+            new Dictionary<string, string>
+            {
+                ["mobile/default/body"] = "res://Assets/Avatars/default.tscn",
+                ["icons/item/sword"] = "res://Assets/Icons/sword.png"
+            },
+            out ContentResolverLayer builtIn,
+            out string error), error);
+        Assert.True(ContentResolverLayer.TryCreate(
+            "server.local",
+            ContentTrustClass.ServerPatch,
+            ContentResolverPriority.ServerPatch,
+            new Dictionary<string, string>
+            {
+                ["mobile/default/body"] = "/cache/server/Assets/avatars/server-default.tscn"
+            },
+            out ContentResolverLayer serverPatch,
+            out error), error);
+        Assert.True(ContentResolverLayer.TryCreate(
+            "resource-pack.noir",
+            ContentTrustClass.UserResourcePack,
+            ContentResolverPriority.UserResourcePack,
+            new Dictionary<string, string>
+            {
+                ["mobile/default/body"] = "/packs/noir/default.tscn"
+            },
+            out ContentResolverLayer resourcePack,
+            out error), error);
+
+        var resolver = new LayeredContentResolver([builtIn, serverPatch, resourcePack]);
+
+        Assert.True(resolver.TryResolve(" mobile/default/body ", out ContentResolution resolved));
+        Assert.Equal("/packs/noir/default.tscn", resolved.ResolvedPath);
+        Assert.Equal(ContentTrustClass.UserResourcePack, resolved.TrustClass);
+        Assert.Equal("resource-pack.noir", resolved.LayerId);
+
+        Assert.True(resolver.TryResolve("icons/item/sword", out resolved));
+        Assert.Equal("res://Assets/Icons/sword.png", resolved.ResolvedPath);
+        Assert.Equal(ContentTrustClass.BuiltIn, resolved.TrustClass);
+
+        Assert.False(resolver.TryResolve("missing", out _));
+    }
+
+    private static void ResourcePackManifestValidator_CreatesUserOverrideLayer()
+    {
+        var manifest = new ResourcePackManifest(
+            "high-contrast",
+            Priority: 12,
+            new Dictionary<string, string>
+            {
+                ["icons/item/sword"] = "user://packs/high-contrast/icons/sword.png"
+            });
+
+        Assert.True(ResourcePackManifestValidator.TryCreateResolverLayer(manifest, out ContentResolverLayer layer, out string error), error);
+        Assert.Equal("resource-pack.high-contrast", layer.LayerId);
+        Assert.Equal(ContentTrustClass.UserResourcePack, layer.TrustClass);
+        Assert.Equal(ContentResolverPriority.UserResourcePack + 12, layer.Priority);
+        Assert.True(layer.TryResolve("icons/item/sword", out ContentResolution resolution));
+        Assert.Equal("user://packs/high-contrast/icons/sword.png", resolution.ResolvedPath);
+
+        var invalid = new ResourcePackManifest(
+            "bad pack",
+            Priority: 0,
+            new Dictionary<string, string>
+            {
+                ["icons/item/sword"] = "user://packs/bad/icons/sword.png"
+            });
+        Assert.False(ResourcePackManifestValidator.TryCreateResolverLayer(invalid, out _, out error));
+        Assert.True(error.Contains("layer id", StringComparison.Ordinal), error);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()

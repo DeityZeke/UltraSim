@@ -28,6 +28,7 @@ What now exists:
     - server patch manifest validation
     - asset size/SHA-256 validation
     - content resolver trust-class contracts
+    - layered content resolver priority stack for built-ins, server patches, resource packs, and future mods
 - `Client/Network`
   - movement input send path over `Kernels/Network`
   - authoritative movement-state receive path

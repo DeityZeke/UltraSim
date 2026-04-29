@@ -8,7 +8,16 @@ public interface IContentResolver
 public readonly record struct ContentResolution(
     string LogicalId,
     string ResolvedPath,
-    ContentTrustClass TrustClass);
+    ContentTrustClass TrustClass,
+    string LayerId = "");
+
+public static class ContentResolverPriority
+{
+    public const int BuiltIn = 0;
+    public const int ServerPatch = 100;
+    public const int UserResourcePack = 200;
+    public const int UserMod = 300;
+}
 
 public enum ContentTrustClass
 {
