@@ -52,6 +52,10 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         Execute = () => RunActionDescriptorScenario(10_000),
     };
 
+    yield return CreateActionRequestValidationScenario(10_000);
+
+    yield return CreateActionResultValidationScenario(10_000);
+
     yield return new BenchmarkScenario
     {
         Name = "StateBinding_Validate_10000",
@@ -187,6 +191,108 @@ static ScenarioMeasurement RunActionDescriptorScenario(int iterations)
     }
 
     return new ScenarioMeasurement(iterations, checksum);
+}
+
+static BenchmarkScenario CreateActionRequestValidationScenario(int iterations)
+{
+    (UiSchemaDocument schema, _) = CreateLargeModelCompatibilityPair(16);
+    UiValidationResult contextResult = UiSchemaCompatibilityContext.TryCreate(
+        schema,
+        out UiSchemaCompatibilityContext? context,
+        UiSchemaValidationLimits.Default with { MaxChildrenPerNode = 32 });
+    if (!contextResult.IsValid || context is null)
+    {
+        throw new InvalidOperationException(contextResult.Error);
+    }
+
+    var request = new UiActionRequestDocument(
+        "panel/bench",
+        schema.Identity,
+        schema.CatalogIdentity,
+        ClientSequence: 1,
+        "bench.refresh",
+        UiActionContextKind.Panel,
+        ContextId: null,
+        FieldValues:
+        [
+            UiModelSlotValue.String("model.slot.0", "value-0"),
+            UiModelSlotValue.String("model.slot.1", "value-1"),
+        ]);
+
+    return new BenchmarkScenario
+    {
+        Name = "ActionRequest_ValidateAgainstContext_10000",
+        Category = "UiAction",
+        Comparable = false,
+        Scale = iterations,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            long checksum = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                UiValidationResult result = request.ValidateAgainst(context);
+                if (!result.IsValid)
+                {
+                    throw new InvalidOperationException(result.Error);
+                }
+
+                checksum += request.ClientSequence + request.FieldValues.Count + i;
+            }
+
+            return new ScenarioMeasurement(iterations, checksum);
+        },
+    };
+}
+
+static BenchmarkScenario CreateActionResultValidationScenario(int iterations)
+{
+    (UiSchemaDocument schema, _) = CreateLargeModelCompatibilityPair(16);
+    UiValidationResult contextResult = UiSchemaCompatibilityContext.TryCreate(
+        schema,
+        out UiSchemaCompatibilityContext? context,
+        UiSchemaValidationLimits.Default with { MaxChildrenPerNode = 32 });
+    if (!contextResult.IsValid || context is null)
+    {
+        throw new InvalidOperationException(contextResult.Error);
+    }
+
+    var resultDocument = new UiActionResultDocument(
+        "panel/bench",
+        schema.Identity,
+        ClientSequence: 1,
+        "bench.refresh",
+        UiActionResultKind.Accepted,
+        UiActionFailureReason.None,
+        Message: null,
+        ModelUpdates: []);
+
+    return new BenchmarkScenario
+    {
+        Name = "ActionResult_ValidateAgainstContext_10000",
+        Category = "UiAction",
+        Comparable = false,
+        Scale = iterations,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            long checksum = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                UiValidationResult result = resultDocument.ValidateAgainst(context);
+                if (!result.IsValid)
+                {
+                    throw new InvalidOperationException(result.Error);
+                }
+
+                checksum += resultDocument.ClientSequence + resultDocument.ModelUpdates.Count + i;
+            }
+
+            return new ScenarioMeasurement(iterations, checksum);
+        },
+    };
 }
 
 static ScenarioMeasurement RunStateBindingScenario(int iterations)
@@ -470,7 +576,17 @@ static (UiSchemaDocument Schema, UiModelDocument Model) CreateLargeModelCompatib
         RootNodeId: 1,
         Nodes: nodes,
         PayloadSlots: payloadSlots,
-        Actions: [],
+        Actions:
+        [
+            new UiActionDescriptor(
+                "bench.refresh",
+                "Refresh",
+                null,
+                UiActionRole.Normal,
+                UiActionContextKind.Panel,
+                RequiresConfirm: false,
+                ChildMenuKey: null),
+        ],
         StateBindings: []);
 
     var model = new UiModelDocument(identity, values);

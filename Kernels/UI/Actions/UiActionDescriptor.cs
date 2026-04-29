@@ -7,7 +7,9 @@ public sealed record UiActionDescriptor(
     UiActionRole Role,
     UiActionContextKind ContextKind,
     bool RequiresConfirm,
-    string? ChildMenuKey)
+    string? ChildMenuKey,
+    UiActionAvailability Availability = UiActionAvailability.Available,
+    string? AvailabilityReason = null)
 {
     public UiValidationResult Validate()
     {
@@ -44,6 +46,21 @@ public sealed record UiActionDescriptor(
         if (!UiValidation.IsDefined(ContextKind))
         {
             return UiValidationResult.Invalid("Action context kind is invalid.");
+        }
+
+        if (!UiValidation.IsDefined(Availability))
+        {
+            return UiValidationResult.Invalid("Action availability is invalid.");
+        }
+
+        if (!string.IsNullOrEmpty(AvailabilityReason) && AvailabilityReason.Length > UiValidation.MaxDisplayTextLength)
+        {
+            return UiValidationResult.Invalid($"Action availability reason cannot exceed {UiValidation.MaxDisplayTextLength} characters.");
+        }
+
+        if (Availability == UiActionAvailability.Available && !string.IsNullOrWhiteSpace(AvailabilityReason))
+        {
+            return UiValidationResult.Invalid("Available actions cannot carry an availability reason.");
         }
 
         if (!string.IsNullOrWhiteSpace(ChildMenuKey))

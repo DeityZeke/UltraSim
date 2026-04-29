@@ -3,17 +3,22 @@ namespace UltraSim.UI;
 public sealed class UiSchemaCompatibilityContext
 {
     private readonly Dictionary<string, UiPayloadSlotDescriptor> _payloadSlotById;
+    private readonly Dictionary<string, UiActionDescriptor> _actionById;
 
     private UiSchemaCompatibilityContext(
         UiSchemaIdentity schemaIdentity,
         UiCatalogIdentity? catalogIdentity,
         IReadOnlyList<UiPayloadSlotDescriptor> payloadSlots,
-        Dictionary<string, UiPayloadSlotDescriptor> payloadSlotById)
+        IReadOnlyList<UiActionDescriptor> actions,
+        Dictionary<string, UiPayloadSlotDescriptor> payloadSlotById,
+        Dictionary<string, UiActionDescriptor> actionById)
     {
         SchemaIdentity = schemaIdentity;
         CatalogIdentity = catalogIdentity;
         PayloadSlots = payloadSlots;
+        Actions = actions;
         _payloadSlotById = payloadSlotById;
+        _actionById = actionById;
     }
 
     public UiSchemaIdentity SchemaIdentity { get; }
@@ -21,6 +26,8 @@ public sealed class UiSchemaCompatibilityContext
     public UiCatalogIdentity? CatalogIdentity { get; }
 
     public IReadOnlyList<UiPayloadSlotDescriptor> PayloadSlots { get; }
+
+    public IReadOnlyList<UiActionDescriptor> Actions { get; }
 
     public static UiValidationResult TryCreate(
         UiSchemaDocument schema,
@@ -44,11 +51,22 @@ public sealed class UiSchemaCompatibilityContext
             payloadSlotById.Add(descriptor.SlotId, descriptor);
         }
 
+        var actionById = new Dictionary<string, UiActionDescriptor>(
+            schema.Actions.Count,
+            StringComparer.Ordinal);
+        for (int i = 0; i < schema.Actions.Count; i++)
+        {
+            UiActionDescriptor action = schema.Actions[i];
+            actionById.Add(action.ActionId, action);
+        }
+
         context = new UiSchemaCompatibilityContext(
             schema.Identity,
             schema.CatalogIdentity,
             schema.PayloadSlots,
-            payloadSlotById);
+            schema.Actions,
+            payloadSlotById,
+            actionById);
         return UiValidationResult.Valid;
     }
 
@@ -77,5 +95,10 @@ public sealed class UiSchemaCompatibilityContext
     public bool TryGetPayloadSlot(string slotId, out UiPayloadSlotDescriptor descriptor)
     {
         return _payloadSlotById.TryGetValue(slotId, out descriptor!);
+    }
+
+    public bool TryGetAction(string actionId, out UiActionDescriptor action)
+    {
+        return _actionById.TryGetValue(actionId, out action!);
     }
 }

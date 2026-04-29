@@ -819,6 +819,10 @@ The pre-schema client shell gate is now validated. G6/UI-1 has started in `Kerne
 - capability flags and renderer capability record
 - panel metadata
 - action/context descriptor shape
+- action availability, request, and result contracts:
+  - client sequence echo
+  - server-authored unavailable/stale/out-of-range state
+  - machine-readable rejection reasons
 - runtime state binding descriptor and fallback shape
 - early node id reservations
 - schema node/tree descriptors
@@ -849,12 +853,13 @@ First UI benchmark report:
 - current model/schema compatibility baseline includes `ModelDocument_ValidateAgainstSchema_1000Slots`
 - current update validation baseline includes `ModelUpdate_ValidateSlotPatch_1000Slots`
 - current hot-path update baseline includes `ModelUpdate_ValidateSlotPatchAgainstContext_1000Slots`
+- current action validation baselines include `ActionRequest_ValidateAgainstContext_10000` and `ActionResult_ValidateAgainstContext_10000`
 
 Next G6/UI-1 steps:
 
 1. Add catalog identity/schema linkage contract tests around the compatibility context.
 2. Add schema/catalog/model/update cache identity compatibility tests.
-3. Add response/action result descriptor contracts.
+3. Add tooltip/rich-tooltip descriptor contracts.
 4. Keep client runtime, server providers, and Godot renderer work out of the kernel until these contracts are measurable.
 5. If implementation exposes a bad contract, fix the UI kernel contract and planning docs before patching around it in the bridge layers.
 

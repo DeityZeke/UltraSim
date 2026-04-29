@@ -11,6 +11,7 @@ internal static class TestRunner
         Run(nameof(UiPanelMetadata_ValidatesSurfaceFocusPolicyAndOptionalKeys), UiPanelMetadata_ValidatesSurfaceFocusPolicyAndOptionalKeys);
         Run(nameof(UiRendererCapabilities_ValidatesLimitsAndUnknownFlags), UiRendererCapabilities_ValidatesLimitsAndUnknownFlags);
         Run(nameof(UiActionDescriptor_ValidatesContextMenuShape), UiActionDescriptor_ValidatesContextMenuShape);
+        Run(nameof(UiActionDescriptor_ValidatesServerAuthoredAvailability), UiActionDescriptor_ValidatesServerAuthoredAvailability);
         Run(nameof(UiStateBindingDescriptor_ValidatesPerBindingFallback), UiStateBindingDescriptor_ValidatesPerBindingFallback);
         Run(nameof(UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities), UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities);
         Run(nameof(UiSchemaDocument_RejectsInvalidTreeShapes), UiSchemaDocument_RejectsInvalidTreeShapes);
@@ -22,6 +23,8 @@ internal static class TestRunner
         Run(nameof(UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility), UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility);
         Run(nameof(UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates), UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates);
         Run(nameof(UiModelUpdateDocument_RejectsInvalidUpdateShapes), UiModelUpdateDocument_RejectsInvalidUpdateShapes);
+        Run(nameof(UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates), UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates);
+        Run(nameof(UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses), UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
 
@@ -142,6 +145,28 @@ internal static class TestRunner
         Assert.Valid(nested.Validate());
     }
 
+    private static void UiActionDescriptor_ValidatesServerAuthoredAvailability()
+    {
+        var unavailable = new UiActionDescriptor(
+            "entity.talk",
+            "Talk",
+            null,
+            UiActionRole.Normal,
+            UiActionContextKind.Entity,
+            RequiresConfirm: false,
+            ChildMenuKey: null,
+            UiActionAvailability.OutOfRange,
+            "Move closer");
+        Assert.Valid(unavailable.Validate());
+
+        Assert.InvalidContains((unavailable with { Availability = (UiActionAvailability)255 }).Validate(), "availability");
+        Assert.InvalidContains((unavailable with
+        {
+            Availability = UiActionAvailability.Available,
+            AvailabilityReason = "not needed"
+        }).Validate(), "Available actions");
+    }
+
     private static void UiStateBindingDescriptor_ValidatesPerBindingFallback()
     {
         var descriptor = new UiStateBindingDescriptor(
@@ -222,6 +247,37 @@ internal static class TestRunner
         Assert.Equal(update.PanelInstanceId, decodedUpdate.PanelInstanceId);
         Assert.Equal(update.Sequence, decodedUpdate.Sequence);
         Assert.Valid(decodedUpdate.ValidateAgainst(schema));
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        var request = new UiActionRequestDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 77,
+            ActionId: "hud.open_character",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: [UiModelSlotValue.Integer("levelValue", 12)]);
+        encoded = UiContractJsonCodec.Encode(request);
+        UiActionRequestDocument decodedRequest = UiContractJsonCodec.Decode<UiActionRequestDocument>(encoded);
+        Assert.Equal(request.ClientSequence, decodedRequest.ClientSequence);
+        Assert.Valid(decodedRequest.ValidateAgainst(context!));
+
+        var result = new UiActionResultDocument(
+            "panel/1",
+            schema.Identity,
+            ClientSequence: 77,
+            ActionId: "hud.open_character",
+            UiActionResultKind.Accepted,
+            UiActionFailureReason.None,
+            Message: null,
+            ModelUpdates: []);
+        encoded = UiContractJsonCodec.Encode(result);
+        UiActionResultDocument decodedResult = UiContractJsonCodec.Decode<UiActionResultDocument>(encoded);
+        Assert.Equal(result.ClientSequence, decodedResult.ClientSequence);
+        Assert.Valid(decodedResult.ValidateAgainst(context!));
     }
 
     private static void UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities()
@@ -556,6 +612,97 @@ internal static class TestRunner
             ClearedSlotIds: [],
             RowDeltas: []);
         Assert.InvalidContains(fullMissingRequired.ValidateAgainst(schema), "missing required");
+    }
+
+    private static void UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        var request = new UiActionRequestDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 42,
+            ActionId: "hud.open_character",
+            UiActionContextKind.Panel,
+            ContextId: "hud/status",
+            FieldValues: [UiModelSlotValue.Integer("levelValue", 15)]);
+        Assert.Valid(request.ValidateAgainst(context!));
+
+        var result = new UiActionResultDocument(
+            "panel/1",
+            schema.Identity,
+            ClientSequence: 42,
+            ActionId: "hud.open_character",
+            UiActionResultKind.Accepted,
+            UiActionFailureReason.None,
+            Message: "Opened",
+            ModelUpdates: [CreateValidSlotPatch(schema)]);
+        Assert.Valid(result.ValidateAgainst(context!));
+    }
+
+    private static void UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        UiSchemaDocument unavailableSchema = schema with
+        {
+            Actions =
+            [
+                schema.Actions[0] with
+                {
+                    Availability = UiActionAvailability.OutOfRange,
+                    AvailabilityReason = "Move closer"
+                }
+            ]
+        };
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(unavailableSchema, out UiSchemaCompatibilityContext? unavailableContext));
+        Assert.NotNull(unavailableContext);
+
+        var request = new UiActionRequestDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 42,
+            ActionId: "hud.open_character",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: []);
+        Assert.InvalidContains(request.ValidateAgainst(unavailableContext!), "not currently available");
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        var unknownAction = request with { ActionId = "missing.action" };
+        Assert.InvalidContains(unknownAction.ValidateAgainst(context!), "unknown action");
+
+        var badField = request with { FieldValues = [UiModelSlotValue.String("missingSlot", "nope")] };
+        Assert.InvalidContains(badField.ValidateAgainst(context!), "unknown field slot");
+
+        var rejectedWithoutReason = new UiActionResultDocument(
+            "panel/1",
+            schema.Identity,
+            ClientSequence: 42,
+            ActionId: "hud.open_character",
+            UiActionResultKind.Rejected,
+            UiActionFailureReason.None,
+            Message: "Nope",
+            ModelUpdates: []);
+        Assert.InvalidContains(rejectedWithoutReason.ValidateAgainst(context!), "require a failure reason");
+
+        var staleTarget = rejectedWithoutReason with
+        {
+            FailureReason = UiActionFailureReason.StaleTarget,
+            Message = "Target changed"
+        };
+        Assert.Valid(staleTarget.ValidateAgainst(context!));
+
+        var acceptedWithReason = staleTarget with
+        {
+            Kind = UiActionResultKind.Accepted
+        };
+        Assert.InvalidContains(acceptedWithReason.ValidateAgainst(context!), "cannot carry");
     }
 
     private static void UiNodeKind_ReservesExpectedEarlyNodeIds()
