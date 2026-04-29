@@ -93,6 +93,12 @@ Current contracts:
   - transaction id/state
   - participant containers
   - suspended items with source/destination containers
+- list projection contracts:
+  - point-in-time projection id
+  - source container id/revision
+  - source placement mode
+  - sort descriptor
+  - list rows that preserve item snapshots and original placement metadata
 - executable tests in `_Tests/UltraSim.Inventory.Tests`
 - benchmark harness in `_Benchmarks/UltraSim.Inventory.Benchmarks`
 
@@ -106,10 +112,12 @@ Current benchmark baselines:
 
 - `ContainerSnapshot_Validate_List_1000Items`: about `0.57 ms`
 - `ContainerSnapshot_Validate_Grid_1000Items`: about `0.74 ms`
-- `MutationIntent_Validate_Move_10000`: about `10.65 ms`
+- `MutationIntent_Validate_Move_10000`: about `10.47 ms`
 - `MutationResult_Validate_Accepted_10000`: about `7.60 ms`
-- `ViewerRegistry_CountRecipients_1000Viewers_1000Deltas`: about `27.16 ms`
-- `TransactionSnapshot_Validate_1000SuspendedItems`: about `3.47 ms`
+- `ViewerRegistry_CountRecipients_1000Viewers_1000Deltas`: about `26.57 ms`
+  - this is per 1000-viewer fanout pass, or roughly 26.6 ns per viewer check in that benchmark shape
+- `TransactionSnapshot_Validate_1000SuspendedItems`: about `3.32 ms`
+- `ListProjection_FromGridContainer_1000Items`: about `1.53 ms`
 
 ## Layering
 
@@ -521,6 +529,8 @@ Multiple viewers may remove rows/items concurrently. The server must reject stal
 
 Inventory UI consumes inventory contracts; it does not define inventory truth.
 
+Projection contracts are read-only, point-in-time views over a container snapshot. They do not own live state and they do not auto-update when container deltas arrive. The live delta path updates the underlying client/server container state, and a bridge may build a fresh projection for a newer container revision when the viewer needs it.
+
 Planned viewers:
 
 - Skyrim-style list viewer
@@ -533,6 +543,8 @@ Implementation discipline:
 2. Write list-view contract/smoke tests before grid-specific work.
 3. Add grid placement helpers only as optional placement facets.
 4. Keep UO/freeform possible through `Freeform` placement metadata and `ContainerCanvas`, but do not implement the renderer until needed.
+
+The first implemented projection is `InventoryListProjectionSnapshot`. It can project a grid-backed container as a simple list while preserving each item's source placement metadata. Sort descriptors are projection/viewer inputs, not new container truth.
 
 If the list viewer cannot consume the same container state as the grid viewer, the contract has leaked presentation assumptions.
 
@@ -580,7 +592,7 @@ Suggested first slices:
 5. Container viewer/session snapshot and live delta contracts.
 6. Transactional container/trade contract shape.
 7. Minimal benchmarks.
-8. Server/ECS bridge resolver prototype.
-9. UI viewer contracts over the neutral model, starting with list before grid.
+8. UI viewer contracts over the neutral model, starting with list before grid.
+9. Server/ECS bridge resolver prototype.
 
 Stop and revise the kernel contract if any bridge starts requiring ad-hoc item/container fields that only make sense for one viewer or one gameplay feature.

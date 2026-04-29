@@ -18,6 +18,7 @@ internal static class TestRunner
         Run(nameof(InventoryContainerViewerRegistry_FiltersDeltasByAccessAndScope), InventoryContainerViewerRegistry_FiltersDeltasByAccessAndScope);
         Run(nameof(InventoryContainerDelta_ValidatesItemAndPlacementShapes), InventoryContainerDelta_ValidatesItemAndPlacementShapes);
         Run(nameof(InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle), InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle);
+        Run(nameof(InventoryListProjection_ProjectsListAndGridContainersWithoutOwningTruth), InventoryListProjection_ProjectsListAndGridContainersWithoutOwningTruth);
 
         Console.WriteLine("All inventory kernel contract tests passed.");
     }
@@ -365,6 +366,69 @@ internal static class TestRunner
         }).Validate(), "duplicate suspended");
     }
 
+    private static void InventoryListProjection_ProjectsListAndGridContainersWithoutOwningTruth()
+    {
+        InventoryContainerSnapshot listContainer = CreateListContainer();
+        InventoryListProjectionSnapshot listProjection = InventoryListProjectionSnapshot.FromContainer(
+            "projection:list/backpack",
+            listContainer,
+            containerRevision: 7,
+            InventoryProjectionSortDescriptor.ByPlacementIndex,
+            viewId: "view:backpack");
+        Assert.Valid(listProjection.Validate());
+        Assert.Equal(listContainer.Items.Count, listProjection.Rows.Count, "list projection row count");
+
+        var gridContainer = new InventoryContainerSnapshot(
+            "container:grid_pack/1",
+            "container.grid_pack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:alpha"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Grid,
+            [InventoryPermissionDescriptor.PublicReadTake],
+            [
+                new InventoryItemSnapshot(
+                    "item:wide_sword/1",
+                    "item.wide_sword",
+                    Quantity: 1,
+                    MaxStackQuantity: 1,
+                    InventoryPlacementDescriptor.Grid(0, 0, width: 2, height: 1)),
+                new InventoryItemSnapshot(
+                    "item:gem/1",
+                    "item.gem",
+                    Quantity: 3,
+                    MaxStackQuantity: 20,
+                    InventoryPlacementDescriptor.Grid(2, 0, width: 1, height: 1)),
+            ]);
+        Assert.Valid(gridContainer.Validate());
+
+        InventoryListProjectionSnapshot gridAsList = InventoryListProjectionSnapshot.FromContainer(
+            "projection:list/grid_pack",
+            gridContainer,
+            containerRevision: 3,
+            InventoryProjectionSortDescriptor.ByDefinitionId);
+        Assert.Valid(gridAsList.Validate());
+        Assert.Equal(InventoryPlacementMode.Grid, gridAsList.SourcePlacementMode, "grid projection source placement mode");
+
+        Assert.InvalidContains((gridAsList with
+        {
+            Rows =
+            [
+                gridAsList.Rows[0],
+                gridAsList.Rows[1] with { DisplayIndex = gridAsList.Rows[0].DisplayIndex }
+            ]
+        }).Validate(), "duplicate display");
+
+        Assert.InvalidContains((gridAsList with
+        {
+            Rows = [gridAsList.Rows[0], gridAsList.Rows[0] with { DisplayIndex = 8 }]
+        }).Validate(), "duplicate item");
+
+        Assert.InvalidContains((gridAsList with
+        {
+            Sort = InventoryProjectionSortDescriptor.ByDefinitionId with { Direction = (InventoryProjectionSortDirection)255 }
+        }).Validate(), "sort direction");
+    }
+
     private static InventoryContainerSnapshot CreateListContainer()
     {
         return new InventoryContainerSnapshot(
@@ -446,6 +510,14 @@ internal static class Assert
     }
 
     public static void Equal(int expected, int actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(InventoryPlacementMode expected, InventoryPlacementMode actual, string label)
     {
         if (expected != actual)
         {

@@ -84,6 +84,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         IterationCount = 5,
         Execute = () => RunTransactionValidationScenario(CreateTransactionSnapshot(1_000)),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ListProjection_FromGridContainer_1000Items",
+        Category = "InventoryProjection",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunListProjectionScenario(CreateGridContainer(1_000)),
+    };
 }
 
 static ScenarioMeasurement RunContainerValidationScenario(InventoryContainerSnapshot container)
@@ -197,6 +208,23 @@ static ScenarioMeasurement RunTransactionValidationScenario(InventoryTransaction
     }
 
     return new ScenarioMeasurement(transaction.SuspendedItems.Count, transaction.SuspendedItems.Count + transaction.ParticipantContainerIds.Count);
+}
+
+static ScenarioMeasurement RunListProjectionScenario(InventoryContainerSnapshot container)
+{
+    InventoryListProjectionSnapshot projection = InventoryListProjectionSnapshot.FromContainer(
+        "projection:bench/list_from_grid",
+        container,
+        containerRevision: 9,
+        InventoryProjectionSortDescriptor.ByDefinitionId,
+        viewId: "view:bench/list");
+    InventoryValidationResult result = projection.Validate();
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(projection.Rows.Count, projection.Rows.Count + (int)projection.SourcePlacementMode);
 }
 
 static InventoryContainerSnapshot CreateListContainer(int itemCount)
