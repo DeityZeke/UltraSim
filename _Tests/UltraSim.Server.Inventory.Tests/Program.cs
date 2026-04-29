@@ -15,7 +15,9 @@ internal static class TestRunner
         Run(nameof(DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy), DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy);
         Run(nameof(InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers), InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers);
         Run(nameof(InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource), InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource);
+        Run(nameof(InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone), InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone);
         Run(nameof(InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions), InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions);
+        Run(nameof(InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies), InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -318,6 +320,39 @@ internal static class TestRunner
         Assert.Equal("item:coin/trade", restoredLeft.Items[0].ItemInstanceId, "restored item id");
     }
 
+    private static void InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone()
+    {
+        var store = new InMemoryInventoryStore(new FakeInventoryRuntimeRefResolver(), new DefaultInventoryOwnerLifetimePolicy());
+        InventoryContainerSnapshot left = CreateContainer(
+            "container:trade/gone_left",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:left"),
+            InventoryContainerLifecycle.Transactional,
+            [CreateCoinItem("item:coin/unresolved")]);
+        InventoryContainerSnapshot right = CreateContainer(
+            "container:trade/gone_right",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:right"),
+            InventoryContainerLifecycle.Transactional);
+        Assert.StoreSuccess(store.AddContainer(left));
+        Assert.StoreSuccess(store.AddContainer(right));
+        Assert.StoreSuccess(store.BeginTransaction(new InventoryTransactionSnapshot(
+            "trade:gone_source/1",
+            InventoryTransactionState.Open,
+            [left.ContainerId, right.ContainerId],
+            [])));
+        Assert.StoreSuccess(store.SuspendWholeItem(
+            "trade:gone_source/1",
+            left.ContainerId,
+            right.ContainerId,
+            "item:coin/unresolved"));
+
+        Assert.StoreSuccess(store.DestroyContainer(left.ContainerId, "source removed during transaction"));
+        InventoryStoreOperationResult cancel = store.CancelTransaction("trade:gone_source/1", "test unresolved return");
+        Assert.StoreSuccess(cancel);
+        Assert.ContainsEvent(cancel.Events, InventoryStoreEventKind.SuspendedItemReturnUnresolved, "item:coin/unresolved");
+        Assert.NotContainsEvent(cancel.Events, InventoryStoreEventKind.SuspendedItemReleased, "item:coin/unresolved");
+        Assert.False(store.TryGetTransaction("trade:gone_source/1", out _), "transaction removed after unresolved cancel");
+    }
+
     private static void InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions()
     {
         World world = CreateWorld();
@@ -367,6 +402,72 @@ internal static class TestRunner
         Assert.Equal(1, restoredLeft.Items.Count, "released item returned to source");
         Assert.Equal("item:coin/entity_trade", restoredLeft.Items[0].ItemInstanceId, "released item id");
         Assert.Equal(0, store.ActiveContainerCount, "active containers after owner invalidation");
+    }
+
+    private static void InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:mover");
+        InventoryItemSnapshot sword = new InventoryItemSnapshot(
+            "item:sword/move",
+            "item.sword",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.List(0));
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:source/move",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:mover"),
+            InventoryContainerLifecycle.Persistent,
+            [sword]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:destination/move",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:mover"),
+            InventoryContainerLifecycle.Persistent);
+        var intent = new InventoryMutationIntent(
+            "corr/move/rules",
+            requester,
+            ClientSequence: 41,
+            InventoryMutationKind.MoveItem,
+            source.ContainerId,
+            destination.ContainerId,
+            sword.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.List(0));
+        Assert.Valid(intent.Validate());
+
+        var access = new PublicTakePutAccessPolicy();
+        var range = new ToggleRangePolicy();
+        var capacity = new MaxItemCountCapacityPolicy(maxItems: 1);
+        var rules = new InventoryMoveMutationRules(access, capacity, range);
+        InventoryMutationRuleContext context = new InventoryMutationRuleContext(
+            intent,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            source,
+            destination,
+            sword,
+            DestinationItem: null);
+
+        InventoryMutationRuleDecision accepted = rules.Evaluate(context);
+        Assert.True(accepted.IsAccepted, "move rule accepts baseline");
+        InventoryMutationResult acceptedResult = accepted.ToResult(intent, [source.ContainerId, destination.ContainerId]);
+        Assert.Valid(acceptedResult.Validate());
+
+        range.Allow = false;
+        InventoryMutationRuleDecision outOfRange = rules.Evaluate(context);
+        Assert.False(outOfRange.IsAccepted, "move rule range rejection");
+        Assert.Equal(InventoryMutationFailureReason.OutOfRange, outOfRange.FailureReason, "range failure reason");
+        range.Allow = true;
+
+        InventoryContainerSnapshot fullDestination = destination with { Items = [CreateCoinItem("item:coin/full_destination")] };
+        InventoryMutationRuleDecision full = rules.Evaluate(context with { DestinationContainer = fullDestination });
+        Assert.False(full.IsAccepted, "move rule capacity rejection");
+        Assert.Equal(InventoryMutationFailureReason.RuleRejected, full.FailureReason, "capacity failure reason");
+
+        var noPutAccess = new DenyPutAccessPolicy();
+        var noPutRules = new InventoryMoveMutationRules(noPutAccess, capacity, range);
+        InventoryMutationRuleDecision denied = noPutRules.Evaluate(context);
+        Assert.False(denied.IsAccepted, "move rule access rejection");
+        Assert.Equal(InventoryMutationFailureReason.Unauthorized, denied.FailureReason, "access failure reason");
     }
 
     private static World CreateWorld()
@@ -610,6 +711,75 @@ internal sealed class MergeMutationRules : IInventoryMutationRules
     }
 }
 
+internal sealed class PublicTakePutAccessPolicy : IInventoryContainerAccessPolicy
+{
+    public InventoryContainerAccessDecision Evaluate(in InventoryContainerAccessRequest request)
+    {
+        if (!request.RequesterResolution.IsResolved)
+        {
+            return InventoryContainerAccessDecision.Denied(
+                InventoryMutationFailureReason.InvalidRequester,
+                "Requester did not resolve.");
+        }
+
+        return InventoryContainerAccessDecision.Allowed(request.RequestedAccess);
+    }
+}
+
+internal sealed class DenyPutAccessPolicy : IInventoryContainerAccessPolicy
+{
+    public InventoryContainerAccessDecision Evaluate(in InventoryContainerAccessRequest request)
+    {
+        if ((request.RequestedAccess & InventoryAccessFlags.Put) == InventoryAccessFlags.Put)
+        {
+            return InventoryContainerAccessDecision.Denied(
+                InventoryMutationFailureReason.Unauthorized,
+                "Put access denied.");
+        }
+
+        return InventoryContainerAccessDecision.Allowed(request.RequestedAccess);
+    }
+}
+
+internal sealed class ToggleRangePolicy : IInventoryInteractionRangePolicy
+{
+    public bool Allow { get; set; } = true;
+
+    public InventoryMutationRuleDecision IsInRange(
+        InventoryRequesterRef requester,
+        InventoryContainerSnapshot source,
+        InventoryContainerSnapshot? destination)
+    {
+        return Allow
+            ? InventoryMutationRuleDecision.Accepted()
+            : InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.OutOfRange,
+                "Requester is out of range.");
+    }
+}
+
+internal sealed class MaxItemCountCapacityPolicy : IInventoryContainerCapacityPolicy
+{
+    private readonly int _maxItems;
+
+    public MaxItemCountCapacityPolicy(int maxItems)
+    {
+        _maxItems = maxItems;
+    }
+
+    public InventoryMutationRuleDecision CanAccept(
+        InventoryContainerSnapshot destination,
+        InventoryItemSnapshot item,
+        InventoryPlacementDescriptor? proposedPlacement)
+    {
+        return destination.Items.Count < _maxItems
+            ? InventoryMutationRuleDecision.Accepted()
+            : InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.RuleRejected,
+                "Destination container is full.");
+    }
+}
+
 internal static class Assert
 {
     public static void Valid(InventoryValidationResult result)
@@ -768,5 +938,28 @@ internal static class Assert
         }
 
         throw new InvalidOperationException($"Expected event {kind} for '{id}'.");
+    }
+
+    public static void NotContainsEvent(
+        IReadOnlyList<InventoryStoreEvent> events,
+        InventoryStoreEventKind kind,
+        string id)
+    {
+        for (int i = 0; i < events.Count; i++)
+        {
+            InventoryStoreEvent candidate = events[i];
+            if (candidate.Kind != kind)
+            {
+                continue;
+            }
+
+            if (string.Equals(candidate.ContainerId, id, StringComparison.Ordinal) ||
+                string.Equals(candidate.ViewId, id, StringComparison.Ordinal) ||
+                string.Equals(candidate.TransactionId, id, StringComparison.Ordinal) ||
+                string.Equals(candidate.ItemInstanceId, id, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Did not expect event {kind} for '{id}'.");
+            }
+        }
     }
 }

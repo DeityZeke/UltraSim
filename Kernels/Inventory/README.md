@@ -164,7 +164,7 @@ The kernel may use identity references such as `InventoryOwnerRef(Entity, 123)` 
 
 The first bridge prototype lives in `Server/Inventory`. It resolves ECS entity owner/requester refs through `IEntityReadOnly` while keeping ECS types out of this kernel. Entity refs use `entity:{packedUlong}` so ECS generation/version bits survive across the bridge and stale slot reuse is rejected.
 
-`Server/Inventory` also owns the first bridge foundation: mutation admission, container access, stack merging, owner-lifetime invalidation policies, and an in-memory store/session prototype. These are bridge contracts, not kernel contracts, because they need runtime resolution and gameplay policy.
+`Server/Inventory` also owns the first bridge foundation: mutation admission, container access, stack merging, owner-lifetime invalidation policies, an in-memory store/session prototype, unresolved suspended-item return events, and a first whole-item move rule. These are bridge contracts, not kernel contracts, because they need runtime resolution and gameplay policy.
 
 ## Core Concepts
 

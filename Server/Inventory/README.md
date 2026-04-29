@@ -24,6 +24,13 @@ Implemented first boundary slice:
   - scoped delta dispatch recipient selection
   - transaction begin/suspend/cancel
   - owner-lifetime refresh handling
+- first concrete move mutation rule:
+  - requester resolution check
+  - source take access check
+  - destination put access check
+  - range policy hook
+  - capacity policy hook
+  - whole-item move only
 
 Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse. If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
 
@@ -41,7 +48,9 @@ The default policy currently maps:
 
 Actual session closure, delta emission, item rollback, and persistence are still future store/session responsibilities.
 
-The in-memory store prototype now exercises the first version of this signal path. It closes viewers, cancels affected transactions, and returns suspended whole items to their source containers when a transaction is cancelled or owner invalidation requires release. It does not persist, authorize real gameplay, split partial stacks, or own transport delivery.
+The in-memory store prototype now exercises the first version of this signal path. It closes viewers, cancels affected transactions, and returns suspended whole items to their source containers when a transaction is cancelled or owner invalidation requires release. If the source container no longer exists, the store emits `SuspendedItemReturnUnresolved` instead of guessing whether to destroy, recover, or reroute the item.
+
+It does not persist, authorize real gameplay, split partial stacks, or own transport delivery.
 
 ## Store Prototype Rules
 
@@ -50,7 +59,20 @@ The in-memory store prototype now exercises the first version of this signal pat
 - Transactions are generic participant-container sets with suspended items.
 - Delta fanout always uses the container's viewer registry.
 - Store events are effects for higher layers to consume; they are not network packets.
+- Unresolved suspended-item returns are explicit events for higher layers/rules to recover or destroy deliberately.
 - Persistence, audit logging, and database ownership stay outside this prototype.
+
+## Move Rule Prototype
+
+`InventoryMoveMutationRules` is the first concrete mutation rule. It intentionally supports only whole-item `MoveItem` intents. It proves that real mutation policy can be composed from:
+
+- `IInventoryContainerAccessPolicy`
+- `IInventoryInteractionRangePolicy`
+- `IInventoryContainerCapacityPolicy`
+- kernel snapshots/intents
+- resolved requester refs
+
+Splits, stack merges, equipment restrictions, grid collision placement, weight limits, ownership rules, and scripted container behavior remain future policy implementations.
 
 ## Boundary Rules
 

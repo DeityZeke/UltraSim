@@ -348,6 +348,25 @@ public sealed class InMemoryInventoryStore
         return InventoryStoreOperationResult.Success(events);
     }
 
+    public InventoryStoreOperationResult DestroyContainer(string containerId, string reason)
+    {
+        if (!_containers.ContainsKey(containerId))
+        {
+            return InventoryStoreOperationResult.Failure($"Inventory container '{containerId}' does not exist.");
+        }
+
+        var events = new List<InventoryStoreEvent>();
+        CloseAllViewers(containerId, events, reason);
+        _containers.Remove(containerId);
+        _viewerRegistries.Remove(containerId);
+        events.Add(new InventoryStoreEvent(
+            InventoryStoreEventKind.ContainerDestroyed,
+            containerId,
+            Message: reason));
+
+        return InventoryStoreOperationResult.Success(events);
+    }
+
     private void CloseAllViewers(string containerId, List<InventoryStoreEvent> events, string? reason)
     {
         if (!_viewerRegistries.TryGetValue(containerId, out InventoryContainerViewerRegistrySnapshot? registry))
@@ -409,14 +428,22 @@ public sealed class InMemoryInventoryStore
             if (_containers.TryGetValue(suspended.SourceContainerId, out InventoryContainerSnapshot? source))
             {
                 _containers[suspended.SourceContainerId] = AddItem(source, item);
+                events.Add(new InventoryStoreEvent(
+                    InventoryStoreEventKind.SuspendedItemReleased,
+                    suspended.SourceContainerId,
+                    TransactionId: transactionId,
+                    ItemInstanceId: suspended.ItemInstanceId,
+                    Message: reason));
             }
-
-            events.Add(new InventoryStoreEvent(
-                InventoryStoreEventKind.SuspendedItemReleased,
-                suspended.SourceContainerId,
-                TransactionId: transactionId,
-                ItemInstanceId: suspended.ItemInstanceId,
-                Message: reason));
+            else
+            {
+                events.Add(new InventoryStoreEvent(
+                    InventoryStoreEventKind.SuspendedItemReturnUnresolved,
+                    suspended.SourceContainerId,
+                    TransactionId: transactionId,
+                    ItemInstanceId: suspended.ItemInstanceId,
+                    Message: reason));
+            }
         }
 
         transaction.ReservedItems.Clear();
