@@ -584,9 +584,9 @@ Current status:
   - persisted cache metadata index with validated JSON load/save
   - metadata eviction execution that removes planned candidates from the index
   - opaque UI schema byte cache store with SHA-256 validation and metadata updates
+  - server patch asset byte cache store with manifest size/SHA-256 validation and metadata updates
 - remaining G5 work:
   - first Godot-side content resolver adapter
-  - patch asset cache IO
   - schema codec/validation and typed schema cache entries
 - manifest validation tests
 - resolver precedence tests

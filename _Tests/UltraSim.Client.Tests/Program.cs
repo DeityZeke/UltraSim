@@ -31,6 +31,8 @@ internal static class TestRunner
         Run(nameof(ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries), ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries);
         Run(nameof(UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes), UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes);
         Run(nameof(UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes), UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes);
+        Run(nameof(ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets), ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets);
+        Run(nameof(ServerAssetCacheStore_RejectsSizeHashAndUnsafePathMismatches), ServerAssetCacheStore_RejectsSizeHashAndUnsafePathMismatches);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -661,6 +663,68 @@ internal static class TestRunner
         Assert.False(store.TryWrite(key, [1, 2, 3, 4], DateTimeOffset.UtcNow, pinned: false, out error));
         Assert.Equal("Asset SHA-256 hash mismatch.", error);
         Assert.False(File.Exists(pathPolicy.GetSchemaPath(key)));
+        Assert.Equal(0, index.Count);
+    }
+
+    private static void ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        byte[] bytes = [3, 1, 4, 1, 5];
+        string hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        var manifestEntry = new ServerPatchManifestEntry("icons/items/sword.png", bytes.Length, hash);
+
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-asset-cache-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        var store = new ServerAssetCacheStore(pathPolicy, index);
+        DateTimeOffset writtenAt = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        DateTimeOffset readAt = writtenAt.AddMinutes(3);
+
+        Assert.False(store.Has(server, manifestEntry));
+        Assert.True(store.TryWrite(server, manifestEntry, bytes, writtenAt, pinned: false, out error), error);
+        Assert.True(store.Has(server, manifestEntry));
+        Assert.True(pathPolicy.TryGetServerAssetPath(server, manifestEntry.RelativePath, out string assetPath, out error), error);
+        Assert.True(File.Exists(assetPath));
+
+        string cacheKey = ServerAssetCacheStore.CreateCacheKey(server, "icons/items/sword.png", hash);
+        Assert.True(index.TryGet(cacheKey, out ContentCacheEntry entry));
+        Assert.Equal(ContentCacheEntryKind.Asset, entry.Kind);
+        Assert.Equal(bytes.Length, entry.SizeBytes);
+        Assert.Equal(writtenAt, entry.LastAccessUtc);
+        Assert.False(entry.Pinned);
+        Assert.True(entry.RelativePath.EndsWith("Assets/icons/items/sword.png", StringComparison.Ordinal), entry.RelativePath);
+
+        Assert.True(store.TryRead(server, manifestEntry, readAt, out byte[] readBytes, out error), error);
+        Assert.SequenceEqual(bytes, readBytes);
+        Assert.True(index.TryGet(cacheKey, out entry));
+        Assert.Equal(readAt, entry.LastAccessUtc);
+
+        Assert.True(store.Remove(server, manifestEntry));
+        Assert.False(File.Exists(assetPath));
+        Assert.False(index.TryGet(cacheKey, out _));
+    }
+
+    private static void ServerAssetCacheStore_RejectsSizeHashAndUnsafePathMismatches()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        byte[] bytes = [1, 2, 3, 4];
+        string hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-asset-cache-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        var store = new ServerAssetCacheStore(pathPolicy, index);
+
+        var wrongSize = new ServerPatchManifestEntry("icons/items/sword.png", bytes.Length + 1, hash);
+        Assert.False(store.TryWrite(server, wrongSize, bytes, DateTimeOffset.UtcNow, pinned: false, out error));
+        Assert.True(error.Contains("size mismatch", StringComparison.OrdinalIgnoreCase), error);
+
+        var wrongHash = new ServerPatchManifestEntry("icons/items/sword.png", bytes.Length, new string('0', 64));
+        Assert.False(store.TryWrite(server, wrongHash, bytes, DateTimeOffset.UtcNow, pinned: false, out error));
+        Assert.Equal("Asset SHA-256 hash mismatch.", error);
+
+        var unsafePath = new ServerPatchManifestEntry("../outside.bin", bytes.Length, hash);
+        Assert.False(store.TryWrite(server, unsafePath, bytes, DateTimeOffset.UtcNow, pinned: false, out error));
+        Assert.Equal("Content path cannot contain traversal segments.", error);
         Assert.Equal(0, index.Count);
     }
 

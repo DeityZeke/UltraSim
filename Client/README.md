@@ -32,6 +32,7 @@ What now exists:
     - first cache metadata/quota eviction planning hook
     - persisted cache metadata index store with safe JSON round-trip validation
     - UI schema cache byte store with hash validation and metadata updates
+    - server patch asset cache byte store with manifest size/hash validation
 - `Client/Network`
   - movement input send path over `Kernels/Network`
   - authoritative movement-state receive path
