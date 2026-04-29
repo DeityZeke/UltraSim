@@ -24,6 +24,7 @@ Implemented first boundary slice:
   - scoped delta dispatch recipient selection
   - transaction begin/suspend/cancel
   - owner-lifetime refresh handling
+  - whole-item move application through injected mutation rules
 - first concrete move mutation rule:
   - requester resolution check
   - source take access check
@@ -46,7 +47,7 @@ The default policy currently maps:
 - runtime/ephemeral/destructive entity container with despawned owner: close viewers and destroy container
 - non-entity unresolved owner: close viewers
 
-Actual session closure, delta emission, item rollback, and persistence are still future store/session responsibilities.
+Transport session closure, persistence, recovery policy, and real gameplay-specific rollback remain future bridge responsibilities.
 
 The in-memory store prototype now exercises the first version of this signal path. It closes viewers, cancels affected transactions, and returns suspended whole items to their source containers when a transaction is cancelled or owner invalidation requires release. If the source container no longer exists, the store emits `SuspendedItemReturnUnresolved` instead of guessing whether to destroy, recover, or reroute the item.
 
@@ -60,6 +61,8 @@ It does not persist, authorize real gameplay, split partial stacks, or own trans
 - Delta fanout always uses the container's viewer registry.
 - Store events are effects for higher layers to consume; they are not network packets.
 - Unresolved suspended-item returns are explicit events for higher layers/rules to recover or destroy deliberately.
+- `ApplyMove` evaluates injected mutation rules first, then commits snapshot changes only for accepted whole-item moves.
+- Rule rejection is returned as an `InventoryMutationResult`; malformed store state remains a store failure.
 - Persistence, audit logging, and database ownership stay outside this prototype.
 
 ## Move Rule Prototype

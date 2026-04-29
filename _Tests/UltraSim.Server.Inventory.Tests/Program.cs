@@ -18,6 +18,8 @@ internal static class TestRunner
         Run(nameof(InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone), InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone);
         Run(nameof(InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions), InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions);
         Run(nameof(InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies), InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies);
+        Run(nameof(InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas);
+        Run(nameof(InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots), InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -470,6 +472,138 @@ internal static class TestRunner
         Assert.Equal(InventoryMutationFailureReason.Unauthorized, denied.FailureReason, "access failure reason");
     }
 
+    private static void InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:apply_move");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot coin = CreateCoinItem("item:coin/apply_move");
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:move_apply/source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_move"),
+            InventoryContainerLifecycle.Persistent,
+            [coin]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:move_apply/destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_move"),
+            InventoryContainerLifecycle.Persistent);
+        InventoryContainerSnapshot unrelated = CreateContainer(
+            "container:move_apply/unrelated",
+            new InventoryOwnerRef(InventoryOwnerKind.WorldObject, "world:unrelated"),
+            InventoryContainerLifecycle.WorldPersistent);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+        Assert.StoreSuccess(store.AddContainer(unrelated));
+
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:move_apply/source",
+            source.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:move_apply/destination",
+            destination.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:move_apply/unrelated",
+            unrelated.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:move_apply",
+            requester,
+            ClientSequence: 77,
+            InventoryMutationKind.MoveItem,
+            source.ContainerId,
+            destination.ContainerId,
+            coin.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.List(2));
+        var rules = new InventoryMoveMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 4),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyMove(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "move mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "move mutation result kind");
+        Assert.Equal(intent.ClientSequence, result.MutationResult.ClientSequence, "move mutation sequence");
+        Assert.Equal(2, result.Dispatches.Count, "move dispatch count");
+
+        Assert.True(store.TryGetContainer(source.ContainerId, out InventoryContainerSnapshot updatedSource), "source container after move");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot updatedDestination), "destination container after move");
+        Assert.Equal(0, updatedSource.Items.Count, "source items after move");
+        Assert.Equal(1, updatedDestination.Items.Count, "destination items after move");
+        Assert.Equal(2, updatedDestination.Items[0].Placement.Index, "destination item placement");
+
+        Assert.Equal(InventoryContainerDeltaKind.ItemRemoved, result.Dispatches[0].Delta.Kind, "source delta kind");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:move_apply/source", "source delta recipient");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:move_apply/destination", "source delta excludes destination");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:move_apply/unrelated", "source delta excludes unrelated");
+
+        Assert.Equal(InventoryContainerDeltaKind.ItemAdded, result.Dispatches[1].Delta.Kind, "destination delta kind");
+        Assert.Contains(result.Dispatches[1].RecipientViewIds, "view:move_apply/destination", "destination delta recipient");
+        Assert.NotContains(result.Dispatches[1].RecipientViewIds, "view:move_apply/source", "destination delta excludes source");
+        Assert.NotContains(result.Dispatches[1].RecipientViewIds, "view:move_apply/unrelated", "destination delta excludes unrelated");
+    }
+
+    private static void InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:apply_reject");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot coin = CreateCoinItem("item:coin/apply_reject");
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:move_reject/source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_reject"),
+            InventoryContainerLifecycle.Persistent,
+            [coin]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:move_reject/destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_reject"),
+            InventoryContainerLifecycle.Persistent);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:move_reject",
+            requester,
+            ClientSequence: 78,
+            InventoryMutationKind.MoveItem,
+            source.ContainerId,
+            destination.ContainerId,
+            coin.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.List(0));
+        var range = new ToggleRangePolicy { Allow = false };
+        var rules = new InventoryMoveMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 4),
+            range);
+
+        InventoryStoreOperationResult result = store.ApplyMove(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "rejected move mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Rejected, result.MutationResult!.ResultKind, "rejected move result kind");
+        Assert.Equal(InventoryMutationFailureReason.OutOfRange, result.MutationResult.FailureReason, "rejected move reason");
+        Assert.Equal(0, result.Dispatches.Count, "rejected move dispatch count");
+
+        Assert.True(store.TryGetContainer(source.ContainerId, out InventoryContainerSnapshot unchangedSource), "source container after rejected move");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot unchangedDestination), "destination container after rejected move");
+        Assert.Equal(1, unchangedSource.Items.Count, "source items after rejected move");
+        Assert.Equal(0, unchangedDestination.Items.Count, "destination items after rejected move");
+        Assert.Equal(coin.ItemInstanceId, unchangedSource.Items[0].ItemInstanceId, "source item after rejected move");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
@@ -860,6 +994,22 @@ internal static class Assert
     }
 
     public static void Equal(InventoryMutationFailureReason expected, InventoryMutationFailureReason actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(InventoryMutationResultKind expected, InventoryMutationResultKind actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(InventoryContainerDeltaKind expected, InventoryContainerDeltaKind actual, string label)
     {
         if (expected != actual)
         {

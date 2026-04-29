@@ -18,6 +18,7 @@ public sealed class InMemoryInventoryStore
     private readonly IInventoryRuntimeRefResolver _refResolver;
     private readonly IInventoryOwnerLifetimePolicy _ownerLifetimePolicy;
     private readonly Dictionary<string, InventoryContainerSnapshot> _containers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _containerRevisions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, InventoryContainerViewerRegistrySnapshot> _viewerRegistries = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TransactionEntry> _transactions = new(StringComparer.Ordinal);
 
@@ -80,6 +81,7 @@ public sealed class InMemoryInventoryStore
         }
 
         _containers.Add(container.ContainerId, container);
+        _containerRevisions.Add(container.ContainerId, 0);
         _viewerRegistries.Add(
             container.ContainerId,
             new InventoryContainerViewerRegistrySnapshot(container.ContainerId, Revision: 0, Viewers: []));
@@ -187,6 +189,160 @@ public sealed class InMemoryInventoryStore
             dispatches: [new InventoryStoreDeltaDispatch(delta, recipients)]);
     }
 
+    public InventoryStoreOperationResult ApplyMove(InventoryMutationIntent intent, IInventoryMutationRules rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        InventoryValidationResult intentValidation = intent.Validate();
+        if (!intentValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(intentValidation.Error);
+        }
+
+        if (intent.Kind != InventoryMutationKind.MoveItem)
+        {
+            return InventoryStoreOperationResult.Failure("ApplyMove only accepts MoveItem intents.");
+        }
+
+        _containers.TryGetValue(intent.SourceContainerId!, out InventoryContainerSnapshot? sourceContainer);
+        _containers.TryGetValue(intent.DestinationContainerId!, out InventoryContainerSnapshot? destinationContainer);
+        InventoryItemSnapshot? sourceItem = null;
+        InventoryItemSnapshot? destinationItem = null;
+        int sourceItemIndex = -1;
+
+        if (sourceContainer is not null)
+        {
+            sourceItemIndex = FindItemIndex(sourceContainer, intent.SourceItemInstanceId!);
+            if (sourceItemIndex >= 0)
+            {
+                sourceItem = sourceContainer.Items[sourceItemIndex];
+            }
+        }
+
+        if (destinationContainer is not null && !string.IsNullOrWhiteSpace(intent.DestinationItemInstanceId))
+        {
+            int destinationItemIndex = FindItemIndex(destinationContainer, intent.DestinationItemInstanceId);
+            if (destinationItemIndex >= 0)
+            {
+                destinationItem = destinationContainer.Items[destinationItemIndex];
+            }
+        }
+
+        InventoryRuntimeRefResolution requester = _refResolver.ResolveRequester(intent.Requester);
+        InventoryMutationRuleDecision decision = rules.Evaluate(new InventoryMutationRuleContext(
+            intent,
+            requester,
+            sourceContainer,
+            destinationContainer,
+            sourceItem,
+            destinationItem));
+
+        string[] affectedContainerIds = BuildAffectedContainerIds(intent.SourceContainerId!, intent.DestinationContainerId!);
+        InventoryMutationResult mutationResult = decision.ToResult(intent, affectedContainerIds);
+        InventoryValidationResult resultValidation = mutationResult.Validate();
+        if (!resultValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(resultValidation.Error);
+        }
+
+        if (!decision.IsAccepted)
+        {
+            return InventoryStoreOperationResult.Success(mutationResult: mutationResult);
+        }
+
+        if (sourceContainer is null || destinationContainer is null || sourceItem is null || sourceItemIndex < 0)
+        {
+            return InventoryStoreOperationResult.Failure("Accepted move decision requires existing source/destination containers and source item.");
+        }
+
+        InventoryPlacementDescriptor currentPlacement = intent.ProposedPlacement ?? sourceItem.Placement;
+        InventoryItemSnapshot movedItem = sourceItem with { Placement = currentPlacement };
+        var dispatches = new List<InventoryStoreDeltaDispatch>(capacity: 2);
+
+        if (string.Equals(sourceContainer.ContainerId, destinationContainer.ContainerId, StringComparison.Ordinal))
+        {
+            InventoryContainerSnapshot updated = ReplaceItem(sourceContainer, sourceItemIndex, movedItem);
+            InventoryValidationResult validation = updated.Validate();
+            if (!validation.IsValid)
+            {
+                return InventoryStoreOperationResult.Failure(validation.Error);
+            }
+
+            long revision = SetContainerSnapshot(updated);
+            InventoryStoreOperationResult dispatchResult = DispatchDelta(new InventoryContainerDelta(
+                $"delta:{intent.CorrelationId}/move/{movedItem.ItemInstanceId}",
+                updated.ContainerId,
+                revision,
+                InventoryContainerDeltaKind.ItemMoved,
+                movedItem.ItemInstanceId,
+                Item: null,
+                PreviousPlacement: sourceItem.Placement,
+                CurrentPlacement: movedItem.Placement,
+                QuantityDelta: 0,
+                InventoryAccessFlags.Read));
+            if (!dispatchResult.Succeeded)
+            {
+                return dispatchResult;
+            }
+
+            dispatches.AddRange(dispatchResult.Dispatches);
+            return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+        }
+
+        InventoryContainerSnapshot updatedSource = RemoveItem(sourceContainer, sourceItemIndex);
+        InventoryContainerSnapshot updatedDestination = AddItem(destinationContainer, movedItem);
+        InventoryValidationResult sourceValidation = updatedSource.Validate();
+        if (!sourceValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(sourceValidation.Error);
+        }
+
+        InventoryValidationResult destinationValidation = updatedDestination.Validate();
+        if (!destinationValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(destinationValidation.Error);
+        }
+
+        long sourceRevision = SetContainerSnapshot(updatedSource);
+        long destinationRevision = SetContainerSnapshot(updatedDestination);
+
+        InventoryStoreOperationResult removedDispatch = DispatchDelta(new InventoryContainerDelta(
+            $"delta:{intent.CorrelationId}/removed/{movedItem.ItemInstanceId}",
+            updatedSource.ContainerId,
+            sourceRevision,
+            InventoryContainerDeltaKind.ItemRemoved,
+            movedItem.ItemInstanceId,
+            Item: null,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read));
+        if (!removedDispatch.Succeeded)
+        {
+            return removedDispatch;
+        }
+
+        dispatches.AddRange(removedDispatch.Dispatches);
+        InventoryStoreOperationResult addedDispatch = DispatchDelta(new InventoryContainerDelta(
+            $"delta:{intent.CorrelationId}/added/{movedItem.ItemInstanceId}",
+            updatedDestination.ContainerId,
+            destinationRevision,
+            InventoryContainerDeltaKind.ItemAdded,
+            movedItem.ItemInstanceId,
+            movedItem,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read));
+        if (!addedDispatch.Succeeded)
+        {
+            return addedDispatch;
+        }
+
+        dispatches.AddRange(addedDispatch.Dispatches);
+        return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+    }
+
     public InventoryStoreOperationResult BeginTransaction(InventoryTransactionSnapshot transaction)
     {
         InventoryValidationResult validation = transaction.Validate();
@@ -246,7 +402,7 @@ public sealed class InMemoryInventoryStore
             return InventoryStoreOperationResult.Failure($"Inventory item '{item.ItemInstanceId}' is already suspended in transaction.");
         }
 
-        _containers[sourceContainerId] = RemoveItem(sourceContainer, itemIndex);
+        long sourceRevision = SetContainerSnapshot(RemoveItem(sourceContainer, itemIndex));
         var suspendedItems = new InventorySuspendedItemSnapshot[transaction.Snapshot.SuspendedItems.Count + 1];
         for (int i = 0; i < transaction.Snapshot.SuspendedItems.Count; i++)
         {
@@ -269,7 +425,7 @@ public sealed class InMemoryInventoryStore
         var delta = new InventoryContainerDelta(
             $"delta:{transactionId}/reserved/{item.ItemInstanceId}",
             sourceContainerId,
-            ContainerRevision: transaction.Snapshot.SuspendedItems.Count,
+            ContainerRevision: sourceRevision,
             InventoryContainerDeltaKind.ItemReserved,
             item.ItemInstanceId,
             Item: null,
@@ -338,6 +494,7 @@ public sealed class InMemoryInventoryStore
         {
             CancelTransactionsForContainer(containerId, events, decision.Reason ?? "Container destroyed.");
             _containers.Remove(containerId);
+            _containerRevisions.Remove(containerId);
             _viewerRegistries.Remove(containerId);
             events.Add(new InventoryStoreEvent(
                 InventoryStoreEventKind.ContainerDestroyed,
@@ -358,6 +515,7 @@ public sealed class InMemoryInventoryStore
         var events = new List<InventoryStoreEvent>();
         CloseAllViewers(containerId, events, reason);
         _containers.Remove(containerId);
+        _containerRevisions.Remove(containerId);
         _viewerRegistries.Remove(containerId);
         events.Add(new InventoryStoreEvent(
             InventoryStoreEventKind.ContainerDestroyed,
@@ -427,7 +585,7 @@ public sealed class InMemoryInventoryStore
 
             if (_containers.TryGetValue(suspended.SourceContainerId, out InventoryContainerSnapshot? source))
             {
-                _containers[suspended.SourceContainerId] = AddItem(source, item);
+                SetContainerSnapshot(AddItem(source, item));
                 events.Add(new InventoryStoreEvent(
                     InventoryStoreEventKind.SuspendedItemReleased,
                     suspended.SourceContainerId,
@@ -476,6 +634,23 @@ public sealed class InMemoryInventoryStore
         return -1;
     }
 
+    private static string[] BuildAffectedContainerIds(string sourceContainerId, string destinationContainerId)
+    {
+        return string.Equals(sourceContainerId, destinationContainerId, StringComparison.Ordinal)
+            ? [sourceContainerId]
+            : [sourceContainerId, destinationContainerId];
+    }
+
+    private long SetContainerSnapshot(InventoryContainerSnapshot container)
+    {
+        _containers[container.ContainerId] = container;
+        long revision = _containerRevisions.TryGetValue(container.ContainerId, out long current)
+            ? current + 1
+            : 1;
+        _containerRevisions[container.ContainerId] = revision;
+        return revision;
+    }
+
     private static InventoryContainerSnapshot RemoveItem(InventoryContainerSnapshot container, int itemIndex)
     {
         var items = new InventoryItemSnapshot[container.Items.Count - 1];
@@ -500,6 +675,20 @@ public sealed class InMemoryInventoryStore
         }
 
         items[^1] = item;
+        return container with { Items = items };
+    }
+
+    private static InventoryContainerSnapshot ReplaceItem(
+        InventoryContainerSnapshot container,
+        int itemIndex,
+        InventoryItemSnapshot item)
+    {
+        var items = new InventoryItemSnapshot[container.Items.Count];
+        for (int i = 0; i < container.Items.Count; i++)
+        {
+            items[i] = i == itemIndex ? item : container.Items[i];
+        }
+
         return container with { Items = items };
     }
 }
