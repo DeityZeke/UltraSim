@@ -354,6 +354,8 @@ Use full node construction for unusual panels, dense admin/debug tools, or one-o
 
 ### Inventory Architecture And Viewers
 
+Design reference: `Kernels/Inventory/README.md`.
+
 Inventory must be separated into two layers:
 
 - inventory/container truth: server-owned item ids, container ids, quantities, equipment state, item metadata, permissions, position metadata, and mutation rules

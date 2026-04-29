@@ -1,0 +1,472 @@
+# Inventory Kernel Plan
+
+## Purpose
+
+`Kernels/Inventory` will define the engine-agnostic inventory/container vocabulary for UltraSim.
+
+It is not the D2 grid viewer, not the Godot inventory UI, not an ECS component implementation, and not the persistence/database layer. It is the neutral item/container/intent contract that gameplay rules, ECS bridges, UI viewers, persistence, vendors, crafting, banks, trade, loot, followers, NPC simulation, and admin tools can all agree on.
+
+The central rule:
+
+```text
+container truth is not the UI viewer
+```
+
+A D2 grid, Skyrim-style list, and UO freeform bag should be different viewers over the same underlying container state. If the container model cannot support a simple list viewer without grid fields leaking everywhere, the contract is wrong.
+
+## Layering
+
+Use the same kernel/bridge discipline as ECS, Network, and UI.
+
+```text
+Kernels/Inventory
+  neutral ids
+  owner/requester refs
+  item instance records
+  container state records
+  placement metadata facets
+  permission vocabulary
+  mutation intent/result contracts
+  transaction lifecycle contracts
+  validation helpers
+
+Server/Inventory or Server/Game bridge
+  resolves refs into ECS entities, accounts, characters, world objects, houses, vendors
+  applies gameplay rules
+  validates range, permissions, locks, tags, weight, capacity, transactions
+  emits persistence/audit events
+
+Client/Inventory or Client/UI bridge
+  consumes replicated/container snapshots
+  applies validated deltas
+  routes viewer intents
+  presents list/grid/freeform viewers
+
+Godot renderer
+  drag/drop visuals
+  grid/list/freeform controls
+  tooltip/context menu presentation
+  hover and placement feedback
+```
+
+The kernel may use identity references such as `InventoryOwnerRef(Entity, 123)` or `InventoryRequesterRef(Session, abc)`. It must not resolve those references by reaching into ECS, accounts, Godot nodes, server sessions, files, or databases.
+
+## Core Concepts
+
+### Item Identity
+
+Separate definition identity from instance identity.
+
+- `ItemDefinitionId`: stable item type, such as `item.iron_sword`
+- `ItemInstanceId`: stable instance id for a concrete item or stack
+- `StackQuantity`: current quantity
+- `MaxStackQuantity`: rule input, not hardcoded kernel behavior
+
+Rules layer decides whether two items can stack. Kernel intents should carry source/destination item ids; the rules layer decides mergeability based on definition, durability, enchantments, quality, bind state, ownership, freshness, or other server-specific metadata.
+
+Suggested item facets:
+
+- definition id
+- instance id
+- quantity
+- optional display/catalog key
+- optional tags
+- lock state
+- bind/trade restrictions
+- transaction/suspended state
+- persistence hint
+
+### Owner References
+
+Inventory owner refs are identity handles with different lifetime semantics. The kernel should carry them; bridges resolve them.
+
+Likely owner kinds:
+
+- `Entity`: living player, NPC, pet, mount, follower, creature, spawned world actor
+- `Character`: persisted playable character
+- `Account`: account-level storage such as shared bank
+- `WorldObject`: chest, barrel, corpse, resource node, placed house container
+- `Guild`: guild bank/storage
+- `Vendor`: vendor stock or buyback pool
+- `System`: internal/generated/transient owner
+
+The owner resolver lives outside the kernel. It must answer:
+
+- owner exists and is loaded
+- owner exists but is unloaded
+- owner was destroyed
+- owner is unauthorized to the requester
+- owner cannot be resolved due to server/system error
+
+The kernel should not assume that all owner refs are equally durable. A character inventory may persist across sessions; an entity inventory may vanish on death; a world object may be persistent or temporary; account storage may have multiple active character sessions viewing it at once.
+
+### Requester References
+
+The actor submitting an inventory intent is not always a player.
+
+Requester kinds should cover:
+
+- player session
+- character
+- NPC/entity AI
+- server simulation/system
+- GM/admin
+- scripted server process
+
+NPCs, mounts, followers, and simulated mobs should submit through the same intent/validation shape as players when they move items, loot corpses, feed companions, restock bags, or interact with containers. They may carry different authority, but they should not bypass the rules path silently.
+
+### Containers
+
+A container is an authoritative item-holding state, independent from presentation.
+
+Container metadata should include:
+
+- `ContainerId`
+- owner ref
+- container kind/type id
+- lifecycle
+- layout/placement mode
+- capacity hints
+- permission policy
+- item records
+- optional tags/rule keys
+
+Do not hardcode "one backpack", "one bank", or "one viewer".
+
+Examples:
+
+- player backpack
+- equipment container
+- hotbar/ability binding container, if represented as item-like slots later
+- pet/mount/follower pack
+- NPC inventory
+- corpse loot
+- world chest/barrel
+- bank box
+- multiple account bank boxes
+- guild bank
+- vendor stock
+- crafting station input/output
+- trade offer side
+- house locked-down storage
+- rental property storage
+- trash bin
+
+### Container Lifecycle
+
+Lifecycle affects persistence, rollback, and viewer warnings.
+
+Suggested lifecycle values:
+
+- `Persistent`: character backpack, bank, house chest
+- `WorldPersistent`: placed world chest/barrel/house container
+- `Runtime`: temporary mob bag, generated encounter container
+- `Ephemeral`: loot roll, crafting output preview, temporary staging area
+- `Transactional`: trade offer, auction escrow, two-phase commit container
+- `Destructive`: trash bin or sink where items are not guaranteed to persist
+
+The kernel defines lifecycle vocabulary. The rules/persistence layer decides what lifecycle means operationally.
+
+### Placement Modes
+
+Placement metadata must be viewer-agnostic but mode-compatible.
+
+Container declares a placement mode. Items inside the container must carry compatible placement metadata.
+
+Suggested placement modes:
+
+- `None`: no ordering/placement semantics
+- `List`: stable list index or sort key
+- `Grid`: x, y, width, height, optional rotation
+- `Freeform`: x, y, z/order layer
+- `Slot`: named slot id, useful for equipment or fixed station inputs
+
+Kernel validation should reject obvious mismatches, such as freeform placement submitted to a grid container. Rules layer validates detailed constraints:
+
+- grid bounds
+- collision/overlap
+- rotation allowed
+- accepted item tags
+- weight/count capacity
+- nested-container policy
+- equipment slot eligibility
+
+This keeps the contract neutral while still preventing nonsense shapes from crossing layers.
+
+### Stack And Merge Rules
+
+The kernel carries stack quantities and merge intents. The rules layer decides policy.
+
+Default interpretation:
+
+- `MaxStackQuantity = 1`: item does not stack
+- `MaxStackQuantity > 1`: item may stack if rules allow it
+
+Merge intent should carry:
+
+- requester ref
+- source container id
+- source item id
+- destination container id
+- destination item id
+- requested quantity
+- correlation/audit id
+
+Rules layer evaluates:
+
+- same definition
+- same quality
+- same durability/freshness
+- same enchantments/affixes
+- same bind/trade state
+- stack cap
+- permission/range/container constraints
+
+Do not encode "same definition means merge" into the kernel.
+
+## Permissions
+
+Permissions should be generic now, not housing-specific.
+
+World-opened containers can default to public read/take unless rules override them. Housing, rentals, guilds, vendors, and locked-down items plug into the same vocabulary later.
+
+Suggested permission modes/facets:
+
+- public read
+- public take
+- owner read/write
+- account read/write
+- party access
+- guild access
+- house access list
+- vendor-managed
+- GM/admin
+- scripted rule
+- locked item
+- no-trade/no-drop/no-destroy item
+- quest item
+
+The kernel should carry permission descriptors and produce permission-related result codes. The server bridge decides whether a given requester satisfies a permission rule.
+
+### Per-Item Locks
+
+Some rules attach to items, not just containers.
+
+Examples:
+
+- UO-style house lockdown
+- quest item cannot be dropped
+- bound item cannot be traded
+- reserved item cannot be moved during a transaction
+
+Reserve per-item flags/facets early. Do not model every lock as a container-wide state.
+
+## Container Sessions And Viewers
+
+A container may have multiple concurrent viewers.
+
+Examples:
+
+- player has backpack open
+- GM inspects the same backpack
+- two players loot the same corpse
+- account bank is open from multiple character sessions
+- both parties watch the same trade state
+
+Container session metadata should include:
+
+- session/view id
+- viewer/requester ref
+- target container id
+- granted access mode
+- permission-filtered visibility if needed
+- current sequence/cursor
+
+The kernel should allow live deltas to be broadcast to all authorized viewers. A GM viewer does not change the container shape; it is an elevated viewer with different permission filtering.
+
+## Mutation Intents
+
+Mutation intents are compact, auditable, server-authoritative requests.
+
+Likely first intent kinds:
+
+- move item
+- split stack
+- merge stack
+- swap positions
+- take from container
+- drop to world/container
+- equip/unequip
+- use item
+- destroy/discard
+- lock/unlock item
+- open container
+- close container view
+- begin transaction
+- commit transaction
+- cancel transaction
+
+Intent envelope should reserve:
+
+- requester ref
+- client sequence when UI-originated
+- correlation/audit id
+- source container id
+- destination container id when applicable
+- item ids
+- requested quantity
+- proposed placement
+- optional rule/context id
+
+The kernel owns the shape. The bridge/rules layer owns authority and effects.
+
+### Audit And Correlation
+
+Reserve a correlation/audit field from the start.
+
+It can be ignored in the first implementation, but intent/result contracts should carry it so admin tools, anti-cheat, trade dispute logs, item provenance, and server diagnostics do not require a later breaking change.
+
+Audit data should be emitted by bridges or persistence/event systems, not stored directly in every kernel object unless needed.
+
+## Transactions And Trade
+
+Trade windows are the most duplication-sensitive inventory shape.
+
+Model trade as linked transactional containers:
+
+- each participant has an offer-side container
+- items moved into an offer are suspended/reserved
+- commit requires both parties to lock/confirm
+- cancel or disconnect rolls items back
+- commit atomically moves ownership
+
+Avoid any state where the same item instance is both in the source backpack and in the trade offer. The kernel should include explicit suspended/transactional state so rollback/commit semantics are clear.
+
+The same transaction pattern can later support:
+
+- auction escrow
+- crafting input escrow
+- loot roll reservation
+- player-to-player mail attachment escrow
+
+## Weird Container Cases
+
+### GM/Admin Inspection
+
+No special item/container shape. A GM is another viewer/requester with elevated permission.
+
+Important requirements:
+
+- multiple viewers per container
+- permission-filtered view model
+- live deltas to all authorized viewers
+- audit entries for admin moves/takes/edits
+
+### NPCs, Mobs, Mounts, Followers
+
+Use the same semantics as players.
+
+An NPC with a mount/follower should use entity-owned containers, requester refs, range/permission checks, and normal intents. AI/system authority may differ from player session authority, but the shape should not fork.
+
+### Banks And Multiple Bank Boxes
+
+Banks are usually account-owned, not character-owned.
+
+Allow:
+
+- multiple containers under the same account owner
+- multiple active sessions viewing the same account storage
+- bank category/type tags
+- rule-layer capacity/perk expansion
+
+### UO-Style Lockdown
+
+Treat as item/container permission state, usually per item.
+
+The kernel carries lock state; housing rules decide who can unlock/move it.
+
+### Rentals
+
+Rentals need time/dynamic access policy.
+
+Use scripted/conditional permission rules. The kernel does not need to know what rent is.
+
+### Trash Bins
+
+Trash bins are destructive/transient containers.
+
+The kernel should carry lifecycle/persistence hints so viewers can warn users. The rules layer owns actual destruction timing.
+
+### Corpses And Shared Loot
+
+Corpses are shared containers with live deltas.
+
+Multiple viewers may remove rows/items concurrently. The server must reject stale take intents cleanly and push row/item remove deltas to other viewers.
+
+## UI Relationship
+
+Inventory UI consumes inventory contracts; it does not define inventory truth.
+
+Planned viewers:
+
+- Skyrim-style list viewer
+- D2 grid viewer
+- UO freeform bag viewer
+
+Implementation discipline:
+
+1. Define neutral inventory/container records first.
+2. Write list-view contract/smoke tests before grid-specific work.
+3. Add grid placement helpers only as optional placement facets.
+4. Keep UO/freeform possible through `Freeform` placement metadata and `ContainerCanvas`, but do not implement the renderer until needed.
+
+If the list viewer cannot consume the same container state as the grid viewer, the contract has leaked presentation assumptions.
+
+## Testing Plan
+
+Early kernel tests should cover:
+
+- owner/requester ref validation
+- unresolved owner result shapes
+- container placement mode vs item placement metadata compatibility
+- stack split/merge intent validation without hardcoded merge policy
+- public/default world container permission descriptors
+- GM viewer over another owner/container
+- NPC/system requester intent shape
+- account-owned bank with multiple container ids
+- multiple concurrent viewers over one container
+- item lock/no-trade/no-drop facets
+- destructive/trash lifecycle marker
+- transactional/trade suspended item shape
+- transaction commit/cancel result shape
+- audit/correlation id round trips
+- viewer-agnostic list and grid contract fixtures over the same container state
+
+## Benchmark Plan
+
+Benchmark before UI/server integration hides costs:
+
+- item/container snapshot validation
+- container delta validation
+- placement compatibility checks
+- stack split/merge intent validation
+- viewer snapshot projection for list/grid/freeform facets
+- many-small-item container scans
+- transaction commit/cancel validation shape
+- permission descriptor evaluation hook overhead with fake rule resolvers
+
+## Implementation Phasing
+
+Suggested first slices:
+
+1. Inventory ids, refs, lifecycle, placement, permission, and item/container snapshot records.
+2. Validation tests for refs, placement compatibility, permissions, and lifecycle.
+3. Mutation intent/result envelope with correlation/audit id.
+4. Split/merge/move/swap/equip intent shapes.
+5. Container viewer/session snapshot and live delta contracts.
+6. Transactional container/trade contract shape.
+7. Minimal benchmarks.
+8. Server/ECS bridge resolver prototype.
+9. UI viewer contracts over the neutral model, starting with list before grid.
+
+Stop and revise the kernel contract if any bridge starts requiring ad-hoc item/container fields that only make sense for one viewer or one gameplay feature.
