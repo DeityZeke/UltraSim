@@ -576,12 +576,13 @@ Current status:
   - content resolver trust-class contracts
   - layered resolver stack with explicit priority ordering:
     - built-in defaults
-    - server patch mappings
     - user resource-pack overrides
+    - server patch mappings
     - future explicit user mods
   - resource-pack manifest -> resolver layer conversion
+  - cache metadata/quota planner that proposes oldest unpinned entries for eviction
 - remaining G5 work:
-  - persisted cache metadata/quota/eviction hooks
+  - persisted cache metadata store and actual eviction execution
   - first Godot-side content resolver adapter
   - real patch/schema cache IO
 - manifest validation tests

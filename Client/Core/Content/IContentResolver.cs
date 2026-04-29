@@ -14,8 +14,8 @@ public readonly record struct ContentResolution(
 public static class ContentResolverPriority
 {
     public const int BuiltIn = 0;
-    public const int ServerPatch = 100;
-    public const int UserResourcePack = 200;
+    public const int UserResourcePack = 100;
+    public const int ServerPatch = 200;
     public const int UserMod = 300;
 }
 

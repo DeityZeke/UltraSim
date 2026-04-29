@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using UltraSim.Client;
 using UltraSim.Client.Content;
@@ -25,6 +26,7 @@ internal static class TestRunner
         Run(nameof(ContentPathValidation_ValidatesSizeAndSha256), ContentPathValidation_ValidatesSizeAndSha256);
         Run(nameof(LayeredContentResolver_ResolvesHighestPriorityMapping), LayeredContentResolver_ResolvesHighestPriorityMapping);
         Run(nameof(ResourcePackManifestValidator_CreatesUserOverrideLayer), ResourcePackManifestValidator_CreatesUserOverrideLayer);
+        Run(nameof(ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions), ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -429,9 +431,9 @@ internal static class TestRunner
         var resolver = new LayeredContentResolver([builtIn, serverPatch, resourcePack]);
 
         Assert.True(resolver.TryResolve(" mobile/default/body ", out ContentResolution resolved));
-        Assert.Equal("/packs/noir/default.tscn", resolved.ResolvedPath);
-        Assert.Equal(ContentTrustClass.UserResourcePack, resolved.TrustClass);
-        Assert.Equal("resource-pack.noir", resolved.LayerId);
+        Assert.Equal("/cache/server/Assets/avatars/server-default.tscn", resolved.ResolvedPath);
+        Assert.Equal(ContentTrustClass.ServerPatch, resolved.TrustClass);
+        Assert.Equal("server.local", resolved.LayerId);
 
         Assert.True(resolver.TryResolve("icons/item/sword", out resolved));
         Assert.Equal("res://Assets/Icons/sword.png", resolved.ResolvedPath);
@@ -466,6 +468,52 @@ internal static class TestRunner
             });
         Assert.False(ResourcePackManifestValidator.TryCreateResolverLayer(invalid, out _, out error));
         Assert.True(error.Contains("layer id", StringComparison.Ordinal), error);
+    }
+
+    private static void ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions()
+    {
+        DateTimeOffset now = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        ContentCacheEntry pinnedOld = new(
+            "pinned-old",
+            "schemas/pinned.uischema",
+            ContentCacheEntryKind.Schema,
+            600,
+            now.AddDays(-10),
+            Pinned: true);
+        ContentCacheEntry oldest = new(
+            "oldest",
+            "assets/old.bin",
+            ContentCacheEntryKind.Asset,
+            400,
+            now.AddDays(-7));
+        ContentCacheEntry middle = new(
+            "middle",
+            "assets/middle.bin",
+            ContentCacheEntryKind.Asset,
+            350,
+            now.AddDays(-3));
+        ContentCacheEntry newest = new(
+            "newest",
+            "assets/new.bin",
+            ContentCacheEntryKind.Asset,
+            300,
+            now);
+
+        ContentCacheQuotaPlan plan = ContentCacheQuotaPlanner.PlanEviction(
+            [pinnedOld, newest, middle, oldest],
+            quotaBytes: 1000,
+            targetFillRatio: 0.80);
+
+        Assert.Equal(1650L, plan.CurrentSizeBytes);
+        Assert.Equal(1000L, plan.QuotaBytes);
+        Assert.Equal(800L, plan.TargetSizeBytes);
+        Assert.Equal(850L, plan.BytesToFree);
+        Assert.SequenceEqual([oldest, middle, newest], plan.EvictionCandidates);
+
+        ContentCacheQuotaPlan underQuota = ContentCacheQuotaPlanner.PlanEviction(
+            [oldest, middle],
+            quotaBytes: 1000);
+        Assert.Equal(0, underQuota.EvictionCandidates.Count);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()
