@@ -29,6 +29,8 @@ internal static class TestRunner
         Run(nameof(ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions), ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions);
         Run(nameof(ContentCacheIndex_TracksMetadataAccessPinningAndEviction), ContentCacheIndex_TracksMetadataAccessPinningAndEviction);
         Run(nameof(ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries), ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries);
+        Run(nameof(UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes), UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes);
+        Run(nameof(UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes), UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -606,6 +608,60 @@ internal static class TestRunner
         """;
         Assert.False(ContentCacheIndexStore.TryDeserialize(unsafeJson, out _, out error));
         Assert.Equal("Content path cannot contain traversal segments.", error);
+    }
+
+    private static void UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        byte[] bytes = [10, 20, 30, 40];
+        string hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        Assert.True(UiSchemaCacheKey.TryCreate(server, "login", 1, hash, out UiSchemaCacheKey key, out error), error);
+
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-schema-cache-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        var store = new UiSchemaCacheStore(pathPolicy, index);
+        DateTimeOffset writtenAt = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        DateTimeOffset readAt = writtenAt.AddMinutes(5);
+
+        Assert.False(store.Has(key));
+        Assert.True(store.TryWrite(key, bytes, writtenAt, pinned: true, out error), error);
+        Assert.True(store.Has(key));
+        Assert.True(File.Exists(pathPolicy.GetSchemaPath(key)));
+
+        string cacheKey = UiSchemaCacheStore.CreateCacheKey(key);
+        Assert.True(index.TryGet(cacheKey, out ContentCacheEntry entry));
+        Assert.Equal(ContentCacheEntryKind.Schema, entry.Kind);
+        Assert.Equal(bytes.Length, entry.SizeBytes);
+        Assert.Equal(writtenAt, entry.LastAccessUtc);
+        Assert.True(entry.Pinned);
+        Assert.True(entry.RelativePath.StartsWith("Servers/", StringComparison.Ordinal), entry.RelativePath);
+
+        Assert.True(store.TryRead(key, readAt, out byte[] readBytes, out error), error);
+        Assert.SequenceEqual(bytes, readBytes);
+        Assert.True(index.TryGet(cacheKey, out entry));
+        Assert.Equal(readAt, entry.LastAccessUtc);
+
+        Assert.True(store.Remove(key));
+        Assert.False(File.Exists(pathPolicy.GetSchemaPath(key)));
+        Assert.False(index.TryGet(cacheKey, out _));
+    }
+
+    private static void UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        string wrongHash = new string('0', 64);
+        Assert.True(UiSchemaCacheKey.TryCreate(server, "login", 1, wrongHash, out UiSchemaCacheKey key, out error), error);
+
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-schema-cache-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        var store = new UiSchemaCacheStore(pathPolicy, index);
+
+        Assert.False(store.TryWrite(key, [1, 2, 3, 4], DateTimeOffset.UtcNow, pinned: false, out error));
+        Assert.Equal("Asset SHA-256 hash mismatch.", error);
+        Assert.False(File.Exists(pathPolicy.GetSchemaPath(key)));
+        Assert.Equal(0, index.Count);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()

@@ -103,4 +103,22 @@ public static class ContentPathValidation
         error = string.Empty;
         return true;
     }
+
+    public static bool ValidateSha256(ReadOnlySpan<byte> bytes, string expectedSha256Hex, out string error)
+    {
+        if (!TryNormalizeSha256Hex(expectedSha256Hex, out string normalizedHash, out error))
+        {
+            return false;
+        }
+
+        string actualHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        if (!string.Equals(actualHash, normalizedHash, StringComparison.Ordinal))
+        {
+            error = "Asset SHA-256 hash mismatch.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
 }
