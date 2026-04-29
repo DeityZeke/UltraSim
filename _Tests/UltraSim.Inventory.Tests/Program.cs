@@ -12,6 +12,9 @@ internal static class TestRunner
         Run(nameof(InventoryContainerSnapshot_ValidatesNeutralListContainer), InventoryContainerSnapshot_ValidatesNeutralListContainer);
         Run(nameof(InventoryContainerSnapshot_RejectsViewerPlacementMismatchAndDuplicateItems), InventoryContainerSnapshot_RejectsViewerPlacementMismatchAndDuplicateItems);
         Run(nameof(InventoryItemSnapshot_ValidatesStackAndFlags), InventoryItemSnapshot_ValidatesStackAndFlags);
+        Run(nameof(InventoryMutationIntent_ValidatesMoveSplitMergeAndSwapShapes), InventoryMutationIntent_ValidatesMoveSplitMergeAndSwapShapes);
+        Run(nameof(InventoryMutationIntent_ValidatesNpcAndTransactionShapes), InventoryMutationIntent_ValidatesNpcAndTransactionShapes);
+        Run(nameof(InventoryMutationResult_ValidatesCorrelationFailureAndAffectedContainers), InventoryMutationResult_ValidatesCorrelationFailureAndAffectedContainers);
 
         Console.WriteLine("All inventory kernel contract tests passed.");
     }
@@ -113,6 +116,119 @@ internal static class TestRunner
         Assert.InvalidContains((item with { Flags = (InventoryItemFlags)(1u << 31) }).Validate(InventoryPlacementMode.List), "unknown");
     }
 
+    private static void InventoryMutationIntent_ValidatesMoveSplitMergeAndSwapShapes()
+    {
+        InventoryMutationIntent move = CreateMoveIntent();
+        Assert.Valid(move.Validate());
+
+        InventoryMutationIntent split = move with
+        {
+            Kind = InventoryMutationKind.SplitStack,
+            CorrelationId = "corr/split/1",
+            Quantity = 3
+        };
+        Assert.Valid(split.Validate());
+
+        InventoryMutationIntent merge = move with
+        {
+            Kind = InventoryMutationKind.MergeStack,
+            CorrelationId = "corr/merge/1",
+            DestinationItemInstanceId = "item:apple_stack/2",
+            ProposedPlacement = null
+        };
+        Assert.Valid(merge.Validate());
+
+        InventoryMutationIntent swap = move with
+        {
+            Kind = InventoryMutationKind.SwapItems,
+            CorrelationId = "corr/swap/1",
+            DestinationItemInstanceId = "item:shield/1",
+            ProposedPlacement = null
+        };
+        Assert.Valid(swap.Validate());
+
+        Assert.InvalidContains((move with { DestinationContainerId = null }).Validate(), "DestinationContainerId");
+        Assert.InvalidContains((move with { Quantity = 0 }).Validate(), "quantity");
+        Assert.InvalidContains((merge with { DestinationItemInstanceId = null }).Validate(), "DestinationItemInstanceId");
+        Assert.InvalidContains((move with
+        {
+            ProposedPlacement = InventoryPlacementDescriptor.Grid(-1, 0, 1, 1)
+        }).Validate(), "non-negative");
+    }
+
+    private static void InventoryMutationIntent_ValidatesNpcAndTransactionShapes()
+    {
+        var npcMove = CreateMoveIntent() with
+        {
+            CorrelationId = "corr/npc/loot/1",
+            Requester = new InventoryRequesterRef(InventoryRequesterKind.EntityAi, "entity:npc/7"),
+            ClientSequence = -1,
+            SourceContainerId = "container:corpse/1",
+            DestinationContainerId = "container:npc_pack/7"
+        };
+        Assert.Valid(npcMove.Validate());
+
+        var open = new InventoryMutationIntent(
+            "corr/open/1",
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:alpha"),
+            ClientSequence: 11,
+            InventoryMutationKind.OpenContainer,
+            SourceContainerId: "container:barrel/1",
+            DestinationContainerId: null,
+            SourceItemInstanceId: null,
+            DestinationItemInstanceId: null,
+            Quantity: 0,
+            ProposedPlacement: null);
+        Assert.Valid(open.Validate());
+
+        var beginTrade = new InventoryMutationIntent(
+            "corr/trade/begin/1",
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:alpha"),
+            ClientSequence: 12,
+            InventoryMutationKind.BeginTransaction,
+            SourceContainerId: "container:trade_offer/a",
+            DestinationContainerId: "container:trade_offer/b",
+            SourceItemInstanceId: null,
+            DestinationItemInstanceId: null,
+            Quantity: 0,
+            ProposedPlacement: null,
+            RuleContextId: "trade:alpha_beta/1");
+        Assert.Valid(beginTrade.Validate());
+
+        Assert.InvalidContains((beginTrade with { RuleContextId = null }).Validate(), "RuleContextId");
+        Assert.InvalidContains((beginTrade with { Quantity = 1 }).Validate(), "transaction context");
+        Assert.InvalidContains((open with { SourceItemInstanceId = "item:bad" }).Validate(), "source container");
+    }
+
+    private static void InventoryMutationResult_ValidatesCorrelationFailureAndAffectedContainers()
+    {
+        var accepted = new InventoryMutationResult(
+            "corr/move/1",
+            ClientSequence: 1,
+            InventoryMutationKind.MoveItem,
+            InventoryMutationResultKind.Accepted,
+            InventoryMutationFailureReason.None,
+            Message: null,
+            AffectedContainerIds: ["container:backpack/1", "container:bank/1"]);
+        Assert.Valid(accepted.Validate());
+
+        var rejected = accepted with
+        {
+            ResultKind = InventoryMutationResultKind.Rejected,
+            FailureReason = InventoryMutationFailureReason.Locked,
+            Message = "Item is locked down.",
+            AffectedContainerIds = []
+        };
+        Assert.Valid(rejected.Validate());
+
+        Assert.InvalidContains((accepted with { FailureReason = InventoryMutationFailureReason.Locked }).Validate(), "Accepted");
+        Assert.InvalidContains((rejected with { FailureReason = InventoryMutationFailureReason.None }).Validate(), "require");
+        Assert.InvalidContains((accepted with
+        {
+            AffectedContainerIds = ["container:backpack/1", "container:backpack/1"]
+        }).Validate(), "duplicate");
+    }
+
     private static InventoryContainerSnapshot CreateListContainer()
     {
         return new InventoryContainerSnapshot(
@@ -137,6 +253,21 @@ internal static class TestRunner
                     MaxStackQuantity: 20,
                     InventoryPlacementDescriptor.List(1)),
             ]);
+    }
+
+    private static InventoryMutationIntent CreateMoveIntent()
+    {
+        return new InventoryMutationIntent(
+            "corr/move/1",
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:alpha"),
+            ClientSequence: 1,
+            InventoryMutationKind.MoveItem,
+            SourceContainerId: "container:backpack/1",
+            DestinationContainerId: "container:bank/1",
+            SourceItemInstanceId: "item:apple_stack/1",
+            DestinationItemInstanceId: null,
+            Quantity: 2,
+            ProposedPlacement: InventoryPlacementDescriptor.List(4));
     }
 
     private static void Run(string name, Action test)

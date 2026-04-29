@@ -40,6 +40,28 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         IterationCount = 5,
         Execute = () => RunContainerValidationScenario(CreateGridContainer(1_000)),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "MutationIntent_Validate_Move_10000",
+        Category = "InventoryMutation",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunMutationIntentValidationScenario(10_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "MutationResult_Validate_Accepted_10000",
+        Category = "InventoryMutation",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunMutationResultValidationScenario(10_000),
+    };
 }
 
 static ScenarioMeasurement RunContainerValidationScenario(InventoryContainerSnapshot container)
@@ -51,6 +73,61 @@ static ScenarioMeasurement RunContainerValidationScenario(InventoryContainerSnap
     }
 
     return new ScenarioMeasurement(container.Items.Count, container.Items.Count + container.Permissions.Count);
+}
+
+static ScenarioMeasurement RunMutationIntentValidationScenario(int iterations)
+{
+    var intent = new InventoryMutationIntent(
+        "corr/bench/move",
+        new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench"),
+        ClientSequence: 1,
+        InventoryMutationKind.MoveItem,
+        SourceContainerId: "container:bench/list",
+        DestinationContainerId: "container:bench/grid",
+        SourceItemInstanceId: "item:list/1",
+        DestinationItemInstanceId: null,
+        Quantity: 1,
+        ProposedPlacement: InventoryPlacementDescriptor.Grid(1, 1, 1, 1));
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        InventoryValidationResult result = intent.Validate();
+        if (!result.IsValid)
+        {
+            throw new InvalidOperationException(result.Error);
+        }
+
+        checksum += intent.ClientSequence + intent.Quantity + i;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunMutationResultValidationScenario(int iterations)
+{
+    var resultDocument = new InventoryMutationResult(
+        "corr/bench/move",
+        ClientSequence: 1,
+        InventoryMutationKind.MoveItem,
+        InventoryMutationResultKind.Accepted,
+        InventoryMutationFailureReason.None,
+        Message: null,
+        AffectedContainerIds: ["container:bench/list", "container:bench/grid"]);
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        InventoryValidationResult result = resultDocument.Validate();
+        if (!result.IsValid)
+        {
+            throw new InvalidOperationException(result.Error);
+        }
+
+        checksum += resultDocument.ClientSequence + resultDocument.AffectedContainerIds.Count + i;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
 }
 
 static InventoryContainerSnapshot CreateListContainer(int itemCount)

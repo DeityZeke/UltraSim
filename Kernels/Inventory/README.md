@@ -63,6 +63,19 @@ Current contracts:
   - non-persistent
 - item snapshot validation
 - container snapshot validation
+- mutation intent/result contracts:
+  - move
+  - split stack
+  - merge stack
+  - swap
+  - take/drop
+  - equip/unequip
+  - use/destroy
+  - lock/unlock
+  - open/close container view
+  - begin/commit/cancel transaction
+- correlation/audit id field on mutation intents/results
+- optional client sequence field for UI-originated requests
 - executable tests in `_Tests/UltraSim.Inventory.Tests`
 - benchmark harness in `_Benchmarks/UltraSim.Inventory.Benchmarks`
 
@@ -76,6 +89,8 @@ Current benchmark baselines:
 
 - `ContainerSnapshot_Validate_List_1000Items`: about `0.57 ms`
 - `ContainerSnapshot_Validate_Grid_1000Items`: about `0.74 ms`
+- `MutationIntent_Validate_Move_10000`: about `10.65 ms`
+- `MutationResult_Validate_Accepted_10000`: about `7.60 ms`
 
 ## Layering
 
