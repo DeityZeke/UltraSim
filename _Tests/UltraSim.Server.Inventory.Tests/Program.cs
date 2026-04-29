@@ -32,6 +32,9 @@ internal static class TestRunner
         Run(nameof(InventoryEquipItemMutationRules_UsesSlotPolicyAccessRangeAndCapacity), InventoryEquipItemMutationRules_UsesSlotPolicyAccessRangeAndCapacity);
         Run(nameof(InMemoryInventoryStore_ApplyEquipMovesItemIntoSlotContainer), InMemoryInventoryStore_ApplyEquipMovesItemIntoSlotContainer);
         Run(nameof(InMemoryInventoryStore_ApplyEquipRejectedByRulesDoesNotMutateSnapshots), InMemoryInventoryStore_ApplyEquipRejectedByRulesDoesNotMutateSnapshots);
+        Run(nameof(InventoryLockItemMutationRules_UsesAccessRangeAndLockPolicy), InventoryLockItemMutationRules_UsesAccessRangeAndLockPolicy);
+        Run(nameof(InMemoryInventoryStore_ApplyLockStateUpdatesItemAndDispatchesItemUpdated), InMemoryInventoryStore_ApplyLockStateUpdatesItemAndDispatchesItemUpdated);
+        Run(nameof(InMemoryInventoryStore_ApplyLockStateNoOpAndRejectedDoNotMutateSnapshots), InMemoryInventoryStore_ApplyLockStateNoOpAndRejectedDoNotMutateSnapshots);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -1356,6 +1359,186 @@ internal static class TestRunner
         Assert.Equal(occupied.ItemInstanceId, unchangedEquipment.Items[0].ItemInstanceId, "equipment item after rejected equip");
     }
 
+    private static void InventoryLockItemMutationRules_UsesAccessRangeAndLockPolicy()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:lock_rules");
+        InventoryItemSnapshot coin = CreateCoinItem("item:coin/lock_rules");
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:lock_rules/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:lock_rules"),
+            InventoryContainerLifecycle.Persistent,
+            [coin]);
+        var intent = new InventoryMutationIntent(
+            "corr/lock/rules",
+            requester,
+            ClientSequence: 91,
+            InventoryMutationKind.LockItem,
+            backpack.ContainerId,
+            DestinationContainerId: null,
+            coin.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: null);
+        Assert.Valid(intent.Validate());
+
+        var range = new ToggleRangePolicy();
+        var lockPolicy = new ToggleItemLockPolicy();
+        var rules = new InventoryLockItemMutationRules(new PublicTakePutAccessPolicy(), lockPolicy, range);
+        InventoryMutationRuleContext context = new InventoryMutationRuleContext(
+            intent,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            backpack,
+            DestinationContainer: null,
+            coin,
+            DestinationItem: null);
+
+        InventoryMutationRuleDecision accepted = rules.Evaluate(context);
+        Assert.True(accepted.IsAccepted, "lock rule accepts baseline");
+
+        InventoryMutationRuleDecision alreadyLocked = rules.Evaluate(context with
+        {
+            SourceItem = coin with { Flags = InventoryItemFlags.Locked }
+        });
+        Assert.Equal(InventoryMutationResultKind.NoOp, alreadyLocked.ResultKind, "already locked result kind");
+
+        range.Allow = false;
+        InventoryMutationRuleDecision outOfRange = rules.Evaluate(context);
+        Assert.False(outOfRange.IsAccepted, "lock rule range rejection");
+        Assert.Equal(InventoryMutationFailureReason.OutOfRange, outOfRange.FailureReason, "lock range failure reason");
+        range.Allow = true;
+
+        lockPolicy.Allow = false;
+        InventoryMutationRuleDecision policyRejected = rules.Evaluate(context);
+        Assert.False(policyRejected.IsAccepted, "lock policy rejection");
+        Assert.Equal(InventoryMutationFailureReason.RuleRejected, policyRejected.FailureReason, "lock policy failure reason");
+
+        var deniedRules = new InventoryLockItemMutationRules(new DenyMutateAccessPolicy(), new ToggleItemLockPolicy(), range);
+        InventoryMutationRuleDecision denied = deniedRules.Evaluate(context);
+        Assert.False(denied.IsAccepted, "lock mutate access rejection");
+        Assert.Equal(InventoryMutationFailureReason.Unauthorized, denied.FailureReason, "lock access failure reason");
+    }
+
+    private static void InMemoryInventoryStore_ApplyLockStateUpdatesItemAndDispatchesItemUpdated()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:lock_apply");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot coin = CreateCoinItem("item:coin/lock_apply");
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:lock_apply/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:lock_apply"),
+            InventoryContainerLifecycle.Persistent,
+            [coin]);
+        Assert.StoreSuccess(store.AddContainer(backpack));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:lock_apply/backpack",
+            backpack.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+
+        var rules = new InventoryLockItemMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new ToggleItemLockPolicy(),
+            new ToggleRangePolicy());
+        InventoryMutationIntent lockIntent = new InventoryMutationIntent(
+            "corr:lock_apply",
+            requester,
+            ClientSequence: 92,
+            InventoryMutationKind.LockItem,
+            backpack.ContainerId,
+            DestinationContainerId: null,
+            coin.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: null);
+
+        InventoryStoreOperationResult lockResult = store.ApplyLockState(lockIntent, rules);
+        Assert.StoreSuccess(lockResult);
+        Assert.True(lockResult.MutationResult is not null, "lock mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, lockResult.MutationResult!.ResultKind, "lock mutation result kind");
+        Assert.Equal(1, lockResult.Dispatches.Count, "lock dispatch count");
+        Assert.Equal(InventoryContainerDeltaKind.ItemUpdated, lockResult.Dispatches[0].Delta.Kind, "lock delta kind");
+        Assert.Contains(lockResult.Dispatches[0].RecipientViewIds, "view:lock_apply/backpack", "lock recipient");
+        Assert.True(lockResult.Dispatches[0].Delta.Item is not null, "lock delta item present");
+        Assert.True((lockResult.Dispatches[0].Delta.Item!.Flags & InventoryItemFlags.Locked) != 0, "lock delta item flag");
+
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot lockedBackpack), "backpack after lock");
+        Assert.True((lockedBackpack.Items[0].Flags & InventoryItemFlags.Locked) != 0, "stored locked flag");
+
+        InventoryMutationIntent unlockIntent = lockIntent with
+        {
+            CorrelationId = "corr:unlock_apply",
+            ClientSequence = 93,
+            Kind = InventoryMutationKind.UnlockItem
+        };
+        InventoryStoreOperationResult unlockResult = store.ApplyLockState(unlockIntent, rules);
+        Assert.StoreSuccess(unlockResult);
+        Assert.Equal(InventoryMutationResultKind.Accepted, unlockResult.MutationResult!.ResultKind, "unlock mutation result kind");
+        Assert.Equal(1, unlockResult.Dispatches.Count, "unlock dispatch count");
+        Assert.Equal(InventoryContainerDeltaKind.ItemUpdated, unlockResult.Dispatches[0].Delta.Kind, "unlock delta kind");
+
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot unlockedBackpack), "backpack after unlock");
+        Assert.True((unlockedBackpack.Items[0].Flags & InventoryItemFlags.Locked) == 0, "stored unlocked flag");
+    }
+
+    private static void InMemoryInventoryStore_ApplyLockStateNoOpAndRejectedDoNotMutateSnapshots()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:lock_noop");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot lockedCoin = CreateCoinItem("item:coin/lock_noop") with { Flags = InventoryItemFlags.Locked };
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:lock_noop/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:lock_noop"),
+            InventoryContainerLifecycle.Persistent,
+            [lockedCoin]);
+        Assert.StoreSuccess(store.AddContainer(backpack));
+
+        InventoryMutationIntent lockIntent = new InventoryMutationIntent(
+            "corr:lock_noop",
+            requester,
+            ClientSequence: 94,
+            InventoryMutationKind.LockItem,
+            backpack.ContainerId,
+            DestinationContainerId: null,
+            lockedCoin.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: null);
+        var allowRules = new InventoryLockItemMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new ToggleItemLockPolicy(),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult noop = store.ApplyLockState(lockIntent, allowRules);
+        Assert.StoreSuccess(noop);
+        Assert.Equal(InventoryMutationResultKind.NoOp, noop.MutationResult!.ResultKind, "lock noop result kind");
+        Assert.Equal(0, noop.Dispatches.Count, "lock noop dispatch count");
+
+        InventoryMutationIntent unlockIntent = lockIntent with
+        {
+            CorrelationId = "corr:unlock_reject",
+            ClientSequence = 95,
+            Kind = InventoryMutationKind.UnlockItem
+        };
+        var rejectRules = new InventoryLockItemMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new ToggleItemLockPolicy { Allow = false },
+            new ToggleRangePolicy());
+        InventoryStoreOperationResult rejected = store.ApplyLockState(unlockIntent, rejectRules);
+        Assert.StoreSuccess(rejected);
+        Assert.Equal(InventoryMutationResultKind.Rejected, rejected.MutationResult!.ResultKind, "unlock rejected result kind");
+        Assert.Equal(InventoryMutationFailureReason.RuleRejected, rejected.MutationResult.FailureReason, "unlock rejected reason");
+        Assert.Equal(0, rejected.Dispatches.Count, "unlock rejected dispatch count");
+
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot unchanged), "backpack after noop/reject");
+        Assert.True((unchanged.Items[0].Flags & InventoryItemFlags.Locked) != 0, "locked flag unchanged after noop/reject");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
@@ -1647,6 +1830,21 @@ internal sealed class DenyPutAccessPolicy : IInventoryContainerAccessPolicy
     }
 }
 
+internal sealed class DenyMutateAccessPolicy : IInventoryContainerAccessPolicy
+{
+    public InventoryContainerAccessDecision Evaluate(in InventoryContainerAccessRequest request)
+    {
+        if ((request.RequestedAccess & InventoryAccessFlags.Mutate) == InventoryAccessFlags.Mutate)
+        {
+            return InventoryContainerAccessDecision.Denied(
+                InventoryMutationFailureReason.Unauthorized,
+                "Mutate access denied.");
+        }
+
+        return InventoryContainerAccessDecision.Allowed(request.RequestedAccess);
+    }
+}
+
 internal sealed class ToggleRangePolicy : IInventoryInteractionRangePolicy
 {
     public bool Allow { get; set; } = true;
@@ -1699,6 +1897,24 @@ internal sealed class SwordMainHandEquipmentSlotPolicy : IInventoryEquipmentSlot
         }
 
         return InventoryMutationRuleDecision.Accepted();
+    }
+}
+
+internal sealed class ToggleItemLockPolicy : IInventoryItemLockPolicy
+{
+    public bool Allow { get; set; } = true;
+
+    public InventoryMutationRuleDecision CanChangeLockState(
+        InventoryRequesterRef requester,
+        InventoryItemSnapshot item,
+        InventoryContainerSnapshot container,
+        bool locked)
+    {
+        return Allow
+            ? InventoryMutationRuleDecision.Accepted()
+            : InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.RuleRejected,
+                "Item lock state change denied.");
     }
 }
 

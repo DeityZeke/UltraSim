@@ -163,6 +163,16 @@ internal static class TestRunner
         };
         Assert.Valid(equip.Validate());
 
+        InventoryMutationIntent lockItem = move with
+        {
+            Kind = InventoryMutationKind.LockItem,
+            CorrelationId = "corr/lock/1",
+            DestinationContainerId = null,
+            DestinationItemInstanceId = null,
+            ProposedPlacement = null
+        };
+        Assert.Valid(lockItem.Validate());
+
         Assert.InvalidContains((move with { DestinationContainerId = null }).Validate(), "DestinationContainerId");
         Assert.InvalidContains((move with { Quantity = 0 }).Validate(), "quantity");
         Assert.InvalidContains((split with { DestinationItemInstanceId = null }).Validate(), "DestinationItemInstanceId");
@@ -170,6 +180,7 @@ internal static class TestRunner
         Assert.InvalidContains((merge with { DestinationItemInstanceId = null }).Validate(), "DestinationItemInstanceId");
         Assert.InvalidContains((equip with { ProposedPlacement = null }).Validate(), "requires proposed placement");
         Assert.InvalidContains((equip with { ProposedPlacement = InventoryPlacementDescriptor.List(0) }).Validate(), "slot placement");
+        Assert.InvalidContains((lockItem with { DestinationContainerId = "container:equipment/1" }).Validate(), "destination");
         Assert.InvalidContains((move with
         {
             ProposedPlacement = InventoryPlacementDescriptor.Grid(-1, 0, 1, 1)

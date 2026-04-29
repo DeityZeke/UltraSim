@@ -464,6 +464,85 @@ public sealed class InMemoryInventoryStore
         return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
     }
 
+    public InventoryStoreOperationResult ApplyLockState(InventoryMutationIntent intent, IInventoryMutationRules rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        InventoryValidationResult intentValidation = intent.Validate();
+        if (!intentValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(intentValidation.Error);
+        }
+
+        if (intent.Kind is not (InventoryMutationKind.LockItem or InventoryMutationKind.UnlockItem))
+        {
+            return InventoryStoreOperationResult.Failure("ApplyLockState only accepts LockItem and UnlockItem intents.");
+        }
+
+        _containers.TryGetValue(intent.SourceContainerId!, out InventoryContainerSnapshot? sourceContainer);
+        InventoryItemSnapshot? sourceItem = null;
+        int sourceItemIndex = -1;
+
+        if (sourceContainer is not null)
+        {
+            sourceItemIndex = FindItemIndex(sourceContainer, intent.SourceItemInstanceId!);
+            if (sourceItemIndex >= 0)
+            {
+                sourceItem = sourceContainer.Items[sourceItemIndex];
+            }
+        }
+
+        InventoryRuntimeRefResolution requester = _refResolver.ResolveRequester(intent.Requester);
+        InventoryMutationRuleDecision decision = rules.Evaluate(new InventoryMutationRuleContext(
+            intent,
+            requester,
+            sourceContainer,
+            DestinationContainer: null,
+            sourceItem,
+            DestinationItem: null));
+
+        string[] affectedContainerIds = [intent.SourceContainerId!];
+        InventoryMutationResult mutationResult = decision.ToResult(intent, affectedContainerIds);
+        InventoryValidationResult resultValidation = mutationResult.Validate();
+        if (!resultValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(resultValidation.Error);
+        }
+
+        if (!decision.IsAccepted)
+        {
+            return InventoryStoreOperationResult.Success(mutationResult: mutationResult);
+        }
+
+        if (sourceContainer is null || sourceItem is null || sourceItemIndex < 0)
+        {
+            return InventoryStoreOperationResult.Failure("Accepted lock-state decision requires an existing source container and source item.");
+        }
+
+        bool targetLocked = intent.Kind == InventoryMutationKind.LockItem;
+        InventoryItemFlags flags = targetLocked
+            ? sourceItem.Flags | InventoryItemFlags.Locked
+            : sourceItem.Flags & ~InventoryItemFlags.Locked;
+        InventoryItemSnapshot updatedItem = sourceItem with { Flags = flags };
+        InventoryContainerSnapshot updated = ReplaceItem(sourceContainer, sourceItemIndex, updatedItem);
+        InventoryValidationResult validation = updated.Validate();
+        if (!validation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(validation.Error);
+        }
+
+        long revision = SetContainerSnapshot(updated);
+        InventoryStoreOperationResult dispatch = DispatchDelta(CreateItemUpdatedDelta(
+            intent,
+            updated.ContainerId,
+            revision,
+            updatedItem,
+            targetLocked ? "locked" : "unlocked"));
+        return dispatch.Succeeded
+            ? InventoryStoreOperationResult.Success(dispatches: dispatch.Dispatches, mutationResult: mutationResult)
+            : dispatch;
+    }
+
     public InventoryStoreOperationResult ApplySplit(InventoryMutationIntent intent, IInventoryMutationRules rules)
     {
         ArgumentNullException.ThrowIfNull(rules);
@@ -1118,6 +1197,26 @@ public sealed class InMemoryInventoryStore
             containerId,
             revision,
             InventoryContainerDeltaKind.ItemAdded,
+            item.ItemInstanceId,
+            item,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read);
+    }
+
+    private static InventoryContainerDelta CreateItemUpdatedDelta(
+        InventoryMutationIntent intent,
+        string containerId,
+        long revision,
+        InventoryItemSnapshot item,
+        string suffix)
+    {
+        return new InventoryContainerDelta(
+            $"delta:{intent.CorrelationId}/{suffix}/{item.ItemInstanceId}",
+            containerId,
+            revision,
+            InventoryContainerDeltaKind.ItemUpdated,
             item.ItemInstanceId,
             item,
             PreviousPlacement: null,

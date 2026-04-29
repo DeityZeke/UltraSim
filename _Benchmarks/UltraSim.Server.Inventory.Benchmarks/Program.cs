@@ -88,6 +88,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 
     yield return new BenchmarkScenario
     {
+        Name = "ApplyLockState_10000",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunLockStateScenario(10_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
         Name = "DispatchDelta_1000Viewers_10000",
         Category = "InventoryStore",
         Comparable = false,
@@ -278,6 +289,47 @@ static ScenarioMeasurement RunEquipScenario(int iterations)
         if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
         {
             throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Equip failed.");
+        }
+
+        checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunLockStateScenario(int iterations)
+{
+    var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_lock");
+    var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
+    InventoryContainerSnapshot container = CreateContainer(
+        "container:bench_store_lock/backpack",
+        InventoryPlacementMode.List,
+        [CreateItem("item:bench_store_lock/coin", InventoryPlacementDescriptor.List(0))]);
+    StoreSuccess(store.AddContainer(container));
+
+    var rules = new InventoryLockItemMutationRules(
+        new AllowAllInventoryContainerAccessPolicy(),
+        new AllowInventoryItemLockPolicy(),
+        new ToggleInventoryRangePolicy(allow: true));
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        var intent = new InventoryMutationIntent(
+            i % 2 == 0 ? "corr:bench_store_lock/apply" : "corr:bench_store_unlock/apply",
+            requester,
+            ClientSequence: i,
+            i % 2 == 0 ? InventoryMutationKind.LockItem : InventoryMutationKind.UnlockItem,
+            container.ContainerId,
+            DestinationContainerId: null,
+            "item:bench_store_lock/coin",
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: null);
+        InventoryStoreOperationResult result = store.ApplyLockState(intent, rules);
+        if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
+        {
+            throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Lock-state change failed.");
         }
 
         checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
@@ -567,6 +619,18 @@ internal sealed class PrefixInventoryEquipmentSlotPolicy : IInventoryEquipmentSl
             }
         }
 
+        return InventoryMutationRuleDecision.Accepted();
+    }
+}
+
+internal sealed class AllowInventoryItemLockPolicy : IInventoryItemLockPolicy
+{
+    public InventoryMutationRuleDecision CanChangeLockState(
+        InventoryRequesterRef requester,
+        InventoryItemSnapshot item,
+        InventoryContainerSnapshot container,
+        bool locked)
+    {
         return InventoryMutationRuleDecision.Accepted();
     }
 }
