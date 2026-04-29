@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using UltraSim.Client;
+using UltraSim.Client.Content;
 using UltraSim.Discovery;
 using UltraSim.Network;
 
@@ -16,6 +18,11 @@ internal static class TestRunner
         Run(nameof(ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary), ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary);
         Run(nameof(ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure), ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure);
         Run(nameof(ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields), ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields);
+        Run(nameof(ServerContentIdentity_ProducesPathSafeStableNamespace), ServerContentIdentity_ProducesPathSafeStableNamespace);
+        Run(nameof(ClientContentCachePathPolicy_ResolvesServerScopedPathsAndRejectsTraversal), ClientContentCachePathPolicy_ResolvesServerScopedPathsAndRejectsTraversal);
+        Run(nameof(UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity), UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity);
+        Run(nameof(ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths), ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths);
+        Run(nameof(ContentPathValidation_ValidatesSizeAndSha256), ContentPathValidation_ValidatesSizeAndSha256);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -274,6 +281,113 @@ internal static class TestRunner
             out _,
             out error));
         Assert.Equal("Server 'Relay' does not expose a direct connect target.", error);
+    }
+
+    private static void ServerContentIdentity_ProducesPathSafeStableNamespace()
+    {
+        Assert.True(ServerContentIdentity.TryCreate(" official:shard/main ", out ServerContentIdentity first, out string error), error);
+        Assert.True(ServerContentIdentity.TryCreate("official:shard/main", out ServerContentIdentity second, out error), error);
+        Assert.True(ServerContentIdentity.TryCreate("official:shard/other", out ServerContentIdentity other, out error), error);
+
+        Assert.Equal("official:shard/main", first.ServerId);
+        Assert.Equal(first.CacheNamespace, second.CacheNamespace);
+        Assert.False(string.Equals(first.CacheNamespace, other.CacheNamespace, StringComparison.Ordinal));
+        Assert.True(first.CacheNamespace.StartsWith("server-", StringComparison.Ordinal), first.CacheNamespace);
+        Assert.False(first.CacheNamespace.Contains('/', StringComparison.Ordinal), first.CacheNamespace);
+        Assert.False(first.CacheNamespace.Contains('\\', StringComparison.Ordinal), first.CacheNamespace);
+
+        Assert.False(ServerContentIdentity.TryCreate("", out _, out error));
+        Assert.Equal("Server identity is required.", error);
+    }
+
+    private static void ClientContentCachePathPolicy_ResolvesServerScopedPathsAndRejectsTraversal()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        var policy = new ClientContentCachePathPolicy(Path.Combine(Path.GetTempPath(), "ultrasim-cache-test"));
+
+        Assert.True(policy.TryGetServerAssetPath(server, "icons\\items/sword.png", out string assetPath, out error), error);
+        Assert.True(assetPath.Contains(server.CacheNamespace, StringComparison.Ordinal), assetPath);
+        Assert.True(assetPath.EndsWith(Path.Combine("Assets", "icons", "items", "sword.png"), StringComparison.Ordinal), assetPath);
+
+        Assert.False(policy.TryGetServerAssetPath(server, "../outside.bin", out _, out error));
+        Assert.Equal("Content path cannot contain traversal segments.", error);
+
+        Assert.False(policy.TryGetServerAssetPath(server, "/tmp/outside.bin", out _, out error));
+        Assert.Equal("Content path must be relative.", error);
+
+        Assert.True(string.Equals(Path.Combine(policy.RootPath, "Mods"), policy.ModsRoot, StringComparison.Ordinal));
+        Assert.True(policy.ModsRoot.Contains("Mods", StringComparison.Ordinal));
+    }
+
+    private static void UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        string hash = new string('A', 64);
+        Assert.True(UiSchemaCacheKey.TryCreate(server, "login.character_select", 7, hash, out UiSchemaCacheKey key, out error), error);
+
+        Assert.Equal("login.character_select", key.PanelType);
+        Assert.Equal(7, key.Revision);
+        Assert.Equal(new string('a', 64), key.SchemaHashHex);
+
+        var policy = new ClientContentCachePathPolicy(Path.Combine(Path.GetTempPath(), "ultrasim-cache-test"));
+        string path = policy.GetSchemaPath(key);
+        Assert.True(path.Contains(server.CacheNamespace, StringComparison.Ordinal), path);
+        Assert.True(path.EndsWith(Path.Combine("Schemas", "login.character_select", "7", new string('a', 64) + ".uischema"), StringComparison.Ordinal), path);
+
+        Assert.False(UiSchemaCacheKey.TryCreate(server, "../login", 7, hash, out _, out error));
+        Assert.True(error.Contains("Panel type", StringComparison.Ordinal), error);
+
+        Assert.False(UiSchemaCacheKey.TryCreate(server, "login", -1, hash, out _, out error));
+        Assert.Equal("Schema revision cannot be negative.", error);
+    }
+
+    private static void ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths()
+    {
+        string hash = new string('b', 64);
+        var valid = new ServerPatchManifest(
+            "patch-1",
+            1,
+            [
+                new ServerPatchManifestEntry("icons/items/sword.png", 128, hash),
+                new ServerPatchManifestEntry("ui/login.uischema", 256, new string('c', 64))
+            ]);
+        Assert.True(ServerPatchManifestValidator.TryValidate(valid, out string error), error);
+
+        var executable = new ServerPatchManifest(
+            "patch-1",
+            1,
+            [new ServerPatchManifestEntry("scripts/evil.gd", 1, hash)]);
+        Assert.False(ServerPatchManifestValidator.TryValidate(executable, out error));
+        Assert.True(error.Contains("executable/script", StringComparison.Ordinal), error);
+
+        var traversal = new ServerPatchManifest(
+            "patch-1",
+            1,
+            [new ServerPatchManifestEntry("../outside.png", 1, hash)]);
+        Assert.False(ServerPatchManifestValidator.TryValidate(traversal, out error));
+        Assert.Equal("Content path cannot contain traversal segments.", error);
+
+        var duplicate = new ServerPatchManifest(
+            "patch-1",
+            1,
+            [
+                new ServerPatchManifestEntry("icons/a.png", 1, hash),
+                new ServerPatchManifestEntry("icons\\a.png", 1, hash)
+            ]);
+        Assert.False(ServerPatchManifestValidator.TryValidate(duplicate, out error));
+        Assert.True(error.Contains("duplicate path", StringComparison.Ordinal), error);
+    }
+
+    private static void ContentPathValidation_ValidatesSizeAndSha256()
+    {
+        byte[] bytes = [1, 2, 3, 4];
+        string hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+
+        Assert.True(ContentPathValidation.ValidateSizeAndSha256(bytes, bytes.Length, hash, out string error), error);
+        Assert.False(ContentPathValidation.ValidateSizeAndSha256(bytes, bytes.Length + 1, hash, out error));
+        Assert.True(error.Contains("size mismatch", StringComparison.OrdinalIgnoreCase), error);
+        Assert.False(ContentPathValidation.ValidateSizeAndSha256(bytes, bytes.Length, new string('0', 64), out error));
+        Assert.Equal("Asset SHA-256 hash mismatch.", error);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()

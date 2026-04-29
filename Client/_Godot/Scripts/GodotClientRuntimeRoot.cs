@@ -33,6 +33,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawConnected;
 	private bool _smokeRequireDisconnected;
 	private bool _smokeSawDisconnected;
+	private bool _smokeRequireSessionFailed;
+	private bool _smokeSawSessionFailed;
 	private bool _smokeRequireChatReceived;
 	private bool _smokeRequireOwnerMovement;
 	private double _smokeReconnectAfterSeconds = -1.0;
@@ -43,6 +45,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeReconnectRequested;
 	private bool _smokeChatRequested;
 	private string _smokeChatText = "hello from smoke";
+	private string? _smokeSessionFailedContains;
+	private string? _smokeSessionFailureStatus;
 	private short _smokeMoveX = 100;
 	private short _smokeMoveY;
 	private int _smokeConnectedCount;
@@ -58,6 +62,7 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
 		_smokeRequireDisconnected = HasUserArg("--us-smoke-require-disconnected");
+		_smokeRequireSessionFailed = HasUserArg("--us-smoke-require-session-failed");
 		_smokeRequireChatReceived = HasUserArg("--us-smoke-require-chat-received");
 		_smokeRequireOwnerMovement = HasUserArg("--us-smoke-require-owner-movement");
 		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
@@ -65,6 +70,7 @@ public partial class GodotClientRuntimeRoot : Node
 		_smokeMoveAfterSeconds = ReadPositiveUserArg("--us-smoke-move-after=");
 		_smokeMoveDurationSeconds = ReadPositiveUserArg("--us-smoke-move-duration=");
 		_smokeChatText = ReadStringUserArg("--us-smoke-chat-text=") ?? _smokeChatText;
+		_smokeSessionFailedContains = ReadStringUserArg("--us-smoke-session-failed-contains=");
 		_smokeMoveX = (short)Math.Clamp(ReadIntUserArg("--us-smoke-move-x=", _smokeMoveX), -100, 100);
 		_smokeMoveY = (short)Math.Clamp(ReadIntUserArg("--us-smoke-move-y=", _smokeMoveY), -100, 100);
 		_smokeRequiredConnectedCount = ReadPositiveIntUserArg("--us-smoke-require-connected-count=");
@@ -91,6 +97,7 @@ public partial class GodotClientRuntimeRoot : Node
 			HandleObserverState,
 			HandleObserverStateReset,
 			HandleSessionFailed);
+		ApplyNetworkDriverUserOptions(_sessionDriver);
 		if (UiManager?.Menus is not null)
 		{
 			UiManager.Menus.DirectConnectRequested += HandleDirectConnectRequested;
@@ -242,6 +249,27 @@ public partial class GodotClientRuntimeRoot : Node
 		UiManager?.Menus?.ShowSessionStatus();
 	}
 
+	private static void ApplyNetworkDriverUserOptions(GodotClientNetworkSessionDriver driver)
+	{
+		int maxHandshakeAttempts = ReadPositiveIntUserArg("--us-connect-max-handshake-attempts=");
+		if (maxHandshakeAttempts > 0)
+		{
+			driver.MaxHandshakeAttempts = maxHandshakeAttempts;
+		}
+
+		double handshakeRetrySeconds = ReadPositiveUserArg("--us-connect-handshake-retry-seconds=");
+		if (handshakeRetrySeconds > 0.0)
+		{
+			driver.HandshakeRetryIntervalSeconds = handshakeRetrySeconds;
+		}
+
+		double keepAliveTimeoutSeconds = ReadPositiveUserArg("--us-connect-ready-keepalive-timeout-seconds=");
+		if (keepAliveTimeoutSeconds > 0.0)
+		{
+			driver.ReadyKeepAliveTimeoutSeconds = keepAliveTimeoutSeconds;
+		}
+	}
+
 	private void HandleDisconnectRequested()
 	{
 		_sessionDriver?.Disconnect();
@@ -259,6 +287,8 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		_wasSessionReady = false;
 		_smokeSawDisconnected = true;
+		_smokeSawSessionFailed = true;
+		_smokeSessionFailureStatus = status;
 		CharacterWorld?.ClearAllActors();
 		if (LocalPlayerController is not null)
 		{
@@ -438,6 +468,32 @@ public partial class GodotClientRuntimeRoot : Node
 			GD.PushError($"UltraSim client smoke failed: expected {_smokeRequiredConnectedCount} connected transition(s), saw {_smokeConnectedCount}.");
 			GetTree().Quit(1);
 			return;
+		}
+
+		if (_smokeRequireSessionFailed)
+		{
+			if (!_smokeSawSessionFailed)
+			{
+				GD.PushError("UltraSim client smoke failed: expected session failure but saw none.");
+				GetTree().Quit(1);
+				return;
+			}
+
+			if (_sessionDriver?.IsRunning == true)
+			{
+				GD.PushError("UltraSim client smoke failed: network session is still running after expected failure.");
+				GetTree().Quit(1);
+				return;
+			}
+
+			if (!string.IsNullOrWhiteSpace(_smokeSessionFailedContains) &&
+				(_smokeSessionFailureStatus is null ||
+				 !_smokeSessionFailureStatus.Contains(_smokeSessionFailedContains, StringComparison.OrdinalIgnoreCase)))
+			{
+				GD.PushError($"UltraSim client smoke failed: expected failure status containing '{_smokeSessionFailedContains}', got '{_smokeSessionFailureStatus ?? "<none>"}'.");
+				GetTree().Quit(1);
+				return;
+			}
 		}
 
 		if (_smokeRequireChatReceived && _smokeChatReceivedCount <= 0)

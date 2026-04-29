@@ -83,6 +83,9 @@ Current Godot smoke hooks:
   - `--us-connect=host:port`
   - `--us-connect-host=host`
   - `--us-connect-port=port`
+  - `--us-connect-max-handshake-attempts=n`
+  - `--us-connect-handshake-retry-seconds=seconds`
+  - `--us-connect-ready-keepalive-timeout-seconds=seconds`
   - `--us-smoke-quit-after=seconds`
   - `--us-smoke-require-connected`
   - `--us-smoke-require-connected-count=n`
@@ -90,6 +93,8 @@ Current Godot smoke hooks:
   - `--us-smoke-final-disconnect-after=seconds`
   - `--us-smoke-reconnect-after=seconds`
   - `--us-smoke-require-disconnected`
+  - `--us-smoke-require-session-failed`
+  - `--us-smoke-session-failed-contains=text`
   - `--us-smoke-chat-after=seconds`
   - `--us-smoke-chat-text=text`
   - `--us-smoke-require-chat-received`
@@ -559,6 +564,21 @@ Done when:
 Validation:
 
 - cache path tests
+
+Current status:
+
+- first engine-agnostic `Client/Core/Content` slice exists:
+  - server identity -> deterministic path-safe cache namespace
+  - server asset cache path policy with traversal rejection
+  - UI schema cache key/path model by server, panel type, revision, and SHA-256 hash
+  - server patch manifest validation that rejects executable/script content
+  - asset size/SHA-256 validation primitive
+  - content resolver trust-class contracts
+- remaining G5 work:
+  - resource-pack override stack
+  - persisted cache metadata/quota/eviction hooks
+  - first Godot-side content resolver adapter
+  - real patch/schema cache IO
 - manifest validation tests
 - resolver precedence tests
 - "server patch cannot contain executable/script entries" test
