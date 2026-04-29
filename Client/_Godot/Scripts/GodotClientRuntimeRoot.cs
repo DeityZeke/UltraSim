@@ -1,5 +1,6 @@
 using Godot;
 using UltraSim.Client.Godot.Camera;
+using UltraSim.Client.Godot.Content;
 using UltraSim.Client.Godot.Controllers;
 using UltraSim.Client.Godot.Mobiles;
 using UltraSim.Client.Godot.UI;
@@ -15,6 +16,7 @@ public partial class GodotClientRuntimeRoot : Node
 	[Export] public NodePath? CameraRigPath { get; set; }
 	[Export] public NodePath? UiManagerPath { get; set; }
 	[Export] public bool StartPreviewOnReady { get; set; } = true;
+	[Export] public string ContentCacheRootOverride { get; set; } = string.Empty;
 	[Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
 
 	private readonly List<double> _smokeDisconnectAtSeconds = new();
@@ -23,6 +25,7 @@ public partial class GodotClientRuntimeRoot : Node
 	public LocalPlayerController? LocalPlayerController { get; private set; }
 	public OrbitFollowCameraRig? CameraRig { get; private set; }
 	public UiManager? UiManager { get; private set; }
+	public GodotClientContentServices? ContentServices { get; private set; }
 
 	private GodotClientNetworkSessionDriver? _sessionDriver;
 	private GodotNetworkPresentationBridge? _presentationBridge;
@@ -35,6 +38,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawDisconnected;
 	private bool _smokeRequireSessionFailed;
 	private bool _smokeSawSessionFailed;
+	private bool _smokeRequireContentCache;
 	private bool _smokeRequireChatReceived;
 	private bool _smokeRequireOwnerMovement;
 	private double _smokeReconnectAfterSeconds = -1.0;
@@ -63,6 +67,7 @@ public partial class GodotClientRuntimeRoot : Node
 		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
 		_smokeRequireDisconnected = HasUserArg("--us-smoke-require-disconnected");
 		_smokeRequireSessionFailed = HasUserArg("--us-smoke-require-session-failed");
+		_smokeRequireContentCache = HasUserArg("--us-smoke-require-content-cache");
 		_smokeRequireChatReceived = HasUserArg("--us-smoke-require-chat-received");
 		_smokeRequireOwnerMovement = HasUserArg("--us-smoke-require-owner-movement");
 		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
@@ -79,6 +84,8 @@ public partial class GodotClientRuntimeRoot : Node
 		LocalPlayerController = ResolveNode<LocalPlayerController>(LocalPlayerControllerPath);
 		CameraRig = ResolveNode<OrbitFollowCameraRig>(CameraRigPath);
 		UiManager = ResolveNode<UiManager>(UiManagerPath);
+		ContentServices = GodotClientContentServices.Load(ResolveContentCacheRoot(), GD.PushWarning);
+		SetStatusText($"Content cache ready: {ContentServices.PathPolicy.RootPath}");
 
 		if (LocalPlayerController is not null && CameraRig is not null)
 		{
@@ -155,6 +162,8 @@ public partial class GodotClientRuntimeRoot : Node
 
 		_sessionDriver?.Dispose();
 		_sessionDriver = null;
+		ContentServices?.SaveIndex();
+		ContentServices = null;
 		_presentationBridge = null;
 	}
 
@@ -268,6 +277,17 @@ public partial class GodotClientRuntimeRoot : Node
 		{
 			driver.ReadyKeepAliveTimeoutSeconds = keepAliveTimeoutSeconds;
 		}
+	}
+
+	private string ResolveContentCacheRoot()
+	{
+		string? argRoot = ReadStringUserArg("--us-content-cache-root=");
+		string root = !string.IsNullOrWhiteSpace(argRoot)
+			? argRoot
+			: !string.IsNullOrWhiteSpace(ContentCacheRootOverride)
+				? ContentCacheRootOverride
+				: ProjectSettings.GlobalizePath("user://UltraSimCache");
+		return root;
 	}
 
 	private void HandleDisconnectRequested()
@@ -466,6 +486,13 @@ public partial class GodotClientRuntimeRoot : Node
 		if (_smokeRequiredConnectedCount > 0 && _smokeConnectedCount < _smokeRequiredConnectedCount)
 		{
 			GD.PushError($"UltraSim client smoke failed: expected {_smokeRequiredConnectedCount} connected transition(s), saw {_smokeConnectedCount}.");
+			GetTree().Quit(1);
+			return;
+		}
+
+		if (_smokeRequireContentCache && ContentServices is null)
+		{
+			GD.PushError("UltraSim client smoke failed: content cache services were not initialized.");
 			GetTree().Quit(1);
 			return;
 		}

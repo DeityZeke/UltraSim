@@ -86,6 +86,7 @@ Current Godot smoke hooks:
   - `--us-connect-max-handshake-attempts=n`
   - `--us-connect-handshake-retry-seconds=seconds`
   - `--us-connect-ready-keepalive-timeout-seconds=seconds`
+  - `--us-content-cache-root=path`
   - `--us-smoke-quit-after=seconds`
   - `--us-smoke-require-connected`
   - `--us-smoke-require-connected-count=n`
@@ -95,6 +96,7 @@ Current Godot smoke hooks:
   - `--us-smoke-require-disconnected`
   - `--us-smoke-require-session-failed`
   - `--us-smoke-session-failed-contains=text`
+  - `--us-smoke-require-content-cache`
   - `--us-smoke-chat-after=seconds`
   - `--us-smoke-chat-text=text`
   - `--us-smoke-require-chat-received`
@@ -585,8 +587,12 @@ Current status:
   - metadata eviction execution that removes planned candidates from the index
   - opaque UI schema byte cache store with SHA-256 validation and metadata updates
   - server patch asset byte cache store with manifest size/SHA-256 validation and metadata updates
+  - first Godot-side content/cache service adapter:
+    - resolves default `user://UltraSimCache`
+    - loads/recreates cache index metadata
+    - exposes schema and server-asset cache stores
+    - saves cache metadata on shell exit
 - remaining G5 work:
-  - first Godot-side content resolver adapter
   - schema codec/validation and typed schema cache entries
 - manifest validation tests
 - resolver precedence tests
