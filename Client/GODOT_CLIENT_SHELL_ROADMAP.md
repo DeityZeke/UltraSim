@@ -60,7 +60,27 @@ The current Godot client shell now has a real thin-host spine:
   - chat submit/event display path
   - ping/status HUD summary
 
-This means Phase G0 and most of G1/G2 are implemented, and G3 has an initial working bridge that still needs live direct-connect validation against the current server. The remaining client bottleneck is no longer "create a shell"; it is reintroducing the old v2 feature set on top of the rebuilt runtime shape: discovery polish, server-driven schema UI, login/character flow, content/cache identity, reconnect/persistence validation, and admin/debug panels.
+This means Phase G0, G1, G2, G3, and the pre-schema portion of G5 are implemented and validated on the current Linux/Godot Mono setup. The remaining client bottleneck is no longer "create a shell"; it is reintroducing the old v2 feature set on top of the rebuilt runtime shape: discovery polish, server-driven schema UI, login/character flow, reconnect/persistence validation, content-backed gameplay panels, and admin/debug panels.
+
+Latest pre-G6 validation on Linux:
+
+- `UltraSim.Client.Tests`: passed
+- `UltraSim.Server.Tests`: passed
+- `dotnet build Client/_Godot/UltraSim.Client.Godot.csproj -c Release`: passed
+- `dotnet build Server/_Godot/UltraSim.Server.Godot.csproj -c Release`: passed
+- Godot client content-cache/preview smoke: passed
+- Godot server + client live direct-connect smoke: passed
+  - connected over UDP
+  - owner movement acknowledged
+  - chat echoed
+  - client disconnect cleared session world
+  - server empty-session smoke satisfied
+
+The active Godot executable used for these smokes is:
+
+```text
+/mnt/data/Programs/Godot v4.6.2 Mono/Godot_v4.6.2-stable_mono_linux.x86_64
+```
 
 ## Testing Posture
 
@@ -545,6 +565,20 @@ Validation:
 - provider snapshot/controller tests
 - registry unavailable behavior test with fake query provider
 
+Current status:
+
+- engine-agnostic discovery contracts exist in `Discovery`
+- `ClientServerBrowserService` supports provider-backed snapshots, refresh, provider selection, and friendly provider failure state
+- Godot app shell has a provider-backed server browser surface
+- manual/local-dev provider is wired and direct-connect remains available
+- direct-connect row resolution and provider failure behavior are covered by `UltraSim.Client.Tests`
+
+Remaining G4 work before a real registry launch:
+
+- official registry HTTP/query adapter once the portal/registry endpoint is available
+- favorites/history/LAN providers are explicitly deferred
+- richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
+
 ### Phase G5 - Content Resolver And Cache Spine
 
 Goal: add the minimal content/cache shape before schema caching and real content patching.
@@ -572,6 +606,12 @@ Done when:
 Validation:
 
 - cache path tests
+- manifest validation tests
+- resolver precedence tests
+- server patch cannot contain executable/script entries test
+- metadata/index round-trip tests
+- cache eviction safety tests
+- schema/manifest/asset cache store tests
 
 Current status:
 
@@ -601,10 +641,8 @@ Current status:
     - exposes schema, server patch manifest, and server-asset cache stores
     - saves cache metadata on shell exit
 - remaining G5 work:
-  - stop here before schema codec/validation, typed schema cache entries, or server-driven menu work until the schema UI plan is discussed
-- manifest validation tests
-- resolver precedence tests
-- "server patch cannot contain executable/script entries" test
+  - G5 is complete enough for the pre-schema gate
+  - stop here before schema codec/validation, typed schema cache entries, or server-driven menu work; those belong to G6/UI-1
 
 ### Phase G6 - Server-Driven UI Schema Path
 
@@ -773,19 +811,37 @@ Keep these seams available even if they are empty in the first pass:
 
 ## Next Implementation Slice
 
-The G0/G1 shell surface now exists. The next sensible slice is to validate and tighten Phase G3 before rebuilding the larger v2 UI/service features:
+The pre-schema client shell gate is now validated. G6/UI-1 has started in `Kernels/UI` with the first engine-agnostic contract slice:
 
-1. Run Godot build and root-scene smoke on the current Linux Godot Mono executable.
-2. Run `UltraSim.Client.Tests`.
-3. Direct-connect the Godot client shell to the current headless/server runtime.
-4. Verify:
-   - local avatar ownership
-   - movement input send
-   - owner correction receive
-   - remote observer actor presentation
-   - chat submit/receive
-   - ping/status HUD updates
-   - disconnect clears session-owned world state without replacing the shell
-5. Document any gaps before starting server-driven schema UI.
+- `Kernels/UI/UltraSim.UI.csproj`
+- schema/catalog identity records
+- surface/focus/open/back/tooltip policy enums
+- capability flags and renderer capability record
+- panel metadata
+- action/context descriptor shape
+- runtime state binding descriptor and fallback shape
+- early node id reservations
+- simple JSON contract codec for round-trip tests
+- `_Tests/UltraSim.UI.Tests`
+- `_Benchmarks/UltraSim.UI.Benchmarks`
 
-After G3 is validated, move into the content/cache spine and server-driven schema UI path. The old v2 UI/schema/discovery/account docs are the main reference for that work; the rebuilt version should keep the same features but use the current runtime boundaries and cleaner packet/cache/service shape.
+Current UI-1 validation:
+
+- `dotnet build Kernels/UI/UltraSim.UI.csproj -c Release`: passed
+- `dotnet run --project _Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj -c Release`: passed
+- `dotnet run --project _Benchmarks/UltraSim.UI.Benchmarks/UltraSim.UI.Benchmarks.csproj -c Release`: passed
+
+First UI benchmark report:
+
+- `_Benchmarks/results/ui-benchmarks.json`
+
+Next G6/UI-1 steps:
+
+1. Add schema node/tree descriptors and schema document validation.
+2. Add model payload slot descriptors and model compatibility validation.
+3. Add delta/update descriptor contracts.
+4. Add catalog identity/schema linkage contracts.
+5. Keep client runtime, server providers, and Godot renderer work out of the kernel until these contracts are measurable.
+6. If implementation exposes a bad contract, fix the UI kernel contract and planning docs before patching around it in the bridge layers.
+
+The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.
