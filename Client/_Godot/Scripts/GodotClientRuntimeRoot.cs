@@ -34,25 +34,37 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeRequireDisconnected;
 	private bool _smokeSawDisconnected;
 	private bool _smokeRequireChatReceived;
+	private bool _smokeRequireOwnerMovement;
 	private double _smokeReconnectAfterSeconds = -1.0;
 	private double _smokeChatAfterSeconds = -1.0;
+	private double _smokeMoveAfterSeconds = -1.0;
+	private double _smokeMoveDurationSeconds = 1.0;
 	private double _smokeElapsedSeconds;
 	private bool _smokeReconnectRequested;
 	private bool _smokeChatRequested;
 	private string _smokeChatText = "hello from smoke";
+	private short _smokeMoveX = 100;
+	private short _smokeMoveY;
 	private int _smokeConnectedCount;
 	private int _smokeRequiredConnectedCount;
 	private int _smokeChatReceivedCount;
+	private int _smokeOwnerMovementCount;
 	private int _nextSmokeDisconnectIndex;
+	private ClientMovementState _lastAuthoritativeOwnerState;
 
 	public override void _Ready()
 	{
 		_smokeRequireConnected = HasUserArg("--us-smoke-require-connected");
 		_smokeRequireDisconnected = HasUserArg("--us-smoke-require-disconnected");
 		_smokeRequireChatReceived = HasUserArg("--us-smoke-require-chat-received");
+		_smokeRequireOwnerMovement = HasUserArg("--us-smoke-require-owner-movement");
 		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
 		_smokeChatAfterSeconds = ReadPositiveUserArg("--us-smoke-chat-after=");
+		_smokeMoveAfterSeconds = ReadPositiveUserArg("--us-smoke-move-after=");
+		_smokeMoveDurationSeconds = ReadPositiveUserArg("--us-smoke-move-duration=");
 		_smokeChatText = ReadStringUserArg("--us-smoke-chat-text=") ?? _smokeChatText;
+		_smokeMoveX = (short)Math.Clamp(ReadIntUserArg("--us-smoke-move-x=", _smokeMoveX), -100, 100);
+		_smokeMoveY = (short)Math.Clamp(ReadIntUserArg("--us-smoke-move-y=", _smokeMoveY), -100, 100);
 		_smokeRequiredConnectedCount = ReadPositiveIntUserArg("--us-smoke-require-connected-count=");
 		ReadSmokeDisconnectSchedule();
 		CharacterWorld = ResolveNode<ClientCharacterWorld>(CharacterWorldPath);
@@ -112,9 +124,9 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		_sessionDriver?.Pump();
 		UpdateReadySessionTransition();
+		UpdateSmokeSchedule(delta);
 		SendMovementInputIfReady(delta);
 		UpdateNetworkSummary();
-		UpdateSmokeSchedule(delta);
 
 		if (LocalPlayerController is not null)
 		{
@@ -278,6 +290,12 @@ public partial class GodotClientRuntimeRoot : Node
 
 	private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)
 	{
+		_lastAuthoritativeOwnerState = result.AuthoritativeState;
+		if (result.LastProcessedInputSequence != 0)
+		{
+			_smokeOwnerMovementCount++;
+		}
+
 		_presentationBridge?.ApplyOwnerMovement(result);
 	}
 
@@ -302,9 +320,10 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		bool hasMoveInput = LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection);
+		bool hasSmokeMoveInput = TryReadSmokeMoveInput(out short smokeMoveX, out short smokeMoveY);
 		var input = new ClientMovementInput(
-			MoveX: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f) : (short)0,
-			MoveY: hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f) : (short)0,
+			MoveX: hasSmokeMoveInput ? smokeMoveX : hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f) : (short)0,
+			MoveY: hasSmokeMoveInput ? smokeMoveY : hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f) : (short)0,
 			Flags: 0);
 
 		global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
@@ -316,7 +335,7 @@ public partial class GodotClientRuntimeRoot : Node
 			velocityX,
 			velocityY);
 
-		ApplyLocalPredictedMovement(predicted, hasMoveInput);
+		ApplyLocalPredictedMovement(predicted, hasMoveInput || hasSmokeMoveInput);
 
 		_localClientTick++;
 		_sessionDriver.TrySendMovementInput(input, predicted);
@@ -416,6 +435,13 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (_smokeRequireOwnerMovement && _smokeOwnerMovementCount <= 0)
+		{
+			GD.PushError("UltraSim client smoke failed: expected acknowledged owner movement but received none.");
+			GetTree().Quit(1);
+			return;
+		}
+
 		if (_smokeRequireDisconnected)
 		{
 			if (!_smokeSawDisconnected)
@@ -488,6 +514,29 @@ public partial class GodotClientRuntimeRoot : Node
 			SetStatusText("Smoke reconnect requested.");
 			HandleDirectConnectRequested(_lastDirectConnectRequest.Value);
 		}
+	}
+
+	private bool TryReadSmokeMoveInput(out short moveX, out short moveY)
+	{
+		moveX = _smokeMoveX;
+		moveY = _smokeMoveY;
+		if (_smokeMoveAfterSeconds <= 0.0)
+		{
+			return false;
+		}
+
+		if (_smokeElapsedSeconds < _smokeMoveAfterSeconds)
+		{
+			return false;
+		}
+
+		double duration = _smokeMoveDurationSeconds <= 0.0 ? 1.0 : _smokeMoveDurationSeconds;
+		if (_smokeElapsedSeconds > _smokeMoveAfterSeconds + duration)
+		{
+			return false;
+		}
+
+		return moveX != 0 || moveY != 0;
 	}
 
 	private void ReadSmokeDisconnectSchedule()
@@ -581,6 +630,27 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		return 0;
+	}
+
+	private static int ReadIntUserArg(string prefix, int defaultValue)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (int.TryParse(arg[prefix.Length..], out int value))
+			{
+				return value;
+			}
+
+			GD.PushWarning($"Invalid {prefix.TrimEnd('=')} value.");
+			return defaultValue;
+		}
+
+		return defaultValue;
 	}
 
 	private static string? ReadStringUserArg(string prefix)
