@@ -13,6 +13,9 @@ internal static class TestRunner
         Run(nameof(EcsInventoryRuntimeRefResolver_LeavesNonEcsRefsAsExternalRuntimeIds), EcsInventoryRuntimeRefResolver_LeavesNonEcsRefsAsExternalRuntimeIds);
         Run(nameof(InventoryRulesFoundation_FakePoliciesEvaluateMutationAccessAndStackMerge), InventoryRulesFoundation_FakePoliciesEvaluateMutationAccessAndStackMerge);
         Run(nameof(DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy), DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy);
+        Run(nameof(InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers), InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers);
+        Run(nameof(InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource), InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource);
+        Run(nameof(InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions), InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -220,6 +223,152 @@ internal static class TestRunner
         Assert.Equal(InventoryOwnerInvalidationAction.CloseViewers, accountFailure.Action, "external owner invalidation");
     }
 
+    private static void InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers()
+    {
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryContainerSnapshot chest = CreateContainer(
+            "container:chest/x",
+            new InventoryOwnerRef(InventoryOwnerKind.WorldObject, "world:chest/x"),
+            InventoryContainerLifecycle.WorldPersistent);
+        InventoryContainerSnapshot barrel = CreateContainer(
+            "container:barrel/y",
+            new InventoryOwnerRef(InventoryOwnerKind.WorldObject, "world:barrel/y"),
+            InventoryContainerLifecycle.WorldPersistent);
+        Assert.StoreSuccess(store.AddContainer(chest));
+        Assert.StoreSuccess(store.AddContainer(barrel));
+
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:player/chest",
+            chest.ContainerId,
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:player"),
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:player/barrel",
+            barrel.ContainerId,
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:player"),
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:gm/chest",
+            chest.ContainerId,
+            new InventoryRequesterRef(InventoryRequesterKind.Admin, "admin:gm"),
+            InventoryAccessFlags.Read | InventoryAccessFlags.Admin)));
+
+        Assert.Equal(2, store.ActiveContainerCount, "active container count");
+
+        var delta = new InventoryContainerDelta(
+            "delta:chest/x/1",
+            chest.ContainerId,
+            ContainerRevision: 1,
+            InventoryContainerDeltaKind.QuantityChanged,
+            ItemInstanceId: "item:coin/x",
+            Item: null,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: -1,
+            InventoryAccessFlags.Read);
+        InventoryStoreOperationResult result = store.DispatchDelta(delta);
+        Assert.StoreSuccess(result);
+        Assert.Equal(1, result.Dispatches.Count, "dispatch count");
+        Assert.Equal(2, result.Dispatches[0].RecipientViewIds.Count, "chest recipient count");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:player/chest", "chest player recipient");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:gm/chest", "chest gm recipient");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:player/barrel", "barrel viewer isolation");
+    }
+
+    private static void InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource()
+    {
+        var store = new InMemoryInventoryStore(new FakeInventoryRuntimeRefResolver(), new DefaultInventoryOwnerLifetimePolicy());
+        InventoryContainerSnapshot left = CreateContainer(
+            "container:trade/left",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:left"),
+            InventoryContainerLifecycle.Transactional,
+            [CreateCoinItem("item:coin/trade")]);
+        InventoryContainerSnapshot right = CreateContainer(
+            "container:trade/right",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:right"),
+            InventoryContainerLifecycle.Transactional);
+        Assert.StoreSuccess(store.AddContainer(left));
+        Assert.StoreSuccess(store.AddContainer(right));
+
+        Assert.StoreSuccess(store.BeginTransaction(new InventoryTransactionSnapshot(
+            "trade:left_right/1",
+            InventoryTransactionState.Open,
+            [left.ContainerId, right.ContainerId],
+            [])));
+
+        Assert.StoreSuccess(store.SuspendWholeItem(
+            "trade:left_right/1",
+            left.ContainerId,
+            right.ContainerId,
+            "item:coin/trade"));
+        Assert.True(store.TryGetContainer(left.ContainerId, out InventoryContainerSnapshot suspendedLeft), "left container after suspend");
+        Assert.Equal(0, suspendedLeft.Items.Count, "left items after suspend");
+        Assert.True(store.TryGetTransaction("trade:left_right/1", out InventoryTransactionSnapshot openTransaction), "open transaction exists");
+        Assert.Equal(1, openTransaction.SuspendedItems.Count, "suspended item count");
+
+        InventoryStoreOperationResult cancel = store.CancelTransaction("trade:left_right/1", "test cancel");
+        Assert.StoreSuccess(cancel);
+        Assert.ContainsEvent(cancel.Events, InventoryStoreEventKind.SuspendedItemReleased, "item:coin/trade");
+        Assert.ContainsEvent(cancel.Events, InventoryStoreEventKind.TransactionCancelled, "trade:left_right/1");
+        Assert.False(store.TryGetTransaction("trade:left_right/1", out _), "transaction removed after cancel");
+        Assert.True(store.TryGetContainer(left.ContainerId, out InventoryContainerSnapshot restoredLeft), "left container after cancel");
+        Assert.Equal(1, restoredLeft.Items.Count, "left items after cancel");
+        Assert.Equal("item:coin/trade", restoredLeft.Items[0].ItemInstanceId, "restored item id");
+    }
+
+    private static void InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions()
+    {
+        World world = CreateWorld();
+        Entity ownerEntity = world.CreateDefault(new ArchetypeSignature([]));
+        string ownerRef = InventoryEcsEntityRefCodec.Format(ownerEntity);
+        var store = new InMemoryInventoryStore(
+            new EcsInventoryRuntimeRefResolver(world.Entities),
+            new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryContainerSnapshot left = CreateContainer(
+            "container:entity_trade/left",
+            new InventoryOwnerRef(InventoryOwnerKind.Entity, ownerRef),
+            InventoryContainerLifecycle.Transactional,
+            [CreateCoinItem("item:coin/entity_trade")]);
+        InventoryContainerSnapshot right = CreateContainer(
+            "container:entity_trade/right",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:right"),
+            InventoryContainerLifecycle.Transactional);
+        Assert.StoreSuccess(store.AddContainer(left));
+        Assert.StoreSuccess(store.AddContainer(right));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:entity_trade/left",
+            left.ContainerId,
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:watcher"),
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.BeginTransaction(new InventoryTransactionSnapshot(
+            "trade:entity_right/1",
+            InventoryTransactionState.Open,
+            [left.ContainerId, right.ContainerId],
+            [])));
+        Assert.StoreSuccess(store.SuspendWholeItem(
+            "trade:entity_right/1",
+            left.ContainerId,
+            right.ContainerId,
+            "item:coin/entity_trade"));
+
+        world.Destroy(ownerEntity);
+        InventoryStoreOperationResult invalidated = store.RefreshOwnerLifetime(left.ContainerId);
+        Assert.StoreSuccess(invalidated);
+
+        Assert.ContainsEvent(invalidated.Events, InventoryStoreEventKind.OwnerInvalidated, left.ContainerId);
+        Assert.ContainsEvent(invalidated.Events, InventoryStoreEventKind.ViewerClosed, "view:entity_trade/left");
+        Assert.ContainsEvent(invalidated.Events, InventoryStoreEventKind.SuspendedItemReleased, "item:coin/entity_trade");
+        Assert.ContainsEvent(invalidated.Events, InventoryStoreEventKind.TransactionCancelled, "trade:entity_right/1");
+        Assert.False(store.TryGetTransaction("trade:entity_right/1", out _), "transaction removed after owner invalidation");
+        Assert.True(store.TryGetContainer(left.ContainerId, out InventoryContainerSnapshot restoredLeft), "transactional container remains after owner invalidation");
+        Assert.Equal(1, restoredLeft.Items.Count, "released item returned to source");
+        Assert.Equal("item:coin/entity_trade", restoredLeft.Items[0].ItemInstanceId, "released item id");
+        Assert.Equal(0, store.ActiveContainerCount, "active containers after owner invalidation");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
@@ -239,6 +388,16 @@ internal static class TestRunner
             InventoryPlacementMode.List,
             [InventoryPermissionDescriptor.PublicReadTake],
             items ?? []);
+    }
+
+    private static InventoryItemSnapshot CreateCoinItem(string itemId)
+    {
+        return new InventoryItemSnapshot(
+            itemId,
+            "item.coin",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.List(0));
     }
 
     private static void Run(string name, Action test)
@@ -514,6 +673,14 @@ internal static class Assert
         }
     }
 
+    public static void Equal(int expected, int actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
     public static void Equal(long expected, long actual, string label)
     {
         if (expected != actual)
@@ -544,5 +711,62 @@ internal static class Assert
         {
             throw new InvalidOperationException($"Expected {label} to equal '{expected}', got '{actual}'.");
         }
+    }
+
+    public static void StoreSuccess(InventoryStoreOperationResult result)
+    {
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException($"Expected store operation to succeed, got '{result.Error}'.");
+        }
+    }
+
+    public static void Contains(IReadOnlyList<string> values, string expected, string label)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], expected, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException($"Expected {label} to contain '{expected}'.");
+    }
+
+    public static void NotContains(IReadOnlyList<string> values, string unexpected, string label)
+    {
+        for (int i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], unexpected, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException($"Expected {label} not to contain '{unexpected}'.");
+            }
+        }
+    }
+
+    public static void ContainsEvent(
+        IReadOnlyList<InventoryStoreEvent> events,
+        InventoryStoreEventKind kind,
+        string id)
+    {
+        for (int i = 0; i < events.Count; i++)
+        {
+            InventoryStoreEvent candidate = events[i];
+            if (candidate.Kind != kind)
+            {
+                continue;
+            }
+
+            if (string.Equals(candidate.ContainerId, id, StringComparison.Ordinal) ||
+                string.Equals(candidate.ViewId, id, StringComparison.Ordinal) ||
+                string.Equals(candidate.TransactionId, id, StringComparison.Ordinal) ||
+                string.Equals(candidate.ItemInstanceId, id, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException($"Expected event {kind} for '{id}'.");
     }
 }
