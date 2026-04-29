@@ -20,6 +20,8 @@ internal static class TestRunner
         Run(nameof(InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies), InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies);
         Run(nameof(InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas);
         Run(nameof(InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots), InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots);
+        Run(nameof(InMemoryInventoryStore_ApplyMoveSupportsCrossPlacementModeDestination), InMemoryInventoryStore_ApplyMoveSupportsCrossPlacementModeDestination);
+        Run(nameof(InMemoryInventoryStore_ApplyMoveRepositionsWithinSameContainer), InMemoryInventoryStore_ApplyMoveRepositionsWithinSameContainer);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -604,6 +606,102 @@ internal static class TestRunner
         Assert.Equal(coin.ItemInstanceId, unchangedSource.Items[0].ItemInstanceId, "source item after rejected move");
     }
 
+    private static void InMemoryInventoryStore_ApplyMoveSupportsCrossPlacementModeDestination()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:cross_mode");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot sourceItem = CreateCoinItem("item:coin/cross_mode");
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:cross_mode/list_source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:cross_mode"),
+            InventoryContainerLifecycle.Persistent,
+            [sourceItem]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:cross_mode/grid_destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:cross_mode"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Grid);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:cross_mode",
+            requester,
+            ClientSequence: 79,
+            InventoryMutationKind.MoveItem,
+            source.ContainerId,
+            destination.ContainerId,
+            sourceItem.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.Grid(3, 4, 1, 1));
+        var rules = new InventoryMoveMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 4),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyMove(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "cross-mode move mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "cross-mode move result kind");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot updatedDestination), "grid destination after move");
+        Assert.Equal(1, updatedDestination.Items.Count, "grid destination item count");
+        Assert.Equal(InventoryPlacementMode.Grid, updatedDestination.Items[0].Placement.Mode, "grid destination placement mode");
+        Assert.Equal(3, updatedDestination.Items[0].Placement.X, "grid destination placement x");
+        Assert.Equal(4, updatedDestination.Items[0].Placement.Y, "grid destination placement y");
+    }
+
+    private static void InMemoryInventoryStore_ApplyMoveRepositionsWithinSameContainer()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:reposition");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot coin = CreateCoinItem("item:coin/reposition");
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:reposition/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:reposition"),
+            InventoryContainerLifecycle.Persistent,
+            [coin]);
+        Assert.StoreSuccess(store.AddContainer(backpack));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:reposition/backpack",
+            backpack.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:reposition",
+            requester,
+            ClientSequence: 80,
+            InventoryMutationKind.MoveItem,
+            backpack.ContainerId,
+            backpack.ContainerId,
+            coin.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.List(7));
+        var rules = new InventoryMoveMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 4),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyMove(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "reposition mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "reposition result kind");
+        Assert.Equal(1, result.Dispatches.Count, "reposition dispatch count");
+        Assert.Equal(InventoryContainerDeltaKind.ItemMoved, result.Dispatches[0].Delta.Kind, "reposition delta kind");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:reposition/backpack", "reposition recipient");
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot updated), "backpack after reposition");
+        Assert.Equal(1, updated.Items.Count, "reposition item count");
+        Assert.Equal(7, updated.Items[0].Placement.Index, "reposition index");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
@@ -615,12 +713,22 @@ internal static class TestRunner
         InventoryContainerLifecycle lifecycle,
         IReadOnlyList<InventoryItemSnapshot>? items = null)
     {
+        return CreateContainer(containerId, owner, lifecycle, InventoryPlacementMode.List, items);
+    }
+
+    private static InventoryContainerSnapshot CreateContainer(
+        string containerId,
+        InventoryOwnerRef owner,
+        InventoryContainerLifecycle lifecycle,
+        InventoryPlacementMode placementMode,
+        IReadOnlyList<InventoryItemSnapshot>? items = null)
+    {
         return new InventoryContainerSnapshot(
             containerId,
             "container.test",
             owner,
             lifecycle,
-            InventoryPlacementMode.List,
+            placementMode,
             [InventoryPermissionDescriptor.PublicReadTake],
             items ?? []);
     }
@@ -1010,6 +1118,14 @@ internal static class Assert
     }
 
     public static void Equal(InventoryContainerDeltaKind expected, InventoryContainerDeltaKind actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(InventoryPlacementMode expected, InventoryPlacementMode actual, string label)
     {
         if (expected != actual)
         {

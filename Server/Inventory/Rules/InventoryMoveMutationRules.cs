@@ -63,23 +63,15 @@ public sealed class InventoryMoveMutationRules : IInventoryMutationRules
                 "The first move rule only supports whole-item moves.");
         }
 
-        if (context.DestinationContainer.PlacementMode != context.SourceItem.Placement.Mode)
+        InventoryPlacementDescriptor destinationPlacement =
+            context.Intent.ProposedPlacement ?? context.SourceItem.Placement;
+        InventoryValidationResult placementResult = destinationPlacement.ValidateForContainerMode(
+            context.DestinationContainer.PlacementMode);
+        if (!placementResult.IsValid)
         {
             return InventoryMutationRuleDecision.Rejected(
                 InventoryMutationFailureReason.InvalidPlacement,
-                "Destination placement mode does not match the item placement mode.");
-        }
-
-        if (context.Intent.ProposedPlacement is not null)
-        {
-            InventoryValidationResult placementResult = context.Intent.ProposedPlacement.ValidateForContainerMode(
-                context.DestinationContainer.PlacementMode);
-            if (!placementResult.IsValid)
-            {
-                return InventoryMutationRuleDecision.Rejected(
-                    InventoryMutationFailureReason.InvalidPlacement,
-                    placementResult.Error);
-            }
+                placementResult.Error);
         }
 
         InventoryContainerAccessDecision sourceAccess = _accessPolicy.Evaluate(new InventoryContainerAccessRequest(
@@ -114,7 +106,7 @@ public sealed class InventoryMoveMutationRules : IInventoryMutationRules
         InventoryMutationRuleDecision capacityDecision = _capacityPolicy.CanAccept(
             context.DestinationContainer,
             context.SourceItem,
-            context.Intent.ProposedPlacement);
+            destinationPlacement);
         if (!capacityDecision.IsAccepted)
         {
             return capacityDecision;

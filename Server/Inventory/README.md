@@ -29,9 +29,11 @@ Implemented first boundary slice:
   - requester resolution check
   - source take access check
   - destination put access check
+  - destination placement compatibility check
   - range policy hook
   - capacity policy hook
   - whole-item move only
+- benchmark harness in `_Benchmarks/UltraSim.Server.Inventory.Benchmarks`
 
 Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse. If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
 
@@ -75,7 +77,19 @@ It does not persist, authorize real gameplay, split partial stacks, or own trans
 - kernel snapshots/intents
 - resolved requester refs
 
+The rule validates the effective destination placement, not the item's old source placement. That keeps cross-viewer moves legal when the caller supplies a destination-compatible placement, such as moving a list-backed loot row into a grid-backed backpack.
+
 Splits, stack merges, equipment restrictions, grid collision placement, weight limits, ownership rules, and scripted container behavior remain future policy implementations.
+
+## Benchmark Harness
+
+Current server bridge benchmark:
+
+```bash
+dotnet run --project _Benchmarks/UltraSim.Server.Inventory.Benchmarks/UltraSim.Server.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/server-inventory-benchmarks.json
+```
+
+Initial scenarios cover accepted same-container reposition moves and rejected out-of-range moves. These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, split/merge, equipment rules, and scripted containers are layered on.
 
 ## Boundary Rules
 
