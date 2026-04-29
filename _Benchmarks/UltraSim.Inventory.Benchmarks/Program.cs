@@ -62,6 +62,28 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         IterationCount = 5,
         Execute = () => RunMutationResultValidationScenario(10_000),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ViewerRegistry_CountRecipients_1000Viewers_1000Deltas",
+        Category = "InventorySession",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunViewerRegistryFanoutScenario(1_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "TransactionSnapshot_Validate_1000SuspendedItems",
+        Category = "InventoryTransaction",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunTransactionValidationScenario(CreateTransactionSnapshot(1_000)),
+    };
 }
 
 static ScenarioMeasurement RunContainerValidationScenario(InventoryContainerSnapshot container)
@@ -130,6 +152,53 @@ static ScenarioMeasurement RunMutationResultValidationScenario(int iterations)
     return new ScenarioMeasurement(iterations, checksum);
 }
 
+static ScenarioMeasurement RunViewerRegistryFanoutScenario(int iterations)
+{
+    InventoryContainerViewerRegistrySnapshot registry = CreateViewerRegistry(1_000);
+    InventoryValidationResult registryResult = registry.Validate();
+    if (!registryResult.IsValid)
+    {
+        throw new InvalidOperationException(registryResult.Error);
+    }
+
+    var delta = new InventoryContainerDelta(
+        "delta:bench/fanout",
+        "container:bench/vendor",
+        ContainerRevision: 2,
+        InventoryContainerDeltaKind.QuantityChanged,
+        ItemInstanceId: "item:bench/1",
+        Item: null,
+        PreviousPlacement: null,
+        CurrentPlacement: null,
+        QuantityDelta: -1,
+        InventoryAccessFlags.Read,
+        VisibilityScopeId: "scope/vendor/display");
+    InventoryValidationResult deltaResult = delta.Validate(InventoryPlacementMode.List);
+    if (!deltaResult.IsValid)
+    {
+        throw new InvalidOperationException(deltaResult.Error);
+    }
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        checksum += registry.CountRecipients(delta);
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunTransactionValidationScenario(InventoryTransactionSnapshot transaction)
+{
+    InventoryValidationResult result = transaction.Validate();
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(transaction.SuspendedItems.Count, transaction.SuspendedItems.Count + transaction.ParticipantContainerIds.Count);
+}
+
 static InventoryContainerSnapshot CreateListContainer(int itemCount)
 {
     var items = new InventoryItemSnapshot[itemCount];
@@ -176,4 +245,49 @@ static InventoryContainerSnapshot CreateGridContainer(int itemCount)
         InventoryPlacementMode.Grid,
         [InventoryPermissionDescriptor.PublicReadTake],
         items);
+}
+
+static InventoryContainerViewerRegistrySnapshot CreateViewerRegistry(int viewerCount)
+{
+    var viewers = new InventoryContainerViewSnapshot[viewerCount];
+    for (int i = 0; i < viewerCount; i++)
+    {
+        InventoryAccessFlags access = InventoryAccessFlags.Read;
+        string? scope = i % 2 == 0 ? "scope/vendor/display" : "scope/public";
+        if (i % 64 == 0)
+        {
+            access |= InventoryAccessFlags.Admin;
+            scope = null;
+        }
+
+        viewers[i] = new InventoryContainerViewSnapshot(
+            $"view:bench/{i}",
+            "container:bench/vendor",
+            new InventoryRequesterRef(
+                i % 64 == 0 ? InventoryRequesterKind.Admin : InventoryRequesterKind.PlayerSession,
+                i % 64 == 0 ? $"admin:bench/{i}" : $"session:bench/{i}"),
+            access,
+            scope);
+    }
+
+    return new InventoryContainerViewerRegistrySnapshot("container:bench/vendor", Revision: 1, viewers);
+}
+
+static InventoryTransactionSnapshot CreateTransactionSnapshot(int suspendedItemCount)
+{
+    var suspended = new InventorySuspendedItemSnapshot[suspendedItemCount];
+    for (int i = 0; i < suspendedItemCount; i++)
+    {
+        suspended[i] = new InventorySuspendedItemSnapshot(
+            $"item:trade/{i}",
+            i % 2 == 0 ? "container:trade/a" : "container:trade/b",
+            i % 2 == 0 ? "container:trade/b" : "container:trade/a",
+            Quantity: 1);
+    }
+
+    return new InventoryTransactionSnapshot(
+        "trade:bench/1",
+        InventoryTransactionState.Open,
+        ["container:trade/a", "container:trade/b"],
+        suspended);
 }

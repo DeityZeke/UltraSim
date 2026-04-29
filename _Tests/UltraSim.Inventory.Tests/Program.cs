@@ -15,6 +15,9 @@ internal static class TestRunner
         Run(nameof(InventoryMutationIntent_ValidatesMoveSplitMergeAndSwapShapes), InventoryMutationIntent_ValidatesMoveSplitMergeAndSwapShapes);
         Run(nameof(InventoryMutationIntent_ValidatesNpcAndTransactionShapes), InventoryMutationIntent_ValidatesNpcAndTransactionShapes);
         Run(nameof(InventoryMutationResult_ValidatesCorrelationFailureAndAffectedContainers), InventoryMutationResult_ValidatesCorrelationFailureAndAffectedContainers);
+        Run(nameof(InventoryContainerViewerRegistry_FiltersDeltasByAccessAndScope), InventoryContainerViewerRegistry_FiltersDeltasByAccessAndScope);
+        Run(nameof(InventoryContainerDelta_ValidatesItemAndPlacementShapes), InventoryContainerDelta_ValidatesItemAndPlacementShapes);
+        Run(nameof(InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle), InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle);
 
         Console.WriteLine("All inventory kernel contract tests passed.");
     }
@@ -229,6 +232,139 @@ internal static class TestRunner
         }).Validate(), "duplicate");
     }
 
+    private static void InventoryContainerViewerRegistry_FiltersDeltasByAccessAndScope()
+    {
+        var registry = new InventoryContainerViewerRegistrySnapshot(
+            "container:vendor/stock",
+            Revision: 1,
+            [
+                new InventoryContainerViewSnapshot(
+                    "view:buyer",
+                    "container:vendor/stock",
+                    new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:buyer"),
+                    InventoryAccessFlags.Read,
+                    VisibilityScopeId: "scope/vendor/display"),
+                new InventoryContainerViewSnapshot(
+                    "view:stock_admin",
+                    "container:vendor/stock",
+                    new InventoryRequesterRef(InventoryRequesterKind.Admin, "admin:gm"),
+                    InventoryAccessFlags.Read | InventoryAccessFlags.Take | InventoryAccessFlags.Admin),
+                new InventoryContainerViewSnapshot(
+                    "view:public",
+                    "container:vendor/stock",
+                    new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:other"),
+                    InventoryAccessFlags.Read,
+                    VisibilityScopeId: "scope/public"),
+            ]);
+        Assert.Valid(registry.Validate());
+
+        var displayDelta = new InventoryContainerDelta(
+            "delta:vendor/display/1",
+            "container:vendor/stock",
+            ContainerRevision: 2,
+            InventoryContainerDeltaKind.QuantityChanged,
+            ItemInstanceId: "item:potion/1",
+            Item: null,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: -1,
+            InventoryAccessFlags.Read,
+            VisibilityScopeId: "scope/vendor/display");
+        Assert.Valid(displayDelta.Validate(InventoryPlacementMode.List));
+        Assert.Equal(2, registry.CountRecipients(displayDelta), "display delta recipient count");
+
+        var adminDelta = displayDelta with
+        {
+            DeltaId = "delta:vendor/admin/1",
+            RequiredAccess = InventoryAccessFlags.Admin,
+            VisibilityScopeId = null
+        };
+        Assert.Valid(adminDelta.Validate(InventoryPlacementMode.List));
+        Assert.Equal(1, registry.CountRecipients(adminDelta), "admin delta recipient count");
+
+        var duplicateView = registry with
+        {
+            Viewers = [registry.Viewers[0], registry.Viewers[0]]
+        };
+        Assert.InvalidContains(duplicateView.Validate(), "duplicate view");
+    }
+
+    private static void InventoryContainerDelta_ValidatesItemAndPlacementShapes()
+    {
+        var added = new InventoryContainerDelta(
+            "delta:add/1",
+            "container:backpack/1",
+            ContainerRevision: 2,
+            InventoryContainerDeltaKind.ItemAdded,
+            ItemInstanceId: null,
+            Item: new InventoryItemSnapshot(
+                "item:apple_stack/2",
+                "item.apple",
+                Quantity: 3,
+                MaxStackQuantity: 20,
+                InventoryPlacementDescriptor.List(3)),
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read);
+        Assert.Valid(added.Validate(InventoryPlacementMode.List));
+
+        var moved = new InventoryContainerDelta(
+            "delta:move/1",
+            "container:backpack/1",
+            ContainerRevision: 3,
+            InventoryContainerDeltaKind.ItemMoved,
+            ItemInstanceId: "item:apple_stack/2",
+            Item: null,
+            PreviousPlacement: InventoryPlacementDescriptor.List(3),
+            CurrentPlacement: InventoryPlacementDescriptor.List(0),
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read);
+        Assert.Valid(moved.Validate(InventoryPlacementMode.List));
+
+        Assert.InvalidContains((added with
+        {
+            Item = added.Item! with { Placement = InventoryPlacementDescriptor.Grid(0, 0, 1, 1) }
+        }).Validate(InventoryPlacementMode.List), "not compatible");
+
+        Assert.InvalidContains((moved with { CurrentPlacement = null }).Validate(InventoryPlacementMode.List), "previous and current");
+        Assert.InvalidContains((moved with { RequiredAccess = InventoryAccessFlags.None }).Validate(InventoryPlacementMode.List), "cannot be None");
+    }
+
+    private static void InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle()
+    {
+        var transaction = new InventoryTransactionSnapshot(
+            "trade:alpha_beta/1",
+            InventoryTransactionState.Open,
+            ["container:trade/alpha", "container:trade/beta"],
+            [
+                new InventorySuspendedItemSnapshot(
+                    "item:iron_sword/1",
+                    "container:trade/alpha",
+                    "container:trade/beta",
+                    Quantity: 1)
+            ]);
+        Assert.Valid(transaction.Validate());
+
+        Assert.InvalidContains((transaction with
+        {
+            ParticipantContainerIds = ["container:trade/alpha", "container:trade/alpha"]
+        }).Validate(), "duplicate participant");
+
+        Assert.InvalidContains((transaction with
+        {
+            SuspendedItems =
+            [
+                transaction.SuspendedItems[0] with { DestinationContainerId = "container:not/in_trade" }
+            ]
+        }).Validate(), "participant");
+
+        Assert.InvalidContains((transaction with
+        {
+            SuspendedItems = [transaction.SuspendedItems[0], transaction.SuspendedItems[0]]
+        }).Validate(), "duplicate suspended");
+    }
+
     private static InventoryContainerSnapshot CreateListContainer()
     {
         return new InventoryContainerSnapshot(
@@ -306,6 +442,14 @@ internal static class Assert
         if (!result.Error.Contains(text, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException($"Expected error containing '{text}', got '{result.Error}'.");
+        }
+    }
+
+    public static void Equal(int expected, int actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
         }
     }
 }

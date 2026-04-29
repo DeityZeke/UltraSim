@@ -76,6 +76,23 @@ Current contracts:
   - begin/commit/cancel transaction
 - correlation/audit id field on mutation intents/results
 - optional client sequence field for UI-originated requests
+- container viewer/session contracts:
+  - view id
+  - viewer/requester ref
+  - granted access
+  - optional visibility scope
+  - authoritative recipient counting for container deltas
+- container delta contracts:
+  - snapshot replacement
+  - item add/remove/update/move
+  - quantity change
+  - transaction reserve/release
+  - viewer open/close
+  - transaction state change
+- transaction snapshot contracts:
+  - transaction id/state
+  - participant containers
+  - suspended items with source/destination containers
 - executable tests in `_Tests/UltraSim.Inventory.Tests`
 - benchmark harness in `_Benchmarks/UltraSim.Inventory.Benchmarks`
 
@@ -91,6 +108,8 @@ Current benchmark baselines:
 - `ContainerSnapshot_Validate_Grid_1000Items`: about `0.74 ms`
 - `MutationIntent_Validate_Move_10000`: about `10.65 ms`
 - `MutationResult_Validate_Accepted_10000`: about `7.60 ms`
+- `ViewerRegistry_CountRecipients_1000Viewers_1000Deltas`: about `27.16 ms`
+- `TransactionSnapshot_Validate_1000SuspendedItems`: about `3.47 ms`
 
 ## Layering
 
@@ -362,6 +381,14 @@ Container session metadata should include:
 
 The kernel should allow live deltas to be broadcast to all authorized viewers. A GM viewer does not change the container shape; it is an elevated viewer with different permission filtering.
 
+Implemented contract rule:
+
+- `InventoryContainerViewerRegistrySnapshot` is the authoritative fanout list for one container.
+- `InventoryContainerDelta.RequiredAccess` says the minimum access needed to receive a delta.
+- `InventoryContainerDelta.VisibilityScopeId` lets the server/rules bridge separate filtered views, such as vendor display rows vs stock-management metadata.
+- Admin viewers bypass visibility scope filtering but still flow through the same registry.
+- The kernel only counts/selects eligible recipients; the server bridge owns actual network delivery.
+
 ## Mutation Intents
 
 Mutation intents are compact, auditable, server-authoritative requests.
@@ -398,6 +425,8 @@ Intent envelope should reserve:
 
 The kernel owns the shape. The bridge/rules layer owns authority and effects.
 
+`RuleContextId` is an opaque, bridge-minted handle. Callers should not invent arbitrary payload shapes inside it. The server/session/rules layer should mint stable context ids for things like trade sessions, house rules, scripted containers, or vendor interactions; the kernel only validates that the id is stable and routes it through intents/results.
+
 ### Audit And Correlation
 
 Reserve a correlation/audit field from the start.
@@ -419,6 +448,13 @@ Model trade as linked transactional containers:
 - commit atomically moves ownership
 
 Avoid any state where the same item instance is both in the source backpack and in the trade offer. The kernel should include explicit suspended/transactional state so rollback/commit semantics are clear.
+
+Implemented contract rule:
+
+- `InventoryContainerLifecycle.Transactional` marks transactional containers.
+- `InventoryTransactionSnapshot` carries the transaction state and participant containers.
+- `InventorySuspendedItemSnapshot` represents item quantities reserved between source/destination containers while commit/cancel is unresolved.
+- `InventoryContainerDeltaKind.ItemReserved`, `ItemReleased`, and `TransactionStateChanged` provide the live update vocabulary for viewers.
 
 The same transaction pattern can later support:
 
