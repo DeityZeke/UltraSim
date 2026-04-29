@@ -1,0 +1,1330 @@
+# UI Schema And Admin Panel Plan
+
+Purpose: define the rebuilt server-driven UI/schema system before implementation starts.
+
+The target is a RunUO-gump-like server authoring experience with a more robust engine-neutral schema underneath. The server should be able to build login screens, character flow, vendors, crafting panels, inventories, admin tools, and future ECS control panels without shipping executable client code or hand-writing Godot UI for every feature.
+
+This document extends the old v2 UI/schema work with lessons from:
+
+- old v2 schema UI under `_OLD/UltraSim/UI`, `_OLD/Client.Godot/UI/ServerDriven`, and `_OLD/Server.Godot/UI`
+- old v1 ECS control panel under `_OLD/_OLD/Client/ECS/ControlPanel`
+- old v1 ECS settings under `_OLD/_OLD/UltraSim/ECS/Settings`
+- ACC-style RunUO admin shell under `/home/nathan/Downloads/Servers/Nagashizar 2.0/Scripts/Customs/ACC`
+- current ECS hooks in `Kernels/ECS/Systems/SystemSettings.cs` and `SystemControlDescriptor.cs`
+
+## Goals
+
+- Keep Godot thin: Godot renders schema and handles focus, but protocol and UI state-machine semantics live in shared/client runtime code.
+- Keep server authoring simple: normal panels should read like compact builder code, not a raw AST.
+- Keep wire payloads compact: schema is cached; repeated opens and live updates send only model payloads or deltas.
+- Keep UI safe: server sends schema/data, never executable client UI code.
+- Support dense admin/debug panels: tables, repeaters, collapsible groups, tabs, and live telemetry are first-class requirements.
+- Support future ECS control panel work: ECS systems should expose typed descriptors, and the UI layer should render them generically.
+
+## Non-Goals
+
+- Do not port old fixed-position RunUO gump code directly.
+- Do not let server content patches ship executable client scripts.
+- Do not make login credentials flow through generic `UiPanelResponse` if a trusted packet-bound path is required.
+- Do not collapse local app shell screens and server-driven panels into one system.
+- Do not replace current ECS `SystemSettings` hooks with a parallel v1-only settings system.
+
+## Ownership Boundaries
+
+`ClientAppShell` owns client-local app flow:
+
+- start menu
+- server browser/direct connect
+- local settings
+- in-session options
+- disconnect/error screens
+
+Server-driven schema panels are sibling windows under `MenuCanvasManager`:
+
+- login and character panels
+- vendors, crafting, inventory, journal, trainers
+- admin/game-master panels
+- ECS/system/debug panels
+- server-specific gameplay menus
+
+`DebugCanvasManager` can host client-local debug overlays, but server-driven admin windows should still use the schema path when they are server-authoritative.
+
+## Presentation Runtime Shape
+
+The old v2 client already used the right broad idea:
+
+- one shared UI protocol/runtime path for server-driven panels
+- Godot canvas managers for world, HUD, menu, and debug surfaces
+- a `MenuCanvasManager` that hosted both local app-shell screens and server-driven panel instances
+- panel metadata for category, shared/exclusive presentation, bring-to-front, session-loss persistence, and gameplay-input blocking
+
+Keep that architecture, but make the policy less implicit this time.
+
+Backend/runtime concepts:
+
+- one panel protocol
+- one schema/cache/action path
+- panel metadata declares surface/layer target, category, focus mode, exclusive group, z-order class, input blocking, and close/back behavior
+
+Godot presentation can then mount panels into separate child hosts without creating separate backend systems:
+
+- shared menu panels: chat, inventory, character sheet, bank, vendor, crafting, normal admin inspectors
+- modal panels: confirmation prompts, short blocking choices
+- exclusive overlays: settings/options, pause menu, login, character select/create, reconnect/error screens
+- HUD/world/debug surfaces as separate categories where appropriate
+
+Opening an exclusive overlay may hide, dim, or disable the shared menu host underneath, but shared menu panel state should survive unless the server or local app shell explicitly closes it.
+
+Schema authors should be able to declare the intended surface with an API like `.Layer("menu")`, `.Layer("hud")`, `.Layer("world")`, `.Layer("tooltip")`, or `.Layer("debug")`. The exact Godot host is renderer policy, but the authoring/runtime metadata should be explicit so a tooltip, world nameplate, health bar, and inventory window do not all compete in the same z-order pile.
+
+Recommended surface targets:
+
+- `World`: object-anchored UI such as name tags, interact prompts, damage numbers, click/right-clickable labels, and "hold Ctrl to reveal labels" overlays
+- `Hud`: persistent gameplay HUD such as player bars, hotbar, minimap, target frame, party frames
+- `Menu`: default server-driven windows such as inventory, character sheet, crafting, vendors, bank, journal, admin inspectors
+- `Modal`: confirmations and short blocking choices above menus
+- `Exclusive`: settings/options, login/admission, character select/create, reconnect/error, full-screen blocking flows
+- `Tooltip`: transient hover/focus tooltip surface that should render above menu/modal/exclusive content unless explicitly suppressed
+- `Debug`: developer/admin overlays that should stay above normal gameplay UI when enabled
+
+Surface target and focus mode are related but separate. A tooltip can be on the `Tooltip` surface with no focus. A world name tag can be on the `World` surface but still be clickable/right-clickable. A settings menu can be on the `Exclusive` surface and block lower menu interaction. This separation keeps layering predictable without forking the schema protocol.
+
+Exclusive and modal panels should be able to declare tooltip policy, such as allow, suppress, or suppress-external-tooltips. Login, character creation, disconnect/error, and other clean full-screen flows can suppress tooltip overlays while active instead of relying on ad-hoc renderer exceptions.
+
+## Cold And Hot Paths
+
+The schema path has two normal modes. Catalog-backed panels may also reference a separate catalog cache identity; schema and catalog misses are independent.
+
+Cold path:
+
+1. Server opens a panel with server identity, panel type, revision, schema hash, optional catalog identity, and model payload.
+2. Client does not have the exact schema cached.
+3. Server sends or responds with the full schema definition.
+4. Client validates and caches the schema under the server-specific cache namespace.
+5. If the panel references a missing catalog, client requests or receives that catalog, validates it, and caches it separately.
+6. Client renders it with the model payload once required definitions are available.
+
+Hot path:
+
+1. Server opens a panel with the same schema identity, same catalog identity where applicable, and model payload or model delta.
+2. Client has exact cached schema/catalog matches.
+3. Client validates payload shape against the cached schema and catalog metadata.
+4. Client renders or updates without receiving the full schema or catalog again.
+
+Schema cache identity must include:
+
+- stable server identity
+- panel type id
+- schema revision
+- schema hash/version
+- UI protocol/schema version
+
+The client must not accept a "close enough" schema. A mismatch is a cache miss or a protocol error, not a best-effort render.
+
+Cold path UX must be explicit. The first open of a panel type can require schema transfer, validation, cache write, and then render. For startup-critical panels such as login and character select, prefer proactive schema push during the early session/admission flow once the server knows the client UI protocol version. If the schema is not available yet, the client should show a trusted local loading/pending panel with the same modal/input-blocking behavior as the eventual panel.
+
+Pending exclusive panels occupy their exclusive group before the real server panel is renderable. For example, if login closes and character select has not arrived yet, the client should show a trusted local `SessionAdmission` loading panel that blocks gameplay input and reserves the `SessionAdmission` exclusive slot until the server opens login, character select, character create, or a disconnect/error panel.
+
+## Layered Authoring Model
+
+The implementation should have three layers.
+
+### Low-Level Schema
+
+The low-level schema is the compact, versioned, engine-neutral AST that goes over the wire and into the cache.
+
+It should stay boring:
+
+- stable node type ids
+- stable slot ids
+- compact primitive values
+- bounded strings and arrays
+- explicit validation
+- no client-executed script blocks
+
+### Builder API
+
+The server-facing builder should be friendly and terse. Example target style:
+
+```csharp
+Panel("Movement")
+    .Toggle("Enabled", movement.Enabled)
+    .Slider("Speed Multiplier", movement.Speed, min: 0, max: 10, step: 0.1)
+    .Button("Reset Stats", ResetStats)
+    .Table("Systems", rows);
+```
+
+The builder resolves nice API calls into the lower-level schema nodes, slot manifests, action ids, and model bindings.
+
+Prefer nested lambda builders for containers instead of scope-closing `.End()` chains. The source shape should make hierarchy obvious and hard to misuse:
+
+```csharp
+Panel("Characters", b =>
+{
+    b.Column(col =>
+    {
+        col.DynamicText("name");
+        col.Row(row =>
+        {
+            row.Button("play", "Play", Buttons.Play);
+            row.Button("delete", "Delete", Buttons.Delete);
+        });
+    });
+});
+```
+
+Avoid APIs where forgetting one `End()` silently compiles the wrong schema tree. If an imperative builder is still useful internally, the public authoring API should validate container balance and produce clear diagnostics.
+
+### Context And Domain Builders
+
+RunUO's crafting system is a useful reference, but the exact pattern is more specific than "every later add attaches to the last thing." In `CraftSystem`, a normal craft entry is registered with `AddCraft(...)`. Complex entries capture the returned item index, then call `AddRes(index, ...)`, `AddSkill(index, ...)`, `AddRecipe(index, ...)`, or `SetNeededExpansion(index, ...)` against that explicit handle. Its more stateful pattern is used for selectable material families: `SetSubRes(...)` defines the active resource selector, then `AddSubRes(...)` appends choices to that selector.
+
+That split is worth adopting:
+
+- use nested lambdas for actual UI layout hierarchy
+- use explicit handles or scoped lambdas for domain catalogs such as crafting recipes, vendors, character creation options, skill/stat pages, and admin setting groups
+- avoid hidden sticky global context where `AddMaterial(...)` silently mutates whichever recipe happened to be last
+- allow short-lived context builders inside a bounded scope, with validation that rejects calls made outside the right scope
+
+A scoped lambda parameter is the preferred explicit handle. In `cat.Recipe("Dagger", ..., r => { ... })`, `r` has the same conceptual role as RunUO's returned craft item index, but it is safer because it only exists inside that recipe's scope. You cannot accidentally attach a material to the previously-created recipe after the scope exits.
+
+Catalog builders are intentionally flatter than layout builders. Layout builders have depth because UI has visual hierarchy: columns contain rows, rows contain buttons, tabs contain pages. A recipe, vendor entry, character option, or setting descriptor should mostly be a flat property surface on a bounded object: `Skill(...)`, `Material(...)`, `RequiresRecipe(...)`, `Price(...)`, `Permission(...)`, `Tooltip(...)`. The compiler can later render that catalog into tables, detail panels, or paged menus without making the author describe every visual node manually.
+
+Good target style for catalog-like authoring:
+
+```csharp
+CraftingPanel("Blacksmithy", b =>
+{
+    b.Category("Weapons", cat =>
+    {
+        cat.Recipe("Dagger", typeof(Dagger), r =>
+        {
+            r.Skill(SkillName.Blacksmith, min: 0.0, max: 49.6);
+            r.Material(typeof(IronIngot), amount: 3);
+        });
+
+        cat.Recipe("Gemmed Circlet", typeof(GemmedCirclet), r =>
+        {
+            r.Skill(SkillName.Blacksmith, min: 75.0, max: 125.0);
+            r.Material(typeof(IronIngot), amount: 6);
+            r.Material(typeof(Tourmaline), amount: 1);
+            r.Material(typeof(Amethyst), amount: 1);
+            r.RequiresRecipe(RecipeIds.GemmedCirclet);
+        });
+    });
+
+    b.ResourceSelector(typeof(IronIngot), "Metal", res =>
+    {
+        res.Option(typeof(IronIngot), "Iron", requiredSkill: 0.0);
+        res.Option(typeof(DullCopperIngot), "Dull Copper", requiredSkill: 65.0);
+        res.Option(typeof(ValoriteIngot), "Valorite", requiredSkill: 99.0);
+    });
+});
+```
+
+This keeps dense RunUO-style authoring ergonomics while preserving clear ownership: layout builders build node trees, catalog builders build data-backed menus, and the lower schema compiler turns both into compact panel schemas, manifests, action ids, and payload slots.
+
+### Catalog Data Cache
+
+Catalog-heavy panels need a cache tier in addition to schema caching.
+
+Examples:
+
+- crafting recipe lists
+- vendor inventories and service catalogs
+- character creation options
+- skill/stat progression tables
+- admin page/provider registries
+
+These datasets change much less frequently than per-open model state, but they can be too large to resend on every panel open. A blacksmithing catalog can include many categories, recipes, skill ranges, material costs, recipe ids, expansion/permission gates, and display metadata.
+
+Use three separate concepts:
+
+- `Schema`: panel structure, node tree, bindings, action ids
+- `Catalog`: mostly-static domain data rendered by the panel
+- `Model`: per-open/per-session runtime values, selections, counts, dirty flags, permission-filtered state
+
+Catalog cache identity should include:
+
+- stable server identity
+- catalog type id
+- catalog revision/hash
+- UI/catalog protocol version
+- locale/content variant when relevant
+
+Opening a catalog-backed panel should normally send schema identity, catalog identity, and the small model payload. If the client lacks the catalog, it requests or receives the catalog once and caches it under the server namespace. Very large catalogs may support paged catalog fetch later, but the first implementation should prefer whole-catalog caching over streaming unless a real size problem appears.
+
+Worked example: crafting panel.
+
+Schema:
+
+- declares a category list bound to catalog path `craft.categories`
+- declares a recipe repeater bound to catalog path `craft.recipes`
+- uses stable row keys such as `recipeId`, not transient array indexes, whenever practical
+- declares model overlays for dynamic state such as known/unknown, craftable, selected, material availability, cooldown, and button enabled state
+- declares actions such as `SelectCategory`, `SelectRecipe`, `CraftSelected`, `SelectResourceOption`, and `Back`
+
+Catalog:
+
+- categories: `categoryId`, display text/icon, sort order
+- recipes: `recipeId`, `categoryId`, result item id, display text/icon, skill requirements, material requirements, required recipe id, permission/expansion gates
+- resource selectors: selector id, base resource type, resource options, required skill, display metadata
+
+Model:
+
+- selected category id
+- selected recipe id
+- selected resource option ids
+- visible/filter/page state
+- known recipe ids or compact known bitset
+- craftable recipe ids or compact craftable bitset
+- available material counts
+- per-selected-recipe validation/result message
+
+The renderer joins schema, catalog, and model by stable ids. It should not need the server to resend every recipe row just because material counts changed. A model delta can update `availableMaterials`, selected ids, craftable bits, or result text while the cached catalog remains unchanged.
+
+Worked example: stat distribution panel without catalog.
+
+Schema:
+
+- declares static labels and value slots for strength, dexterity, intelligence, level, experience, stat points, and skill points
+- declares conditional groups for player-only skill rows, pet skill pages, and increase buttons
+- declares buttons such as `IncreaseStrength`, `IncreaseDexterity`, `IncreaseSkill`, `PreviousSkillPage`, `NextSkillPage`, and `Close`
+- declares stable row keys for skill rows such as `skillId`, not display position
+
+Model:
+
+- target entity id/name/type
+- current stat values and caps
+- current point pools
+- current skill page and skill rows
+- booleans for `canIncreaseStrength`, `canIncreaseDexterity`, `canIncreaseSkill`
+- validation/status text for the last attempted action
+
+There is no catalog in this shape. The server opens the panel with schema identity and model payload only. If points are spent or the page changes, the server sends a model delta for the affected stat fields, button enabled states, and visible skill page. Catalog identity is optional, not a requirement for every panel.
+
+### Composite Helpers
+
+Composite helpers are authoring sugar only. They should not become new protocol primitives unless they need unique renderer behavior.
+
+Examples:
+
+- `SettingsGroup(...)`
+- `SystemTable(...)`
+- `EntityInspector(...)`
+- `ConfirmButton(...)`
+- `Pager(...)`
+- `AdminShell(...)`
+
+### Semantic Roles And Defaults
+
+Most gameplay panels should not be full manual construction.
+
+Builders should offer semantic roles, tags, and defaults for common gameplay patterns, then let authors override details when needed. The common path should feel like declaring intent, not assembling every row and margin by hand.
+
+Examples:
+
+- `CharacterSelectList(...)`
+- `StatBlock(...)`
+- `SkillPage(...)`
+- `InventoryGrid(...)`
+- `InventoryList(...)`
+- `ContainerCanvas(...)`
+- `VendorList(...)`
+- `CraftingCatalog(...)`
+- `HealthBar(...)`
+- `ResourceBar(...)`
+- `ConfirmAction(...)`
+- `SettingsGroup(...)`
+
+These helpers can choose default layout, density, labels, icons, tooltips, empty states, focus behavior, common actions, and common state bindings. Authors should be able to override text, style role, permissions, action handlers, row templates, fallback behavior, or layout constraints without abandoning the helper.
+
+Semantic helpers are shared vocabulary, not one-off local shortcuts. They should be defined and owned centrally so helper-generated schema shapes, slot names, row keys, action ids, catalog paths, and state binding conventions do not drift between panels or mods. Server-side customs and future mods can add new helpers or override helper templates through explicit registration, but the built-in helpers should remain stable reference implementations.
+
+Use full node construction for unusual panels, dense admin/debug tools, or one-off layouts. Use semantic helpers for normal gameplay UI. This should cover most menus while preserving flexibility for RunUO-style custom panels.
+
+### Inventory Architecture And Viewers
+
+Inventory must be separated into two layers:
+
+- inventory/container truth: server-owned item ids, container ids, quantities, equipment state, item metadata, permissions, position metadata, and mutation rules
+- inventory viewers: menu shells that present and manipulate that truth in a particular style
+
+The project should ship with the D2-style grid inventory as the primary gameplay viewer, but the schema foundation should not bake that one visual metaphor into the underlying inventory contract. The same server inventory state should be adaptable to different viewers when the data model supports it.
+
+The shared item/container model should be viewer-agnostic. Item row keys, container ids, stack quantities, permissions, metadata, and placement records should not assume list, grid, or freeform presentation. Viewer-specific fields can be optional placement facets: a grid viewer may use cell, width, height, and rotation; a freeform viewer may use x/y and draw order; a list viewer may ignore placement and use category/sort metadata. UI-1 should define the common contract first, then let each viewer declare which facets it consumes.
+
+Useful viewer shapes:
+
+- Skyrim-style list inventory:
+  - categories, filters, sort columns, item rows, detail pane
+  - mostly a repeater/table plus selection model
+  - good reference case for "simple row resolver" inventory
+- D2-style grid inventory:
+  - fixed grid cells, item width/height, optional rotation, equipment slots
+  - drag from one slot/cell to another
+  - server validates all moves and returns affected item/container deltas
+  - this is the intended default product inventory
+- UO-style freeform container:
+  - bounded 2D container surface with item `x/y` placement and draw order
+  - overlapping items may be allowed
+  - drag/drop arbitrary placement, stack split/merge, nested containers, item context menus
+  - useful extension/reference case for customs or alternative server rules
+
+The viewer is not the authority. Drag/drop, equip, split, merge, move-to-bank, move-to-vendor, and take-from-container actions should submit compact intents with stable item/container ids and proposed placement metadata. The server validates permissions, capacity, collisions, range, ownership, locks, trade/vendor rules, and any anti-cheat constraints, then sends model deltas for the affected containers.
+
+Shared containers need live deltas. A corpse, chest, bank box, trade window, or auction listing can change because another player or server process acted. Viewers must handle row/item add, update, remove, and replace deltas without assuming the local action caused the change.
+
+Trade windows are a special shared-container shape. They are two-session shared views with two player-owned offer sides, real-time row deltas to both participants, lock/unlock state, and a two-party commit. Each player has write authority over their own offer side and read authority over both sides. The server must validate both sides at commit time and prevent unilateral completion.
+
+Auction listings should not be treated as ordinary cached catalogs. They look catalog-like, but listing availability, prices, bids, expiration, and seller actions can change continuously. The auction panel should be modeled as a live/polled repeater or paged table with server-forced row deltas, not as a static catalog that stays valid for a long session.
+
+This does not mean UI-1 must implement every viewer. It means the contracts should avoid coupling "inventory" to one renderer. A good staged approach is:
+
+1. Define the underlying inventory/container slot and action conventions once.
+2. Implement the D2 grid viewer for the game.
+3. Keep a simple Skyrim-style list viewer as a low-cost reference/test shell.
+4. Treat UO-style freeform containers as a later extension shell, adding a dedicated container-canvas renderer primitive only when needed.
+
+Repeated patterns found while building those viewers should move down into shared helpers, descriptors, and validation hooks. Viewer-specific presentation should stay in the viewer helper.
+
+### World Interaction Companion Panels
+
+Some features should not be forced entirely into schema UI.
+
+Housing/building is the clearest example. The menu side can still be schema-driven:
+
+- building piece catalog
+- categories, filters, costs, and required tools/materials
+- rotate/snap/grid toggles
+- undo/redo/history controls
+- commit/cancel
+- permission, ownership, and placement error text
+
+After the player picks a piece, the client should enter a world placement context. That context owns the in-world ghost preview, cursor/raycast targeting, snap feedback, and local visual affordances. The server still owns validation and commits. The client submits compact placement intents; the server validates land/house permissions, collisions, support, cost, range, locks, and rule constraints, then returns success/failure and any world/container/model deltas.
+
+This keeps the schema system responsible for menus and control surfaces while leaving spatial editing to world interaction code. A companion schema panel can stay open beside the world placement mode, but the generic schema renderer should not become a full 2D/3D building editor.
+
+## Core Schema Nodes
+
+Initial or early nodes:
+
+- `Panel`
+- `Text`
+- `DynamicText`
+- `Button`
+- `IconButton`
+- `Image`
+- `Layer`
+- `Separator`
+- `Spacer`
+- `Row`
+- `Column`
+- `Group`
+- `Section`
+- `ScrollRegion`
+- `TextInput`
+- `NumberInput`
+- `Toggle`
+- `CheckboxGroup`
+- `RadioGroup`
+- `Select`
+- `Slider`
+- `Stepper`
+- `Repeater`
+- `Table`
+- `Tabs`
+- `Pager`
+- `ContextMenu`
+- `RadialMenu`
+- `InventoryGrid`
+- `ContainerCanvas`
+
+The first implementation can stage these, but the schema id space should reserve room for them. In particular, ECS/admin work needs more than text, buttons, and repeaters.
+
+Do not make high-level concepts such as `AdminShell` a renderer-level node type. An admin shell is a composition pattern built from generic nodes such as panel, nav rail/sidebar, tabs, page host, status bar, tables, and groups. The renderer should not need to know what an ECS admin shell is.
+
+`InventoryGrid` and `ContainerCanvas` are different from helpers such as `AdminShell`. They may need renderer-level behavior because they involve hit testing, drag/drop previews, placement rules, and dense item surfaces. Keep the underlying inventory action/model contract generic, but allow specialized renderer primitives where interaction semantics cannot be expressed cleanly as ordinary rows and buttons.
+
+Reserving a node id does not mean implementing the renderer immediately. `InventoryGrid` is expected for the default product inventory. `ContainerCanvas` should be reserved in the schema id space so the contract can grow cleanly, but the UO-style freeform renderer can wait until a real feature or reference shell needs it.
+
+`ContextMenu` and `RadialMenu` are interaction surfaces, not long-lived panel shells. They should use the same action/permission/validation model as panels, but their presentation lifetime is usually short and anchored to an item, entity, world position, or selected UI row.
+
+## Tooltips, Context Menus, And Interaction Wheels
+
+Tooltips should be first-class metadata on nodes, rows, cells, items, actions, and settings.
+
+Tooltip levels:
+
+- simple text: a short label or explanation
+- rich tooltip: title, body lines, icon, rarity/quality role, stat lines, requirement lines, warning/error lines
+- state-bound tooltip: tooltip fields that update from authorized item/entity/session state
+- delayed/advanced tooltip: compact on hover, expanded when holding a modifier or using a controller detail action
+
+Tooltips are presentation only. They can explain permissions, requirements, item stats, cooldowns, and errors, but the server must still validate all actions.
+
+Context menus cover UO-style right-click menus, item action menus, row action menus, entity interaction menus, and admin/debug action menus. They should be built from compact action descriptors:
+
+```text
+ActionId
+Label/Icon
+Role: normal, primary, destructive, disabled, debug
+Permission/visibility hint
+RequiresConfirm
+Optional child menu key
+Optional row/item/entity context
+```
+
+The menu can be generated in three ways:
+
+- static schema-declared actions, such as fixed row actions in a table
+- model-provided actions, such as item-specific verbs for a selected inventory item
+- request-on-open actions, where the client asks the server for the current context actions for an item/entity/world target
+
+Request-on-open is important for world/entity interactions because available verbs can depend on distance, ownership, faction, combat state, permissions, cooldowns, target state, and equipped tools. The client may show cached/local likely actions for responsiveness, but executing an action always goes through the server.
+
+Radial menus are a presentation variant of context menus. The Sims-style interaction wheel should use the same action descriptor model, but group actions by category and allow nested/depth menus:
+
+- Talk
+- Trade
+- Party
+- Pet/Follower
+- Combat
+- Admin
+- Debug
+- More
+
+Nested radial menus should avoid hidden global state. Each depth level carries explicit context: target entity id, selected category/action path, world position if relevant, and client sequence. The server can return a refreshed action set when entering a nested category so the wheel does not show stale verbs.
+
+Context/radial menu open behavior:
+
+- item/menu-row context: anchored near the row/item/cursor
+- world/entity context: anchored near cursor or target, with optional screen-space fallback
+- controller mode: centered radial or selected-target action wheel
+- modal behavior should be configurable; most context menus close when focus is lost, but confirmation submenus can be modal
+
+Common edge cases:
+
+- target disappears while menu is open: close or refresh with unavailable state
+- target remains visible but the player moves out of interaction range: refresh/disable range-sensitive actions where possible; otherwise the server rejects execution with a reason and the client shows the invalid state
+- permission changes while menu is open: server rejects or pushes refreshed actions
+- item moves/stack changes while menu is open: update action enabled state or close
+- action becomes invalid after click: server returns rejection/status; client should not assume success
+- nested menu category becomes empty: show empty state or close that branch
+
+This gives RunUO-style context menus and Sims-style radial interaction wheels the same underlying protocol: compact server-authoritative action descriptors with flexible client presentation.
+
+Hotbar and ability slots are a useful future stress test. A single slot can be a drag/drop target, a context-menu target, a state-bound cooldown/resource display, and a quick action trigger. The architecture should support that convergence through shared action descriptors, state bindings, and drag/drop contracts rather than a special one-off hotbar protocol.
+
+## Conditional Layout
+
+Complex conditional layout is a first-class requirement, not an edge case.
+
+RunUO-style panels frequently include logic such as:
+
+- show stat buttons only when points are available and caps allow an increase
+- show player skill sections for players and pet skill sections for creatures
+- show entire editor regions only when a row/category/location is selected
+- swap page contents based on selected tab/page/state
+
+Simple `VisibleSlot` / `EnabledSlot` bindings are useful, but they are not enough by themselves.
+
+The schema system should support two explicit strategies:
+
+1. Conditional groups/subtrees:
+   - a container can bind visibility/enabled state to a boolean payload slot
+   - hidden subtrees do not participate in focus traversal
+   - hidden subtrees may preserve client-local input state only when the server marks them as state-preserving
+   - validators still count hidden subtree nodes against schema limits
+2. Variant schemas:
+   - when layout shape is materially different, the server may open a different schema revision/type/variant
+   - variants must have explicit cache identity
+   - variants should be used for major mode changes, not tiny button visibility changes
+
+Guidance:
+
+- use conditional groups for small to medium subtree visibility
+- use tab/page model updates for content page changes
+- use variant schemas when the panel's structural shape changes enough that keeping all branches in one schema would be wasteful or hard to validate
+
+## Layout Model
+
+Support both semantic and explicit layout.
+
+Semantic layout:
+
+- rows
+- columns
+- grouped sections
+- headers
+- footers
+- tables
+- tabs
+- pagers
+- scroll regions
+
+Explicit layout:
+
+- bounded absolute coordinates for RunUO-style dense panels
+- anchored regions
+- fixed-size compact windows
+- controlled overlays
+
+The default should be semantic layout. Absolute positioning is useful for dense custom server panels, but should be bounded and validated.
+
+Fixed/absolute layouts should be capability-gated. They are most likely to look broken across aspect ratios, DPI settings, and theme changes. A server should have to opt into fixed layout explicitly, and the client/operator should be able to reject or warn on fixed-layout panels from untrusted servers.
+
+Mechanically, fixed layout should require all of:
+
+- a schema declaration such as `RequiresCapability.FixedLayoutV1`
+- bounded panel dimensions and max coordinate extents
+- renderer validation that all fixed nodes fit inside declared bounds
+- a client/server capability negotiation bit before the server sends the panel
+- a local trust policy that can allow, warn, or reject fixed layouts per server
+
+Capability exchange is a connection/session-level concern, not something each panel invents independently. During admission or UI protocol negotiation, the client should advertise supported UI protocol versions, schema node families, renderer limits, and optional capabilities such as `FixedLayoutV1`. The server should only open panels that fit the negotiated capability set.
+
+Trusted built-in panels can use fixed layout without warning. Remote server-driven fixed layouts should be opt-in, because a bad fixed layout can make controls inaccessible even when it is not malicious.
+
+## Typed Settings Controls
+
+Old v1 ECS settings exposed:
+
+- bool
+- int
+- float
+- enum
+- string
+- choice string
+- button/action
+- tooltip
+- min/max/step for numeric values
+- read-only/editable distinction
+- value change hooks
+- per-system persistence
+
+The new schema should represent that as a generic descriptor:
+
+```text
+settingId
+label
+type
+value
+scope
+readOnly
+tooltip
+group
+min/max/step
+format
+options
+requiresRestart
+dirty
+persisted
+permission
+```
+
+Setting scopes:
+
+- `ClientLocal`
+- `ServerRuntime`
+- `WorldPersistent`
+- `Session`
+- `DebugOnly`
+
+The current ECS already has:
+
+- `SystemBase.Settings`
+- `SystemBase.ControlDescriptors`
+- `SystemSettings.Apply(ref SystemSchedule)`
+- `SystemControlDescriptor`
+- `SystemControlKind`
+- `SystemManager.ApplySettings`
+
+Do not replace these. Grow them into the schema-facing descriptor model.
+
+Important implementation rule: do not add a parallel UI-only system-control vocabulary because the current ECS descriptor is missing fields. Extend `SystemControlDescriptor` / related ECS-side types instead, then bridge them into schema. The schema layer should reflect ECS's own control vocabulary, not drift away from it.
+
+## Admin Shell Model
+
+The ACC package is a good conceptual reference. It had:
+
+- one root command/control panel
+- registered systems
+- a selected system page
+- system enable/disable
+- save/load lifecycle
+- delegated draw and response handling
+- per-system page state via `ACCGumpParams`
+
+The rebuilt version should become a typed admin shell:
+
+```text
+AdminShell
+- navigation rail or tabs
+- current page/system
+- access checks
+- common header/status
+- system enable/disable
+- dirty/save/revert controls
+- result/toast/status feedback
+- hosted page content
+```
+
+Each hosted page should come from a descriptor/provider:
+
+```text
+PanelId
+Title
+Category
+Icon
+RequiredAccess
+BuildSchema
+BuildModel
+HandleAction
+Optional Enable/Disable
+Optional Save/Load
+Optional TelemetrySubscription
+```
+
+This lets future systems contribute pages without hardcoding one giant admin window.
+
+The admin shell itself should be authored as a reusable builder/helper over generic schema nodes. It should not require a special renderer mode.
+
+## Page State
+
+Server-owned page state is mandatory.
+
+Examples:
+
+- selected system
+- selected entity
+- selected component
+- selected category/location
+- active tab
+- page index
+- sort column
+- filter text
+- expanded row keys
+
+The client can remember local presentation preferences such as window position and collapsed state, but authoritative selection and mutation state should remain server-owned for server panels.
+
+## Panel Composition And Navigation
+
+Server-driven panels need explicit composition rules.
+
+There are two normal navigation shapes:
+
+- in-shell navigation: an existing shell swaps selected page, tab, row, or page model state
+- cross-panel navigation: an action opens another panel instance, such as entity inspector, item details, recipe details, bank box, or vendor buy/sell panel
+
+In-shell navigation should stay inside the same panel instance when the surrounding shell remains stable. This is the normal path for admin pages, tabs, pagers, and selected rows.
+
+Cross-panel navigation should create or focus a distinct panel instance when the new surface has its own lifetime, placement, focus, permissions, or close behavior. Examples: opening an entity inspector from the admin shell, opening item details from inventory, opening a vendor subpanel, or opening a confirmation dialog.
+
+Navigation authority rule: for server-owned panels, the server decides what Back, tab changes, page changes, row selection, and close actually mean. The client may render a back button or maintain display-only focus order, but it must not locally mutate server-owned navigation state as the source of truth.
+
+For in-shell navigation, the client sends an action intent such as `Back`, `SelectTab`, `SelectPage`, or `SelectRow`. The server recomputes the target page/region state and responds with one of:
+
+- a scoped model delta for the affected page/tab/region
+- a full model update for the same panel instance
+- an open/close command when navigation crosses panel-instance boundaries
+- a rejection/status update if the action is no longer valid
+
+This keeps back/page/tab navigation fresh without forcing full close/reopen churn. It also avoids stale nested data: the destination region is refreshed explicitly by the server as part of the navigation response.
+
+Panel open messages should be able to declare:
+
+- `ParentPanelInstanceId`
+- `NavigationOriginActionId`
+- `OpenPolicy`: new, replace-current, focus-existing, or singleton-by-key
+- `BackPolicy`: send-action, close-and-focus-parent, replace-with-parent-state, none
+- `PlacementHint`: cascade, near-parent, centered, restore-client-position
+
+The client presentation stack is display-only for server-owned panels. It can decide which panel appears on top or where a back affordance is drawn, but the actual navigation result must come from the server's response.
+
+## Server-Driven Model Refresh
+
+The server may refresh an open panel even when the user did not press a button.
+
+Examples:
+
+- character select list changes because a character was created, deleted, renamed, or updated elsewhere
+- bank, vendor, or inventory contents change while the panel is open
+- crafting availability changes because materials were consumed or gained
+- admin inspector target changes due to simulation/network state
+- permissions change while a panel is open
+
+Refresh options should stay simple:
+
+- full model update for the panel instance
+- scoped model delta for a named page/tab/region
+- repeater/table row add, update, remove, or replace
+- open/close command if the panel is no longer valid
+
+Use stable row keys for additive deltas. For character select, a newly-created character can be sent as a row-add delta keyed by `characterId`; a deleted character can be a row-remove delta; a major account refresh can still use a full model update. The protocol should support deltas, but builders should be allowed to choose full updates when the list is small or the simpler path is clearer.
+
+Schema and catalog supersession during a live session must be explicit:
+
+- if a schema revision changes while an instance using the old schema is open, the server should either keep that old instance valid until it closes or send a normal close/reopen flow for the new revision
+- if a catalog revision changes while an open panel references the old catalog, the server should send a catalog-superseded/open-refresh flow, or close and reopen the panel with the new catalog identity
+- clients should not keep applying deltas against old catalog row keys after the server has declared the catalog superseded
+- if the server cannot safely migrate open page state, closing/reopening is preferred over silently ignoring later responses
+
+The first implementation can use close/reopen for schema or catalog supersession. More granular live catalog replacement can be added later if content hot-reload needs it.
+
+## Panel Lifetime
+
+Panel instances have both client-side and server-side lifetime.
+
+Client-side session loss:
+
+- close or invalidate all server-owned panels
+- clear pending schema requests
+- clear focused server-owned input
+- return input routing to local shell/preview state
+- show trusted local disconnect/error UI when appropriate
+
+Server-side session loss:
+
+- close all open panel instances for that session
+- release server-side page state and any temporary resources
+- discard unsubmitted input fields
+- discard dirty-but-unapplied preview state unless the panel explicitly committed it already
+- leave already-applied settings/actions intact
+- write audit/log entries for interrupted admin operations when useful
+
+Admin/settings panels should distinguish:
+
+- previewed but unapplied values
+- applied runtime values
+- persisted saved values
+
+A disconnect must not leave a half-owned server-side panel object or a hidden pending mutation.
+
+## Repeaters, Tables, And Inspectors
+
+Repeaters need:
+
+- stable row keys
+- row action context
+- row index
+- selection state
+- optional paging cursor
+- optional sort metadata
+- optional empty state
+
+Tables need:
+
+- compact column descriptors
+- cell slot descriptors
+- sortable columns where server supports it
+- row selection
+- row actions
+- dense mode for admin panels
+
+Future ECS panels will need:
+
+- systems table
+- archetypes table
+- entities table
+- components table
+- sessions/connections table
+- network lanes/families table
+- log/event table
+
+## Live Updates And Telemetry
+
+The old v1 control panel updated:
+
+- FPS
+- frame time
+- ECS tick time
+- memory
+- entity count
+- archetype count
+- per-system average timing
+- per-system enabled state
+
+The new schema should support live model updates without rebuilding the full panel.
+
+Requirements:
+
+- full payload update
+- partial slot update
+- repeater row add/remove/update
+- telemetry refresh interval hint
+- client throttling
+- server push or poll compatibility
+- stale data indication
+
+Telemetry should be declarative. The renderer should not know what an ECS system is.
+
+Server-side push discipline is required. Do not let each telemetry-producing system push tiny updates independently on every ECS tick. Use a telemetry scheduler/service that:
+
+- batches dirty telemetry slots across open panels
+- emits at a configured interval, such as 100-250 ms for admin panels
+- coalesces multiple writes to the same slot
+- respects panel visibility and permissions
+- can downgrade or pause telemetry when the client is overloaded
+- sends one compact delta message per session/panel batch where possible
+
+## Runtime State Bindings
+
+Some UI surfaces should update from normal replicated/session state, not from explicit `UiPanelUpdate` messages.
+
+Examples:
+
+- UO-style peeled-off health/status bars
+- target frame
+- party frames
+- selected entity inspection summary
+- compact pet/follower status windows
+- local player stat/resource widgets
+- inventory item count badges when backed by replicated inventory state
+
+These panels should be able to declare state bindings. The schema defines which slots can bind to state, and the model provides the binding target:
+
+```text
+slot: healthCurrent
+source: EntityState
+target: entityId 12345
+field: Health.Current
+fallback:
+  whenMissing: stale
+  whenUnauthorized: hidden
+  whenDead: stale
+  staleAfterMs: 1500
+```
+
+When the normal network/session runtime receives a state update for that entity/session/object, the client-side UI runtime invalidates and refreshes the bound slots automatically. The server does not need to send a separate menu update just to move a health bar from 78% to 72%.
+
+The UI runtime should not reach directly into arbitrary gameplay internals. Put a small resolver interface between schema UI and gameplay/network caches:
+
+```text
+IUiStateBindingResolver
+- TryResolve(bindingTarget, field, out value)
+- CanBind(bindingTarget, field)
+- Subscribe(bindingTarget, field, callback)
+- GetStaleState(bindingTarget, field)
+```
+
+Implementations can read from client-side entity, inventory, party, session, and local-player state caches. This is an intentional dependency: state-bound panels are UI views over gameplay/session state. The dependency should be narrow and interface-based so the schema renderer remains mostly generic.
+
+The client runtime should own a resolver registry created during client startup/session runtime composition. Resolvers such as `EntityState`, `InventoryState`, `PartyState`, `SessionState`, and `LocalPlayerState` register by source id/name. The UI runtime asks the registry for the resolver declared by a binding; it should not service-locate gameplay systems directly from individual panel code.
+
+State binding rules:
+
+- bindings are declarative and permission-filtered by the server
+- the server should only send bindings for targets the session is allowed to observe
+- the client must still enforce binding authorization locally through `CanBind`; invalid or unauthorized bindings fail closed
+- state bindings update visual slots, not authoritative game state
+- binding targets are per panel instance, not per schema type; multiple health bars using the same schema can subscribe to different entities at the same time
+- fallback behavior is per binding, not global to the whole panel
+- if the bound target disappears, dies, goes stale, or permission is revoked, the panel follows that binding's declared fallback behavior
+- bound slots should have stale indicators or timeout behavior when updates stop
+- high-frequency bindings should be throttled/coalesced by the client renderer to frame cadence
+- server-owned actions from the panel still go through normal action/response validation
+
+This is distinct from telemetry. Telemetry is admin/debug data intentionally pushed for open panels. Runtime state bindings are UI views over existing gameplay/session state streams. A health bar should update because the entity status cache changed, not because the server sent a bespoke "health bar panel update."
+
+Slot update priority should be deterministic:
+
+1. Explicit server model updates and model deltas win.
+2. Telemetry updates apply next for slots declared as telemetry-backed.
+3. Runtime state bindings refresh visual values from the latest authorized client cache.
+
+A slot should normally use one update source. If a full model update touches a state-bound slot, the model update is applied first and the binding resumes from the new value/cache state on the next binding refresh. Builders should warn when a slot is accidentally declared as both telemetry-backed and state-bound unless a specific override policy is set.
+
+## Actions And Responses
+
+Responses should include:
+
+- panel instance id
+- action id
+- row context if action came from a repeater/table
+- current input field values
+- selected toggle/radio/select values if needed
+- client-side sequence number
+
+Actions can be:
+
+- normal button
+- setting preview
+- apply setting
+- save setting
+- save all
+- reset/revert
+- tab/page selection
+- row selection
+- destructive command
+- context menu action
+- radial menu action
+- nested context/radial category selection
+- tooltip detail request when tooltip data is not already present
+
+Destructive actions should support:
+
+- confirmation prompt
+- disabled state
+- permission check
+- rate limit
+- result message
+
+## Validation And Safety
+
+Schema data is untrusted input.
+
+Validate:
+
+- max schema bytes
+- max payload bytes
+- max nodes
+- max tree depth
+- max text length
+- max input fields
+- max repeaters
+- max rows per update
+- max columns
+- max asset references
+- allowed node types for client version
+- valid slot references
+- valid action ids
+- valid style keys
+- valid row contexts
+
+Security rules:
+
+- client does not execute server-provided UI scripts
+- server content patches cannot contain executable UI code
+- schema cannot override trusted packet bindings
+- login credentials use a trusted packet-bound path if required
+- server revalidates every admin action
+- permissions are hints for rendering, never trust boundaries
+
+## Trusted Login And Sensitive Inputs
+
+Login and other sensitive credential flows need a precise rule.
+
+If credentials are considered sensitive enough to avoid the generic panel response path, then the schema login panel must not submit username/password as ordinary `UiActionResponse` field values. Use a trusted packet-bound binding instead:
+
+- the panel may render trusted credential fields
+- those fields are owned by a client-side trusted login controller
+- pressing Login invokes a dedicated login packet path
+- the generic panel response may carry only non-sensitive action intent, such as cancel/back
+- the server challenge/nonce and retry state stay in the trusted auth flow
+
+If transport encryption later makes generic field submission acceptable, that should be an explicit design decision and documented as such. Until then, treat password fields as dedicated-path controls, not ordinary text inputs.
+
+## Permissions And Capabilities
+
+Panels and controls can carry capability metadata:
+
+- required account role
+- required game-master/admin permission
+- available only in debug builds
+- available only on local embedded server
+- read-only for current user
+- hidden for current user
+
+The server decides. The client uses this for presentation only.
+
+## Styling And Assets
+
+Schema should reference logical styles and assets:
+
+- style keys
+- icon ids
+- image ids
+- theme slots
+- density mode
+- warning/destructive/primary button roles
+
+Assets resolve through the content resolver stack:
+
+1. built-in defaults
+2. user resource packs
+3. server patch mappings
+4. future explicit user mods
+
+Resource packs are cosmetic. Server patches are additive/override data/assets. Mods are explicit functionality. UI schema must preserve that separation.
+
+## Window And Focus Policy
+
+Panels should declare:
+
+- surface/layer target
+- focus mode
+- exclusive group
+- input blocking behavior
+- default focus field
+- close behavior
+- escape behavior
+- z-order class
+- persistence key for client-local window placement
+
+Multiple non-exclusive menu panels must be able to coexist. Inventory, character sheet, chat, journal, bank, vendor, crafting, and similar gameplay menus are separate server-driven or client-local menu surfaces. Opening one should not implicitly close the others unless the server says so. This is a presentation rule, not a separate backend protocol: the runtime uses panel metadata to decide which host/layer receives the panel.
+
+Recommended focus modes:
+
+- `Passive`: visible but does not capture keyboard/controller focus by default, such as chat history or read-only status panels
+- `Normal`: focusable window that can coexist with other normal windows, such as inventory, character sheet, bank, crafting, vendors, journal, and admin inspectors
+- `Modal`: top-level focused panel that blocks interaction with lower panels until answered or closed, such as confirmation dialogs
+- `Exclusive`: singleton top layer for a declared group, such as settings/options, pause menu, login, character select, reconnect/error, or full-screen admin takeover
+
+Focus mode governs default focus acquisition, input routing, controller navigation, and whether lower layers remain interactive. `Passive` does not mean "can never receive input." It means the panel does not automatically steal focus when shown. If the user explicitly clicks a text field or presses the chat key, a passive panel may temporarily own that control's input until it releases focus.
+
+Exclusive groups prevent overlap within the same group. Opening a new panel in an exclusive group should replace, close, or focus the existing panel according to `OpenPolicy`. Example groups:
+
+- `AppShell`: start menu, settings/options, local pause/options overlay
+- `SessionAdmission`: login, character select, character create/delete
+- `BlockingServerDialog`: disconnect/error/reconnect/account messages
+- `AdminTakeover`: full-screen or input-blocking GM tools
+
+Z-order classes should be explicit:
+
+- world UI
+- HUD
+- normal menu windows
+- floating utility windows
+- modal dialogs
+- exclusive app/session overlays
+- tooltip overlays
+- trusted error/disconnect overlays
+- debug overlays
+
+Suggested Godot menu hosts:
+
+- `WorldUiHost`: world/object anchored UI, labels, interaction prompts
+- `HudHost`: persistent gameplay HUD
+- `MenuSharedHost`: passive and normal shared menu panels
+- `MenuModalHost`: modal dialogs above shared menus
+- `MenuExclusiveHost`: app/session overlays that can dim, hide, or disable lower menu hosts
+- `TooltipHost`: transient hover/focus tooltips above normal UI
+- `DebugOverlayHost`: debug/admin overlays that intentionally sit above normal gameplay UI
+
+These hosts are renderer/runtime implementation details. They should not fork the schema protocol or create a second server-driven UI system.
+
+Escape/back behavior should be deterministic:
+
+- if a modal or exclusive panel is on top, route Escape to that panel's declared close/back action
+- otherwise close or defocus the topmost closable normal panel by z-order, with last-focused order used to update z-order when the user clicks or focuses a panel
+- if no closable server-driven panel owns focus, route Escape to the local app shell settings/options overlay
+- server-owned panels receive a close/back intent; the server decides whether the panel actually closes
+
+Session loss must close or invalidate server-owned panels. Pending exclusive panels should block input the same way the final panel would.
+
+## Client Local Settings
+
+Client-local settings can use the same renderer vocabulary, but they are not server-owned panels.
+
+Examples:
+
+- graphics
+- sound
+- nameplates
+- chat display
+- HUD preferences
+- debug overlay preferences
+- content/cache preferences
+
+These can live in `ClientAppShell` or a local schema renderer path, but they should not be confused with server authority.
+
+## ECS Control Panel Target
+
+The eventual ECS control panel should reproduce and improve the v1 panel:
+
+- statistics header
+- environment/hardware panel
+- rendering/debug panel
+- systems table
+- per-system settings
+- per-system live timings
+- entity/archetype counters
+- component/entity inspector
+- chunk/AOI/network panels
+- save/reload/reset controls
+
+The schema work needed for that:
+
+- typed setting descriptors
+- collapsible groups
+- tabs/sidebar navigation
+- repeaters/tables
+- live telemetry slots
+- row selection
+- dirty/apply/save-all semantics
+- action result feedback
+- permission-gated destructive actions
+
+## Implementation Phases
+
+### UI-1: Contracts And Schema Core
+
+- port/refresh shared UI ids and contracts
+- define UI capability negotiation record for protocol version, supported node families, renderer limits, and optional capabilities
+- define schema node ids
+- define payload slots and update messages
+- define response messages
+- define panel metadata: surface/layer target, category, focus mode, exclusive group, z-order class, open/back policy, input-blocking flags
+- define tooltip policy metadata for modal/exclusive panels
+- define catalog identity records separately from schema identity records
+- define inventory/container identity, item row keys, placement metadata, and mutation action conventions separately from any one inventory viewer
+- define tooltip metadata, rich tooltip payload shape, and optional detail-request flow
+- define context/radial action descriptor shape for item, row, entity, world, and admin targets
+- define scoped model delta format for page/tab/region refreshes
+- define state binding descriptors for slots backed by replicated/session state
+- define state binding resolver interface boundary
+- define state binding resolver registry ownership and registration contract
+- define slot update priority for explicit model updates, telemetry updates, and runtime state bindings
+- define validation limits
+- round-trip codec tests
+
+### UI-2: Cache Negotiation
+
+- integrate with existing server-specific cache key/path model
+- implement cold path schema definition handling
+- implement hot path schema lookup
+- implement catalog cache identity and request/response handling
+- verify schema hash/revision identity
+- verify catalog hash/revision identity
+- cache hit/miss tests for both schema and catalog data
+
+### UI-3: Minimal Renderer
+
+- render panel, text, dynamic text, button, row, column, separator, text input
+- open/update/close panel host under `MenuCanvasManager`
+- split Godot presentation into world, HUD, shared menu, modal, exclusive, tooltip, and debug hosts while keeping one backend panel path
+- enforce focus mode, input blocking, z-order class, and exclusive group rules
+- enforce tooltip policy for modal/exclusive panels
+- implement pending exclusive placeholder panels for cold server-driven opens
+- implement state-bound slot refresh from client runtime caches
+- implement server-forced full model, scoped region, and repeater row update application
+- implement basic inventory/container model delta application using stable item/container ids
+- implement basic tooltip and context menu rendering for schema-declared actions
+- response/ack path
+- message box smoke
+
+### UI-4: Login And Character Flow
+
+- login panel with trusted credential binding
+- character select
+- character create
+- character delete confirm
+- character select row add/update/remove refresh smoke
+- simple state-bound status panel smoke, such as a local player health/resource widget
+- session loss clears active panels
+- focused smoke tests
+
+### UI-5: Settings Controls
+
+- toggle
+- number input
+- slider
+- stepper
+- select
+- radio group
+- checkbox group
+- dirty/apply/revert
+- descriptor-to-renderer tests
+
+### UI-5B: Inventory Viewer Foundation
+
+- implement the D2-style grid inventory viewer helper as the default product path
+- implement or keep a simple Skyrim-style list viewer as a reference/test shell over the same inventory/container contract
+- validate drag/drop, equip, split/merge, item remove, and shared-container delta flows against server authority
+- validate inventory item context menu actions over the same item/container contract
+- validate trade-window two-party shared view semantics at the contract/model level before treating it as a normal container
+- validate auction-style volatile listing refresh as a live repeater/paged table, not a cached catalog
+- reserve `ContainerCanvas` for later UO-style freeform containers; implement only when a real feature needs it
+
+### UI-6: Admin Shell Prototype
+
+- admin shell panel host
+- plugin/page registration model
+- page state model
+- systems list prototype
+- current ECS `ControlDescriptors` rendered generically
+- permission-gated actions
+- admin row/context action menus for common inspect/toggle/reset/debug actions
+
+### UI-7: Tables And Live Telemetry
+
+- table/repeater row context
+- paging
+- row selection
+- partial row updates
+- live slot updates
+- timing/statistics panel
+
+### UI-8: ECS Control Panel
+
+- system settings panels
+- system timings
+- entity/archetype counters
+- component inspector
+- debug actions
+- save-all/revert behavior
+
+## Testing Plan
+
+Engine-agnostic tests:
+
+- schema codec round trips
+- validator limit failures
+- payload slot compatibility
+- state binding descriptor validation
+- state binding resolver authorization failure
+- cache identity match/miss
+- response action id validation
+- row context validation
+- setting descriptor serialization
+- permission filtering
+- update/delta application
+- repeater row add/update/remove application
+- shared container item add/update/remove application
+- inventory viewer contract parity between list and grid viewers
+- drag/drop intent validation shape for item/container actions
+- tooltip metadata and rich tooltip payload validation
+- context/radial action descriptor validation
+- context action stale target rejection
+- context/radial action range-exit rejection
+- schema/catalog supersession close/reopen handling
+- slot update priority between model, telemetry, and state binding sources
+
+Godot validation:
+
+- renderer smoke for basic nodes
+- state-bound slot refresh from a fake client runtime state cache
+- multiple state-bound panel instances using the same schema with different binding targets
+- surface/layer routing for world, HUD, menu, modal, exclusive, tooltip, and debug targets
+- tooltip hover/focus smoke
+- modal/exclusive tooltip suppression smoke
+- context menu open/action/close smoke
+- radial menu category/action smoke
+- inventory grid smoke with server-confirmed drag/drop
+- inventory list smoke over the same inventory/container model
+- focus traversal
+- escape/close behavior
+- modal/exclusive behavior
+- session loss clears panels
+- login/character flow smoke
+
+Server validation:
+
+- panel open/update/close
+- panel response routing
+- admin permission checks
+- destructive action confirmation
+- ECS descriptor generation
+
+## Design Guidance
+
+- Prefer semantic schema nodes over absolute pixel layouts.
+- Keep absolute positioning available but bounded.
+- Keep builders pleasant, but make the wire schema explicit and testable.
+- Add composite helpers only when they remove real authoring pain.
+- Treat permissions and disabled states as presentation hints on the client.
+- Revalidate all behavior on the server.
+- Keep schema and payload separate.
+- Keep server-driven UI separate from local app shell screens.
+- Do not send executable UI logic from server to client.

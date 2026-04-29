@@ -33,6 +33,8 @@ Use the old client network code as reference for:
 
 Preserve the useful behavior. Do not preserve the old project structure by default. The older v1 tree under `_OLD/_OLD` is only a secondary concept reference; likely candidates are the old hybrid render/culling idea and the old `Client/ECS/ControlPanel` admin/debug panel concepts.
 
+The rebuilt server-driven UI and admin/control-panel plan lives in `UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`. Use it before starting schema UI work; it incorporates the old v2 UI/schema path, old v1 ECS settings/control panel, ACC-style pluggable RunUO admin pages, and the current ECS `SystemSettings` / `ControlDescriptors` hooks.
+
 ## Phase C1: Core Contracts
 
 Deliver:

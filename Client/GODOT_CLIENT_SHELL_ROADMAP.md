@@ -171,6 +171,12 @@ Primary old docs:
 - `_OLD/Docs/SERVER_DISCOVERY_AND_REGISTRY_ARCHITECTURE_V2.md`
 - `_OLD/Docs/AUTHORITATIVE_PHYSICS_ARCHITECTURE.md`
 
+Current planning docs:
+
+- `Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`
+  - comprehensive rebuilt UI/schema/admin-panel plan
+  - folds in old v2 schema UI, old v1 ECS settings/control panel, ACC-style system pages, and current ECS `SystemSettings` / `ControlDescriptors`
+
 ## Decisions To Preserve
 
 ### One Persistent Shell, Inject Current Things
@@ -603,6 +609,10 @@ Current status:
 ### Phase G6 - Server-Driven UI Schema Path
 
 Goal: bring back the schema/cache UI path once there is a shell to render it.
+
+Design reference:
+
+- `Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`
 
 Deliver:
 

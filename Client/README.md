@@ -13,6 +13,10 @@ Current focus:
 - restoring old v2 client features cleanly on top of the new runtime boundaries
 - preparing the content/cache and server-driven UI schema path for login and character flow
 
+Schema/admin UI planning:
+
+- `UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md` is the current reference for the rebuilt RunUO-style server-driven UI path, future ECS control panel, typed settings controls, cached schema model, and ACC-style pluggable admin pages.
+
 What now exists:
 
 - `Client/Core`
