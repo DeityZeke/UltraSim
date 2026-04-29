@@ -14,6 +14,69 @@ container truth is not the UI viewer
 
 A D2 grid, Skyrim-style list, and UO freeform bag should be different viewers over the same underlying container state. If the container model cannot support a simple list viewer without grid fields leaking everywhere, the contract is wrong.
 
+## Current Status
+
+The first foundation slice is implemented.
+
+Current contracts:
+
+- `UltraSim.Inventory.csproj`
+- validation helpers/results
+- owner refs:
+  - entity
+  - character
+  - account
+  - world object
+  - guild
+  - vendor
+  - system
+- requester refs:
+  - player session
+  - character
+  - entity AI
+  - server system
+  - admin
+  - script
+- container lifecycle enum
+- placement modes and descriptors:
+  - none
+  - list
+  - grid
+  - freeform
+  - slot
+- permission descriptor vocabulary:
+  - public
+  - owner
+  - account
+  - party
+  - guild
+  - house access list
+  - vendor managed
+  - admin
+  - scripted rule
+- item flags:
+  - locked
+  - no trade
+  - no drop
+  - quest item
+  - transaction reserved
+  - non-persistent
+- item snapshot validation
+- container snapshot validation
+- executable tests in `_Tests/UltraSim.Inventory.Tests`
+- benchmark harness in `_Benchmarks/UltraSim.Inventory.Benchmarks`
+
+Current validation:
+
+- `dotnet build Kernels/Inventory/UltraSim.Inventory.csproj -c Release /p:UseSharedCompilation=false`: passed
+- `dotnet run --project _Tests/UltraSim.Inventory.Tests/UltraSim.Inventory.Tests.csproj -c Release`: passed
+- `dotnet run --project _Benchmarks/UltraSim.Inventory.Benchmarks/UltraSim.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/inventory-benchmarks.json`: passed
+
+Current benchmark baselines:
+
+- `ContainerSnapshot_Validate_List_1000Items`: about `0.57 ms`
+- `ContainerSnapshot_Validate_Grid_1000Items`: about `0.74 ms`
+
 ## Layering
 
 Use the same kernel/bridge discipline as ECS, Network, and UI.
