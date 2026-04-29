@@ -108,6 +108,8 @@ Current validation:
 
 - `dotnet build Kernels/Inventory/UltraSim.Inventory.csproj -c Release /p:UseSharedCompilation=false`: passed
 - `dotnet run --project _Tests/UltraSim.Inventory.Tests/UltraSim.Inventory.Tests.csproj -c Release`: passed
+- `dotnet build Server/Inventory/UltraSim.Server.Inventory.csproj -c Release /p:UseSharedCompilation=false`: passed
+- `dotnet run --project _Tests/UltraSim.Server.Inventory.Tests/UltraSim.Server.Inventory.Tests.csproj -c Release`: passed
 - `dotnet run --project _Benchmarks/UltraSim.Inventory.Benchmarks/UltraSim.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/inventory-benchmarks.json`: passed
 
 Current benchmark baselines:
@@ -159,6 +161,8 @@ Godot renderer
 ```
 
 The kernel may use identity references such as `InventoryOwnerRef(Entity, 123)` or `InventoryRequesterRef(Session, abc)`. It must not resolve those references by reaching into ECS, accounts, Godot nodes, server sessions, files, or databases.
+
+The first bridge prototype lives in `Server/Inventory`. It resolves ECS entity owner/requester refs through `IEntityReadOnly` while keeping ECS types out of this kernel. Entity refs use `entity:{packedUlong}` so ECS generation/version bits survive across the bridge and stale slot reuse is rejected.
 
 ## Core Concepts
 
