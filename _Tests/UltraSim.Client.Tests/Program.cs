@@ -27,6 +27,8 @@ internal static class TestRunner
         Run(nameof(LayeredContentResolver_ResolvesHighestPriorityMapping), LayeredContentResolver_ResolvesHighestPriorityMapping);
         Run(nameof(ResourcePackManifestValidator_CreatesUserOverrideLayer), ResourcePackManifestValidator_CreatesUserOverrideLayer);
         Run(nameof(ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions), ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions);
+        Run(nameof(ContentCacheIndex_TracksMetadataAccessPinningAndEviction), ContentCacheIndex_TracksMetadataAccessPinningAndEviction);
+        Run(nameof(ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries), ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
         Run(nameof(ClientInterpolationBuffer_SamplesInterpolatedAndLatestState), ClientInterpolationBuffer_SamplesInterpolatedAndLatestState);
         Run(nameof(MovementPackets_RoundTripExpectedFields), MovementPackets_RoundTripExpectedFields);
@@ -514,6 +516,96 @@ internal static class TestRunner
             [oldest, middle],
             quotaBytes: 1000);
         Assert.Equal(0, underQuota.EvictionCandidates.Count);
+    }
+
+    private static void ContentCacheIndex_TracksMetadataAccessPinningAndEviction()
+    {
+        DateTimeOffset now = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        var index = new ContentCacheIndex();
+        Assert.True(index.TryUpsert(new ContentCacheEntry(
+            "schema/login",
+            "Schemas/login/1/hash.uischema",
+            ContentCacheEntryKind.Schema,
+            100,
+            now.AddHours(-2)), out string error), error);
+        Assert.True(index.TryUpsert(new ContentCacheEntry(
+            "asset/sword",
+            "Assets/icons/sword.png",
+            ContentCacheEntryKind.Asset,
+            500,
+            now.AddHours(-4)), out error), error);
+        Assert.Equal(2, index.Count);
+        Assert.Equal(600L, index.TotalSizeBytes);
+
+        Assert.True(index.TryMarkAccessed("asset/sword", now));
+        Assert.True(index.TrySetPinned("asset/sword", true));
+        Assert.True(index.TryGet("asset/sword", out ContentCacheEntry sword));
+        Assert.Equal(now, sword.LastAccessUtc);
+        Assert.True(sword.Pinned);
+
+        ContentCacheQuotaPlan plan = index.PlanEviction(quotaBytes: 300, targetFillRatio: 0.5);
+        Assert.SequenceEqual(["schema/login"], plan.EvictionCandidates.Select(static entry => entry.CacheKey).ToArray());
+        IReadOnlyList<ContentCacheEntry> removed = index.ApplyEvictionPlan(plan);
+        Assert.Equal(1, removed.Count);
+        Assert.Equal("schema/login", removed[0].CacheKey);
+        Assert.Equal(1, index.Count);
+        Assert.True(index.TryGet("asset/sword", out _));
+
+        Assert.False(index.TryUpsert(new ContentCacheEntry(
+            "bad",
+            "../outside.bin",
+            ContentCacheEntryKind.Asset,
+            1,
+            now), out error));
+        Assert.Equal("Content path cannot contain traversal segments.", error);
+    }
+
+    private static void ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-cache-index-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var store = new ContentCacheIndexStore(pathPolicy.CacheIndexPath);
+        DateTimeOffset now = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        var index = new ContentCacheIndex();
+        Assert.True(index.TryUpsert(new ContentCacheEntry(
+            "schema/login",
+            "Schemas/login/1/hash.uischema",
+            ContentCacheEntryKind.Schema,
+            100,
+            now,
+            Pinned: true), out string error), error);
+
+        store.Save(index);
+        ContentCacheIndex loaded = store.LoadOrCreate();
+
+        Assert.Equal(1, loaded.Count);
+        Assert.True(loaded.TryGet("schema/login", out ContentCacheEntry entry));
+        Assert.Equal("Schemas/login/1/hash.uischema", entry.RelativePath);
+        Assert.Equal(ContentCacheEntryKind.Schema, entry.Kind);
+        Assert.Equal(100L, entry.SizeBytes);
+        Assert.True(entry.Pinned);
+
+        string json = ContentCacheIndexStore.Serialize(index);
+        Assert.True(ContentCacheIndexStore.TryDeserialize(json, out ContentCacheIndex parsed, out error), error);
+        Assert.True(parsed.TryGet("schema/login", out _));
+
+        string unsafeJson = """
+        {
+          "Version": 1,
+          "Entries": [
+            {
+              "CacheKey": "bad",
+              "RelativePath": "../outside.bin",
+              "Kind": 0,
+              "SizeBytes": 1,
+              "LastAccessUtc": "2026-04-29T00:00:00+00:00",
+              "Pinned": false
+            }
+          ]
+        }
+        """;
+        Assert.False(ContentCacheIndexStore.TryDeserialize(unsafeJson, out _, out error));
+        Assert.Equal("Content path cannot contain traversal segments.", error);
     }
 
     private static void ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates()

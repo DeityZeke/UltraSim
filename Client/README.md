@@ -30,6 +30,7 @@ What now exists:
     - content resolver trust-class contracts
     - layered content resolver priority stack for built-ins, resource packs, server patches, and future mods
     - first cache metadata/quota eviction planning hook
+    - persisted cache metadata index store with safe JSON round-trip validation
 - `Client/Network`
   - movement input send path over `Kernels/Network`
   - authoritative movement-state receive path

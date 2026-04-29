@@ -581,8 +581,9 @@ Current status:
     - future explicit user mods
   - resource-pack manifest -> resolver layer conversion
   - cache metadata/quota planner that proposes oldest unpinned entries for eviction
+  - persisted cache metadata index with validated JSON load/save
+  - metadata eviction execution that removes planned candidates from the index
 - remaining G5 work:
-  - persisted cache metadata store and actual eviction execution
   - first Godot-side content resolver adapter
   - real patch/schema cache IO
 - manifest validation tests

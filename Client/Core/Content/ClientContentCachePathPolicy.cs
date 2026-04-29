@@ -15,6 +15,7 @@ public sealed class ClientContentCachePathPolicy
     public string RootPath { get; }
     public string GlobalCacheRoot => Path.Combine(RootPath, "Global");
     public string ModsRoot => Path.Combine(RootPath, "Mods");
+    public string CacheIndexPath => Path.Combine(RootPath, "cache-index.json");
 
     public string GetServerRoot(ServerContentIdentity server)
     {
