@@ -43,6 +43,13 @@ Implemented first boundary slice:
   - range policy hook
   - capacity policy hook
   - all-or-nothing source decrement plus new-stack creation
+- first concrete merge-stack mutation rule:
+  - requester resolution check
+  - source take access check
+  - destination put access check
+  - merge policy hook
+  - range policy hook
+  - all-or-nothing source decrement/removal plus destination increment
 - benchmark harness in `_Benchmarks/UltraSim.Server.Inventory.Benchmarks`
 
 Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse. If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
@@ -75,6 +82,7 @@ It does not persist, authorize real gameplay, split partial stacks, or own trans
 - Unresolved suspended-item returns are explicit events for higher layers/rules to recover or destroy deliberately.
 - `ApplyMove` evaluates injected mutation rules first, then commits snapshot changes only for accepted whole-item moves.
 - `ApplySplit` evaluates injected mutation rules first, then commits source quantity and destination item changes only after both updated snapshots validate.
+- `ApplyMerge` evaluates injected mutation rules first, then commits source decrement/removal and destination quantity changes only after both updated snapshots validate.
 - Rule rejection is returned as an `InventoryMutationResult`; malformed store state remains a store failure.
 - Persistence, audit logging, and database ownership stay outside this prototype.
 
@@ -107,6 +115,20 @@ The store applies split as an all-or-nothing operation. It builds and validates 
 
 Stack merge, partial stack transfer into an existing destination stack, and split-specific definition rules remain future policy implementations.
 
+## Merge Rule Prototype
+
+`InventoryMergeStackMutationRules` is the first concrete merge rule. It supports transferring quantity from one existing stack into another existing stack. A merge intent must provide:
+
+- source container id
+- destination container id
+- source item id
+- destination item id
+- merge quantity
+
+The first concrete rule requires the merge policy's approved transfer quantity to exactly match the intent quantity. If a policy wants to cap to available stack space, the caller should submit the capped quantity explicitly. This keeps the result deterministic and prevents the store from applying a quantity different from the requested action.
+
+The store applies merge as an all-or-nothing operation. Partial merges decrement the source stack and increment the destination stack. Full merges remove the source item and increment the destination stack. A rejected merge leaves both containers unchanged.
+
 ## Benchmark Harness
 
 Current server bridge benchmark:
@@ -121,6 +143,7 @@ Initial scenarios cover:
 - accepted same-container reposition moves with one viewer
 - rejected out-of-range moves
 - accepted cross-container split-stack moves
+- accepted cross-container partial merge-stack moves
 - raw `DispatchDelta` fanout across 1000 viewers
 
 These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, split/merge, equipment rules, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.

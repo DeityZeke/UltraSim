@@ -496,6 +496,176 @@ public sealed class InMemoryInventoryStore
         return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
     }
 
+    public InventoryStoreOperationResult ApplyMerge(InventoryMutationIntent intent, IInventoryMutationRules rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        InventoryValidationResult intentValidation = intent.Validate();
+        if (!intentValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(intentValidation.Error);
+        }
+
+        if (intent.Kind != InventoryMutationKind.MergeStack)
+        {
+            return InventoryStoreOperationResult.Failure("ApplyMerge only accepts MergeStack intents.");
+        }
+
+        _containers.TryGetValue(intent.SourceContainerId!, out InventoryContainerSnapshot? sourceContainer);
+        _containers.TryGetValue(intent.DestinationContainerId!, out InventoryContainerSnapshot? destinationContainer);
+        InventoryItemSnapshot? sourceItem = null;
+        InventoryItemSnapshot? destinationItem = null;
+        int sourceItemIndex = -1;
+        int destinationItemIndex = -1;
+
+        if (sourceContainer is not null)
+        {
+            sourceItemIndex = FindItemIndex(sourceContainer, intent.SourceItemInstanceId!);
+            if (sourceItemIndex >= 0)
+            {
+                sourceItem = sourceContainer.Items[sourceItemIndex];
+            }
+        }
+
+        if (destinationContainer is not null && !string.IsNullOrWhiteSpace(intent.DestinationItemInstanceId))
+        {
+            destinationItemIndex = FindItemIndex(destinationContainer, intent.DestinationItemInstanceId);
+            if (destinationItemIndex >= 0)
+            {
+                destinationItem = destinationContainer.Items[destinationItemIndex];
+            }
+        }
+
+        InventoryRuntimeRefResolution requester = _refResolver.ResolveRequester(intent.Requester);
+        InventoryMutationRuleDecision decision = rules.Evaluate(new InventoryMutationRuleContext(
+            intent,
+            requester,
+            sourceContainer,
+            destinationContainer,
+            sourceItem,
+            destinationItem));
+
+        string[] affectedContainerIds = BuildAffectedContainerIds(intent.SourceContainerId!, intent.DestinationContainerId!);
+        InventoryMutationResult mutationResult = decision.ToResult(intent, affectedContainerIds);
+        InventoryValidationResult resultValidation = mutationResult.Validate();
+        if (!resultValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(resultValidation.Error);
+        }
+
+        if (!decision.IsAccepted)
+        {
+            return InventoryStoreOperationResult.Success(mutationResult: mutationResult);
+        }
+
+        if (sourceContainer is null ||
+            destinationContainer is null ||
+            sourceItem is null ||
+            destinationItem is null ||
+            sourceItemIndex < 0 ||
+            destinationItemIndex < 0)
+        {
+            return InventoryStoreOperationResult.Failure("Accepted merge decision requires existing source/destination containers and source/destination items.");
+        }
+
+        bool removeSource = intent.Quantity == sourceItem.Quantity;
+        InventoryItemSnapshot mergedDestination = destinationItem with { Quantity = destinationItem.Quantity + intent.Quantity };
+        InventoryItemSnapshot reducedSource = sourceItem with { Quantity = sourceItem.Quantity - intent.Quantity };
+        var dispatches = new List<InventoryStoreDeltaDispatch>(capacity: 2);
+
+        if (string.Equals(sourceContainer.ContainerId, destinationContainer.ContainerId, StringComparison.Ordinal))
+        {
+            InventoryContainerSnapshot updated = MergeItemsInSameContainer(
+                sourceContainer,
+                sourceItemIndex,
+                destinationItemIndex,
+                reducedSource,
+                mergedDestination,
+                removeSource);
+            InventoryValidationResult validation = updated.Validate();
+            if (!validation.IsValid)
+            {
+                return InventoryStoreOperationResult.Failure(validation.Error);
+            }
+
+            long revision = SetContainerSnapshot(updated);
+            InventoryStoreOperationResult sourceDispatch = DispatchDelta(CreateMergeSourceDelta(
+                intent,
+                updated.ContainerId,
+                revision,
+                sourceItem.ItemInstanceId,
+                -intent.Quantity,
+                removeSource));
+            if (!sourceDispatch.Succeeded)
+            {
+                return sourceDispatch;
+            }
+
+            dispatches.AddRange(sourceDispatch.Dispatches);
+            InventoryStoreOperationResult destinationDispatch = DispatchDelta(CreateQuantityChangedDelta(
+                intent,
+                updated.ContainerId,
+                revision,
+                destinationItem.ItemInstanceId,
+                intent.Quantity,
+                "merge_destination"));
+            if (!destinationDispatch.Succeeded)
+            {
+                return destinationDispatch;
+            }
+
+            dispatches.AddRange(destinationDispatch.Dispatches);
+            return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+        }
+
+        InventoryContainerSnapshot updatedSource = removeSource
+            ? RemoveItem(sourceContainer, sourceItemIndex)
+            : ReplaceItem(sourceContainer, sourceItemIndex, reducedSource);
+        InventoryContainerSnapshot updatedDestination = ReplaceItem(destinationContainer, destinationItemIndex, mergedDestination);
+        InventoryValidationResult sourceValidation = updatedSource.Validate();
+        if (!sourceValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(sourceValidation.Error);
+        }
+
+        InventoryValidationResult destinationValidation = updatedDestination.Validate();
+        if (!destinationValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(destinationValidation.Error);
+        }
+
+        long sourceRevision = SetContainerSnapshot(updatedSource);
+        long destinationRevision = SetContainerSnapshot(updatedDestination);
+
+        InventoryStoreOperationResult sourceResult = DispatchDelta(CreateMergeSourceDelta(
+            intent,
+            updatedSource.ContainerId,
+            sourceRevision,
+            sourceItem.ItemInstanceId,
+            -intent.Quantity,
+            removeSource));
+        if (!sourceResult.Succeeded)
+        {
+            return sourceResult;
+        }
+
+        dispatches.AddRange(sourceResult.Dispatches);
+        InventoryStoreOperationResult destinationResult = DispatchDelta(CreateQuantityChangedDelta(
+            intent,
+            updatedDestination.ContainerId,
+            destinationRevision,
+            destinationItem.ItemInstanceId,
+            intent.Quantity,
+            "merge_destination"));
+        if (!destinationResult.Succeeded)
+        {
+            return destinationResult;
+        }
+
+        dispatches.AddRange(destinationResult.Dispatches);
+        return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+    }
+
     public InventoryStoreOperationResult BeginTransaction(InventoryTransactionSnapshot transaction)
     {
         InventoryValidationResult validation = transaction.Validate();
@@ -835,6 +1005,35 @@ public sealed class InMemoryInventoryStore
             InventoryAccessFlags.Read);
     }
 
+    private static InventoryContainerDelta CreateMergeSourceDelta(
+        InventoryMutationIntent intent,
+        string containerId,
+        long revision,
+        string itemInstanceId,
+        long quantityDelta,
+        bool removed)
+    {
+        return removed
+            ? new InventoryContainerDelta(
+                $"delta:{intent.CorrelationId}/merge_source_removed/{itemInstanceId}",
+                containerId,
+                revision,
+                InventoryContainerDeltaKind.ItemRemoved,
+                itemInstanceId,
+                Item: null,
+                PreviousPlacement: null,
+                CurrentPlacement: null,
+                QuantityDelta: 0,
+                InventoryAccessFlags.Read)
+            : CreateQuantityChangedDelta(
+                intent,
+                containerId,
+                revision,
+                itemInstanceId,
+                quantityDelta,
+                "merge_source");
+    }
+
     private long SetContainerSnapshot(InventoryContainerSnapshot container)
     {
         _containers[container.ContainerId] = container;
@@ -881,6 +1080,40 @@ public sealed class InMemoryInventoryStore
         for (int i = 0; i < container.Items.Count; i++)
         {
             items[i] = i == itemIndex ? item : container.Items[i];
+        }
+
+        return container with { Items = items };
+    }
+
+    private static InventoryContainerSnapshot MergeItemsInSameContainer(
+        InventoryContainerSnapshot container,
+        int sourceItemIndex,
+        int destinationItemIndex,
+        InventoryItemSnapshot reducedSource,
+        InventoryItemSnapshot mergedDestination,
+        bool removeSource)
+    {
+        var items = new InventoryItemSnapshot[removeSource ? container.Items.Count - 1 : container.Items.Count];
+        int write = 0;
+        for (int i = 0; i < container.Items.Count; i++)
+        {
+            if (removeSource && i == sourceItemIndex)
+            {
+                continue;
+            }
+
+            if (i == sourceItemIndex)
+            {
+                items[write++] = reducedSource;
+            }
+            else if (i == destinationItemIndex)
+            {
+                items[write++] = mergedDestination;
+            }
+            else
+            {
+                items[write++] = container.Items[i];
+            }
         }
 
         return container with { Items = items };

@@ -66,6 +66,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 
     yield return new BenchmarkScenario
     {
+        Name = "ApplyMerge_CrossContainer_Partial_10000",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunMergeScenario(10_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
         Name = "DispatchDelta_1000Viewers_10000",
         Category = "InventoryStore",
         Comparable = false,
@@ -155,6 +166,52 @@ static ScenarioMeasurement RunSplitScenario(int iterations)
         if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
         {
             throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Split failed.");
+        }
+
+        checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunMergeScenario(int iterations)
+{
+    var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_merge");
+    var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
+    InventoryContainerSnapshot source = CreateContainer(
+        "container:bench_store_merge/source",
+        InventoryPlacementMode.List,
+        [CreateItem("item:bench_store_merge/source", InventoryPlacementDescriptor.List(0), quantity: iterations + 1, maxStackQuantity: iterations + 1)]);
+    InventoryContainerSnapshot destination = CreateContainer(
+        "container:bench_store_merge/destination",
+        InventoryPlacementMode.List,
+        [CreateItem("item:bench_store_merge/destination", InventoryPlacementDescriptor.List(0), quantity: 1, maxStackQuantity: iterations + 1)]);
+    StoreSuccess(store.AddContainer(source));
+    StoreSuccess(store.AddContainer(destination));
+
+    var rules = new InventoryMergeStackMutationRules(
+        new AllowAllInventoryContainerAccessPolicy(),
+        new ToggleInventoryRangePolicy(allow: true),
+        new SameDefinitionInventoryStackMergePolicy());
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        var intent = new InventoryMutationIntent(
+            "corr:bench_store_merge/apply",
+            requester,
+            ClientSequence: i,
+            InventoryMutationKind.MergeStack,
+            source.ContainerId,
+            destination.ContainerId,
+            "item:bench_store_merge/source",
+            "item:bench_store_merge/destination",
+            Quantity: 1,
+            ProposedPlacement: null);
+        InventoryStoreOperationResult result = store.ApplyMerge(intent, rules);
+        if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
+        {
+            throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Merge failed.");
         }
 
         checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
@@ -382,5 +439,25 @@ internal sealed class ToggleInventoryRangePolicy : IInventoryInteractionRangePol
         return _allow
             ? InventoryMutationRuleDecision.Accepted()
             : InventoryMutationRuleDecision.Rejected(InventoryMutationFailureReason.OutOfRange, "Requester is out of range.");
+    }
+}
+
+internal sealed class SameDefinitionInventoryStackMergePolicy : IInventoryStackMergePolicy
+{
+    public InventoryStackMergeDecision Evaluate(in InventoryStackMergeRequest request)
+    {
+        if (!string.Equals(request.SourceItem.ItemDefinitionId, request.DestinationItem.ItemDefinitionId, StringComparison.Ordinal))
+        {
+            return InventoryStackMergeDecision.Denied(
+                InventoryMutationFailureReason.RuleRejected,
+                "Item definitions do not match.");
+        }
+
+        long capacity = request.DestinationItem.MaxStackQuantity - request.DestinationItem.Quantity;
+        return request.RequestedQuantity <= capacity
+            ? InventoryStackMergeDecision.Allowed(request.RequestedQuantity)
+            : InventoryStackMergeDecision.Denied(
+                InventoryMutationFailureReason.InvalidQuantity,
+                "Destination stack does not have enough capacity.");
     }
 }

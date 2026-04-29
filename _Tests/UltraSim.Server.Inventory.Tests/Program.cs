@@ -25,6 +25,10 @@ internal static class TestRunner
         Run(nameof(InventorySplitStackMutationRules_UsesAccessRangeCapacityAndNewItemId), InventorySplitStackMutationRules_UsesAccessRangeCapacityAndNewItemId);
         Run(nameof(InMemoryInventoryStore_ApplySplitMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplySplitMutatesSnapshotsAndDispatchesScopedDeltas);
         Run(nameof(InMemoryInventoryStore_ApplySplitRejectedByRulesDoesNotPartiallyMutateSnapshots), InMemoryInventoryStore_ApplySplitRejectedByRulesDoesNotPartiallyMutateSnapshots);
+        Run(nameof(InventoryMergeStackMutationRules_UsesMergePolicyAccessAndRange), InventoryMergeStackMutationRules_UsesMergePolicyAccessAndRange);
+        Run(nameof(InMemoryInventoryStore_ApplyMergePartialMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplyMergePartialMutatesSnapshotsAndDispatchesScopedDeltas);
+        Run(nameof(InMemoryInventoryStore_ApplyMergeFullQuantityRemovesSourceWithoutDuplication), InMemoryInventoryStore_ApplyMergeFullQuantityRemovesSourceWithoutDuplication);
+        Run(nameof(InMemoryInventoryStore_ApplyMergeRejectedByRulesDoesNotPartiallyMutateSnapshots), InMemoryInventoryStore_ApplyMergeRejectedByRulesDoesNotPartiallyMutateSnapshots);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -782,10 +786,12 @@ internal static class TestRunner
             new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_split"),
             InventoryContainerLifecycle.Persistent,
             [apples]);
+        InventoryItemSnapshot existingDestinationStack = CreateStackItem("item:apple/apply_split/existing", quantity: 2, maxStack: 20);
         InventoryContainerSnapshot destination = CreateContainer(
             "container:split_apply/destination",
             new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_split"),
-            InventoryContainerLifecycle.Persistent);
+            InventoryContainerLifecycle.Persistent,
+            [existingDestinationStack]);
         InventoryContainerSnapshot unrelated = CreateContainer(
             "container:split_apply/unrelated",
             new InventoryOwnerRef(InventoryOwnerKind.WorldObject, "world:split_unrelated"),
@@ -836,10 +842,12 @@ internal static class TestRunner
         Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot updatedDestination), "destination container after split");
         Assert.Equal(1, updatedSource.Items.Count, "source item count after split");
         Assert.Equal(6L, updatedSource.Items[0].Quantity, "source quantity after split");
-        Assert.Equal(1, updatedDestination.Items.Count, "destination item count after split");
-        Assert.Equal("item:apple/apply_split/new", updatedDestination.Items[0].ItemInstanceId, "new split item id");
-        Assert.Equal(4L, updatedDestination.Items[0].Quantity, "new split item quantity");
-        Assert.Equal(3, updatedDestination.Items[0].Placement.Index, "new split item placement");
+        Assert.Equal(2, updatedDestination.Items.Count, "destination item count after split");
+        Assert.Equal(existingDestinationStack.ItemInstanceId, updatedDestination.Items[0].ItemInstanceId, "existing destination stack after split");
+        Assert.Equal(2L, updatedDestination.Items[0].Quantity, "existing destination stack quantity after split");
+        Assert.Equal("item:apple/apply_split/new", updatedDestination.Items[1].ItemInstanceId, "new split item id");
+        Assert.Equal(4L, updatedDestination.Items[1].Quantity, "new split item quantity");
+        Assert.Equal(3, updatedDestination.Items[1].Placement.Index, "new split item placement");
 
         Assert.Equal(InventoryContainerDeltaKind.QuantityChanged, result.Dispatches[0].Delta.Kind, "split source delta kind");
         Assert.Equal(-4L, result.Dispatches[0].Delta.QuantityDelta, "split source quantity delta");
@@ -901,6 +909,234 @@ internal static class TestRunner
         Assert.Equal(1, unchangedSource.Items.Count, "source item count after rejected split");
         Assert.Equal(10L, unchangedSource.Items[0].Quantity, "source quantity after rejected split");
         Assert.Equal(0, unchangedDestination.Items.Count, "destination item count after rejected split");
+    }
+
+    private static void InventoryMergeStackMutationRules_UsesMergePolicyAccessAndRange()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:merger");
+        InventoryItemSnapshot sourceItem = CreateStackItem("item:apple/merge_rules/source", quantity: 8, maxStack: 20);
+        InventoryItemSnapshot destinationItem = CreateStackItem("item:apple/merge_rules/destination", quantity: 6, maxStack: 20);
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:source/merge_rules",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merger"),
+            InventoryContainerLifecycle.Persistent,
+            [sourceItem]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:destination/merge_rules",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merger"),
+            InventoryContainerLifecycle.Persistent,
+            [destinationItem]);
+        var intent = new InventoryMutationIntent(
+            "corr/merge/rules",
+            requester,
+            ClientSequence: 84,
+            InventoryMutationKind.MergeStack,
+            source.ContainerId,
+            destination.ContainerId,
+            sourceItem.ItemInstanceId,
+            destinationItem.ItemInstanceId,
+            Quantity: 4,
+            ProposedPlacement: null);
+        Assert.Valid(intent.Validate());
+
+        var access = new PublicTakePutAccessPolicy();
+        var range = new ToggleRangePolicy();
+        var merge = new SameDefinitionStackMergePolicy();
+        var rules = new InventoryMergeStackMutationRules(access, range, merge);
+        InventoryMutationRuleContext context = new InventoryMutationRuleContext(
+            intent,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            source,
+            destination,
+            sourceItem,
+            destinationItem);
+
+        InventoryMutationRuleDecision accepted = rules.Evaluate(context);
+        Assert.True(accepted.IsAccepted, "merge rule accepts baseline");
+
+        InventoryItemSnapshot nearlyFullDestination = destinationItem with { Quantity = 19 };
+        InventoryMutationRuleDecision capped = rules.Evaluate(context with
+        {
+            DestinationItem = nearlyFullDestination,
+            DestinationContainer = destination with { Items = [nearlyFullDestination] }
+        });
+        Assert.False(capped.IsAccepted, "merge rule rejects policy-capped quantity");
+        Assert.Equal(InventoryMutationFailureReason.InvalidQuantity, capped.FailureReason, "capped merge failure reason");
+
+        range.Allow = false;
+        InventoryMutationRuleDecision outOfRange = rules.Evaluate(context);
+        Assert.False(outOfRange.IsAccepted, "merge rule range rejection");
+        Assert.Equal(InventoryMutationFailureReason.OutOfRange, outOfRange.FailureReason, "merge range failure reason");
+    }
+
+    private static void InMemoryInventoryStore_ApplyMergePartialMutatesSnapshotsAndDispatchesScopedDeltas()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:merge_partial");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot sourceItem = CreateStackItem("item:apple/merge_partial/source", quantity: 10, maxStack: 20);
+        InventoryItemSnapshot destinationItem = CreateStackItem("item:apple/merge_partial/destination", quantity: 3, maxStack: 20);
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:merge_partial/source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merge_partial"),
+            InventoryContainerLifecycle.Persistent,
+            [sourceItem]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:merge_partial/destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merge_partial"),
+            InventoryContainerLifecycle.Persistent,
+            [destinationItem]);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:merge_partial/source",
+            source.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:merge_partial/destination",
+            destination.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:merge_partial",
+            requester,
+            ClientSequence: 85,
+            InventoryMutationKind.MergeStack,
+            source.ContainerId,
+            destination.ContainerId,
+            sourceItem.ItemInstanceId,
+            destinationItem.ItemInstanceId,
+            Quantity: 4,
+            ProposedPlacement: null);
+        var rules = new InventoryMergeStackMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new ToggleRangePolicy(),
+            new SameDefinitionStackMergePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyMerge(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "merge mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "merge mutation result kind");
+        Assert.Equal(2, result.Dispatches.Count, "merge dispatch count");
+
+        Assert.True(store.TryGetContainer(source.ContainerId, out InventoryContainerSnapshot updatedSource), "source container after partial merge");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot updatedDestination), "destination container after partial merge");
+        Assert.Equal(1, updatedSource.Items.Count, "source item count after partial merge");
+        Assert.Equal(6L, updatedSource.Items[0].Quantity, "source quantity after partial merge");
+        Assert.Equal(1, updatedDestination.Items.Count, "destination item count after partial merge");
+        Assert.Equal(7L, updatedDestination.Items[0].Quantity, "destination quantity after partial merge");
+
+        Assert.Equal(InventoryContainerDeltaKind.QuantityChanged, result.Dispatches[0].Delta.Kind, "merge source delta kind");
+        Assert.Equal(-4L, result.Dispatches[0].Delta.QuantityDelta, "merge source quantity delta");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:merge_partial/source", "merge source recipient");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:merge_partial/destination", "merge source excludes destination");
+
+        Assert.Equal(InventoryContainerDeltaKind.QuantityChanged, result.Dispatches[1].Delta.Kind, "merge destination delta kind");
+        Assert.Equal(4L, result.Dispatches[1].Delta.QuantityDelta, "merge destination quantity delta");
+        Assert.Contains(result.Dispatches[1].RecipientViewIds, "view:merge_partial/destination", "merge destination recipient");
+        Assert.NotContains(result.Dispatches[1].RecipientViewIds, "view:merge_partial/source", "merge destination excludes source");
+    }
+
+    private static void InMemoryInventoryStore_ApplyMergeFullQuantityRemovesSourceWithoutDuplication()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:merge_full");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot sourceItem = CreateStackItem("item:apple/merge_full/source", quantity: 4, maxStack: 20);
+        InventoryItemSnapshot destinationItem = CreateStackItem("item:apple/merge_full/destination", quantity: 3, maxStack: 20);
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:merge_full/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merge_full"),
+            InventoryContainerLifecycle.Persistent,
+            [sourceItem, destinationItem]);
+        Assert.StoreSuccess(store.AddContainer(backpack));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:merge_full",
+            requester,
+            ClientSequence: 86,
+            InventoryMutationKind.MergeStack,
+            backpack.ContainerId,
+            backpack.ContainerId,
+            sourceItem.ItemInstanceId,
+            destinationItem.ItemInstanceId,
+            Quantity: 4,
+            ProposedPlacement: null);
+        var rules = new InventoryMergeStackMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new ToggleRangePolicy(),
+            new SameDefinitionStackMergePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyMerge(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "full merge mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "full merge mutation result kind");
+        Assert.Equal(2, result.Dispatches.Count, "full merge dispatch count");
+
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot updated), "backpack after full merge");
+        Assert.Equal(1, updated.Items.Count, "full merge removes source item");
+        Assert.Equal(destinationItem.ItemInstanceId, updated.Items[0].ItemInstanceId, "full merge destination item id");
+        Assert.Equal(7L, updated.Items[0].Quantity, "full merge destination quantity");
+        Assert.Equal(InventoryContainerDeltaKind.ItemRemoved, result.Dispatches[0].Delta.Kind, "full merge source delta kind");
+        Assert.Equal(InventoryContainerDeltaKind.QuantityChanged, result.Dispatches[1].Delta.Kind, "full merge destination delta kind");
+        Assert.Equal(4L, result.Dispatches[1].Delta.QuantityDelta, "full merge destination delta quantity");
+    }
+
+    private static void InMemoryInventoryStore_ApplyMergeRejectedByRulesDoesNotPartiallyMutateSnapshots()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:merge_reject");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot sourceItem = CreateStackItem("item:apple/merge_reject/source", quantity: 8, maxStack: 20);
+        InventoryItemSnapshot destinationItem = CreateStackItem("item:apple/merge_reject/destination", quantity: 19, maxStack: 20);
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:merge_reject/source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merge_reject"),
+            InventoryContainerLifecycle.Persistent,
+            [sourceItem]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:merge_reject/destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:merge_reject"),
+            InventoryContainerLifecycle.Persistent,
+            [destinationItem]);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:merge_reject",
+            requester,
+            ClientSequence: 87,
+            InventoryMutationKind.MergeStack,
+            source.ContainerId,
+            destination.ContainerId,
+            sourceItem.ItemInstanceId,
+            destinationItem.ItemInstanceId,
+            Quantity: 4,
+            ProposedPlacement: null);
+        var rules = new InventoryMergeStackMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new ToggleRangePolicy(),
+            new SameDefinitionStackMergePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyMerge(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "rejected merge mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Rejected, result.MutationResult!.ResultKind, "rejected merge result kind");
+        Assert.Equal(InventoryMutationFailureReason.InvalidQuantity, result.MutationResult.FailureReason, "rejected merge reason");
+        Assert.Equal(0, result.Dispatches.Count, "rejected merge dispatch count");
+
+        Assert.True(store.TryGetContainer(source.ContainerId, out InventoryContainerSnapshot unchangedSource), "source container after rejected merge");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot unchangedDestination), "destination container after rejected merge");
+        Assert.Equal(8L, unchangedSource.Items[0].Quantity, "source quantity after rejected merge");
+        Assert.Equal(19L, unchangedDestination.Items[0].Quantity, "destination quantity after rejected merge");
     }
 
     private static World CreateWorld()
