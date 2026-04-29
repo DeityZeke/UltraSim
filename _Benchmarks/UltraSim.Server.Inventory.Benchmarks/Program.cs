@@ -22,13 +22,24 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 {
     yield return new BenchmarkScenario
     {
-        Name = "ApplyMove_SameContainer_Reposition_10000",
+        Name = "ApplyMove_SameContainer_Reposition_NoViewers_10000",
         Category = "InventoryStore",
         Comparable = false,
         Scale = 10_000,
-        WarmupCount = 1,
+        WarmupCount = 3,
         IterationCount = 5,
-        Execute = () => RunSameContainerMoveScenario(10_000),
+        Execute = () => RunSameContainerMoveScenario(10_000, viewerCount: 0),
+    };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ApplyMove_SameContainer_Reposition_OneViewer_10000",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunSameContainerMoveScenario(10_000, viewerCount: 1),
     };
 
     yield return new BenchmarkScenario
@@ -37,13 +48,24 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         Category = "InventoryStore",
         Comparable = false,
         Scale = 10_000,
-        WarmupCount = 1,
+        WarmupCount = 3,
         IterationCount = 5,
         Execute = () => RunRejectedMoveScenario(10_000),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "DispatchDelta_1000Viewers_10000",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunDispatchDeltaScenario(iterations: 10_000, viewerCount: 1_000),
+    };
 }
 
-static ScenarioMeasurement RunSameContainerMoveScenario(int iterations)
+static ScenarioMeasurement RunSameContainerMoveScenario(int iterations, int viewerCount)
 {
     var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_move");
     var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
@@ -52,11 +74,7 @@ static ScenarioMeasurement RunSameContainerMoveScenario(int iterations)
         InventoryPlacementMode.List,
         [CreateItem("item:bench_store_move/coin", InventoryPlacementDescriptor.List(0))]);
     StoreSuccess(store.AddContainer(container));
-    StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
-        "view:bench_store_move/backpack",
-        container.ContainerId,
-        requester,
-        InventoryAccessFlags.Read)));
+    OpenViews(store, container.ContainerId, requester, viewerCount, "view:bench_store_move/backpack");
 
     var rules = new InventoryMoveMutationRules(
         new AllowAllInventoryContainerAccessPolicy(),
@@ -87,6 +105,44 @@ static ScenarioMeasurement RunSameContainerMoveScenario(int iterations)
     }
 
     return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunDispatchDeltaScenario(int iterations, int viewerCount)
+{
+    var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_dispatch");
+    var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
+    InventoryContainerSnapshot container = CreateContainer(
+        "container:bench_store_dispatch/backpack",
+        InventoryPlacementMode.List,
+        [CreateItem("item:bench_store_dispatch/coin", InventoryPlacementDescriptor.List(0))]);
+    StoreSuccess(store.AddContainer(container));
+    OpenViews(store, container.ContainerId, requester, viewerCount, "view:bench_store_dispatch/backpack");
+
+    var delta = new InventoryContainerDelta(
+        "delta:bench_store_dispatch/item_moved",
+        container.ContainerId,
+        ContainerRevision: 1,
+        InventoryContainerDeltaKind.ItemMoved,
+        ItemInstanceId: "item:bench_store_dispatch/coin",
+        Item: null,
+        PreviousPlacement: InventoryPlacementDescriptor.List(0),
+        CurrentPlacement: InventoryPlacementDescriptor.List(1),
+        QuantityDelta: 0,
+        InventoryAccessFlags.Read);
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        InventoryStoreOperationResult result = store.DispatchDelta(delta);
+        if (!result.Succeeded)
+        {
+            throw new InvalidOperationException(result.Error);
+        }
+
+        checksum += result.Dispatches[0].RecipientViewIds.Count + i;
+    }
+
+    return new ScenarioMeasurement((long)iterations * viewerCount, checksum);
 }
 
 static ScenarioMeasurement RunRejectedMoveScenario(int iterations)
@@ -164,6 +220,23 @@ static void StoreSuccess(InventoryStoreOperationResult result)
     if (!result.Succeeded)
     {
         throw new InvalidOperationException(result.Error);
+    }
+}
+
+static void OpenViews(
+    InMemoryInventoryStore store,
+    string containerId,
+    InventoryRequesterRef requester,
+    int viewerCount,
+    string viewPrefix)
+{
+    for (int i = 0; i < viewerCount; i++)
+    {
+        StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            $"{viewPrefix}/{i}",
+            containerId,
+            requester,
+            InventoryAccessFlags.Read)));
     }
 }
 

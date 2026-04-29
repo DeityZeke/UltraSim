@@ -89,7 +89,14 @@ Current server bridge benchmark:
 dotnet run --project _Benchmarks/UltraSim.Server.Inventory.Benchmarks/UltraSim.Server.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/server-inventory-benchmarks.json
 ```
 
-Initial scenarios cover accepted same-container reposition moves and rejected out-of-range moves. These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, split/merge, equipment rules, and scripted containers are layered on.
+Initial scenarios cover:
+
+- accepted same-container reposition moves with no viewers
+- accepted same-container reposition moves with one viewer
+- rejected out-of-range moves
+- raw `DispatchDelta` fanout across 1000 viewers
+
+These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, split/merge, equipment rules, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.
 
 ## Boundary Rules
 
