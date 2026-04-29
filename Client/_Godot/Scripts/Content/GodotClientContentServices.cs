@@ -10,6 +10,7 @@ public sealed class GodotClientContentServices
         ContentCacheIndex index,
         ContentCacheIndexStore indexStore,
         UiSchemaCacheStore schemaCache,
+        ServerPatchManifestCacheStore patchManifestCache,
         ServerAssetCacheStore assetCache,
         LayeredContentResolver resolver)
     {
@@ -17,6 +18,7 @@ public sealed class GodotClientContentServices
         Index = index;
         IndexStore = indexStore;
         SchemaCache = schemaCache;
+        PatchManifestCache = patchManifestCache;
         AssetCache = assetCache;
         Resolver = resolver;
     }
@@ -25,6 +27,7 @@ public sealed class GodotClientContentServices
     public ContentCacheIndex Index { get; }
     public ContentCacheIndexStore IndexStore { get; }
     public UiSchemaCacheStore SchemaCache { get; }
+    public ServerPatchManifestCacheStore PatchManifestCache { get; }
     public ServerAssetCacheStore AssetCache { get; }
     public LayeredContentResolver Resolver { get; }
 
@@ -49,6 +52,7 @@ public sealed class GodotClientContentServices
             index,
             indexStore,
             new UiSchemaCacheStore(pathPolicy, index),
+            new ServerPatchManifestCacheStore(pathPolicy, index),
             new ServerAssetCacheStore(pathPolicy, index),
             resolver);
     }

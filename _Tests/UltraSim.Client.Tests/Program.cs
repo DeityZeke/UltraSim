@@ -29,8 +29,11 @@ internal static class TestRunner
         Run(nameof(ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions), ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions);
         Run(nameof(ContentCacheIndex_TracksMetadataAccessPinningAndEviction), ContentCacheIndex_TracksMetadataAccessPinningAndEviction);
         Run(nameof(ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries), ContentCacheIndexStore_RoundTripsMetadataAndRejectsUnsafeEntries);
+        Run(nameof(ContentCacheEvictionExecutor_DeletesFilesAndMetadataUnderCacheRootOnly), ContentCacheEvictionExecutor_DeletesFilesAndMetadataUnderCacheRootOnly);
         Run(nameof(UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes), UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes);
         Run(nameof(UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes), UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes);
+        Run(nameof(ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest), ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest);
+        Run(nameof(ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests), ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests);
         Run(nameof(ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets), ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets);
         Run(nameof(ServerAssetCacheStore_RejectsSizeHashAndUnsafePathMismatches), ServerAssetCacheStore_RejectsSizeHashAndUnsafePathMismatches);
         Run(nameof(ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates), ClientPredictionStore_RecordsLooksUpAndRemovesAcknowledgedStates);
@@ -612,6 +615,53 @@ internal static class TestRunner
         Assert.Equal("Content path cannot contain traversal segments.", error);
     }
 
+    private static void ContentCacheEvictionExecutor_DeletesFilesAndMetadataUnderCacheRootOnly()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-cache-eviction-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        DateTimeOffset now = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        string relativePath = "Servers/server-a/Assets/icons/sword.png";
+        string fullPath = Path.Combine(pathPolicy.RootPath, "Servers", "server-a", "Assets", "icons", "sword.png");
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        File.WriteAllBytes(fullPath, [1, 2, 3]);
+
+        var entry = new ContentCacheEntry(
+            "asset/server-a/icons/sword",
+            relativePath,
+            ContentCacheEntryKind.Asset,
+            3,
+            now);
+        Assert.True(index.TryUpsert(entry, out string error), error);
+
+        ContentCacheQuotaPlan plan = ContentCacheQuotaPlanner.PlanEviction(index.Entries, quotaBytes: 1, targetFillRatio: 0.0);
+        var executor = new ContentCacheEvictionExecutor(pathPolicy, index);
+        IReadOnlyList<ContentCacheEvictionResult> results = executor.Execute(plan);
+
+        Assert.Equal(1, results.Count);
+        Assert.True(results[0].DeletedFile, results[0].Error);
+        Assert.True(results[0].RemovedMetadata, results[0].Error);
+        Assert.True(results[0].Error is null, results[0].Error);
+        Assert.False(File.Exists(fullPath));
+        Assert.False(index.TryGet(entry.CacheKey, out _));
+
+        var pinned = new ContentCacheEntry(
+            "asset/pinned",
+            "Servers/server-a/Assets/icons/pinned.png",
+            ContentCacheEntryKind.Asset,
+            10,
+            now,
+            Pinned: true);
+        Assert.True(index.TryUpsert(pinned, out error), error);
+        var badPlan = new ContentCacheQuotaPlan(10, 1, 0, [pinned]);
+        results = executor.Execute(badPlan);
+        Assert.Equal(1, results.Count);
+        Assert.False(results[0].DeletedFile);
+        Assert.False(results[0].RemovedMetadata);
+        Assert.True(results[0].Error?.Contains("Pinned", StringComparison.Ordinal) == true, results[0].Error);
+        Assert.True(index.TryGet(pinned.CacheKey, out _));
+    }
+
     private static void UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes()
     {
         Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
@@ -664,6 +714,83 @@ internal static class TestRunner
         Assert.Equal("Asset SHA-256 hash mismatch.", error);
         Assert.False(File.Exists(pathPolicy.GetSchemaPath(key)));
         Assert.Equal(0, index.Count);
+    }
+
+    private static void ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        var manifest = new ServerPatchManifest(
+            "patch-1",
+            3,
+            [
+                new ServerPatchManifestEntry("icons/items/sword.png", 128, new string('a', 64)),
+                new ServerPatchManifestEntry("ui/login.uischema", 256, new string('b', 64))
+            ]);
+
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-patch-manifest-cache-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        var store = new ServerPatchManifestCacheStore(pathPolicy, index);
+        DateTimeOffset writtenAt = DateTimeOffset.Parse("2026-04-29T00:00:00Z", CultureInfo.InvariantCulture);
+        DateTimeOffset readAt = writtenAt.AddMinutes(4);
+
+        Assert.False(store.Has(server, manifest.PatchId, manifest.Revision));
+        Assert.True(store.TryWrite(server, manifest, writtenAt, pinned: true, out error), error);
+        Assert.True(store.Has(server, manifest.PatchId, manifest.Revision));
+        Assert.True(store.TryGetPath(server, manifest.PatchId, manifest.Revision, out string manifestPath, out error), error);
+        Assert.True(File.Exists(manifestPath));
+
+        string cacheKey = ServerPatchManifestCacheStore.CreateCacheKey(server, manifest.PatchId, manifest.Revision);
+        Assert.True(index.TryGet(cacheKey, out ContentCacheEntry entry));
+        Assert.Equal(ContentCacheEntryKind.PatchManifest, entry.Kind);
+        Assert.True(entry.SizeBytes > 0);
+        Assert.Equal(writtenAt, entry.LastAccessUtc);
+        Assert.True(entry.Pinned);
+        Assert.True(entry.RelativePath.EndsWith(".json", StringComparison.Ordinal), entry.RelativePath);
+
+        Assert.True(store.TryRead(server, manifest.PatchId, manifest.Revision, readAt, out ServerPatchManifest readManifest, out error), error);
+        Assert.Equal(manifest.PatchId, readManifest.PatchId);
+        Assert.Equal(manifest.Revision, readManifest.Revision);
+        Assert.Equal(2, readManifest.Entries.Count);
+        Assert.Equal("icons/items/sword.png", readManifest.Entries[0].RelativePath);
+        Assert.True(index.TryGet(cacheKey, out entry));
+        Assert.Equal(readAt, entry.LastAccessUtc);
+
+        Assert.True(store.Remove(server, manifest.PatchId, manifest.Revision));
+        Assert.False(File.Exists(manifestPath));
+        Assert.False(index.TryGet(cacheKey, out _));
+    }
+
+    private static void ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests()
+    {
+        Assert.True(ServerContentIdentity.TryCreate("local-dev", out ServerContentIdentity server, out string error), error);
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-patch-manifest-cache-tests", Guid.NewGuid().ToString("N"));
+        var pathPolicy = new ClientContentCachePathPolicy(root);
+        var index = new ContentCacheIndex();
+        var store = new ServerPatchManifestCacheStore(pathPolicy, index);
+
+        var executable = new ServerPatchManifest(
+            "patch-evil",
+            1,
+            [new ServerPatchManifestEntry("scripts/evil.gd", 1, new string('a', 64))]);
+        Assert.False(store.TryWrite(server, executable, DateTimeOffset.UtcNow, pinned: false, out error));
+        Assert.True(error.Contains("executable/script", StringComparison.Ordinal), error);
+        Assert.Equal(0, index.Count);
+
+        Assert.True(store.TryGetPath(server, "patch-1", 3, out string manifestPath, out error), error);
+        Directory.CreateDirectory(Path.GetDirectoryName(manifestPath) ?? ".");
+        File.WriteAllText(
+            manifestPath,
+            """
+            {
+              "PatchId": "patch-other",
+              "Revision": 3,
+              "Entries": []
+            }
+            """);
+
+        Assert.False(store.TryRead(server, "patch-1", 3, DateTimeOffset.UtcNow, out _, out error));
+        Assert.Equal("Cached patch manifest identity does not match requested key.", error);
     }
 
     private static void ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets()

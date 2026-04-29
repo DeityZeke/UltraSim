@@ -31,7 +31,9 @@ What now exists:
     - layered content resolver priority stack for built-ins, resource packs, server patches, and future mods
     - first cache metadata/quota eviction planning hook
     - persisted cache metadata index store with safe JSON round-trip validation
+    - cache eviction executor that deletes files only under the cache root
     - UI schema cache byte store with hash validation and metadata updates
+    - server patch manifest cache store with validation, identity checks, and metadata updates
     - server patch asset cache byte store with manifest size/hash validation
 - `Client/Network`
   - movement input send path over `Kernels/Network`

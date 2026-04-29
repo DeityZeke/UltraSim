@@ -53,6 +53,25 @@ public sealed class ClientContentCachePathPolicy
             key.SchemaHashHex + ".uischema");
     }
 
+    public string GetServerPatchManifestPath(ServerContentIdentity server, string patchIdHashHex, int revision)
+    {
+        if (!ContentPathValidation.TryNormalizeSha256Hex(patchIdHashHex, out string normalizedPatchIdHashHex, out string error))
+        {
+            throw new ArgumentException(error, nameof(patchIdHashHex));
+        }
+
+        if (revision < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(revision), "Patch revision cannot be negative.");
+        }
+
+        return Path.Combine(
+            GetServerRoot(server),
+            "PatchManifests",
+            revision.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            normalizedPatchIdHashHex + ".json");
+    }
+
     private static bool IsWithinRoot(string candidatePath, string rootPath)
     {
         string normalizedRoot = rootPath.EndsWith(Path.DirectorySeparatorChar)

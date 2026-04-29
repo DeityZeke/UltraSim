@@ -585,15 +585,17 @@ Current status:
   - cache metadata/quota planner that proposes oldest unpinned entries for eviction
   - persisted cache metadata index with validated JSON load/save
   - metadata eviction execution that removes planned candidates from the index
+  - cache eviction executor that deletes files only under the cache root and then removes metadata
   - opaque UI schema byte cache store with SHA-256 validation and metadata updates
+  - server patch manifest cache store with validation, exact patch identity checks, and metadata updates
   - server patch asset byte cache store with manifest size/SHA-256 validation and metadata updates
   - first Godot-side content/cache service adapter:
     - resolves default `user://UltraSimCache`
     - loads/recreates cache index metadata
-    - exposes schema and server-asset cache stores
+    - exposes schema, server patch manifest, and server-asset cache stores
     - saves cache metadata on shell exit
 - remaining G5 work:
-  - schema codec/validation and typed schema cache entries
+  - stop here before schema codec/validation, typed schema cache entries, or server-driven menu work until the schema UI plan is discussed
 - manifest validation tests
 - resolver precedence tests
 - "server patch cannot contain executable/script entries" test
