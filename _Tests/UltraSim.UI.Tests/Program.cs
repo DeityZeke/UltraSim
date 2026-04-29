@@ -12,6 +12,9 @@ internal static class TestRunner
         Run(nameof(UiRendererCapabilities_ValidatesLimitsAndUnknownFlags), UiRendererCapabilities_ValidatesLimitsAndUnknownFlags);
         Run(nameof(UiActionDescriptor_ValidatesContextMenuShape), UiActionDescriptor_ValidatesContextMenuShape);
         Run(nameof(UiStateBindingDescriptor_ValidatesPerBindingFallback), UiStateBindingDescriptor_ValidatesPerBindingFallback);
+        Run(nameof(UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities), UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities);
+        Run(nameof(UiSchemaDocument_RejectsInvalidTreeShapes), UiSchemaDocument_RejectsInvalidTreeShapes);
+        Run(nameof(UiSchemaDocument_RejectsDuplicateActionsBindingsAndMissingCapabilities), UiSchemaDocument_RejectsDuplicateActionsBindingsAndMissingCapabilities);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
 
@@ -187,6 +190,121 @@ internal static class TestRunner
         UiActionDescriptor decodedAction = UiContractJsonCodec.Decode<UiActionDescriptor>(encoded);
         Assert.Equal(action, decodedAction);
         Assert.Valid(decodedAction.Validate());
+
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        encoded = UiContractJsonCodec.Encode(schema);
+        UiSchemaDocument decodedSchema = UiContractJsonCodec.Decode<UiSchemaDocument>(encoded);
+        Assert.Equal(schema.Identity, decodedSchema.Identity);
+        Assert.Equal(schema.Metadata, decodedSchema.Metadata);
+        Assert.Equal(schema.RootNodeId, decodedSchema.RootNodeId);
+        Assert.Equal(schema.Nodes.Count, decodedSchema.Nodes.Count);
+        Assert.Equal(schema.Actions.Count, decodedSchema.Actions.Count);
+        Assert.Equal(schema.StateBindings.Count, decodedSchema.StateBindings.Count);
+        Assert.Valid(decodedSchema.Validate(rendererCapabilities: CreateRendererCapabilities()));
+    }
+
+    private static void UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.Valid(schema.Validate(rendererCapabilities: CreateRendererCapabilities()));
+
+        var noCapabilityRenderer = CreateRendererCapabilities() with
+        {
+            CapabilityFlags = UiCapabilityFlags.ContextMenusV1 | UiCapabilityFlags.RuntimeStateBindingsV1
+        };
+        Assert.Valid(schema.Validate(rendererCapabilities: noCapabilityRenderer));
+    }
+
+    private static void UiSchemaDocument_RejectsInvalidTreeShapes()
+    {
+        UiSchemaDocument valid = CreateValidSchemaDocument();
+
+        UiSchemaDocument duplicateNode = valid with
+        {
+            Nodes =
+            [
+                .. valid.Nodes,
+                valid.Nodes[0] with { Text = "duplicate" }
+            ]
+        };
+        Assert.InvalidContains(duplicateNode.Validate(), "Duplicate node id");
+
+        UiSchemaDocument missingChild = valid with
+        {
+            Nodes =
+            [
+                valid.Nodes[0] with { Children = [2, 999] },
+                valid.Nodes[1],
+                valid.Nodes[2],
+                valid.Nodes[3],
+            ]
+        };
+        Assert.InvalidContains(missingChild.Validate(), "does not exist");
+
+        UiSchemaDocument cycle = valid with
+        {
+            Nodes =
+            [
+                valid.Nodes[0] with { Children = [2] },
+                valid.Nodes[1] with { Children = [1] },
+                valid.Nodes[2],
+                valid.Nodes[3],
+            ]
+        };
+        Assert.InvalidContains(cycle.Validate(), "cycle");
+
+        UiSchemaDocument unreachable = valid with
+        {
+            Nodes =
+            [
+                valid.Nodes[0],
+                valid.Nodes[1],
+                valid.Nodes[2],
+                valid.Nodes[3],
+                new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, "orphan", []),
+            ]
+        };
+        Assert.InvalidContains(unreachable.Validate(), "not reachable");
+
+        var shallowLimits = UiSchemaValidationLimits.Default with { MaxTreeDepth = 1 };
+        Assert.InvalidContains(valid.Validate(shallowLimits), "depth");
+    }
+
+    private static void UiSchemaDocument_RejectsDuplicateActionsBindingsAndMissingCapabilities()
+    {
+        UiSchemaDocument valid = CreateValidSchemaDocument();
+
+        UiSchemaDocument duplicateActions = valid with
+        {
+            Actions =
+            [
+                .. valid.Actions,
+                valid.Actions[0] with { Label = "Again" }
+            ]
+        };
+        Assert.InvalidContains(duplicateActions.Validate(), "Duplicate action");
+
+        UiSchemaDocument duplicateBindings = valid with
+        {
+            StateBindings =
+            [
+                .. valid.StateBindings,
+                valid.StateBindings[0] with { SourceId = "LocalPlayerState" }
+            ]
+        };
+        Assert.InvalidContains(duplicateBindings.Validate(), "Duplicate state binding");
+
+        UiSchemaDocument fixedLayoutRequired = valid with
+        {
+            Nodes =
+            [
+                valid.Nodes[0],
+                valid.Nodes[1],
+                valid.Nodes[2] with { RequiredCapabilities = UiCapabilityFlags.FixedLayoutV1 },
+                valid.Nodes[3],
+            ]
+        };
+        Assert.InvalidContains(fixedLayoutRequired.Validate(rendererCapabilities: CreateRendererCapabilities()), "missing required");
     }
 
     private static void UiNodeKind_ReservesExpectedEarlyNodeIds()
@@ -197,6 +315,79 @@ internal static class TestRunner
         Assert.Equal(28, (int)UiNodeKind.RadialMenu);
         Assert.Equal(29, (int)UiNodeKind.InventoryGrid);
         Assert.Equal(30, (int)UiNodeKind.ContainerCanvas);
+    }
+
+    private static UiSchemaDocument CreateValidSchemaDocument()
+    {
+        Assert.True(UiSchemaIdentity.TryCreate(
+            "server/main",
+            "hud.status",
+            1,
+            new string('c', 64),
+            1,
+            out UiSchemaIdentity identity,
+            out string error), error);
+
+        var metadata = new UiPanelMetadata(
+            PanelType: "hud.status",
+            SurfaceTarget: UiSurfaceTarget.Hud,
+            FocusMode: UiFocusMode.Passive,
+            ExclusiveGroup: null,
+            ZOrderClass: 1,
+            OpenPolicy: UiOpenPolicy.SingletonByKey,
+            BackPolicy: UiBackPolicy.None,
+            TooltipPolicy: UiTooltipPolicy.Allow,
+            BlocksGameplayInput: false,
+            PersistenceKey: null);
+
+        return new UiSchemaDocument(
+            identity,
+            metadata,
+            RootNodeId: 1,
+            Nodes:
+            [
+                new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
+                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4]),
+                new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "healthText", "Health", []),
+                new UiSchemaNodeDescriptor(4, UiNodeKind.Button, null, "Open", []),
+            ],
+            Actions:
+            [
+                new UiActionDescriptor(
+                    "hud.open_character",
+                    "Open Character",
+                    null,
+                    UiActionRole.Normal,
+                    UiActionContextKind.Panel,
+                    RequiresConfirm: false,
+                    ChildMenuKey: null)
+            ],
+            StateBindings:
+            [
+                new UiStateBindingDescriptor(
+                    "healthText",
+                    "EntityState",
+                    "entity:local",
+                    "Health.Current",
+                    new UiStateBindingFallback(
+                        UiBindingFallbackBehavior.Stale,
+                        UiBindingFallbackBehavior.Hidden,
+                        UiBindingFallbackBehavior.Stale,
+                        1500))
+            ]);
+    }
+
+    private static UiRendererCapabilities CreateRendererCapabilities()
+    {
+        return new UiRendererCapabilities(
+            ProtocolVersion: 1,
+            CapabilityFlags: UiCapabilityFlags.ContextMenusV1 | UiCapabilityFlags.RuntimeStateBindingsV1,
+            MaxSchemaBytes: 64 * 1024,
+            MaxModelBytes: 16 * 1024,
+            MaxNodeCount: 512,
+            MaxTreeDepth: 32,
+            MaxRepeaterRows: 256,
+            MaxTableColumns: 24);
     }
 
     private static void Run(string name, Action test)

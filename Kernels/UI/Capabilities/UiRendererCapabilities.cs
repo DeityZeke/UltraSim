@@ -17,7 +17,7 @@ public sealed record UiRendererCapabilities(
             return UiValidationResult.Invalid("Protocol version must be positive.");
         }
 
-        if ((CapabilityFlags & ~AllKnownFlags) != 0)
+        if ((CapabilityFlags & ~UiCapabilitySet.AllKnown) != 0)
         {
             return UiValidationResult.Invalid("Capability flags contain unknown values.");
         }
@@ -34,14 +34,4 @@ public sealed record UiRendererCapabilities(
 
         return UiValidationResult.Valid;
     }
-
-    private const UiCapabilityFlags AllKnownFlags =
-        UiCapabilityFlags.FixedLayoutV1 |
-        UiCapabilityFlags.RichTooltipsV1 |
-        UiCapabilityFlags.ContextMenusV1 |
-        UiCapabilityFlags.RadialMenusV1 |
-        UiCapabilityFlags.InventoryGridV1 |
-        UiCapabilityFlags.ContainerCanvasV1 |
-        UiCapabilityFlags.RuntimeStateBindingsV1 |
-        UiCapabilityFlags.CatalogCacheV1;
 }

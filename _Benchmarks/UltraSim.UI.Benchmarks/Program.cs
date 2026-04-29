@@ -73,6 +73,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         IterationCount = 5,
         Execute = () => RunPanelMetadataJsonRoundTripScenario(1_000),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "SchemaDocument_Validate_1000Nodes",
+        Category = "UiSchemaValidation",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunSchemaDocumentValidationScenario(1_000),
+    };
 }
 
 static ScenarioMeasurement RunSchemaIdentityScenario(int iterations)
@@ -205,4 +216,80 @@ static ScenarioMeasurement RunPanelMetadataJsonRoundTripScenario(int iterations)
     }
 
     return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunSchemaDocumentValidationScenario(int nodeCount)
+{
+    UiSchemaDocument schema = CreateLargeSchemaDocument(nodeCount);
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = nodeCount + 8,
+        MaxTreeDepth = nodeCount + 8,
+    };
+    var rendererCapabilities = new UiRendererCapabilities(
+        ProtocolVersion: 1,
+        CapabilityFlags: UiCapabilityFlags.RuntimeStateBindingsV1,
+        MaxSchemaBytes: 512 * 1024,
+        MaxModelBytes: 64 * 1024,
+        MaxNodeCount: nodeCount + 8,
+        MaxTreeDepth: nodeCount + 8,
+        MaxRepeaterRows: 256,
+        MaxTableColumns: 32);
+
+    UiValidationResult result = schema.Validate(limits, rendererCapabilities);
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(nodeCount, schema.Nodes.Count + schema.RootNodeId);
+}
+
+static UiSchemaDocument CreateLargeSchemaDocument(int nodeCount)
+{
+    if (!UiSchemaIdentity.TryCreate(
+        "server/main",
+        "bench.large_schema",
+        1,
+        new string('d', 64),
+        1,
+        out UiSchemaIdentity identity,
+        out string error))
+    {
+        throw new InvalidOperationException(error);
+    }
+
+    var nodes = new UiSchemaNodeDescriptor[nodeCount];
+    for (int i = 0; i < nodeCount; i++)
+    {
+        int nodeId = i + 1;
+        UiNodeKind kind = i == 0
+            ? UiNodeKind.Panel
+            : i % 3 == 0
+                ? UiNodeKind.DynamicText
+                : UiNodeKind.Column;
+        string? slotId = kind == UiNodeKind.DynamicText ? $"slot.{nodeId}" : null;
+        IReadOnlyList<int> children = nodeId < nodeCount ? [nodeId + 1] : [];
+        nodes[i] = new UiSchemaNodeDescriptor(nodeId, kind, slotId, kind == UiNodeKind.DynamicText ? "Value" : null, children);
+    }
+
+    var metadata = new UiPanelMetadata(
+        "bench.large_schema",
+        UiSurfaceTarget.Menu,
+        UiFocusMode.Normal,
+        null,
+        1,
+        UiOpenPolicy.New,
+        UiBackPolicy.None,
+        UiTooltipPolicy.Allow,
+        BlocksGameplayInput: false,
+        PersistenceKey: null);
+
+    return new UiSchemaDocument(
+        identity,
+        metadata,
+        RootNodeId: 1,
+        Nodes: nodes,
+        Actions: [],
+        StateBindings: []);
 }

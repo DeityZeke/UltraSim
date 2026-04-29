@@ -821,6 +821,8 @@ The pre-schema client shell gate is now validated. G6/UI-1 has started in `Kerne
 - action/context descriptor shape
 - runtime state binding descriptor and fallback shape
 - early node id reservations
+- schema node/tree descriptors
+- schema document validation
 - simple JSON contract codec for round-trip tests
 - `_Tests/UltraSim.UI.Tests`
 - `_Benchmarks/UltraSim.UI.Benchmarks`
@@ -834,14 +836,14 @@ Current UI-1 validation:
 First UI benchmark report:
 
 - `_Benchmarks/results/ui-benchmarks.json`
+- current schema validation baseline includes `SchemaDocument_Validate_1000Nodes`
 
 Next G6/UI-1 steps:
 
-1. Add schema node/tree descriptors and schema document validation.
-2. Add model payload slot descriptors and model compatibility validation.
-3. Add delta/update descriptor contracts.
-4. Add catalog identity/schema linkage contracts.
-5. Keep client runtime, server providers, and Godot renderer work out of the kernel until these contracts are measurable.
-6. If implementation exposes a bad contract, fix the UI kernel contract and planning docs before patching around it in the bridge layers.
+1. Add model payload slot descriptors and model compatibility validation.
+2. Add delta/update descriptor contracts.
+3. Add catalog identity/schema linkage contracts.
+4. Keep client runtime, server providers, and Godot renderer work out of the kernel until these contracts are measurable.
+5. If implementation exposes a bad contract, fix the UI kernel contract and planning docs before patching around it in the bridge layers.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.
