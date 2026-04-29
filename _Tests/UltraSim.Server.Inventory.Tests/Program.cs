@@ -22,6 +22,9 @@ internal static class TestRunner
         Run(nameof(InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots), InMemoryInventoryStore_ApplyMoveRejectedByRulesDoesNotMutateSnapshots);
         Run(nameof(InMemoryInventoryStore_ApplyMoveSupportsCrossPlacementModeDestination), InMemoryInventoryStore_ApplyMoveSupportsCrossPlacementModeDestination);
         Run(nameof(InMemoryInventoryStore_ApplyMoveRepositionsWithinSameContainer), InMemoryInventoryStore_ApplyMoveRepositionsWithinSameContainer);
+        Run(nameof(InventorySplitStackMutationRules_UsesAccessRangeCapacityAndNewItemId), InventorySplitStackMutationRules_UsesAccessRangeCapacityAndNewItemId);
+        Run(nameof(InMemoryInventoryStore_ApplySplitMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplySplitMutatesSnapshotsAndDispatchesScopedDeltas);
+        Run(nameof(InMemoryInventoryStore_ApplySplitRejectedByRulesDoesNotPartiallyMutateSnapshots), InMemoryInventoryStore_ApplySplitRejectedByRulesDoesNotPartiallyMutateSnapshots);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -702,6 +705,204 @@ internal static class TestRunner
         Assert.Equal(7, updated.Items[0].Placement.Index, "reposition index");
     }
 
+    private static void InventorySplitStackMutationRules_UsesAccessRangeCapacityAndNewItemId()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:splitter");
+        InventoryItemSnapshot apples = CreateStackItem("item:apple/split_rules", quantity: 8, maxStack: 20);
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:source/split_rules",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:splitter"),
+            InventoryContainerLifecycle.Persistent,
+            [apples]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:destination/split_rules",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:splitter"),
+            InventoryContainerLifecycle.Persistent);
+        var intent = new InventoryMutationIntent(
+            "corr/split/rules",
+            requester,
+            ClientSequence: 81,
+            InventoryMutationKind.SplitStack,
+            source.ContainerId,
+            destination.ContainerId,
+            apples.ItemInstanceId,
+            DestinationItemInstanceId: "item:apple/split_rules/new",
+            Quantity: 3,
+            ProposedPlacement: InventoryPlacementDescriptor.List(0));
+        Assert.Valid(intent.Validate());
+
+        var access = new PublicTakePutAccessPolicy();
+        var range = new ToggleRangePolicy();
+        var capacity = new MaxItemCountCapacityPolicy(maxItems: 1);
+        var rules = new InventorySplitStackMutationRules(access, capacity, range);
+        InventoryMutationRuleContext context = new InventoryMutationRuleContext(
+            intent,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            source,
+            destination,
+            apples,
+            DestinationItem: null);
+
+        InventoryMutationRuleDecision accepted = rules.Evaluate(context);
+        Assert.True(accepted.IsAccepted, "split rule accepts baseline");
+
+        InventoryMutationRuleDecision fullQuantity = rules.Evaluate(context with
+        {
+            Intent = intent with { Quantity = apples.Quantity }
+        });
+        Assert.False(fullQuantity.IsAccepted, "split rule rejects full quantity");
+        Assert.Equal(InventoryMutationFailureReason.InvalidQuantity, fullQuantity.FailureReason, "full split failure reason");
+
+        InventoryItemSnapshot duplicateDestination = apples with
+        {
+            ItemInstanceId = intent.DestinationItemInstanceId!,
+            Quantity = 1,
+            Placement = InventoryPlacementDescriptor.List(0)
+        };
+        InventoryMutationRuleDecision duplicate = rules.Evaluate(context with { DestinationItem = duplicateDestination });
+        Assert.False(duplicate.IsAccepted, "split rule rejects duplicate new item id");
+        Assert.Equal(InventoryMutationFailureReason.StaleItem, duplicate.FailureReason, "duplicate split failure reason");
+
+        range.Allow = false;
+        InventoryMutationRuleDecision outOfRange = rules.Evaluate(context);
+        Assert.False(outOfRange.IsAccepted, "split rule range rejection");
+        Assert.Equal(InventoryMutationFailureReason.OutOfRange, outOfRange.FailureReason, "split range failure reason");
+    }
+
+    private static void InMemoryInventoryStore_ApplySplitMutatesSnapshotsAndDispatchesScopedDeltas()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:apply_split");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot apples = CreateStackItem("item:apple/apply_split", quantity: 10, maxStack: 20);
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:split_apply/source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_split"),
+            InventoryContainerLifecycle.Persistent,
+            [apples]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:split_apply/destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:apply_split"),
+            InventoryContainerLifecycle.Persistent);
+        InventoryContainerSnapshot unrelated = CreateContainer(
+            "container:split_apply/unrelated",
+            new InventoryOwnerRef(InventoryOwnerKind.WorldObject, "world:split_unrelated"),
+            InventoryContainerLifecycle.WorldPersistent);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+        Assert.StoreSuccess(store.AddContainer(unrelated));
+
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:split_apply/source",
+            source.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:split_apply/destination",
+            destination.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:split_apply/unrelated",
+            unrelated.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:split_apply",
+            requester,
+            ClientSequence: 82,
+            InventoryMutationKind.SplitStack,
+            source.ContainerId,
+            destination.ContainerId,
+            apples.ItemInstanceId,
+            DestinationItemInstanceId: "item:apple/apply_split/new",
+            Quantity: 4,
+            ProposedPlacement: InventoryPlacementDescriptor.List(3));
+        var rules = new InventorySplitStackMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 4),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplySplit(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "split mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "split mutation result kind");
+        Assert.Equal(2, result.Dispatches.Count, "split dispatch count");
+
+        Assert.True(store.TryGetContainer(source.ContainerId, out InventoryContainerSnapshot updatedSource), "source container after split");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot updatedDestination), "destination container after split");
+        Assert.Equal(1, updatedSource.Items.Count, "source item count after split");
+        Assert.Equal(6L, updatedSource.Items[0].Quantity, "source quantity after split");
+        Assert.Equal(1, updatedDestination.Items.Count, "destination item count after split");
+        Assert.Equal("item:apple/apply_split/new", updatedDestination.Items[0].ItemInstanceId, "new split item id");
+        Assert.Equal(4L, updatedDestination.Items[0].Quantity, "new split item quantity");
+        Assert.Equal(3, updatedDestination.Items[0].Placement.Index, "new split item placement");
+
+        Assert.Equal(InventoryContainerDeltaKind.QuantityChanged, result.Dispatches[0].Delta.Kind, "split source delta kind");
+        Assert.Equal(-4L, result.Dispatches[0].Delta.QuantityDelta, "split source quantity delta");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:split_apply/source", "split source recipient");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:split_apply/destination", "split source excludes destination");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:split_apply/unrelated", "split source excludes unrelated");
+
+        Assert.Equal(InventoryContainerDeltaKind.ItemAdded, result.Dispatches[1].Delta.Kind, "split destination delta kind");
+        Assert.Contains(result.Dispatches[1].RecipientViewIds, "view:split_apply/destination", "split destination recipient");
+        Assert.NotContains(result.Dispatches[1].RecipientViewIds, "view:split_apply/source", "split destination excludes source");
+        Assert.NotContains(result.Dispatches[1].RecipientViewIds, "view:split_apply/unrelated", "split destination excludes unrelated");
+    }
+
+    private static void InMemoryInventoryStore_ApplySplitRejectedByRulesDoesNotPartiallyMutateSnapshots()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:split_reject");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot apples = CreateStackItem("item:apple/split_reject", quantity: 10, maxStack: 20);
+        InventoryContainerSnapshot source = CreateContainer(
+            "container:split_reject/source",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:split_reject"),
+            InventoryContainerLifecycle.Persistent,
+            [apples]);
+        InventoryContainerSnapshot destination = CreateContainer(
+            "container:split_reject/destination",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:split_reject"),
+            InventoryContainerLifecycle.Persistent);
+        Assert.StoreSuccess(store.AddContainer(source));
+        Assert.StoreSuccess(store.AddContainer(destination));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:split_reject",
+            requester,
+            ClientSequence: 83,
+            InventoryMutationKind.SplitStack,
+            source.ContainerId,
+            destination.ContainerId,
+            apples.ItemInstanceId,
+            DestinationItemInstanceId: "item:apple/split_reject/new",
+            Quantity: 4,
+            ProposedPlacement: InventoryPlacementDescriptor.List(0));
+        var rules = new InventorySplitStackMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 0),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplySplit(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "rejected split mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Rejected, result.MutationResult!.ResultKind, "rejected split result kind");
+        Assert.Equal(InventoryMutationFailureReason.RuleRejected, result.MutationResult.FailureReason, "rejected split reason");
+        Assert.Equal(0, result.Dispatches.Count, "rejected split dispatch count");
+
+        Assert.True(store.TryGetContainer(source.ContainerId, out InventoryContainerSnapshot unchangedSource), "source container after rejected split");
+        Assert.True(store.TryGetContainer(destination.ContainerId, out InventoryContainerSnapshot unchangedDestination), "destination container after rejected split");
+        Assert.Equal(1, unchangedSource.Items.Count, "source item count after rejected split");
+        Assert.Equal(10L, unchangedSource.Items[0].Quantity, "source quantity after rejected split");
+        Assert.Equal(0, unchangedDestination.Items.Count, "destination item count after rejected split");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
@@ -740,6 +941,16 @@ internal static class TestRunner
             "item.coin",
             Quantity: 1,
             MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.List(0));
+    }
+
+    private static InventoryItemSnapshot CreateStackItem(string itemId, long quantity, long maxStack)
+    {
+        return new InventoryItemSnapshot(
+            itemId,
+            "item.apple",
+            quantity,
+            maxStack,
             InventoryPlacementDescriptor.List(0));
     }
 

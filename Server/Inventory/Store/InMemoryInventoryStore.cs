@@ -343,6 +343,159 @@ public sealed class InMemoryInventoryStore
         return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
     }
 
+    public InventoryStoreOperationResult ApplySplit(InventoryMutationIntent intent, IInventoryMutationRules rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        InventoryValidationResult intentValidation = intent.Validate();
+        if (!intentValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(intentValidation.Error);
+        }
+
+        if (intent.Kind != InventoryMutationKind.SplitStack)
+        {
+            return InventoryStoreOperationResult.Failure("ApplySplit only accepts SplitStack intents.");
+        }
+
+        _containers.TryGetValue(intent.SourceContainerId!, out InventoryContainerSnapshot? sourceContainer);
+        _containers.TryGetValue(intent.DestinationContainerId!, out InventoryContainerSnapshot? destinationContainer);
+        InventoryItemSnapshot? sourceItem = null;
+        InventoryItemSnapshot? destinationItem = null;
+        int sourceItemIndex = -1;
+
+        if (sourceContainer is not null)
+        {
+            sourceItemIndex = FindItemIndex(sourceContainer, intent.SourceItemInstanceId!);
+            if (sourceItemIndex >= 0)
+            {
+                sourceItem = sourceContainer.Items[sourceItemIndex];
+            }
+        }
+
+        if (destinationContainer is not null && !string.IsNullOrWhiteSpace(intent.DestinationItemInstanceId))
+        {
+            int destinationItemIndex = FindItemIndex(destinationContainer, intent.DestinationItemInstanceId);
+            if (destinationItemIndex >= 0)
+            {
+                destinationItem = destinationContainer.Items[destinationItemIndex];
+            }
+        }
+
+        InventoryRuntimeRefResolution requester = _refResolver.ResolveRequester(intent.Requester);
+        InventoryMutationRuleDecision decision = rules.Evaluate(new InventoryMutationRuleContext(
+            intent,
+            requester,
+            sourceContainer,
+            destinationContainer,
+            sourceItem,
+            destinationItem));
+
+        string[] affectedContainerIds = BuildAffectedContainerIds(intent.SourceContainerId!, intent.DestinationContainerId!);
+        InventoryMutationResult mutationResult = decision.ToResult(intent, affectedContainerIds);
+        InventoryValidationResult resultValidation = mutationResult.Validate();
+        if (!resultValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(resultValidation.Error);
+        }
+
+        if (!decision.IsAccepted)
+        {
+            return InventoryStoreOperationResult.Success(mutationResult: mutationResult);
+        }
+
+        if (sourceContainer is null || destinationContainer is null || sourceItem is null || sourceItemIndex < 0)
+        {
+            return InventoryStoreOperationResult.Failure("Accepted split decision requires existing source/destination containers and source item.");
+        }
+
+        InventoryItemSnapshot reducedSourceItem = sourceItem with { Quantity = sourceItem.Quantity - intent.Quantity };
+        InventoryItemSnapshot splitItem = InventorySplitStackMutationRules.CreateSplitItem(intent, sourceItem);
+        var dispatches = new List<InventoryStoreDeltaDispatch>(capacity: 2);
+
+        if (string.Equals(sourceContainer.ContainerId, destinationContainer.ContainerId, StringComparison.Ordinal))
+        {
+            InventoryContainerSnapshot updated = AddItem(ReplaceItem(sourceContainer, sourceItemIndex, reducedSourceItem), splitItem);
+            InventoryValidationResult validation = updated.Validate();
+            if (!validation.IsValid)
+            {
+                return InventoryStoreOperationResult.Failure(validation.Error);
+            }
+
+            long revision = SetContainerSnapshot(updated);
+            InventoryStoreOperationResult quantityDispatch = DispatchDelta(CreateQuantityChangedDelta(
+                intent,
+                updated.ContainerId,
+                revision,
+                sourceItem.ItemInstanceId,
+                -intent.Quantity,
+                "split_source"));
+            if (!quantityDispatch.Succeeded)
+            {
+                return quantityDispatch;
+            }
+
+            dispatches.AddRange(quantityDispatch.Dispatches);
+            InventoryStoreOperationResult addedDispatch = DispatchDelta(CreateItemAddedDelta(
+                intent,
+                updated.ContainerId,
+                revision,
+                splitItem,
+                "split_added"));
+            if (!addedDispatch.Succeeded)
+            {
+                return addedDispatch;
+            }
+
+            dispatches.AddRange(addedDispatch.Dispatches);
+            return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+        }
+
+        InventoryContainerSnapshot updatedSource = ReplaceItem(sourceContainer, sourceItemIndex, reducedSourceItem);
+        InventoryContainerSnapshot updatedDestination = AddItem(destinationContainer, splitItem);
+        InventoryValidationResult sourceValidation = updatedSource.Validate();
+        if (!sourceValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(sourceValidation.Error);
+        }
+
+        InventoryValidationResult destinationValidation = updatedDestination.Validate();
+        if (!destinationValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(destinationValidation.Error);
+        }
+
+        long sourceRevision = SetContainerSnapshot(updatedSource);
+        long destinationRevision = SetContainerSnapshot(updatedDestination);
+
+        InventoryStoreOperationResult sourceDispatch = DispatchDelta(CreateQuantityChangedDelta(
+            intent,
+            updatedSource.ContainerId,
+            sourceRevision,
+            sourceItem.ItemInstanceId,
+            -intent.Quantity,
+            "split_source"));
+        if (!sourceDispatch.Succeeded)
+        {
+            return sourceDispatch;
+        }
+
+        dispatches.AddRange(sourceDispatch.Dispatches);
+        InventoryStoreOperationResult destinationDispatch = DispatchDelta(CreateItemAddedDelta(
+            intent,
+            updatedDestination.ContainerId,
+            destinationRevision,
+            splitItem,
+            "split_added"));
+        if (!destinationDispatch.Succeeded)
+        {
+            return destinationDispatch;
+        }
+
+        dispatches.AddRange(destinationDispatch.Dispatches);
+        return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+    }
+
     public InventoryStoreOperationResult BeginTransaction(InventoryTransactionSnapshot transaction)
     {
         InventoryValidationResult validation = transaction.Validate();
@@ -639,6 +792,47 @@ public sealed class InMemoryInventoryStore
         return string.Equals(sourceContainerId, destinationContainerId, StringComparison.Ordinal)
             ? [sourceContainerId]
             : [sourceContainerId, destinationContainerId];
+    }
+
+    private static InventoryContainerDelta CreateQuantityChangedDelta(
+        InventoryMutationIntent intent,
+        string containerId,
+        long revision,
+        string itemInstanceId,
+        long quantityDelta,
+        string suffix)
+    {
+        return new InventoryContainerDelta(
+            $"delta:{intent.CorrelationId}/{suffix}/{itemInstanceId}",
+            containerId,
+            revision,
+            InventoryContainerDeltaKind.QuantityChanged,
+            itemInstanceId,
+            Item: null,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            quantityDelta,
+            InventoryAccessFlags.Read);
+    }
+
+    private static InventoryContainerDelta CreateItemAddedDelta(
+        InventoryMutationIntent intent,
+        string containerId,
+        long revision,
+        InventoryItemSnapshot item,
+        string suffix)
+    {
+        return new InventoryContainerDelta(
+            $"delta:{intent.CorrelationId}/{suffix}/{item.ItemInstanceId}",
+            containerId,
+            revision,
+            InventoryContainerDeltaKind.ItemAdded,
+            item.ItemInstanceId,
+            item,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read);
     }
 
     private long SetContainerSnapshot(InventoryContainerSnapshot container)

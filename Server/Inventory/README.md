@@ -25,6 +25,7 @@ Implemented first boundary slice:
   - transaction begin/suspend/cancel
   - owner-lifetime refresh handling
   - whole-item move application through injected mutation rules
+  - split-stack application through injected mutation rules
 - first concrete move mutation rule:
   - requester resolution check
   - source take access check
@@ -33,6 +34,15 @@ Implemented first boundary slice:
   - range policy hook
   - capacity policy hook
   - whole-item move only
+- first concrete split-stack mutation rule:
+  - requester resolution check
+  - source take access check
+  - destination put access check
+  - destination/new item id uniqueness check
+  - destination placement compatibility check
+  - range policy hook
+  - capacity policy hook
+  - all-or-nothing source decrement plus new-stack creation
 - benchmark harness in `_Benchmarks/UltraSim.Server.Inventory.Benchmarks`
 
 Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse. If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
@@ -64,6 +74,7 @@ It does not persist, authorize real gameplay, split partial stacks, or own trans
 - Store events are effects for higher layers to consume; they are not network packets.
 - Unresolved suspended-item returns are explicit events for higher layers/rules to recover or destroy deliberately.
 - `ApplyMove` evaluates injected mutation rules first, then commits snapshot changes only for accepted whole-item moves.
+- `ApplySplit` evaluates injected mutation rules first, then commits source quantity and destination item changes only after both updated snapshots validate.
 - Rule rejection is returned as an `InventoryMutationResult`; malformed store state remains a store failure.
 - Persistence, audit logging, and database ownership stay outside this prototype.
 
@@ -81,6 +92,21 @@ The rule validates the effective destination placement, not the item's old sourc
 
 Splits, stack merges, equipment restrictions, grid collision placement, weight limits, ownership rules, and scripted container behavior remain future policy implementations.
 
+## Split Rule Prototype
+
+`InventorySplitStackMutationRules` is the first concrete split rule. It supports creating a new stack item from part of a source stack. A split intent must provide:
+
+- source container id
+- destination container id
+- source item id
+- destination/new item id
+- split quantity
+- proposed destination placement
+
+The store applies split as an all-or-nothing operation. It builds and validates the reduced source stack and the new destination stack before committing either snapshot. A rejected split leaves both containers unchanged.
+
+Stack merge, partial stack transfer into an existing destination stack, and split-specific definition rules remain future policy implementations.
+
 ## Benchmark Harness
 
 Current server bridge benchmark:
@@ -94,6 +120,7 @@ Initial scenarios cover:
 - accepted same-container reposition moves with no viewers
 - accepted same-container reposition moves with one viewer
 - rejected out-of-range moves
+- accepted cross-container split-stack moves
 - raw `DispatchDelta` fanout across 1000 viewers
 
 These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, split/merge, equipment rules, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.

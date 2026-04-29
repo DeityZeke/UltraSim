@@ -131,6 +131,7 @@ internal static class TestRunner
         {
             Kind = InventoryMutationKind.SplitStack,
             CorrelationId = "corr/split/1",
+            DestinationItemInstanceId = "item:apple_stack/split_new",
             Quantity = 3
         };
         Assert.Valid(split.Validate());
@@ -155,6 +156,8 @@ internal static class TestRunner
 
         Assert.InvalidContains((move with { DestinationContainerId = null }).Validate(), "DestinationContainerId");
         Assert.InvalidContains((move with { Quantity = 0 }).Validate(), "quantity");
+        Assert.InvalidContains((split with { DestinationItemInstanceId = null }).Validate(), "DestinationItemInstanceId");
+        Assert.InvalidContains((split with { ProposedPlacement = null }).Validate(), "requires proposed placement");
         Assert.InvalidContains((merge with { DestinationItemInstanceId = null }).Validate(), "DestinationItemInstanceId");
         Assert.InvalidContains((move with
         {

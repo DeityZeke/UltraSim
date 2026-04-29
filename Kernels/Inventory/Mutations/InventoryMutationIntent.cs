@@ -58,7 +58,7 @@ public sealed record InventoryMutationIntent(
         return Kind switch
         {
             InventoryMutationKind.MoveItem => ValidateMoveLike(requirePlacement: false),
-            InventoryMutationKind.SplitStack => ValidateMoveLike(requirePlacement: false),
+            InventoryMutationKind.SplitStack => ValidateSplit(),
             InventoryMutationKind.MergeStack => ValidateMerge(),
             InventoryMutationKind.SwapItems => ValidateSwap(),
             InventoryMutationKind.TakeItem => ValidateMoveLike(requirePlacement: false),
@@ -150,6 +150,17 @@ public sealed record InventoryMutationIntent(
     private InventoryValidationResult ValidateMerge()
     {
         InventoryValidationResult moveResult = ValidateMoveLike(requirePlacement: false);
+        if (!moveResult.IsValid)
+        {
+            return moveResult;
+        }
+
+        return Require(DestinationItemInstanceId, nameof(DestinationItemInstanceId));
+    }
+
+    private InventoryValidationResult ValidateSplit()
+    {
+        InventoryValidationResult moveResult = ValidateMoveLike(requirePlacement: true);
         if (!moveResult.IsValid)
         {
             return moveResult;

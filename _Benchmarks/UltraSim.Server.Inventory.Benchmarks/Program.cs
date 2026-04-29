@@ -55,6 +55,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 
     yield return new BenchmarkScenario
     {
+        Name = "ApplySplit_CrossContainer_1000",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunSplitScenario(1_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
         Name = "DispatchDelta_1000Viewers_10000",
         Category = "InventoryStore",
         Comparable = false,
@@ -99,6 +110,51 @@ static ScenarioMeasurement RunSameContainerMoveScenario(int iterations, int view
         if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
         {
             throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Move failed.");
+        }
+
+        checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunSplitScenario(int iterations)
+{
+    var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_split");
+    var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
+    InventoryContainerSnapshot source = CreateContainer(
+        "container:bench_store_split/source",
+        InventoryPlacementMode.List,
+        [CreateItem("item:bench_store_split/source", InventoryPlacementDescriptor.List(0), quantity: iterations + 1, maxStackQuantity: iterations + 1)]);
+    InventoryContainerSnapshot destination = CreateContainer(
+        "container:bench_store_split/destination",
+        InventoryPlacementMode.List);
+    StoreSuccess(store.AddContainer(source));
+    StoreSuccess(store.AddContainer(destination));
+
+    var rules = new InventorySplitStackMutationRules(
+        new AllowAllInventoryContainerAccessPolicy(),
+        new MaxItemsInventoryCapacityPolicy(maxItems: iterations + 1),
+        new ToggleInventoryRangePolicy(allow: true));
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        var intent = new InventoryMutationIntent(
+            "corr:bench_store_split/apply",
+            requester,
+            ClientSequence: i,
+            InventoryMutationKind.SplitStack,
+            source.ContainerId,
+            destination.ContainerId,
+            "item:bench_store_split/source",
+            DestinationItemInstanceId: $"item:bench_store_split/new_{i}",
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.List(i));
+        InventoryStoreOperationResult result = store.ApplySplit(intent, rules);
+        if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
+        {
+            throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Split failed.");
         }
 
         checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
@@ -205,13 +261,17 @@ static InventoryContainerSnapshot CreateContainer(
         items ?? []);
 }
 
-static InventoryItemSnapshot CreateItem(string itemId, InventoryPlacementDescriptor placement)
+static InventoryItemSnapshot CreateItem(
+    string itemId,
+    InventoryPlacementDescriptor placement,
+    long quantity = 1,
+    long maxStackQuantity = 1)
 {
     return new InventoryItemSnapshot(
         itemId,
         "item.benchmark",
-        Quantity: 1,
-        MaxStackQuantity: 1,
+        quantity,
+        maxStackQuantity,
         placement);
 }
 
