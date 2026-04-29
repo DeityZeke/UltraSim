@@ -29,10 +29,15 @@ public partial class ServerShellRoot : Control
 	private Button? _statusButton;
 	private Button? _runButton;
 	private bool _smokeRequireEmptySessions;
+	private double _smokeEmptySessionGraceSeconds = 2.0;
+	private double _smokeEmptySessionWaitedSeconds;
+	private bool _smokeQuitRequested;
+	private bool _smokeEmptySessionWaitLogged;
 
 	public override void _Ready()
 	{
 		_smokeRequireEmptySessions = HasUserArg("--us-smoke-require-empty-sessions");
+		_smokeEmptySessionGraceSeconds = ReadNonNegativeUserArg("--us-smoke-empty-session-grace=", _smokeEmptySessionGraceSeconds);
 		ConfigureWindow();
 		BuildInterface();
 
@@ -56,6 +61,10 @@ public partial class ServerShellRoot : Control
 	{
 		_controller?.TickFrame(delta);
 		RefreshStatus();
+		if (_smokeQuitRequested)
+		{
+			CompleteSmokeQuit(delta);
+		}
 	}
 
 	public override void _ExitTree()
@@ -160,25 +169,70 @@ public partial class ServerShellRoot : Control
 			}
 
 			SceneTreeTimer timer = GetTree().CreateTimer(seconds);
-			timer.Timeout += QuitForSmoke;
+			timer.Timeout += RequestSmokeQuit;
 			return;
 		}
 	}
 
-	private void QuitForSmoke()
+	private void RequestSmokeQuit()
+	{
+		_smokeQuitRequested = true;
+		_smokeEmptySessionWaitedSeconds = 0.0;
+		_smokeEmptySessionWaitLogged = false;
+		CompleteSmokeQuit(0.0);
+	}
+
+	private void CompleteSmokeQuit(double delta)
 	{
 		if (_smokeRequireEmptySessions)
 		{
 			int activeSessions = _controller?.GetStatusSnapshot().ActiveSessions ?? 0;
 			if (activeSessions != 0)
 			{
-				GD.PushError($"UltraSim server smoke failed: expected 0 active sessions, found {activeSessions}.");
+				if (!_smokeEmptySessionWaitLogged)
+				{
+					AppendOutput("SMOKE", $"Waiting up to {_smokeEmptySessionGraceSeconds:0.###}s for empty sessions ({activeSessions} active).");
+					_smokeEmptySessionWaitLogged = true;
+				}
+
+				_smokeEmptySessionWaitedSeconds += Math.Max(0.0, delta);
+				if (_smokeEmptySessionWaitedSeconds < _smokeEmptySessionGraceSeconds)
+				{
+					return;
+				}
+
+				_smokeQuitRequested = false;
+				GD.PushError($"UltraSim server smoke failed: expected 0 active sessions after {_smokeEmptySessionGraceSeconds:0.###}s grace, found {activeSessions}.");
 				GetTree().Quit(1);
 				return;
 			}
+
+			AppendOutput("SMOKE", "Empty session requirement satisfied.");
 		}
 
+		_smokeQuitRequested = false;
 		GetTree().Quit();
+	}
+
+	private static double ReadNonNegativeUserArg(string prefix, double defaultValue)
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			if (double.TryParse(arg[prefix.Length..], out double seconds) && seconds >= 0.0)
+			{
+				return seconds;
+			}
+
+			GD.PushWarning($"Invalid {prefix.TrimEnd('=')} value.");
+			return defaultValue;
+		}
+
+		return defaultValue;
 	}
 
 	private static bool HasUserArg(string expected)

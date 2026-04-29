@@ -112,6 +112,7 @@ Current Godot smoke hooks:
   - `--us-server-no-movement-world`
   - `--us-smoke-quit-after=seconds`
   - `--us-smoke-require-empty-sessions`
+  - `--us-smoke-empty-session-grace=seconds`
 
 These are smoke/test hooks only. Normal interactive flow still goes through the local app shell and server operator shell.
 

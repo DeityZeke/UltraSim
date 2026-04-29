@@ -50,6 +50,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private int _smokeChatReceivedCount;
 	private int _smokeOwnerMovementCount;
 	private int _nextSmokeDisconnectIndex;
+	private bool _smokeChatReceiveLogged;
+	private bool _smokeOwnerMovementLogged;
 	private ClientMovementState _lastAuthoritativeOwnerState;
 
 	public override void _Ready()
@@ -282,6 +284,11 @@ public partial class GodotClientRuntimeRoot : Node
 		if (string.Equals(packet.Text, _smokeChatText, StringComparison.Ordinal))
 		{
 			_smokeChatReceivedCount++;
+			if (!_smokeChatReceiveLogged)
+			{
+				_smokeChatReceiveLogged = true;
+				SetStatusText($"Smoke chat received: {packet.Text}");
+			}
 		}
 
 		UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
@@ -294,6 +301,11 @@ public partial class GodotClientRuntimeRoot : Node
 		if (result.LastProcessedInputSequence != 0)
 		{
 			_smokeOwnerMovementCount++;
+			if (!_smokeOwnerMovementLogged)
+			{
+				_smokeOwnerMovementLogged = true;
+				SetStatusText($"Smoke owner movement acknowledged seq={result.LastProcessedInputSequence}.");
+			}
 		}
 
 		_presentationBridge?.ApplyOwnerMovement(result);
