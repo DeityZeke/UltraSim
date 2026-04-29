@@ -19,6 +19,8 @@ internal static class TestRunner
         Run(nameof(InventoryContainerDelta_ValidatesItemAndPlacementShapes), InventoryContainerDelta_ValidatesItemAndPlacementShapes);
         Run(nameof(InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle), InventoryTransactionSnapshot_ValidatesSuspendedItemLifecycle);
         Run(nameof(InventoryListProjection_ProjectsListAndGridContainersWithoutOwningTruth), InventoryListProjection_ProjectsListAndGridContainersWithoutOwningTruth);
+        Run(nameof(InventoryGridProjection_ValidatesBoundsAndOverlap), InventoryGridProjection_ValidatesBoundsAndOverlap);
+        Run(nameof(InventoryFreeformProjection_PreservesCoordinatesWithoutInterpretingZLayer), InventoryFreeformProjection_PreservesCoordinatesWithoutInterpretingZLayer);
 
         Console.WriteLine("All inventory kernel contract tests passed.");
     }
@@ -429,6 +431,86 @@ internal static class TestRunner
         }).Validate(), "sort direction");
     }
 
+    private static void InventoryGridProjection_ValidatesBoundsAndOverlap()
+    {
+        InventoryContainerSnapshot gridContainer = CreateGridContainer();
+        InventoryGridProjectionSnapshot projection = InventoryGridProjectionSnapshot.FromContainer(
+            "projection:grid/pack",
+            gridContainer,
+            containerRevision: 4,
+            gridWidth: 4,
+            gridHeight: 4,
+            viewId: "view:grid_pack");
+        Assert.Valid(projection.Validate());
+        Assert.Equal(gridContainer.Items.Count, projection.Items.Count, "grid projection item count");
+
+        Assert.InvalidContains((projection with
+        {
+            GridWidth = 2
+        }).Validate(), "bounds");
+
+        Assert.InvalidContains((projection with
+        {
+            Items =
+            [
+                projection.Items[0],
+                new InventoryGridProjectionItem(
+                    projection.Items[1].Item with
+                    {
+                        Placement = InventoryPlacementDescriptor.Grid(1, 0, width: 1, height: 1)
+                    })
+            ]
+        }).Validate(), "overlapping");
+
+        InventoryContainerSnapshot listContainer = CreateListContainer();
+        InventoryGridProjectionSnapshot invalidSource = InventoryGridProjectionSnapshot.FromContainer(
+            "projection:grid/list",
+            listContainer,
+            containerRevision: 1,
+            gridWidth: 4,
+            gridHeight: 4);
+        Assert.InvalidContains(invalidSource.Validate(), "must be Grid");
+    }
+
+    private static void InventoryFreeformProjection_PreservesCoordinatesWithoutInterpretingZLayer()
+    {
+        InventoryContainerSnapshot freeformContainer = CreateFreeformContainer();
+        InventoryFreeformProjectionSnapshot projection = InventoryFreeformProjectionSnapshot.FromContainer(
+            "projection:freeform/bag",
+            freeformContainer,
+            containerRevision: 5,
+            viewId: "view:bag");
+        Assert.Valid(projection.Validate());
+        Assert.Equal(freeformContainer.Items.Count, projection.Rows.Count, "freeform projection row count");
+
+        InventoryPlacementDescriptor firstPlacement = projection.Rows[0].Item.Placement;
+        Assert.Equal(20, firstPlacement.X, "freeform x");
+        Assert.Equal(-12, firstPlacement.Y, "freeform y");
+        Assert.Equal(3, firstPlacement.ZLayer, "freeform z layer");
+
+        Assert.InvalidContains((projection with
+        {
+            Rows =
+            [
+                projection.Rows[0],
+                projection.Rows[1] with { DisplayOrder = projection.Rows[0].DisplayOrder }
+            ]
+        }).Validate(), "duplicate display");
+
+        Assert.InvalidContains((projection with
+        {
+            Rows = [projection.Rows[0], projection.Rows[0] with { DisplayOrder = 9 }]
+        }).Validate(), "duplicate item");
+
+        InventoryGridProjectionSnapshot invalidGridProjection = InventoryGridProjectionSnapshot.FromContainer(
+            "projection:grid/freeform",
+            freeformContainer,
+            containerRevision: 5,
+            gridWidth: 4,
+            gridHeight: 4);
+        Assert.InvalidContains(invalidGridProjection.Validate(), "must be Grid");
+    }
+
     private static InventoryContainerSnapshot CreateListContainer()
     {
         return new InventoryContainerSnapshot(
@@ -452,6 +534,56 @@ internal static class TestRunner
                     Quantity: 5,
                     MaxStackQuantity: 20,
                     InventoryPlacementDescriptor.List(1)),
+            ]);
+    }
+
+    private static InventoryContainerSnapshot CreateGridContainer()
+    {
+        return new InventoryContainerSnapshot(
+            "container:grid_pack/1",
+            "container.grid_pack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:alpha"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Grid,
+            [InventoryPermissionDescriptor.PublicReadTake],
+            [
+                new InventoryItemSnapshot(
+                    "item:wide_sword/1",
+                    "item.wide_sword",
+                    Quantity: 1,
+                    MaxStackQuantity: 1,
+                    InventoryPlacementDescriptor.Grid(0, 0, width: 2, height: 1)),
+                new InventoryItemSnapshot(
+                    "item:gem/1",
+                    "item.gem",
+                    Quantity: 3,
+                    MaxStackQuantity: 20,
+                    InventoryPlacementDescriptor.Grid(2, 0, width: 1, height: 1)),
+            ]);
+    }
+
+    private static InventoryContainerSnapshot CreateFreeformContainer()
+    {
+        return new InventoryContainerSnapshot(
+            "container:freeform_bag/1",
+            "container.freeform_bag",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:alpha"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Freeform,
+            [InventoryPermissionDescriptor.PublicReadTake],
+            [
+                new InventoryItemSnapshot(
+                    "item:gold_pile/1",
+                    "item.gold",
+                    Quantity: 25,
+                    MaxStackQuantity: 1000,
+                    InventoryPlacementDescriptor.Freeform(20, -12, zLayer: 3)),
+                new InventoryItemSnapshot(
+                    "item:rune/1",
+                    "item.rune",
+                    Quantity: 1,
+                    MaxStackQuantity: 1,
+                    InventoryPlacementDescriptor.Freeform(-4, 30, zLayer: 1)),
             ]);
     }
 

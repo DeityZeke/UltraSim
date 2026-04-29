@@ -95,6 +95,28 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         IterationCount = 5,
         Execute = () => RunListProjectionScenario(CreateGridContainer(1_000)),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "GridProjection_Validate_1000Items",
+        Category = "InventoryProjection",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunGridProjectionScenario(CreateGridContainer(1_000)),
+    };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "FreeformProjection_Validate_1000Items",
+        Category = "InventoryProjection",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunFreeformProjectionScenario(CreateFreeformContainer(1_000)),
+    };
 }
 
 static ScenarioMeasurement RunContainerValidationScenario(InventoryContainerSnapshot container)
@@ -227,6 +249,40 @@ static ScenarioMeasurement RunListProjectionScenario(InventoryContainerSnapshot 
     return new ScenarioMeasurement(projection.Rows.Count, projection.Rows.Count + (int)projection.SourcePlacementMode);
 }
 
+static ScenarioMeasurement RunGridProjectionScenario(InventoryContainerSnapshot container)
+{
+    InventoryGridProjectionSnapshot projection = InventoryGridProjectionSnapshot.FromContainer(
+        "projection:bench/grid",
+        container,
+        containerRevision: 10,
+        gridWidth: 40,
+        gridHeight: 25,
+        viewId: "view:bench/grid");
+    InventoryValidationResult result = projection.Validate();
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(projection.Items.Count, projection.Items.Count + projection.GridWidth + projection.GridHeight);
+}
+
+static ScenarioMeasurement RunFreeformProjectionScenario(InventoryContainerSnapshot container)
+{
+    InventoryFreeformProjectionSnapshot projection = InventoryFreeformProjectionSnapshot.FromContainer(
+        "projection:bench/freeform",
+        container,
+        containerRevision: 11,
+        viewId: "view:bench/freeform");
+    InventoryValidationResult result = projection.Validate();
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(projection.Rows.Count, projection.Rows.Count + (int)projection.SourcePlacementMode);
+}
+
 static InventoryContainerSnapshot CreateListContainer(int itemCount)
 {
     var items = new InventoryItemSnapshot[itemCount];
@@ -271,6 +327,29 @@ static InventoryContainerSnapshot CreateGridContainer(int itemCount)
         new InventoryOwnerRef(InventoryOwnerKind.Character, "character:bench"),
         InventoryContainerLifecycle.Persistent,
         InventoryPlacementMode.Grid,
+        [InventoryPermissionDescriptor.PublicReadTake],
+        items);
+}
+
+static InventoryContainerSnapshot CreateFreeformContainer(int itemCount)
+{
+    var items = new InventoryItemSnapshot[itemCount];
+    for (int i = 0; i < itemCount; i++)
+    {
+        items[i] = new InventoryItemSnapshot(
+            $"item:freeform/{i}",
+            "item.freeform_test",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.Freeform(i % 50, i / 50, zLayer: i % 8));
+    }
+
+    return new InventoryContainerSnapshot(
+        "container:bench/freeform",
+        "container.freeform_bag",
+        new InventoryOwnerRef(InventoryOwnerKind.Character, "character:bench"),
+        InventoryContainerLifecycle.Persistent,
+        InventoryPlacementMode.Freeform,
         [InventoryPermissionDescriptor.PublicReadTake],
         items);
 }

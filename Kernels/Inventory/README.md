@@ -93,12 +93,14 @@ Current contracts:
   - transaction id/state
   - participant containers
   - suspended items with source/destination containers
-- list projection contracts:
+- projection contracts:
   - point-in-time projection id
   - source container id/revision
   - source placement mode
-  - sort descriptor
-  - list rows that preserve item snapshots and original placement metadata
+  - list projection rows with sort descriptor
+  - grid projection items with bounds/overlap validation
+  - freeform projection rows that preserve x/y/z placement without interpreting z-layer visually
+  - projections preserve item snapshots and original placement metadata
 - executable tests in `_Tests/UltraSim.Inventory.Tests`
 - benchmark harness in `_Benchmarks/UltraSim.Inventory.Benchmarks`
 
@@ -114,10 +116,12 @@ Current benchmark baselines:
 - `ContainerSnapshot_Validate_Grid_1000Items`: about `0.74 ms`
 - `MutationIntent_Validate_Move_10000`: about `10.47 ms`
 - `MutationResult_Validate_Accepted_10000`: about `7.60 ms`
-- `ViewerRegistry_CountRecipients_1000Viewers_1000Deltas`: about `26.57 ms`
+- `ViewerRegistry_CountRecipients_1000Viewers_1000Deltas`: about `26.82 ms`
   - this is per 1000-viewer fanout pass, or roughly 26.6 ns per viewer check in that benchmark shape
-- `TransactionSnapshot_Validate_1000SuspendedItems`: about `3.32 ms`
+- `TransactionSnapshot_Validate_1000SuspendedItems`: about `3.50 ms`
 - `ListProjection_FromGridContainer_1000Items`: about `1.53 ms`
+- `GridProjection_Validate_1000Items`: about `1.06 ms`
+- `FreeformProjection_Validate_1000Items`: about `0.78 ms`
 
 ## Layering
 
@@ -544,9 +548,27 @@ Implementation discipline:
 3. Add grid placement helpers only as optional placement facets.
 4. Keep UO/freeform possible through `Freeform` placement metadata and `ContainerCanvas`, but do not implement the renderer until needed.
 
-The first implemented projection is `InventoryListProjectionSnapshot`. It can project a grid-backed container as a simple list while preserving each item's source placement metadata. Sort descriptors are projection/viewer inputs, not new container truth.
+Implemented projections:
+
+- `InventoryListProjectionSnapshot` can project a grid-backed container as a simple list while preserving each item's source placement metadata. Sort descriptors are projection/viewer inputs, not new container truth.
+- `InventoryGridProjectionSnapshot` is only valid over grid-backed containers. It validates grid dimensions, item bounds, duplicate item ids, and overlapping occupied cells.
+- `InventoryFreeformProjectionSnapshot` is only valid over freeform-backed containers. It preserves x/y/z placement metadata but does not define how the renderer interprets visual layering or overlap.
 
 If the list viewer cannot consume the same container state as the grid viewer, the contract has leaked presentation assumptions.
+
+## Bridge Metrics
+
+The kernel should not maintain live metrics counters, but its contracts expose enough data for the server bridge/admin panel to surface useful inventory telemetry later:
+
+- total containers
+- active containers, where active means at least one current viewer
+- containers by `ContainerTypeId`
+- containers by `InventoryOwnerKind`
+- containers by lifecycle
+- total viewers
+- open transactions and suspended item counts
+- mutation accepted/rejected counts by result/failure reason
+- delta fanout recipient counts
 
 ## Testing Plan
 
