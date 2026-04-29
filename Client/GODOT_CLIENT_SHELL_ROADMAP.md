@@ -823,6 +823,11 @@ The pre-schema client shell gate is now validated. G6/UI-1 has started in `Kerne
   - client sequence echo
   - server-authored unavailable/stale/out-of-range state
   - machine-readable rejection reasons
+- flat tooltip/rich-tooltip descriptors:
+  - title/icon/quality role
+  - body/stat/requirement/warning/error/flavor/advanced lines
+  - payload/state-slot-backed dynamic values
+  - optional detail action id
 - runtime state binding descriptor and fallback shape
 - early node id reservations
 - schema node/tree descriptors
@@ -854,12 +859,13 @@ First UI benchmark report:
 - current update validation baseline includes `ModelUpdate_ValidateSlotPatch_1000Slots`
 - current hot-path update baseline includes `ModelUpdate_ValidateSlotPatchAgainstContext_1000Slots`
 - current action validation baselines include `ActionRequest_ValidateAgainstContext_10000` and `ActionResult_ValidateAgainstContext_10000`
+- current tooltip validation baseline includes `TooltipDescriptor_ValidateAgainstContext_10000`
 
 Next G6/UI-1 steps:
 
 1. Add catalog identity/schema linkage contract tests around the compatibility context.
 2. Add schema/catalog/model/update cache identity compatibility tests.
-3. Add tooltip/rich-tooltip descriptor contracts.
+3. Add inventory/container identity and viewer-agnostic placement metadata contracts.
 4. Keep client runtime, server providers, and Godot renderer work out of the kernel until these contracts are measurable.
 5. If implementation exposes a bad contract, fix the UI kernel contract and planning docs before patching around it in the bridge layers.
 

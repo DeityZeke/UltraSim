@@ -4,21 +4,26 @@ public sealed class UiSchemaCompatibilityContext
 {
     private readonly Dictionary<string, UiPayloadSlotDescriptor> _payloadSlotById;
     private readonly Dictionary<string, UiActionDescriptor> _actionById;
+    private readonly HashSet<string> _stateBindingSlotIds;
 
     private UiSchemaCompatibilityContext(
         UiSchemaIdentity schemaIdentity,
         UiCatalogIdentity? catalogIdentity,
         IReadOnlyList<UiPayloadSlotDescriptor> payloadSlots,
         IReadOnlyList<UiActionDescriptor> actions,
+        IReadOnlyList<UiStateBindingDescriptor> stateBindings,
         Dictionary<string, UiPayloadSlotDescriptor> payloadSlotById,
-        Dictionary<string, UiActionDescriptor> actionById)
+        Dictionary<string, UiActionDescriptor> actionById,
+        HashSet<string> stateBindingSlotIds)
     {
         SchemaIdentity = schemaIdentity;
         CatalogIdentity = catalogIdentity;
         PayloadSlots = payloadSlots;
         Actions = actions;
+        StateBindings = stateBindings;
         _payloadSlotById = payloadSlotById;
         _actionById = actionById;
+        _stateBindingSlotIds = stateBindingSlotIds;
     }
 
     public UiSchemaIdentity SchemaIdentity { get; }
@@ -28,6 +33,8 @@ public sealed class UiSchemaCompatibilityContext
     public IReadOnlyList<UiPayloadSlotDescriptor> PayloadSlots { get; }
 
     public IReadOnlyList<UiActionDescriptor> Actions { get; }
+
+    public IReadOnlyList<UiStateBindingDescriptor> StateBindings { get; }
 
     public static UiValidationResult TryCreate(
         UiSchemaDocument schema,
@@ -60,13 +67,22 @@ public sealed class UiSchemaCompatibilityContext
             actionById.Add(action.ActionId, action);
         }
 
+        var stateBindingSlotIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < schema.StateBindings.Count; i++)
+        {
+            UiStateBindingDescriptor binding = schema.StateBindings[i];
+            stateBindingSlotIds.Add(binding.SlotId);
+        }
+
         context = new UiSchemaCompatibilityContext(
             schema.Identity,
             schema.CatalogIdentity,
             schema.PayloadSlots,
             schema.Actions,
+            schema.StateBindings,
             payloadSlotById,
-            actionById);
+            actionById,
+            stateBindingSlotIds);
         return UiValidationResult.Valid;
     }
 
@@ -100,5 +116,10 @@ public sealed class UiSchemaCompatibilityContext
     public bool TryGetAction(string actionId, out UiActionDescriptor action)
     {
         return _actionById.TryGetValue(actionId, out action!);
+    }
+
+    public bool HasStateBindingSlot(string slotId)
+    {
+        return _stateBindingSlotIds.Contains(slotId);
     }
 }

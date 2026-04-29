@@ -25,6 +25,8 @@ internal static class TestRunner
         Run(nameof(UiModelUpdateDocument_RejectsInvalidUpdateShapes), UiModelUpdateDocument_RejectsInvalidUpdateShapes);
         Run(nameof(UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates), UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates);
         Run(nameof(UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses), UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses);
+        Run(nameof(UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines), UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines);
+        Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsActionsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsActionsAndOversizedShapes);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
 
@@ -278,6 +280,13 @@ internal static class TestRunner
         UiActionResultDocument decodedResult = UiContractJsonCodec.Decode<UiActionResultDocument>(encoded);
         Assert.Equal(result.ClientSequence, decodedResult.ClientSequence);
         Assert.Valid(decodedResult.ValidateAgainst(context!));
+
+        UiTooltipDescriptor tooltip = CreateValidTooltip();
+        encoded = UiContractJsonCodec.Encode(tooltip);
+        UiTooltipDescriptor decodedTooltip = UiContractJsonCodec.Decode<UiTooltipDescriptor>(encoded);
+        Assert.Equal(tooltip.TooltipId, decodedTooltip.TooltipId);
+        Assert.Equal(tooltip.Lines.Count, decodedTooltip.Lines.Count);
+        Assert.Valid(decodedTooltip.Validate(context!));
     }
 
     private static void UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities()
@@ -705,6 +714,54 @@ internal static class TestRunner
         Assert.InvalidContains(acceptedWithReason.ValidateAgainst(context!), "cannot carry");
     }
 
+    private static void UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        UiTooltipDescriptor tooltip = CreateValidTooltip();
+        Assert.Valid(tooltip.Validate(context!));
+
+        var simple = new UiTooltipDescriptor(
+            "simple/help",
+            Title: null,
+            IconId: null,
+            UiTooltipVisualRole.Normal,
+            Lines: [new UiTooltipLineDescriptor(UiTooltipLineKind.Body, null, "A compact hint.", null)]);
+        Assert.Valid(simple.Validate());
+    }
+
+    private static void UiTooltipDescriptor_RejectsUnknownSlotsActionsAndOversizedShapes()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        var unknownSlot = CreateValidTooltip() with
+        {
+            Lines =
+            [
+                new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Missing", null, "missingSlot")
+            ]
+        };
+        Assert.InvalidContains(unknownSlot.Validate(context!), "unknown slot");
+
+        var unknownAction = CreateValidTooltip() with { DetailActionId = "missing.action" };
+        Assert.InvalidContains(unknownAction.Validate(context!), "does not exist");
+
+        var noLines = CreateValidTooltip() with { Lines = [] };
+        Assert.InvalidContains(noLines.Validate(context!), "at least one line");
+
+        var tooMany = CreateValidTooltip() with
+        {
+            Lines = Enumerable.Range(0, UiTooltipDescriptor.MaxTooltipLines + 1)
+                .Select(i => new UiTooltipLineDescriptor(UiTooltipLineKind.Body, null, $"line {i}", null))
+                .ToArray()
+        };
+        Assert.InvalidContains(tooMany.Validate(context!), "more than");
+    }
+
     private static void UiNodeKind_ReservesExpectedEarlyNodeIds()
     {
         Assert.Equal(1, (int)UiNodeKind.Panel);
@@ -805,6 +862,23 @@ internal static class TestRunner
             SlotValues: [UiModelSlotValue.Integer("levelValue", 13)],
             ClearedSlotIds: [],
             RowDeltas: []);
+    }
+
+    private static UiTooltipDescriptor CreateValidTooltip()
+    {
+        return new UiTooltipDescriptor(
+            "tooltip/hud/status",
+            "Status",
+            "icons/ui/status",
+            UiTooltipVisualRole.Uncommon,
+            Lines:
+            [
+                new UiTooltipLineDescriptor(UiTooltipLineKind.Body, null, "Current character status.", null),
+                new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Health", null, "healthText", UiTooltipVisualRole.Positive),
+                new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Level", null, "levelValue"),
+                new UiTooltipLineDescriptor(UiTooltipLineKind.Advanced, null, "Hold detail for the full character panel.", null, UiTooltipVisualRole.Muted),
+            ],
+            DetailActionId: "hud.open_character");
     }
 
     private static UiRendererCapabilities CreateRendererCapabilities()

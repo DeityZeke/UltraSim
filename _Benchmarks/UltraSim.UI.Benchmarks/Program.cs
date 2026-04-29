@@ -67,6 +67,8 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         Execute = () => RunStateBindingScenario(10_000),
     };
 
+    yield return CreateTooltipValidationScenario(10_000);
+
     yield return new BenchmarkScenario
     {
         Name = "PanelMetadata_JsonRoundTrip_1000",
@@ -321,6 +323,59 @@ static ScenarioMeasurement RunStateBindingScenario(int iterations)
     }
 
     return new ScenarioMeasurement(iterations, checksum);
+}
+
+static BenchmarkScenario CreateTooltipValidationScenario(int iterations)
+{
+    (UiSchemaDocument schema, _) = CreateLargeModelCompatibilityPair(16);
+    UiValidationResult contextResult = UiSchemaCompatibilityContext.TryCreate(
+        schema,
+        out UiSchemaCompatibilityContext? context,
+        UiSchemaValidationLimits.Default with { MaxChildrenPerNode = 32 });
+    if (!contextResult.IsValid || context is null)
+    {
+        throw new InvalidOperationException(contextResult.Error);
+    }
+
+    var tooltip = new UiTooltipDescriptor(
+        "tooltip/bench/item",
+        "Iron Sword",
+        "icons/items/iron_sword",
+        UiTooltipVisualRole.Common,
+        Lines:
+        [
+            new UiTooltipLineDescriptor(UiTooltipLineKind.Body, null, "A plain forged blade.", null),
+            new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Damage", "4-8", null, UiTooltipVisualRole.Positive),
+            new UiTooltipLineDescriptor(UiTooltipLineKind.Requirement, "Level", null, "model.slot.0"),
+            new UiTooltipLineDescriptor(UiTooltipLineKind.Advanced, null, "Hold detail for crafting lineage.", null, UiTooltipVisualRole.Muted),
+        ],
+        DetailActionId: "bench.refresh");
+
+    return new BenchmarkScenario
+    {
+        Name = "TooltipDescriptor_ValidateAgainstContext_10000",
+        Category = "UiTooltip",
+        Comparable = false,
+        Scale = iterations,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            long checksum = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                UiValidationResult result = tooltip.Validate(context);
+                if (!result.IsValid)
+                {
+                    throw new InvalidOperationException(result.Error);
+                }
+
+                checksum += tooltip.Lines.Count + i;
+            }
+
+            return new ScenarioMeasurement(iterations, checksum);
+        },
+    };
 }
 
 static ScenarioMeasurement RunPanelMetadataJsonRoundTripScenario(int iterations)

@@ -472,6 +472,10 @@ Tooltip levels:
 
 Tooltips are presentation only. They can explain permissions, requirements, item stats, cooldowns, and errors, but the server must still validate all actions.
 
+Rich tooltips should stay flat. They are not a nested mini-schema and should not contain buttons, child panels, arbitrary layout trees, or executable behavior. The contract is title, icon, quality/visual role, body/stat/requirement/warning/error/flavor/advanced lines, optional slot-backed values, and an optional detail action id. If a surface needs buttons, tabs, forms, or complex conditional layout, it is a popover/panel, not a tooltip.
+
+Dynamic tooltip values should reference existing payload slots or runtime state binding slots. A tooltip should not invent its own hidden state channel. Optional advanced/detail content can be requested through a normal action id, but the response should still be a tooltip payload or a real panel open, not imperative client code.
+
 Context menus cover UO-style right-click menus, item action menus, row action menus, entity interaction menus, and admin/debug action menus. They should be built from compact action descriptors:
 
 ```text
