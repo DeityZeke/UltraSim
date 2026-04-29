@@ -63,7 +63,7 @@ public sealed record InventoryMutationIntent(
             InventoryMutationKind.SwapItems => ValidateSwap(),
             InventoryMutationKind.TakeItem => ValidateMoveLike(requirePlacement: false),
             InventoryMutationKind.DropItem => ValidateMoveLike(requirePlacement: false),
-            InventoryMutationKind.EquipItem => ValidateMoveLike(requirePlacement: false),
+            InventoryMutationKind.EquipItem => ValidateEquip(),
             InventoryMutationKind.UnequipItem => ValidateMoveLike(requirePlacement: false),
             InventoryMutationKind.UseItem => ValidateSingleItemMutation(),
             InventoryMutationKind.DestroyItem => ValidateSingleItemMutation(),
@@ -167,6 +167,19 @@ public sealed record InventoryMutationIntent(
         }
 
         return Require(DestinationItemInstanceId, nameof(DestinationItemInstanceId));
+    }
+
+    private InventoryValidationResult ValidateEquip()
+    {
+        InventoryValidationResult moveResult = ValidateMoveLike(requirePlacement: true);
+        if (!moveResult.IsValid)
+        {
+            return moveResult;
+        }
+
+        return ProposedPlacement!.Mode == InventoryPlacementMode.Slot
+            ? InventoryValidationResult.Valid
+            : InventoryValidationResult.Invalid("EquipItem requires slot placement.");
     }
 
     private InventoryValidationResult ValidateSwap()

@@ -50,6 +50,15 @@ Implemented first boundary slice:
   - merge policy hook
   - range policy hook
   - all-or-nothing source decrement/removal plus destination increment
+- first concrete equip-item mutation rule:
+  - requester resolution check
+  - source take access check
+  - destination put access check
+  - slot placement requirement
+  - equipment slot policy hook
+  - range policy hook
+  - capacity policy hook
+  - all-or-nothing source removal plus equipment-slot insertion
 - benchmark harness in `_Benchmarks/UltraSim.Server.Inventory.Benchmarks`
 
 Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse. If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
@@ -70,7 +79,7 @@ Transport session closure, persistence, recovery policy, and real gameplay-speci
 
 The in-memory store prototype now exercises the first version of this signal path. It closes viewers, cancels affected transactions, and returns suspended whole items to their source containers when a transaction is cancelled or owner invalidation requires release. If the source container no longer exists, the store emits `SuspendedItemReturnUnresolved` instead of guessing whether to destroy, recover, or reroute the item.
 
-It does not persist, authorize real gameplay, split partial stacks, or own transport delivery.
+It does not persist, authorize real gameplay, or own transport delivery.
 
 ## Store Prototype Rules
 
@@ -83,6 +92,7 @@ It does not persist, authorize real gameplay, split partial stacks, or own trans
 - `ApplyMove` evaluates injected mutation rules first, then commits snapshot changes only for accepted whole-item moves.
 - `ApplySplit` evaluates injected mutation rules first, then commits source quantity and destination item changes only after both updated snapshots validate.
 - `ApplyMerge` evaluates injected mutation rules first, then commits source decrement/removal and destination quantity changes only after both updated snapshots validate.
+- `ApplyEquip` evaluates injected mutation rules first, then commits source removal and equipment-slot insertion only after both updated snapshots validate.
 - Rule rejection is returned as an `InventoryMutationResult`; malformed store state remains a store failure.
 - Persistence, audit logging, and database ownership stay outside this prototype.
 
@@ -129,6 +139,14 @@ The first concrete rule requires the merge policy's approved transfer quantity t
 
 The store applies merge as an all-or-nothing operation. Partial merges decrement the source stack and increment the destination stack. Full merges remove the source item and increment the destination stack. A rejected merge leaves both containers unchanged.
 
+## Equip Rule Prototype
+
+`InventoryEquipItemMutationRules` is the first concrete equip rule. `EquipItem` intents must carry a slot placement. The kernel validates that the intent is slot-shaped; this bridge layer decides whether the item is allowed in that slot through `IInventoryEquipmentSlotPolicy`.
+
+The first store implementation treats equip as a whole-item transfer into a slot-backed equipment container. It removes the item from the source snapshot and inserts the same item into the equipment container with the requested slot placement only after both updated snapshots validate. Occupancy, item category eligibility, class/race restrictions, two-handed conflicts, cosmetic overlays, and similar gameplay constraints belong in equipment slot policy implementations, not in the inventory kernel.
+
+The benchmark slot policy intentionally uses a simple linear occupancy scan and the prototype store still copies immutable snapshots on each accepted mutation. Large synthetic equip runs into a growing equipment container therefore measure prototype stress, not the intended production cost of an indexed equipment-slot policy.
+
 ## Benchmark Harness
 
 Current server bridge benchmark:
@@ -144,9 +162,10 @@ Initial scenarios cover:
 - rejected out-of-range moves
 - accepted cross-container split-stack moves
 - accepted cross-container partial merge-stack moves
+- accepted cross-container equip-item moves
 - raw `DispatchDelta` fanout across 1000 viewers
 
-These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, split/merge, equipment rules, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.
+These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, richer equipment rules, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.
 
 ## Boundary Rules
 

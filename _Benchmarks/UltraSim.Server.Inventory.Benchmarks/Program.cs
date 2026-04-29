@@ -77,6 +77,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 
     yield return new BenchmarkScenario
     {
+        Name = "ApplyEquip_CrossContainer_1000",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunEquipScenario(1_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
         Name = "DispatchDelta_1000Viewers_10000",
         Category = "InventoryStore",
         Comparable = false,
@@ -220,6 +231,61 @@ static ScenarioMeasurement RunMergeScenario(int iterations)
     return new ScenarioMeasurement(iterations, checksum);
 }
 
+static ScenarioMeasurement RunEquipScenario(int iterations)
+{
+    var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_equip");
+    var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
+    var backpackItems = new InventoryItemSnapshot[iterations];
+    for (int i = 0; i < backpackItems.Length; i++)
+    {
+        backpackItems[i] = CreateItem(
+            $"item:bench_store_equip/sword_{i}",
+            InventoryPlacementDescriptor.List(i),
+            itemDefinitionId: "item.sword");
+    }
+
+    InventoryContainerSnapshot backpack = CreateContainer(
+        "container:bench_store_equip/backpack",
+        InventoryPlacementMode.List,
+        backpackItems);
+    InventoryContainerSnapshot equipment = CreateContainer(
+        "container:bench_store_equip/equipment",
+        InventoryPlacementMode.Slot);
+    StoreSuccess(store.AddContainer(backpack));
+    StoreSuccess(store.AddContainer(equipment));
+
+    var rules = new InventoryEquipItemMutationRules(
+        new AllowAllInventoryContainerAccessPolicy(),
+        new MaxItemsInventoryCapacityPolicy(maxItems: iterations + 1),
+        new PrefixInventoryEquipmentSlotPolicy("item.sword", "equipment:weapon/"),
+        new ToggleInventoryRangePolicy(allow: true));
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        var intent = new InventoryMutationIntent(
+            "corr:bench_store_equip/apply",
+            requester,
+            ClientSequence: i,
+            InventoryMutationKind.EquipItem,
+            backpack.ContainerId,
+            equipment.ContainerId,
+            $"item:bench_store_equip/sword_{i}",
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.Slot($"equipment:weapon/{i}"));
+        InventoryStoreOperationResult result = store.ApplyEquip(intent, rules);
+        if (!result.Succeeded || result.MutationResult is null || result.MutationResult.ResultKind != InventoryMutationResultKind.Accepted)
+        {
+            throw new InvalidOperationException(result.Error ?? result.MutationResult?.Message ?? "Equip failed.");
+        }
+
+        checksum += result.Dispatches.Count + result.MutationResult.ClientSequence;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
 static ScenarioMeasurement RunDispatchDeltaScenario(int iterations, int viewerCount)
 {
     var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_dispatch");
@@ -322,11 +388,12 @@ static InventoryItemSnapshot CreateItem(
     string itemId,
     InventoryPlacementDescriptor placement,
     long quantity = 1,
-    long maxStackQuantity = 1)
+    long maxStackQuantity = 1,
+    string itemDefinitionId = "item.benchmark")
 {
     return new InventoryItemSnapshot(
         itemId,
-        "item.benchmark",
+        itemDefinitionId,
         quantity,
         maxStackQuantity,
         placement);
@@ -459,5 +526,47 @@ internal sealed class SameDefinitionInventoryStackMergePolicy : IInventoryStackM
             : InventoryStackMergeDecision.Denied(
                 InventoryMutationFailureReason.InvalidQuantity,
                 "Destination stack does not have enough capacity.");
+    }
+}
+
+internal sealed class PrefixInventoryEquipmentSlotPolicy : IInventoryEquipmentSlotPolicy
+{
+    private readonly string _itemDefinitionId;
+    private readonly string _slotPrefix;
+
+    public PrefixInventoryEquipmentSlotPolicy(string itemDefinitionId, string slotPrefix)
+    {
+        _itemDefinitionId = itemDefinitionId;
+        _slotPrefix = slotPrefix;
+    }
+
+    public InventoryMutationRuleDecision CanEquip(
+        InventoryRequesterRef requester,
+        InventoryItemSnapshot item,
+        InventoryContainerSnapshot equipmentContainer,
+        InventoryPlacementDescriptor slotPlacement)
+    {
+        if (!string.Equals(item.ItemDefinitionId, _itemDefinitionId, StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(slotPlacement.SlotId) ||
+            !slotPlacement.SlotId.StartsWith(_slotPrefix, StringComparison.Ordinal))
+        {
+            return InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.RuleRejected,
+                "Item is not allowed in this equipment slot.");
+        }
+
+        for (int i = 0; i < equipmentContainer.Items.Count; i++)
+        {
+            InventoryItemSnapshot existing = equipmentContainer.Items[i];
+            if (existing.Placement.Mode == InventoryPlacementMode.Slot &&
+                string.Equals(existing.Placement.SlotId, slotPlacement.SlotId, StringComparison.Ordinal))
+            {
+                return InventoryMutationRuleDecision.Rejected(
+                    InventoryMutationFailureReason.Conflict,
+                    "Equipment slot is already occupied.");
+            }
+        }
+
+        return InventoryMutationRuleDecision.Accepted();
     }
 }

@@ -29,6 +29,9 @@ internal static class TestRunner
         Run(nameof(InMemoryInventoryStore_ApplyMergePartialMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplyMergePartialMutatesSnapshotsAndDispatchesScopedDeltas);
         Run(nameof(InMemoryInventoryStore_ApplyMergeFullQuantityRemovesSourceWithoutDuplication), InMemoryInventoryStore_ApplyMergeFullQuantityRemovesSourceWithoutDuplication);
         Run(nameof(InMemoryInventoryStore_ApplyMergeRejectedByRulesDoesNotPartiallyMutateSnapshots), InMemoryInventoryStore_ApplyMergeRejectedByRulesDoesNotPartiallyMutateSnapshots);
+        Run(nameof(InventoryEquipItemMutationRules_UsesSlotPolicyAccessRangeAndCapacity), InventoryEquipItemMutationRules_UsesSlotPolicyAccessRangeAndCapacity);
+        Run(nameof(InMemoryInventoryStore_ApplyEquipMovesItemIntoSlotContainer), InMemoryInventoryStore_ApplyEquipMovesItemIntoSlotContainer);
+        Run(nameof(InMemoryInventoryStore_ApplyEquipRejectedByRulesDoesNotMutateSnapshots), InMemoryInventoryStore_ApplyEquipRejectedByRulesDoesNotMutateSnapshots);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -1139,6 +1142,220 @@ internal static class TestRunner
         Assert.Equal(19L, unchangedDestination.Items[0].Quantity, "destination quantity after rejected merge");
     }
 
+    private static void InventoryEquipItemMutationRules_UsesSlotPolicyAccessRangeAndCapacity()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:equipper");
+        InventoryItemSnapshot sword = new InventoryItemSnapshot(
+            "item:sword/equip_rules",
+            "item.sword",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.List(0));
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:equip_rules/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:equipper"),
+            InventoryContainerLifecycle.Persistent,
+            [sword]);
+        InventoryContainerSnapshot equipment = CreateContainer(
+            "container:equip_rules/equipment",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:equipper"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Slot);
+        var intent = new InventoryMutationIntent(
+            "corr/equip/rules",
+            requester,
+            ClientSequence: 88,
+            InventoryMutationKind.EquipItem,
+            backpack.ContainerId,
+            equipment.ContainerId,
+            sword.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.Slot("equipment:weapon/mainhand"));
+        Assert.Valid(intent.Validate());
+
+        var access = new PublicTakePutAccessPolicy();
+        var range = new ToggleRangePolicy();
+        var slot = new SwordMainHandEquipmentSlotPolicy();
+        var capacity = new MaxItemCountCapacityPolicy(maxItems: 1);
+        var rules = new InventoryEquipItemMutationRules(access, capacity, slot, range);
+        InventoryMutationRuleContext context = new InventoryMutationRuleContext(
+            intent,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            backpack,
+            equipment,
+            sword,
+            DestinationItem: null);
+
+        InventoryMutationRuleDecision accepted = rules.Evaluate(context);
+        Assert.True(accepted.IsAccepted, "equip rule accepts baseline");
+
+        InventoryMutationRuleDecision wrongSlot = rules.Evaluate(context with
+        {
+            Intent = intent with { ProposedPlacement = InventoryPlacementDescriptor.Slot("equipment:ring/left") }
+        });
+        Assert.False(wrongSlot.IsAccepted, "equip rule rejects wrong slot");
+        Assert.Equal(InventoryMutationFailureReason.RuleRejected, wrongSlot.FailureReason, "wrong slot failure reason");
+
+        InventoryItemSnapshot occupiedSword = sword with
+        {
+            ItemInstanceId = "item:sword/equip_rules/occupied",
+            Placement = InventoryPlacementDescriptor.Slot("equipment:weapon/mainhand")
+        };
+        InventoryMutationRuleDecision occupied = rules.Evaluate(context with
+        {
+            DestinationContainer = equipment with { Items = [occupiedSword] }
+        });
+        Assert.False(occupied.IsAccepted, "equip rule rejects occupied slot");
+        Assert.Equal(InventoryMutationFailureReason.Conflict, occupied.FailureReason, "occupied slot failure reason");
+
+        range.Allow = false;
+        InventoryMutationRuleDecision outOfRange = rules.Evaluate(context);
+        Assert.False(outOfRange.IsAccepted, "equip rule range rejection");
+        Assert.Equal(InventoryMutationFailureReason.OutOfRange, outOfRange.FailureReason, "equip range failure reason");
+    }
+
+    private static void InMemoryInventoryStore_ApplyEquipMovesItemIntoSlotContainer()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:equip_apply");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot sword = new InventoryItemSnapshot(
+            "item:sword/equip_apply",
+            "item.sword",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.List(0));
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:equip_apply/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:equip_apply"),
+            InventoryContainerLifecycle.Persistent,
+            [sword]);
+        InventoryContainerSnapshot equipment = CreateContainer(
+            "container:equip_apply/equipment",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:equip_apply"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Slot);
+        Assert.StoreSuccess(store.AddContainer(backpack));
+        Assert.StoreSuccess(store.AddContainer(equipment));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:equip_apply/backpack",
+            backpack.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:equip_apply/equipment",
+            equipment.ContainerId,
+            requester,
+            InventoryAccessFlags.Read)));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:equip_apply",
+            requester,
+            ClientSequence: 89,
+            InventoryMutationKind.EquipItem,
+            backpack.ContainerId,
+            equipment.ContainerId,
+            sword.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.Slot("equipment:weapon/mainhand"));
+        var rules = new InventoryEquipItemMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 1),
+            new SwordMainHandEquipmentSlotPolicy(),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyEquip(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "equip mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Accepted, result.MutationResult!.ResultKind, "equip mutation result kind");
+        Assert.Equal(2, result.Dispatches.Count, "equip dispatch count");
+
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot updatedBackpack), "backpack after equip");
+        Assert.True(store.TryGetContainer(equipment.ContainerId, out InventoryContainerSnapshot updatedEquipment), "equipment after equip");
+        Assert.Equal(0, updatedBackpack.Items.Count, "backpack item count after equip");
+        Assert.Equal(1, updatedEquipment.Items.Count, "equipment item count after equip");
+        Assert.Equal(sword.ItemInstanceId, updatedEquipment.Items[0].ItemInstanceId, "equipped item id");
+        Assert.Equal(InventoryPlacementMode.Slot, updatedEquipment.Items[0].Placement.Mode, "equipped placement mode");
+        Assert.Equal("equipment:weapon/mainhand", updatedEquipment.Items[0].Placement.SlotId!, "equipped slot id");
+
+        Assert.Equal(InventoryContainerDeltaKind.ItemRemoved, result.Dispatches[0].Delta.Kind, "equip source delta kind");
+        Assert.Contains(result.Dispatches[0].RecipientViewIds, "view:equip_apply/backpack", "equip source recipient");
+        Assert.NotContains(result.Dispatches[0].RecipientViewIds, "view:equip_apply/equipment", "equip source excludes equipment");
+
+        Assert.Equal(InventoryContainerDeltaKind.ItemAdded, result.Dispatches[1].Delta.Kind, "equip destination delta kind");
+        Assert.Contains(result.Dispatches[1].RecipientViewIds, "view:equip_apply/equipment", "equip destination recipient");
+        Assert.NotContains(result.Dispatches[1].RecipientViewIds, "view:equip_apply/backpack", "equip destination excludes backpack");
+    }
+
+    private static void InMemoryInventoryStore_ApplyEquipRejectedByRulesDoesNotMutateSnapshots()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:equip_reject");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+
+        InventoryItemSnapshot sword = new InventoryItemSnapshot(
+            "item:sword/equip_reject",
+            "item.sword",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.List(0));
+        InventoryItemSnapshot occupied = new InventoryItemSnapshot(
+            "item:sword/equip_reject/occupied",
+            "item.sword",
+            Quantity: 1,
+            MaxStackQuantity: 1,
+            InventoryPlacementDescriptor.Slot("equipment:weapon/mainhand"));
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:equip_reject/backpack",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:equip_reject"),
+            InventoryContainerLifecycle.Persistent,
+            [sword]);
+        InventoryContainerSnapshot equipment = CreateContainer(
+            "container:equip_reject/equipment",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:equip_reject"),
+            InventoryContainerLifecycle.Persistent,
+            InventoryPlacementMode.Slot,
+            [occupied]);
+        Assert.StoreSuccess(store.AddContainer(backpack));
+        Assert.StoreSuccess(store.AddContainer(equipment));
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr:equip_reject",
+            requester,
+            ClientSequence: 90,
+            InventoryMutationKind.EquipItem,
+            backpack.ContainerId,
+            equipment.ContainerId,
+            sword.ItemInstanceId,
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.Slot("equipment:weapon/mainhand"));
+        var rules = new InventoryEquipItemMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 2),
+            new SwordMainHandEquipmentSlotPolicy(),
+            new ToggleRangePolicy());
+
+        InventoryStoreOperationResult result = store.ApplyEquip(intent, rules);
+        Assert.StoreSuccess(result);
+        Assert.True(result.MutationResult is not null, "rejected equip mutation result present");
+        Assert.Equal(InventoryMutationResultKind.Rejected, result.MutationResult!.ResultKind, "rejected equip result kind");
+        Assert.Equal(InventoryMutationFailureReason.Conflict, result.MutationResult.FailureReason, "rejected equip reason");
+        Assert.Equal(0, result.Dispatches.Count, "rejected equip dispatch count");
+
+        Assert.True(store.TryGetContainer(backpack.ContainerId, out InventoryContainerSnapshot unchangedBackpack), "backpack after rejected equip");
+        Assert.True(store.TryGetContainer(equipment.ContainerId, out InventoryContainerSnapshot unchangedEquipment), "equipment after rejected equip");
+        Assert.Equal(1, unchangedBackpack.Items.Count, "backpack item count after rejected equip");
+        Assert.Equal(sword.ItemInstanceId, unchangedBackpack.Items[0].ItemInstanceId, "backpack item after rejected equip");
+        Assert.Equal(1, unchangedEquipment.Items.Count, "equipment item count after rejected equip");
+        Assert.Equal(occupied.ItemInstanceId, unchangedEquipment.Items[0].ItemInstanceId, "equipment item after rejected equip");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
@@ -1444,6 +1661,44 @@ internal sealed class ToggleRangePolicy : IInventoryInteractionRangePolicy
             : InventoryMutationRuleDecision.Rejected(
                 InventoryMutationFailureReason.OutOfRange,
                 "Requester is out of range.");
+    }
+}
+
+internal sealed class SwordMainHandEquipmentSlotPolicy : IInventoryEquipmentSlotPolicy
+{
+    public InventoryMutationRuleDecision CanEquip(
+        InventoryRequesterRef requester,
+        InventoryItemSnapshot item,
+        InventoryContainerSnapshot equipmentContainer,
+        InventoryPlacementDescriptor slotPlacement)
+    {
+        if (!string.Equals(item.ItemDefinitionId, "item.sword", StringComparison.Ordinal))
+        {
+            return InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.RuleRejected,
+                "Only swords can use this test equipment policy.");
+        }
+
+        if (!string.Equals(slotPlacement.SlotId, "equipment:weapon/mainhand", StringComparison.Ordinal))
+        {
+            return InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.RuleRejected,
+                "Sword must be equipped in the main-hand weapon slot.");
+        }
+
+        for (int i = 0; i < equipmentContainer.Items.Count; i++)
+        {
+            InventoryItemSnapshot existing = equipmentContainer.Items[i];
+            if (existing.Placement.Mode == InventoryPlacementMode.Slot &&
+                string.Equals(existing.Placement.SlotId, slotPlacement.SlotId, StringComparison.Ordinal))
+            {
+                return InventoryMutationRuleDecision.Rejected(
+                    InventoryMutationFailureReason.Conflict,
+                    "Equipment slot is already occupied.");
+            }
+        }
+
+        return InventoryMutationRuleDecision.Accepted();
     }
 }
 

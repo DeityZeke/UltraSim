@@ -343,6 +343,127 @@ public sealed class InMemoryInventoryStore
         return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
     }
 
+    public InventoryStoreOperationResult ApplyEquip(InventoryMutationIntent intent, IInventoryMutationRules rules)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        InventoryValidationResult intentValidation = intent.Validate();
+        if (!intentValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(intentValidation.Error);
+        }
+
+        if (intent.Kind != InventoryMutationKind.EquipItem)
+        {
+            return InventoryStoreOperationResult.Failure("ApplyEquip only accepts EquipItem intents.");
+        }
+
+        _containers.TryGetValue(intent.SourceContainerId!, out InventoryContainerSnapshot? sourceContainer);
+        _containers.TryGetValue(intent.DestinationContainerId!, out InventoryContainerSnapshot? destinationContainer);
+        InventoryItemSnapshot? sourceItem = null;
+        InventoryItemSnapshot? destinationItem = null;
+        int sourceItemIndex = -1;
+
+        if (sourceContainer is not null)
+        {
+            sourceItemIndex = FindItemIndex(sourceContainer, intent.SourceItemInstanceId!);
+            if (sourceItemIndex >= 0)
+            {
+                sourceItem = sourceContainer.Items[sourceItemIndex];
+            }
+        }
+
+        if (destinationContainer is not null && !string.IsNullOrWhiteSpace(intent.DestinationItemInstanceId))
+        {
+            int destinationItemIndex = FindItemIndex(destinationContainer, intent.DestinationItemInstanceId);
+            if (destinationItemIndex >= 0)
+            {
+                destinationItem = destinationContainer.Items[destinationItemIndex];
+            }
+        }
+
+        InventoryRuntimeRefResolution requester = _refResolver.ResolveRequester(intent.Requester);
+        InventoryMutationRuleDecision decision = rules.Evaluate(new InventoryMutationRuleContext(
+            intent,
+            requester,
+            sourceContainer,
+            destinationContainer,
+            sourceItem,
+            destinationItem));
+
+        string[] affectedContainerIds = BuildAffectedContainerIds(intent.SourceContainerId!, intent.DestinationContainerId!);
+        InventoryMutationResult mutationResult = decision.ToResult(intent, affectedContainerIds);
+        InventoryValidationResult resultValidation = mutationResult.Validate();
+        if (!resultValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(resultValidation.Error);
+        }
+
+        if (!decision.IsAccepted)
+        {
+            return InventoryStoreOperationResult.Success(mutationResult: mutationResult);
+        }
+
+        if (sourceContainer is null ||
+            destinationContainer is null ||
+            sourceItem is null ||
+            sourceItemIndex < 0 ||
+            intent.ProposedPlacement is null)
+        {
+            return InventoryStoreOperationResult.Failure("Accepted equip decision requires existing source/destination containers, source item, and slot placement.");
+        }
+
+        InventoryItemSnapshot equippedItem = sourceItem with { Placement = intent.ProposedPlacement };
+        var dispatches = new List<InventoryStoreDeltaDispatch>(capacity: 2);
+        InventoryContainerSnapshot updatedSource = RemoveItem(sourceContainer, sourceItemIndex);
+        InventoryContainerSnapshot updatedDestination = AddItem(destinationContainer, equippedItem);
+        InventoryValidationResult sourceValidation = updatedSource.Validate();
+        if (!sourceValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(sourceValidation.Error);
+        }
+
+        InventoryValidationResult destinationValidation = updatedDestination.Validate();
+        if (!destinationValidation.IsValid)
+        {
+            return InventoryStoreOperationResult.Failure(destinationValidation.Error);
+        }
+
+        long sourceRevision = SetContainerSnapshot(updatedSource);
+        long destinationRevision = SetContainerSnapshot(updatedDestination);
+
+        InventoryStoreOperationResult removedDispatch = DispatchDelta(new InventoryContainerDelta(
+            $"delta:{intent.CorrelationId}/equip_removed/{equippedItem.ItemInstanceId}",
+            updatedSource.ContainerId,
+            sourceRevision,
+            InventoryContainerDeltaKind.ItemRemoved,
+            equippedItem.ItemInstanceId,
+            Item: null,
+            PreviousPlacement: null,
+            CurrentPlacement: null,
+            QuantityDelta: 0,
+            InventoryAccessFlags.Read));
+        if (!removedDispatch.Succeeded)
+        {
+            return removedDispatch;
+        }
+
+        dispatches.AddRange(removedDispatch.Dispatches);
+        InventoryStoreOperationResult addedDispatch = DispatchDelta(CreateItemAddedDelta(
+            intent,
+            updatedDestination.ContainerId,
+            destinationRevision,
+            equippedItem,
+            "equip_added"));
+        if (!addedDispatch.Succeeded)
+        {
+            return addedDispatch;
+        }
+
+        dispatches.AddRange(addedDispatch.Dispatches);
+        return InventoryStoreOperationResult.Success(dispatches: dispatches, mutationResult: mutationResult);
+    }
+
     public InventoryStoreOperationResult ApplySplit(InventoryMutationIntent intent, IInventoryMutationRules rules)
     {
         ArgumentNullException.ThrowIfNull(rules);
