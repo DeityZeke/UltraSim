@@ -121,6 +121,13 @@ Schema cache identity must include:
 
 The client must not accept a "close enough" schema. A mismatch is a cache miss or a protocol error, not a best-effort render.
 
+Identity matching and structural compatibility are separate checks:
+
+- identity matching answers "is this model/update for the exact schema/catalog instance I have cached?"
+- structural compatibility answers "do these values fit the payload slots declared by that already-validated schema?"
+
+The runtime should validate a schema once, create a reusable compatibility context from it, and then apply hot model/delta compatibility checks against that context. Do not re-walk the full schema tree for every slot patch, telemetry batch, or small server-forced refresh.
+
 Cold path UX must be explicit. The first open of a panel type can require schema transfer, validation, cache write, and then render. For startup-critical panels such as login and character select, prefer proactive schema push during the early session/admission flow once the server knows the client UI protocol version. If the schema is not available yet, the client should show a trusted local loading/pending panel with the same modal/input-blocking behavior as the eventual panel.
 
 Pending exclusive panels occupy their exclusive group before the real server panel is renderable. For example, if login closes and character select has not arrived yet, the client should show a trusted local `SessionAdmission` loading panel that blocks gameplay input and reserves the `SessionAdmission` exclusive slot until the server opens login, character select, character create, or a disconnect/error panel.

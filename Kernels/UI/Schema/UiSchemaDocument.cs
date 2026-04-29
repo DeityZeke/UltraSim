@@ -5,6 +5,7 @@ public sealed record UiSchemaDocument(
     UiPanelMetadata Metadata,
     int RootNodeId,
     IReadOnlyList<UiSchemaNodeDescriptor> Nodes,
+    IReadOnlyList<UiPayloadSlotDescriptor> PayloadSlots,
     IReadOnlyList<UiActionDescriptor> Actions,
     IReadOnlyList<UiStateBindingDescriptor> StateBindings,
     UiCatalogIdentity? CatalogIdentity = null)
@@ -54,6 +55,12 @@ public sealed record UiSchemaDocument(
         if (StateBindings.Count > actualLimits.MaxStateBindings)
         {
             return UiValidationResult.Invalid($"Schema cannot contain more than {actualLimits.MaxStateBindings} state bindings.");
+        }
+
+        UiValidationResult payloadSlotResult = ValidatePayloadSlots();
+        if (!payloadSlotResult.IsValid)
+        {
+            return payloadSlotResult;
         }
 
         UiValidationResult rendererResult = rendererCapabilities?.Validate() ?? UiValidationResult.Valid;
@@ -113,6 +120,12 @@ public sealed record UiSchemaDocument(
         if (!bindingResult.IsValid)
         {
             return bindingResult;
+        }
+
+        UiValidationResult slotReferenceResult = ValidateNodeSlotReferences();
+        if (!slotReferenceResult.IsValid)
+        {
+            return slotReferenceResult;
         }
 
         return UiValidationResult.Valid;
@@ -235,6 +248,51 @@ public sealed record UiSchemaDocument(
             {
                 return UiValidationResult.Invalid($"Duplicate state binding slot id '{binding.SlotId}'.");
             }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private UiValidationResult ValidatePayloadSlots()
+    {
+        var slotIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < PayloadSlots.Count; i++)
+        {
+            UiPayloadSlotDescriptor slot = PayloadSlots[i];
+            UiValidationResult result = slot.Validate();
+            if (!result.IsValid)
+            {
+                return result;
+            }
+
+            if (!slotIds.Add(slot.SlotId))
+            {
+                return UiValidationResult.Invalid($"Duplicate payload slot id '{slot.SlotId}'.");
+            }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private UiValidationResult ValidateNodeSlotReferences()
+    {
+        var payloadSlots = new HashSet<string>(PayloadSlots.Select(static slot => slot.SlotId), StringComparer.Ordinal);
+        var stateBindingSlots = new HashSet<string>(StateBindings.Select(static binding => binding.SlotId), StringComparer.Ordinal);
+
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            string? slotId = Nodes[i].SlotId;
+            if (string.IsNullOrWhiteSpace(slotId))
+            {
+                continue;
+            }
+
+            if (payloadSlots.Contains(slotId) || stateBindingSlots.Contains(slotId))
+            {
+                continue;
+            }
+
+            return UiValidationResult.Invalid($"Node slot '{slotId}' is not declared as a payload slot or state binding.");
         }
 
         return UiValidationResult.Valid;

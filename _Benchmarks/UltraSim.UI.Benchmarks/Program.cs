@@ -84,6 +84,30 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         IterationCount = 5,
         Execute = () => RunSchemaDocumentValidationScenario(1_000),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ModelDocument_ValidateAgainstSchema_1000Slots",
+        Category = "UiModelCompatibility",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunModelDocumentValidationScenario(1_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ModelUpdate_ValidateSlotPatch_1000Slots",
+        Category = "UiModelCompatibility",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunModelUpdateValidationScenario(1_000),
+    };
+
+    yield return CreateModelUpdateContextScenario(1_000);
 }
 
 static ScenarioMeasurement RunSchemaIdentityScenario(int iterations)
@@ -245,6 +269,102 @@ static ScenarioMeasurement RunSchemaDocumentValidationScenario(int nodeCount)
     return new ScenarioMeasurement(nodeCount, schema.Nodes.Count + schema.RootNodeId);
 }
 
+static ScenarioMeasurement RunModelDocumentValidationScenario(int slotCount)
+{
+    (UiSchemaDocument schema, UiModelDocument model) = CreateLargeModelCompatibilityPair(slotCount);
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = slotCount + 8,
+        MaxChildrenPerNode = slotCount + 8,
+    };
+
+    UiValidationResult result = model.ValidateAgainst(schema, limits);
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(slotCount, model.Values.Count + schema.PayloadSlots.Count);
+}
+
+static ScenarioMeasurement RunModelUpdateValidationScenario(int slotCount)
+{
+    (UiSchemaDocument schema, UiModelDocument model) = CreateLargeModelCompatibilityPair(slotCount);
+    var update = new UiModelUpdateDocument(
+        "panel/bench",
+        schema.Identity,
+        schema.CatalogIdentity,
+        Sequence: 1,
+        UiModelUpdateKind.SlotPatch,
+        ScopeId: null,
+        SlotValues: model.Values,
+        ClearedSlotIds: [],
+        RowDeltas: []);
+
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = slotCount + 8,
+        MaxChildrenPerNode = slotCount + 8,
+    };
+
+    UiValidationResult result = update.ValidateAgainst(schema, limits);
+    if (!result.IsValid)
+    {
+        throw new InvalidOperationException(result.Error);
+    }
+
+    return new ScenarioMeasurement(slotCount, update.SlotValues.Count + schema.PayloadSlots.Count);
+}
+
+static BenchmarkScenario CreateModelUpdateContextScenario(int slotCount)
+{
+    (UiSchemaDocument schema, UiModelDocument model) = CreateLargeModelCompatibilityPair(slotCount);
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = slotCount + 8,
+        MaxChildrenPerNode = slotCount + 8,
+    };
+    UiValidationResult contextResult = UiSchemaCompatibilityContext.TryCreate(
+        schema,
+        out UiSchemaCompatibilityContext? context,
+        limits);
+    if (!contextResult.IsValid || context is null)
+    {
+        throw new InvalidOperationException(contextResult.Error);
+    }
+
+    var update = new UiModelUpdateDocument(
+        "panel/bench",
+        schema.Identity,
+        schema.CatalogIdentity,
+        Sequence: 1,
+        UiModelUpdateKind.SlotPatch,
+        ScopeId: null,
+        SlotValues: model.Values,
+        ClearedSlotIds: [],
+        RowDeltas: []);
+
+    return new BenchmarkScenario
+    {
+        Name = "ModelUpdate_ValidateSlotPatchAgainstContext_1000Slots",
+        Category = "UiModelCompatibility",
+        Comparable = false,
+        Scale = slotCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            UiValidationResult result = update.ValidateAgainst(context);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(result.Error);
+            }
+
+            return new ScenarioMeasurement(slotCount, update.SlotValues.Count + context.PayloadSlots.Count);
+        },
+    };
+}
+
 static UiSchemaDocument CreateLargeSchemaDocument(int nodeCount)
 {
     if (!UiSchemaIdentity.TryCreate(
@@ -260,6 +380,7 @@ static UiSchemaDocument CreateLargeSchemaDocument(int nodeCount)
     }
 
     var nodes = new UiSchemaNodeDescriptor[nodeCount];
+    var payloadSlots = new List<UiPayloadSlotDescriptor>(nodeCount / 3 + 1);
     for (int i = 0; i < nodeCount; i++)
     {
         int nodeId = i + 1;
@@ -269,6 +390,11 @@ static UiSchemaDocument CreateLargeSchemaDocument(int nodeCount)
                 ? UiNodeKind.DynamicText
                 : UiNodeKind.Column;
         string? slotId = kind == UiNodeKind.DynamicText ? $"slot.{nodeId}" : null;
+        if (slotId is not null)
+        {
+            payloadSlots.Add(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, Required: false));
+        }
+
         IReadOnlyList<int> children = nodeId < nodeCount ? [nodeId + 1] : [];
         nodes[i] = new UiSchemaNodeDescriptor(nodeId, kind, slotId, kind == UiNodeKind.DynamicText ? "Value" : null, children);
     }
@@ -290,6 +416,63 @@ static UiSchemaDocument CreateLargeSchemaDocument(int nodeCount)
         metadata,
         RootNodeId: 1,
         Nodes: nodes,
+        PayloadSlots: payloadSlots,
         Actions: [],
         StateBindings: []);
+}
+
+static (UiSchemaDocument Schema, UiModelDocument Model) CreateLargeModelCompatibilityPair(int slotCount)
+{
+    if (!UiSchemaIdentity.TryCreate(
+        "server/main",
+        "bench.large_model",
+        1,
+        new string('e', 64),
+        1,
+        out UiSchemaIdentity identity,
+        out string error))
+    {
+        throw new InvalidOperationException(error);
+    }
+
+    var children = new int[slotCount];
+    var nodes = new UiSchemaNodeDescriptor[slotCount + 1];
+    var payloadSlots = new UiPayloadSlotDescriptor[slotCount];
+    var values = new UiModelSlotValue[slotCount];
+
+    for (int i = 0; i < slotCount; i++)
+    {
+        int nodeId = i + 2;
+        string slotId = $"model.slot.{i}";
+        children[i] = nodeId;
+        nodes[i + 1] = new UiSchemaNodeDescriptor(nodeId, UiNodeKind.DynamicText, slotId, "Value", []);
+        payloadSlots[i] = new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, Required: true, MaxStringLength: 64);
+        values[i] = UiModelSlotValue.String(slotId, $"value-{i}");
+    }
+
+    nodes[0] = new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, children);
+
+    var metadata = new UiPanelMetadata(
+        "bench.large_model",
+        UiSurfaceTarget.Menu,
+        UiFocusMode.Normal,
+        null,
+        1,
+        UiOpenPolicy.New,
+        UiBackPolicy.None,
+        UiTooltipPolicy.Allow,
+        BlocksGameplayInput: false,
+        PersistenceKey: null);
+
+    var schema = new UiSchemaDocument(
+        identity,
+        metadata,
+        RootNodeId: 1,
+        Nodes: nodes,
+        PayloadSlots: payloadSlots,
+        Actions: [],
+        StateBindings: []);
+
+    var model = new UiModelDocument(identity, values);
+    return (schema, model);
 }

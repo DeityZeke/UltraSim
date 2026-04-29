@@ -15,6 +15,13 @@ internal static class TestRunner
         Run(nameof(UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities), UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities);
         Run(nameof(UiSchemaDocument_RejectsInvalidTreeShapes), UiSchemaDocument_RejectsInvalidTreeShapes);
         Run(nameof(UiSchemaDocument_RejectsDuplicateActionsBindingsAndMissingCapabilities), UiSchemaDocument_RejectsDuplicateActionsBindingsAndMissingCapabilities);
+        Run(nameof(UiModelDocument_ValidatesPayloadSlotsAgainstSchema), UiModelDocument_ValidatesPayloadSlotsAgainstSchema);
+        Run(nameof(UiModelDocument_RejectsMissingUnknownDuplicateAndWrongTypeSlots), UiModelDocument_RejectsMissingUnknownDuplicateAndWrongTypeSlots);
+        Run(nameof(UiModelSlotValue_ValidatesStringAndNumberConstraints), UiModelSlotValue_ValidatesStringAndNumberConstraints);
+        Run(nameof(UiSchemaCompatibilityContext_ReusesValidatedSchemaForModelAndUpdateChecks), UiSchemaCompatibilityContext_ReusesValidatedSchemaForModelAndUpdateChecks);
+        Run(nameof(UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility), UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility);
+        Run(nameof(UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates), UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates);
+        Run(nameof(UiModelUpdateDocument_RejectsInvalidUpdateShapes), UiModelUpdateDocument_RejectsInvalidUpdateShapes);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
 
@@ -201,6 +208,20 @@ internal static class TestRunner
         Assert.Equal(schema.Actions.Count, decodedSchema.Actions.Count);
         Assert.Equal(schema.StateBindings.Count, decodedSchema.StateBindings.Count);
         Assert.Valid(decodedSchema.Validate(rendererCapabilities: CreateRendererCapabilities()));
+
+        UiModelDocument model = CreateValidModelDocument(schema);
+        encoded = UiContractJsonCodec.Encode(model);
+        UiModelDocument decodedModel = UiContractJsonCodec.Decode<UiModelDocument>(encoded);
+        Assert.Equal(model.SchemaIdentity, decodedModel.SchemaIdentity);
+        Assert.Equal(model.Values.Count, decodedModel.Values.Count);
+        Assert.Valid(decodedModel.ValidateAgainst(schema));
+
+        UiModelUpdateDocument update = CreateValidSlotPatch(schema);
+        encoded = UiContractJsonCodec.Encode(update);
+        UiModelUpdateDocument decodedUpdate = UiContractJsonCodec.Decode<UiModelUpdateDocument>(encoded);
+        Assert.Equal(update.PanelInstanceId, decodedUpdate.PanelInstanceId);
+        Assert.Equal(update.Sequence, decodedUpdate.Sequence);
+        Assert.Valid(decodedUpdate.ValidateAgainst(schema));
     }
 
     private static void UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities()
@@ -234,9 +255,7 @@ internal static class TestRunner
             Nodes =
             [
                 valid.Nodes[0] with { Children = [2, 999] },
-                valid.Nodes[1],
-                valid.Nodes[2],
-                valid.Nodes[3],
+                .. valid.Nodes.Skip(1),
             ]
         };
         Assert.InvalidContains(missingChild.Validate(), "does not exist");
@@ -247,8 +266,7 @@ internal static class TestRunner
             [
                 valid.Nodes[0] with { Children = [2] },
                 valid.Nodes[1] with { Children = [1] },
-                valid.Nodes[2],
-                valid.Nodes[3],
+                .. valid.Nodes.Skip(2),
             ]
         };
         Assert.InvalidContains(cycle.Validate(), "cycle");
@@ -258,10 +276,8 @@ internal static class TestRunner
             Nodes =
             [
                 valid.Nodes[0],
-                valid.Nodes[1],
-                valid.Nodes[2],
-                valid.Nodes[3],
-                new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, "orphan", []),
+                .. valid.Nodes.Skip(1),
+                new UiSchemaNodeDescriptor(99, UiNodeKind.Text, null, "orphan", []),
             ]
         };
         Assert.InvalidContains(unreachable.Validate(), "not reachable");
@@ -301,10 +317,245 @@ internal static class TestRunner
                 valid.Nodes[0],
                 valid.Nodes[1],
                 valid.Nodes[2] with { RequiredCapabilities = UiCapabilityFlags.FixedLayoutV1 },
-                valid.Nodes[3],
+                .. valid.Nodes.Skip(3),
             ]
         };
         Assert.InvalidContains(fixedLayoutRequired.Validate(rendererCapabilities: CreateRendererCapabilities()), "missing required");
+    }
+
+    private static void UiModelDocument_ValidatesPayloadSlotsAgainstSchema()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        UiModelDocument model = CreateValidModelDocument(schema);
+
+        Assert.Valid(model.ValidateAgainst(schema));
+    }
+
+    private static void UiModelDocument_RejectsMissingUnknownDuplicateAndWrongTypeSlots()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        UiModelDocument valid = CreateValidModelDocument(schema);
+
+        var missing = valid with
+        {
+            Values = [UiModelSlotValue.Integer("levelValue", 12)]
+        };
+        Assert.InvalidContains(missing.ValidateAgainst(schema), "missing required");
+
+        var unknown = valid with
+        {
+            Values = [.. valid.Values, UiModelSlotValue.String("unknownSlot", "nope")]
+        };
+        Assert.InvalidContains(unknown.ValidateAgainst(schema), "unknown slot");
+
+        var duplicate = valid with
+        {
+            Values = [.. valid.Values, UiModelSlotValue.String("titleText", "again")]
+        };
+        Assert.InvalidContains(duplicate.ValidateAgainst(schema), "duplicate slot");
+
+        var wrongType = valid with
+        {
+            Values =
+            [
+                UiModelSlotValue.Integer("titleText", 42),
+                UiModelSlotValue.Integer("levelValue", 12),
+            ]
+        };
+        Assert.InvalidContains(wrongType.ValidateAgainst(schema), "expected String");
+
+        Assert.True(UiSchemaIdentity.TryCreate(
+            "server/main",
+            "other.panel",
+            1,
+            new string('e', 64),
+            1,
+            out UiSchemaIdentity otherIdentity,
+            out string error), error);
+        var wrongIdentity = valid with { SchemaIdentity = otherIdentity };
+        Assert.InvalidContains(wrongIdentity.ValidateAgainst(schema), "identity");
+    }
+
+    private static void UiModelSlotValue_ValidatesStringAndNumberConstraints()
+    {
+        var text = new UiPayloadSlotDescriptor("name", UiModelValueKind.String, Required: true, MaxStringLength: 4);
+        Assert.Valid(UiModelSlotValue.String("name", "Rune").Validate(text));
+        Assert.InvalidContains(UiModelSlotValue.String("name", "TooLong").Validate(text), "cannot exceed");
+
+        var number = new UiPayloadSlotDescriptor("progress", UiModelValueKind.Number, Required: true, MinNumber: 0, MaxNumber: 1);
+        Assert.Valid(UiModelSlotValue.Number("progress", 0.5).Validate(number));
+        Assert.InvalidContains(UiModelSlotValue.Number("progress", double.NaN).Validate(number), "finite");
+        Assert.InvalidContains(UiModelSlotValue.Number("progress", 1.5).Validate(number), "exceeds");
+
+        var optional = new UiPayloadSlotDescriptor("optionalText", UiModelValueKind.String, Required: false);
+        Assert.Valid(UiModelSlotValue.Null("optionalText").Validate(optional));
+
+        var required = optional with { Required = true };
+        Assert.InvalidContains(UiModelSlotValue.Null("optionalText").Validate(required), "Required");
+    }
+
+    private static void UiSchemaCompatibilityContext_ReusesValidatedSchemaForModelAndUpdateChecks()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        UiModelDocument model = CreateValidModelDocument(schema);
+        Assert.Valid(model.ValidateAgainst(context!));
+        Assert.Valid(CreateValidSlotPatch(schema).ValidateAgainst(context!));
+    }
+
+    private static void UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+
+        Assert.True(UiSchemaIdentity.TryCreate(
+            schema.Identity.ServerIdentity,
+            schema.Identity.PanelType,
+            schema.Identity.SchemaRevision + 1,
+            new string('f', 64),
+            schema.Identity.ProtocolVersion,
+            out UiSchemaIdentity otherIdentity,
+            out string error), error);
+
+        UiModelDocument sameSlotsWrongIdentity = CreateValidModelDocument(schema) with
+        {
+            SchemaIdentity = otherIdentity
+        };
+        Assert.InvalidContains(sameSlotsWrongIdentity.ValidateAgainst(context!), "identity");
+
+        UiModelDocument rightIdentityWrongSlots = CreateValidModelDocument(schema) with
+        {
+            Values = [UiModelSlotValue.String("unknownSlot", "nope")]
+        };
+        Assert.InvalidContains(rightIdentityWrongSlots.ValidateAgainst(context!), "unknown slot");
+    }
+
+    private static void UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+
+        var full = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 1,
+            UiModelUpdateKind.FullModel,
+            ScopeId: null,
+            SlotValues: CreateValidModelDocument(schema).Values,
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        Assert.Valid(full.ValidateAgainst(schema));
+
+        Assert.Valid(CreateValidSlotPatch(schema).ValidateAgainst(schema));
+
+        var scoped = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 3,
+            UiModelUpdateKind.ScopedPatch,
+            ScopeId: "skills/page/2",
+            SlotValues: [UiModelSlotValue.Integer("levelValue", 14)],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        Assert.Valid(scoped.ValidateAgainst(schema));
+
+        var rowUpdate = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 4,
+            UiModelUpdateKind.RepeaterRows,
+            ScopeId: null,
+            SlotValues: [],
+            ClearedSlotIds: [],
+            RowDeltas:
+            [
+                new UiRepeaterRowDelta(
+                    "characters",
+                    "character/1",
+                    UiRepeaterRowUpdateKind.Add,
+                    [UiModelSlotValue.String("name", "Lira")]),
+                new UiRepeaterRowDelta(
+                    "characters",
+                    "character/2",
+                    UiRepeaterRowUpdateKind.Remove,
+                    []),
+            ]);
+        Assert.Valid(rowUpdate.ValidateAgainst(schema));
+
+        var superseded = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 5,
+            UiModelUpdateKind.SchemaSuperseded,
+            ScopeId: null,
+            SlotValues: [],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        Assert.Valid(superseded.ValidateAgainst(schema));
+    }
+
+    private static void UiModelUpdateDocument_RejectsInvalidUpdateShapes()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+
+        var patchUnknown = CreateValidSlotPatch(schema) with
+        {
+            SlotValues = [UiModelSlotValue.String("missing", "nope")]
+        };
+        Assert.InvalidContains(patchUnknown.ValidateAgainst(schema), "unknown slot");
+
+        var patchClearRequired = CreateValidSlotPatch(schema) with
+        {
+            SlotValues = [],
+            ClearedSlotIds = ["titleText"]
+        };
+        Assert.InvalidContains(patchClearRequired.ValidateAgainst(schema), "cannot clear required");
+
+        var scopedMissingScope = CreateValidSlotPatch(schema) with
+        {
+            Kind = UiModelUpdateKind.ScopedPatch
+        };
+        Assert.InvalidContains(scopedMissingScope.ValidateAgainst(schema), "scope id");
+
+        var rowWithDuplicateSlots = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 9,
+            UiModelUpdateKind.RepeaterRows,
+            ScopeId: null,
+            SlotValues: [],
+            ClearedSlotIds: [],
+            RowDeltas:
+            [
+                new UiRepeaterRowDelta(
+                    "characters",
+                    "character/1",
+                    UiRepeaterRowUpdateKind.Update,
+                    [
+                        UiModelSlotValue.String("name", "A"),
+                        UiModelSlotValue.String("name", "B"),
+                    ]),
+            ]);
+        Assert.InvalidContains(rowWithDuplicateSlots.ValidateAgainst(schema), "duplicate slot");
+
+        var fullMissingRequired = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 10,
+            UiModelUpdateKind.FullModel,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.Integer("levelValue", 12)],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        Assert.InvalidContains(fullMissingRequired.ValidateAgainst(schema), "missing required");
     }
 
     private static void UiNodeKind_ReservesExpectedEarlyNodeIds()
@@ -347,9 +598,16 @@ internal static class TestRunner
             Nodes:
             [
                 new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
-                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4]),
+                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4, 5, 6]),
                 new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "healthText", "Health", []),
                 new UiSchemaNodeDescriptor(4, UiNodeKind.Button, null, "Open", []),
+                new UiSchemaNodeDescriptor(5, UiNodeKind.DynamicText, "titleText", "Title", []),
+                new UiSchemaNodeDescriptor(6, UiNodeKind.DynamicText, "levelValue", "Level", []),
+            ],
+            PayloadSlots:
+            [
+                new UiPayloadSlotDescriptor("titleText", UiModelValueKind.String, Required: true, MaxStringLength: 64),
+                new UiPayloadSlotDescriptor("levelValue", UiModelValueKind.Integer, Required: false, MinNumber: 1, MaxNumber: 100),
             ],
             Actions:
             [
@@ -375,6 +633,31 @@ internal static class TestRunner
                         UiBindingFallbackBehavior.Stale,
                         1500))
             ]);
+    }
+
+    private static UiModelDocument CreateValidModelDocument(UiSchemaDocument schema)
+    {
+        return new UiModelDocument(
+            schema.Identity,
+            Values:
+            [
+                UiModelSlotValue.String("titleText", "Status"),
+                UiModelSlotValue.Integer("levelValue", 12),
+            ]);
+    }
+
+    private static UiModelUpdateDocument CreateValidSlotPatch(UiSchemaDocument schema)
+    {
+        return new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 2,
+            UiModelUpdateKind.SlotPatch,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.Integer("levelValue", 13)],
+            ClearedSlotIds: [],
+            RowDeltas: []);
     }
 
     private static UiRendererCapabilities CreateRendererCapabilities()
@@ -429,6 +712,14 @@ internal static class Assert
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
         {
             throw new InvalidOperationException($"Expected '{expected}', got '{actual}'.");
+        }
+    }
+
+    public static void NotNull(object? value)
+    {
+        if (value is null)
+        {
+            throw new InvalidOperationException("Expected non-null value.");
         }
     }
 
