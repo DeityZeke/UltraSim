@@ -11,6 +11,8 @@ internal static class TestRunner
         Run(nameof(EcsInventoryRuntimeRefResolver_UsesPackedEntityAndRejectsStaleHandles), EcsInventoryRuntimeRefResolver_UsesPackedEntityAndRejectsStaleHandles);
         Run(nameof(InventoryRuntimeRefResolver_FakeAndEcsResolversAgreeOnIntentRequesterShape), InventoryRuntimeRefResolver_FakeAndEcsResolversAgreeOnIntentRequesterShape);
         Run(nameof(EcsInventoryRuntimeRefResolver_LeavesNonEcsRefsAsExternalRuntimeIds), EcsInventoryRuntimeRefResolver_LeavesNonEcsRefsAsExternalRuntimeIds);
+        Run(nameof(InventoryRulesFoundation_FakePoliciesEvaluateMutationAccessAndStackMerge), InventoryRulesFoundation_FakePoliciesEvaluateMutationAccessAndStackMerge);
+        Run(nameof(DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy), DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy);
 
         Console.WriteLine("All server inventory bridge tests passed.");
     }
@@ -105,9 +107,138 @@ internal static class TestRunner
         Assert.NotResolved(resolver.ResolveOwner(invalidEntityOwner), InventoryRuntimeRefResolutionKind.InvalidEntityFormat);
     }
 
+    private static void InventoryRulesFoundation_FakePoliciesEvaluateMutationAccessAndStackMerge()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:alpha");
+        InventoryContainerSnapshot backpack = CreateContainer(
+            "container:backpack/rules",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:alpha"),
+            InventoryContainerLifecycle.Persistent,
+            [
+                new InventoryItemSnapshot(
+                    "item:apple/source",
+                    "item.apple",
+                    Quantity: 5,
+                    MaxStackQuantity: 20,
+                    InventoryPlacementDescriptor.List(0)),
+                new InventoryItemSnapshot(
+                    "item:apple/destination",
+                    "item.apple",
+                    Quantity: 18,
+                    MaxStackQuantity: 20,
+                    InventoryPlacementDescriptor.List(1)),
+            ]);
+
+        var accessPolicy = new PublicReadTakeAccessPolicy();
+        InventoryContainerAccessDecision access = accessPolicy.Evaluate(new InventoryContainerAccessRequest(
+            requester,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            backpack,
+            InventoryAccessFlags.Read | InventoryAccessFlags.Take));
+        Assert.True(access.IsAllowed, "public read/take access");
+
+        InventoryContainerAccessDecision denied = accessPolicy.Evaluate(new InventoryContainerAccessRequest(
+            requester,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            backpack,
+            InventoryAccessFlags.Mutate));
+        Assert.False(denied.IsAllowed, "public mutate access");
+        Assert.Equal(InventoryMutationFailureReason.Unauthorized, denied.FailureReason, "denied access failure reason");
+
+        var mergePolicy = new SameDefinitionStackMergePolicy();
+        InventoryStackMergeDecision merge = mergePolicy.Evaluate(new InventoryStackMergeRequest(
+            requester,
+            backpack.Items[0],
+            backpack.Items[1],
+            RequestedQuantity: 5,
+            SourceContainer: backpack,
+            DestinationContainer: backpack));
+        Assert.True(merge.CanMerge, "stack merge allowed");
+        Assert.Equal(2L, merge.QuantityToMove, "stack merge capped quantity");
+
+        InventoryMutationIntent intent = new InventoryMutationIntent(
+            "corr/rules/merge",
+            requester,
+            ClientSequence: 19,
+            InventoryMutationKind.MergeStack,
+            SourceContainerId: backpack.ContainerId,
+            DestinationContainerId: backpack.ContainerId,
+            SourceItemInstanceId: backpack.Items[0].ItemInstanceId,
+            DestinationItemInstanceId: backpack.Items[1].ItemInstanceId,
+            Quantity: 5,
+            ProposedPlacement: null);
+        Assert.Valid(intent.Validate());
+
+        var mutationRules = new MergeMutationRules(mergePolicy);
+        InventoryMutationRuleDecision decision = mutationRules.Evaluate(new InventoryMutationRuleContext(
+            intent,
+            InventoryRuntimeRefResolution.Success(InventoryResolvedRuntimeRef.ForRequester(requester)),
+            backpack,
+            backpack,
+            backpack.Items[0],
+            backpack.Items[1]));
+        Assert.True(decision.IsAccepted, "merge mutation decision");
+
+        InventoryMutationResult result = decision.ToResult(intent, [backpack.ContainerId]);
+        Assert.Valid(result.Validate());
+        Assert.Equal(intent.ClientSequence, result.ClientSequence, "mutation result client sequence");
+    }
+
+    private static void DefaultInventoryOwnerLifetimePolicy_MapsStaleEntityOwnersToCloseReleaseOrDestroy()
+    {
+        var policy = new DefaultInventoryOwnerLifetimePolicy();
+        var owner = new InventoryOwnerRef(InventoryOwnerKind.Entity, "entity:4294967297");
+        InventoryRuntimeRefResolution staleOwner = InventoryRuntimeRefResolution.Failure(
+            InventoryRuntimeRefResolutionKind.EntityNotAlive,
+            "owner despawned");
+
+        InventoryOwnerInvalidationDecision persistent = policy.Evaluate(
+            CreateContainer("container:persistent/entity", owner, InventoryContainerLifecycle.Persistent),
+            staleOwner);
+        Assert.Equal(InventoryOwnerInvalidationAction.CloseViewers, persistent.Action, "persistent owner invalidation");
+        Assert.True(persistent.ShouldCloseViewers, "persistent closes viewers");
+        Assert.False(persistent.ShouldDestroyContainer, "persistent destroy flag");
+
+        InventoryOwnerInvalidationDecision runtime = policy.Evaluate(
+            CreateContainer("container:runtime/entity", owner, InventoryContainerLifecycle.Runtime),
+            staleOwner);
+        Assert.Equal(InventoryOwnerInvalidationAction.CloseViewersAndDestroyContainer, runtime.Action, "runtime owner invalidation");
+        Assert.True(runtime.ShouldDestroyContainer, "runtime destroy flag");
+
+        InventoryOwnerInvalidationDecision transactional = policy.Evaluate(
+            CreateContainer("container:trade/entity", owner, InventoryContainerLifecycle.Transactional),
+            staleOwner);
+        Assert.Equal(InventoryOwnerInvalidationAction.CloseViewersAndReleaseTransactions, transactional.Action, "transaction owner invalidation");
+        Assert.True(transactional.ShouldReleaseTransactions, "transaction release flag");
+
+        InventoryOwnerInvalidationDecision accountFailure = policy.Evaluate(
+            CreateContainer(
+                "container:account/bank",
+                new InventoryOwnerRef(InventoryOwnerKind.Account, "account:alpha"),
+                InventoryContainerLifecycle.Persistent),
+            InventoryRuntimeRefResolution.Failure(InventoryRuntimeRefResolutionKind.NotFound, "missing account"));
+        Assert.Equal(InventoryOwnerInvalidationAction.CloseViewers, accountFailure.Action, "external owner invalidation");
+    }
+
     private static World CreateWorld()
     {
         return new World(new EcsSchemaBuilder().Build());
+    }
+
+    private static InventoryContainerSnapshot CreateContainer(
+        string containerId,
+        InventoryOwnerRef owner,
+        InventoryContainerLifecycle lifecycle,
+        IReadOnlyList<InventoryItemSnapshot>? items = null)
+    {
+        return new InventoryContainerSnapshot(
+            containerId,
+            "container.test",
+            owner,
+            lifecycle,
+            InventoryPlacementMode.List,
+            [InventoryPermissionDescriptor.PublicReadTake],
+            items ?? []);
     }
 
     private static void Run(string name, Action test)
@@ -231,6 +362,95 @@ internal sealed class FakeInventoryRuntimeRefResolver : IInventoryRuntimeRefReso
     }
 }
 
+internal sealed class PublicReadTakeAccessPolicy : IInventoryContainerAccessPolicy
+{
+    public InventoryContainerAccessDecision Evaluate(in InventoryContainerAccessRequest request)
+    {
+        if (!request.RequesterResolution.IsResolved)
+        {
+            return InventoryContainerAccessDecision.Denied(
+                InventoryMutationFailureReason.InvalidRequester,
+                "Requester did not resolve.");
+        }
+
+        for (int i = 0; i < request.Container.Permissions.Count; i++)
+        {
+            InventoryPermissionDescriptor permission = request.Container.Permissions[i];
+            if (permission.Kind == InventoryPermissionKind.Public &&
+                (permission.Access & request.RequestedAccess) == request.RequestedAccess)
+            {
+                return InventoryContainerAccessDecision.Allowed(permission.Access);
+            }
+        }
+
+        return InventoryContainerAccessDecision.Denied(
+            InventoryMutationFailureReason.Unauthorized,
+            "Requested access was not granted.");
+    }
+}
+
+internal sealed class SameDefinitionStackMergePolicy : IInventoryStackMergePolicy
+{
+    public InventoryStackMergeDecision Evaluate(in InventoryStackMergeRequest request)
+    {
+        if (!string.Equals(request.SourceItem.ItemDefinitionId, request.DestinationItem.ItemDefinitionId, StringComparison.Ordinal))
+        {
+            return InventoryStackMergeDecision.Denied(
+                InventoryMutationFailureReason.RuleRejected,
+                "Item definitions do not match.");
+        }
+
+        long capacity = request.DestinationItem.MaxStackQuantity - request.DestinationItem.Quantity;
+        long quantity = Math.Min(request.RequestedQuantity, capacity);
+        return quantity > 0
+            ? InventoryStackMergeDecision.Allowed(quantity)
+            : InventoryStackMergeDecision.Denied(
+                InventoryMutationFailureReason.RuleRejected,
+                "Destination stack is full.");
+    }
+}
+
+internal sealed class MergeMutationRules : IInventoryMutationRules
+{
+    private readonly IInventoryStackMergePolicy _mergePolicy;
+
+    public MergeMutationRules(IInventoryStackMergePolicy mergePolicy)
+    {
+        _mergePolicy = mergePolicy;
+    }
+
+    public InventoryMutationRuleDecision Evaluate(in InventoryMutationRuleContext context)
+    {
+        if (!context.Requester.IsResolved)
+        {
+            return InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.InvalidRequester,
+                "Requester did not resolve.");
+        }
+
+        if (context.Intent.Kind != InventoryMutationKind.MergeStack ||
+            context.SourceItem is null ||
+            context.DestinationItem is null)
+        {
+            return InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.RuleRejected,
+                "Only complete merge intents are supported by this fake policy.");
+        }
+
+        InventoryStackMergeDecision merge = _mergePolicy.Evaluate(new InventoryStackMergeRequest(
+            context.Intent.Requester,
+            context.SourceItem,
+            context.DestinationItem,
+            context.Intent.Quantity,
+            context.SourceContainer,
+            context.DestinationContainer));
+
+        return merge.CanMerge
+            ? InventoryMutationRuleDecision.Accepted()
+            : InventoryMutationRuleDecision.Rejected(merge.FailureReason, merge.Message);
+    }
+}
+
 internal static class Assert
 {
     public static void Valid(InventoryValidationResult result)
@@ -287,6 +507,30 @@ internal static class Assert
     }
 
     public static void Equal(uint expected, uint actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(long expected, long actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(InventoryMutationFailureReason expected, InventoryMutationFailureReason actual, string label)
+    {
+        if (expected != actual)
+        {
+            throw new InvalidOperationException($"Expected {label} to equal {expected}, got {actual}.");
+        }
+    }
+
+    public static void Equal(InventoryOwnerInvalidationAction expected, InventoryOwnerInvalidationAction actual, string label)
     {
         if (expected != actual)
         {
