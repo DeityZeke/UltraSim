@@ -12,6 +12,8 @@ internal static class TestRunner
         Run(nameof(UiRendererCapabilities_ValidatesLimitsAndUnknownFlags), UiRendererCapabilities_ValidatesLimitsAndUnknownFlags);
         Run(nameof(UiActionDescriptor_ValidatesContextMenuShape), UiActionDescriptor_ValidatesContextMenuShape);
         Run(nameof(UiActionDescriptor_ValidatesServerAuthoredAvailability), UiActionDescriptor_ValidatesServerAuthoredAvailability);
+        Run(nameof(UiActionMenuDescriptor_ValidatesContextAndRadialMenus), UiActionMenuDescriptor_ValidatesContextAndRadialMenus);
+        Run(nameof(UiActionMenuDescriptor_RejectsInvalidCapabilitiesAndDuplicateActions), UiActionMenuDescriptor_RejectsInvalidCapabilitiesAndDuplicateActions);
         Run(nameof(UiStateBindingDescriptor_ValidatesPerBindingFallback), UiStateBindingDescriptor_ValidatesPerBindingFallback);
         Run(nameof(UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities), UiSchemaDocument_ValidatesReachableTreeActionsBindingsAndCapabilities);
         Run(nameof(UiSchemaDocument_RejectsInvalidTreeShapes), UiSchemaDocument_RejectsInvalidTreeShapes);
@@ -145,6 +147,10 @@ internal static class TestRunner
 
         var nested = action with { ActionId = "entity.talk.more", ContextKind = UiActionContextKind.Entity, ChildMenuKey = "talk/more" };
         Assert.Valid(nested.Validate());
+
+        var grouped = action with { ActionId = "item.drop", MenuGroupKey = "inventory/actions" };
+        Assert.Valid(grouped.Validate());
+        Assert.InvalidContains((grouped with { MenuGroupKey = "../bad" }).Validate(), "MenuGroupKey");
     }
 
     private static void UiActionDescriptor_ValidatesServerAuthoredAvailability()
@@ -167,6 +173,79 @@ internal static class TestRunner
             Availability = UiActionAvailability.Available,
             AvailabilityReason = "not needed"
         }).Validate(), "Available actions");
+    }
+
+    private static void UiActionMenuDescriptor_ValidatesContextAndRadialMenus()
+    {
+        var contextMenu = CreateValidContextMenu();
+        Assert.Valid(contextMenu.Validate(CreateRendererCapabilities()));
+
+        var radial = contextMenu with
+        {
+            MenuKey = "entity/interaction/root",
+            PresentationKind = UiActionMenuPresentationKind.RadialMenu,
+            ContextKind = UiActionContextKind.Entity,
+            ContextId = "entity:local_target",
+            CloseOnFocusLost = false,
+            Actions =
+            [
+                new UiActionDescriptor(
+                    "entity.talk",
+                    "Talk",
+                    "icons/actions/talk",
+                    UiActionRole.Primary,
+                    UiActionContextKind.Entity,
+                    RequiresConfirm: false,
+                    ChildMenuKey: "entity/interaction/talk",
+                    MenuGroupKey: "social"),
+                new UiActionDescriptor(
+                    "entity.trade",
+                    "Trade",
+                    null,
+                    UiActionRole.Normal,
+                    UiActionContextKind.Entity,
+                    RequiresConfirm: false,
+                    ChildMenuKey: null,
+                    UiActionAvailability.OutOfRange,
+                    "Move closer",
+                    MenuGroupKey: "commerce"),
+            ]
+        };
+        Assert.Valid(radial.Validate(CreateRendererCapabilities()));
+    }
+
+    private static void UiActionMenuDescriptor_RejectsInvalidCapabilitiesAndDuplicateActions()
+    {
+        UiActionMenuDescriptor menu = CreateValidContextMenu();
+        Assert.InvalidContains((menu with { MenuKey = "" }).Validate(), "MenuKey");
+        Assert.InvalidContains((menu with { PresentationKind = (UiActionMenuPresentationKind)99 }).Validate(), "presentation");
+        Assert.InvalidContains((menu with { ContextId = "../bad" }).Validate(), "ContextId");
+        Assert.InvalidContains((menu with { Actions = [] }).Validate(), "at least one action");
+
+        var duplicate = menu with
+        {
+            Actions =
+            [
+                menu.Actions[0],
+                menu.Actions[0] with { Label = "Equip Again" },
+            ]
+        };
+        Assert.InvalidContains(duplicate.Validate(), "duplicate action");
+
+        var tooMany = menu with
+        {
+            Actions = Enumerable.Range(0, UiActionMenuDescriptor.MaxMenuActions + 1)
+                .Select(i => menu.Actions[0] with { ActionId = $"item.action.{i}", Label = $"Action {i}" })
+                .ToArray()
+        };
+        Assert.InvalidContains(tooMany.Validate(), "more than");
+
+        var radial = menu with { PresentationKind = UiActionMenuPresentationKind.RadialMenu };
+        var noRadialCapability = CreateRendererCapabilities() with
+        {
+            CapabilityFlags = UiCapabilityFlags.ContextMenusV1
+        };
+        Assert.InvalidContains(radial.Validate(noRadialCapability), "RadialMenusV1");
     }
 
     private static void UiStateBindingDescriptor_ValidatesPerBindingFallback()
@@ -224,6 +303,13 @@ internal static class TestRunner
         UiActionDescriptor decodedAction = UiContractJsonCodec.Decode<UiActionDescriptor>(encoded);
         Assert.Equal(action, decodedAction);
         Assert.Valid(decodedAction.Validate());
+
+        UiActionMenuDescriptor menu = CreateValidContextMenu();
+        encoded = UiContractJsonCodec.Encode(menu);
+        UiActionMenuDescriptor decodedMenu = UiContractJsonCodec.Decode<UiActionMenuDescriptor>(encoded);
+        Assert.Equal(menu.MenuKey, decodedMenu.MenuKey);
+        Assert.Equal(menu.Actions.Count, decodedMenu.Actions.Count);
+        Assert.Valid(decodedMenu.Validate(CreateRendererCapabilities()));
 
         UiSchemaDocument schema = CreateValidSchemaDocument();
         encoded = UiContractJsonCodec.Encode(schema);
@@ -877,11 +963,41 @@ internal static class TestRunner
             ]);
     }
 
+    private static UiActionMenuDescriptor CreateValidContextMenu()
+    {
+        return new UiActionMenuDescriptor(
+            "item/context/root",
+            UiActionMenuPresentationKind.ContextMenu,
+            UiActionContextKind.Item,
+            ContextId: "item:iron_sword/1",
+            Actions:
+            [
+                new UiActionDescriptor(
+                    "item.equip",
+                    "Equip",
+                    "icons/items/equip",
+                    UiActionRole.Primary,
+                    UiActionContextKind.Item,
+                    RequiresConfirm: false,
+                    ChildMenuKey: null,
+                    MenuGroupKey: "inventory"),
+                new UiActionDescriptor(
+                    "item.destroy",
+                    "Destroy",
+                    null,
+                    UiActionRole.Destructive,
+                    UiActionContextKind.Item,
+                    RequiresConfirm: true,
+                    ChildMenuKey: null,
+                    MenuGroupKey: "danger"),
+            ]);
+    }
+
     private static UiRendererCapabilities CreateRendererCapabilities()
     {
         return new UiRendererCapabilities(
             ProtocolVersion: 1,
-            CapabilityFlags: UiCapabilityFlags.ContextMenusV1 | UiCapabilityFlags.RuntimeStateBindingsV1,
+            CapabilityFlags: UiCapabilityFlags.ContextMenusV1 | UiCapabilityFlags.RadialMenusV1 | UiCapabilityFlags.RuntimeStateBindingsV1,
             MaxSchemaBytes: 64 * 1024,
             MaxModelBytes: 16 * 1024,
             MaxNodeCount: 512,

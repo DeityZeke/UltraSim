@@ -52,6 +52,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         Execute = () => RunActionDescriptorScenario(10_000),
     };
 
+    yield return new BenchmarkScenario
+    {
+        Name = "ActionMenuDescriptor_Validate_10000",
+        Category = "UiAction",
+        Comparable = false,
+        Scale = 10_000,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () => RunActionMenuDescriptorScenario(10_000),
+    };
+
     yield return CreateActionRequestValidationScenario(10_000);
 
     yield return CreateActionResultValidationScenario(10_000);
@@ -190,6 +201,70 @@ static ScenarioMeasurement RunActionDescriptorScenario(int iterations)
         }
 
         checksum += action.ActionId.Length + i;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunActionMenuDescriptorScenario(int iterations)
+{
+    var capabilities = new UiRendererCapabilities(
+        ProtocolVersion: 1,
+        CapabilityFlags: UiCapabilityFlags.ContextMenusV1 | UiCapabilityFlags.RadialMenusV1,
+        MaxSchemaBytes: 64 * 1024,
+        MaxModelBytes: 16 * 1024,
+        MaxNodeCount: 512,
+        MaxTreeDepth: 32,
+        MaxRepeaterRows: 256,
+        MaxTableColumns: 24);
+    var menu = new UiActionMenuDescriptor(
+        "entity/interaction/root",
+        UiActionMenuPresentationKind.RadialMenu,
+        UiActionContextKind.Entity,
+        ContextId: "entity:target_42",
+        Actions:
+        [
+            new UiActionDescriptor(
+                "entity.talk",
+                "Talk",
+                "icons/actions/talk",
+                UiActionRole.Primary,
+                UiActionContextKind.Entity,
+                RequiresConfirm: false,
+                ChildMenuKey: "entity/interaction/talk",
+                MenuGroupKey: "social"),
+            new UiActionDescriptor(
+                "entity.trade",
+                "Trade",
+                null,
+                UiActionRole.Normal,
+                UiActionContextKind.Entity,
+                RequiresConfirm: false,
+                ChildMenuKey: null,
+                UiActionAvailability.OutOfRange,
+                "Move closer",
+                MenuGroupKey: "commerce"),
+            new UiActionDescriptor(
+                "entity.admin.inspect",
+                "Inspect",
+                null,
+                UiActionRole.Debug,
+                UiActionContextKind.Admin,
+                RequiresConfirm: false,
+                ChildMenuKey: null,
+                MenuGroupKey: "debug"),
+        ]);
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        UiValidationResult result = menu.Validate(capabilities);
+        if (!result.IsValid)
+        {
+            throw new InvalidOperationException(result.Error);
+        }
+
+        checksum += menu.Actions.Count + i;
     }
 
     return new ScenarioMeasurement(iterations, checksum);

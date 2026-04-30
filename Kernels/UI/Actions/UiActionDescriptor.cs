@@ -9,7 +9,8 @@ public sealed record UiActionDescriptor(
     bool RequiresConfirm,
     string? ChildMenuKey,
     UiActionAvailability Availability = UiActionAvailability.Available,
-    string? AvailabilityReason = null)
+    string? AvailabilityReason = null,
+    string? MenuGroupKey = null)
 {
     public UiValidationResult Validate()
     {
@@ -69,6 +70,15 @@ public sealed record UiActionDescriptor(
             if (!childResult.IsValid)
             {
                 return childResult;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(MenuGroupKey))
+        {
+            UiValidationResult groupResult = UiValidation.ValidateStableId(MenuGroupKey, nameof(MenuGroupKey), 96);
+            if (!groupResult.IsValid)
+            {
+                return groupResult;
             }
         }
 
