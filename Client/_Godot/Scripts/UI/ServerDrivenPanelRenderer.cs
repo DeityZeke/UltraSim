@@ -6,7 +6,11 @@ namespace UltraSim.Client.Godot.UI;
 
 internal static class ServerDrivenPanelRenderer
 {
-    public static bool TryBuild(ClientUiPanelInstance panel, out Control root, out string error)
+    public static bool TryBuild(
+        ClientUiPanelInstance panel,
+        Action<UiActionDescriptor>? actionPressed,
+        out Control root,
+        out string error)
     {
         ArgumentNullException.ThrowIfNull(panel);
 
@@ -17,7 +21,14 @@ internal static class ServerDrivenPanelRenderer
             nodeById[node.NodeId] = node;
         }
 
-        if (!TryBuildNode(panel.Schema.RootNodeId, nodeById, out root!, out error))
+        var modelBySlot = new Dictionary<string, UiModelSlotValue>(panel.Model.Values.Count, StringComparer.Ordinal);
+        for (int i = 0; i < panel.Model.Values.Count; i++)
+        {
+            UiModelSlotValue value = panel.Model.Values[i];
+            modelBySlot[value.SlotId] = value;
+        }
+
+        if (!TryBuildNode(panel.Schema.RootNodeId, panel.CompatibilityContext, nodeById, modelBySlot, actionPressed, out root!, out error))
         {
             root = new Control();
             return false;
@@ -32,7 +43,10 @@ internal static class ServerDrivenPanelRenderer
 
     private static bool TryBuildNode(
         int nodeId,
+        UiSchemaCompatibilityContext compatibilityContext,
         IReadOnlyDictionary<int, UiSchemaNodeDescriptor> nodeById,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot,
+        Action<UiActionDescriptor>? actionPressed,
         out Control control,
         out string error)
     {
@@ -49,17 +63,14 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Row => CreateRow(node),
             UiNodeKind.Column => CreateColumn(node),
             UiNodeKind.Text => CreateText(node),
-            UiNodeKind.Button => CreateButton(node),
-            _ => new Control(),
+            UiNodeKind.DynamicText => CreateDynamicText(node, modelBySlot),
+            UiNodeKind.Button => CreateButton(node, compatibilityContext, actionPressed),
+            UiNodeKind.Separator => CreateSeparator(node),
+            UiNodeKind.Spacer => CreateSpacer(node),
+            _ => CreateUnsupportedPlaceholder(node),
         };
 
-        if (node.Kind is not (UiNodeKind.Panel or UiNodeKind.Row or UiNodeKind.Column or UiNodeKind.Text or UiNodeKind.Button))
-        {
-            error = $"UI node kind '{node.Kind}' is not supported by the minimal Godot renderer.";
-            return false;
-        }
-
-        if (node.Children.Count > 0 && control is Label or Button)
+        if (node.Children.Count > 0 && control is Label or Button or HSeparator)
         {
             error = $"UI node kind '{node.Kind}' cannot host child controls in the minimal Godot renderer.";
             return false;
@@ -80,7 +91,14 @@ internal static class ServerDrivenPanelRenderer
 
         for (int i = 0; i < node.Children.Count; i++)
         {
-            if (!TryBuildNode(node.Children[i], nodeById, out Control child, out error))
+            if (!TryBuildNode(
+                node.Children[i],
+                compatibilityContext,
+                nodeById,
+                modelBySlot,
+                actionPressed,
+                out Control child,
+                out error))
             {
                 control.QueueFree();
                 return false;
@@ -142,14 +160,99 @@ internal static class ServerDrivenPanelRenderer
         };
     }
 
-    private static Button CreateButton(UiSchemaNodeDescriptor node)
+    private static Label CreateDynamicText(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
     {
-        return new Button
+        string text = node.Text ?? string.Empty;
+        string? slotId = node.SlotId;
+        if (!string.IsNullOrWhiteSpace(slotId)
+            && modelBySlot.TryGetValue(slotId, out UiModelSlotValue? value)
+            && value is not null)
         {
-            Name = MakeNodeName("Button", node.NodeId),
-            Text = node.Text ?? "Button",
+            text = FormatModelValue(value);
+        }
+
+        return new Label
+        {
+            Name = MakeNodeName("DynamicText", node.NodeId),
+            Text = text,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+    }
+
+    private static Button CreateButton(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        Action<UiActionDescriptor>? actionPressed)
+    {
+        UiActionDescriptor? action = null;
+        if (!string.IsNullOrWhiteSpace(node.ActionId))
+        {
+            _ = compatibilityContext.TryGetAction(node.ActionId, out action);
+        }
+
+        var button = new Button
+        {
+            Name = MakeNodeName("Button", node.NodeId),
+            Text = node.Text ?? action?.Label ?? "Button",
+            Disabled = action is null || action.Availability != UiActionAvailability.Available,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        if (action is not null && actionPressed is not null)
+        {
+            button.Pressed += () => actionPressed(action);
+        }
+
+        return button;
+    }
+
+    private static HSeparator CreateSeparator(UiSchemaNodeDescriptor node)
+    {
+        return new HSeparator
+        {
+            Name = MakeNodeName("Separator", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        };
+    }
+
+    private static Control CreateSpacer(UiSchemaNodeDescriptor node)
+    {
+        return new Control
+        {
+            Name = MakeNodeName("Spacer", node.NodeId),
+            CustomMinimumSize = new Vector2(0.0f, 8.0f),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+    }
+
+    private static Control CreateUnsupportedPlaceholder(UiSchemaNodeDescriptor node)
+    {
+        return new VBoxContainer
+        {
+            Name = MakeNodeName($"Unsupported_{node.Kind}", node.NodeId),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+    }
+
+    private static string FormatModelValue(UiModelSlotValue value)
+    {
+        return value.Kind switch
+        {
+            UiModelValueKind.String => value.StringValue ?? string.Empty,
+            UiModelValueKind.Boolean => value.BooleanValue ? "True" : "False",
+            UiModelValueKind.Integer => value.IntegerValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            UiModelValueKind.Number => value.NumberValue.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            _ => string.Empty,
         };
     }
 

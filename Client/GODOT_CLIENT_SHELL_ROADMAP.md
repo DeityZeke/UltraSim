@@ -819,6 +819,7 @@ The pre-schema client shell gate is validated, and the server-driven UI path is 
 - capability flags and renderer capability record
 - panel metadata
 - action/context descriptor shape
+- explicit `ActionId` binding on action-capable schema nodes such as buttons
 - action availability, request, and result contracts:
   - client sequence echo
   - server-authored unavailable/stale/out-of-range state
@@ -864,14 +865,14 @@ First UI benchmark report:
 Current client/Godot bridge status:
 
 - `Client/Core/UI/ClientUiPanelRegistry` opens panels through the in-memory definition cache, retains validated schema and compatibility context per instance, validates action requests, and applies full/patch/repeater model updates with sequence tracking.
-- `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` is the first minimal renderer bridge. It renders only static `Panel`, `Row`, `Column`, `Text`, and `Button` nodes from a validated `ClientUiPanelInstance`.
+- `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` is the first minimal renderer bridge. It renders `Panel`, `Row`, `Column`, static `Text`, model-backed `DynamicText`, `Button`, `Separator`, and `Spacer` nodes from a validated `ClientUiPanelInstance`; unsupported node kinds degrade to inert placeholders.
 - `MenuCanvasManager` can mount, replace, close, and clear server-driven panels on separate menu/modal/exclusive lanes.
+- Godot buttons bound with `ActionId` produce validated client action route results through `ClientUiPanelRegistry.ValidateActionRequest`.
 
 Next G6/UI steps:
 
-1. Add dynamic text binding from model slots into rendered labels.
-2. Add action callback routing from Godot buttons back into `ClientUiPanelRegistry.ValidateActionRequest`.
-3. Add renderer-side model update/re-render or diff application for open instances.
-4. Add server-driven tooltip/context menu rendering after basic panel action flow is proven.
+1. Add renderer-side model update/re-render or diff application for open instances.
+2. Add an actual message-box/login-panel smoke that exercises cold open, render, button press, and validated outbound action.
+3. Add server-driven tooltip/context menu rendering after basic panel action flow is proven.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.

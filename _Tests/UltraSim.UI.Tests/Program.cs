@@ -477,6 +477,28 @@ internal static class TestRunner
             ]
         };
         Assert.InvalidContains(fixedLayoutRequired.Validate(rendererCapabilities: CreateRendererCapabilities()), "missing required");
+
+        UiSchemaDocument missingNodeAction = valid with
+        {
+            Nodes =
+            [
+                .. valid.Nodes.Select(static node => node.Kind == UiNodeKind.Button
+                    ? node with { ActionId = "missing.action" }
+                    : node)
+            ]
+        };
+        Assert.InvalidContains(missingNodeAction.Validate(rendererCapabilities: CreateRendererCapabilities()), "not declared");
+
+        UiSchemaDocument actionOnText = valid with
+        {
+            Nodes =
+            [
+                .. valid.Nodes.Select(static node => node.Kind == UiNodeKind.Text || node.Kind == UiNodeKind.DynamicText
+                    ? node with { ActionId = "hud.open_character" }
+                    : node)
+            ]
+        };
+        Assert.InvalidContains(actionOnText.Validate(rendererCapabilities: CreateRendererCapabilities()), "cannot declare");
     }
 
     private static void UiModelDocument_ValidatesPayloadSlotsAgainstSchema()
@@ -1066,7 +1088,7 @@ internal static class TestRunner
                 new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
                 new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4, 5, 6]),
                 new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "healthText", "Health", []),
-                new UiSchemaNodeDescriptor(4, UiNodeKind.Button, null, "Open", []),
+                new UiSchemaNodeDescriptor(4, UiNodeKind.Button, null, "Open", [], ActionId: "hud.open_character"),
                 new UiSchemaNodeDescriptor(5, UiNodeKind.DynamicText, "titleText", "Title", []),
                 new UiSchemaNodeDescriptor(6, UiNodeKind.DynamicText, "levelValue", "Level", []),
             ],

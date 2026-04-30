@@ -128,6 +128,12 @@ public sealed record UiSchemaDocument(
             return slotReferenceResult;
         }
 
+        UiValidationResult actionReferenceResult = ValidateNodeActionReferences();
+        if (!actionReferenceResult.IsValid)
+        {
+            return actionReferenceResult;
+        }
+
         return UiValidationResult.Valid;
     }
 
@@ -293,6 +299,32 @@ public sealed record UiSchemaDocument(
             }
 
             return UiValidationResult.Invalid($"Node slot '{slotId}' is not declared as a payload slot or state binding.");
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private UiValidationResult ValidateNodeActionReferences()
+    {
+        var actionIds = new HashSet<string>(Actions.Select(static action => action.ActionId), StringComparer.Ordinal);
+
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = Nodes[i];
+            if (string.IsNullOrWhiteSpace(node.ActionId))
+            {
+                continue;
+            }
+
+            if (node.Kind is not (UiNodeKind.Button or UiNodeKind.IconButton))
+            {
+                return UiValidationResult.Invalid($"Node kind '{node.Kind}' cannot declare an action id.");
+            }
+
+            if (!actionIds.Contains(node.ActionId))
+            {
+                return UiValidationResult.Invalid($"Node action '{node.ActionId}' is not declared in schema actions.");
+            }
         }
 
         return UiValidationResult.Valid;

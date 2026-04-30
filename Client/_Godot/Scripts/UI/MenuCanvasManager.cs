@@ -19,13 +19,16 @@ public partial class MenuCanvasManager : CanvasLayer
     public event Action? DisconnectRequested;
     public event Action? PreviewRequested;
     public event Action<string>? ChatSubmitted;
+    public event Action<ClientUiActionRouteResult>? ServerDrivenActionRouted;
 
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
+    private long _nextServerDrivenActionSequence;
 
     public bool IsMenuOpen => _appShell?.Visible == true;
     public bool HasServerDrivenPanels => _serverDrivenPanels.Count > 0;
     public bool BlocksGameplayInput => IsMenuOpen || _blockingServerDrivenPanels.Count > 0 || _chatPanel?.HasInputFocus == true;
+    public ClientUiPanelRegistry? ServerDrivenPanelRegistry { get; set; }
 
     public override void _Ready()
     {
@@ -55,7 +58,11 @@ public partial class MenuCanvasManager : CanvasLayer
             return false;
         }
 
-        if (!ServerDrivenPanelRenderer.TryBuild(panel, out Control renderedPanel, out error))
+        if (!ServerDrivenPanelRenderer.TryBuild(
+            panel,
+            action => RouteServerDrivenAction(panel, action),
+            out Control renderedPanel,
+            out error))
         {
             return false;
         }
@@ -283,6 +290,26 @@ public partial class MenuCanvasManager : CanvasLayer
         }
 
         ApplyNavigation();
+    }
+
+    private void RouteServerDrivenAction(ClientUiPanelInstance panel, UiActionDescriptor action)
+    {
+        if (ServerDrivenPanelRegistry is null)
+        {
+            ServerDrivenActionRouted?.Invoke(ClientUiActionRouteResult.Rejected("Server-driven UI action registry is not attached."));
+            return;
+        }
+
+        var request = new UiActionRequestDocument(
+            panel.PanelInstanceId,
+            panel.SchemaIdentity,
+            panel.CatalogIdentity,
+            ++_nextServerDrivenActionSequence,
+            action.ActionId,
+            action.ContextKind,
+            ContextId: null,
+            FieldValues: []);
+        ServerDrivenActionRouted?.Invoke(ServerDrivenPanelRegistry.ValidateActionRequest(request));
     }
 
     private void ApplyNavigation()

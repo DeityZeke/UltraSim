@@ -68,8 +68,10 @@ What now exists:
   - first server-driven UI renderer bridge:
     - `MenuCanvasManager` hosts server-driven menu, modal, and exclusive surface lanes separately
     - validated open panel instances can mount into Godot controls
-    - initial static renderer supports `Panel`, `Row`, `Column`, `Text`, and `Button`
-    - dynamic text, repeaters, inventory viewers, tooltips, and action callbacks are intentionally deferred to the next renderer slices
+    - initial renderer supports `Panel`, `Row`, `Column`, `Text`, `DynamicText`, `Button`, `Separator`, and `Spacer`
+    - unsupported node kinds degrade to inert placeholders instead of crashing older clients
+    - button presses route through the retained panel instance and `ClientUiPanelRegistry.ValidateActionRequest`
+    - repeaters, inventory viewers, tooltips, and network send callbacks are intentionally deferred to the next renderer slices
 
 Current benchmark note:
 

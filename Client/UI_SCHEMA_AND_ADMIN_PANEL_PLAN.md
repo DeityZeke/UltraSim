@@ -158,6 +158,7 @@ It should stay boring:
 
 - stable node type ids
 - stable slot ids
+- explicit action ids on action-capable nodes such as buttons
 - compact primitive values
 - bounded strings and arrays
 - explicit validation
@@ -1250,7 +1251,9 @@ The schema work needed for that:
 - implement action request routing from open panel instance to validated outbound action using the panel's retained compatibility context
 - implement model update routing against open panel instances: full model refresh, slot/scoped patch, repeater rows, stale sequence ignore, and schema/catalog supersession signals
 - retain the validated schema document on open panel instances so renderers can build from the same schema/context that action and update routing use
-- first Godot renderer slice should render only static `Panel`, `Row`, `Column`, `Text`, and `Button` nodes; dynamic text, repeaters, inputs, inventory viewers, tooltip rendering, and action callbacks should be layered on after this bridge is proven
+- first Godot renderer slice should render only static `Panel`, `Row`, `Column`, `Text`, and `Button` nodes; unsupported node kinds should degrade to inert placeholders rather than crashing the client
+- next renderer slice should add `DynamicText`, trivial `Separator`/`Spacer` nodes, and `Button.ActionId` press routing through `ClientUiPanelRegistry.ValidateActionRequest`
+- dynamic text reads from the panel instance's current model slots; later update slices should refresh existing controls from model updates instead of rebuilding the schema tree
 - open/replace/close panel host under `MenuCanvasManager`
 - split Godot presentation into world, HUD, shared menu, modal, exclusive, tooltip, and debug hosts while keeping one backend panel path; the first Godot bridge mounts separate menu, modal, and exclusive lanes under `MenuCanvasManager`
 - enforce focus mode, input blocking, z-order class, and exclusive group rules

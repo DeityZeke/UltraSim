@@ -6,7 +6,8 @@ public sealed record UiSchemaNodeDescriptor(
     string? SlotId,
     string? Text,
     IReadOnlyList<int> Children,
-    UiCapabilityFlags RequiredCapabilities = UiCapabilityFlags.None)
+    UiCapabilityFlags RequiredCapabilities = UiCapabilityFlags.None,
+    string? ActionId = null)
 {
     public UiValidationResult Validate(UiSchemaValidationLimits limits)
     {
@@ -37,6 +38,15 @@ public sealed record UiSchemaNodeDescriptor(
             if (!slotResult.IsValid)
             {
                 return slotResult;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(ActionId))
+        {
+            UiValidationResult actionResult = UiValidation.ValidateStableId(ActionId, nameof(ActionId), UiValidation.MaxActionIdLength);
+            if (!actionResult.IsValid)
+            {
+                return actionResult;
             }
         }
 
