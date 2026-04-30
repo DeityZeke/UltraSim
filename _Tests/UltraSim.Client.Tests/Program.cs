@@ -39,6 +39,9 @@ internal static class TestRunner
         Run(nameof(ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen), ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen);
         Run(nameof(ClientUiPanelRegistry_ValidatesActionsAgainstOpenInstanceContext), ClientUiPanelRegistry_ValidatesActionsAgainstOpenInstanceContext);
         Run(nameof(ClientUiPanelRegistry_RejectsMissingPanelAndInvalidActionRequests), ClientUiPanelRegistry_RejectsMissingPanelAndInvalidActionRequests);
+        Run(nameof(ClientUiPanelRegistry_AppliesModelSlotUpdatesAndIgnoresStaleSequences), ClientUiPanelRegistry_AppliesModelSlotUpdatesAndIgnoresStaleSequences);
+        Run(nameof(ClientUiPanelRegistry_AppliesRepeaterRowsSeparateFromFlatModel), ClientUiPanelRegistry_AppliesRepeaterRowsSeparateFromFlatModel);
+        Run(nameof(ClientUiPanelRegistry_RejectsMissingInvalidAndSupersededModelUpdates), ClientUiPanelRegistry_RejectsMissingInvalidAndSupersededModelUpdates);
         Run(nameof(ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource), ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource);
         Run(nameof(ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest), ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest);
         Run(nameof(ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests), ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests);
@@ -871,6 +874,171 @@ internal static class TestRunner
         });
         Assert.Equal(ClientUiActionRouteStatus.Rejected, wrongContext.Status);
         Assert.True(wrongContext.Error.Contains("context kind", StringComparison.OrdinalIgnoreCase), wrongContext.Error);
+    }
+
+    private static void ClientUiPanelRegistry_AppliesModelSlotUpdatesAndIgnoresStaleSequences()
+    {
+        UiSchemaDocument schema = CreateClientUiSchema();
+        UiModelDocument model = CreateClientUiModel(schema);
+        var registry = new ClientUiPanelRegistry();
+        Assert.Equal(
+            ClientUiPanelOpenStatus.ColdOpened,
+            registry.OpenPanel(
+                new UiPanelOpenDocument("panel/status/update", schema.Identity, null, model, schema),
+                rendererCapabilities: CreateClientRendererCapabilities()).Status);
+
+        var patch = new UiModelUpdateDocument(
+            "panel/status/update",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 1,
+            UiModelUpdateKind.SlotPatch,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.Integer("levelValue", 20)],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        ClientUiModelUpdateApplyResult applied = registry.ApplyModelUpdate(patch);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.Applied, applied.Status);
+        Assert.True(applied.Panel is not null);
+        Assert.Equal(20L, GetModelValue(applied.Panel!.Model, "levelValue").IntegerValue);
+        Assert.Equal(1L, applied.Panel.LastModelUpdateSequence);
+
+        ClientUiModelUpdateApplyResult stale = registry.ApplyModelUpdate(patch with
+        {
+            SlotValues = [UiModelSlotValue.Integer("levelValue", 21)]
+        });
+        Assert.Equal(ClientUiModelUpdateApplyStatus.IgnoredStale, stale.Status);
+        Assert.True(registry.TryGetPanel("panel/status/update", out ClientUiPanelInstance panel));
+        Assert.Equal(20L, GetModelValue(panel.Model, "levelValue").IntegerValue);
+
+        var full = new UiModelUpdateDocument(
+            "panel/status/update",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 2,
+            UiModelUpdateKind.FullModel,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.String("titleText", "Fresh")],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        ClientUiModelUpdateApplyResult fullApplied = registry.ApplyModelUpdate(full);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.Applied, fullApplied.Status);
+        Assert.Equal("Fresh", GetModelValue(fullApplied.Panel!.Model, "titleText").StringValue ?? string.Empty);
+        Assert.False(TryGetModelValue(fullApplied.Panel.Model, "levelValue", out _));
+    }
+
+    private static void ClientUiPanelRegistry_AppliesRepeaterRowsSeparateFromFlatModel()
+    {
+        UiSchemaDocument schema = CreateClientUiSchema();
+        UiModelDocument model = CreateClientUiModel(schema);
+        var registry = new ClientUiPanelRegistry();
+        Assert.Equal(
+            ClientUiPanelOpenStatus.ColdOpened,
+            registry.OpenPanel(
+                new UiPanelOpenDocument("panel/status/rows", schema.Identity, null, model, schema),
+                rendererCapabilities: CreateClientRendererCapabilities()).Status);
+
+        var addRows = new UiModelUpdateDocument(
+            "panel/status/rows",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 1,
+            UiModelUpdateKind.RepeaterRows,
+            ScopeId: null,
+            SlotValues: [],
+            ClearedSlotIds: [],
+            RowDeltas:
+            [
+                new UiRepeaterRowDelta(
+                    "characters",
+                    "character/1",
+                    UiRepeaterRowUpdateKind.Add,
+                    [UiModelSlotValue.String("name", "Ari"), UiModelSlotValue.Integer("level", 4)]),
+            ]);
+        ClientUiModelUpdateApplyResult added = registry.ApplyModelUpdate(addRows);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.Applied, added.Status);
+        Assert.Equal("Ari", added.Panel!.RepeaterRows["characters"]["character/1"].Values[0].StringValue ?? string.Empty);
+        Assert.Equal(2, added.Panel.RepeaterRows["characters"]["character/1"].Values.Count);
+        Assert.Equal("Status", GetModelValue(added.Panel.Model, "titleText").StringValue ?? string.Empty);
+
+        var updateRow = addRows with
+        {
+            Sequence = 2,
+            RowDeltas =
+            [
+                new UiRepeaterRowDelta(
+                    "characters",
+                    "character/1",
+                    UiRepeaterRowUpdateKind.Update,
+                    [UiModelSlotValue.Integer("level", 5)])
+            ]
+        };
+        ClientUiModelUpdateApplyResult updated = registry.ApplyModelUpdate(updateRow);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.Applied, updated.Status);
+        ClientUiRepeaterRowState row = updated.Panel!.RepeaterRows["characters"]["character/1"];
+        Assert.Equal("Ari", GetRowValue(row, "name").StringValue ?? string.Empty);
+        Assert.Equal(5L, GetRowValue(row, "level").IntegerValue);
+
+        var removeRow = addRows with
+        {
+            Sequence = 3,
+            RowDeltas =
+            [
+                new UiRepeaterRowDelta(
+                    "characters",
+                    "character/1",
+                    UiRepeaterRowUpdateKind.Remove,
+                    [])
+            ]
+        };
+        ClientUiModelUpdateApplyResult removed = registry.ApplyModelUpdate(removeRow);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.Applied, removed.Status);
+        Assert.False(removed.Panel!.RepeaterRows.ContainsKey("characters"));
+    }
+
+    private static void ClientUiPanelRegistry_RejectsMissingInvalidAndSupersededModelUpdates()
+    {
+        UiSchemaDocument schema = CreateClientUiSchema();
+        UiModelDocument model = CreateClientUiModel(schema);
+        var registry = new ClientUiPanelRegistry();
+
+        var missingPanel = new UiModelUpdateDocument(
+            "panel/missing",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 1,
+            UiModelUpdateKind.SlotPatch,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.Integer("levelValue", 20)],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.MissingPanel, registry.ApplyModelUpdate(missingPanel).Status);
+
+        Assert.Equal(
+            ClientUiPanelOpenStatus.ColdOpened,
+            registry.OpenPanel(
+                new UiPanelOpenDocument("panel/status/update", schema.Identity, null, model, schema),
+                rendererCapabilities: CreateClientRendererCapabilities()).Status);
+
+        ClientUiModelUpdateApplyResult invalid = registry.ApplyModelUpdate(missingPanel with
+        {
+            PanelInstanceId = "panel/status/update",
+            SlotValues = [UiModelSlotValue.Integer("unknownSlot", 20)]
+        });
+        Assert.Equal(ClientUiModelUpdateApplyStatus.Rejected, invalid.Status);
+        Assert.True(invalid.Error.Contains("unknown slot", StringComparison.OrdinalIgnoreCase), invalid.Error);
+
+        var superseded = missingPanel with
+        {
+            PanelInstanceId = "panel/status/update",
+            Sequence = 2,
+            Kind = UiModelUpdateKind.SchemaSuperseded,
+            SlotValues = []
+        };
+        ClientUiModelUpdateApplyResult result = registry.ApplyModelUpdate(superseded);
+        Assert.Equal(ClientUiModelUpdateApplyStatus.SchemaSuperseded, result.Status);
+        Assert.True(registry.TryGetPanel("panel/status/update", out ClientUiPanelInstance panel));
+        Assert.Equal(2L, panel.LastModelUpdateSequence);
     }
 
     private static void ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource()
@@ -1823,6 +1991,44 @@ internal static class TestRunner
             MaxTreeDepth: 32,
             MaxRepeaterRows: 256,
             MaxTableColumns: 24);
+    }
+
+    private static UiModelSlotValue GetModelValue(UiModelDocument model, string slotId)
+    {
+        if (TryGetModelValue(model, slotId, out UiModelSlotValue value))
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"Missing model slot '{slotId}'.");
+    }
+
+    private static bool TryGetModelValue(UiModelDocument model, string slotId, out UiModelSlotValue value)
+    {
+        for (int i = 0; i < model.Values.Count; i++)
+        {
+            if (string.Equals(model.Values[i].SlotId, slotId, StringComparison.Ordinal))
+            {
+                value = model.Values[i];
+                return true;
+            }
+        }
+
+        value = UiModelSlotValue.Null(slotId);
+        return false;
+    }
+
+    private static UiModelSlotValue GetRowValue(ClientUiRepeaterRowState row, string slotId)
+    {
+        for (int i = 0; i < row.Values.Count; i++)
+        {
+            if (string.Equals(row.Values[i].SlotId, slotId, StringComparison.Ordinal))
+            {
+                return row.Values[i];
+            }
+        }
+
+        throw new InvalidOperationException($"Missing row slot '{slotId}'.");
     }
 
     private static void Run(string name, Action test)

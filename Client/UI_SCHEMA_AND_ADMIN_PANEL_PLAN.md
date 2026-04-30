@@ -1248,6 +1248,7 @@ The schema work needed for that:
 
 - implement client runtime bridge foundation: panel instance registry, cold/hot open routing through `UiDefinitionCache`, explicit missing/superseded statuses, and state-binding resolver registry ownership
 - implement action request routing from open panel instance to validated outbound action using the panel's retained compatibility context
+- implement model update routing against open panel instances: full model refresh, slot/scoped patch, repeater rows, stale sequence ignore, and schema/catalog supersession signals
 - render panel, text, dynamic text, button, row, column, separator, text input
 - open/update/close panel host under `MenuCanvasManager`
 - split Godot presentation into world, HUD, shared menu, modal, exclusive, tooltip, and debug hosts while keeping one backend panel path

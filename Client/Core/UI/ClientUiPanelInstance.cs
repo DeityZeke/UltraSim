@@ -8,5 +8,7 @@ public sealed record ClientUiPanelInstance(
     UiCatalogIdentity? CatalogIdentity,
     UiPanelMetadata Metadata,
     UiModelDocument Model,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> RepeaterRows,
     UiSchemaCompatibilityContext CompatibilityContext,
+    long LastModelUpdateSequence,
     long OpenSequence);

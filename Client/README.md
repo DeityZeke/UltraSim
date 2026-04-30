@@ -46,6 +46,7 @@ What now exists:
     - explicit missing/superseded schema and catalog statuses
     - open panel instances retain their validation compatibility context for action/update routing
     - action request validation against open panel instances before network send
+    - model update application for full model refreshes, slot/scoped patches, repeater row deltas, stale sequence ignore, and supersession signals
     - state-binding resolver registry stub for future entity/inventory/party/session cache adapters
 - `Client/Network`
   - movement input send path over `Kernels/Network`

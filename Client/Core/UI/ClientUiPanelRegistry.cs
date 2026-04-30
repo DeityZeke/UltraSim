@@ -117,6 +117,57 @@ public sealed class ClientUiPanelRegistry
             : ClientUiActionRouteResult.Rejected(result.Error);
     }
 
+    public ClientUiModelUpdateApplyResult ApplyModelUpdate(UiModelUpdateDocument update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+
+        if (!_panelsById.TryGetValue(update.PanelInstanceId, out ClientUiPanelInstance? panel))
+        {
+            return ClientUiModelUpdateApplyResult.MissingPanel("UI panel instance is not open.");
+        }
+
+        UiValidationResult validationResult = update.ValidateAgainst(panel.CompatibilityContext);
+        if (!validationResult.IsValid)
+        {
+            return ClientUiModelUpdateApplyResult.Rejected(validationResult.Error);
+        }
+
+        if (update.Sequence <= panel.LastModelUpdateSequence)
+        {
+            return ClientUiModelUpdateApplyResult.IgnoredStale(panel, update);
+        }
+
+        ClientUiModelUpdateApplyResult? lifecycleResult = update.Kind switch
+        {
+            UiModelUpdateKind.SchemaSuperseded => ClientUiModelUpdateApplyResult.SchemaSuperseded(panel, update),
+            UiModelUpdateKind.CatalogSuperseded => ClientUiModelUpdateApplyResult.CatalogSuperseded(panel, update),
+            _ => null,
+        };
+        if (lifecycleResult is not null)
+        {
+            ClientUiPanelInstance markedPanel = panel with { LastModelUpdateSequence = update.Sequence };
+            _panelsById[panel.PanelInstanceId] = markedPanel;
+            return lifecycleResult with { Panel = markedPanel };
+        }
+
+        ClientUiPanelInstance updatedPanel = update.Kind switch
+        {
+            UiModelUpdateKind.FullModel => ApplyFullModel(panel, update),
+            UiModelUpdateKind.SlotPatch or UiModelUpdateKind.ScopedPatch => ApplySlotPatch(panel, update),
+            UiModelUpdateKind.RepeaterRows => ApplyRepeaterRows(panel, update),
+            _ => panel,
+        };
+
+        UiValidationResult modelResult = updatedPanel.Model.ValidateAgainst(updatedPanel.CompatibilityContext);
+        if (!modelResult.IsValid)
+        {
+            return ClientUiModelUpdateApplyResult.Rejected(modelResult.Error);
+        }
+
+        _panelsById[updatedPanel.PanelInstanceId] = updatedPanel;
+        return ClientUiModelUpdateApplyResult.AppliedUpdate(updatedPanel, update);
+    }
+
     public bool TryGetPanel(string panelInstanceId, out ClientUiPanelInstance panel)
     {
         return _panelsById.TryGetValue(panelInstanceId, out panel!);
@@ -171,7 +222,122 @@ public sealed class ClientUiPanelRegistry
             open.CatalogIdentity,
             metadata,
             open.Model,
+            EmptyRepeaterRows,
             compatibilityContext,
+            LastModelUpdateSequence: -1,
             ++_nextOpenSequence);
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> EmptyRepeaterRows { get; } =
+        new Dictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>>(0, StringComparer.Ordinal);
+
+    private static ClientUiPanelInstance ApplyFullModel(
+        ClientUiPanelInstance panel,
+        UiModelUpdateDocument update)
+    {
+        return panel with
+        {
+            Model = new UiModelDocument(update.SchemaIdentity, update.SlotValues),
+            LastModelUpdateSequence = update.Sequence,
+        };
+    }
+
+    private static ClientUiPanelInstance ApplySlotPatch(
+        ClientUiPanelInstance panel,
+        UiModelUpdateDocument update)
+    {
+        var valuesBySlot = new Dictionary<string, UiModelSlotValue>(StringComparer.Ordinal);
+        for (int i = 0; i < panel.Model.Values.Count; i++)
+        {
+            UiModelSlotValue value = panel.Model.Values[i];
+            valuesBySlot[value.SlotId] = value;
+        }
+
+        for (int i = 0; i < update.ClearedSlotIds.Count; i++)
+        {
+            valuesBySlot.Remove(update.ClearedSlotIds[i]);
+        }
+
+        for (int i = 0; i < update.SlotValues.Count; i++)
+        {
+            UiModelSlotValue value = update.SlotValues[i];
+            valuesBySlot[value.SlotId] = value;
+        }
+
+        return panel with
+        {
+            Model = new UiModelDocument(update.SchemaIdentity, valuesBySlot.Values.ToArray()),
+            LastModelUpdateSequence = update.Sequence,
+        };
+    }
+
+    private static ClientUiPanelInstance ApplyRepeaterRows(
+        ClientUiPanelInstance panel,
+        UiModelUpdateDocument update)
+    {
+        var repeaters = panel.RepeaterRows.ToDictionary(
+            static pair => pair.Key,
+            static pair => new Dictionary<string, ClientUiRepeaterRowState>(pair.Value, StringComparer.Ordinal),
+            StringComparer.Ordinal);
+
+        for (int i = 0; i < update.RowDeltas.Count; i++)
+        {
+            UiRepeaterRowDelta delta = update.RowDeltas[i];
+            if (!repeaters.TryGetValue(delta.RepeaterSlotId, out Dictionary<string, ClientUiRepeaterRowState>? rows))
+            {
+                rows = new Dictionary<string, ClientUiRepeaterRowState>(StringComparer.Ordinal);
+                repeaters[delta.RepeaterSlotId] = rows;
+            }
+
+            switch (delta.Kind)
+            {
+                case UiRepeaterRowUpdateKind.Add:
+                case UiRepeaterRowUpdateKind.Replace:
+                    rows[delta.RowKey] = new ClientUiRepeaterRowState(delta.RepeaterSlotId, delta.RowKey, delta.Values);
+                    break;
+                case UiRepeaterRowUpdateKind.Update:
+                    rows[delta.RowKey] = MergeRow(rows.TryGetValue(delta.RowKey, out ClientUiRepeaterRowState? existing)
+                        ? existing
+                        : new ClientUiRepeaterRowState(delta.RepeaterSlotId, delta.RowKey, []), delta);
+                    break;
+                case UiRepeaterRowUpdateKind.Remove:
+                    rows.Remove(delta.RowKey);
+                    break;
+            }
+
+            if (rows.Count == 0)
+            {
+                repeaters.Remove(delta.RepeaterSlotId);
+            }
+        }
+
+        return panel with
+        {
+            RepeaterRows = repeaters.ToDictionary(
+                static pair => pair.Key,
+                static pair => (IReadOnlyDictionary<string, ClientUiRepeaterRowState>)pair.Value,
+                StringComparer.Ordinal),
+            LastModelUpdateSequence = update.Sequence,
+        };
+    }
+
+    private static ClientUiRepeaterRowState MergeRow(
+        ClientUiRepeaterRowState existing,
+        UiRepeaterRowDelta delta)
+    {
+        var valuesBySlot = new Dictionary<string, UiModelSlotValue>(StringComparer.Ordinal);
+        for (int i = 0; i < existing.Values.Count; i++)
+        {
+            UiModelSlotValue value = existing.Values[i];
+            valuesBySlot[value.SlotId] = value;
+        }
+
+        for (int i = 0; i < delta.Values.Count; i++)
+        {
+            UiModelSlotValue value = delta.Values[i];
+            valuesBySlot[value.SlotId] = value;
+        }
+
+        return existing with { Values = valuesBySlot.Values.ToArray() };
     }
 }
