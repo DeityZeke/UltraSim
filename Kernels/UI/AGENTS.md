@@ -104,6 +104,7 @@ If a feature needs both UI contracts and gameplay knowledge, put the contract in
 - Schema and catalog cache identities must match exactly.
 - No "close enough" schema compatibility at runtime.
 - A mismatch is a cache miss, supersession flow, or protocol error.
+- Superseded cache lookups must not return stale schema compatibility contexts or stale catalog entries as usable hits.
 
 ### Validation Before Use
 

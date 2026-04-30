@@ -117,6 +117,7 @@ Kernel contract:
 - Cold opens carry an inline `UiSchemaDocument` plus model payload and validate the model against that schema before render/cache use.
 - Hot opens carry only schema/catalog identities plus model payload and validate against the cached `UiSchemaCompatibilityContext`.
 - The open envelope carries exact optional catalog identity, but catalog bytes remain a separate cache/document concern.
+- `UiDefinitionCache` is the first in-memory cache contract/prototype. It stores validated schema entries with immutable compatibility contexts, tracks catalog identities separately, and reports `Hit`, `Miss`, or `Superseded` without returning stale entries as usable hot contexts.
 
 Schema cache identity must include:
 
@@ -127,6 +128,8 @@ Schema cache identity must include:
 - UI protocol/schema version
 
 The client must not accept a "close enough" schema. A mismatch is a cache miss or a protocol error, not a best-effort render.
+
+Supersession is explicit. If the cache has the same server/panel/protocol family but a different schema revision/hash, lookup should report superseded and force the bridge into a fresh cold-open/request path. It must not hand out the old compatibility context. Catalog identity supersession follows the same rule for same server/catalog/protocol/locale families.
 
 Identity matching and structural compatibility are separate checks:
 
@@ -1230,13 +1233,14 @@ The schema work needed for that:
 
 ### UI-2: Cache Negotiation
 
-- integrate with existing server-specific cache key/path model
-- implement cold path schema definition handling
-- implement hot path schema lookup
-- implement catalog cache identity and request/response handling
-- verify schema hash/revision identity
-- verify catalog hash/revision identity
-- cache hit/miss tests for both schema and catalog data
+- implement in-memory kernel cache prototype with exact schema/catalog identity lookup
+- integrate bridge with existing server-specific cache key/path model
+- implement cold path schema definition handling and validated schema-cache insert
+- implement hot path schema lookup through cached compatibility contexts
+- implement catalog cache identity and request/response handling; first kernel step stores catalog identities until catalog documents exist
+- verify schema hash/revision identity and supersession behavior
+- verify catalog hash/revision identity and supersession behavior
+- cache hit/miss/superseded tests for both schema and catalog data
 
 ### UI-3: Minimal Renderer
 

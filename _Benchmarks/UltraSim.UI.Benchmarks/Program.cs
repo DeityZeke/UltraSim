@@ -117,6 +117,10 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 
     yield return CreatePanelOpenHotValidationScenario(1_000);
 
+    yield return CreateDefinitionCacheLookupScenario(10_000);
+
+    yield return CreateDefinitionCacheHotOpenScenario(1_000);
+
     yield return new BenchmarkScenario
     {
         Name = "ModelUpdate_ValidateSlotPatch_1000Slots",
@@ -603,6 +607,94 @@ static BenchmarkScenario CreatePanelOpenHotValidationScenario(int slotCount)
             }
 
             return new ScenarioMeasurement(slotCount, open.Model.Values.Count + context.PayloadSlots.Count);
+        },
+    };
+}
+
+static BenchmarkScenario CreateDefinitionCacheLookupScenario(int iterations)
+{
+    (UiSchemaDocument schema, _) = CreateLargeModelCompatibilityPair(16);
+    var cache = new UiDefinitionCache();
+    UiValidationResult putResult = cache.PutSchema(
+        schema,
+        UiSchemaValidationLimits.Default with { MaxChildrenPerNode = 32 });
+    if (!putResult.IsValid)
+    {
+        throw new InvalidOperationException(putResult.Error);
+    }
+
+    return new BenchmarkScenario
+    {
+        Name = "DefinitionCache_SchemaExactLookup_10000",
+        Category = "UiCacheNegotiation",
+        Comparable = false,
+        Scale = iterations,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            long checksum = 0;
+            for (int i = 0; i < iterations; i++)
+            {
+                UiSchemaCacheLookupResult lookup = cache.TryGetSchema(schema.Identity);
+                if (lookup.Kind != UiDefinitionCacheLookupKind.Hit || lookup.Entry is null)
+                {
+                    throw new InvalidOperationException($"Expected cache hit, got {lookup.Kind}.");
+                }
+
+                checksum += lookup.Entry.CompatibilityContext.PayloadSlots.Count + i;
+            }
+
+            return new ScenarioMeasurement(iterations, checksum);
+        },
+    };
+}
+
+static BenchmarkScenario CreateDefinitionCacheHotOpenScenario(int slotCount)
+{
+    (UiSchemaDocument schema, UiModelDocument model) = CreateLargeModelCompatibilityPair(slotCount);
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = slotCount + 8,
+        MaxChildrenPerNode = slotCount + 8,
+    };
+    var cache = new UiDefinitionCache();
+    UiValidationResult putResult = cache.PutSchema(schema, limits);
+    if (!putResult.IsValid)
+    {
+        throw new InvalidOperationException(putResult.Error);
+    }
+
+    var open = new UiPanelOpenDocument(
+        "panel/bench/open",
+        schema.Identity,
+        schema.CatalogIdentity,
+        model,
+        SchemaDefinition: null);
+
+    return new BenchmarkScenario
+    {
+        Name = "DefinitionCache_LookupAndValidateHotOpen_1000Slots",
+        Category = "UiCacheNegotiation",
+        Comparable = false,
+        Scale = slotCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            UiSchemaCacheLookupResult lookup = cache.TryGetSchema(schema.Identity);
+            if (lookup.Kind != UiDefinitionCacheLookupKind.Hit || lookup.Entry is null)
+            {
+                throw new InvalidOperationException($"Expected cache hit, got {lookup.Kind}.");
+            }
+
+            UiValidationResult result = open.ValidateHot(lookup.Entry.CompatibilityContext);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(result.Error);
+            }
+
+            return new ScenarioMeasurement(slotCount, open.Model.Values.Count + lookup.Entry.CacheSequence);
         },
     };
 }

@@ -25,6 +25,9 @@ internal static class TestRunner
         Run(nameof(UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility), UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility);
         Run(nameof(UiPanelOpenDocument_ValidatesColdAndHotOpenPaths), UiPanelOpenDocument_ValidatesColdAndHotOpenPaths);
         Run(nameof(UiPanelOpenDocument_RejectsMissingDefinitionsAndIdentityMismatches), UiPanelOpenDocument_RejectsMissingDefinitionsAndIdentityMismatches);
+        Run(nameof(UiDefinitionCache_StoresSchemasAndReturnsHotCompatibilityContext), UiDefinitionCache_StoresSchemasAndReturnsHotCompatibilityContext);
+        Run(nameof(UiDefinitionCache_ReportsMissSupersededAndCapacityEviction), UiDefinitionCache_ReportsMissSupersededAndCapacityEviction);
+        Run(nameof(UiDefinitionCache_TracksCatalogIdentityHitsSupersessionAndServerClear), UiDefinitionCache_TracksCatalogIdentityHitsSupersessionAndServerClear);
         Run(nameof(UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates), UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates);
         Run(nameof(UiModelUpdateDocument_RejectsInvalidUpdateShapes), UiModelUpdateDocument_RejectsInvalidUpdateShapes);
         Run(nameof(UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates), UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates);
@@ -660,6 +663,103 @@ internal static class TestRunner
         Assert.InvalidContains(mismatchedDefinition.ValidateEnvelope(), "catalog identity");
     }
 
+    private static void UiDefinitionCache_StoresSchemasAndReturnsHotCompatibilityContext()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        UiModelDocument model = CreateValidModelDocument(schema);
+        var cache = new UiDefinitionCache();
+
+        Assert.Valid(cache.PutSchema(schema, rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Equal(1, cache.SchemaCount);
+
+        UiSchemaCacheLookupResult lookup = cache.TryGetSchema(schema.Identity);
+        Assert.Equal(UiDefinitionCacheLookupKind.Hit, lookup.Kind);
+        Assert.NotNull(lookup.Entry);
+        Assert.Equal(schema.Identity, lookup.Entry!.Schema.Identity);
+
+        var hot = new UiPanelOpenDocument(
+            "panel/open/status",
+            schema.Identity,
+            schema.CatalogIdentity,
+            model,
+            SchemaDefinition: null);
+        Assert.Valid(hot.ValidateHot(lookup.Entry.CompatibilityContext));
+    }
+
+    private static void UiDefinitionCache_ReportsMissSupersededAndCapacityEviction()
+    {
+        UiSchemaDocument schemaV1 = CreateValidSchemaDocument();
+        UiSchemaDocument schemaV2 = CreateSchemaRevision(schemaV1, 2, 'd');
+        var cache = new UiDefinitionCache(maxSchemaEntries: 1);
+
+        Assert.Equal(UiDefinitionCacheLookupKind.Miss, cache.TryGetSchema(schemaV1.Identity).Kind);
+
+        Assert.Valid(cache.PutSchema(schemaV1, rendererCapabilities: CreateRendererCapabilities()));
+        UiSchemaCacheLookupResult staleLookup = cache.TryGetSchema(schemaV2.Identity);
+        Assert.Equal(UiDefinitionCacheLookupKind.Superseded, staleLookup.Kind);
+        Assert.True(staleLookup.Entry is null, "superseded lookup must not return a usable hot context");
+        Assert.Equal(schemaV1.Identity, staleLookup.SupersededByIdentity);
+
+        Assert.Valid(cache.PutSchema(schemaV2, rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Equal(UiDefinitionCacheLookupKind.Hit, cache.TryGetSchema(schemaV2.Identity).Kind);
+
+        UiSchemaCacheLookupResult oldLookup = cache.TryGetSchema(schemaV1.Identity);
+        Assert.Equal(UiDefinitionCacheLookupKind.Superseded, oldLookup.Kind);
+        Assert.Equal(schemaV2.Identity, oldLookup.SupersededByIdentity);
+
+        UiSchemaDocument otherPanel = CreateSchemaForPanel("inventory.grid", 'e');
+        Assert.Valid(cache.PutSchema(otherPanel, rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Equal(1, cache.SchemaCount);
+        Assert.Equal(UiDefinitionCacheLookupKind.Miss, cache.TryGetSchema(schemaV2.Identity).Kind);
+        Assert.Equal(UiDefinitionCacheLookupKind.Hit, cache.TryGetSchema(otherPanel.Identity).Kind);
+    }
+
+    private static void UiDefinitionCache_TracksCatalogIdentityHitsSupersessionAndServerClear()
+    {
+        Assert.True(UiCatalogIdentity.TryCreate(
+            "server/main",
+            "craft.blacksmith",
+            1,
+            new string('a', 64),
+            1,
+            "en-US",
+            out UiCatalogIdentity catalogV1,
+            out string error), error);
+        Assert.True(UiCatalogIdentity.TryCreate(
+            "server/main",
+            "craft.blacksmith",
+            2,
+            new string('b', 64),
+            1,
+            "en-US",
+            out UiCatalogIdentity catalogV2,
+            out error), error);
+
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        var cache = new UiDefinitionCache();
+        Assert.Valid(cache.PutSchema(schema, rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Valid(cache.PutCatalogIdentity(catalogV1));
+
+        UiCatalogCacheLookupResult hit = cache.TryGetCatalog(catalogV1);
+        Assert.Equal(UiDefinitionCacheLookupKind.Hit, hit.Kind);
+        Assert.NotNull(hit.Entry);
+
+        UiCatalogCacheLookupResult staleLookup = cache.TryGetCatalog(catalogV2);
+        Assert.Equal(UiDefinitionCacheLookupKind.Superseded, staleLookup.Kind);
+        Assert.True(staleLookup.Entry is null, "superseded catalog lookup must not return stale data");
+        Assert.Equal(catalogV1, staleLookup.SupersededByIdentity);
+
+        Assert.Valid(cache.PutCatalogIdentity(catalogV2));
+        Assert.Equal(UiDefinitionCacheLookupKind.Hit, cache.TryGetCatalog(catalogV2).Kind);
+        Assert.Equal(UiDefinitionCacheLookupKind.Superseded, cache.TryGetCatalog(catalogV1).Kind);
+
+        cache.ClearServer(" server/main ");
+        Assert.Equal(0, cache.SchemaCount);
+        Assert.Equal(0, cache.CatalogCount);
+        Assert.Equal(UiDefinitionCacheLookupKind.Miss, cache.TryGetSchema(schema.Identity).Kind);
+        Assert.Equal(UiDefinitionCacheLookupKind.Miss, cache.TryGetCatalog(catalogV2).Kind);
+    }
+
     private static void UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates()
     {
         UiSchemaDocument schema = CreateValidSchemaDocument();
@@ -996,6 +1096,37 @@ internal static class TestRunner
                         UiBindingFallbackBehavior.Stale,
                         1500))
             ]);
+    }
+
+    private static UiSchemaDocument CreateSchemaRevision(UiSchemaDocument schema, int revision, char hashChar)
+    {
+        Assert.True(UiSchemaIdentity.TryCreate(
+            schema.Identity.ServerIdentity,
+            schema.Identity.PanelType,
+            revision,
+            new string(hashChar, 64),
+            schema.Identity.ProtocolVersion,
+            out UiSchemaIdentity identity,
+            out string error), error);
+        return schema with { Identity = identity };
+    }
+
+    private static UiSchemaDocument CreateSchemaForPanel(string panelType, char hashChar)
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        Assert.True(UiSchemaIdentity.TryCreate(
+            schema.Identity.ServerIdentity,
+            panelType,
+            1,
+            new string(hashChar, 64),
+            schema.Identity.ProtocolVersion,
+            out UiSchemaIdentity identity,
+            out string error), error);
+        return schema with
+        {
+            Identity = identity,
+            Metadata = schema.Metadata with { PanelType = panelType },
+        };
     }
 
     private static UiModelDocument CreateValidModelDocument(UiSchemaDocument schema)
