@@ -26,7 +26,7 @@ internal static class TestRunner
         Run(nameof(UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates), UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates);
         Run(nameof(UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses), UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses);
         Run(nameof(UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines), UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines);
-        Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsActionsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsActionsAndOversizedShapes);
+        Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
 
@@ -732,7 +732,7 @@ internal static class TestRunner
         Assert.Valid(simple.Validate());
     }
 
-    private static void UiTooltipDescriptor_RejectsUnknownSlotsActionsAndOversizedShapes()
+    private static void UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes()
     {
         UiSchemaDocument schema = CreateValidSchemaDocument();
         Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
@@ -746,9 +746,6 @@ internal static class TestRunner
             ]
         };
         Assert.InvalidContains(unknownSlot.Validate(context!), "unknown slot");
-
-        var unknownAction = CreateValidTooltip() with { DetailActionId = "missing.action" };
-        Assert.InvalidContains(unknownAction.Validate(context!), "does not exist");
 
         var noLines = CreateValidTooltip() with { Lines = [] };
         Assert.InvalidContains(noLines.Validate(context!), "at least one line");
@@ -877,8 +874,7 @@ internal static class TestRunner
                 new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Health", null, "healthText", UiTooltipVisualRole.Positive),
                 new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Level", null, "levelValue"),
                 new UiTooltipLineDescriptor(UiTooltipLineKind.Advanced, null, "Hold detail for the full character panel.", null, UiTooltipVisualRole.Muted),
-            ],
-            DetailActionId: "hud.open_character");
+            ]);
     }
 
     private static UiRendererCapabilities CreateRendererCapabilities()

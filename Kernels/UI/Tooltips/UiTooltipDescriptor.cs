@@ -5,8 +5,7 @@ public sealed record UiTooltipDescriptor(
     string? Title,
     string? IconId,
     UiTooltipVisualRole QualityRole,
-    IReadOnlyList<UiTooltipLineDescriptor> Lines,
-    string? DetailActionId = null)
+    IReadOnlyList<UiTooltipLineDescriptor> Lines)
 {
     public const int MaxTooltipLines = 32;
 
@@ -53,23 +52,6 @@ public sealed record UiTooltipDescriptor(
             if (!lineResult.IsValid)
             {
                 return lineResult;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(DetailActionId))
-        {
-            UiValidationResult detailResult = UiValidation.ValidateStableId(
-                DetailActionId,
-                nameof(DetailActionId),
-                UiValidation.MaxActionIdLength);
-            if (!detailResult.IsValid)
-            {
-                return detailResult;
-            }
-
-            if (context is not null && !context.TryGetAction(DetailActionId!, out _))
-            {
-                return UiValidationResult.Invalid($"Tooltip detail action '{DetailActionId}' does not exist.");
             }
         }
 

@@ -348,8 +348,7 @@ static BenchmarkScenario CreateTooltipValidationScenario(int iterations)
             new UiTooltipLineDescriptor(UiTooltipLineKind.Stat, "Damage", "4-8", null, UiTooltipVisualRole.Positive),
             new UiTooltipLineDescriptor(UiTooltipLineKind.Requirement, "Level", null, "model.slot.0"),
             new UiTooltipLineDescriptor(UiTooltipLineKind.Advanced, null, "Hold detail for crafting lineage.", null, UiTooltipVisualRole.Muted),
-        ],
-        DetailActionId: "bench.refresh");
+        ]);
 
     return new BenchmarkScenario
     {
