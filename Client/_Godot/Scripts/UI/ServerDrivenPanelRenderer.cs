@@ -62,15 +62,19 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Panel => CreatePanel(node),
             UiNodeKind.Row => CreateRow(node),
             UiNodeKind.Column => CreateColumn(node),
+            UiNodeKind.Group => CreateGroup(node),
+            UiNodeKind.Section => CreateSection(node),
             UiNodeKind.Text => CreateText(node),
             UiNodeKind.DynamicText => CreateDynamicText(node, modelBySlot),
             UiNodeKind.Button => CreateButton(node, compatibilityContext, actionPressed),
             UiNodeKind.Separator => CreateSeparator(node),
             UiNodeKind.Spacer => CreateSpacer(node),
+            UiNodeKind.TextInput => CreateTextInput(node, modelBySlot),
+            UiNodeKind.Toggle => CreateToggle(node, modelBySlot),
             _ => CreateUnsupportedPlaceholder(node),
         };
 
-        if (node.Children.Count > 0 && control is Label or Button or HSeparator)
+        if (node.Children.Count > 0 && control is Label or BaseButton or LineEdit or HSeparator)
         {
             error = $"UI node kind '{node.Kind}' cannot host child controls in the minimal Godot renderer.";
             return false;
@@ -148,6 +152,38 @@ internal static class ServerDrivenPanelRenderer
         };
     }
 
+    private static VBoxContainer CreateGroup(UiSchemaNodeDescriptor node)
+    {
+        var group = new VBoxContainer
+        {
+            Name = MakeNodeName("Group", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        AddTitleLabelIfPresent(group, node, "GroupTitle");
+        return group;
+    }
+
+    private static VBoxContainer CreateSection(UiSchemaNodeDescriptor node)
+    {
+        var section = new VBoxContainer
+        {
+            Name = MakeNodeName("Section", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        AddTitleLabelIfPresent(section, node, "SectionTitle");
+        section.AddChild(new HSeparator
+        {
+            Name = MakeNodeName("SectionSeparator", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        });
+        return section;
+    }
+
     private static Label CreateText(UiSchemaNodeDescriptor node)
     {
         return new Label
@@ -181,6 +217,40 @@ internal static class ServerDrivenPanelRenderer
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
+    }
+
+    private static LineEdit CreateTextInput(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        var input = new LineEdit
+        {
+            Name = MakeNodeName("TextInput", node.NodeId),
+            Text = GetStringModelValue(node, modelBySlot),
+            PlaceholderText = node.Text ?? string.Empty,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        SetSlotMeta(input, node);
+        return input;
+    }
+
+    private static CheckBox CreateToggle(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        var toggle = new CheckBox
+        {
+            Name = MakeNodeName("Toggle", node.NodeId),
+            Text = node.Text ?? node.SlotId ?? "Toggle",
+            ButtonPressed = GetBooleanModelValue(node, modelBySlot),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        SetSlotMeta(toggle, node);
+        return toggle;
     }
 
     private static Button CreateButton(
@@ -243,6 +313,57 @@ internal static class ServerDrivenPanelRenderer
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
+    }
+
+    private static void AddTitleLabelIfPresent(VBoxContainer parent, UiSchemaNodeDescriptor node, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(node.Text))
+        {
+            return;
+        }
+
+        parent.AddChild(new Label
+        {
+            Name = MakeNodeName(prefix, node.NodeId),
+            Text = node.Text,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        });
+    }
+
+    private static void SetSlotMeta(Control control, UiSchemaNodeDescriptor node)
+    {
+        if (!string.IsNullOrWhiteSpace(node.SlotId))
+        {
+            control.SetMeta("UiSlotId", node.SlotId);
+        }
+    }
+
+    private static string GetStringModelValue(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        if (!string.IsNullOrWhiteSpace(node.SlotId)
+            && modelBySlot.TryGetValue(node.SlotId, out UiModelSlotValue? value)
+            && value is not null
+            && value.Kind == UiModelValueKind.String)
+        {
+            return value.StringValue ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    private static bool GetBooleanModelValue(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        return !string.IsNullOrWhiteSpace(node.SlotId)
+            && modelBySlot.TryGetValue(node.SlotId, out UiModelSlotValue? value)
+            && value is not null
+            && value.Kind == UiModelValueKind.Boolean
+            && value.BooleanValue;
     }
 
     private static string FormatModelValue(UiModelSlotValue value)

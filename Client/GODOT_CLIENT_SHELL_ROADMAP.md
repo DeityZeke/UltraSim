@@ -399,6 +399,20 @@ The old server startup flow had the intended shape:
 
 The client should expose stable protocol/UI/content/presentation hooks that server scripts can target. It should not accept executable scripts from streamed server content.
 
+Implementation gate: once the minimal server-driven UI path is live end-to-end (builder-authored server panel opens on the Godot client and button actions route back to the server), pause before expanding into login, character select/create, inventory, crafting, vendors, and admin menus. At that point, plan, implement, and test the server-side C# script compiler/runtime setup.
+
+Target exported server/app shape:
+
+- `scripts/engines` for reusable server-side systems such as inventory rules, crafting, vendors, mobs, UI panel providers, and admin pages
+- `scripts/items`
+- `scripts/mobs`
+- `scripts/crafting`
+- `scripts/customs`
+- compile cache keyed by source hashes, referenced assemblies, compiler options, and API/protocol versions
+- startup diagnostics that clearly report compile warnings/errors and cache hits/misses
+
+This makes server-side modding fall out naturally while preserving the client security rule: server content patches can provide data/assets/UI schemas, but not executable client code.
+
 ## Target App Flow
 
 Minimum platform loop:
@@ -874,6 +888,8 @@ Next G6/UI steps:
 
 1. Add renderer-side model update/re-render or diff application for open instances.
 2. Add UI open/action packet routing over the live client/server network path, then upgrade the local message-box smoke into a true server-to-client smoke.
-3. Add server-driven tooltip/context menu rendering after basic panel action flow is proven.
+3. Add the first narrow server-side panel builder API and prove a builder-authored message box over the live path.
+4. Before expanding into login/character/inventory/crafting/admin panels, plan, implement, and test the RunUO-style server script compiler/runtime setup described above.
+5. Add server-driven tooltip/context menu rendering after basic panel action flow and script-hosted panel registration are proven.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.

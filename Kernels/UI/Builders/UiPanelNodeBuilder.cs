@@ -24,6 +24,18 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder Group(string? title, Action<UiPanelNodeBuilder> build)
+    {
+        _childIds.Add(_owner.AddContainer(UiNodeKind.Group, title, build));
+        return this;
+    }
+
+    public UiPanelNodeBuilder Section(string title, Action<UiPanelNodeBuilder> build)
+    {
+        _childIds.Add(_owner.AddContainer(UiNodeKind.Section, title, build));
+        return this;
+    }
+
     public UiPanelNodeBuilder Text(string text)
     {
         _childIds.Add(_owner.AddLeaf(UiNodeKind.Text, slotId: null, text, actionId: null));
@@ -88,6 +100,27 @@ public sealed class UiPanelNodeBuilder
         _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.Boolean, required));
         _owner.SetModelValue(UiModelSlotValue.Boolean(slotId, value));
         _childIds.Add(_owner.AddLeaf(UiNodeKind.DynamicText, slotId, label, actionId: null));
+        return this;
+    }
+
+    public UiPanelNodeBuilder Toggle(string slotId, string label, bool value, bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.Boolean, required));
+        _owner.SetModelValue(UiModelSlotValue.Boolean(slotId, value));
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Toggle, slotId, label, actionId: null));
+        return this;
+    }
+
+    public UiPanelNodeBuilder TextInput(
+        string slotId,
+        string label,
+        string value,
+        int maxStringLength = UiValidation.MaxDisplayTextLength,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, required, maxStringLength));
+        _owner.SetModelValue(UiModelSlotValue.String(slotId, value));
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.TextInput, slotId, label, actionId: null));
         return this;
     }
 

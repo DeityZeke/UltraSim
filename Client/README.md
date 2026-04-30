@@ -12,6 +12,7 @@ Current focus:
 - direct-connect movement/chat/observer smoke against the current server
 - restoring old v2 client features cleanly on top of the new runtime boundaries
 - preparing the content/cache and server-driven UI schema path for login and character flow
+- after the live server-driven UI message-box path works, plan, implement, and test the RunUO-style server C# script compiler before expanding into login/character/inventory/crafting/admin panel content
 
 Schema/admin UI planning:
 

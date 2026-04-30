@@ -16,7 +16,9 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeMessageBoxPanelId = "smoke/message_box/1";
 	private const string SmokeMessageBoxActionId = "smoke.message_box.ok";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
-	private const string SmokeUnsupportedChildText = "Unsupported group child survived";
+	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
+	private const string SmokeTextInputSlot = "displayName";
+	private const string SmokeToggleSlot = "rememberAccount";
 
 	[Export] public NodePath? CharacterWorldPath { get; set; }
 	[Export] public NodePath? LocalPlayerControllerPath { get; set; }
@@ -642,7 +644,11 @@ public partial class GodotClientRuntimeRoot : Node
 		UiSchemaDocument schema = CreateSmokeMessageBoxSchema();
 		var model = new UiModelDocument(
 			schema.Identity,
-			[UiModelSlotValue.String("messageText", SmokeMessageBoxText)]);
+			[
+				UiModelSlotValue.String("messageText", SmokeMessageBoxText),
+				UiModelSlotValue.String(SmokeTextInputSlot, "Test Pilot"),
+				UiModelSlotValue.Boolean(SmokeToggleSlot, true),
+			]);
 		var open = new UiPanelOpenDocument(
 			SmokeMessageBoxPanelId,
 			schema.Identity,
@@ -680,6 +686,18 @@ public partial class GodotClientRuntimeRoot : Node
 		else
 		{
 			GD.PushError($"Server UI smoke failed: {childTextError}");
+		}
+
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeTextInputSlot, out string textInputError))
+		{
+			GD.PushError($"Server UI smoke failed: {textInputError}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeToggleSlot, out string toggleError))
+		{
+			GD.PushError($"Server UI smoke failed: {toggleError}");
+			return;
 		}
 
 		if (!UiManager.Menus.TryPressServerDrivenActionButton(opened.Panel.PanelInstanceId, SmokeMessageBoxActionId, out string pressError))
@@ -724,17 +742,22 @@ public partial class GodotClientRuntimeRoot : Node
 			Nodes:
 			[
 				new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
-				new UiSchemaNodeDescriptor(2, UiNodeKind.Column, null, null, [3, 4, 6, 7]),
+				new UiSchemaNodeDescriptor(2, UiNodeKind.Column, null, null, [3, 4, 6, 7, 10]),
 				new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "messageText", "Message", []),
-				new UiSchemaNodeDescriptor(4, UiNodeKind.Group, null, null, [5]),
+				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, null, [5]),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Row, null, null, [8]),
-				new UiSchemaNodeDescriptor(8, UiNodeKind.Button, null, "OK", [], ActionId: SmokeMessageBoxActionId),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9]),
+				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
+				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
+				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
+				new UiSchemaNodeDescriptor(11, UiNodeKind.Button, null, "OK", [], ActionId: SmokeMessageBoxActionId),
 			],
 			PayloadSlots:
 			[
 				new UiPayloadSlotDescriptor("messageText", UiModelValueKind.String, Required: true, MaxStringLength: 128),
+				new UiPayloadSlotDescriptor(SmokeTextInputSlot, UiModelValueKind.String, Required: true, MaxStringLength: 64),
+				new UiPayloadSlotDescriptor(SmokeToggleSlot, UiModelValueKind.Boolean, Required: true),
 			],
 			Actions:
 			[

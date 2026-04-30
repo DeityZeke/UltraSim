@@ -1267,6 +1267,34 @@ The schema work needed for that:
 - response/ack path
 - message box smoke
 
+### UI-3B: Server Script Compiler Gate
+
+After the minimal renderer, live UI open/action packet path, and first builder-authored message-box smoke are working, pause before login/character/menu expansion to plan, implement, and test the server-side C# script compiler/runtime setup.
+
+This compiler belongs to server startup/plugin infrastructure, not the client patch stream and not the UI kernel. The goal is a RunUO-style exported server app layout where server operators can put gameplay code under folders such as:
+
+- `scripts/engines`
+- `scripts/items`
+- `scripts/mobs`
+- `scripts/crafting`
+- `scripts/customs`
+
+The compiler should support a cache keyed by script source hashes, referenced assemblies, compiler options, and API/protocol versions so clean restarts can skip unnecessary recompilation. Startup should report a clear phase like `Scripts: Compiling C# scripts... - done (0 warnings, 0 errors)` and should fail with actionable diagnostics when scripts do not compile.
+
+First proof should stay small:
+
+- script-defined command or startup hook
+- script-authored message/admin panel using `UiPanelBuilder`
+- script registration surface that can later host engines such as inventory rules, crafting, vendors, mobs, and admin pages
+- tests for compile success, compile failure diagnostics, cache hit/miss behavior, registration discovery, and no executable code arriving through server content patches
+
+The important boundary is:
+
+- kernels stay engine-agnostic (`UI`, `Inventory`, `Network`, `ECS`)
+- server glue exposes stable APIs to scripts
+- scripts/customs implement gameplay/content behavior on top of those APIs
+- client content patches remain data/assets only and must not carry executable scripts
+
 ### UI-4: Login And Character Flow
 
 - login panel with trusted credential binding

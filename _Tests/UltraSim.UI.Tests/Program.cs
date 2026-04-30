@@ -35,6 +35,7 @@ internal static class TestRunner
         Run(nameof(UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines), UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines);
         Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes);
         Run(nameof(UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments), UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments);
+        Run(nameof(UiPanelBuilder_BuildsGroupsSectionsAndFormControls), UiPanelBuilder_BuildsGroupsSectionsAndFormControls);
         Run(nameof(UiPanelBuilder_RejectsConflictingScopedDeclarations), UiPanelBuilder_RejectsConflictingScopedDeclarations);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
@@ -325,6 +326,48 @@ internal static class TestRunner
             })
             .Build();
         Assert.Equal(built.Schema.Identity.SchemaHashHex, rebuilt.Schema.Identity.SchemaHashHex);
+    }
+
+    private static void UiPanelBuilder_BuildsGroupsSectionsAndFormControls()
+    {
+        UiBuiltPanel built = UiPanelBuilder
+            .Create("server/main", "settings.connection", 1)
+            .Panel(panel =>
+            {
+                panel.Group("Connection", group =>
+                {
+                    group.Section("Account", section =>
+                    {
+                        section.TextInput("displayName", "Display Name", "Test Pilot", maxStringLength: 64);
+                        section.Toggle("rememberAccount", "Remember Account", true);
+                    });
+                });
+            })
+            .Build();
+
+        Assert.Valid(built.Schema.Validate(rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Valid(built.Model.ValidateAgainst(built.Schema));
+
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Group && string.Equals(node.Text, "Connection", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Section && string.Equals(node.Text, "Account", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.TextInput && string.Equals(node.SlotId, "displayName", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Toggle && string.Equals(node.SlotId, "rememberAccount", StringComparison.Ordinal)));
+
+        UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.String, nameSlot.ValueKind);
+        Assert.Equal(64, nameSlot.MaxStringLength);
+
+        UiPayloadSlotDescriptor toggleSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "rememberAccount", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.Boolean, toggleSlot.ValueKind);
+
+        UiModelSlotValue nameValue = built.Model.Values.First(value => string.Equals(value.SlotId, "displayName", StringComparison.Ordinal));
+        Assert.Equal("Test Pilot", nameValue.StringValue);
+
+        UiModelSlotValue toggleValue = built.Model.Values.First(value => string.Equals(value.SlotId, "rememberAccount", StringComparison.Ordinal));
+        Assert.True(toggleValue.BooleanValue);
+
+        UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
+        Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
     }
 
     private static void UiPanelBuilder_RejectsConflictingScopedDeclarations()

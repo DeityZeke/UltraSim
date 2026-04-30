@@ -121,6 +121,24 @@ public partial class MenuCanvasManager : CanvasLayer
         return false;
     }
 
+    public bool TryFindServerDrivenSlotControl(string panelInstanceId, string slotId, out string error)
+    {
+        if (!_serverDrivenPanels.TryGetValue(panelInstanceId, out Control? renderedPanel))
+        {
+            error = $"Server-driven panel '{panelInstanceId}' is not mounted.";
+            return false;
+        }
+
+        if (ContainsSlotControl(renderedPanel, slotId))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = $"Server-driven panel '{panelInstanceId}' does not contain slot control '{slotId}'.";
+        return false;
+    }
+
     public bool TryPressServerDrivenActionButton(string panelInstanceId, string actionId, out string error)
     {
         if (!_serverDrivenPanels.TryGetValue(panelInstanceId, out Control? renderedPanel))
@@ -423,6 +441,26 @@ public partial class MenuCanvasManager : CanvasLayer
         foreach (Node child in root.GetChildren())
         {
             if (ContainsLabelText(child, expectedText))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsSlotControl(Node root, string slotId)
+    {
+        if (root is Control control &&
+            control.HasMeta("UiSlotId") &&
+            string.Equals(control.GetMeta("UiSlotId").ToString(), slotId, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            if (ContainsSlotControl(child, slotId))
             {
                 return true;
             }
