@@ -868,11 +868,12 @@ Current client/Godot bridge status:
 - `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` is the first minimal renderer bridge. It renders `Panel`, `Row`, `Column`, static `Text`, model-backed `DynamicText`, `Button`, `Separator`, and `Spacer` nodes from a validated `ClientUiPanelInstance`; unsupported node kinds degrade to inert placeholders.
 - `MenuCanvasManager` can mount, replace, close, and clear server-driven panels on separate menu/modal/exclusive lanes.
 - Godot buttons bound with `ActionId` produce validated client action route results through `ClientUiPanelRegistry.ValidateActionRequest`.
+- The local Godot smoke flag `--us-smoke-server-ui-message-box` cold-opens a server-driven message-box schema, mounts it into the menu lane, verifies model-backed dynamic text, and presses the rendered OK button through validated action routing. This is a renderer/client-runtime smoke, not yet a network UI packet smoke.
 
 Next G6/UI steps:
 
 1. Add renderer-side model update/re-render or diff application for open instances.
-2. Add an actual message-box/login-panel smoke that exercises cold open, render, button press, and validated outbound action.
+2. Add UI open/action packet routing over the live client/server network path, then upgrade the local message-box smoke into a true server-to-client smoke.
 3. Add server-driven tooltip/context menu rendering after basic panel action flow is proven.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.

@@ -1254,6 +1254,7 @@ The schema work needed for that:
 - first Godot renderer slice should render only static `Panel`, `Row`, `Column`, `Text`, and `Button` nodes; unsupported node kinds should degrade to inert placeholders rather than crashing the client
 - next renderer slice should add `DynamicText`, trivial `Separator`/`Spacer` nodes, and `Button.ActionId` press routing through `ClientUiPanelRegistry.ValidateActionRequest`
 - dynamic text reads from the panel instance's current model slots; later update slices should refresh existing controls from model updates instead of rebuilding the schema tree
+- until UI packets exist on the live network path, the Godot message-box smoke is local to the client runtime: it cold-opens a schema through the client registry, mounts the renderer output, verifies dynamic text, and presses the rendered button through action validation
 - open/replace/close panel host under `MenuCanvasManager`
 - split Godot presentation into world, HUD, shared menu, modal, exclusive, tooltip, and debug hosts while keeping one backend panel path; the first Godot bridge mounts separate menu, modal, and exclusive lanes under `MenuCanvasManager`
 - enforce focus mode, input blocking, z-order class, and exclusive group rules

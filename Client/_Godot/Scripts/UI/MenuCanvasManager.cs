@@ -103,6 +103,44 @@ public partial class MenuCanvasManager : CanvasLayer
         _blockingServerDrivenPanels.Clear();
     }
 
+    public bool TryFindServerDrivenText(string panelInstanceId, string expectedText, out string error)
+    {
+        if (!_serverDrivenPanels.TryGetValue(panelInstanceId, out Control? renderedPanel))
+        {
+            error = $"Server-driven panel '{panelInstanceId}' is not mounted.";
+            return false;
+        }
+
+        if (ContainsLabelText(renderedPanel, expectedText))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = $"Server-driven panel '{panelInstanceId}' does not contain text '{expectedText}'.";
+        return false;
+    }
+
+    public bool TryPressServerDrivenActionButton(string panelInstanceId, string actionId, out string error)
+    {
+        if (!_serverDrivenPanels.TryGetValue(panelInstanceId, out Control? renderedPanel))
+        {
+            error = $"Server-driven panel '{panelInstanceId}' is not mounted.";
+            return false;
+        }
+
+        Button? button = FindActionButton(renderedPanel, actionId);
+        if (button is null)
+        {
+            error = $"Server-driven panel '{panelInstanceId}' does not contain action button '{actionId}'.";
+            return false;
+        }
+
+        button.EmitSignal(BaseButton.SignalName.Pressed);
+        error = string.Empty;
+        return true;
+    }
+
     public override void _UnhandledInput(InputEvent @event)
     {
         if (@event.IsActionPressed("ui_cancel"))
@@ -373,6 +411,45 @@ public partial class MenuCanvasManager : CanvasLayer
             UiSurfaceTarget.Exclusive => 300,
             _ => 0,
         };
+    }
+
+    private static bool ContainsLabelText(Node root, string expectedText)
+    {
+        if (root is Label label && string.Equals(label.Text, expectedText, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            if (ContainsLabelText(child, expectedText))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static Button? FindActionButton(Node root, string actionId)
+    {
+        if (root is Button button &&
+            button.HasMeta("UiActionId") &&
+            string.Equals(button.GetMeta("UiActionId").ToString(), actionId, StringComparison.Ordinal))
+        {
+            return button;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            Button? found = FindActionButton(child, actionId);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     private static void PlaceFullScreen(Control control)

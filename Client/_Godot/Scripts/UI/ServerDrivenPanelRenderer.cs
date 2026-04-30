@@ -205,6 +205,7 @@ internal static class ServerDrivenPanelRenderer
 
         if (action is not null && actionPressed is not null)
         {
+            button.SetMeta("UiActionId", action.ActionId);
             button.Pressed += () => actionPressed(action);
         }
 

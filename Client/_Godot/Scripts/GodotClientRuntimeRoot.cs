@@ -5,12 +5,19 @@ using UltraSim.Client.Godot.Controllers;
 using UltraSim.Client.Godot.Mobiles;
 using UltraSim.Client.Godot.UI;
 using UltraSim.Client.Godot.World;
+using UltraSim.Client.UI;
+using UltraSim.UI;
 
 namespace UltraSim.Client.Godot;
 
 [GlobalClass]
 public partial class GodotClientRuntimeRoot : Node
 {
+	private const string SmokeMessageBoxPanelId = "smoke/message_box/1";
+	private const string SmokeMessageBoxActionId = "smoke.message_box.ok";
+	private const string SmokeMessageBoxText = "Server-driven smoke message";
+	private const string SmokeUnsupportedChildText = "Unsupported group child survived";
+
 	[Export] public NodePath? CharacterWorldPath { get; set; }
 	[Export] public NodePath? LocalPlayerControllerPath { get; set; }
 	[Export] public NodePath? CameraRigPath { get; set; }
@@ -20,6 +27,7 @@ public partial class GodotClientRuntimeRoot : Node
 	[Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
 
 	private readonly List<double> _smokeDisconnectAtSeconds = new();
+	private readonly ClientUiPanelRegistry _serverDrivenPanels = new();
 
 	public ClientCharacterWorld? CharacterWorld { get; private set; }
 	public LocalPlayerController? LocalPlayerController { get; private set; }
@@ -41,6 +49,9 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeRequireContentCache;
 	private bool _smokeRequireChatReceived;
 	private bool _smokeRequireOwnerMovement;
+	private bool _smokeServerUiMessageBox;
+	private bool _smokeRequireServerUiMessageBox;
+	private bool _smokeRequireServerUiAction;
 	private double _smokeReconnectAfterSeconds = -1.0;
 	private double _smokeChatAfterSeconds = -1.0;
 	private double _smokeMoveAfterSeconds = -1.0;
@@ -60,6 +71,10 @@ public partial class GodotClientRuntimeRoot : Node
 	private int _nextSmokeDisconnectIndex;
 	private bool _smokeChatReceiveLogged;
 	private bool _smokeOwnerMovementLogged;
+	private bool _smokeSawServerUiMessageBox;
+	private bool _smokeSawServerUiText;
+	private bool _smokeSawServerUiUnsupportedChild;
+	private bool _smokeSawServerUiAction;
 	private ClientMovementState _lastAuthoritativeOwnerState;
 
 	public override void _Ready()
@@ -70,6 +85,9 @@ public partial class GodotClientRuntimeRoot : Node
 		_smokeRequireContentCache = HasUserArg("--us-smoke-require-content-cache");
 		_smokeRequireChatReceived = HasUserArg("--us-smoke-require-chat-received");
 		_smokeRequireOwnerMovement = HasUserArg("--us-smoke-require-owner-movement");
+		_smokeServerUiMessageBox = HasUserArg("--us-smoke-server-ui-message-box");
+		_smokeRequireServerUiMessageBox = HasUserArg("--us-smoke-require-server-ui-message-box");
+		_smokeRequireServerUiAction = HasUserArg("--us-smoke-require-server-ui-action");
 		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
 		_smokeChatAfterSeconds = ReadPositiveUserArg("--us-smoke-chat-after=");
 		_smokeMoveAfterSeconds = ReadPositiveUserArg("--us-smoke-move-after=");
@@ -111,9 +129,16 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.DisconnectRequested += HandleDisconnectRequested;
 			UiManager.Menus.PreviewRequested += HandlePreviewRequested;
 			UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
+			UiManager.Menus.ServerDrivenPanelRegistry = _serverDrivenPanels;
+			UiManager.Menus.ServerDrivenActionRouted += HandleServerDrivenActionRouted;
 		}
 
 		ScheduleSmokeQuitIfRequested();
+
+		if (_smokeServerUiMessageBox)
+		{
+			OpenSmokeServerUiMessageBox();
+		}
 
 		if (TryReadAutoConnectRequest(out ClientDirectConnectRequest autoConnectRequest, out string? autoConnectError))
 		{
@@ -158,6 +183,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.DisconnectRequested -= HandleDisconnectRequested;
 			UiManager.Menus.PreviewRequested -= HandlePreviewRequested;
 			UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
+			UiManager.Menus.ServerDrivenActionRouted -= HandleServerDrivenActionRouted;
 		}
 
 		_sessionDriver?.Dispose();
@@ -327,6 +353,23 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		UiManager?.Menus?.AppendSystemChatLine("Chat is not connected yet.");
+	}
+
+	private void HandleServerDrivenActionRouted(ClientUiActionRouteResult result)
+	{
+		if (result.ReadyToSend &&
+			result.Request is not null &&
+			string.Equals(result.Request.ActionId, SmokeMessageBoxActionId, StringComparison.Ordinal))
+		{
+			_smokeSawServerUiAction = true;
+			SetStatusText($"Server UI smoke action routed: {result.Request.ActionId}");
+			return;
+		}
+
+		if (!result.ReadyToSend)
+		{
+			GD.PushWarning($"Server UI action route failed: {result.Status} {result.Error}");
+		}
 	}
 
 	private void HandleChatMessage(UltraSim.Network.ChatMessageEventPacket packet)
@@ -537,6 +580,37 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (_smokeRequireServerUiMessageBox)
+		{
+			if (!_smokeSawServerUiMessageBox)
+			{
+				GD.PushError("UltraSim client smoke failed: server-driven message box did not mount.");
+				GetTree().Quit(1);
+				return;
+			}
+
+			if (!_smokeSawServerUiText)
+			{
+				GD.PushError("UltraSim client smoke failed: server-driven message box dynamic text was not rendered.");
+				GetTree().Quit(1);
+				return;
+			}
+
+			if (!_smokeSawServerUiUnsupportedChild)
+			{
+				GD.PushError("UltraSim client smoke failed: unsupported server-driven node did not preserve child rendering.");
+				GetTree().Quit(1);
+				return;
+			}
+		}
+
+		if (_smokeRequireServerUiAction && !_smokeSawServerUiAction)
+		{
+			GD.PushError("UltraSim client smoke failed: server-driven message box action did not route.");
+			GetTree().Quit(1);
+			return;
+		}
+
 		if (_smokeRequireDisconnected)
 		{
 			if (!_smokeSawDisconnected)
@@ -555,6 +629,138 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		GetTree().Quit();
+	}
+
+	private void OpenSmokeServerUiMessageBox()
+	{
+		if (UiManager?.Menus is null)
+		{
+			GD.PushError("Server UI smoke failed: menu canvas is unavailable.");
+			return;
+		}
+
+		UiSchemaDocument schema = CreateSmokeMessageBoxSchema();
+		var model = new UiModelDocument(
+			schema.Identity,
+			[UiModelSlotValue.String("messageText", SmokeMessageBoxText)]);
+		var open = new UiPanelOpenDocument(
+			SmokeMessageBoxPanelId,
+			schema.Identity,
+			CatalogIdentity: null,
+			model,
+			SchemaDefinition: schema);
+
+		ClientUiPanelOpenResult opened = _serverDrivenPanels.OpenPanel(open, rendererCapabilities: CreateSmokeRendererCapabilities());
+		if (!opened.Opened || opened.Panel is null)
+		{
+			GD.PushError($"Server UI smoke failed: panel open returned {opened.Status} {opened.Error}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryMountServerDrivenPanel(opened.Panel, out string mountError))
+		{
+			GD.PushError($"Server UI smoke failed: {mountError}");
+			return;
+		}
+
+		_smokeSawServerUiMessageBox = true;
+		if (UiManager.Menus.TryFindServerDrivenText(opened.Panel.PanelInstanceId, SmokeMessageBoxText, out string textError))
+		{
+			_smokeSawServerUiText = true;
+		}
+		else
+		{
+			GD.PushError($"Server UI smoke failed: {textError}");
+		}
+
+		if (UiManager.Menus.TryFindServerDrivenText(opened.Panel.PanelInstanceId, SmokeUnsupportedChildText, out string childTextError))
+		{
+			_smokeSawServerUiUnsupportedChild = true;
+		}
+		else
+		{
+			GD.PushError($"Server UI smoke failed: {childTextError}");
+		}
+
+		if (!UiManager.Menus.TryPressServerDrivenActionButton(opened.Panel.PanelInstanceId, SmokeMessageBoxActionId, out string pressError))
+		{
+			GD.PushError($"Server UI smoke failed: {pressError}");
+			return;
+		}
+
+		SetStatusText("Server UI smoke message box mounted.");
+	}
+
+	private static UiSchemaDocument CreateSmokeMessageBoxSchema()
+	{
+		if (!UiSchemaIdentity.TryCreate(
+			"local-smoke",
+			"smoke.message_box",
+			1,
+			new string('f', 64),
+			1,
+			out UiSchemaIdentity identity,
+			out string error))
+		{
+			throw new InvalidOperationException(error);
+		}
+
+		var metadata = new UiPanelMetadata(
+			"smoke.message_box",
+			UiSurfaceTarget.Menu,
+			UiFocusMode.Normal,
+			ExclusiveGroup: null,
+			ZOrderClass: 10,
+			UiOpenPolicy.ReplaceCurrent,
+			UiBackPolicy.CloseAndFocusParent,
+			UiTooltipPolicy.Allow,
+			BlocksGameplayInput: true,
+			PersistenceKey: null);
+
+		return new UiSchemaDocument(
+			identity,
+			metadata,
+			RootNodeId: 1,
+			Nodes:
+			[
+				new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
+				new UiSchemaNodeDescriptor(2, UiNodeKind.Column, null, null, [3, 4, 6, 7]),
+				new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "messageText", "Message", []),
+				new UiSchemaNodeDescriptor(4, UiNodeKind.Group, null, null, [5]),
+				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
+				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Row, null, null, [8]),
+				new UiSchemaNodeDescriptor(8, UiNodeKind.Button, null, "OK", [], ActionId: SmokeMessageBoxActionId),
+			],
+			PayloadSlots:
+			[
+				new UiPayloadSlotDescriptor("messageText", UiModelValueKind.String, Required: true, MaxStringLength: 128),
+			],
+			Actions:
+			[
+				new UiActionDescriptor(
+					SmokeMessageBoxActionId,
+					"OK",
+					IconId: null,
+					UiActionRole.Primary,
+					UiActionContextKind.Panel,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+			],
+			StateBindings: []);
+	}
+
+	private static UiRendererCapabilities CreateSmokeRendererCapabilities()
+	{
+		return new UiRendererCapabilities(
+			ProtocolVersion: 1,
+			CapabilityFlags: UiCapabilityFlags.None,
+			MaxSchemaBytes: 64 * 1024,
+			MaxModelBytes: 16 * 1024,
+			MaxNodeCount: 512,
+			MaxTreeDepth: 32,
+			MaxRepeaterRows: 256,
+			MaxTableColumns: 24);
 	}
 
 	private void UpdateSmokeSchedule(double delta)
