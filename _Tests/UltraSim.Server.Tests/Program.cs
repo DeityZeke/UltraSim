@@ -2701,10 +2701,9 @@ internal static class TestRunner
         Assert.True(serverHost.TryGetLastStateBaselineAck(connectionId, out _));
         Assert.True(serverHost.Subscriptions.IsSubscribed(connectionId, ServerUiScopes.ForConnection(connectionId)));
 
-        UiSchemaDocument schema = CreateServerUiSchema();
-        UiModelDocument model = CreateServerUiModel(schema);
-        var open = new UiPanelOpenDocument("panel/network/message", schema.Identity, null, model, schema);
-        Assert.True(serverHost.Ui.TryOpenPanel(connectionId, open));
+        UiBuiltPanel builtPanel = CreateServerBuiltPanel();
+        UiPanelOpenDocument open = builtPanel.ToColdOpen("panel/network/message");
+        Assert.True(serverHost.Ui.TryOpenPanel(connectionId, builtPanel, open.PanelInstanceId));
         Assert.Equal(1L, serverHost.Ui.PublishedPanelOpens);
 
         serverHost.Pump(200, 0.016f, 20);
@@ -2723,7 +2722,7 @@ internal static class TestRunner
         };
         var action = new UiActionRequestDocument(
             open.PanelInstanceId,
-            schema.Identity,
+            builtPanel.Schema.Identity,
             CatalogIdentity: null,
             ClientSequence: 42,
             "network.ok",
@@ -3083,67 +3082,19 @@ internal static class TestRunner
         return world;
     }
 
-    private static UiSchemaDocument CreateServerUiSchema()
+    private static UiBuiltPanel CreateServerBuiltPanel()
     {
-        bool created = UiSchemaIdentity.TryCreate(
-            "server/main",
-            "smoke.network_message",
-            1,
-            new string('e', 64),
-            1,
-            out UiSchemaIdentity identity,
-            out string error);
-        Assert.True(created);
-
-        var metadata = new UiPanelMetadata(
-            "smoke.network_message",
-            UiSurfaceTarget.Menu,
-            UiFocusMode.Normal,
-            ExclusiveGroup: null,
-            ZOrderClass: 1,
-            UiOpenPolicy.New,
-            UiBackPolicy.CloseAndFocusParent,
-            UiTooltipPolicy.Allow,
-            BlocksGameplayInput: false,
-            PersistenceKey: null);
-
-        return new UiSchemaDocument(
-            identity,
-            metadata,
-            RootNodeId: 1,
-            Nodes:
-            [
-                new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2, 3]),
-                new UiSchemaNodeDescriptor(2, UiNodeKind.DynamicText, "message", "Message", []),
-                new UiSchemaNodeDescriptor(3, UiNodeKind.Button, null, "OK", [], ActionId: "network.ok"),
-            ],
-            PayloadSlots:
-            [
-                new UiPayloadSlotDescriptor("message", UiModelValueKind.String, Required: true, MaxStringLength: 128),
-            ],
-            Actions:
-            [
-                new UiActionDescriptor(
-                    "network.ok",
-                    "OK",
-                    IconId: null,
-                    UiActionRole.Primary,
-                    UiActionContextKind.Panel,
-                    RequiresConfirm: false,
-                    ChildMenuKey: null),
-            ],
-            StateBindings: [],
-            CatalogIdentity: null);
-    }
-
-    private static UiModelDocument CreateServerUiModel(UiSchemaDocument schema)
-    {
-        return new UiModelDocument(
-            schema.Identity,
-            Values:
-            [
-                UiModelSlotValue.String("message", "Hello over the live network path."),
-            ]);
+        return UiPanelBuilder
+            .Create("server/main", "smoke.network_message", 1)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.DynamicText("message", "Message", "Hello over the live network path.", maxStringLength: 128);
+                    column.Row(row => row.Button("network.ok", "OK", UiActionRole.Primary));
+                });
+            })
+            .Build();
     }
 
     private static int PollUntilNonZero<TState>(Func<TState, int> poll, TState state, int maxAttempts)

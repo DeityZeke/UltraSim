@@ -19,6 +19,13 @@ public sealed class ServerUiService
 
     public event Action<ConnectionId, UiActionRequestDocument>? ActionReceived;
 
+    public bool TryOpenPanel(ConnectionId connectionId, UiBuiltPanel panel, string panelInstanceId)
+    {
+        ArgumentNullException.ThrowIfNull(panel);
+
+        return TryOpenPanel(connectionId, panel.ToColdOpen(panelInstanceId));
+    }
+
     public bool TryOpenPanel(ConnectionId connectionId, UiPanelOpenDocument document)
     {
         if (!connectionId.IsValid)

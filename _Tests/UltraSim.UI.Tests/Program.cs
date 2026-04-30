@@ -34,6 +34,8 @@ internal static class TestRunner
         Run(nameof(UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses), UiActionRequestAndResult_RejectUnavailableStaleAndMismatchedResponses);
         Run(nameof(UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines), UiTooltipDescriptor_ValidatesFlatStaticAndSlotBackedLines);
         Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes);
+        Run(nameof(UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments), UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments);
+        Run(nameof(UiPanelBuilder_RejectsConflictingScopedDeclarations), UiPanelBuilder_RejectsConflictingScopedDeclarations);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
 
@@ -273,6 +275,89 @@ internal static class TestRunner
         {
             Fallback = descriptor.Fallback with { StaleAfterMilliseconds = -1 }
         }).Validate(), "stale timeout");
+    }
+
+    private static void UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments()
+    {
+        UiBuiltPanel built = UiPanelBuilder
+            .Create("server/main", "smoke.message_box", 1)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.Text("Notice");
+                    column.DynamicText("messageText", "Message", "Hello from the builder.", maxStringLength: 128);
+                    column.Row(row => row.Button("message.ok", "OK", UiActionRole.Primary));
+                });
+            })
+            .Build();
+
+        Assert.Equal("smoke.message_box", built.Schema.Identity.PanelType);
+        Assert.Equal("smoke.message_box", built.Schema.Metadata.PanelType);
+        Assert.Equal(1, built.Schema.RootNodeId);
+        UiSchemaNodeDescriptor root = built.Schema.Nodes.First(node => node.NodeId == built.Schema.RootNodeId);
+        Assert.Equal(UiNodeKind.Panel, root.Kind);
+        Assert.Equal(1, built.Schema.PayloadSlots.Count);
+        Assert.Equal(1, built.Schema.Actions.Count);
+        Assert.Equal("messageText", built.Schema.PayloadSlots[0].SlotId);
+        Assert.Equal("message.ok", built.Schema.Actions[0].ActionId);
+        Assert.Valid(built.Schema.Validate(rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Valid(built.Model.ValidateAgainst(built.Schema));
+
+        UiPanelOpenDocument cold = built.ToColdOpen("panel/smoke/1");
+        Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(built.Schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+        UiPanelOpenDocument hot = built.ToHotOpen("panel/smoke/2");
+        Assert.Valid(hot.ValidateHot(context!));
+
+        UiBuiltPanel rebuilt = UiPanelBuilder
+            .Create("server/main", "smoke.message_box", 1)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.Text("Notice");
+                    column.DynamicText("messageText", "Message", "Hello from the builder.", maxStringLength: 128);
+                    column.Row(row => row.Button("message.ok", "OK", UiActionRole.Primary));
+                });
+            })
+            .Build();
+        Assert.Equal(built.Schema.Identity.SchemaHashHex, rebuilt.Schema.Identity.SchemaHashHex);
+    }
+
+    private static void UiPanelBuilder_RejectsConflictingScopedDeclarations()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            UiPanelBuilder
+                .Create("server/main", "smoke.conflict", 1)
+                .Panel(panel =>
+                {
+                    panel.DynamicText("messageText", "Message", "first", maxStringLength: 64);
+                    panel.DynamicText("messageText", "Message", "second", maxStringLength: 64);
+                })
+                .Build();
+        });
+
+        var metadata = new UiPanelMetadata(
+            "smoke.other",
+            UiSurfaceTarget.Menu,
+            UiFocusMode.Normal,
+            ExclusiveGroup: null,
+            ZOrderClass: 1,
+            UiOpenPolicy.New,
+            UiBackPolicy.CloseAndFocusParent,
+            UiTooltipPolicy.Allow,
+            BlocksGameplayInput: false,
+            PersistenceKey: null);
+        bool built = UiPanelBuilder
+            .Create("server/main", "smoke.conflict", 1, metadata)
+            .Panel(panel => panel.Text("Nope"))
+            .TryBuild(out _, out string error);
+        Assert.False(built);
+        Assert.True(error.Contains("metadata panel type", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void UiContractJsonCodec_RoundTripsCoreContracts()
@@ -1307,5 +1392,20 @@ internal static class Assert
         {
             throw new InvalidOperationException($"Expected error containing '{text}', got '{result.Error}'.");
         }
+    }
+
+    public static TException Throws<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException ex)
+        {
+            return ex;
+        }
+
+        throw new InvalidOperationException($"Expected exception of type {typeof(TException).Name}.");
     }
 }
