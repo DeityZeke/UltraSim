@@ -16,6 +16,8 @@ internal static class TestRunner
         Run(nameof(InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers), InMemoryInventoryStore_DispatchesDeltasOnlyToMatchingContainerViewers);
         Run(nameof(InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource), InMemoryInventoryStore_CancelTransactionReturnsSuspendedItemsToSource);
         Run(nameof(InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone), InMemoryInventoryStore_CancelTransactionEmitsUnresolvedReturnWhenSourceIsGone);
+        Run(nameof(InMemoryInventoryStore_CommitTransactionMovesSuspendedItemsToDestinationsAtomically), InMemoryInventoryStore_CommitTransactionMovesSuspendedItemsToDestinationsAtomically);
+        Run(nameof(InMemoryInventoryStore_CommitTransactionRejectedByCurrentDestinationStateDoesNotPartiallyMutate), InMemoryInventoryStore_CommitTransactionRejectedByCurrentDestinationStateDoesNotPartiallyMutate);
         Run(nameof(InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions), InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions);
         Run(nameof(InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies), InventoryMoveMutationRules_UsesAccessRangeAndCapacityPolicies);
         Run(nameof(InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas), InMemoryInventoryStore_ApplyMoveMutatesSnapshotsAndDispatchesScopedDeltas);
@@ -368,6 +370,135 @@ internal static class TestRunner
         Assert.ContainsEvent(cancel.Events, InventoryStoreEventKind.SuspendedItemReturnUnresolved, "item:coin/unresolved");
         Assert.NotContainsEvent(cancel.Events, InventoryStoreEventKind.SuspendedItemReleased, "item:coin/unresolved");
         Assert.False(store.TryGetTransaction("trade:gone_source/1", out _), "transaction removed after unresolved cancel");
+    }
+
+    private static void InMemoryInventoryStore_CommitTransactionMovesSuspendedItemsToDestinationsAtomically()
+    {
+        var store = new InMemoryInventoryStore(new FakeInventoryRuntimeRefResolver(), new DefaultInventoryOwnerLifetimePolicy());
+        InventoryContainerSnapshot left = CreateContainer(
+            "container:trade_commit/left",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:left"),
+            InventoryContainerLifecycle.Transactional,
+            [CreateCoinItem("item:coin/commit_left")]);
+        InventoryContainerSnapshot right = CreateContainer(
+            "container:trade_commit/right",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:right"),
+            InventoryContainerLifecycle.Transactional,
+            [CreateCoinItem("item:coin/commit_right")]);
+        Assert.StoreSuccess(store.AddContainer(left));
+        Assert.StoreSuccess(store.AddContainer(right));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:trade_commit/left",
+            left.ContainerId,
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:left"),
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.OpenView(new InventoryContainerViewSnapshot(
+            "view:trade_commit/right",
+            right.ContainerId,
+            new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:right"),
+            InventoryAccessFlags.Read)));
+        Assert.StoreSuccess(store.BeginTransaction(new InventoryTransactionSnapshot(
+            "trade:commit/1",
+            InventoryTransactionState.Open,
+            [left.ContainerId, right.ContainerId],
+            [])));
+        Assert.StoreSuccess(store.SuspendWholeItem(
+            "trade:commit/1",
+            left.ContainerId,
+            right.ContainerId,
+            "item:coin/commit_left"));
+        Assert.StoreSuccess(store.SuspendWholeItem(
+            "trade:commit/1",
+            right.ContainerId,
+            left.ContainerId,
+            "item:coin/commit_right"));
+
+        InventoryStoreOperationResult committed = store.CommitTransaction(
+            "trade:commit/1",
+            new MaxDestinationItemsTransactionCommitPolicy(maxItems: 1),
+            "trade accepted");
+        Assert.StoreSuccess(committed);
+        Assert.ContainsEvent(committed.Events, InventoryStoreEventKind.TransactionCommitted, "trade:commit/1");
+        Assert.Equal(2, committed.Dispatches.Count, "commit dispatch count");
+        Assert.False(store.TryGetTransaction("trade:commit/1", out _), "transaction removed after commit");
+
+        Assert.True(store.TryGetContainer(left.ContainerId, out InventoryContainerSnapshot committedLeft), "left after commit");
+        Assert.True(store.TryGetContainer(right.ContainerId, out InventoryContainerSnapshot committedRight), "right after commit");
+        Assert.Equal(1, committedLeft.Items.Count, "left count after commit");
+        Assert.Equal("item:coin/commit_right", committedLeft.Items[0].ItemInstanceId, "left received right item");
+        Assert.Equal(1, committedRight.Items.Count, "right count after commit");
+        Assert.Equal("item:coin/commit_left", committedRight.Items[0].ItemInstanceId, "right received left item");
+
+        Assert.Equal(InventoryContainerDeltaKind.ItemAdded, committed.Dispatches[0].Delta.Kind, "first commit delta kind");
+        Assert.Equal("trade:commit/1", committed.Dispatches[0].Delta.TransactionId!, "first commit delta transaction");
+        Assert.Equal(InventoryContainerDeltaKind.ItemAdded, committed.Dispatches[1].Delta.Kind, "second commit delta kind");
+        Assert.Equal("trade:commit/1", committed.Dispatches[1].Delta.TransactionId!, "second commit delta transaction");
+    }
+
+    private static void InMemoryInventoryStore_CommitTransactionRejectedByCurrentDestinationStateDoesNotPartiallyMutate()
+    {
+        var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:trade_fill");
+        var resolver = new FakeInventoryRuntimeRefResolver();
+        resolver.RegisterRequester(requester);
+        var store = new InMemoryInventoryStore(resolver, new DefaultInventoryOwnerLifetimePolicy());
+        InventoryContainerSnapshot left = CreateContainer(
+            "container:trade_current/left",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:left"),
+            InventoryContainerLifecycle.Transactional,
+            [CreateCoinItem("item:coin/current_trade")]);
+        InventoryContainerSnapshot right = CreateContainer(
+            "container:trade_current/right",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:right"),
+            InventoryContainerLifecycle.Transactional);
+        InventoryContainerSnapshot stash = CreateContainer(
+            "container:trade_current/stash",
+            new InventoryOwnerRef(InventoryOwnerKind.Character, "character:right"),
+            InventoryContainerLifecycle.Persistent,
+            [CreateCoinItem("item:coin/current_filler")]);
+        Assert.StoreSuccess(store.AddContainer(left));
+        Assert.StoreSuccess(store.AddContainer(right));
+        Assert.StoreSuccess(store.AddContainer(stash));
+        Assert.StoreSuccess(store.BeginTransaction(new InventoryTransactionSnapshot(
+            "trade:current_state/1",
+            InventoryTransactionState.Open,
+            [left.ContainerId, right.ContainerId],
+            [])));
+        Assert.StoreSuccess(store.SuspendWholeItem(
+            "trade:current_state/1",
+            left.ContainerId,
+            right.ContainerId,
+            "item:coin/current_trade"));
+
+        var fillIntent = new InventoryMutationIntent(
+            "corr:trade_current/fill",
+            requester,
+            ClientSequence: 96,
+            InventoryMutationKind.MoveItem,
+            stash.ContainerId,
+            right.ContainerId,
+            "item:coin/current_filler",
+            DestinationItemInstanceId: null,
+            Quantity: 1,
+            ProposedPlacement: InventoryPlacementDescriptor.List(0));
+        Assert.StoreSuccess(store.ApplyMove(fillIntent, new InventoryMoveMutationRules(
+            new PublicTakePutAccessPolicy(),
+            new MaxItemCountCapacityPolicy(maxItems: 1),
+            new ToggleRangePolicy())));
+
+        InventoryStoreOperationResult rejected = store.CommitTransaction(
+            "trade:current_state/1",
+            new MaxDestinationItemsTransactionCommitPolicy(maxItems: 1),
+            "trade accepted");
+        Assert.False(rejected.Succeeded, "commit rejected by current destination capacity");
+        Assert.Contains(rejected.Error!, "capacity", "commit rejection mentions capacity");
+        Assert.True(store.TryGetTransaction("trade:current_state/1", out InventoryTransactionSnapshot stillOpen), "transaction remains after rejected commit");
+        Assert.Equal(1, stillOpen.SuspendedItems.Count, "suspended item remains after rejected commit");
+
+        Assert.True(store.TryGetContainer(left.ContainerId, out InventoryContainerSnapshot unchangedLeft), "left after rejected commit");
+        Assert.True(store.TryGetContainer(right.ContainerId, out InventoryContainerSnapshot unchangedRight), "right after rejected commit");
+        Assert.Equal(0, unchangedLeft.Items.Count, "left remains empty while item suspended");
+        Assert.Equal(1, unchangedRight.Items.Count, "right keeps only filler item");
+        Assert.Equal("item:coin/current_filler", unchangedRight.Items[0].ItemInstanceId, "right filler remains");
     }
 
     private static void InMemoryInventoryStore_EntityOwnerInvalidationClosesViewersAndReleasesTransactions()
@@ -1918,6 +2049,29 @@ internal sealed class ToggleItemLockPolicy : IInventoryItemLockPolicy
     }
 }
 
+internal sealed class MaxDestinationItemsTransactionCommitPolicy : IInventoryTransactionCommitPolicy
+{
+    private readonly int _maxItems;
+
+    public MaxDestinationItemsTransactionCommitPolicy(int maxItems)
+    {
+        _maxItems = maxItems;
+    }
+
+    public InventoryMutationRuleDecision CanCommitSuspendedItem(
+        InventoryTransactionSnapshot transaction,
+        InventorySuspendedItemSnapshot suspendedItem,
+        InventoryItemSnapshot item,
+        InventoryContainerSnapshot destinationContainer)
+    {
+        return destinationContainer.Items.Count < _maxItems
+            ? InventoryMutationRuleDecision.Accepted()
+            : InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.Conflict,
+                "Destination container is at current commit capacity.");
+    }
+}
+
 internal sealed class MaxItemCountCapacityPolicy : IInventoryContainerCapacityPolicy
 {
     private readonly int _maxItems;
@@ -2086,6 +2240,14 @@ internal static class Assert
         }
 
         throw new InvalidOperationException($"Expected {label} to contain '{expected}'.");
+    }
+
+    public static void Contains(string value, string expected, string label)
+    {
+        if (!value.Contains(expected, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Expected {label} to contain '{expected}', got '{value}'.");
+        }
     }
 
     public static void NotContains(IReadOnlyList<string> values, string unexpected, string label)

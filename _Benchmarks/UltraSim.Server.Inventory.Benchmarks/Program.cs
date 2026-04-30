@@ -99,6 +99,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
 
     yield return new BenchmarkScenario
     {
+        Name = "CommitTransaction_1000SuspendedItems",
+        Category = "InventoryStore",
+        Comparable = false,
+        Scale = 1_000,
+        WarmupCount = 3,
+        IterationCount = 5,
+        Execute = () => RunCommitTransactionScenario(1_000),
+    };
+
+    yield return new BenchmarkScenario
+    {
         Name = "DispatchDelta_1000Viewers_10000",
         Category = "InventoryStore",
         Comparable = false,
@@ -336,6 +347,54 @@ static ScenarioMeasurement RunLockStateScenario(int iterations)
     }
 
     return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunCommitTransactionScenario(int itemCount)
+{
+    var requester = new InventoryRequesterRef(InventoryRequesterKind.PlayerSession, "session:bench_store_commit");
+    var store = new InMemoryInventoryStore(new StaticInventoryRuntimeRefResolver(requester), new DefaultInventoryOwnerLifetimePolicy());
+    var sourceItems = new InventoryItemSnapshot[itemCount];
+    for (int i = 0; i < sourceItems.Length; i++)
+    {
+        sourceItems[i] = CreateItem(
+            $"item:bench_store_commit/source_{i}",
+            InventoryPlacementDescriptor.List(i));
+    }
+
+    InventoryContainerSnapshot source = CreateContainer(
+        "container:bench_store_commit/source",
+        InventoryPlacementMode.List,
+        sourceItems);
+    InventoryContainerSnapshot destination = CreateContainer(
+        "container:bench_store_commit/destination",
+        InventoryPlacementMode.List);
+    StoreSuccess(store.AddContainer(source));
+    StoreSuccess(store.AddContainer(destination));
+    StoreSuccess(store.BeginTransaction(new InventoryTransactionSnapshot(
+        "trade:bench_store_commit/1",
+        InventoryTransactionState.Open,
+        [source.ContainerId, destination.ContainerId],
+        [])));
+
+    for (int i = 0; i < sourceItems.Length; i++)
+    {
+        StoreSuccess(store.SuspendWholeItem(
+            "trade:bench_store_commit/1",
+            source.ContainerId,
+            destination.ContainerId,
+            sourceItems[i].ItemInstanceId));
+    }
+
+    InventoryStoreOperationResult result = store.CommitTransaction(
+        "trade:bench_store_commit/1",
+        new MaxDestinationItemsTransactionCommitPolicy(itemCount + 1),
+        "benchmark commit");
+    if (!result.Succeeded)
+    {
+        throw new InvalidOperationException(result.Error ?? "Commit transaction failed.");
+    }
+
+    return new ScenarioMeasurement(itemCount, result.Dispatches.Count + result.Events.Count);
 }
 
 static ScenarioMeasurement RunDispatchDeltaScenario(int iterations, int viewerCount)
@@ -632,5 +691,28 @@ internal sealed class AllowInventoryItemLockPolicy : IInventoryItemLockPolicy
         bool locked)
     {
         return InventoryMutationRuleDecision.Accepted();
+    }
+}
+
+internal sealed class MaxDestinationItemsTransactionCommitPolicy : IInventoryTransactionCommitPolicy
+{
+    private readonly int _maxItems;
+
+    public MaxDestinationItemsTransactionCommitPolicy(int maxItems)
+    {
+        _maxItems = maxItems;
+    }
+
+    public InventoryMutationRuleDecision CanCommitSuspendedItem(
+        InventoryTransactionSnapshot transaction,
+        InventorySuspendedItemSnapshot suspendedItem,
+        InventoryItemSnapshot item,
+        InventoryContainerSnapshot destinationContainer)
+    {
+        return destinationContainer.Items.Count < _maxItems
+            ? InventoryMutationRuleDecision.Accepted()
+            : InventoryMutationRuleDecision.Rejected(
+                InventoryMutationFailureReason.Conflict,
+                "Destination container is at current commit capacity.");
     }
 }

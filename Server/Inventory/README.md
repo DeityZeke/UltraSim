@@ -18,6 +18,7 @@ Implemented first boundary slice:
   - `IInventoryStackMergePolicy`
   - `IInventoryEquipmentSlotPolicy`
   - `IInventoryItemLockPolicy`
+  - `IInventoryTransactionCommitPolicy`
 - `IInventoryOwnerLifetimePolicy`
 - default owner lifetime policy for unresolved/despawned owners
 - in-memory store prototype:
@@ -25,6 +26,7 @@ Implemented first boundary slice:
   - viewer registry/session tracking
   - scoped delta dispatch recipient selection
   - transaction begin/suspend/cancel
+  - transaction commit/cancel handling
   - owner-lifetime refresh handling
   - whole-item move application through injected mutation rules
   - split-stack application through injected mutation rules
@@ -106,6 +108,7 @@ It does not persist, authorize real gameplay, or own transport delivery.
 - `ApplyMerge` evaluates injected mutation rules first, then commits source decrement/removal and destination quantity changes only after both updated snapshots validate.
 - `ApplyEquip` evaluates injected mutation rules first, then commits source removal and equipment-slot insertion only after both updated snapshots validate.
 - `ApplyLockState` evaluates injected mutation rules first, then commits item flag changes only after the updated snapshot validates.
+- `CommitTransaction` evaluates a commit policy against current destination snapshots, then moves all suspended items forward or none of them.
 - Rule rejection is returned as an `InventoryMutationResult`; malformed store state remains a store failure.
 - Persistence, audit logging, and database ownership stay outside this prototype.
 
@@ -166,6 +169,16 @@ The benchmark slot policy intentionally uses a simple linear occupancy scan and 
 
 The first rule requires mutate access, range approval, and quantity `1`. Quantity is treated as an action-shape convention, not a partial-stack lock operation; the whole item stack receives the new lock state. If the item is already in the requested state, the rule returns `NoOp` and the store emits no delta. Accepted lock-state changes produce an `ItemUpdated` delta with the updated item snapshot.
 
+## Transaction Commit Prototype
+
+Transactions remain generic participant-container sets, not trade-specific objects. `CommitTransaction` resolves suspended whole items forward into their declared destination containers. `CancelTransaction` resolves suspended items backward into their source containers.
+
+Commit has an explicit policy hook, `IInventoryTransactionCommitPolicy`, so capacity, escrow, trade-confirm, ownership, housing, vendor, or scripted rules stay above the store. The store passes the current destination snapshot into the policy for each suspended item, including any earlier incoming items in the same commit. This is intentional: destination state at commit time wins over destination state at transaction begin time.
+
+The store prepares every destination snapshot and validates every updated container before mutating live state. A rejected commit leaves the transaction open, keeps suspended items reserved, and does not partially transfer any item. An accepted commit emits `ItemAdded` deltas for destination viewers, clears suspended state, removes the transaction, and emits a `TransactionCommitted` store event.
+
+The current commit benchmark is an end-to-end prototype stress case: it builds the store, suspends 1000 whole items, and commits them into a growing destination snapshot inside the measured scenario. Treat it as a ceiling for the immutable prototype path, not as the expected production cost of a prebuilt transaction commit.
+
 ## Benchmark Harness
 
 Current server bridge benchmark:
@@ -183,9 +196,10 @@ Initial scenarios cover:
 - accepted cross-container partial merge-stack moves
 - accepted cross-container equip-item moves
 - accepted in-place lock/unlock item updates
+- accepted transaction commits with suspended whole items
 - raw `DispatchDelta` fanout across 1000 viewers
 
-These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, richer equipment rules, richer lock/permission policy, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.
+These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, richer equipment rules, richer lock/permission policy, trade confirmation state, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.
 
 ## Boundary Rules
 

@@ -9,4 +9,5 @@ public enum InventoryStoreEventKind : byte
     SuspendedItemReleased = 5,
     SuspendedItemReturnUnresolved = 6,
     ContainerDestroyed = 7,
+    TransactionCommitted = 8,
 }

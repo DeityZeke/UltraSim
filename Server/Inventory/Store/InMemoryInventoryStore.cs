@@ -984,6 +984,116 @@ public sealed class InMemoryInventoryStore
         return InventoryStoreOperationResult.Success(events);
     }
 
+    public InventoryStoreOperationResult CommitTransaction(
+        string transactionId,
+        IInventoryTransactionCommitPolicy commitPolicy,
+        string reason)
+    {
+        ArgumentNullException.ThrowIfNull(commitPolicy);
+
+        if (!_transactions.TryGetValue(transactionId, out TransactionEntry? transaction))
+        {
+            return InventoryStoreOperationResult.Failure($"Inventory transaction '{transactionId}' does not exist.");
+        }
+
+        if (transaction.Snapshot.State != InventoryTransactionState.Open &&
+            transaction.Snapshot.State != InventoryTransactionState.CommitPending)
+        {
+            return InventoryStoreOperationResult.Failure($"Inventory transaction '{transactionId}' is not committable.");
+        }
+
+        var updatedDestinations = new Dictionary<string, InventoryContainerSnapshot>(StringComparer.Ordinal);
+        var committedItems = new List<(InventorySuspendedItemSnapshot Suspended, InventoryItemSnapshot Item)>();
+        for (int i = 0; i < transaction.Snapshot.SuspendedItems.Count; i++)
+        {
+            InventorySuspendedItemSnapshot suspended = transaction.Snapshot.SuspendedItems[i];
+            if (string.IsNullOrWhiteSpace(suspended.DestinationContainerId))
+            {
+                return InventoryStoreOperationResult.Failure($"Suspended item '{suspended.ItemInstanceId}' has no destination container.");
+            }
+
+            if (!transaction.ReservedItems.TryGetValue(suspended.ItemInstanceId, out InventoryItemSnapshot? item))
+            {
+                return InventoryStoreOperationResult.Failure($"Suspended item '{suspended.ItemInstanceId}' has no reserved item snapshot.");
+            }
+
+            if (!updatedDestinations.TryGetValue(suspended.DestinationContainerId, out InventoryContainerSnapshot? destination))
+            {
+                if (!_containers.TryGetValue(suspended.DestinationContainerId, out destination))
+                {
+                    return InventoryStoreOperationResult.Failure($"Destination container '{suspended.DestinationContainerId}' does not exist.");
+                }
+            }
+
+            InventoryMutationRuleDecision decision = commitPolicy.CanCommitSuspendedItem(
+                transaction.Snapshot,
+                suspended,
+                item,
+                destination);
+            if (!decision.IsAccepted)
+            {
+                return InventoryStoreOperationResult.Failure(decision.Message ?? "Inventory transaction commit was rejected.");
+            }
+
+            InventoryContainerSnapshot updatedDestination = AddItem(destination, item);
+            InventoryValidationResult destinationValidation = updatedDestination.Validate();
+            if (!destinationValidation.IsValid)
+            {
+                return InventoryStoreOperationResult.Failure(destinationValidation.Error);
+            }
+
+            updatedDestinations[suspended.DestinationContainerId] = updatedDestination;
+            committedItems.Add((suspended, item));
+        }
+
+        var dispatches = new List<InventoryStoreDeltaDispatch>(committedItems.Count);
+        for (int i = 0; i < committedItems.Count; i++)
+        {
+            InventorySuspendedItemSnapshot suspended = committedItems[i].Suspended;
+            InventoryItemSnapshot item = committedItems[i].Item;
+            InventoryContainerSnapshot destination = updatedDestinations[suspended.DestinationContainerId!];
+            long revision = SetContainerSnapshot(destination);
+            InventoryStoreOperationResult dispatch = DispatchDelta(new InventoryContainerDelta(
+                $"delta:{transactionId}/committed/{item.ItemInstanceId}",
+                destination.ContainerId,
+                revision,
+                InventoryContainerDeltaKind.ItemAdded,
+                item.ItemInstanceId,
+                item,
+                PreviousPlacement: null,
+                CurrentPlacement: null,
+                QuantityDelta: 0,
+                InventoryAccessFlags.Read,
+                VisibilityScopeId: null,
+                TransactionId: transactionId));
+            if (!dispatch.Succeeded)
+            {
+                return dispatch;
+            }
+
+            dispatches.AddRange(dispatch.Dispatches);
+        }
+
+        transaction.Snapshot = transaction.Snapshot with
+        {
+            State = InventoryTransactionState.Committed,
+            SuspendedItems = []
+        };
+        transaction.ReservedItems.Clear();
+        _transactions.Remove(transactionId);
+
+        var events = new List<InventoryStoreEvent>
+        {
+            new(
+                InventoryStoreEventKind.TransactionCommitted,
+                transaction.Snapshot.ParticipantContainerIds[0],
+                TransactionId: transactionId,
+                Message: reason)
+        };
+
+        return InventoryStoreOperationResult.Success(events, dispatches, mutationResult: null);
+    }
+
     public InventoryStoreOperationResult RefreshOwnerLifetime(string containerId)
     {
         if (!_containers.TryGetValue(containerId, out InventoryContainerSnapshot? container))
