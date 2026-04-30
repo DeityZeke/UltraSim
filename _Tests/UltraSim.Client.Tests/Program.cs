@@ -740,6 +740,7 @@ internal static class TestRunner
         Assert.True(cold.Panel is not null);
         Assert.Equal(1, registry.Count);
         Assert.Equal(schema.Metadata, cold.Panel!.Metadata);
+        Assert.Equal(schema, cold.Panel.Schema);
 
         var hotOpen = new UiPanelOpenDocument("panel/status/2", schema.Identity, schema.CatalogIdentity, model, SchemaDefinition: null);
         ClientUiPanelOpenResult hot = registry.OpenPanel(hotOpen, rendererCapabilities: CreateClientRendererCapabilities());
@@ -748,6 +749,7 @@ internal static class TestRunner
         Assert.Equal(2, registry.Count);
         Assert.True(registry.TryGetPanel("panel/status/2", out ClientUiPanelInstance panel));
         Assert.Equal(schema.Identity, panel.SchemaIdentity);
+        Assert.Equal(schema, panel.Schema);
         Assert.True(hot.Panel!.OpenSequence > cold.Panel.OpenSequence);
     }
 

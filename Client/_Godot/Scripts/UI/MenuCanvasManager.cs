@@ -1,6 +1,8 @@
 using Godot;
 using UltraSim.Client;
+using UltraSim.Client.UI;
 using UltraSim.Discovery;
+using UltraSim.UI;
 
 namespace UltraSim.Client.Godot.UI;
 
@@ -9,6 +11,9 @@ public partial class MenuCanvasManager : CanvasLayer
 {
     private readonly ClientAppShellNavigation _navigation = new();
     private readonly ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser();
+    private readonly Dictionary<string, Control> _serverDrivenPanels = new(StringComparer.Ordinal);
+    private readonly Dictionary<UiSurfaceTarget, Control> _serverDrivenSurfaceHosts = new();
+    private readonly HashSet<string> _blockingServerDrivenPanels = new(StringComparer.Ordinal);
 
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
     public event Action? DisconnectRequested;
@@ -19,16 +24,76 @@ public partial class MenuCanvasManager : CanvasLayer
     private ClientChatPanel? _chatPanel;
 
     public bool IsMenuOpen => _appShell?.Visible == true;
-    public bool BlocksGameplayInput => IsMenuOpen || _chatPanel?.HasInputFocus == true;
+    public bool HasServerDrivenPanels => _serverDrivenPanels.Count > 0;
+    public bool BlocksGameplayInput => IsMenuOpen || _blockingServerDrivenPanels.Count > 0 || _chatPanel?.HasInputFocus == true;
 
     public override void _Ready()
     {
         _appShell = GetNodeOrNull<ClientAppShell>("AppShell") ?? CreateAppShell();
+        EnsureServerDrivenSurfaceHosts();
         _chatPanel = GetNodeOrNull<ClientChatPanel>("ChatPanel") ?? CreateChatPanel();
         _chatPanel.ChatSubmitted += text => ChatSubmitted?.Invoke(text);
 
         WireAppShell(_appShell);
         ApplyNavigation();
+    }
+
+    public bool TryMountServerDrivenPanel(ClientUiPanelInstance panel, out string error)
+    {
+        ArgumentNullException.ThrowIfNull(panel);
+
+        if (panel.Metadata.SurfaceTarget is not (UiSurfaceTarget.Menu or UiSurfaceTarget.Modal or UiSurfaceTarget.Exclusive))
+        {
+            error = $"Panel surface '{panel.Metadata.SurfaceTarget}' does not belong on the menu canvas.";
+            return false;
+        }
+
+        Control? surfaceHost = GetOrCreateServerDrivenSurfaceHost(panel.Metadata.SurfaceTarget);
+        if (surfaceHost is null)
+        {
+            error = $"Server-driven surface host '{panel.Metadata.SurfaceTarget}' is not available.";
+            return false;
+        }
+
+        if (!ServerDrivenPanelRenderer.TryBuild(panel, out Control renderedPanel, out error))
+        {
+            return false;
+        }
+
+        CloseServerDrivenPanel(panel.PanelInstanceId);
+        _serverDrivenPanels[panel.PanelInstanceId] = renderedPanel;
+        if (PanelBlocksGameplayInput(panel.Metadata))
+        {
+            _blockingServerDrivenPanels.Add(panel.PanelInstanceId);
+        }
+
+        surfaceHost.AddChild(renderedPanel);
+        ApplyServerPanelPlacement(renderedPanel, panel.Metadata);
+        error = string.Empty;
+        return true;
+    }
+
+    public bool CloseServerDrivenPanel(string panelInstanceId)
+    {
+        if (!_serverDrivenPanels.Remove(panelInstanceId, out Control? renderedPanel))
+        {
+            return false;
+        }
+
+        _blockingServerDrivenPanels.Remove(panelInstanceId);
+        renderedPanel.QueueFree();
+        return true;
+    }
+
+    public void ClearServerDrivenPanels()
+    {
+        foreach (Control panel in _serverDrivenPanels.Values)
+        {
+            panel.QueueFree();
+        }
+
+        _serverDrivenPanels.Clear();
+        _blockingServerDrivenPanels.Clear();
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -106,6 +171,20 @@ public partial class MenuCanvasManager : CanvasLayer
         };
         AddChild(chatPanel);
         return chatPanel;
+    }
+
+    private Control CreateServerDrivenSurfaceHost(UiSurfaceTarget surface)
+    {
+        var host = new Control
+        {
+            Name = $"ServerDriven{surface}",
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            ZIndex = GetServerDrivenSurfaceZIndex(surface),
+        };
+        AddChild(host);
+        MoveChild(host, 0);
+        PlaceFullScreen(host);
+        return host;
     }
 
     private void WireAppShell(ClientAppShell appShell)
@@ -208,6 +287,8 @@ public partial class MenuCanvasManager : CanvasLayer
 
     private void ApplyNavigation()
     {
+        EnsureServerDrivenSurfaceHosts();
+
         if (_appShell is not null)
         {
             _appShell.Visible = _navigation.IsMenuVisible;
@@ -219,6 +300,61 @@ public partial class MenuCanvasManager : CanvasLayer
         {
             _chatPanel.Visible = _navigation.IsInSession;
         }
+    }
+
+    private void EnsureServerDrivenSurfaceHosts()
+    {
+        _ = GetOrCreateServerDrivenSurfaceHost(UiSurfaceTarget.Menu);
+        _ = GetOrCreateServerDrivenSurfaceHost(UiSurfaceTarget.Modal);
+        _ = GetOrCreateServerDrivenSurfaceHost(UiSurfaceTarget.Exclusive);
+    }
+
+    private Control? GetOrCreateServerDrivenSurfaceHost(UiSurfaceTarget surface)
+    {
+        if (surface is not (UiSurfaceTarget.Menu or UiSurfaceTarget.Modal or UiSurfaceTarget.Exclusive))
+        {
+            return null;
+        }
+
+        if (!_serverDrivenSurfaceHosts.TryGetValue(surface, out Control? host))
+        {
+            host = GetNodeOrNull<Control>($"ServerDriven{surface}") ?? CreateServerDrivenSurfaceHost(surface);
+            _serverDrivenSurfaceHosts[surface] = host;
+        }
+
+        PlaceFullScreen(host);
+        return host;
+    }
+
+    private static void ApplyServerPanelPlacement(Control panel, UiPanelMetadata metadata)
+    {
+        panel.Position = new Vector2(24.0f + metadata.ZOrderClass * 8.0f, 96.0f + metadata.ZOrderClass * 8.0f);
+        panel.ZIndex = metadata.ZOrderClass;
+    }
+
+    private static bool PanelBlocksGameplayInput(UiPanelMetadata metadata)
+    {
+        return metadata.BlocksGameplayInput || metadata.FocusMode is UiFocusMode.Normal or UiFocusMode.Modal or UiFocusMode.Exclusive;
+    }
+
+    private static int GetServerDrivenSurfaceZIndex(UiSurfaceTarget surface)
+    {
+        return surface switch
+        {
+            UiSurfaceTarget.Menu => 100,
+            UiSurfaceTarget.Modal => 200,
+            UiSurfaceTarget.Exclusive => 300,
+            _ => 0,
+        };
+    }
+
+    private static void PlaceFullScreen(Control control)
+    {
+        control.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        control.OffsetLeft = 0;
+        control.OffsetTop = 0;
+        control.OffsetRight = 0;
+        control.OffsetBottom = 0;
     }
 
     private bool ShouldFocusChat(InputEvent @event)

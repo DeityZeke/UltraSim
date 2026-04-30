@@ -4,6 +4,7 @@ namespace UltraSim.Client.UI;
 
 public sealed record ClientUiPanelInstance(
     string PanelInstanceId,
+    UiSchemaDocument Schema,
     UiSchemaIdentity SchemaIdentity,
     UiCatalogIdentity? CatalogIdentity,
     UiPanelMetadata Metadata,

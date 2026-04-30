@@ -61,7 +61,7 @@ public sealed class ClientUiPanelRegistry
                 return ClientUiPanelOpenResult.Rejected("Cold-open schema was not available after cache insert.");
             }
 
-            var panel = CreatePanel(open, schemaLookup.Entry.Schema.Metadata, schemaLookup.Entry.CompatibilityContext);
+            var panel = CreatePanel(open, schemaLookup.Entry.Schema, schemaLookup.Entry.CompatibilityContext);
             _panelsById[panel.PanelInstanceId] = panel;
             return ClientUiPanelOpenResult.ColdOpened(panel);
         }
@@ -96,7 +96,7 @@ public sealed class ClientUiPanelRegistry
 
         ClientUiPanelInstance hotPanel = CreatePanel(
             open,
-            hotSchemaLookup.Entry.Schema.Metadata,
+            hotSchemaLookup.Entry.Schema,
             hotSchemaLookup.Entry.CompatibilityContext);
         _panelsById[hotPanel.PanelInstanceId] = hotPanel;
         return ClientUiPanelOpenResult.HotOpened(hotPanel);
@@ -213,14 +213,15 @@ public sealed class ClientUiPanelRegistry
 
     private ClientUiPanelInstance CreatePanel(
         UiPanelOpenDocument open,
-        UiPanelMetadata metadata,
+        UiSchemaDocument schema,
         UiSchemaCompatibilityContext compatibilityContext)
     {
         return new ClientUiPanelInstance(
             open.PanelInstanceId,
+            schema,
             open.SchemaIdentity,
             open.CatalogIdentity,
-            metadata,
+            schema.Metadata,
             open.Model,
             EmptyRepeaterRows,
             compatibilityContext,

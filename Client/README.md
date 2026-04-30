@@ -65,6 +65,11 @@ What now exists:
   - preview actor, local controller, orbit camera, nameplate/overhead-chat projection
   - local app shell, manual server browser row, direct connect, in-session menu, chat panel
   - initial UDP session driver wiring for movement, observer state, chat, ping/status, and disconnect
+  - first server-driven UI renderer bridge:
+    - `MenuCanvasManager` hosts server-driven menu, modal, and exclusive surface lanes separately
+    - validated open panel instances can mount into Godot controls
+    - initial static renderer supports `Panel`, `Row`, `Column`, `Text`, and `Button`
+    - dynamic text, repeaters, inventory viewers, tooltips, and action callbacks are intentionally deferred to the next renderer slices
 
 Current benchmark note:
 

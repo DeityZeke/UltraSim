@@ -809,9 +809,9 @@ Keep these seams available even if they are empty in the first pass:
 - local single-player as embedded server + loopback client
 - debug layer overlays for future physics/chunk/AOI tools
 
-## Next Implementation Slice
+## Current G6/UI Status
 
-The pre-schema client shell gate is now validated. G6/UI-1 has started in `Kernels/UI` with the first engine-agnostic contract slice:
+The pre-schema client shell gate is validated, and the server-driven UI path is now past the pure-kernel stage. The implemented shape currently includes:
 
 - `Kernels/UI/UltraSim.UI.csproj`
 - schema/catalog identity records
@@ -861,12 +861,17 @@ First UI benchmark report:
 - current action validation baselines include `ActionRequest_ValidateAgainstContext_10000` and `ActionResult_ValidateAgainstContext_10000`
 - current tooltip validation baseline includes `TooltipDescriptor_ValidateAgainstContext_10000`
 
-Next G6/UI-1 steps:
+Current client/Godot bridge status:
 
-1. Add catalog identity/schema linkage contract tests around the compatibility context.
-2. Add schema/catalog/model/update cache identity compatibility tests.
-3. Add inventory/container identity and viewer-agnostic placement metadata contracts.
-4. Keep client runtime, server providers, and Godot renderer work out of the kernel until these contracts are measurable.
-5. If implementation exposes a bad contract, fix the UI kernel contract and planning docs before patching around it in the bridge layers.
+- `Client/Core/UI/ClientUiPanelRegistry` opens panels through the in-memory definition cache, retains validated schema and compatibility context per instance, validates action requests, and applies full/patch/repeater model updates with sequence tracking.
+- `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` is the first minimal renderer bridge. It renders only static `Panel`, `Row`, `Column`, `Text`, and `Button` nodes from a validated `ClientUiPanelInstance`.
+- `MenuCanvasManager` can mount, replace, close, and clear server-driven panels on separate menu/modal/exclusive lanes.
+
+Next G6/UI steps:
+
+1. Add dynamic text binding from model slots into rendered labels.
+2. Add action callback routing from Godot buttons back into `ClientUiPanelRegistry.ValidateActionRequest`.
+3. Add renderer-side model update/re-render or diff application for open instances.
+4. Add server-driven tooltip/context menu rendering after basic panel action flow is proven.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.

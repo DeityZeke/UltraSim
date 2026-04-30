@@ -23,6 +23,10 @@
       <HintPath>..\Network\bin\$(Configuration)\net8.0\UltraSim.Client.Network.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.UI">
+      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="UltraSim.Network">
       <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
       <Private>true</Private>
@@ -38,7 +42,7 @@
 
   <Target Name="BuildClientGodotDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\Core\UltraSim.Client.Core.csproj;..\Network\UltraSim.Client.Network.csproj"
+      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\Core\UltraSim.Client.Core.csproj;..\Network\UltraSim.Client.Network.csproj"
       Targets="Restore;Build"
       Properties="Configuration=$(Configuration)" />
   </Target>
