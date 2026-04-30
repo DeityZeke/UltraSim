@@ -2,86 +2,161 @@
 
 `Server/Inventory` is the server-side bridge between runtime concepts and `Kernels/Inventory`.
 
-The inventory kernel stays engine-agnostic. This layer is allowed to know about ECS entities, server sessions, accounts, characters, world objects, and future gameplay rules.
+The inventory kernel owns neutral contracts. This bridge is allowed to know about ECS, sessions, accounts, characters, world objects, gameplay policy, owner lifetime, and the server-side store prototype.
 
-## Current Status
+The core rule is:
 
-Implemented first boundary slice:
+```text
+kernel carries shape; bridge resolves authority and effects
+```
 
-- `IInventoryRuntimeRefResolver`
-- ECS-backed `EcsInventoryRuntimeRefResolver`
-- packed ECS entity ref codec using `entity:{packedUlong}`
-- runtime ref resolution result/failure vocabulary
-- rules foundation interfaces:
-  - `IInventoryMutationRules`
+## Implemented Surface
+
+The bridge currently provides:
+
+- runtime ref resolution:
+  - `IInventoryRuntimeRefResolver`
+  - `EcsInventoryRuntimeRefResolver`
+  - packed ECS entity ref codec using `entity:{packedUlong}`
+  - runtime resolution result/failure vocabulary
+- policy interfaces:
   - `IInventoryContainerAccessPolicy`
-  - `IInventoryStackMergePolicy`
+  - `IInventoryContainerCapacityPolicy`
   - `IInventoryEquipmentSlotPolicy`
+  - `IInventoryInteractionRangePolicy`
   - `IInventoryItemLockPolicy`
+  - `IInventoryMutationRules`
+  - `IInventoryOwnerLifetimePolicy`
+  - `IInventoryStackMergePolicy`
   - `IInventoryTransactionCommitPolicy`
-- `IInventoryOwnerLifetimePolicy`
-- default owner lifetime policy for unresolved/despawned owners
+- default owner-lifetime policy for unresolved/despawned owners
 - in-memory store prototype:
   - container snapshot registry
   - viewer registry/session tracking
-  - scoped delta dispatch recipient selection
-  - transaction begin/suspend/cancel
-  - transaction commit/cancel handling
+  - scoped delta recipient selection
   - owner-lifetime refresh handling
-  - whole-item move application through injected mutation rules
-  - split-stack application through injected mutation rules
-  - merge-stack application through injected mutation rules
-  - equip-item application through injected mutation rules
-  - lock-state application through injected mutation rules
-- first concrete move mutation rule:
-  - requester resolution check
-  - source take access check
-  - destination put access check
-  - destination placement compatibility check
-  - range policy hook
-  - capacity policy hook
-  - whole-item move only
-- first concrete split-stack mutation rule:
-  - requester resolution check
-  - source take access check
-  - destination put access check
-  - destination/new item id uniqueness check
-  - destination placement compatibility check
-  - range policy hook
-  - capacity policy hook
-  - all-or-nothing source decrement plus new-stack creation
-- first concrete merge-stack mutation rule:
-  - requester resolution check
-  - source take access check
-  - destination put access check
-  - merge policy hook
-  - range policy hook
-  - all-or-nothing source decrement/removal plus destination increment
-- first concrete equip-item mutation rule:
-  - requester resolution check
-  - source take access check
-  - destination put access check
-  - slot placement requirement
-  - equipment slot policy hook
-  - range policy hook
-  - capacity policy hook
-  - all-or-nothing source removal plus equipment-slot insertion
-- first concrete lock-state mutation rule:
-  - requester resolution check
-  - source mutate access check
-  - range policy hook
-  - item lock policy hook
-  - `NoOp` result for already-target lock state
-  - all-or-nothing item flag update with `ItemUpdated` delta
-- benchmark harness in `_Benchmarks/UltraSim.Server.Inventory.Benchmarks`
+  - transaction begin/suspend/cancel/commit
+  - unresolved suspended-item return events
+  - rule-gated move/split/merge/equip/lock application
+- concrete starter rules:
+  - whole-item move
+  - split stack
+  - merge stack
+  - equip item
+  - lock/unlock item
 
-Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse. If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
+## Runtime Refs
 
-## Owner Lifetime Signal
+Entity refs intentionally preserve the full packed ECS handle, including version bits. Using only the entity index would be smaller, but it would also allow stale refs to accidentally resolve after slot reuse.
 
-The resolver detects stale entity refs, but it does not decide what happens to open containers. `IInventoryOwnerLifetimePolicy` owns that bridge-level decision.
+If inventory transport later needs a compact binary form, encode the same packed value as an 8-byte integer rather than changing the logical ref shape.
 
-The default policy currently maps:
+Non-ECS owner/requester refs stay external and opaque. Account, character, guild, vendor, session, script, and system refs are resolved by the runtime layer that owns them, not by ECS.
+
+## Store Discipline
+
+The in-memory store is a correctness prototype, not a persistence layer.
+
+It guarantees:
+
+- mutations validate against current snapshots
+- accepted mutations apply all-or-nothing
+- rejected and `NoOp` mutations do not mutate snapshots
+- container deltas are scoped through the viewer registry
+- store events are effects for higher layers, not network packets
+- malformed store state is a store failure, while rule rejection is an explicit mutation result
+- persistence, audit logging, database ownership, and transport delivery stay outside the store
+
+The store does not know what a trade, bank, corpse, house, vendor, rental, or trash bin is. Those are policy and gameplay concepts above the store.
+
+## Mutation Rules
+
+### Move
+
+`InventoryMoveMutationRules` supports whole-item `MoveItem` intents.
+
+It composes:
+
+- requester resolution
+- source `Take` access
+- destination `Put` access
+- destination placement compatibility
+- range policy
+- capacity policy
+
+The rule validates the effective destination placement, not the item's old source placement. That keeps cross-viewer moves legal when the caller supplies destination-compatible placement, such as moving a list-backed loot row into a grid-backed backpack.
+
+### Split
+
+`InventorySplitStackMutationRules` creates a new stack item from part of a source stack.
+
+A split intent must provide source container, destination container, source item, new destination item id, split quantity, and proposed destination placement. The store validates the reduced source stack and new destination stack before committing either snapshot.
+
+Split always creates a new stack. Consolidating into an existing destination stack is merge, not split.
+
+### Merge
+
+`InventoryMergeStackMutationRules` transfers quantity from one existing stack into another existing stack.
+
+The starter rule requires the merge policy's approved transfer quantity to exactly match the intent quantity. If a policy wants to cap to available stack space, the caller should submit the capped quantity explicitly. The store must never silently apply a different quantity than requested.
+
+Partial merge decrements the source and increments the destination. Full merge removes the source item and increments the destination, atomically.
+
+### Equip
+
+`InventoryEquipItemMutationRules` treats equip as a whole-item transfer into a slot-backed equipment container.
+
+The kernel validates that `EquipItem` carries slot-shaped placement. This bridge decides whether the item is allowed in that slot through `IInventoryEquipmentSlotPolicy`.
+
+Occupancy, item category eligibility, class/race restrictions, two-handed conflicts, cosmetic overlays, and similar gameplay constraints belong in equipment slot policies, not in the inventory kernel.
+
+### Lock/Unlock
+
+`InventoryLockItemMutationRules` supports `LockItem` and `UnlockItem` as in-place metadata mutations over `InventoryItemFlags.Locked`.
+
+The starter rule requires:
+
+- requester resolution
+- source `Mutate` access
+- range approval
+- item lock policy approval
+- quantity `1` as an action-shape convention
+
+If the item is already in the requested state, the rule returns `NoOp` and the store emits no delta. Accepted lock-state changes emit `ItemUpdated` with the updated item snapshot.
+
+## Transactions
+
+Transactions are generic participant-container sets with suspended items. They are not trade-specific objects.
+
+Current transaction behavior:
+
+- `BeginTransaction` registers participant containers.
+- `SuspendWholeItem` removes an item from its source container and stores the item snapshot in transaction-reserved state.
+- `CancelTransaction` resolves suspended items backward to their source containers.
+- `CommitTransaction` resolves suspended items forward to their destination containers.
+
+Cancel behavior:
+
+- If the source container still exists, the item is returned.
+- If the source container no longer exists, the store emits `SuspendedItemReturnUnresolved`.
+- Higher layers decide whether unresolved items are recovered, destroyed, or rerouted.
+
+Commit behavior:
+
+- Commit uses `IInventoryTransactionCommitPolicy`.
+- Policy sees the current destination snapshot, including earlier incoming items in the same commit.
+- Destination state at commit time wins over destination state at transaction begin time.
+- The store prepares and validates every updated destination snapshot before mutating live state.
+- A rejected commit leaves the transaction open and items suspended.
+- An accepted commit emits destination `ItemAdded` deltas, clears suspended state, removes the transaction, and emits `TransactionCommitted`.
+
+This is the foundation needed for player trade, auction escrow, crafting escrow, loot reservation, and mail attachment escrow.
+
+## Owner Lifetime
+
+The resolver detects stale refs. `IInventoryOwnerLifetimePolicy` decides what happens to open containers when an owner becomes unresolved.
+
+The default policy maps:
 
 - resolved owner: keep container open
 - persistent/world-persistent entity container with despawned owner: close viewers, keep container
@@ -89,105 +164,17 @@ The default policy currently maps:
 - runtime/ephemeral/destructive entity container with despawned owner: close viewers and destroy container
 - non-entity unresolved owner: close viewers
 
-Transport session closure, persistence, recovery policy, and real gameplay-specific rollback remain future bridge responsibilities.
-
-The in-memory store prototype now exercises the first version of this signal path. It closes viewers, cancels affected transactions, and returns suspended whole items to their source containers when a transaction is cancelled or owner invalidation requires release. If the source container no longer exists, the store emits `SuspendedItemReturnUnresolved` instead of guessing whether to destroy, recover, or reroute the item.
-
-It does not persist, authorize real gameplay, or own transport delivery.
-
-## Store Prototype Rules
-
-- The store holds snapshots and emits operation results.
-- The store does not know what a trade, bank, corpse, or house is.
-- Transactions are generic participant-container sets with suspended items.
-- Delta fanout always uses the container's viewer registry.
-- Store events are effects for higher layers to consume; they are not network packets.
-- Unresolved suspended-item returns are explicit events for higher layers/rules to recover or destroy deliberately.
-- `ApplyMove` evaluates injected mutation rules first, then commits snapshot changes only for accepted whole-item moves.
-- `ApplySplit` evaluates injected mutation rules first, then commits source quantity and destination item changes only after both updated snapshots validate.
-- `ApplyMerge` evaluates injected mutation rules first, then commits source decrement/removal and destination quantity changes only after both updated snapshots validate.
-- `ApplyEquip` evaluates injected mutation rules first, then commits source removal and equipment-slot insertion only after both updated snapshots validate.
-- `ApplyLockState` evaluates injected mutation rules first, then commits item flag changes only after the updated snapshot validates.
-- `CommitTransaction` evaluates a commit policy against current destination snapshots, then moves all suspended items forward or none of them.
-- Rule rejection is returned as an `InventoryMutationResult`; malformed store state remains a store failure.
-- Persistence, audit logging, and database ownership stay outside this prototype.
-
-## Move Rule Prototype
-
-`InventoryMoveMutationRules` is the first concrete mutation rule. It intentionally supports only whole-item `MoveItem` intents. It proves that real mutation policy can be composed from:
-
-- `IInventoryContainerAccessPolicy`
-- `IInventoryInteractionRangePolicy`
-- `IInventoryContainerCapacityPolicy`
-- kernel snapshots/intents
-- resolved requester refs
-
-The rule validates the effective destination placement, not the item's old source placement. That keeps cross-viewer moves legal when the caller supplies a destination-compatible placement, such as moving a list-backed loot row into a grid-backed backpack.
-
-Splits, stack merges, equipment restrictions, grid collision placement, weight limits, ownership rules, and scripted container behavior remain future policy implementations.
-
-## Split Rule Prototype
-
-`InventorySplitStackMutationRules` is the first concrete split rule. It supports creating a new stack item from part of a source stack. A split intent must provide:
-
-- source container id
-- destination container id
-- source item id
-- destination/new item id
-- split quantity
-- proposed destination placement
-
-The store applies split as an all-or-nothing operation. It builds and validates the reduced source stack and the new destination stack before committing either snapshot. A rejected split leaves both containers unchanged.
-
-Stack merge, partial stack transfer into an existing destination stack, and split-specific definition rules remain future policy implementations.
-
-## Merge Rule Prototype
-
-`InventoryMergeStackMutationRules` is the first concrete merge rule. It supports transferring quantity from one existing stack into another existing stack. A merge intent must provide:
-
-- source container id
-- destination container id
-- source item id
-- destination item id
-- merge quantity
-
-The first concrete rule requires the merge policy's approved transfer quantity to exactly match the intent quantity. If a policy wants to cap to available stack space, the caller should submit the capped quantity explicitly. This keeps the result deterministic and prevents the store from applying a quantity different from the requested action.
-
-The store applies merge as an all-or-nothing operation. Partial merges decrement the source stack and increment the destination stack. Full merges remove the source item and increment the destination stack. A rejected merge leaves both containers unchanged.
-
-## Equip Rule Prototype
-
-`InventoryEquipItemMutationRules` is the first concrete equip rule. `EquipItem` intents must carry a slot placement. The kernel validates that the intent is slot-shaped; this bridge layer decides whether the item is allowed in that slot through `IInventoryEquipmentSlotPolicy`.
-
-The first store implementation treats equip as a whole-item transfer into a slot-backed equipment container. It removes the item from the source snapshot and inserts the same item into the equipment container with the requested slot placement only after both updated snapshots validate. Occupancy, item category eligibility, class/race restrictions, two-handed conflicts, cosmetic overlays, and similar gameplay constraints belong in equipment slot policy implementations, not in the inventory kernel.
-
-The benchmark slot policy intentionally uses a simple linear occupancy scan and the prototype store still copies immutable snapshots on each accepted mutation. Large synthetic equip runs into a growing equipment container therefore measure prototype stress, not the intended production cost of an indexed equipment-slot policy.
-
-## Lock Rule Prototype
-
-`InventoryLockItemMutationRules` is the first concrete in-place metadata mutation rule. It supports `LockItem` and `UnlockItem` intents over one source item in one source container. The kernel already owns the neutral `InventoryItemFlags.Locked` bit; this bridge layer decides whether a requester may change that bit through `IInventoryItemLockPolicy`.
-
-The first rule requires mutate access, range approval, and quantity `1`. Quantity is treated as an action-shape convention, not a partial-stack lock operation; the whole item stack receives the new lock state. If the item is already in the requested state, the rule returns `NoOp` and the store emits no delta. Accepted lock-state changes produce an `ItemUpdated` delta with the updated item snapshot.
-
-## Transaction Commit Prototype
-
-Transactions remain generic participant-container sets, not trade-specific objects. `CommitTransaction` resolves suspended whole items forward into their declared destination containers. `CancelTransaction` resolves suspended items backward into their source containers.
-
-Commit has an explicit policy hook, `IInventoryTransactionCommitPolicy`, so capacity, escrow, trade-confirm, ownership, housing, vendor, or scripted rules stay above the store. The store passes the current destination snapshot into the policy for each suspended item, including any earlier incoming items in the same commit. This is intentional: destination state at commit time wins over destination state at transaction begin time.
-
-The store prepares every destination snapshot and validates every updated container before mutating live state. A rejected commit leaves the transaction open, keeps suspended items reserved, and does not partially transfer any item. An accepted commit emits `ItemAdded` deltas for destination viewers, clears suspended state, removes the transaction, and emits a `TransactionCommitted` store event.
-
-The current commit benchmark is an end-to-end prototype stress case: it builds the store, suspends 1000 whole items, and commits them into a growing destination snapshot inside the measured scenario. Treat it as a ceiling for the immutable prototype path, not as the expected production cost of a prebuilt transaction commit.
+The store currently closes viewers, cancels affected transactions, returns suspended items when possible, and emits unresolved-return events when it cannot safely return an item.
 
 ## Benchmark Harness
 
-Current server bridge benchmark:
+Run:
 
 ```bash
 dotnet run --project _Benchmarks/UltraSim.Server.Inventory.Benchmarks/UltraSim.Server.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/server-inventory-benchmarks.json
 ```
 
-Initial scenarios cover:
+Current scenarios cover:
 
 - accepted same-container reposition moves with no viewers
 - accepted same-container reposition moves with one viewer
@@ -199,7 +186,24 @@ Initial scenarios cover:
 - accepted transaction commits with suspended whole items
 - raw `DispatchDelta` fanout across 1000 viewers
 
-These are intentionally narrow baselines for store/rules overhead before persistence, transport delivery, richer equipment rules, richer lock/permission policy, trade confirmation state, and scripted containers are layered on. The current decomposition points at accepted-move snapshot/result/delta construction as the small-container cost, not one-viewer fanout. Large shared containers still have real linear recipient fanout cost, so high-viewer containers such as vendors, auction views, trade observers, or admin views should remain measured as features land.
+Interpretation notes:
+
+- accepted move cost in the prototype is mostly snapshot/result/delta construction, not one-viewer fanout
+- equip stress uses a simple linear slot policy over a growing synthetic equipment container
+- transaction commit stress includes setup, suspending 1000 items, and committing into a growing immutable destination snapshot
+- high-viewer containers such as vendors, auction views, trade observers, and admin views should stay benchmarked as features land
+
+## Validation
+
+Current standard validation:
+
+```bash
+dotnet build Server/Inventory/UltraSim.Server.Inventory.csproj -c Release /p:UseSharedCompilation=false
+dotnet run --project _Tests/UltraSim.Inventory.Tests/UltraSim.Inventory.Tests.csproj -c Release
+dotnet run --project _Tests/UltraSim.Server.Inventory.Tests/UltraSim.Server.Inventory.Tests.csproj -c Release
+dotnet build _Benchmarks/UltraSim.Server.Inventory.Benchmarks/UltraSim.Server.Inventory.Benchmarks.csproj -c Release /p:UseSharedCompilation=false
+dotnet run --project _Benchmarks/UltraSim.Server.Inventory.Benchmarks/UltraSim.Server.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/server-inventory-benchmarks.json
+```
 
 ## Boundary Rules
 
@@ -209,3 +213,4 @@ These are intentionally narrow baselines for store/rules overhead before persist
 - NPC/entity-AI requesters should resolve through the same requester path as player/session requesters.
 - Fake resolvers belong in tests; production bridge code should remain concrete or interface-based.
 - Rules interfaces should accept kernel snapshots/intents plus resolved runtime refs, not direct ECS/session/database dependencies.
+- Store operations should never silently duplicate, destroy, or reroute suspended items.

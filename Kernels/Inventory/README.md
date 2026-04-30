@@ -1,8 +1,8 @@
-# Inventory Kernel Plan
+# Inventory Kernel
 
 ## Purpose
 
-`Kernels/Inventory` will define the engine-agnostic inventory/container vocabulary for UltraSim.
+`Kernels/Inventory` defines the engine-agnostic inventory/container vocabulary for UltraSim.
 
 It is not the D2 grid viewer, not the Godot inventory UI, not an ECS component implementation, and not the persistence/database layer. It is the neutral item/container/intent contract that gameplay rules, ECS bridges, UI viewers, persistence, vendors, crafting, banks, trade, loot, followers, NPC simulation, and admin tools can all agree on.
 
@@ -14,11 +14,7 @@ container truth is not the UI viewer
 
 A D2 grid, Skyrim-style list, and UO freeform bag should be different viewers over the same underlying container state. If the container model cannot support a simple list viewer without grid fields leaking everywhere, the contract is wrong.
 
-## Current Status
-
-The first foundation slice is implemented.
-
-Current contracts:
+## Implemented Contracts
 
 - `UltraSim.Inventory.csproj`
 - validation helpers/results
@@ -104,7 +100,7 @@ Current contracts:
 - executable tests in `_Tests/UltraSim.Inventory.Tests`
 - benchmark harness in `_Benchmarks/UltraSim.Inventory.Benchmarks`
 
-Current validation:
+Current standard validation:
 
 - `dotnet build Kernels/Inventory/UltraSim.Inventory.csproj -c Release /p:UseSharedCompilation=false`: passed
 - `dotnet run --project _Tests/UltraSim.Inventory.Tests/UltraSim.Inventory.Tests.csproj -c Release`: passed
@@ -112,7 +108,7 @@ Current validation:
 - `dotnet run --project _Tests/UltraSim.Server.Inventory.Tests/UltraSim.Server.Inventory.Tests.csproj -c Release`: passed
 - `dotnet run --project _Benchmarks/UltraSim.Inventory.Benchmarks/UltraSim.Inventory.Benchmarks.csproj -c Release -- --output _Benchmarks/results/inventory-benchmarks.json`: passed
 
-Current benchmark baselines:
+Current kernel benchmark baselines:
 
 - `ContainerSnapshot_Validate_List_1000Items`: about `0.57 ms`
 - `ContainerSnapshot_Validate_Grid_1000Items`: about `0.74 ms`
@@ -609,18 +605,8 @@ Benchmark before UI/server integration hides costs:
 - transaction commit/cancel validation shape
 - permission descriptor evaluation hook overhead with fake rule resolvers
 
-## Implementation Phasing
+## Contract Discipline
 
-Suggested first slices:
-
-1. Inventory ids, refs, lifecycle, placement, permission, and item/container snapshot records.
-2. Validation tests for refs, placement compatibility, permissions, and lifecycle.
-3. Mutation intent/result envelope with correlation/audit id.
-4. Split/merge/move/swap/equip intent shapes.
-5. Container viewer/session snapshot and live delta contracts.
-6. Transactional container/trade contract shape.
-7. Minimal benchmarks.
-8. UI viewer contracts over the neutral model, starting with list before grid.
-9. Server/ECS bridge resolver prototype.
+The first inventory foundation is implemented. Future slices should extend the kernel only when the new field or enum is truly neutral across server rules, client state, UI viewers, persistence, and Godot rendering.
 
 Stop and revise the kernel contract if any bridge starts requiring ad-hoc item/container fields that only make sense for one viewer or one gameplay feature.
