@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using UltraSim.Network;
+using UltraSim.UI;
 
 namespace UltraSim.Client;
 
@@ -15,6 +16,7 @@ public sealed class ClientMovementSessionHost
     private readonly ClientObserverStateBridge? _observerState;
     private readonly ClientObserverEventBridge? _observerEvents;
     private readonly ClientChatEventBridge? _chatEvents;
+    private readonly ClientUiEventBridge? _uiEvents;
     private readonly InboundDatagram[] _inboundScratch;
     private SessionId _sessionId;
 
@@ -28,6 +30,7 @@ public sealed class ClientMovementSessionHost
         ClientObserverStateBridge? observerState = null,
         ClientObserverEventBridge? observerEvents = null,
         ClientChatEventBridge? chatEvents = null,
+        ClientUiEventBridge? uiEvents = null,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
@@ -37,12 +40,15 @@ public sealed class ClientMovementSessionHost
         _control = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, transport, clientHello: clientHello);
         _movement = new ClientMovementNetworkBridge(transport, connectionId, sequencer, predictionStore, interpolation);
         _observerState = observerState;
-        _observerEvents = observerEvents ?? (chatEvents is null
+        _observerEvents = observerEvents ?? (chatEvents is null && uiEvents is null
             ? null
-            : ClientObserverEventBridge.CreateSpanFastPath(connectionId, (_, payload) => chatEvents.TryProcessEventPayload(payload)));
+            : ClientObserverEventBridge.CreateSpanFastPath(connectionId, (_, payload) => uiEvents?.TryProcessEventPayload(payload)));
         if (_observerEvents is not null && chatEvents is not null)
             _observerEvents.ChatEvents = chatEvents;
+        if (_observerEvents is not null && uiEvents is not null)
+            _observerEvents.UiEvents = uiEvents;
         _chatEvents = chatEvents;
+        _uiEvents = uiEvents;
         _inboundScratch = new InboundDatagram[maxPollBatch];
     }
 
@@ -52,6 +58,7 @@ public sealed class ClientMovementSessionHost
     public ClientObserverStateBridge? ObserverState => _observerState;
     public ClientObserverEventBridge? ObserverEvents => _observerEvents;
     public ClientChatEventBridge? ChatEvents => _chatEvents;
+    public ClientUiEventBridge? UiEvents => _uiEvents;
     public ClientPumpProfileSnapshot LastPumpProfile { get; private set; }
     public SessionId SessionId => _sessionId;
     public bool IsRunning => _transport.IsRunning;
@@ -109,6 +116,7 @@ public sealed class ClientMovementSessionHost
         _observerState?.BeginPump();
         _observerEvents?.BeginPump();
         _chatEvents?.BeginPump();
+        _uiEvents?.BeginPump();
 
         while (true)
         {
@@ -263,6 +271,22 @@ public sealed class ClientMovementSessionHost
             ChatSubmitPacket.PacketClass,
             ChatSubmitPacket.Channel,
             PacketCodec.Encode(new ChatSubmitPacket(text))));
+        _transport.FlushOutbound();
+        return true;
+    }
+
+    public bool TrySendUiAction(UiActionRequestDocument request)
+    {
+        if (!IsReady)
+            return false;
+
+        byte[] documentBytes = UiContractJsonCodec.Encode(request);
+        _transport.EnqueueOutbound(new OutboundDatagram(
+            ConnectionId,
+            UiActionRequestPacket.Plane,
+            UiActionRequestPacket.PacketClass,
+            UiActionRequestPacket.Channel,
+            PacketCodec.Encode(new UiActionRequestPacket(documentBytes))));
         _transport.FlushOutbound();
         return true;
     }

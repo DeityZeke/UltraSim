@@ -22,6 +22,8 @@ internal static class TestRunner
         Run(nameof(ClientDisconnectPacket_RoundTripsReason), ClientDisconnectPacket_RoundTripsReason);
         Run(nameof(ChatSubmitPacket_RoundTripsSubmittedText), ChatSubmitPacket_RoundTripsSubmittedText);
         Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
+        Run(nameof(UiPanelOpenEventPacket_RoundTripsDocumentBytes), UiPanelOpenEventPacket_RoundTripsDocumentBytes);
+        Run(nameof(UiActionRequestPacket_RoundTripsDocumentBytes), UiActionRequestPacket_RoundTripsDocumentBytes);
         Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
         Run(nameof(PacketMetadataRegistry_ResolvesRegisteredPacketMetadata), PacketMetadataRegistry_ResolvesRegisteredPacketMetadata);
@@ -533,6 +535,42 @@ internal static class TestRunner
         Assert.Equal("Maintenance in 10 minutes.", decoded.Text);
         Assert.Equal((uint)77, decoded.ServerTick);
         Assert.Equal(ChatMessageFlags.System | ChatMessageFlags.Announcement, decoded.Flags);
+    }
+
+    private static void UiPanelOpenEventPacket_RoundTripsDocumentBytes()
+    {
+        byte[] documentBytes = [1, 2, 3, 4, 5];
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new UiPanelOpenEventPacket(documentBytes));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(UiPanelOpenEventPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(UiPanelOpenEventPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.State, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        UiPanelOpenEventPacket decoded = UiPanelOpenEventPacket.Deserialize(ref reader);
+        Assert.True(documentBytes.AsSpan().SequenceEqual(decoded.DocumentBytes));
+    }
+
+    private static void UiActionRequestPacket_RoundTripsDocumentBytes()
+    {
+        byte[] documentBytes = [9, 8, 7, 6];
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new UiActionRequestPacket(documentBytes));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(UiActionRequestPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(UiActionRequestPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.Input, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        UiActionRequestPacket decoded = UiActionRequestPacket.Deserialize(ref reader);
+        Assert.True(documentBytes.AsSpan().SequenceEqual(decoded.DocumentBytes));
     }
 
     private static void RealtimeStateBatchPacket_RoundTripsExpectedItems()

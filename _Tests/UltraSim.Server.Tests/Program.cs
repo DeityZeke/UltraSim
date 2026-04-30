@@ -9,6 +9,7 @@ using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
 using UltraSim.Server.Network;
 using UltraSim.Network;
+using UltraSim.UI;
 
 TestRunner.Run();
 
@@ -79,6 +80,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_TracksStateBaselineAcksFromClient), ServerMovementSessionHost_TracksStateBaselineAcksFromClient);
         Run(nameof(ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor), ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor);
         Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
+        Run(nameof(ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession), ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
@@ -2634,6 +2636,110 @@ internal static class TestRunner
         Assert.True(descriptor.BaselineId != 0);
     }
 
+    private static void ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession()
+    {
+        var connectionId = new ConnectionId(1);
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy);
+        UiPanelOpenDocument? opened = null;
+        var uiEvents = new ClientUiEventBridge(document => opened = document);
+        var observerState = new ClientObserverStateBridge(connectionId);
+        var clientHost = new ClientMovementSessionHost(
+            pair.Client,
+            connectionId,
+            new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+            observerState: observerState,
+            uiEvents: uiEvents,
+            maxPollBatch: 8);
+
+        serverHost.Start();
+        clientHost.Start();
+        clientHost.BeginHandshake(100);
+
+        for (int step = 0; step < 10; step++)
+        {
+            serverHost.Pump(101 + step * 2, 0.016f, (uint)(step + 1));
+            clientHost.Pump(102 + step * 2);
+        }
+
+        Assert.True(clientHost.IsReady);
+        Assert.True(serverHost.TryGetLastStateBaselineAck(connectionId, out _));
+        Assert.True(serverHost.Subscriptions.IsSubscribed(connectionId, ServerUiScopes.ForConnection(connectionId)));
+
+        UiSchemaDocument schema = CreateServerUiSchema();
+        UiModelDocument model = CreateServerUiModel(schema);
+        var open = new UiPanelOpenDocument("panel/network/message", schema.Identity, null, model, schema);
+        Assert.True(serverHost.Ui.TryOpenPanel(connectionId, open));
+        Assert.Equal(1L, serverHost.Ui.PublishedPanelOpens);
+
+        serverHost.Pump(200, 0.016f, 20);
+        clientHost.Pump(201);
+
+        Assert.NotNull(opened);
+        Assert.Equal(open.PanelInstanceId, opened!.PanelInstanceId);
+        Assert.Equal(1, uiEvents.LastReceivedOpenCount);
+        Assert.Equal(1, uiEvents.LastAppliedOpenCount);
+
+        UiActionRequestDocument? receivedAction = null;
+        serverHost.Ui.ActionReceived += (connection, request) =>
+        {
+            Assert.Equal(connectionId, connection);
+            receivedAction = request;
+        };
+        var action = new UiActionRequestDocument(
+            open.PanelInstanceId,
+            schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 42,
+            "network.ok",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: []);
+
+        Assert.True(clientHost.TrySendUiAction(action));
+        Assert.True(serverHost.Pump(202, 0.016f, 21) >= 1);
+
+        Assert.NotNull(receivedAction);
+        Assert.Equal(action.ActionId, receivedAction!.ActionId);
+        Assert.Equal(action.ClientSequence, receivedAction.ClientSequence);
+        Assert.Equal(1L, serverHost.Ui.ReceivedActions);
+    }
+
     private static void ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient()
     {
         using var pair = new LoopbackTransportPair();
@@ -2975,6 +3081,69 @@ internal static class TestRunner
 
         world.Initialize();
         return world;
+    }
+
+    private static UiSchemaDocument CreateServerUiSchema()
+    {
+        bool created = UiSchemaIdentity.TryCreate(
+            "server/main",
+            "smoke.network_message",
+            1,
+            new string('e', 64),
+            1,
+            out UiSchemaIdentity identity,
+            out string error);
+        Assert.True(created);
+
+        var metadata = new UiPanelMetadata(
+            "smoke.network_message",
+            UiSurfaceTarget.Menu,
+            UiFocusMode.Normal,
+            ExclusiveGroup: null,
+            ZOrderClass: 1,
+            UiOpenPolicy.New,
+            UiBackPolicy.CloseAndFocusParent,
+            UiTooltipPolicy.Allow,
+            BlocksGameplayInput: false,
+            PersistenceKey: null);
+
+        return new UiSchemaDocument(
+            identity,
+            metadata,
+            RootNodeId: 1,
+            Nodes:
+            [
+                new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2, 3]),
+                new UiSchemaNodeDescriptor(2, UiNodeKind.DynamicText, "message", "Message", []),
+                new UiSchemaNodeDescriptor(3, UiNodeKind.Button, null, "OK", [], ActionId: "network.ok"),
+            ],
+            PayloadSlots:
+            [
+                new UiPayloadSlotDescriptor("message", UiModelValueKind.String, Required: true, MaxStringLength: 128),
+            ],
+            Actions:
+            [
+                new UiActionDescriptor(
+                    "network.ok",
+                    "OK",
+                    IconId: null,
+                    UiActionRole.Primary,
+                    UiActionContextKind.Panel,
+                    RequiresConfirm: false,
+                    ChildMenuKey: null),
+            ],
+            StateBindings: [],
+            CatalogIdentity: null);
+    }
+
+    private static UiModelDocument CreateServerUiModel(UiSchemaDocument schema)
+    {
+        return new UiModelDocument(
+            schema.Identity,
+            Values:
+            [
+                UiModelSlotValue.String("message", "Hello over the live network path."),
+            ]);
     }
 
     private static int PollUntilNonZero<TState>(Func<TState, int> poll, TState state, int maxAttempts)

@@ -67,6 +67,7 @@ public sealed class ClientObserverEventBridge
     public ulong LastAcknowledgedSequence => _pendingAckSequence;
     public long DroppedBufferedEventCount { get; private set; }
     public ClientChatEventBridge? ChatEvents { get; set; }
+    public ClientUiEventBridge? UiEvents { get; set; }
     public bool AllowSequenceGaps { get; set; }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
@@ -190,6 +191,12 @@ public sealed class ClientObserverEventBridge
             return;
         }
 
+        if (UiEvents?.TryProcessEventPayload(payload) == true)
+        {
+            LastAppliedEventCount++;
+            return;
+        }
+
         if (_applyEventSpan is not null)
             _applyEventSpan(sequence, payload);
         else
@@ -202,6 +209,12 @@ public sealed class ClientObserverEventBridge
         _lastAppliedSequence = sequence;
         _pendingAckSequence = sequence;
         if (ChatEvents?.TryProcessEventPayload(payload.Span) == true)
+        {
+            LastAppliedEventCount++;
+            return;
+        }
+
+        if (UiEvents?.TryProcessEventPayload(payload.Span) == true)
         {
             LastAppliedEventCount++;
             return;

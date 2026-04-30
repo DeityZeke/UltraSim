@@ -59,6 +59,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull), ClientObserverEventBridge_CountsDroppedOutOfOrderFramesWhenBufferIsFull);
         Run(nameof(ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps), ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps);
         Run(nameof(ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply);
+        Run(nameof(ClientObserverEventBridge_RoutesNestedUiOpenEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedUiOpenEventsBeforeGenericApply);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip), ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
@@ -1558,6 +1559,35 @@ internal static class TestRunner
         Assert.Equal(7UL, chat.LastMessageId);
         Assert.True(applied.HasValue);
         Assert.Equal("hello", applied.GetValueOrDefault().Text);
+        Assert.Equal(0, genericApplyCount);
+    }
+
+    private static void ClientObserverEventBridge_RoutesNestedUiOpenEventsBeforeGenericApply()
+    {
+        UiPanelOpenDocument? opened = null;
+        int genericApplyCount = 0;
+        var ui = new ClientUiEventBridge(document => opened = document);
+        var bridge = ClientObserverEventBridge.CreateSpanFastPath(
+            new ConnectionId(9),
+            (_, _) => genericApplyCount++);
+        bridge.UiEvents = ui;
+
+        UiSchemaDocument schema = CreateClientUiSchema();
+        UiModelDocument model = CreateClientUiModel(schema);
+        var open = new UiPanelOpenDocument("panel/status/network", schema.Identity, null, model, schema);
+        ImmutablePayloadBuffer uiPayload = PacketCodec.Encode(new UiPanelOpenEventPacket(UiContractJsonCodec.Encode(open)));
+        ImmutablePayloadBuffer frame = PacketCodec.Encode(new ReliableEventFramePacket(10, uiPayload));
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, frame.Memory),
+        ];
+
+        Assert.Equal(1, bridge.ProcessInbound(inbound));
+        Assert.Equal(1, ui.LastReceivedOpenCount);
+        Assert.Equal(1, ui.LastAppliedOpenCount);
+        Assert.Equal("panel/status/network", ui.LastPanelInstanceId);
+        Assert.True(opened is not null);
+        Assert.Equal(open.PanelInstanceId, opened!.PanelInstanceId);
         Assert.Equal(0, genericApplyCount);
     }
 

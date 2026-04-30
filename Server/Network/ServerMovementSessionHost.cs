@@ -18,6 +18,7 @@ public sealed class ServerMovementSessionHost
     private readonly ConnectionSubscriptionRegistry _subscriptions;
     private readonly ServerNetworkSessionRuntime _sessionRuntime;
     private readonly ServerChatService _chat;
+    private readonly ServerUiService _ui;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly bool _enableGlobalMovementObserverState;
@@ -68,6 +69,7 @@ public sealed class ServerMovementSessionHost
             new ReliableEventReplayBuffer(capacityPerConnection: runtimeOptions.ReplayBufferCapacityPerConnection),
             runtimeOptions);
         _chat = new ServerChatService(orderedEvents);
+        _ui = new ServerUiService(orderedEvents);
         ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
@@ -86,6 +88,7 @@ public sealed class ServerMovementSessionHost
     public ConnectionSubscriptionRegistry Subscriptions => _subscriptions;
     public ServerNetworkSessionRuntime SessionRuntime => _sessionRuntime;
     public ServerChatService Chat => _chat;
+    public ServerUiService Ui => _ui;
     public ReliableEventAckTracker ReliableEventAcks => _sessionRuntime.ReliableEventAcks;
     public StateBaselineAckTracker StateBaselineAcks => _sessionRuntime.BaselineAcks;
     public ServerPumpProfileSnapshot LastPumpProfile { get; private set; }
@@ -189,6 +192,7 @@ public sealed class ServerMovementSessionHost
             runtimeInboundElapsedTicks += Stopwatch.GetTimestamp() - runtimeInboundStart;
 
             ProcessChatInbound(inbound, nowTicks, serverTick);
+            ProcessUiActionInbound(inbound);
 
             long movementInboundStart = Stopwatch.GetTimestamp();
             _movement.ProcessInbound(inbound);
@@ -302,6 +306,7 @@ public sealed class ServerMovementSessionHost
                 _movement.Bind(evt.ConnectionId, spawn.Entity, spawn.NetworkEntityId);
                 _sessionRuntime.BindConnection(evt.ConnectionId);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerChatScopes.System);
+                _subscriptions.Subscribe(evt.ConnectionId, ServerUiScopes.ForConnection(evt.ConnectionId));
                 if (_enableGlobalMovementObserverState)
                     _subscriptions.Subscribe(evt.ConnectionId, _globalMovementObserverScope);
                 _entityByConnection[evt.ConnectionId] = spawn.Entity;
@@ -379,6 +384,29 @@ public sealed class ServerMovementSessionHost
                 ServerChatScopes.System,
                 nowTicks,
                 serverTick);
+        }
+    }
+
+    private void ProcessUiActionInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            ref readonly InboundDatagram datagram = ref inbound[i];
+            if (datagram.PacketId != UiActionRequestPacket.PacketId ||
+                datagram.Plane != UiActionRequestPacket.Plane ||
+                datagram.PacketClass != UiActionRequestPacket.PacketClass)
+            {
+                continue;
+            }
+
+            if (!_control.Sessions.TryGetSessionIdByConnection(datagram.ConnectionId, out SessionId sessionId) ||
+                !_control.Sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot) ||
+                snapshot.State != ConnectionSessionState.Ready)
+            {
+                continue;
+            }
+
+            _ui.TryProcessAction(datagram.ConnectionId, datagram.EnvelopePayloadSpan, out _);
         }
     }
 

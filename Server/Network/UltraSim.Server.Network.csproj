@@ -19,11 +19,15 @@
       <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.UI">
+      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
   <Target Name="BuildServerNetworkDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\Core\UltraSim.Server.Core.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj"
+      Projects="..\Core\UltraSim.Server.Core.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>
