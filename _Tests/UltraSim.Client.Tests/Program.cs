@@ -3,8 +3,10 @@ using System.Globalization;
 using System.Security.Cryptography;
 using UltraSim.Client;
 using UltraSim.Client.Content;
+using UltraSim.Client.UI;
 using UltraSim.Discovery;
 using UltraSim.Network;
+using UltraSim.UI;
 
 TestRunner.Run();
 
@@ -32,6 +34,10 @@ internal static class TestRunner
         Run(nameof(ContentCacheEvictionExecutor_DeletesFilesAndMetadataUnderCacheRootOnly), ContentCacheEvictionExecutor_DeletesFilesAndMetadataUnderCacheRootOnly);
         Run(nameof(UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes), UiSchemaCacheStore_WritesReadsIndexesAndRemovesSchemaBytes);
         Run(nameof(UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes), UiSchemaCacheStore_RejectsHashMismatchedSchemaBytes);
+        Run(nameof(ClientUiPanelRegistry_OpensColdPanelCachesSchemaAndReopensHot), ClientUiPanelRegistry_OpensColdPanelCachesSchemaAndReopensHot);
+        Run(nameof(ClientUiPanelRegistry_ReportsMissingAndSupersededDefinitionsWithoutOpening), ClientUiPanelRegistry_ReportsMissingAndSupersededDefinitionsWithoutOpening);
+        Run(nameof(ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen), ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen);
+        Run(nameof(ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource), ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource);
         Run(nameof(ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest), ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest);
         Run(nameof(ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests), ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests);
         Run(nameof(ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets), ServerAssetCacheStore_WritesReadsIndexesAndRemovesManifestBackedAssets);
@@ -714,6 +720,113 @@ internal static class TestRunner
         Assert.Equal("Asset SHA-256 hash mismatch.", error);
         Assert.False(File.Exists(pathPolicy.GetSchemaPath(key)));
         Assert.Equal(0, index.Count);
+    }
+
+    private static void ClientUiPanelRegistry_OpensColdPanelCachesSchemaAndReopensHot()
+    {
+        UiSchemaDocument schema = CreateClientUiSchema();
+        UiModelDocument model = CreateClientUiModel(schema);
+        var registry = new ClientUiPanelRegistry();
+
+        var coldOpen = new UiPanelOpenDocument("panel/status/1", schema.Identity, schema.CatalogIdentity, model, schema);
+        ClientUiPanelOpenResult cold = registry.OpenPanel(coldOpen, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.Equal(ClientUiPanelOpenStatus.ColdOpened, cold.Status);
+        Assert.True(cold.Opened);
+        Assert.True(cold.Panel is not null);
+        Assert.Equal(1, registry.Count);
+        Assert.Equal(schema.Metadata, cold.Panel!.Metadata);
+
+        var hotOpen = new UiPanelOpenDocument("panel/status/2", schema.Identity, schema.CatalogIdentity, model, SchemaDefinition: null);
+        ClientUiPanelOpenResult hot = registry.OpenPanel(hotOpen, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.Equal(ClientUiPanelOpenStatus.HotOpened, hot.Status);
+        Assert.True(hot.Panel is not null);
+        Assert.Equal(2, registry.Count);
+        Assert.True(registry.TryGetPanel("panel/status/2", out ClientUiPanelInstance panel));
+        Assert.Equal(schema.Identity, panel.SchemaIdentity);
+        Assert.True(hot.Panel!.OpenSequence > cold.Panel.OpenSequence);
+    }
+
+    private static void ClientUiPanelRegistry_ReportsMissingAndSupersededDefinitionsWithoutOpening()
+    {
+        UiSchemaDocument schemaV1 = CreateClientUiSchema();
+        UiSchemaDocument schemaV2 = CreateClientSchemaRevision(schemaV1, 2, 'd');
+        UiModelDocument modelV2 = CreateClientUiModel(schemaV2);
+        var registry = new ClientUiPanelRegistry();
+
+        var missingOpen = new UiPanelOpenDocument(
+            "panel/status/missing",
+            schemaV1.Identity,
+            schemaV1.CatalogIdentity,
+            CreateClientUiModel(schemaV1),
+            SchemaDefinition: null);
+        ClientUiPanelOpenResult missing = registry.OpenPanel(missingOpen);
+        Assert.Equal(ClientUiPanelOpenStatus.MissingSchema, missing.Status);
+        Assert.Equal(0, registry.Count);
+
+        UiValidationResult cacheResult = registry.CacheSchema(schemaV1, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.True(cacheResult.IsValid, cacheResult.Error);
+
+        var supersededOpen = new UiPanelOpenDocument(
+            "panel/status/superseded",
+            schemaV2.Identity,
+            schemaV2.CatalogIdentity,
+            modelV2,
+            SchemaDefinition: null);
+        ClientUiPanelOpenResult superseded = registry.OpenPanel(supersededOpen);
+        Assert.Equal(ClientUiPanelOpenStatus.SupersededSchema, superseded.Status);
+        Assert.Equal(schemaV1.Identity, superseded.SupersededSchemaIdentity!.Value);
+        Assert.Equal(0, registry.Count);
+    }
+
+    private static void ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen()
+    {
+        UiCatalogIdentity catalog = CreateClientCatalogIdentity(revision: 1, 'a');
+        UiSchemaDocument schema = CreateClientUiSchema(catalog);
+        UiModelDocument model = CreateClientUiModel(schema);
+        var registry = new ClientUiPanelRegistry();
+
+        var coldOpen = new UiPanelOpenDocument("panel/crafting/1", schema.Identity, catalog, model, schema);
+        ClientUiPanelOpenResult missingCatalog = registry.OpenPanel(coldOpen, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.Equal(ClientUiPanelOpenStatus.MissingCatalog, missingCatalog.Status);
+        Assert.Equal(0, registry.Count);
+
+        UiValidationResult catalogResult = registry.CacheCatalogIdentity(catalog);
+        Assert.True(catalogResult.IsValid, catalogResult.Error);
+
+        var hotOpen = coldOpen with { SchemaDefinition = null };
+        ClientUiPanelOpenResult opened = registry.OpenPanel(hotOpen, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.Equal(ClientUiPanelOpenStatus.HotOpened, opened.Status);
+        Assert.True(opened.Panel is not null);
+        Assert.Equal(catalog, opened.Panel!.CatalogIdentity!.Value);
+        Assert.Equal(1, registry.Count);
+    }
+
+    private static void ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource()
+    {
+        var registry = new ClientUiStateBindingResolverRegistry();
+        var resolver = new FakeStateBindingResolver("EntityState", UiModelSlotValue.Integer("healthText", 42));
+
+        Assert.True(registry.TryRegister(resolver, out string error), error);
+        Assert.False(registry.TryRegister(resolver, out error));
+        Assert.True(error.Contains("already registered", StringComparison.Ordinal), error);
+
+        var binding = new UiStateBindingDescriptor(
+            "healthText",
+            "EntityState",
+            "entity:local",
+            "Health.Current",
+            new UiStateBindingFallback(
+                UiBindingFallbackBehavior.Stale,
+                UiBindingFallbackBehavior.Hidden,
+                UiBindingFallbackBehavior.Stale,
+                1500));
+        Assert.True(registry.TryResolve(binding, out UiModelSlotValue value, out error), error);
+        Assert.Equal("healthText", value.SlotId);
+        Assert.Equal(42L, value.IntegerValue);
+
+        var missing = binding with { SourceId = "PartyState" };
+        Assert.False(registry.TryResolve(missing, out _, out error));
+        Assert.True(error.Contains("No UI state binding resolver", StringComparison.Ordinal), error);
     }
 
     private static void ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest()
@@ -1534,6 +1647,102 @@ internal static class TestRunner
         Assert.Equal((ushort)1, host.Movement.LastReceiveResult.LastProcessedInputSequence);
     }
 
+    private static UiSchemaDocument CreateClientUiSchema(UiCatalogIdentity? catalogIdentity = null)
+    {
+        Assert.True(UiSchemaIdentity.TryCreate(
+            "server/main",
+            catalogIdentity is null ? "hud.status" : "craft.blacksmith",
+            1,
+            new string('c', 64),
+            1,
+            out UiSchemaIdentity identity,
+            out string error), error);
+
+        string panelType = catalogIdentity is null ? "hud.status" : "craft.blacksmith";
+        var metadata = new UiPanelMetadata(
+            panelType,
+            catalogIdentity is null ? UiSurfaceTarget.Hud : UiSurfaceTarget.Menu,
+            catalogIdentity is null ? UiFocusMode.Passive : UiFocusMode.Normal,
+            ExclusiveGroup: null,
+            ZOrderClass: 1,
+            UiOpenPolicy.SingletonByKey,
+            UiBackPolicy.None,
+            UiTooltipPolicy.Allow,
+            BlocksGameplayInput: false,
+            PersistenceKey: null);
+
+        return new UiSchemaDocument(
+            identity,
+            metadata,
+            RootNodeId: 1,
+            Nodes:
+            [
+                new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
+                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4]),
+                new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "titleText", "Title", []),
+                new UiSchemaNodeDescriptor(4, UiNodeKind.DynamicText, "levelValue", "Level", []),
+            ],
+            PayloadSlots:
+            [
+                new UiPayloadSlotDescriptor("titleText", UiModelValueKind.String, Required: true, MaxStringLength: 64),
+                new UiPayloadSlotDescriptor("levelValue", UiModelValueKind.Integer, Required: false, MinNumber: 1, MaxNumber: 100),
+            ],
+            Actions: [],
+            StateBindings: [],
+            CatalogIdentity: catalogIdentity);
+    }
+
+    private static UiModelDocument CreateClientUiModel(UiSchemaDocument schema)
+    {
+        return new UiModelDocument(
+            schema.Identity,
+            Values:
+            [
+                UiModelSlotValue.String("titleText", "Status"),
+                UiModelSlotValue.Integer("levelValue", 12),
+            ]);
+    }
+
+    private static UiSchemaDocument CreateClientSchemaRevision(UiSchemaDocument schema, int revision, char hashChar)
+    {
+        Assert.True(UiSchemaIdentity.TryCreate(
+            schema.Identity.ServerIdentity,
+            schema.Identity.PanelType,
+            revision,
+            new string(hashChar, 64),
+            schema.Identity.ProtocolVersion,
+            out UiSchemaIdentity identity,
+            out string error), error);
+        return schema with { Identity = identity };
+    }
+
+    private static UiCatalogIdentity CreateClientCatalogIdentity(int revision, char hashChar)
+    {
+        Assert.True(UiCatalogIdentity.TryCreate(
+            "server/main",
+            "craft.blacksmith",
+            revision,
+            new string(hashChar, 64),
+            1,
+            "en-US",
+            out UiCatalogIdentity identity,
+            out string error), error);
+        return identity;
+    }
+
+    private static UiRendererCapabilities CreateClientRendererCapabilities()
+    {
+        return new UiRendererCapabilities(
+            ProtocolVersion: 1,
+            CapabilityFlags: UiCapabilityFlags.ContextMenusV1 | UiCapabilityFlags.RuntimeStateBindingsV1,
+            MaxSchemaBytes: 64 * 1024,
+            MaxModelBytes: 16 * 1024,
+            MaxNodeCount: 512,
+            MaxTreeDepth: 32,
+            MaxRepeaterRows: 256,
+            MaxTableColumns: 24);
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -1580,6 +1789,29 @@ internal static class Assert
             if (!EqualityComparer<T>.Default.Equals(expected[i], actual[i]))
                 throw new InvalidOperationException(message ?? $"Sequence mismatch at {i}: expected '{expected[i]}', got '{actual[i]}'.");
         }
+    }
+}
+
+internal sealed class FakeStateBindingResolver : IClientUiStateBindingResolver
+{
+    private readonly UiModelSlotValue _value;
+
+    public FakeStateBindingResolver(string sourceId, UiModelSlotValue value)
+    {
+        SourceId = sourceId;
+        _value = value;
+    }
+
+    public string SourceId { get; }
+
+    public bool TryResolve(
+        UiStateBindingDescriptor binding,
+        out UiModelSlotValue value,
+        out string error)
+    {
+        value = _value with { SlotId = binding.SlotId };
+        error = string.Empty;
+        return true;
     }
 }
 

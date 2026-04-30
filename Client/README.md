@@ -39,6 +39,12 @@ What now exists:
     - UI schema cache byte store with hash validation and metadata updates
     - server patch manifest cache store with validation, identity checks, and metadata updates
     - server patch asset cache byte store with manifest size/hash validation
+  - first server-driven UI runtime bridge primitives:
+    - panel registry over the engine-agnostic UI kernel cache
+    - cold-open schema validation/cache insert path
+    - hot-open schema lookup and model validation path
+    - explicit missing/superseded schema and catalog statuses
+    - state-binding resolver registry stub for future entity/inventory/party/session cache adapters
 - `Client/Network`
   - movement input send path over `Kernels/Network`
   - authoritative movement-state receive path

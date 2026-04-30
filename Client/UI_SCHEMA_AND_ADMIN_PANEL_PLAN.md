@@ -1244,6 +1244,7 @@ The schema work needed for that:
 
 ### UI-3: Minimal Renderer
 
+- implement client runtime bridge foundation: panel instance registry, cold/hot open routing through `UiDefinitionCache`, explicit missing/superseded statuses, and state-binding resolver registry ownership
 - render panel, text, dynamic text, button, row, column, separator, text input
 - open/update/close panel host under `MenuCanvasManager`
 - split Godot presentation into world, HUD, shared menu, modal, exclusive, tooltip, and debug hosts while keeping one backend panel path
