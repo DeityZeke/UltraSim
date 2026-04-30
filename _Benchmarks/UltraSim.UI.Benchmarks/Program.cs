@@ -113,6 +113,10 @@ static IEnumerable<BenchmarkScenario> CreateScenarios()
         Execute = () => RunModelDocumentValidationScenario(1_000),
     };
 
+    yield return CreatePanelOpenColdValidationScenario(1_000);
+
+    yield return CreatePanelOpenHotValidationScenario(1_000);
+
     yield return new BenchmarkScenario
     {
         Name = "ModelUpdate_ValidateSlotPatch_1000Slots",
@@ -520,6 +524,87 @@ static ScenarioMeasurement RunModelDocumentValidationScenario(int slotCount)
     }
 
     return new ScenarioMeasurement(slotCount, model.Values.Count + schema.PayloadSlots.Count);
+}
+
+static BenchmarkScenario CreatePanelOpenColdValidationScenario(int slotCount)
+{
+    (UiSchemaDocument schema, UiModelDocument model) = CreateLargeModelCompatibilityPair(slotCount);
+    var open = new UiPanelOpenDocument(
+        "panel/bench/open",
+        schema.Identity,
+        schema.CatalogIdentity,
+        model,
+        schema);
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = slotCount + 8,
+        MaxChildrenPerNode = slotCount + 8,
+    };
+
+    return new BenchmarkScenario
+    {
+        Name = "PanelOpen_ValidateCold_1000Slots",
+        Category = "UiCacheNegotiation",
+        Comparable = false,
+        Scale = slotCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            UiValidationResult result = open.ValidateCold(limits);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(result.Error);
+            }
+
+            return new ScenarioMeasurement(slotCount, open.Model.Values.Count + open.SchemaDefinition!.Nodes.Count);
+        },
+    };
+}
+
+static BenchmarkScenario CreatePanelOpenHotValidationScenario(int slotCount)
+{
+    (UiSchemaDocument schema, UiModelDocument model) = CreateLargeModelCompatibilityPair(slotCount);
+    var limits = UiSchemaValidationLimits.Default with
+    {
+        MaxNodeCount = slotCount + 8,
+        MaxChildrenPerNode = slotCount + 8,
+    };
+    UiValidationResult contextResult = UiSchemaCompatibilityContext.TryCreate(
+        schema,
+        out UiSchemaCompatibilityContext? context,
+        limits);
+    if (!contextResult.IsValid || context is null)
+    {
+        throw new InvalidOperationException(contextResult.Error);
+    }
+
+    var open = new UiPanelOpenDocument(
+        "panel/bench/open",
+        schema.Identity,
+        schema.CatalogIdentity,
+        model,
+        SchemaDefinition: null);
+
+    return new BenchmarkScenario
+    {
+        Name = "PanelOpen_ValidateHotAgainstContext_1000Slots",
+        Category = "UiCacheNegotiation",
+        Comparable = false,
+        Scale = slotCount,
+        WarmupCount = 1,
+        IterationCount = 5,
+        Execute = () =>
+        {
+            UiValidationResult result = open.ValidateHot(context);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(result.Error);
+            }
+
+            return new ScenarioMeasurement(slotCount, open.Model.Values.Count + context.PayloadSlots.Count);
+        },
+    };
 }
 
 static ScenarioMeasurement RunModelUpdateValidationScenario(int slotCount)

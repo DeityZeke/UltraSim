@@ -111,6 +111,13 @@ Hot path:
 3. Client validates payload shape against the cached schema and catalog metadata.
 4. Client renders or updates without receiving the full schema or catalog again.
 
+Kernel contract:
+
+- `UiPanelOpenDocument` is the open envelope for both cold and hot paths.
+- Cold opens carry an inline `UiSchemaDocument` plus model payload and validate the model against that schema before render/cache use.
+- Hot opens carry only schema/catalog identities plus model payload and validate against the cached `UiSchemaCompatibilityContext`.
+- The open envelope carries exact optional catalog identity, but catalog bytes remain a separate cache/document concern.
+
 Schema cache identity must include:
 
 - stable server identity

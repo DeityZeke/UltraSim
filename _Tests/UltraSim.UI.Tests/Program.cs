@@ -23,6 +23,8 @@ internal static class TestRunner
         Run(nameof(UiModelSlotValue_ValidatesStringAndNumberConstraints), UiModelSlotValue_ValidatesStringAndNumberConstraints);
         Run(nameof(UiSchemaCompatibilityContext_ReusesValidatedSchemaForModelAndUpdateChecks), UiSchemaCompatibilityContext_ReusesValidatedSchemaForModelAndUpdateChecks);
         Run(nameof(UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility), UiSchemaCompatibilityContext_SeparatesExactIdentityFromSlotCompatibility);
+        Run(nameof(UiPanelOpenDocument_ValidatesColdAndHotOpenPaths), UiPanelOpenDocument_ValidatesColdAndHotOpenPaths);
+        Run(nameof(UiPanelOpenDocument_RejectsMissingDefinitionsAndIdentityMismatches), UiPanelOpenDocument_RejectsMissingDefinitionsAndIdentityMismatches);
         Run(nameof(UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates), UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates);
         Run(nameof(UiModelUpdateDocument_RejectsInvalidUpdateShapes), UiModelUpdateDocument_RejectsInvalidUpdateShapes);
         Run(nameof(UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates), UiActionRequestAndResult_ValidateSequenceContextFieldsAndUpdates);
@@ -582,6 +584,80 @@ internal static class TestRunner
             Values = [UiModelSlotValue.String("unknownSlot", "nope")]
         };
         Assert.InvalidContains(rightIdentityWrongSlots.ValidateAgainst(context!), "unknown slot");
+    }
+
+    private static void UiPanelOpenDocument_ValidatesColdAndHotOpenPaths()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        UiModelDocument model = CreateValidModelDocument(schema);
+        var cold = new UiPanelOpenDocument(
+            "panel/open/status",
+            schema.Identity,
+            schema.CatalogIdentity,
+            model,
+            schema);
+        Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+        var hot = cold with { SchemaDefinition = null };
+        Assert.Valid(hot.ValidateHot(context!));
+
+        byte[] encoded = UiContractJsonCodec.Encode(cold);
+        UiPanelOpenDocument decoded = UiContractJsonCodec.Decode<UiPanelOpenDocument>(encoded);
+        Assert.Equal(cold.PanelInstanceId, decoded.PanelInstanceId);
+        Assert.Equal(cold.SchemaIdentity, decoded.SchemaIdentity);
+        Assert.True(decoded.SchemaDefinition is not null, "cold open schema definition roundtrip");
+        Assert.Valid(decoded.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+    }
+
+    private static void UiPanelOpenDocument_RejectsMissingDefinitionsAndIdentityMismatches()
+    {
+        UiSchemaDocument schema = CreateValidSchemaDocument();
+        UiModelDocument model = CreateValidModelDocument(schema);
+        var hot = new UiPanelOpenDocument(
+            "panel/open/status",
+            schema.Identity,
+            schema.CatalogIdentity,
+            model,
+            SchemaDefinition: null);
+        Assert.InvalidContains(hot.ValidateCold(rendererCapabilities: CreateRendererCapabilities()), "inline schema");
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+        Assert.True(UiSchemaIdentity.TryCreate(
+            "server/main",
+            "hud.status",
+            schema.Identity.SchemaRevision + 1,
+            new string('d', 64),
+            1,
+            out UiSchemaIdentity otherIdentity,
+            out string error), error);
+
+        Assert.InvalidContains((hot with { SchemaIdentity = otherIdentity }).ValidateHot(context!), "model schema identity");
+        Assert.InvalidContains((hot with
+        {
+            Model = model with { SchemaIdentity = otherIdentity }
+        }).ValidateHot(context!), "model schema identity");
+
+        Assert.True(UiCatalogIdentity.TryCreate(
+            "server/main",
+            "craft.blacksmith",
+            1,
+            new string('e', 64),
+            1,
+            "en-US",
+            out UiCatalogIdentity catalogIdentity,
+            out error), error);
+        Assert.InvalidContains((hot with { CatalogIdentity = catalogIdentity }).ValidateHot(context!), "catalog");
+
+        var mismatchedDefinition = new UiPanelOpenDocument(
+            "panel/open/status",
+            schema.Identity,
+            CatalogIdentity: catalogIdentity,
+            model,
+            schema);
+        Assert.InvalidContains(mismatchedDefinition.ValidateEnvelope(), "catalog identity");
     }
 
     private static void UiModelUpdateDocument_ValidatesFullPatchScopedAndRepeaterUpdates()
