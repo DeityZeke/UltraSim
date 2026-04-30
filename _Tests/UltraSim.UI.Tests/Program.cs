@@ -951,6 +951,9 @@ internal static class TestRunner
         var badField = request with { FieldValues = [UiModelSlotValue.String("missingSlot", "nope")] };
         Assert.InvalidContains(badField.ValidateAgainst(context!), "unknown field slot");
 
+        var wrongContext = request with { ContextKind = UiActionContextKind.Item };
+        Assert.InvalidContains(wrongContext.ValidateAgainst(context!), "context kind");
+
         var rejectedWithoutReason = new UiActionResultDocument(
             "panel/1",
             schema.Identity,

@@ -55,23 +55,29 @@ public sealed class ClientUiPanelRegistry
                 return catalogResult;
             }
 
-            var panel = CreatePanel(open, open.SchemaDefinition.Metadata);
+            UiSchemaCacheLookupResult schemaLookup = _definitionCache.TryGetSchema(open.SchemaIdentity);
+            if (schemaLookup.Kind != UiDefinitionCacheLookupKind.Hit || schemaLookup.Entry is null)
+            {
+                return ClientUiPanelOpenResult.Rejected("Cold-open schema was not available after cache insert.");
+            }
+
+            var panel = CreatePanel(open, schemaLookup.Entry.Schema.Metadata, schemaLookup.Entry.CompatibilityContext);
             _panelsById[panel.PanelInstanceId] = panel;
             return ClientUiPanelOpenResult.ColdOpened(panel);
         }
 
-        UiSchemaCacheLookupResult schemaLookup = _definitionCache.TryGetSchema(open.SchemaIdentity);
-        if (schemaLookup.Kind == UiDefinitionCacheLookupKind.Miss)
+        UiSchemaCacheLookupResult hotSchemaLookup = _definitionCache.TryGetSchema(open.SchemaIdentity);
+        if (hotSchemaLookup.Kind == UiDefinitionCacheLookupKind.Miss)
         {
             return ClientUiPanelOpenResult.MissingSchema("UI schema is not cached.");
         }
 
-        if (schemaLookup.Kind == UiDefinitionCacheLookupKind.Superseded)
+        if (hotSchemaLookup.Kind == UiDefinitionCacheLookupKind.Superseded)
         {
-            return ClientUiPanelOpenResult.SupersededSchema(schemaLookup.SupersededByIdentity!.Value);
+            return ClientUiPanelOpenResult.SupersededSchema(hotSchemaLookup.SupersededByIdentity!.Value);
         }
 
-        if (schemaLookup.Entry is null)
+        if (hotSchemaLookup.Entry is null)
         {
             return ClientUiPanelOpenResult.Rejected("UI schema cache hit did not include an entry.");
         }
@@ -82,15 +88,33 @@ public sealed class ClientUiPanelRegistry
             return missingCatalog;
         }
 
-        UiValidationResult hotResult = open.ValidateHot(schemaLookup.Entry.CompatibilityContext);
+        UiValidationResult hotResult = open.ValidateHot(hotSchemaLookup.Entry.CompatibilityContext);
         if (!hotResult.IsValid)
         {
             return ClientUiPanelOpenResult.Rejected(hotResult.Error);
         }
 
-        ClientUiPanelInstance hotPanel = CreatePanel(open, schemaLookup.Entry.Schema.Metadata);
+        ClientUiPanelInstance hotPanel = CreatePanel(
+            open,
+            hotSchemaLookup.Entry.Schema.Metadata,
+            hotSchemaLookup.Entry.CompatibilityContext);
         _panelsById[hotPanel.PanelInstanceId] = hotPanel;
         return ClientUiPanelOpenResult.HotOpened(hotPanel);
+    }
+
+    public ClientUiActionRouteResult ValidateActionRequest(UiActionRequestDocument request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!_panelsById.TryGetValue(request.PanelInstanceId, out ClientUiPanelInstance? panel))
+        {
+            return ClientUiActionRouteResult.MissingPanel("UI panel instance is not open.");
+        }
+
+        UiValidationResult result = request.ValidateAgainst(panel.CompatibilityContext);
+        return result.IsValid
+            ? ClientUiActionRouteResult.Validated(request, panel)
+            : ClientUiActionRouteResult.Rejected(result.Error);
     }
 
     public bool TryGetPanel(string panelInstanceId, out ClientUiPanelInstance panel)
@@ -136,7 +160,10 @@ public sealed class ClientUiPanelRegistry
         };
     }
 
-    private ClientUiPanelInstance CreatePanel(UiPanelOpenDocument open, UiPanelMetadata metadata)
+    private ClientUiPanelInstance CreatePanel(
+        UiPanelOpenDocument open,
+        UiPanelMetadata metadata,
+        UiSchemaCompatibilityContext compatibilityContext)
     {
         return new ClientUiPanelInstance(
             open.PanelInstanceId,
@@ -144,6 +171,7 @@ public sealed class ClientUiPanelRegistry
             open.CatalogIdentity,
             metadata,
             open.Model,
+            compatibilityContext,
             ++_nextOpenSequence);
     }
 }

@@ -132,6 +132,7 @@ Validate at least:
 
 - Client presentation may be optimistic, but server actions are authoritative.
 - Permissions and disabled states are presentation hints on the client.
+- Action requests must match the server-declared action context kind; do not allow item/entity/world/admin actions to be rerouted through a different context kind.
 - Server revalidates every mutation, admin action, trade commit, drag/drop, context action, and world interaction.
 
 ### Central Shared Vocabulary

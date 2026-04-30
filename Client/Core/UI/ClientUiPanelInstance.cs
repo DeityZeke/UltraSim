@@ -8,4 +8,5 @@ public sealed record ClientUiPanelInstance(
     UiCatalogIdentity? CatalogIdentity,
     UiPanelMetadata Metadata,
     UiModelDocument Model,
+    UiSchemaCompatibilityContext CompatibilityContext,
     long OpenSequence);

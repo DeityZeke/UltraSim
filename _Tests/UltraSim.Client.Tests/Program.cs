@@ -37,6 +37,8 @@ internal static class TestRunner
         Run(nameof(ClientUiPanelRegistry_OpensColdPanelCachesSchemaAndReopensHot), ClientUiPanelRegistry_OpensColdPanelCachesSchemaAndReopensHot);
         Run(nameof(ClientUiPanelRegistry_ReportsMissingAndSupersededDefinitionsWithoutOpening), ClientUiPanelRegistry_ReportsMissingAndSupersededDefinitionsWithoutOpening);
         Run(nameof(ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen), ClientUiPanelRegistry_RequiresCatalogIdentityBeforeCatalogBackedOpen);
+        Run(nameof(ClientUiPanelRegistry_ValidatesActionsAgainstOpenInstanceContext), ClientUiPanelRegistry_ValidatesActionsAgainstOpenInstanceContext);
+        Run(nameof(ClientUiPanelRegistry_RejectsMissingPanelAndInvalidActionRequests), ClientUiPanelRegistry_RejectsMissingPanelAndInvalidActionRequests);
         Run(nameof(ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource), ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource);
         Run(nameof(ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest), ServerPatchManifestCacheStore_WritesReadsIndexesAndRemovesManifest);
         Run(nameof(ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests), ServerPatchManifestCacheStore_RejectsInvalidAndMismatchedManifests);
@@ -799,6 +801,76 @@ internal static class TestRunner
         Assert.True(opened.Panel is not null);
         Assert.Equal(catalog, opened.Panel!.CatalogIdentity!.Value);
         Assert.Equal(1, registry.Count);
+    }
+
+    private static void ClientUiPanelRegistry_ValidatesActionsAgainstOpenInstanceContext()
+    {
+        UiSchemaDocument schemaV1 = CreateClientUiSchema();
+        UiSchemaDocument schemaV2 = CreateClientSchemaRevision(schemaV1, 2, 'd');
+        UiModelDocument model = CreateClientUiModel(schemaV1);
+        var registry = new ClientUiPanelRegistry();
+
+        var open = new UiPanelOpenDocument("panel/status/action", schemaV1.Identity, null, model, schemaV1);
+        ClientUiPanelOpenResult opened = registry.OpenPanel(open, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.Equal(ClientUiPanelOpenStatus.ColdOpened, opened.Status);
+        Assert.True(opened.Panel is not null);
+
+        UiValidationResult supersedeCache = registry.CacheSchema(schemaV2, rendererCapabilities: CreateClientRendererCapabilities());
+        Assert.True(supersedeCache.IsValid, supersedeCache.Error);
+
+        var request = new UiActionRequestDocument(
+            "panel/status/action",
+            schemaV1.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 10,
+            "hud.open_character",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: [UiModelSlotValue.Integer("levelValue", 13)]);
+        ClientUiActionRouteResult routed = registry.ValidateActionRequest(request);
+        Assert.Equal(ClientUiActionRouteStatus.Validated, routed.Status);
+        Assert.True(routed.ReadyToSend);
+        Assert.Equal(request, routed.Request!);
+        Assert.Equal(opened.Panel!.PanelInstanceId, routed.Panel!.PanelInstanceId);
+        Assert.Equal(schemaV1.Identity, routed.Panel.CompatibilityContext.SchemaIdentity);
+    }
+
+    private static void ClientUiPanelRegistry_RejectsMissingPanelAndInvalidActionRequests()
+    {
+        UiSchemaDocument schema = CreateClientUiSchema();
+        UiModelDocument model = CreateClientUiModel(schema);
+        var registry = new ClientUiPanelRegistry();
+
+        var missingPanelRequest = new UiActionRequestDocument(
+            "panel/missing",
+            schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 1,
+            "hud.open_character",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: []);
+        ClientUiActionRouteResult missing = registry.ValidateActionRequest(missingPanelRequest);
+        Assert.Equal(ClientUiActionRouteStatus.MissingPanel, missing.Status);
+
+        var open = new UiPanelOpenDocument("panel/status/action", schema.Identity, null, model, schema);
+        Assert.Equal(ClientUiPanelOpenStatus.ColdOpened, registry.OpenPanel(open, rendererCapabilities: CreateClientRendererCapabilities()).Status);
+
+        ClientUiActionRouteResult unknown = registry.ValidateActionRequest(missingPanelRequest with
+        {
+            PanelInstanceId = "panel/status/action",
+            ActionId = "missing.action"
+        });
+        Assert.Equal(ClientUiActionRouteStatus.Rejected, unknown.Status);
+        Assert.True(unknown.Error.Contains("unknown action", StringComparison.OrdinalIgnoreCase), unknown.Error);
+
+        ClientUiActionRouteResult wrongContext = registry.ValidateActionRequest(missingPanelRequest with
+        {
+            PanelInstanceId = "panel/status/action",
+            ContextKind = UiActionContextKind.Item
+        });
+        Assert.Equal(ClientUiActionRouteStatus.Rejected, wrongContext.Status);
+        Assert.True(wrongContext.Error.Contains("context kind", StringComparison.OrdinalIgnoreCase), wrongContext.Error);
     }
 
     private static void ClientUiStateBindingResolverRegistry_RegistersAndResolvesBySource()
@@ -1687,7 +1759,17 @@ internal static class TestRunner
                 new UiPayloadSlotDescriptor("titleText", UiModelValueKind.String, Required: true, MaxStringLength: 64),
                 new UiPayloadSlotDescriptor("levelValue", UiModelValueKind.Integer, Required: false, MinNumber: 1, MaxNumber: 100),
             ],
-            Actions: [],
+            Actions:
+            [
+                new UiActionDescriptor(
+                    "hud.open_character",
+                    "Open Character",
+                    IconId: null,
+                    UiActionRole.Normal,
+                    UiActionContextKind.Panel,
+                    RequiresConfirm: false,
+                    ChildMenuKey: null),
+            ],
             StateBindings: [],
             CatalogIdentity: catalogIdentity);
     }

@@ -138,7 +138,9 @@ Identity matching and structural compatibility are separate checks:
 
 The runtime should validate a schema once, create a reusable compatibility context from it, and then apply hot model/delta compatibility checks against that context. Do not re-walk the full schema tree for every slot patch, telemetry batch, or small server-forced refresh.
 
-Compatibility contexts are immutable and should normally be owned by the validated schema cache entry. Multiple open panel instances using the same exact schema/catalog identity may share that context. Panel instances own only their instance state, current model, sequence counters, focus/navigation state, and subscriptions.
+Compatibility contexts are immutable and are created from validated schema entries. Cache entries own the reusable source context, and open panel instances must retain the exact context they validated against for their own lifetime. That means cache eviction or schema supersession cannot strand an already-open panel with no validation context. Panel instances own their instance state, current model, sequence counters, focus/navigation state, retained compatibility context, and subscriptions.
+
+Catalog-backed opens that arrive before the required catalog identity is available should return an explicit missing-catalog state, not create a half-open panel instance. The bridge can request the catalog and retry the open when it arrives; timeout/UX handling belongs to the pending-panel bridge layer, not to a hidden registry entry.
 
 Cold path UX must be explicit. The first open of a panel type can require schema transfer, validation, cache write, and then render. For startup-critical panels such as login and character select, prefer proactive schema push during the early session/admission flow once the server knows the client UI protocol version. If the schema is not available yet, the client should show a trusted local loading/pending panel with the same modal/input-blocking behavior as the eventual panel.
 
@@ -1245,6 +1247,7 @@ The schema work needed for that:
 ### UI-3: Minimal Renderer
 
 - implement client runtime bridge foundation: panel instance registry, cold/hot open routing through `UiDefinitionCache`, explicit missing/superseded statuses, and state-binding resolver registry ownership
+- implement action request routing from open panel instance to validated outbound action using the panel's retained compatibility context
 - render panel, text, dynamic text, button, row, column, separator, text input
 - open/update/close panel host under `MenuCanvasManager`
 - split Godot presentation into world, HUD, shared menu, modal, exclusive, tooltip, and debug hosts while keeping one backend panel path

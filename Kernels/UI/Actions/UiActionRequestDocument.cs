@@ -46,6 +46,11 @@ public sealed record UiActionRequestDocument(
             return actionResult;
         }
 
+        if (action.ContextKind != ContextKind)
+        {
+            return UiValidationResult.Invalid($"Action request context kind does not match action '{ActionId}'.");
+        }
+
         if (action.Availability != UiActionAvailability.Available)
         {
             return UiValidationResult.Invalid($"Action '{ActionId}' is not currently available: {action.Availability}.");
@@ -100,6 +105,11 @@ public sealed record UiActionRequestDocument(
             if (string.Equals(action.ActionId, ActionId, StringComparison.Ordinal))
             {
                 found = true;
+                if (action.ContextKind != ContextKind)
+                {
+                    return UiValidationResult.Invalid($"Action request context kind does not match action '{ActionId}'.");
+                }
+
                 if (action.Availability != UiActionAvailability.Available)
                 {
                     return UiValidationResult.Invalid($"Action '{ActionId}' is not currently available: {action.Availability}.");

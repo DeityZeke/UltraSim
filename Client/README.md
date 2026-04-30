@@ -44,6 +44,8 @@ What now exists:
     - cold-open schema validation/cache insert path
     - hot-open schema lookup and model validation path
     - explicit missing/superseded schema and catalog statuses
+    - open panel instances retain their validation compatibility context for action/update routing
+    - action request validation against open panel instances before network send
     - state-binding resolver registry stub for future entity/inventory/party/session cache adapters
 - `Client/Network`
   - movement input send path over `Kernels/Network`
