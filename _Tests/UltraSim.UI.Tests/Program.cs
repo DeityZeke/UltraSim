@@ -542,6 +542,46 @@ internal static class TestRunner
         Assert.Equal("Ada", firstPromptValue.StringValue);
         Assert.Equal("Grace", secondPromptValue.StringValue);
         Assert.Valid(firstPrompt.ToColdOpen("panel/prompt/rename").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+
+        UiStandardPagedListPicker firstPicker = UiStandardPanels.PagedListPicker(
+            "server/main",
+            "Choose Character",
+            "Select a character.",
+            [
+                new UiStandardListRow("character/lira", "Lira", "Level 12 Ranger"),
+                new UiStandardListRow("character/orrin", "Orrin", "Level 4 Crafter")
+            ],
+            includePagingActions: true);
+        UiStandardPagedListPicker secondPicker = UiStandardPanels.PagedListPicker(
+            "server/main",
+            "Choose Character",
+            "Select a character.",
+            [
+                new UiStandardListRow("character/mira", "Mira", "Level 9 Mage"),
+                new UiStandardListRow("character/tess", "Tess", "Level 2 Thief")
+            ],
+            includePagingActions: true);
+
+        Assert.Equal(UiStandardPanels.PagedListPickerPanelType, firstPicker.Panel.Schema.Identity.PanelType);
+        Assert.Equal(firstPicker.Panel.Schema.Identity.SchemaHashHex, secondPicker.Panel.Schema.Identity.SchemaHashHex);
+        Assert.True(firstPicker.Panel.Schema.Nodes.Any(node =>
+            node.Kind == UiNodeKind.Repeater &&
+            string.Equals(node.SlotId, UiStandardPanels.PagedListRowsSlotId, StringComparison.Ordinal)));
+        Assert.Equal(4, firstPicker.Panel.Schema.Actions.Count);
+        Assert.True(firstPicker.Panel.Schema.Actions.Any(action => string.Equals(action.ActionId, UiStandardPanels.PagedListPreviousActionId, StringComparison.Ordinal)));
+        Assert.True(firstPicker.Panel.Schema.Actions.Any(action => string.Equals(action.ActionId, UiStandardPanels.PagedListNextActionId, StringComparison.Ordinal)));
+        Assert.Valid(firstPicker.Panel.ToColdOpen("panel/picker/characters").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+
+        UiModelUpdateDocument initialRows = firstPicker.CreateInitialRowsUpdate("panel/picker/characters", 1);
+        Assert.Equal(2, initialRows.RowDeltas.Count);
+        Assert.Valid(initialRows.ValidateAgainst(firstPicker.Panel.Schema));
+        Assert.Equal("Lira", initialRows.RowDeltas[0].Values[0].StringValue);
+        Assert.Equal("Level 12 Ranger", initialRows.RowDeltas[0].Values[1].StringValue);
+        Assert.Throws<InvalidOperationException>(() => UiStandardPanels.PagedListPicker(
+            "server/main",
+            "Empty",
+            "No rows.",
+            []));
     }
 
     private static void UiPanelBuilder_RejectsConflictingScopedDeclarations()

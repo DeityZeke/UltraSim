@@ -6,16 +6,24 @@ public static class UiStandardPanels
     public const string ConfirmBoxPanelType = "standard.confirm_box";
     public const string ChoiceBoxPanelType = "standard.choice_box";
     public const string TextPromptPanelType = "standard.text_prompt";
+    public const string PagedListPickerPanelType = "standard.paged_list_picker";
 
     public const string TitleSlotId = "standard.title";
     public const string BodySlotId = "standard.body";
     public const string PromptValueSlotId = "standard.prompt.value";
+    public const string PagedListRowsSlotId = "standard.list.rows";
+    public const string PagedListRowLabelSlotId = "standard.list.row.label";
+    public const string PagedListRowDescriptionSlotId = "standard.list.row.description";
 
     public const string MessageOkActionId = "standard.message.ok";
     public const string ConfirmAcceptActionId = "standard.confirm.accept";
     public const string ConfirmCancelActionId = "standard.confirm.cancel";
     public const string PromptAcceptActionId = "standard.prompt.accept";
     public const string PromptCancelActionId = "standard.prompt.cancel";
+    public const string PagedListAcceptActionId = "standard.list.accept";
+    public const string PagedListCancelActionId = "standard.list.cancel";
+    public const string PagedListPreviousActionId = "standard.list.previous";
+    public const string PagedListNextActionId = "standard.list.next";
 
     public static UiBuiltPanel MessageBox(
         string serverIdentity,
@@ -154,6 +162,62 @@ public static class UiStandardPanels
             .Build();
     }
 
+    public static UiStandardPagedListPicker PagedListPicker(
+        string serverIdentity,
+        string title,
+        string body,
+        IReadOnlyList<UiStandardListRow> rows,
+        string acceptText = "Select",
+        string cancelText = "Cancel",
+        bool includePagingActions = false,
+        string previousText = "Previous",
+        string nextText = "Next",
+        string panelType = PagedListPickerPanelType,
+        int schemaRevision = 1,
+        string acceptActionId = PagedListAcceptActionId,
+        string cancelActionId = PagedListCancelActionId,
+        string previousActionId = PagedListPreviousActionId,
+        string nextActionId = PagedListNextActionId,
+        UiPanelMetadata? metadata = null)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count == 0)
+        {
+            throw new InvalidOperationException("PagedListPicker requires at least one row.");
+        }
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            _ = rows[i] ?? throw new InvalidOperationException("PagedListPicker rows cannot contain null entries.");
+        }
+
+        metadata ??= CreateModalMetadata(panelType);
+        UiBuiltPanel panel = UiPanelBuilder
+            .Create(serverIdentity, panelType, schemaRevision, metadata)
+            .Panel(root =>
+            {
+                root.Column(column =>
+                {
+                    column.DynamicText(TitleSlotId, "Title", title, maxStringLength: 160);
+                    column.DynamicText(BodySlotId, "Body", body, maxStringLength: UiValidation.MaxDisplayTextLength);
+                    column.Repeater(PagedListRowsSlotId, "Rows");
+                    column.Row(row =>
+                    {
+                        if (includePagingActions)
+                        {
+                            row.Button(previousActionId, previousText, UiActionRole.Normal);
+                            row.Button(nextActionId, nextText, UiActionRole.Normal);
+                        }
+
+                        row.Button(cancelActionId, cancelText, UiActionRole.Normal);
+                        row.Button(acceptActionId, acceptText, UiActionRole.Primary);
+                    });
+                });
+            })
+            .Build();
+        return new UiStandardPagedListPicker(panel, rows.ToArray());
+    }
+
     private static UiPanelMetadata CreateModalMetadata(string panelType)
     {
         return new UiPanelMetadata(
@@ -178,3 +242,56 @@ public sealed record UiStandardChoice(
     string? IconId = null,
     UiActionAvailability Availability = UiActionAvailability.Available,
     string? AvailabilityReason = null);
+
+public sealed record UiStandardListRow(
+    string RowKey,
+    string Label,
+    string Description = "")
+{
+    public UiRepeaterRowDelta ToAddDelta(string repeaterSlotId)
+    {
+        UiValidationResult rowKeyResult = UiValidation.ValidateStableId(RowKey, nameof(RowKey), UiValidation.MaxSlotIdLength);
+        if (!rowKeyResult.IsValid)
+        {
+            throw new InvalidOperationException(rowKeyResult.Error);
+        }
+
+        var values = string.IsNullOrEmpty(Description)
+            ? new[] { UiModelSlotValue.String(UiStandardPanels.PagedListRowLabelSlotId, Label) }
+            : new[]
+            {
+                UiModelSlotValue.String(UiStandardPanels.PagedListRowLabelSlotId, Label),
+                UiModelSlotValue.String(UiStandardPanels.PagedListRowDescriptionSlotId, Description)
+            };
+        return new UiRepeaterRowDelta(
+            repeaterSlotId,
+            RowKey,
+            UiRepeaterRowUpdateKind.Add,
+            values);
+    }
+}
+
+public sealed record UiStandardPagedListPicker(
+    UiBuiltPanel Panel,
+    IReadOnlyList<UiStandardListRow> Rows)
+{
+    public UiModelUpdateDocument CreateInitialRowsUpdate(string panelInstanceId, long sequence)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(panelInstanceId);
+        if (sequence < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sequence), "Update sequence cannot be negative.");
+        }
+
+        return new UiModelUpdateDocument(
+            panelInstanceId.Trim(),
+            Panel.Schema.Identity,
+            Panel.Schema.CatalogIdentity,
+            sequence,
+            UiModelUpdateKind.RepeaterRows,
+            ScopeId: null,
+            SlotValues: [],
+            ClearedSlotIds: [],
+            RowDeltas: Rows.Select(row => row.ToAddDelta(UiStandardPanels.PagedListRowsSlotId)).ToArray());
+    }
+}
