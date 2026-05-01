@@ -24,6 +24,7 @@ public static class UiStandardPanels
     public const string PagedListCancelActionId = "standard.list.cancel";
     public const string PagedListPreviousActionId = "standard.list.previous";
     public const string PagedListNextActionId = "standard.list.next";
+    public const string PagedListRowSelectActionId = "standard.list.row.select";
 
     public static UiBuiltPanel MessageBox(
         string serverIdentity,
@@ -178,6 +179,7 @@ public static class UiStandardPanels
         string cancelActionId = PagedListCancelActionId,
         string previousActionId = PagedListPreviousActionId,
         string nextActionId = PagedListNextActionId,
+        string rowSelectActionId = PagedListRowSelectActionId,
         UiPanelMetadata? metadata = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -200,7 +202,7 @@ public static class UiStandardPanels
                 {
                     column.DynamicText(TitleSlotId, "Title", title, maxStringLength: 160);
                     column.DynamicText(BodySlotId, "Body", body, maxStringLength: UiValidation.MaxDisplayTextLength);
-                    column.Repeater(PagedListRowsSlotId, "Rows");
+                    column.Repeater(PagedListRowsSlotId, "Rows", rowSelectActionId, acceptText, UiActionRole.Primary);
                     column.Row(row =>
                     {
                         if (includePagingActions)

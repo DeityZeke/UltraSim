@@ -450,7 +450,11 @@ public sealed record UiSchemaDocument(
 
     private UiValidationResult ValidateNodeActionReferences()
     {
-        var actionIds = new HashSet<string>(Actions.Select(static action => action.ActionId), StringComparer.Ordinal);
+        var actionsById = new Dictionary<string, UiActionDescriptor>(Actions.Count, StringComparer.Ordinal);
+        for (int i = 0; i < Actions.Count; i++)
+        {
+            actionsById[Actions[i].ActionId] = Actions[i];
+        }
 
         for (int i = 0; i < Nodes.Count; i++)
         {
@@ -460,14 +464,19 @@ public sealed record UiSchemaDocument(
                 continue;
             }
 
-            if (node.Kind is not (UiNodeKind.Button or UiNodeKind.IconButton))
+            if (node.Kind is not (UiNodeKind.Button or UiNodeKind.IconButton or UiNodeKind.Repeater))
             {
                 return UiValidationResult.Invalid($"Node kind '{node.Kind}' cannot declare an action id.");
             }
 
-            if (!actionIds.Contains(node.ActionId))
+            if (!actionsById.TryGetValue(node.ActionId, out UiActionDescriptor? action))
             {
                 return UiValidationResult.Invalid($"Node action '{node.ActionId}' is not declared in schema actions.");
+            }
+
+            if (node.Kind == UiNodeKind.Repeater && action.ContextKind != UiActionContextKind.Row)
+            {
+                return UiValidationResult.Invalid($"Repeater node action '{node.ActionId}' must use row context.");
             }
         }
 

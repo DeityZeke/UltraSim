@@ -60,7 +60,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
         if (!ServerDrivenPanelRenderer.TryBuild(
             panel,
-            action => RouteServerDrivenAction(panel, action),
+            (action, contextId) => RouteServerDrivenAction(panel, action, contextId),
             out Control renderedPanel,
             out error))
         {
@@ -348,7 +348,7 @@ public partial class MenuCanvasManager : CanvasLayer
         ApplyNavigation();
     }
 
-    private void RouteServerDrivenAction(ClientUiPanelInstance panel, UiActionDescriptor action)
+    private void RouteServerDrivenAction(ClientUiPanelInstance panel, UiActionDescriptor action, string? contextId)
     {
         if (ServerDrivenPanelRegistry is null)
         {
@@ -356,6 +356,13 @@ public partial class MenuCanvasManager : CanvasLayer
             return;
         }
 
+        if (action.ContextKind == UiActionContextKind.Row && string.IsNullOrWhiteSpace(contextId))
+        {
+            ServerDrivenActionRouted?.Invoke(ClientUiActionRouteResult.Rejected($"Row action '{action.ActionId}' did not include a row context id."));
+            return;
+        }
+
+        string? resolvedContextId = action.ContextKind == UiActionContextKind.Panel ? null : contextId;
         var request = new UiActionRequestDocument(
             panel.PanelInstanceId,
             panel.SchemaIdentity,
@@ -363,7 +370,7 @@ public partial class MenuCanvasManager : CanvasLayer
             ++_nextServerDrivenActionSequence,
             action.ActionId,
             action.ContextKind,
-            ContextId: null,
+            resolvedContextId,
             FieldValues: []);
         ServerDrivenActionRouted?.Invoke(ServerDrivenPanelRegistry.ValidateActionRequest(request));
     }

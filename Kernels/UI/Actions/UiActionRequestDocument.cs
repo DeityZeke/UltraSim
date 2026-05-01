@@ -56,6 +56,11 @@ public sealed record UiActionRequestDocument(
             return UiValidationResult.Invalid($"Action '{ActionId}' is not currently available: {action.Availability}.");
         }
 
+        if (action.ContextKind == UiActionContextKind.Row && string.IsNullOrWhiteSpace(ContextId))
+        {
+            return UiValidationResult.Invalid($"Action request for row action '{ActionId}' requires a row context id.");
+        }
+
         for (int i = 0; i < FieldValues.Count; i++)
         {
             UiModelSlotValue value = FieldValues[i];
@@ -113,6 +118,11 @@ public sealed record UiActionRequestDocument(
                 if (action.Availability != UiActionAvailability.Available)
                 {
                     return UiValidationResult.Invalid($"Action '{ActionId}' is not currently available: {action.Availability}.");
+                }
+
+                if (action.ContextKind == UiActionContextKind.Row && string.IsNullOrWhiteSpace(ContextId))
+                {
+                    return UiValidationResult.Invalid($"Action request for row action '{ActionId}' requires a row context id.");
                 }
             }
         }

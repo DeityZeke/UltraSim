@@ -8,7 +8,7 @@ internal static class ServerDrivenPanelRenderer
 {
     public static bool TryBuild(
         ClientUiPanelInstance panel,
-        Action<UiActionDescriptor>? actionPressed,
+        Action<UiActionDescriptor, string?>? actionPressed,
         out Control root,
         out string error)
     {
@@ -47,7 +47,7 @@ internal static class ServerDrivenPanelRenderer
         IReadOnlyDictionary<int, UiSchemaNodeDescriptor> nodeById,
         IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot,
         IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> repeaterRows,
-        Action<UiActionDescriptor>? actionPressed,
+        Action<UiActionDescriptor, string?>? actionPressed,
         out Control control,
         out string error)
     {
@@ -76,7 +76,7 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Slider => CreateSlider(node, compatibilityContext, modelBySlot),
             UiNodeKind.Stepper => CreateStepper(node, compatibilityContext, modelBySlot),
             UiNodeKind.Select => CreateSelect(node, compatibilityContext, modelBySlot),
-            UiNodeKind.Repeater => CreateRepeater(node, repeaterRows),
+            UiNodeKind.Repeater => CreateRepeater(node, compatibilityContext, repeaterRows, actionPressed),
             _ => CreateUnsupportedPlaceholder(node),
         };
 
@@ -367,7 +367,9 @@ internal static class ServerDrivenPanelRenderer
 
     private static Control CreateRepeater(
         UiSchemaNodeDescriptor node,
-        IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> repeaterRows)
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> repeaterRows,
+        Action<UiActionDescriptor, string?>? actionPressed)
     {
         var container = new VBoxContainer
         {
@@ -382,6 +384,12 @@ internal static class ServerDrivenPanelRenderer
             !repeaterRows.TryGetValue(node.SlotId, out IReadOnlyDictionary<string, ClientUiRepeaterRowState>? rows))
         {
             return container;
+        }
+
+        UiActionDescriptor? rowAction = null;
+        if (!string.IsNullOrWhiteSpace(node.ActionId))
+        {
+            _ = compatibilityContext.TryGetAction(node.ActionId, out rowAction);
         }
 
         foreach (ClientUiRepeaterRowState rowState in rows.Values)
@@ -405,6 +413,23 @@ internal static class ServerDrivenPanelRenderer
                 });
             }
 
+            if (rowAction is not null && actionPressed is not null)
+            {
+                var button = new Button
+                {
+                    Name = MakeNodeName("RepeaterRowAction", rowState.RowKey),
+                    Text = rowAction.Label,
+                    Disabled = rowAction.Availability != UiActionAvailability.Available,
+                    SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                };
+                button.SetMeta("UiActionId", rowAction.ActionId);
+                button.SetMeta("UiRowKey", rowState.RowKey);
+                string rowKey = rowState.RowKey;
+                button.Pressed += () => actionPressed(rowAction, rowKey);
+                row.AddChild(button);
+            }
+
             container.AddChild(row);
         }
 
@@ -414,7 +439,7 @@ internal static class ServerDrivenPanelRenderer
     private static Button CreateButton(
         UiSchemaNodeDescriptor node,
         UiSchemaCompatibilityContext compatibilityContext,
-        Action<UiActionDescriptor>? actionPressed)
+        Action<UiActionDescriptor, string?>? actionPressed)
     {
         UiActionDescriptor? action = null;
         if (!string.IsNullOrWhiteSpace(node.ActionId))
@@ -434,7 +459,7 @@ internal static class ServerDrivenPanelRenderer
         if (action is not null && actionPressed is not null)
         {
             button.SetMeta("UiActionId", action.ActionId);
-            button.Pressed += () => actionPressed(action);
+            button.Pressed += () => actionPressed(action, null);
         }
 
         return button;

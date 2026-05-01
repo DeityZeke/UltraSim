@@ -567,9 +567,16 @@ internal static class TestRunner
         Assert.True(firstPicker.Panel.Schema.Nodes.Any(node =>
             node.Kind == UiNodeKind.Repeater &&
             string.Equals(node.SlotId, UiStandardPanels.PagedListRowsSlotId, StringComparison.Ordinal)));
-        Assert.Equal(4, firstPicker.Panel.Schema.Actions.Count);
+        Assert.Equal(5, firstPicker.Panel.Schema.Actions.Count);
         Assert.True(firstPicker.Panel.Schema.Actions.Any(action => string.Equals(action.ActionId, UiStandardPanels.PagedListPreviousActionId, StringComparison.Ordinal)));
         Assert.True(firstPicker.Panel.Schema.Actions.Any(action => string.Equals(action.ActionId, UiStandardPanels.PagedListNextActionId, StringComparison.Ordinal)));
+        Assert.True(firstPicker.Panel.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, UiStandardPanels.PagedListRowSelectActionId, StringComparison.Ordinal) &&
+            action.ContextKind == UiActionContextKind.Row &&
+            action.Role == UiActionRole.Primary));
+        Assert.True(firstPicker.Panel.Schema.Nodes.Any(node =>
+            node.Kind == UiNodeKind.Repeater &&
+            string.Equals(node.ActionId, UiStandardPanels.PagedListRowSelectActionId, StringComparison.Ordinal)));
         Assert.Valid(firstPicker.Panel.ToColdOpen("panel/picker/characters").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
 
         UiModelUpdateDocument initialRows = firstPicker.CreateInitialRowsUpdate("panel/picker/characters", 1);
@@ -577,6 +584,21 @@ internal static class TestRunner
         Assert.Valid(initialRows.ValidateAgainst(firstPicker.Panel.Schema));
         Assert.Equal("Lira", initialRows.RowDeltas[0].Values[0].StringValue);
         Assert.Equal("Level 12 Ranger", initialRows.RowDeltas[0].Values[1].StringValue);
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(firstPicker.Panel.Schema, out UiSchemaCompatibilityContext? pickerContext));
+        Assert.NotNull(pickerContext);
+        var rowSelectRequest = new UiActionRequestDocument(
+            "panel/picker/characters",
+            firstPicker.Panel.Schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 2,
+            UiStandardPanels.PagedListRowSelectActionId,
+            UiActionContextKind.Row,
+            ContextId: "character/lira",
+            FieldValues: []);
+        Assert.Valid(rowSelectRequest.ValidateAgainst(pickerContext!));
+        Assert.InvalidContains((rowSelectRequest with { ContextId = null }).ValidateAgainst(pickerContext!), "row context");
+
         Assert.Throws<InvalidOperationException>(() => UiStandardPanels.PagedListPicker(
             "server/main",
             "Empty",
@@ -882,6 +904,17 @@ internal static class TestRunner
             ]
         };
         Assert.InvalidContains(actionOnText.Validate(rendererCapabilities: CreateRendererCapabilities()), "cannot declare");
+
+        UiSchemaDocument panelActionOnRepeater = valid with
+        {
+            Nodes =
+            [
+                .. valid.Nodes.Select(static node => node.Kind == UiNodeKind.Repeater
+                    ? node with { ActionId = "hud.open_character" }
+                    : node)
+            ]
+        };
+        Assert.InvalidContains(panelActionOnRepeater.Validate(rendererCapabilities: CreateRendererCapabilities()), "row context");
     }
 
     private static void UiModelDocument_ValidatesPayloadSlotsAgainstSchema()

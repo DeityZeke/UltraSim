@@ -181,9 +181,34 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
-    public UiPanelNodeBuilder Repeater(string slotId, string label)
+    public UiPanelNodeBuilder Repeater(
+        string slotId,
+        string label,
+        string? rowActionId = null,
+        string rowActionLabel = "Select",
+        UiActionRole rowActionRole = UiActionRole.Normal,
+        bool rowActionRequiresConfirm = false,
+        string? rowActionIconId = null,
+        UiActionAvailability rowActionAvailability = UiActionAvailability.Available,
+        string? rowActionAvailabilityReason = null,
+        string? rowActionMenuGroupKey = null)
     {
-        _childIds.Add(_owner.AddLeaf(UiNodeKind.Repeater, slotId, label, actionId: null));
+        if (!string.IsNullOrWhiteSpace(rowActionId))
+        {
+            _owner.DeclareAction(new UiActionDescriptor(
+                rowActionId,
+                rowActionLabel,
+                rowActionIconId,
+                rowActionRole,
+                UiActionContextKind.Row,
+                rowActionRequiresConfirm,
+                ChildMenuKey: null,
+                rowActionAvailability,
+                rowActionAvailabilityReason,
+                rowActionMenuGroupKey));
+        }
+
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Repeater, slotId, label, rowActionId));
         return this;
     }
 

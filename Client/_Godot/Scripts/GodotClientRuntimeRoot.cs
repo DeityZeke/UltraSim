@@ -15,6 +15,7 @@ public partial class GodotClientRuntimeRoot : Node
 {
 	private const string SmokeMessageBoxPanelId = "smoke/message_box/1";
 	private const string SmokeMessageBoxActionId = "smoke.message_box.ok";
+	private const string SmokeRepeaterRowActionId = "smoke.message_box.row.select";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
 	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
 	private const string SmokeTextInputSlot = "displayName";
@@ -24,6 +25,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeStepperSlot = "chatLines";
 	private const string SmokeSelectSlot = "chatChannel";
 	private const string SmokeRepeaterSlot = "characters";
+	private const string SmokeRepeaterRowKey = "character/lira";
 	private const string SmokeRepeaterRowText = "Lira";
 
 	[Export] public NodePath? CharacterWorldPath { get; set; }
@@ -83,6 +85,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawServerUiText;
 	private bool _smokeSawServerUiUnsupportedChild;
 	private bool _smokeSawServerUiAction;
+	private bool _smokeSawServerUiRowAction;
 	private ClientMovementState _lastAuthoritativeOwnerState;
 
 	public override void _Ready()
@@ -365,6 +368,16 @@ public partial class GodotClientRuntimeRoot : Node
 
 	private void HandleServerDrivenActionRouted(ClientUiActionRouteResult result)
 	{
+		if (result.ReadyToSend &&
+			result.Request is not null &&
+			string.Equals(result.Request.ActionId, SmokeRepeaterRowActionId, StringComparison.Ordinal) &&
+			string.Equals(result.Request.ContextId, SmokeRepeaterRowKey, StringComparison.Ordinal))
+		{
+			_smokeSawServerUiRowAction = true;
+			SetStatusText($"Server UI smoke row action routed: {result.Request.ContextId}");
+			return;
+		}
+
 		if (result.ReadyToSend &&
 			result.Request is not null &&
 			string.Equals(result.Request.ActionId, SmokeMessageBoxActionId, StringComparison.Ordinal))
@@ -686,7 +699,7 @@ public partial class GodotClientRuntimeRoot : Node
 			[
 				new UiRepeaterRowDelta(
 					SmokeRepeaterSlot,
-					"character/lira",
+					SmokeRepeaterRowKey,
 					UiRepeaterRowUpdateKind.Add,
 					[UiModelSlotValue.String("name", SmokeRepeaterRowText)])
 			]);
@@ -770,6 +783,18 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!UiManager.Menus.TryPressServerDrivenActionButton(applied.Panel.PanelInstanceId, SmokeRepeaterRowActionId, out string rowPressError))
+		{
+			GD.PushError($"Server UI smoke failed: {rowPressError}");
+			return;
+		}
+
+		if (!_smokeSawServerUiRowAction)
+		{
+			GD.PushError("Server UI smoke failed: repeater row action did not route with row context.");
+			return;
+		}
+
 		if (!UiManager.Menus.TryPressServerDrivenActionButton(applied.Panel.PanelInstanceId, SmokeMessageBoxActionId, out string pressError))
 		{
 			GD.PushError($"Server UI smoke failed: {pressError}");
@@ -826,7 +851,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(13, UiNodeKind.Slider, SmokeSliderSlot, "Music Volume", []),
 				new UiSchemaNodeDescriptor(14, UiNodeKind.Stepper, SmokeStepperSlot, "Chat Lines", []),
 				new UiSchemaNodeDescriptor(15, UiNodeKind.Select, SmokeSelectSlot, "Chat Channel", []),
-				new UiSchemaNodeDescriptor(16, UiNodeKind.Repeater, SmokeRepeaterSlot, "Characters", []),
+				new UiSchemaNodeDescriptor(16, UiNodeKind.Repeater, SmokeRepeaterSlot, "Characters", [], ActionId: SmokeRepeaterRowActionId),
 			],
 			PayloadSlots:
 			[
@@ -846,6 +871,14 @@ public partial class GodotClientRuntimeRoot : Node
 					IconId: null,
 					UiActionRole.Primary,
 					UiActionContextKind.Panel,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					SmokeRepeaterRowActionId,
+					"Select",
+					IconId: null,
+					UiActionRole.Primary,
+					UiActionContextKind.Row,
 					RequiresConfirm: false,
 					ChildMenuKey: null),
 			],
