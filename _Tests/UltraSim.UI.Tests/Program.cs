@@ -341,6 +341,9 @@ internal static class TestRunner
                     {
                         section.TextInput("displayName", "Display Name", "Test Pilot", maxStringLength: 64);
                         section.Toggle("rememberAccount", "Remember Account", true);
+                        section.NumberInput("uiScale", "UI Scale", 1.25, minNumber: 0.5, maxNumber: 3.0);
+                        section.Slider("musicVolume", "Music Volume", 0.75, minNumber: 0.0, maxNumber: 1.0);
+                        section.Stepper("chatLines", "Chat Lines", 8, minNumber: 1, maxNumber: 20);
                     });
                 });
             })
@@ -353,6 +356,9 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Section && string.Equals(node.Text, "Account", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.TextInput && string.Equals(node.SlotId, "displayName", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Toggle && string.Equals(node.SlotId, "rememberAccount", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.NumberInput && string.Equals(node.SlotId, "uiScale", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Slider && string.Equals(node.SlotId, "musicVolume", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Stepper && string.Equals(node.SlotId, "chatLines", StringComparison.Ordinal)));
 
         UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.String, nameSlot.ValueKind);
@@ -361,11 +367,35 @@ internal static class TestRunner
         UiPayloadSlotDescriptor toggleSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "rememberAccount", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.Boolean, toggleSlot.ValueKind);
 
+        UiPayloadSlotDescriptor scaleSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "uiScale", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.Number, scaleSlot.ValueKind);
+        Assert.Equal(0.5, scaleSlot.MinNumber);
+        Assert.Equal(3.0, scaleSlot.MaxNumber);
+
+        UiPayloadSlotDescriptor musicSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "musicVolume", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.Number, musicSlot.ValueKind);
+        Assert.Equal(0.0, musicSlot.MinNumber);
+        Assert.Equal(1.0, musicSlot.MaxNumber);
+
+        UiPayloadSlotDescriptor chatSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "chatLines", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.Integer, chatSlot.ValueKind);
+        Assert.Equal(1.0, chatSlot.MinNumber);
+        Assert.Equal(20.0, chatSlot.MaxNumber);
+
         UiModelSlotValue nameValue = built.Model.Values.First(value => string.Equals(value.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal("Test Pilot", nameValue.StringValue);
 
         UiModelSlotValue toggleValue = built.Model.Values.First(value => string.Equals(value.SlotId, "rememberAccount", StringComparison.Ordinal));
         Assert.True(toggleValue.BooleanValue);
+
+        UiModelSlotValue scaleValue = built.Model.Values.First(value => string.Equals(value.SlotId, "uiScale", StringComparison.Ordinal));
+        Assert.Equal(1.25, scaleValue.NumberValue);
+
+        UiModelSlotValue musicValue = built.Model.Values.First(value => string.Equals(value.SlotId, "musicVolume", StringComparison.Ordinal));
+        Assert.Equal(0.75, musicValue.NumberValue);
+
+        UiModelSlotValue chatValue = built.Model.Values.First(value => string.Equals(value.SlotId, "chatLines", StringComparison.Ordinal));
+        Assert.Equal(8, chatValue.IntegerValue);
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
         Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));

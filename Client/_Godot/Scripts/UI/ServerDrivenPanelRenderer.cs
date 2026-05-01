@@ -70,7 +70,10 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Separator => CreateSeparator(node),
             UiNodeKind.Spacer => CreateSpacer(node),
             UiNodeKind.TextInput => CreateTextInput(node, modelBySlot),
+            UiNodeKind.NumberInput => CreateNumberInput(node, compatibilityContext, modelBySlot),
             UiNodeKind.Toggle => CreateToggle(node, modelBySlot),
+            UiNodeKind.Slider => CreateSlider(node, compatibilityContext, modelBySlot),
+            UiNodeKind.Stepper => CreateStepper(node, compatibilityContext, modelBySlot),
             _ => CreateUnsupportedPlaceholder(node),
         };
 
@@ -253,6 +256,72 @@ internal static class ServerDrivenPanelRenderer
         return toggle;
     }
 
+    private static Control CreateNumberInput(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        double value = GetNumberModelValue(node, modelBySlot);
+        (double minValue, double maxValue) = GetNumberRange(node, compatibilityContext, value);
+        var input = new SpinBox
+        {
+            Name = MakeNodeName("NumberInput", node.NodeId),
+            MinValue = minValue,
+            MaxValue = maxValue,
+            Step = 0.1,
+            Value = value,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        SetSlotMeta(input, node);
+        return CreateLabeledSlotControl(node, input);
+    }
+
+    private static Control CreateSlider(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        double value = GetNumberModelValue(node, modelBySlot);
+        (double minValue, double maxValue) = GetNumberRange(node, compatibilityContext, value);
+        var slider = new HSlider
+        {
+            Name = MakeNodeName("Slider", node.NodeId),
+            MinValue = minValue,
+            MaxValue = maxValue,
+            Step = 0.01,
+            Value = value,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        };
+
+        SetSlotMeta(slider, node);
+        return CreateLabeledSlotControl(node, slider);
+    }
+
+    private static Control CreateStepper(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        double value = GetNumberModelValue(node, modelBySlot);
+        (double minValue, double maxValue) = GetNumberRange(node, compatibilityContext, value);
+        var stepper = new SpinBox
+        {
+            Name = MakeNodeName("Stepper", node.NodeId),
+            MinValue = minValue,
+            MaxValue = maxValue,
+            Step = 1.0,
+            Value = value,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        SetSlotMeta(stepper, node);
+        return CreateLabeledSlotControl(node, stepper);
+    }
+
     private static Button CreateButton(
         UiSchemaNodeDescriptor node,
         UiSchemaCompatibilityContext compatibilityContext,
@@ -315,6 +384,26 @@ internal static class ServerDrivenPanelRenderer
         };
     }
 
+    private static HBoxContainer CreateLabeledSlotControl(UiSchemaNodeDescriptor node, Control slotControl)
+    {
+        var row = new HBoxContainer
+        {
+            Name = MakeNodeName($"{node.Kind}Row", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        row.AddChild(new Label
+        {
+            Name = MakeNodeName($"{node.Kind}Label", node.NodeId),
+            Text = node.Text ?? node.SlotId ?? node.Kind.ToString(),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        });
+        row.AddChild(slotControl);
+        return row;
+    }
+
     private static void AddTitleLabelIfPresent(VBoxContainer parent, UiSchemaNodeDescriptor node, string prefix)
     {
         if (string.IsNullOrWhiteSpace(node.Text))
@@ -364,6 +453,47 @@ internal static class ServerDrivenPanelRenderer
             && value is not null
             && value.Kind == UiModelValueKind.Boolean
             && value.BooleanValue;
+    }
+
+    private static double GetNumberModelValue(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        if (string.IsNullOrWhiteSpace(node.SlotId)
+            || !modelBySlot.TryGetValue(node.SlotId, out UiModelSlotValue? value)
+            || value is null)
+        {
+            return 0.0;
+        }
+
+        return value.Kind switch
+        {
+            UiModelValueKind.Integer => value.IntegerValue,
+            UiModelValueKind.Number => value.NumberValue,
+            _ => 0.0,
+        };
+    }
+
+    private static (double MinValue, double MaxValue) GetNumberRange(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        double value)
+    {
+        double minValue = Math.Min(0.0, value);
+        double maxValue = Math.Max(100.0, value);
+        if (!string.IsNullOrWhiteSpace(node.SlotId)
+            && compatibilityContext.TryGetPayloadSlot(node.SlotId, out UiPayloadSlotDescriptor slot))
+        {
+            minValue = slot.MinNumber ?? minValue;
+            maxValue = slot.MaxNumber ?? maxValue;
+        }
+
+        if (maxValue < minValue)
+        {
+            maxValue = minValue;
+        }
+
+        return (minValue, maxValue);
     }
 
     private static string FormatModelValue(UiModelSlotValue value)

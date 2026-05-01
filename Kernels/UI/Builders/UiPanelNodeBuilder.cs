@@ -124,6 +124,48 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder NumberInput(
+        string slotId,
+        string label,
+        double value,
+        double? minNumber = null,
+        double? maxNumber = null,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.Number, required, MinNumber: minNumber, MaxNumber: maxNumber));
+        _owner.SetModelValue(UiModelSlotValue.Number(slotId, value));
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.NumberInput, slotId, label, actionId: null));
+        return this;
+    }
+
+    public UiPanelNodeBuilder Slider(
+        string slotId,
+        string label,
+        double value,
+        double? minNumber = null,
+        double? maxNumber = null,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.Number, required, MinNumber: minNumber, MaxNumber: maxNumber));
+        _owner.SetModelValue(UiModelSlotValue.Number(slotId, value));
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Slider, slotId, label, actionId: null));
+        return this;
+    }
+
+    public UiPanelNodeBuilder Stepper(
+        string slotId,
+        string label,
+        long value,
+        double? minNumber = null,
+        double? maxNumber = null,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.Integer, required, MinNumber: minNumber, MaxNumber: maxNumber));
+        _owner.SetModelValue(UiModelSlotValue.Integer(slotId, value));
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Stepper, slotId, label, actionId: null));
+        return this;
+    }
+
     public UiPanelNodeBuilder Button(
         string actionId,
         string label,
