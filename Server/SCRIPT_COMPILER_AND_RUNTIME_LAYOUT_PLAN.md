@@ -712,6 +712,16 @@ Keep the first proof small.
    - compile succeeds
    - startup logs script compile phase
 
+The first runtime binding should prove that registrations are not just counted at startup:
+
+- script commands are registered into the live `ServerCommandRegistry` used by chat/console command dispatch
+- script UI panel providers are openable through the existing `ServerUiService`
+- the initial script-panel open command may be a small debug/operator command such as `/panel <provider-key>`
+- opening a script panel must still use the normal server-driven UI packet path and normal per-connection UI scope
+- provider build failures should reply with a structured error and must not crash the session host
+
+This binding is still deliberately narrow. It does not expose inventory, accounts, persistence, or direct ECS world mutation to scripts.
+
 ## Security Boundary
 
 Server scripts are trusted by the server operator and execute on the server only.

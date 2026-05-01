@@ -1,3 +1,5 @@
+using UltraSim.Server.Scripting;
+
 namespace UltraSim.Server.Network;
 
 public sealed record ServerMovementWorldApplicationOptions(
@@ -8,7 +10,8 @@ public sealed record ServerMovementWorldApplicationOptions(
     bool EnableAsyncFlush = true,
     float MovementSpeed = 4.0f,
     double SessionAuthTimeoutSeconds = 5.0,
-    double SessionKeepAliveTimeoutSeconds = 10.0)
+    double SessionKeepAliveTimeoutSeconds = 10.0,
+    DefaultUltraSimScriptContext? ScriptContext = null)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");
 }

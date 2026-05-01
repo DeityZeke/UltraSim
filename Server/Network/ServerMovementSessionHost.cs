@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Network;
 
@@ -19,6 +20,7 @@ public sealed class ServerMovementSessionHost
     private readonly ServerNetworkSessionRuntime _sessionRuntime;
     private readonly ServerChatService _chat;
     private readonly ServerUiService _ui;
+    private readonly ServerScriptRuntimeBinding? _scriptBinding;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly bool _enableGlobalMovementObserverState;
@@ -40,6 +42,7 @@ public sealed class ServerMovementSessionHost
         SessionAdmissionPolicy sessionPolicy = default,
         ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
         ServerNetworkSessionRuntimeOptions runtimeOptions = default,
+        DefaultUltraSimScriptContext? scriptContext = null,
         bool enableGlobalMovementObserverState = false,
         SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
@@ -71,6 +74,8 @@ public sealed class ServerMovementSessionHost
         _chat = new ServerChatService(orderedEvents);
         _ui = new ServerUiService(orderedEvents);
         ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
+        if (scriptContext is not null)
+            _scriptBinding = new ServerScriptRuntimeBinding(scriptContext, _chat.Commands, _ui);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _enableGlobalMovementObserverState = enableGlobalMovementObserverState;
@@ -89,6 +94,7 @@ public sealed class ServerMovementSessionHost
     public ServerNetworkSessionRuntime SessionRuntime => _sessionRuntime;
     public ServerChatService Chat => _chat;
     public ServerUiService Ui => _ui;
+    public ServerScriptRuntimeBinding? ScriptBinding => _scriptBinding;
     public ReliableEventAckTracker ReliableEventAcks => _sessionRuntime.ReliableEventAcks;
     public StateBaselineAckTracker StateBaselineAcks => _sessionRuntime.BaselineAcks;
     public ServerPumpProfileSnapshot LastPumpProfile { get; private set; }

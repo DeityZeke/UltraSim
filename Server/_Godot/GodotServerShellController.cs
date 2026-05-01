@@ -98,14 +98,15 @@ public sealed class GodotServerShellController : IDisposable
         _runtime.Dispose();
     }
 
-    private static IServerApplication CreateDefaultApplication(GodotServerShellOptions options) =>
+    private IServerApplication CreateDefaultApplication(GodotServerShellOptions options) =>
         options.EnableMovementWorld
             ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
                 options.ProfileName,
                 Port: options.NetworkPort,
                 SaveOnStop: options.SaveOnStop,
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
-                SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds))
+                SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
+                ScriptContext: ScriptContext))
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,
                 SaveOnStop: options.SaveOnStop));

@@ -87,6 +87,7 @@ public static class ServerMovementWorldApplicationFactory
                 DespawnSession,
                 handshakePolicy: handshakePolicy,
                 sessionPolicy: sessionPolicy,
+                scriptContext: _options.ScriptContext,
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }

@@ -8,6 +8,7 @@ using UltraSim.Server.Godot;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
 using UltraSim.Server.Network;
+using UltraSim.Server.Scripting;
 using UltraSim.Network;
 using UltraSim.UI;
 
@@ -82,6 +83,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor), ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor);
         Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
         Run(nameof(ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession), ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession);
+        Run(nameof(ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders), ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
@@ -2771,6 +2773,127 @@ internal static class TestRunner
         Assert.Equal(action.ActionId, receivedAction!.ActionId);
         Assert.Equal(action.ClientSequence, receivedAction.ClientSequence);
         Assert.Equal(1L, serverHost.Ui.ReceivedActions);
+    }
+
+    private static void ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders()
+    {
+        var connectionId = new ConnectionId(1);
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var runtimeRoot = new UltraSimRuntimeRootLayout(
+            Path.Combine(Path.GetTempPath(), "ultrasim-script-binding-test"),
+            "scripts",
+            "data",
+            "cache",
+            "cache/scripts",
+            "saves",
+            "backups",
+            "docs");
+        var scriptContext = new DefaultUltraSimScriptContext(runtimeRoot);
+        Assert.True(scriptContext.Commands.Register(
+            "hello",
+            command => command.Reply("hello " + command.RawArguments),
+            "Script greeting."));
+        Assert.True(scriptContext.UiPanels.RegisterPanelProvider(
+            "hello.panel",
+            () => UiPanelBuilder
+                .Create("script/runtime", "script.hello", 1)
+                .Panel(panel =>
+                {
+                    panel.Column(column =>
+                    {
+                        column.DynamicText("message", "Message", "Hello from a script panel.");
+                        column.Button("script.ok", "OK", UiActionRole.Primary);
+                    });
+                })
+                .Build()));
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy,
+            scriptContext: scriptContext);
+        ChatMessageEventPacket? chatMessage = null;
+        UiPanelOpenDocument? openedPanel = null;
+        var chatEvents = new ClientChatEventBridge(packet => chatMessage = packet);
+        var uiEvents = new ClientUiEventBridge(document => openedPanel = document);
+        var observerState = new ClientObserverStateBridge(connectionId);
+        var clientHost = new ClientMovementSessionHost(
+            pair.Client,
+            connectionId,
+            new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+            observerState: observerState,
+            chatEvents: chatEvents,
+            uiEvents: uiEvents,
+            maxPollBatch: 8);
+
+        serverHost.Start();
+        clientHost.Start();
+        clientHost.BeginHandshake(100);
+
+        for (int step = 0; step < 10; step++)
+        {
+            serverHost.Pump(101 + step * 2, 0.016f, (uint)(step + 1));
+            clientHost.Pump(102 + step * 2);
+        }
+
+        Assert.True(clientHost.IsReady);
+        Assert.True(serverHost.TryGetLastStateBaselineAck(connectionId, out _));
+        Assert.NotNull(serverHost.ScriptBinding);
+
+        Assert.True(clientHost.TrySendChat("/hello runtime"));
+        serverHost.Pump(200, 0.016f, 20);
+        clientHost.Pump(201);
+
+        Assert.True(chatMessage.HasValue);
+        ChatMessageEventPacket firstReply = chatMessage.GetValueOrDefault();
+        Assert.Equal("hello runtime", firstReply.Text);
+        Assert.Equal(1L, serverHost.Chat.CommandDispatches);
+
+        chatMessage = null;
+        Assert.True(clientHost.TrySendChat("/panel hello.panel"));
+        serverHost.Pump(220, 0.016f, 21);
+        clientHost.Pump(221);
+
+        UiPanelOpenDocument openDocument = Assert.NotNull(openedPanel);
+        Assert.Equal("script.hello", openDocument.SchemaIdentity.PanelType);
+        Assert.True(openDocument.PanelInstanceId.StartsWith("script.panel/hello.panel/1/", StringComparison.Ordinal));
+        Assert.True(chatMessage.HasValue);
+        ChatMessageEventPacket openReply = chatMessage.GetValueOrDefault();
+        Assert.Equal("Opened script panel 'hello.panel'.", openReply.Text);
+        Assert.Equal(2L, serverHost.Chat.CommandDispatches);
+        Assert.Equal(1L, serverHost.Ui.PublishedPanelOpens);
     }
 
     private static void ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient()

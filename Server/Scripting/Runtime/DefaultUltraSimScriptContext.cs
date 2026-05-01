@@ -78,6 +78,15 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
         return true;
     }
 
+    public bool TryGetPanelProvider(string key, out UltraSimScriptUiPanelProviderDescriptor provider)
+    {
+        provider = default!;
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        return _panelProviders.TryGetValue(key.Trim(), out provider!);
+    }
+
     public void RegisterCommandsInto(ServerCommandRegistry registry)
     {
         ArgumentNullException.ThrowIfNull(registry);
