@@ -325,6 +325,18 @@ Model:
 
 There is no catalog in this shape. The server opens the panel with schema identity and model payload only. If points are spent or the page changes, the server sends a model delta for the affected stat fields, button enabled states, and visible skill page. Catalog identity is optional, not a requirement for every panel.
 
+Human NPCs should be treated as the same base actor shape as player characters for UI/schema purposes. A player is the specifically controlled human mobile, not a fundamentally different stat/skill/progression model. Character sheets, stat distribution panels, need/status panels, health/experience bars, inventory/equipment views, animation tags, and admin inspectors should usually target a generic human mobile/entity binding and then apply permission/control policy for whether the viewer may edit, command, inspect, or only observe. This keeps followers, companions, vendors, citizens, guards, and player characters on one shared schema vocabulary instead of splitting "player UI" and "NPC UI" into parallel systems.
+
+Entity-backed scripted content should also stay aligned with ECS prefabs. A script-defined `iron_dagger` should usually be a concrete prefab/default-value registration for a composed archetype chain such as `BaseItem > BaseWeapon > BaseMeleeWeapon > BaseBladedWeapon`, not a separate script-only object model. That chain is additive component composition and value overriding, not OOP inheritance. UI helpers and admin panels should be able to inspect and render the resulting prefab/archetype metadata generically: item definitions, mobile definitions, equipment slots, stats, needs, abilities, presentation tags, and rule hooks should be exposed through shared descriptors where possible.
+
+Timed effects and other temporary states should follow the same descriptor model. A broad `WeaponState` component can hold common effect fields when systems inspect a weapon only during use. If a system needs to query all affected entities, the effect should have a distinct component/archetype boundary such as `TimedEffectState`, `PoisonState`, `BurningState`, or `AlignmentState`. UI/status panels should consume those component descriptors and state bindings generically, so an effect timer bar, poisoned-item tooltip, or admin "all timed effects" table does not require a one-off protocol.
+
+Future live content builders should also use this same metadata path. An admin item builder should be able to select presentation assets, tags, components, attributes, recipe data, and default values, then save a versioned data prefab that registers into the normal server prefab catalog. That is different from generating C# scripts: the UI edits data-authored prefab descriptors backed by existing registered component types and archetype descriptors. A builder may compose a generated archetype signature from existing components when no current shape fits, but new component types or executable behavior still require scripts/plugins/core code.
+
+Admin UI should show definition origin and editability. A script-authored prefab may be inspectable but require script recompilation or restart to change; a data-authored prefab can be live-added, live-disabled, revised, rolled back, or erased after server-side validation. Commands and gameplay systems should resolve both through the same prefab registry, so `/add my_new_item` does not care whether the definition came from a C# script, a built-in catalog, a content pack, or an in-game builder save.
+
+The builder UI should reflect server-side authoring rules: duplicate prefab keys are hard errors, only registered client/server assets should be selectable, assets can declare compatible base archetype categories, and edit mode should be protected by a server-held edit lease so two staff users do not overwrite each other. Save should report validation, dangling-reference, collision, and stale-revision diagnostics directly in the panel.
+
 ### Composite Helpers
 
 Composite helpers are authoring sugar only. They should not become new protocol primitives unless they need unique renderer behavior.
@@ -1271,15 +1283,19 @@ The schema work needed for that:
 
 After the minimal renderer, live UI open/action packet path, and first builder-authored message-box smoke are working, pause before login/character/menu expansion to plan, implement, and test the server-side C# script compiler/runtime setup.
 
-This compiler belongs to server startup/plugin infrastructure, not the client patch stream and not the UI kernel. The goal is a RunUO-style exported server app layout where server operators can put gameplay code under folders such as:
+Canonical plan: [Server Script Compiler And Runtime Layout Plan](../Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md).
 
-- `scripts/engines`
-- `scripts/items`
-- `scripts/mobs`
-- `scripts/crafting`
-- `scripts/customs`
+This compiler belongs to server startup/plugin infrastructure, not the client patch stream and not the UI kernel. The goal is a RunUO-style exported server app layout where server operators can put gameplay code under `scripts/` folders such as:
 
-The compiler should support a cache keyed by script source hashes, referenced assemblies, compiler options, and API/protocol versions so clean restarts can skip unnecessary recompilation. Startup should report a clear phase like `Scripts: Compiling C# scripts... - done (0 warnings, 0 errors)` and should fail with actionable diagnostics when scripts do not compile.
+- `scripts/Engines`
+- `scripts/Items`
+- `scripts/Mobiles`
+- `scripts/UI`
+- `scripts/Commands`
+- `scripts/Regions`
+- `scripts/Customs`
+
+Generated compiler output should stay outside editable script source by default, under `cache/scripts/`. The compiler should support a cache keyed by script source hashes, referenced assemblies, compiler options, and API/protocol versions so clean restarts can skip unnecessary recompilation. Startup should report a clear phase like `Scripts: Compiling C# scripts... - done (0 warnings, 0 errors)` and should fail with actionable diagnostics when scripts do not compile.
 
 First proof should stay small:
 
@@ -1292,7 +1308,7 @@ The important boundary is:
 
 - kernels stay engine-agnostic (`UI`, `Inventory`, `Network`, `ECS`)
 - server glue exposes stable APIs to scripts
-- scripts/customs implement gameplay/content behavior on top of those APIs
+- `scripts/Customs` implements gameplay/content behavior on top of those APIs
 - client content patches remain data/assets only and must not carry executable scripts
 
 ### UI-4: Login And Character Flow

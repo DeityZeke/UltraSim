@@ -399,15 +399,22 @@ The old server startup flow had the intended shape:
 
 The client should expose stable protocol/UI/content/presentation hooks that server scripts can target. It should not accept executable scripts from streamed server content.
 
+Future live content builders, such as an in-game item/prefab designer, should save validated data-authored prefab descriptors through server registries rather than generating C# or using script cache output. The client UI can provide the authoring surface, but scripts/plugins/core code still define new executable behavior and new component types.
+
 Implementation gate: once the minimal server-driven UI path is live end-to-end (builder-authored server panel opens on the Godot client and button actions route back to the server), pause before expanding into login, character select/create, inventory, crafting, vendors, and admin menus. At that point, plan, implement, and test the server-side C# script compiler/runtime setup.
+
+Canonical plan: [Server Script Compiler And Runtime Layout Plan](../Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md).
 
 Target exported server/app shape:
 
-- `scripts/engines` for reusable server-side systems such as inventory rules, crafting, vendors, mobs, UI panel providers, and admin pages
-- `scripts/items`
-- `scripts/mobs`
-- `scripts/crafting`
-- `scripts/customs`
+- `scripts/Engines` for reusable server-side systems such as inventory rules, crafting, vendors, UI panel providers, and admin pages
+- `scripts/Items`
+- `scripts/Mobiles`
+- `scripts/UI`
+- `scripts/Commands`
+- `scripts/Regions`
+- `scripts/Customs`
+- generated compiler artifacts under `cache/scripts`, not editable script source
 - compile cache keyed by source hashes, referenced assemblies, compiler options, and API/protocol versions
 - startup diagnostics that clearly report compile warnings/errors and cache hits/misses
 

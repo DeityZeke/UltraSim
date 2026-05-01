@@ -270,6 +270,8 @@ Do not build a separate offline gameplay runtime unless explicitly approved. Tha
 
 The server is expected to have a RunUO-style script compiler/registration phase.
 
+Canonical implementation plan: [Server Script Compiler And Runtime Layout Plan](../Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md).
+
 Old server startup logged this shape:
 
 - `Core: Initializing... - done`
@@ -279,6 +281,8 @@ Old server startup logged this shape:
 - discovery/listening startup
 
 That is a server-side startup/plugin concern. The client should expose stable content/UI/presentation hooks that server scripts can target through protocol and schema data, but client streamed patches must not become a covert code delivery system.
+
+Client content patches may deliver assets, catalogs, schemas, manifests, and data tables. They may not deliver executable C# scripts, assemblies, Godot scripts, or native libraries. The client receives serialized data/contracts produced by server scripts, never script code.
 
 ## Testing Rules
 

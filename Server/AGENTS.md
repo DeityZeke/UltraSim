@@ -44,6 +44,10 @@ Use this split unless there is a strong reason not to:
   - thin operator shell with UI binding only
 - `Server/Discovery`
   - discovery/status publishing adapters
+- `Server/Scripting` or `Server/ScriptHost`
+  - RunUO-style C# script compiler, cache manifests, diagnostics, assembly load, and script registration
+- `Server/RuntimeTemplate`
+  - source-controlled template for exported server `scripts`, `data`, `docs`, and `web` folders
 
 ## What Belongs In Core
 
@@ -56,6 +60,29 @@ Use this split unless there is a strong reason not to:
 - status/metrics snapshots
 - command surface
 - event stream for observability
+
+## Script Compiler Boundary
+
+Use [SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md](SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md) as the canonical plan.
+
+Important rules:
+
+- scripts are server-side only and trusted by the server operator
+- client content patches must not deliver executable code
+- editable script source belongs under exported `scripts/`
+- generated compiler output belongs under `cache/scripts/` by default
+- `scripts/Mobiles` is the preferred actor folder name, not `scripts/Mobs`
+- human NPCs and player characters should share the same base human mobile shape; a player is a controlled human, not a separate runtime species
+- entity-backed script content should register ECS prefab definitions on shared archetype shapes rather than creating a parallel script-only entity model
+- archetype families such as `BaseItem > BaseWeapon > BaseMeleeWeapon > iron_dagger` are additive component-set composition and value overrides, not OOP entity inheritance
+- wide components are fine for common shape data; add sub-archetype/effect components when systems need efficient query boundaries such as all timed, poisoned, burning, or aligned entities
+- script-facing archetype/prefab helper classes are authoring facades over `ArchetypeSignature`, `PrefabDefinition`, and `PrefabCatalog`; do not move bespoke runtime entity inheritance into the simulation
+- future live item/mobile/content builders should save versioned data-authored prefab descriptors in durable runtime data folders, not generated C# scripts and not disposable cache output
+- data-authored prefabs must register into the same ECS prefab/runtime registries as script-authored prefabs; they may compose existing registered components/archetype descriptors, but new CLR component types or executable behavior require scripts/plugins/core code
+- live-authored prefab saves must reject duplicate keys, use edit leases for concurrent staff edits, validate against registered assets/components/archetypes, and atomically swap registry snapshots
+- dependent systems should collect rows from active registries and surface missing references through diagnostics; do not broadcast bespoke prefab-delete messages into every feature as the primary consistency mechanism
+- most customization should compile as scripts; defer true custom-kernel/plugin loading until a real use case requires it
+- headless, console, and Godot wrappers must use the same runtime-root resolver and script host
 
 ## What Belongs In Server/Network
 
