@@ -12,7 +12,8 @@ public sealed record HeadlessServerShellOptions(
     bool EnableMovementWorld = true,
     int NetworkPort = 42042,
     double SessionAuthTimeoutSeconds = 5.0,
-    double SessionKeepAliveTimeoutSeconds = 10.0)
+    double SessionKeepAliveTimeoutSeconds = 10.0,
+    string? RuntimeRootPath = null)
 {
     public static HeadlessServerShellOptions Default { get; } =
         new("headless", IdleDelay: TimeSpan.FromMilliseconds(1));

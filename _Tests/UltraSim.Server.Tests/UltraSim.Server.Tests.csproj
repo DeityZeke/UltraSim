@@ -55,9 +55,13 @@
     </Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\..\Server\Scripting\UltraSim.Server.Scripting.csproj" />
+  </ItemGroup>
+
   <Target Name="BuildServerDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj;..\..\Server\_Godot\UltraSim.Server.Godot.csproj"
+      Projects="..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\Scripting\UltraSim.Server.Scripting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj;..\..\Server\_Godot\UltraSim.Server.Godot.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>

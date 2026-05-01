@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UltraSim.ECS.BenchmarkCore\UltraSim.ECS.BenchmarkCore.csproj" />
+    <ProjectReference Include="..\..\Server\Scripting\UltraSim.Server.Scripting.csproj" />
+  </ItemGroup>
+
+</Project>

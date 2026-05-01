@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Godot;
+using UltraSim.Server.Hosting;
 
 namespace UltraSim.Server.Godot;
 
@@ -44,6 +45,10 @@ public partial class ServerShellRoot : Control
 		GodotServerShellOptions options = ReadShellOptions(out bool startOnReady);
 		_controller = new GodotServerShellController(options);
 		_controller.EventRaised += HandleServerEvent;
+		foreach (ServerApplicationEvent startupEvent in _controller.StartupEvents)
+		{
+			HandleServerEvent(startupEvent);
+		}
 
 		AppendOutput("INFO", "Godot operator shell ready.");
 		AppendOutput("INFO", "Use the right-side controls or the command field below the output pane.");
@@ -86,6 +91,7 @@ public partial class ServerShellRoot : Control
 		double sessionAuthTimeoutSeconds = GodotServerShellOptions.Default.SessionAuthTimeoutSeconds;
 		double sessionKeepAliveTimeoutSeconds = GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
 		bool enableMovementWorld = GodotServerShellOptions.Default.EnableMovementWorld;
+		string? runtimeRootPath = GodotServerShellOptions.Default.RuntimeRootPath;
 		startOnReady = false;
 
 		foreach (string arg in OS.GetCmdlineUserArgs())
@@ -104,6 +110,14 @@ public partial class ServerShellRoot : Control
 				if (!string.IsNullOrWhiteSpace(value))
 				{
 					profileName = value;
+				}
+			}
+			else if (arg.StartsWith("--us-server-runtime-root=", StringComparison.OrdinalIgnoreCase))
+			{
+				string value = arg["--us-server-runtime-root=".Length..].Trim();
+				if (!string.IsNullOrWhiteSpace(value))
+				{
+					runtimeRootPath = value;
 				}
 			}
 			else if (arg.StartsWith("--us-server-port=", StringComparison.OrdinalIgnoreCase))
@@ -150,7 +164,8 @@ public partial class ServerShellRoot : Control
 			EnableMovementWorld: enableMovementWorld,
 			NetworkPort: networkPort,
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
-			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds);
+			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+			RuntimeRootPath: runtimeRootPath);
 	}
 
 	private void ScheduleSmokeQuitIfRequested()
@@ -707,6 +722,18 @@ public partial class ServerShellRoot : Control
 
 	private void HandleServerEvent(ServerApplicationEvent evt)
 	{
+		IReadOnlyList<ServerHostLogLine> lines = ServerHostLogFormatter.Format(evt);
+		if (lines.Count > 0)
+		{
+			foreach (ServerHostLogLine line in lines)
+			{
+				AppendOutput(line.Category, line.Message, evt.TimestampUtc);
+			}
+
+			RefreshStatus();
+			return;
+		}
+
 		switch (evt.Kind)
 		{
 			case ServerApplicationEventKind.StateChanged:

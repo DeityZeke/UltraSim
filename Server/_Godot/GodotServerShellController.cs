@@ -1,17 +1,31 @@
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Network;
+using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Godot;
 
 public sealed class GodotServerShellController : IDisposable
 {
     private readonly HostedServerRuntime _runtime;
+    private readonly List<ServerApplicationEvent> _startupEvents = new();
 
     public GodotServerShellController(
         GodotServerShellOptions options,
         Func<GodotServerShellOptions, IServerApplication>? applicationFactory = null)
     {
         Options = options ?? throw new ArgumentNullException(nameof(options));
+        UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+        UltraSimRuntimeTemplate.Ensure(runtimeRoot);
+        AddStartupLog("Core: Created");
+        Version runtimeVersion = Environment.Version;
+        AddStartupLog($"Core: Running on .NET {runtimeVersion.Major}.{runtimeVersion.Minor}.{runtimeVersion.Build}");
+        int processors = Environment.ProcessorCount;
+        AddStartupLog($"Core: Optimizing for {processors} {(processors == 1 ? "processor" : "processors")}");
+        UltraSimScriptStartupResult scriptStartup = new UltraSimScriptStartupService().Run(new UltraSimScriptStartupOptions(runtimeRoot));
+        ScriptContext = scriptStartup.Context;
+        _startupEvents.AddRange(UltraSimScriptStartupLog.CreateEvents(scriptStartup));
+        if (!scriptStartup.Succeeded)
+            throw new UltraSimScriptStartupException(scriptStartup);
 
         Func<GodotServerShellOptions, IServerApplication> factory = applicationFactory ?? CreateDefaultApplication;
         IServerApplication application = factory(options);
@@ -25,6 +39,8 @@ public sealed class GodotServerShellController : IDisposable
     }
 
     public GodotServerShellOptions Options { get; }
+    public DefaultUltraSimScriptContext? ScriptContext { get; }
+    public IReadOnlyList<ServerApplicationEvent> StartupEvents => _startupEvents;
     public ServerApplicationState State => _runtime.State;
     public bool IsRunning => _runtime.IsRunning;
 
@@ -100,6 +116,14 @@ public sealed class GodotServerShellController : IDisposable
     private void HandleEvent(ServerApplicationEvent evt)
     {
         EventRaised?.Invoke(evt);
+    }
+
+    private void AddStartupLog(string message)
+    {
+        _startupEvents.Add(new ServerApplicationEvent(
+            ServerApplicationEventKind.Log,
+            DateTimeOffset.UtcNow,
+            message));
     }
 
     private sealed class ForwardingSink : IServerHostEventSink

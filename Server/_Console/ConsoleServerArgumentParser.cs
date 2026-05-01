@@ -20,6 +20,7 @@ public static class ConsoleServerArgumentParser
         int networkPort = ConsoleServerShellOptions.Default.NetworkPort;
         double sessionAuthTimeoutSeconds = ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+        string? runtimeRootPath = ConsoleServerShellOptions.Default.RuntimeRootPath;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -73,6 +74,12 @@ public static class ConsoleServerArgumentParser
             if (string.Equals(key, "--profile", StringComparison.OrdinalIgnoreCase))
             {
                 profileName = value.Trim();
+                continue;
+            }
+
+            if (string.Equals(key, "--runtime-root", StringComparison.OrdinalIgnoreCase))
+            {
+                runtimeRootPath = value.Trim();
                 continue;
             }
 
@@ -195,7 +202,8 @@ public static class ConsoleServerArgumentParser
             EnableMovementWorld: enableMovementWorld,
             NetworkPort: networkPort,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
-            SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds);
+            SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+            RuntimeRootPath: runtimeRootPath);
         error = null;
         showHelp = false;
         return true;
@@ -205,6 +213,7 @@ public static class ConsoleServerArgumentParser
         """
         UltraSim.Server.Console options:
           --profile=<name>
+          --runtime-root=<path>
           --tick-ms=<n>
           --max-catchup=<n>
           --port=<0-65535>

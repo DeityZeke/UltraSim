@@ -780,9 +780,11 @@ internal static class TestRunner
 
     private static void HeadlessServerArgumentParser_ParsesExpectedOptions()
     {
+        string runtimeRoot = Path.Combine(Path.GetTempPath(), "ultrasim-parser-root");
         string[] args =
         {
             "--profile=test-headless",
+            $"--runtime-root={runtimeRoot}",
             "--tick-ms=16",
             "--max-catchup=4",
             "--port=0",
@@ -802,6 +804,7 @@ internal static class TestRunner
         Assert.Equal<string?>(null, error);
         Assert.False(showHelp);
         Assert.Equal("test-headless", options.ProfileName);
+        Assert.Equal(runtimeRoot, options.RuntimeRootPath);
         Assert.Equal(16, options.TickMilliseconds);
         Assert.Equal(4, options.MaxCatchUpTicksPerPump);
         Assert.False(options.AutoStart);
@@ -817,6 +820,7 @@ internal static class TestRunner
 
     private static void HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly()
     {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var options = new HeadlessServerShellOptions(
@@ -824,27 +828,36 @@ internal static class TestRunner
             TickMilliseconds: 10,
             RunFor: TimeSpan.FromMilliseconds(30),
             IdleDelay: TimeSpan.Zero,
-            NetworkPort: 0);
+            NetworkPort: 0,
+            RuntimeRootPath: runtimeRoot.Path);
         var shell = new HeadlessServerShell(options, stdout, stderr);
 
         int exitCode = shell.RunAsync().GetAwaiter().GetResult();
         string output = stdout.ToString();
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("state changed: Running", output);
-        Assert.Contains("state changed: Stopped", output);
+        Assert.Contains("Core: Created", output);
+        Assert.Contains("Scripts: Compiling C# scripts... - done", output);
+        Assert.Contains("Scripts: Configuring... - done", output);
+        Assert.Contains("Scripts: Initializing... - done", output);
+        Assert.Contains("Core: Initializing... - done", output);
+        Assert.Contains("Core: Starting... - done", output);
+        Assert.Contains("World: Loading... - done", output);
+        Assert.Contains("Core: Stopping... - done", output);
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
     private static void HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults()
     {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
         var stdout = new StringWriter();
         var stderr = new StringWriter();
         var options = new HeadlessServerShellOptions(
             "faulted-headless",
             TickMilliseconds: 10,
             RunFor: TimeSpan.FromMilliseconds(30),
-            IdleDelay: TimeSpan.Zero);
+            IdleDelay: TimeSpan.Zero,
+            RuntimeRootPath: runtimeRoot.Path);
         var shell = new HeadlessServerShell(
             options,
             stdout,
@@ -864,9 +877,11 @@ internal static class TestRunner
 
     private static void ConsoleServerArgumentParser_ParsesExpectedOptions()
     {
+        string runtimeRoot = Path.Combine(Path.GetTempPath(), "ultrasim-console-parser-root");
         string[] args =
         {
             "--profile=test-console",
+            $"--runtime-root={runtimeRoot}",
             "--tick-ms=20",
             "--max-catchup=5",
             "--port=0",
@@ -886,6 +901,7 @@ internal static class TestRunner
         Assert.Equal<string?>(null, error);
         Assert.False(showHelp);
         Assert.Equal("test-console", options.ProfileName);
+        Assert.Equal(runtimeRoot, options.RuntimeRootPath);
         Assert.Equal(20, options.TickMilliseconds);
         Assert.Equal(5, options.MaxCatchUpTicksPerPump);
         Assert.False(options.AutoStart);
@@ -912,6 +928,7 @@ internal static class TestRunner
 
     private static void ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly()
     {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
         var stdin = new StringReader("status\nsave\nshutdown\n");
         var stdout = new StringWriter();
         var stderr = new StringWriter();
@@ -919,26 +936,32 @@ internal static class TestRunner
             "test-console",
             TickMilliseconds: 10,
             IdleDelay: TimeSpan.Zero,
-            NetworkPort: 0);
+            NetworkPort: 0,
+            RuntimeRootPath: runtimeRoot.Path);
         var shell = new ConsoleServerShell(options, stdin, stdout, stderr);
 
         int exitCode = shell.RunAsync().GetAwaiter().GetResult();
         string output = stdout.ToString();
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("StateChanged: state changed: Running", output);
+        Assert.Contains("Core: Created", output);
+        Assert.Contains("Scripts: Compiling C# scripts... - done", output);
+        Assert.Contains("Core: Initializing... - done", output);
+        Assert.Contains("Core: Starting... - done", output);
+        Assert.Contains("World: Loading... - done", output);
         Assert.Contains("> Status: Accepted", output);
         Assert.Contains("> Save: Accepted", output);
         Assert.Contains("> Shutdown: Accepted", output);
-        Assert.Contains("StateChanged: state changed: Stopped", output);
+        Assert.Contains("Core: Stopping... - done", output);
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
     private static void GodotServerShellController_ExposesSharedControlSurface()
     {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
         var observed = new List<ServerApplicationEvent>();
         using var controller = new GodotServerShellController(
-            new GodotServerShellOptions("test-godot", TickMilliseconds: 10),
+            new GodotServerShellOptions("test-godot", TickMilliseconds: 10, RuntimeRootPath: runtimeRoot.Path),
             _ => new ServerApplication(
                 new ServerApplicationOptions("test-godot"),
                 new ServerApplicationHooks
@@ -3234,6 +3257,34 @@ internal sealed class RecordingHostSink : IServerHostEventSink
     public void OnEvent(ServerApplicationEvent evt)
     {
         Events.Add(evt);
+    }
+}
+
+internal sealed class ServerTestRuntimeRoot : IDisposable
+{
+    private ServerTestRuntimeRoot(string path)
+    {
+        Path = path;
+    }
+
+    public string Path { get; }
+
+    public static ServerTestRuntimeRoot Create()
+    {
+        string path = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "ultrasim-server-tests", Guid.NewGuid().ToString("N"));
+        return new ServerTestRuntimeRoot(path);
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            if (Directory.Exists(Path))
+                Directory.Delete(Path, recursive: true);
+        }
+        catch
+        {
+        }
     }
 }
 

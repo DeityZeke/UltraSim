@@ -20,6 +20,7 @@ public static class HeadlessServerArgumentParser
         int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
         double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+        string? runtimeRootPath = HeadlessServerShellOptions.Default.RuntimeRootPath;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -73,6 +74,12 @@ public static class HeadlessServerArgumentParser
             if (string.Equals(key, "--profile", StringComparison.OrdinalIgnoreCase))
             {
                 profileName = value.Trim();
+                continue;
+            }
+
+            if (string.Equals(key, "--runtime-root", StringComparison.OrdinalIgnoreCase))
+            {
+                runtimeRootPath = value.Trim();
                 continue;
             }
 
@@ -195,7 +202,8 @@ public static class HeadlessServerArgumentParser
             EnableMovementWorld: enableMovementWorld,
             NetworkPort: networkPort,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
-            SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds);
+            SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+            RuntimeRootPath: runtimeRootPath);
         error = null;
         showHelp = false;
         return true;
@@ -205,6 +213,7 @@ public static class HeadlessServerArgumentParser
         """
         UltraSim.Server.Headless options:
           --profile=<name>
+          --runtime-root=<path>
           --tick-ms=<n>
           --max-catchup=<n>
           --port=<0-65535>

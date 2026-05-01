@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Network;
+using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Console;
 
@@ -28,9 +29,18 @@ public sealed class ConsoleServerShell
     }
 
     public ConsoleServerShellOptions Options { get; }
+    public DefaultUltraSimScriptContext? ScriptContext { get; private set; }
 
     public async Task<int> RunAsync(CancellationToken cancellationToken = default)
     {
+        UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(Options.RuntimeRootPath);
+        UltraSimRuntimeTemplate.Ensure(runtimeRoot);
+        WriteStartupPreamble(_stdout);
+        UltraSimScriptStartupResult scriptStartup = RunScriptStartup(runtimeRoot, _stdout);
+        ScriptContext = scriptStartup.Context;
+        if (!scriptStartup.Succeeded)
+            return 1;
+
         IServerApplication application = _applicationFactory(Options);
 
         using var runtime = new HostedServerRuntime(
@@ -153,4 +163,30 @@ public sealed class ConsoleServerShell
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,
                 SaveOnStop: options.SaveOnStop));
+
+    private static void WriteStartupPreamble(TextWriter writer)
+    {
+        writer.WriteLine("Core: Created");
+        Version runtime = Environment.Version;
+        writer.WriteLine($"Core: Running on .NET {runtime.Major}.{runtime.Minor}.{runtime.Build}");
+        int processors = Environment.ProcessorCount;
+        writer.WriteLine($"Core: Optimizing for {processors} {(processors == 1 ? "processor" : "processors")}");
+        writer.Flush();
+    }
+
+    private static UltraSimScriptStartupResult RunScriptStartup(UltraSimRuntimeRootLayout runtimeRoot, TextWriter writer)
+    {
+        var startup = new UltraSimScriptStartupService();
+        UltraSimScriptStartupResult result = startup.Run(new UltraSimScriptStartupOptions(runtimeRoot));
+        IReadOnlyList<ServerApplicationEvent> events = UltraSimScriptStartupLog.CreateEvents(result);
+        for (int i = 0; i < events.Count; i++)
+        {
+            IReadOnlyList<ServerHostLogLine> lines = ServerHostLogFormatter.Format(events[i]);
+            for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
+                writer.WriteLine(lines[lineIndex].Message);
+        }
+
+        writer.Flush();
+        return result;
+    }
 }

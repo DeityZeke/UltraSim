@@ -8,7 +8,8 @@ public sealed record GodotServerShellOptions(
     bool EnableMovementWorld = true,
     int NetworkPort = 42042,
     double SessionAuthTimeoutSeconds = 5.0,
-    double SessionKeepAliveTimeoutSeconds = 10.0)
+    double SessionKeepAliveTimeoutSeconds = 10.0,
+    string? RuntimeRootPath = null)
 {
     public static GodotServerShellOptions Default { get; } = new("godot");
 }

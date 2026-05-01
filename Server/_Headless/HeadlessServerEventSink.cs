@@ -15,9 +15,13 @@ public sealed class HeadlessServerEventSink : IServerHostEventSink
 
     public void OnEvent(ServerApplicationEvent evt)
     {
-        string line = $"[{evt.TimestampUtc:O}] {evt.Kind}: {evt.Message}";
-        TextWriter writer = evt.Kind == ServerApplicationEventKind.Faulted ? _stderr : _stdout;
-        writer.WriteLine(line);
-        writer.Flush();
+        IReadOnlyList<ServerHostLogLine> lines = ServerHostLogFormatter.Format(evt);
+        for (int i = 0; i < lines.Count; i++)
+        {
+            ServerHostLogLine line = lines[i];
+            TextWriter writer = line.IsError ? _stderr : _stdout;
+            writer.WriteLine(line.Message);
+            writer.Flush();
+        }
     }
 }
