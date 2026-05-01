@@ -23,6 +23,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeSliderSlot = "musicVolume";
 	private const string SmokeStepperSlot = "chatLines";
 	private const string SmokeSelectSlot = "chatChannel";
+	private const string SmokeRepeaterSlot = "characters";
+	private const string SmokeRepeaterRowText = "Lira";
 
 	[Export] public NodePath? CharacterWorldPath { get; set; }
 	[Export] public NodePath? LocalPlayerControllerPath { get; set; }
@@ -671,14 +673,38 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
-		if (!UiManager.Menus.TryMountServerDrivenPanel(opened.Panel, out string mountError))
+		var rowUpdate = new UiModelUpdateDocument(
+			SmokeMessageBoxPanelId,
+			schema.Identity,
+			CatalogIdentity: null,
+			Sequence: 1,
+			UiModelUpdateKind.RepeaterRows,
+			ScopeId: null,
+			SlotValues: [],
+			ClearedSlotIds: [],
+			RowDeltas:
+			[
+				new UiRepeaterRowDelta(
+					SmokeRepeaterSlot,
+					"character/lira",
+					UiRepeaterRowUpdateKind.Add,
+					[UiModelSlotValue.String("name", SmokeRepeaterRowText)])
+			]);
+		ClientUiModelUpdateApplyResult applied = _serverDrivenPanels.ApplyModelUpdate(rowUpdate);
+		if (!applied.Applied || applied.Panel is null)
+		{
+			GD.PushError($"Server UI smoke failed: repeater row update returned {applied.Status} {applied.Error}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryMountServerDrivenPanel(applied.Panel, out string mountError))
 		{
 			GD.PushError($"Server UI smoke failed: {mountError}");
 			return;
 		}
 
 		_smokeSawServerUiMessageBox = true;
-		if (UiManager.Menus.TryFindServerDrivenText(opened.Panel.PanelInstanceId, SmokeMessageBoxText, out string textError))
+		if (UiManager.Menus.TryFindServerDrivenText(applied.Panel.PanelInstanceId, SmokeMessageBoxText, out string textError))
 		{
 			_smokeSawServerUiText = true;
 		}
@@ -687,7 +713,7 @@ public partial class GodotClientRuntimeRoot : Node
 			GD.PushError($"Server UI smoke failed: {textError}");
 		}
 
-		if (UiManager.Menus.TryFindServerDrivenText(opened.Panel.PanelInstanceId, SmokeUnsupportedChildText, out string childTextError))
+		if (UiManager.Menus.TryFindServerDrivenText(applied.Panel.PanelInstanceId, SmokeUnsupportedChildText, out string childTextError))
 		{
 			_smokeSawServerUiUnsupportedChild = true;
 		}
@@ -696,43 +722,55 @@ public partial class GodotClientRuntimeRoot : Node
 			GD.PushError($"Server UI smoke failed: {childTextError}");
 		}
 
-		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeTextInputSlot, out string textInputError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeTextInputSlot, out string textInputError))
 		{
 			GD.PushError($"Server UI smoke failed: {textInputError}");
 			return;
 		}
 
-		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeToggleSlot, out string toggleError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeToggleSlot, out string toggleError))
 		{
 			GD.PushError($"Server UI smoke failed: {toggleError}");
 			return;
 		}
 
-		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeNumberInputSlot, out string numberInputError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeNumberInputSlot, out string numberInputError))
 		{
 			GD.PushError($"Server UI smoke failed: {numberInputError}");
 			return;
 		}
 
-		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeSliderSlot, out string sliderError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeSliderSlot, out string sliderError))
 		{
 			GD.PushError($"Server UI smoke failed: {sliderError}");
 			return;
 		}
 
-		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeStepperSlot, out string stepperError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeStepperSlot, out string stepperError))
 		{
 			GD.PushError($"Server UI smoke failed: {stepperError}");
 			return;
 		}
 
-		if (!UiManager.Menus.TryFindServerDrivenSlotControl(opened.Panel.PanelInstanceId, SmokeSelectSlot, out string selectError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeSelectSlot, out string selectError))
 		{
 			GD.PushError($"Server UI smoke failed: {selectError}");
 			return;
 		}
 
-		if (!UiManager.Menus.TryPressServerDrivenActionButton(opened.Panel.PanelInstanceId, SmokeMessageBoxActionId, out string pressError))
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeRepeaterSlot, out string repeaterError))
+		{
+			GD.PushError($"Server UI smoke failed: {repeaterError}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryFindServerDrivenText(applied.Panel.PanelInstanceId, SmokeRepeaterRowText, out string repeaterTextError))
+		{
+			GD.PushError($"Server UI smoke failed: {repeaterTextError}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryPressServerDrivenActionButton(applied.Panel.PanelInstanceId, SmokeMessageBoxActionId, out string pressError))
 		{
 			GD.PushError($"Server UI smoke failed: {pressError}");
 			return;
@@ -779,7 +817,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, null, [5]),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -788,6 +826,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(13, UiNodeKind.Slider, SmokeSliderSlot, "Music Volume", []),
 				new UiSchemaNodeDescriptor(14, UiNodeKind.Stepper, SmokeStepperSlot, "Chat Lines", []),
 				new UiSchemaNodeDescriptor(15, UiNodeKind.Select, SmokeSelectSlot, "Chat Channel", []),
+				new UiSchemaNodeDescriptor(16, UiNodeKind.Repeater, SmokeRepeaterSlot, "Characters", []),
 			],
 			PayloadSlots:
 			[

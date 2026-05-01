@@ -135,6 +135,12 @@ public sealed record UiSchemaDocument(
             return selectOptionResult;
         }
 
+        UiValidationResult repeaterResult = ValidateRepeaterNodes();
+        if (!repeaterResult.IsValid)
+        {
+            return repeaterResult;
+        }
+
         UiValidationResult slotReferenceResult = ValidateNodeSlotReferences();
         if (!slotReferenceResult.IsValid)
         {
@@ -148,6 +154,21 @@ public sealed record UiSchemaDocument(
         }
 
         return UiValidationResult.Valid;
+    }
+
+    public IReadOnlySet<string> GetRepeaterSlotIds()
+    {
+        var repeaterSlots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = Nodes[i];
+            if (node.Kind == UiNodeKind.Repeater && !string.IsNullOrWhiteSpace(node.SlotId))
+            {
+                repeaterSlots.Add(node.SlotId);
+            }
+        }
+
+        return repeaterSlots;
     }
 
     public IReadOnlyList<UiSelectOptionDescriptor> GetSelectOptions()
@@ -373,6 +394,31 @@ public sealed record UiSchemaDocument(
         return UiValidationResult.Valid;
     }
 
+    private UiValidationResult ValidateRepeaterNodes()
+    {
+        var repeaterSlots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = Nodes[i];
+            if (node.Kind != UiNodeKind.Repeater)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(node.SlotId))
+            {
+                return UiValidationResult.Invalid("Repeater nodes require a slot id.");
+            }
+
+            if (!repeaterSlots.Add(node.SlotId))
+            {
+                return UiValidationResult.Invalid($"Duplicate repeater slot id '{node.SlotId}'.");
+            }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
     private UiValidationResult ValidateNodeSlotReferences()
     {
         var payloadSlots = new HashSet<string>(PayloadSlots.Select(static slot => slot.SlotId), StringComparer.Ordinal);
@@ -382,6 +428,11 @@ public sealed record UiSchemaDocument(
         {
             string? slotId = Nodes[i].SlotId;
             if (string.IsNullOrWhiteSpace(slotId))
+            {
+                continue;
+            }
+
+            if (Nodes[i].Kind == UiNodeKind.Repeater)
             {
                 continue;
             }

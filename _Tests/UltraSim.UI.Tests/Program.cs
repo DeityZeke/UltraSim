@@ -353,6 +353,7 @@ internal static class TestRunner
                                 new UiSelectOption("guild", "Guild"),
                                 new UiSelectOption("party", "Party", Disabled: true)
                             ]);
+                        section.Repeater("characters", "Characters");
                     });
                 });
             })
@@ -369,6 +370,7 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Slider && string.Equals(node.SlotId, "musicVolume", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Stepper && string.Equals(node.SlotId, "chatLines", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Select && string.Equals(node.SlotId, "chatChannel", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Repeater && string.Equals(node.SlotId, "characters", StringComparison.Ordinal)));
 
         UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.String, nameSlot.ValueKind);
@@ -422,6 +424,7 @@ internal static class TestRunner
         Assert.NotNull(context);
         Assert.True(context!.TryGetSelectOptions("chatChannel", out IReadOnlyList<UiSelectOptionDescriptor> channelOptions));
         Assert.Equal(3, channelOptions.Count);
+        Assert.True(context.HasRepeaterSlot("characters"));
 
         byte[] encodedSchema = UiContractJsonCodec.Encode(built.Schema);
         UiSchemaDocument decodedSchema = UiContractJsonCodec.Decode<UiSchemaDocument>(encodedSchema);
@@ -602,6 +605,17 @@ internal static class TestRunner
                     ]))
                 .Build();
         });
+
+        bool duplicateRepeaterBuilt = UiPanelBuilder
+            .Create("server/main", "smoke.repeater_duplicate", 1)
+            .Panel(panel =>
+            {
+                panel.Repeater("characters", "Characters");
+                panel.Repeater("characters", "Duplicate Characters");
+            })
+            .TryBuild(out _, out string duplicateRepeaterError);
+        Assert.False(duplicateRepeaterBuilt);
+        Assert.True(duplicateRepeaterError.Contains("Duplicate repeater", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void UiContractJsonCodec_RoundTripsCoreContracts()
@@ -1146,7 +1160,7 @@ internal static class TestRunner
             schema.Identity,
             CatalogIdentity: null,
             Sequence: 4,
-            UiModelUpdateKind.RepeaterRows,
+        UiModelUpdateKind.RepeaterRows,
             ScopeId: null,
             SlotValues: [],
             ClearedSlotIds: [],
@@ -1164,6 +1178,9 @@ internal static class TestRunner
                     []),
             ]);
         Assert.Valid(rowUpdate.ValidateAgainst(schema));
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+        Assert.Valid(rowUpdate.ValidateAgainst(context!));
 
         var superseded = new UiModelUpdateDocument(
             "panel/1",
@@ -1223,11 +1240,30 @@ internal static class TestRunner
             ]);
         Assert.InvalidContains(rowWithDuplicateSlots.ValidateAgainst(schema), "duplicate slot");
 
-        var fullMissingRequired = new UiModelUpdateDocument(
+        var rowWithUnknownRepeater = new UiModelUpdateDocument(
             "panel/1",
             schema.Identity,
             CatalogIdentity: null,
             Sequence: 10,
+            UiModelUpdateKind.RepeaterRows,
+            ScopeId: null,
+            SlotValues: [],
+            ClearedSlotIds: [],
+            RowDeltas:
+            [
+                new UiRepeaterRowDelta(
+                    "unknownRepeater",
+                    "character/1",
+                    UiRepeaterRowUpdateKind.Add,
+                    [UiModelSlotValue.String("name", "Ghost")]),
+            ]);
+        Assert.InvalidContains(rowWithUnknownRepeater.ValidateAgainst(schema), "unknown repeater");
+
+        var fullMissingRequired = new UiModelUpdateDocument(
+            "panel/1",
+            schema.Identity,
+            CatalogIdentity: null,
+            Sequence: 11,
             UiModelUpdateKind.FullModel,
             ScopeId: null,
             SlotValues: [UiModelSlotValue.Integer("levelValue", 12)],
@@ -1415,11 +1451,12 @@ internal static class TestRunner
             Nodes:
             [
                 new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
-                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4, 5, 6]),
+                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4, 5, 6, 7]),
                 new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "healthText", "Health", []),
                 new UiSchemaNodeDescriptor(4, UiNodeKind.Button, null, "Open", [], ActionId: "hud.open_character"),
                 new UiSchemaNodeDescriptor(5, UiNodeKind.DynamicText, "titleText", "Title", []),
                 new UiSchemaNodeDescriptor(6, UiNodeKind.DynamicText, "levelValue", "Level", []),
+                new UiSchemaNodeDescriptor(7, UiNodeKind.Repeater, "characters", "Characters", []),
             ],
             PayloadSlots:
             [

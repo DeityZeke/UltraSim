@@ -5,6 +5,7 @@ public sealed class UiSchemaCompatibilityContext
     private readonly Dictionary<string, UiPayloadSlotDescriptor> _payloadSlotById;
     private readonly Dictionary<string, UiActionDescriptor> _actionById;
     private readonly Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> _selectOptionsBySlotId;
+    private readonly HashSet<string> _repeaterSlotIds;
     private readonly HashSet<string> _stateBindingSlotIds;
 
     private UiSchemaCompatibilityContext(
@@ -17,6 +18,7 @@ public sealed class UiSchemaCompatibilityContext
         Dictionary<string, UiPayloadSlotDescriptor> payloadSlotById,
         Dictionary<string, UiActionDescriptor> actionById,
         Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> selectOptionsBySlotId,
+        HashSet<string> repeaterSlotIds,
         HashSet<string> stateBindingSlotIds)
     {
         SchemaIdentity = schemaIdentity;
@@ -28,6 +30,7 @@ public sealed class UiSchemaCompatibilityContext
         _payloadSlotById = payloadSlotById;
         _actionById = actionById;
         _selectOptionsBySlotId = selectOptionsBySlotId;
+        _repeaterSlotIds = repeaterSlotIds;
         _stateBindingSlotIds = stateBindingSlotIds;
     }
 
@@ -81,6 +84,16 @@ public sealed class UiSchemaCompatibilityContext
             stateBindingSlotIds.Add(binding.SlotId);
         }
 
+        var repeaterSlotIds = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < schema.Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = schema.Nodes[i];
+            if (node.Kind == UiNodeKind.Repeater && !string.IsNullOrWhiteSpace(node.SlotId))
+            {
+                repeaterSlotIds.Add(node.SlotId);
+            }
+        }
+
         IReadOnlyList<UiSelectOptionDescriptor> selectOptions = schema.GetSelectOptions();
         var groupedSelectOptions = new Dictionary<string, List<UiSelectOptionDescriptor>>(StringComparer.Ordinal);
         for (int i = 0; i < selectOptions.Count; i++)
@@ -111,6 +124,7 @@ public sealed class UiSchemaCompatibilityContext
             payloadSlotById,
             actionById,
             selectOptionsBySlotId,
+            repeaterSlotIds,
             stateBindingSlotIds);
         return UiValidationResult.Valid;
     }
@@ -150,6 +164,11 @@ public sealed class UiSchemaCompatibilityContext
     public bool TryGetSelectOptions(string slotId, out IReadOnlyList<UiSelectOptionDescriptor> options)
     {
         return _selectOptionsBySlotId.TryGetValue(slotId, out options!);
+    }
+
+    public bool HasRepeaterSlot(string slotId)
+    {
+        return _repeaterSlotIds.Contains(slotId);
     }
 
     public bool HasStateBindingSlot(string slotId)

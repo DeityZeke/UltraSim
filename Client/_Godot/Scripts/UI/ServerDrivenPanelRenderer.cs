@@ -28,7 +28,7 @@ internal static class ServerDrivenPanelRenderer
             modelBySlot[value.SlotId] = value;
         }
 
-        if (!TryBuildNode(panel.Schema.RootNodeId, panel.CompatibilityContext, nodeById, modelBySlot, actionPressed, out root!, out error))
+        if (!TryBuildNode(panel.Schema.RootNodeId, panel.CompatibilityContext, nodeById, modelBySlot, panel.RepeaterRows, actionPressed, out root!, out error))
         {
             root = new Control();
             return false;
@@ -46,6 +46,7 @@ internal static class ServerDrivenPanelRenderer
         UiSchemaCompatibilityContext compatibilityContext,
         IReadOnlyDictionary<int, UiSchemaNodeDescriptor> nodeById,
         IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> repeaterRows,
         Action<UiActionDescriptor>? actionPressed,
         out Control control,
         out string error)
@@ -75,6 +76,7 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Slider => CreateSlider(node, compatibilityContext, modelBySlot),
             UiNodeKind.Stepper => CreateStepper(node, compatibilityContext, modelBySlot),
             UiNodeKind.Select => CreateSelect(node, compatibilityContext, modelBySlot),
+            UiNodeKind.Repeater => CreateRepeater(node, repeaterRows),
             _ => CreateUnsupportedPlaceholder(node),
         };
 
@@ -104,6 +106,7 @@ internal static class ServerDrivenPanelRenderer
                 compatibilityContext,
                 nodeById,
                 modelBySlot,
+                repeaterRows,
                 actionPressed,
                 out Control child,
                 out error))
@@ -360,6 +363,52 @@ internal static class ServerDrivenPanelRenderer
 
         SetSlotMeta(select, node);
         return CreateLabeledSlotControl(node, select);
+    }
+
+    private static Control CreateRepeater(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> repeaterRows)
+    {
+        var container = new VBoxContainer
+        {
+            Name = MakeNodeName("Repeater", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        AddTitleLabelIfPresent(container, node, "RepeaterTitle");
+        SetSlotMeta(container, node);
+        if (string.IsNullOrWhiteSpace(node.SlotId) ||
+            !repeaterRows.TryGetValue(node.SlotId, out IReadOnlyDictionary<string, ClientUiRepeaterRowState>? rows))
+        {
+            return container;
+        }
+
+        foreach (ClientUiRepeaterRowState rowState in rows.Values)
+        {
+            var row = new HBoxContainer
+            {
+                Name = MakeNodeName("RepeaterRow", rowState.RowKey),
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+            };
+
+            for (int i = 0; i < rowState.Values.Count; i++)
+            {
+                UiModelSlotValue value = rowState.Values[i];
+                row.AddChild(new Label
+                {
+                    Name = MakeNodeName("RepeaterCell", value.SlotId),
+                    Text = FormatModelValue(value),
+                    SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                });
+            }
+
+            container.AddChild(row);
+        }
+
+        return container;
     }
 
     private static Button CreateButton(

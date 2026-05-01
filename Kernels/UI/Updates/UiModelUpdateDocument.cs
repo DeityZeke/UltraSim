@@ -33,7 +33,7 @@ public sealed record UiModelUpdateDocument(
             UiModelUpdateKind.FullModel => ValidateFullModel(schema, limits, rendererCapabilities),
             UiModelUpdateKind.SlotPatch => ValidateSlotPatch(schema),
             UiModelUpdateKind.ScopedPatch => ValidateScopedPatch(schema),
-            UiModelUpdateKind.RepeaterRows => ValidateRepeaterRows(),
+            UiModelUpdateKind.RepeaterRows => ValidateRepeaterRows(schema.GetRepeaterSlotIds()),
             UiModelUpdateKind.SchemaSuperseded => ValidateSupersededPayload(),
             UiModelUpdateKind.CatalogSuperseded => ValidateSupersededPayload(),
             _ => UiValidationResult.Invalid("Model update kind is invalid."),
@@ -53,7 +53,7 @@ public sealed record UiModelUpdateDocument(
             UiModelUpdateKind.FullModel => ValidateFullModel(context),
             UiModelUpdateKind.SlotPatch => ValidateSlotPatch(context),
             UiModelUpdateKind.ScopedPatch => ValidateScopedPatch(context),
-            UiModelUpdateKind.RepeaterRows => ValidateRepeaterRows(),
+            UiModelUpdateKind.RepeaterRows => ValidateRepeaterRows(context),
             UiModelUpdateKind.SchemaSuperseded => ValidateSupersededPayload(),
             UiModelUpdateKind.CatalogSuperseded => ValidateSupersededPayload(),
             _ => UiValidationResult.Invalid("Model update kind is invalid."),
@@ -306,7 +306,7 @@ public sealed record UiModelUpdateDocument(
         return UiValidationResult.Valid;
     }
 
-    private UiValidationResult ValidateRepeaterRows()
+    private UiValidationResult ValidateRepeaterRows(IReadOnlySet<string> repeaterSlotIds)
     {
         if (ScopeId is not null || SlotValues.Count != 0 || ClearedSlotIds.Count != 0)
         {
@@ -320,10 +320,46 @@ public sealed record UiModelUpdateDocument(
 
         for (int i = 0; i < RowDeltas.Count; i++)
         {
-            UiValidationResult rowResult = RowDeltas[i].Validate();
+            UiRepeaterRowDelta delta = RowDeltas[i];
+            UiValidationResult rowResult = delta.Validate();
             if (!rowResult.IsValid)
             {
                 return rowResult;
+            }
+
+            if (!repeaterSlotIds.Contains(delta.RepeaterSlotId))
+            {
+                return UiValidationResult.Invalid($"Repeater row update targets unknown repeater slot '{delta.RepeaterSlotId}'.");
+            }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private UiValidationResult ValidateRepeaterRows(UiSchemaCompatibilityContext context)
+    {
+        if (ScopeId is not null || SlotValues.Count != 0 || ClearedSlotIds.Count != 0)
+        {
+            return UiValidationResult.Invalid("Repeater row updates cannot contain scope, slot values, or cleared slots.");
+        }
+
+        if (RowDeltas.Count == 0)
+        {
+            return UiValidationResult.Invalid("Repeater row updates require at least one row delta.");
+        }
+
+        for (int i = 0; i < RowDeltas.Count; i++)
+        {
+            UiRepeaterRowDelta delta = RowDeltas[i];
+            UiValidationResult rowResult = delta.Validate();
+            if (!rowResult.IsValid)
+            {
+                return rowResult;
+            }
+
+            if (!context.HasRepeaterSlot(delta.RepeaterSlotId))
+            {
+                return UiValidationResult.Invalid($"Repeater row update targets unknown repeater slot '{delta.RepeaterSlotId}'.");
             }
         }
 

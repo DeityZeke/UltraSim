@@ -181,6 +181,12 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder Repeater(string slotId, string label)
+    {
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Repeater, slotId, label, actionId: null));
+        return this;
+    }
+
     public UiPanelNodeBuilder Button(
         string actionId,
         string label,
