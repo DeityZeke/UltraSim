@@ -36,7 +36,7 @@ internal static class TestRunner
         Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes);
         Run(nameof(UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments), UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments);
         Run(nameof(UiPanelBuilder_BuildsGroupsSectionsAndFormControls), UiPanelBuilder_BuildsGroupsSectionsAndFormControls);
-        Run(nameof(UiStandardPanels_BuildMessageAndConfirmBoxesWithStableSchema), UiStandardPanels_BuildMessageAndConfirmBoxesWithStableSchema);
+        Run(nameof(UiStandardPanels_BuildStandardModalHelpersWithStableSchemas), UiStandardPanels_BuildStandardModalHelpersWithStableSchemas);
         Run(nameof(UiPanelBuilder_RejectsConflictingScopedDeclarations), UiPanelBuilder_RejectsConflictingScopedDeclarations);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
@@ -371,7 +371,7 @@ internal static class TestRunner
         Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
     }
 
-    private static void UiStandardPanels_BuildMessageAndConfirmBoxesWithStableSchema()
+    private static void UiStandardPanels_BuildStandardModalHelpersWithStableSchemas()
     {
         UiBuiltPanel firstMessage = UiStandardPanels.MessageBox(
             "server/main",
@@ -417,6 +417,67 @@ internal static class TestRunner
             action.Role == UiActionRole.Normal &&
             string.Equals(action.Label, "Keep", StringComparison.Ordinal)));
         Assert.Valid(confirm.ToColdOpen("panel/confirm/delete").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+
+        UiBuiltPanel choice = UiStandardPanels.ChoiceBox(
+            "server/main",
+            "Select Destination",
+            "Where should the party travel?",
+            [
+                new UiStandardChoice("travel.britain", "Britain", UiActionRole.Primary),
+                new UiStandardChoice("travel.yew", "Yew"),
+                new UiStandardChoice("travel.cancel", "Cancel", UiActionRole.Destructive)
+            ]);
+        Assert.Equal(UiStandardPanels.ChoiceBoxPanelType, choice.Schema.Identity.PanelType);
+        Assert.Equal(3, choice.Schema.Actions.Count);
+        Assert.True(choice.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, "travel.britain", StringComparison.Ordinal) &&
+            action.Role == UiActionRole.Primary));
+        Assert.True(choice.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, "travel.cancel", StringComparison.Ordinal) &&
+            action.Role == UiActionRole.Destructive));
+        Assert.Valid(choice.ToColdOpen("panel/choice/travel").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Throws<InvalidOperationException>(() => UiStandardPanels.ChoiceBox(
+            "server/main",
+            "Empty",
+            "No choices.",
+            []));
+
+        UiBuiltPanel firstPrompt = UiStandardPanels.TextPrompt(
+            "server/main",
+            "Rename Character",
+            "Choose a new display name.",
+            "Display Name",
+            value: "Ada",
+            acceptText: "Rename",
+            cancelText: "Cancel",
+            maxStringLength: 48);
+        UiBuiltPanel secondPrompt = UiStandardPanels.TextPrompt(
+            "server/main",
+            "Rename Character",
+            "Choose a new display name.",
+            "Display Name",
+            value: "Grace",
+            acceptText: "Rename",
+            cancelText: "Cancel",
+            maxStringLength: 48);
+
+        Assert.Equal(UiStandardPanels.TextPromptPanelType, firstPrompt.Schema.Identity.PanelType);
+        Assert.Equal(firstPrompt.Schema.Identity.SchemaHashHex, secondPrompt.Schema.Identity.SchemaHashHex);
+        Assert.Equal(2, firstPrompt.Schema.Actions.Count);
+        Assert.True(firstPrompt.Schema.Nodes.Any(node =>
+            node.Kind == UiNodeKind.TextInput &&
+            string.Equals(node.SlotId, UiStandardPanels.PromptValueSlotId, StringComparison.Ordinal) &&
+            string.Equals(node.Text, "Display Name", StringComparison.Ordinal)));
+
+        UiPayloadSlotDescriptor promptSlot = firstPrompt.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, UiStandardPanels.PromptValueSlotId, StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.String, promptSlot.ValueKind);
+        Assert.Equal(48, promptSlot.MaxStringLength);
+
+        UiModelSlotValue firstPromptValue = firstPrompt.Model.Values.First(value => string.Equals(value.SlotId, UiStandardPanels.PromptValueSlotId, StringComparison.Ordinal));
+        UiModelSlotValue secondPromptValue = secondPrompt.Model.Values.First(value => string.Equals(value.SlotId, UiStandardPanels.PromptValueSlotId, StringComparison.Ordinal));
+        Assert.Equal("Ada", firstPromptValue.StringValue);
+        Assert.Equal("Grace", secondPromptValue.StringValue);
+        Assert.Valid(firstPrompt.ToColdOpen("panel/prompt/rename").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
     }
 
     private static void UiPanelBuilder_RejectsConflictingScopedDeclarations()
