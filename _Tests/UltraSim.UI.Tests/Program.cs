@@ -353,6 +353,24 @@ internal static class TestRunner
                                 new UiSelectOption("guild", "Guild"),
                                 new UiSelectOption("party", "Party", Disabled: true)
                             ]);
+                        section.RadioGroup(
+                            "nameplateMode",
+                            "Nameplates",
+                            "party",
+                            [
+                                new UiSelectOption("off", "Off"),
+                                new UiSelectOption("party", "Party"),
+                                new UiSelectOption("all", "All")
+                            ]);
+                        section.CheckboxGroup(
+                            "enabledChannels",
+                            "Enabled Channels",
+                            ["local", "guild"],
+                            [
+                                new UiSelectOption("local", "Local"),
+                                new UiSelectOption("guild", "Guild"),
+                                new UiSelectOption("party", "Party", Disabled: true)
+                            ]);
                         section.Repeater("characters", "Characters");
                     });
                 });
@@ -370,6 +388,8 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Slider && string.Equals(node.SlotId, "musicVolume", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Stepper && string.Equals(node.SlotId, "chatLines", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Select && string.Equals(node.SlotId, "chatChannel", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.RadioGroup && string.Equals(node.SlotId, "nameplateMode", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.CheckboxGroup && string.Equals(node.SlotId, "enabledChannels", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Repeater && string.Equals(node.SlotId, "characters", StringComparison.Ordinal)));
 
         UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));
@@ -396,7 +416,13 @@ internal static class TestRunner
 
         UiPayloadSlotDescriptor channelSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "chatChannel", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.String, channelSlot.ValueKind);
-        Assert.Equal(3, built.Schema.GetSelectOptions().Count);
+        UiPayloadSlotDescriptor nameplateSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "nameplateMode", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.String, nameplateSlot.ValueKind);
+
+        UiPayloadSlotDescriptor enabledChannelsSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "enabledChannels", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.StringList, enabledChannelsSlot.ValueKind);
+
+        Assert.Equal(9, built.Schema.GetSelectOptions().Count);
         Assert.True(built.Schema.GetSelectOptions().Any(option =>
             string.Equals(option.SlotId, "chatChannel", StringComparison.Ordinal) &&
             string.Equals(option.Value, "party", StringComparison.Ordinal) &&
@@ -420,15 +446,25 @@ internal static class TestRunner
         UiModelSlotValue channelValue = built.Model.Values.First(value => string.Equals(value.SlotId, "chatChannel", StringComparison.Ordinal));
         Assert.Equal("guild", channelValue.StringValue);
 
+        UiModelSlotValue nameplateValue = built.Model.Values.First(value => string.Equals(value.SlotId, "nameplateMode", StringComparison.Ordinal));
+        Assert.Equal("party", nameplateValue.StringValue);
+
+        UiModelSlotValue enabledChannelsValue = built.Model.Values.First(value => string.Equals(value.SlotId, "enabledChannels", StringComparison.Ordinal));
+        Assert.Equal(2, enabledChannelsValue.StringListValue?.Count ?? 0);
+        Assert.Equal("local", enabledChannelsValue.StringListValue![0]);
+        Assert.Equal("guild", enabledChannelsValue.StringListValue[1]);
+
         Assert.Valid(UiSchemaCompatibilityContext.TryCreate(built.Schema, out UiSchemaCompatibilityContext? context));
         Assert.NotNull(context);
         Assert.True(context!.TryGetSelectOptions("chatChannel", out IReadOnlyList<UiSelectOptionDescriptor> channelOptions));
         Assert.Equal(3, channelOptions.Count);
+        Assert.True(context.TryGetSelectOptions("enabledChannels", out IReadOnlyList<UiSelectOptionDescriptor> enabledChannelOptions));
+        Assert.Equal(3, enabledChannelOptions.Count);
         Assert.True(context.HasRepeaterSlot("characters"));
 
         byte[] encodedSchema = UiContractJsonCodec.Encode(built.Schema);
         UiSchemaDocument decodedSchema = UiContractJsonCodec.Decode<UiSchemaDocument>(encodedSchema);
-        Assert.Equal(3, decodedSchema.GetSelectOptions().Count);
+        Assert.Equal(9, decodedSchema.GetSelectOptions().Count);
         Assert.Valid(decodedSchema.Validate(rendererCapabilities: CreateRendererCapabilities()));
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
@@ -986,6 +1022,11 @@ internal static class TestRunner
 
         var required = optional with { Required = true };
         Assert.InvalidContains(UiModelSlotValue.Null("optionalText").Validate(required), "Required");
+
+        var stringList = new UiPayloadSlotDescriptor("channels", UiModelValueKind.StringList, Required: true, MaxStringLength: 16);
+        Assert.Valid(UiModelSlotValue.StringList("channels", ["local", "guild"]).Validate(stringList));
+        Assert.InvalidContains(UiModelSlotValue.StringList("channels", ["local", "local"]).Validate(stringList), "duplicate");
+        Assert.InvalidContains(UiModelSlotValue.StringList("channels", ["this_value_is_too_long"]).Validate(stringList), "cannot exceed");
     }
 
     private static void UiSchemaCompatibilityContext_ReusesValidatedSchemaForModelAndUpdateChecks()

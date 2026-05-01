@@ -329,31 +329,34 @@ public sealed record UiSchemaDocument(
             payloadSlotById[PayloadSlots[i].SlotId] = PayloadSlots[i];
         }
 
-        var selectNodeSlots = new HashSet<string>(StringComparer.Ordinal);
+        var optionNodeSlots = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < Nodes.Count; i++)
         {
             UiSchemaNodeDescriptor node = Nodes[i];
-            if (node.Kind != UiNodeKind.Select)
+            if (node.Kind is not (UiNodeKind.Select or UiNodeKind.RadioGroup or UiNodeKind.CheckboxGroup))
             {
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(node.SlotId))
             {
-                return UiValidationResult.Invalid("Select nodes require a slot id.");
+                return UiValidationResult.Invalid($"{node.Kind} nodes require a slot id.");
             }
 
             if (!payloadSlotById.TryGetValue(node.SlotId, out UiPayloadSlotDescriptor? slot))
             {
-                return UiValidationResult.Invalid($"Select node slot '{node.SlotId}' is not declared as a payload slot.");
+                return UiValidationResult.Invalid($"{node.Kind} node slot '{node.SlotId}' is not declared as a payload slot.");
             }
 
-            if (slot.ValueKind != UiModelValueKind.String)
+            UiModelValueKind expectedKind = node.Kind == UiNodeKind.CheckboxGroup
+                ? UiModelValueKind.StringList
+                : UiModelValueKind.String;
+            if (slot.ValueKind != expectedKind)
             {
-                return UiValidationResult.Invalid($"Select node slot '{node.SlotId}' must be a string payload slot.");
+                return UiValidationResult.Invalid($"{node.Kind} node slot '{node.SlotId}' must be a {expectedKind} payload slot.");
             }
 
-            selectNodeSlots.Add(node.SlotId);
+            optionNodeSlots.Add(node.SlotId);
         }
 
         var optionValuesBySlot = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
@@ -366,9 +369,9 @@ public sealed record UiSchemaDocument(
                 return result;
             }
 
-            if (!selectNodeSlots.Contains(option.SlotId))
+            if (!optionNodeSlots.Contains(option.SlotId))
             {
-                return UiValidationResult.Invalid($"Select option slot '{option.SlotId}' does not reference a select node.");
+                return UiValidationResult.Invalid($"Select option slot '{option.SlotId}' does not reference an option node.");
             }
 
             if (!optionValuesBySlot.TryGetValue(option.SlotId, out HashSet<string>? values))
@@ -383,11 +386,11 @@ public sealed record UiSchemaDocument(
             }
         }
 
-        foreach (string slotId in selectNodeSlots)
+        foreach (string slotId in optionNodeSlots)
         {
             if (!optionValuesBySlot.ContainsKey(slotId))
             {
-                return UiValidationResult.Invalid($"Select node slot '{slotId}' requires at least one option.");
+                return UiValidationResult.Invalid($"Option node slot '{slotId}' requires at least one option.");
             }
         }
 

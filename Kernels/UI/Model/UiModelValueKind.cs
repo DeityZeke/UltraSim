@@ -7,4 +7,5 @@ public enum UiModelValueKind : byte
     Boolean = 2,
     Integer = 3,
     Number = 4,
+    StringList = 5,
 }

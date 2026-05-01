@@ -24,6 +24,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeSliderSlot = "musicVolume";
 	private const string SmokeStepperSlot = "chatLines";
 	private const string SmokeSelectSlot = "chatChannel";
+	private const string SmokeRadioSlot = "nameplateMode";
+	private const string SmokeCheckboxSlot = "enabledChannels";
 	private const string SmokeRepeaterSlot = "characters";
 	private const string SmokeRepeaterRowKey = "character/lira";
 	private const string SmokeRepeaterRowText = "Lira";
@@ -671,6 +673,8 @@ public partial class GodotClientRuntimeRoot : Node
 				UiModelSlotValue.Number(SmokeSliderSlot, 0.75),
 				UiModelSlotValue.Integer(SmokeStepperSlot, 8),
 				UiModelSlotValue.String(SmokeSelectSlot, "guild"),
+				UiModelSlotValue.String(SmokeRadioSlot, "party"),
+				UiModelSlotValue.StringList(SmokeCheckboxSlot, ["local", "guild"]),
 			]);
 		var open = new UiPanelOpenDocument(
 			SmokeMessageBoxPanelId,
@@ -777,6 +781,18 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeRadioSlot, out string radioError))
+		{
+			GD.PushError($"Server UI smoke failed: {radioError}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeCheckboxSlot, out string checkboxError))
+		{
+			GD.PushError($"Server UI smoke failed: {checkboxError}");
+			return;
+		}
+
 		if (!UiManager.Menus.TryFindServerDrivenText(applied.Panel.PanelInstanceId, SmokeRepeaterRowText, out string repeaterTextError))
 		{
 			GD.PushError($"Server UI smoke failed: {repeaterTextError}");
@@ -842,7 +858,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, null, [5]),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -852,6 +868,8 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(14, UiNodeKind.Stepper, SmokeStepperSlot, "Chat Lines", []),
 				new UiSchemaNodeDescriptor(15, UiNodeKind.Select, SmokeSelectSlot, "Chat Channel", []),
 				new UiSchemaNodeDescriptor(16, UiNodeKind.Repeater, SmokeRepeaterSlot, "Characters", [], ActionId: SmokeRepeaterRowActionId),
+				new UiSchemaNodeDescriptor(17, UiNodeKind.RadioGroup, SmokeRadioSlot, "Nameplates", []),
+				new UiSchemaNodeDescriptor(18, UiNodeKind.CheckboxGroup, SmokeCheckboxSlot, "Enabled Channels", []),
 			],
 			PayloadSlots:
 			[
@@ -862,6 +880,8 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiPayloadSlotDescriptor(SmokeSliderSlot, UiModelValueKind.Number, Required: true, MinNumber: 0.0, MaxNumber: 1.0),
 				new UiPayloadSlotDescriptor(SmokeStepperSlot, UiModelValueKind.Integer, Required: true, MinNumber: 1, MaxNumber: 20),
 				new UiPayloadSlotDescriptor(SmokeSelectSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
+				new UiPayloadSlotDescriptor(SmokeRadioSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
+				new UiPayloadSlotDescriptor(SmokeCheckboxSlot, UiModelValueKind.StringList, Required: true, MaxStringLength: 32),
 			],
 			Actions:
 			[
@@ -889,6 +909,12 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSelectOptionDescriptor(SmokeSelectSlot, "local", "Local"),
 				new UiSelectOptionDescriptor(SmokeSelectSlot, "guild", "Guild"),
 				new UiSelectOptionDescriptor(SmokeSelectSlot, "party", "Party", Disabled: true),
+				new UiSelectOptionDescriptor(SmokeRadioSlot, "off", "Off"),
+				new UiSelectOptionDescriptor(SmokeRadioSlot, "party", "Party"),
+				new UiSelectOptionDescriptor(SmokeRadioSlot, "all", "All"),
+				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "local", "Local"),
+				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "guild", "Guild"),
+				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "party", "Party", Disabled: true),
 			]);
 	}
 

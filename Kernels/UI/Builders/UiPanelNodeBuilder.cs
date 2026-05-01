@@ -181,6 +181,36 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder RadioGroup(
+        string slotId,
+        string label,
+        string value,
+        IReadOnlyList<UiSelectOption> options,
+        int maxStringLength = UiValidation.MaxIdentityLength,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, required, maxStringLength));
+        _owner.SetModelValue(UiModelSlotValue.String(slotId, value));
+        _owner.DeclareSelectOptions(slotId, options);
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.RadioGroup, slotId, label, actionId: null));
+        return this;
+    }
+
+    public UiPanelNodeBuilder CheckboxGroup(
+        string slotId,
+        string label,
+        IReadOnlyList<string> values,
+        IReadOnlyList<UiSelectOption> options,
+        int maxStringLength = UiValidation.MaxIdentityLength,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.StringList, required, maxStringLength));
+        _owner.SetModelValue(UiModelSlotValue.StringList(slotId, values));
+        _owner.DeclareSelectOptions(slotId, options);
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.CheckboxGroup, slotId, label, actionId: null));
+        return this;
+    }
+
     public UiPanelNodeBuilder Repeater(
         string slotId,
         string label,

@@ -93,11 +93,13 @@ public sealed record UiModelDocument(
             }
 
             if (selectOptionValuesBySlot is not null &&
-                selectOptionValuesBySlot.TryGetValue(value.SlotId, out HashSet<string>? selectOptionValues) &&
-                value.Kind == UiModelValueKind.String &&
-                !selectOptionValues.Contains(value.StringValue ?? string.Empty))
+                selectOptionValuesBySlot.TryGetValue(value.SlotId, out HashSet<string>? selectOptionValues))
             {
-                return UiValidationResult.Invalid($"Model select slot '{value.SlotId}' contains unknown option value '{value.StringValue}'.");
+                UiValidationResult optionResult = ValidateOptionModelValue(value, selectOptionValues);
+                if (!optionResult.IsValid)
+                {
+                    return optionResult;
+                }
             }
         }
 
@@ -141,11 +143,13 @@ public sealed record UiModelDocument(
                 return valueResult;
             }
 
-            if (context.TryGetSelectOptions(value.SlotId, out IReadOnlyList<UiSelectOptionDescriptor> options) &&
-                value.Kind == UiModelValueKind.String &&
-                !ContainsSelectOptionValue(options, value.StringValue ?? string.Empty))
+            if (context.TryGetSelectOptions(value.SlotId, out IReadOnlyList<UiSelectOptionDescriptor> options))
             {
-                return UiValidationResult.Invalid($"Model select slot '{value.SlotId}' contains unknown option value '{value.StringValue}'.");
+                UiValidationResult optionResult = ValidateOptionModelValue(value, options);
+                if (!optionResult.IsValid)
+                {
+                    return optionResult;
+                }
             }
         }
 
@@ -177,5 +181,55 @@ public sealed record UiModelDocument(
         }
 
         return false;
+    }
+
+    private static UiValidationResult ValidateOptionModelValue(UiModelSlotValue value, IReadOnlyCollection<string> optionValues)
+    {
+        if (value.Kind == UiModelValueKind.String)
+        {
+            string selected = value.StringValue ?? string.Empty;
+            return optionValues.Contains(selected)
+                ? UiValidationResult.Valid
+                : UiValidationResult.Invalid($"Model option slot '{value.SlotId}' contains unknown option value '{selected}'.");
+        }
+
+        if (value.Kind == UiModelValueKind.StringList)
+        {
+            IReadOnlyList<string> selectedValues = value.StringListValue ?? [];
+            for (int i = 0; i < selectedValues.Count; i++)
+            {
+                if (!optionValues.Contains(selectedValues[i]))
+                {
+                    return UiValidationResult.Invalid($"Model option slot '{value.SlotId}' contains unknown option value '{selectedValues[i]}'.");
+                }
+            }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private static UiValidationResult ValidateOptionModelValue(UiModelSlotValue value, IReadOnlyList<UiSelectOptionDescriptor> options)
+    {
+        if (value.Kind == UiModelValueKind.String)
+        {
+            string selected = value.StringValue ?? string.Empty;
+            return ContainsSelectOptionValue(options, selected)
+                ? UiValidationResult.Valid
+                : UiValidationResult.Invalid($"Model option slot '{value.SlotId}' contains unknown option value '{selected}'.");
+        }
+
+        if (value.Kind == UiModelValueKind.StringList)
+        {
+            IReadOnlyList<string> selectedValues = value.StringListValue ?? [];
+            for (int i = 0; i < selectedValues.Count; i++)
+            {
+                if (!ContainsSelectOptionValue(options, selectedValues[i]))
+                {
+                    return UiValidationResult.Invalid($"Model option slot '{value.SlotId}' contains unknown option value '{selectedValues[i]}'.");
+                }
+            }
+        }
+
+        return UiValidationResult.Valid;
     }
 }

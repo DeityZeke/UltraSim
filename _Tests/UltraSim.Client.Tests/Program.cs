@@ -1950,9 +1950,10 @@ internal static class TestRunner
             Nodes:
             [
                 new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
-                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4]),
+                new UiSchemaNodeDescriptor(2, UiNodeKind.Row, null, null, [3, 4, 5]),
                 new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "titleText", "Title", []),
                 new UiSchemaNodeDescriptor(4, UiNodeKind.DynamicText, "levelValue", "Level", []),
+                new UiSchemaNodeDescriptor(5, UiNodeKind.Repeater, "characters", "Characters", []),
             ],
             PayloadSlots:
             [

@@ -76,6 +76,8 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Slider => CreateSlider(node, compatibilityContext, modelBySlot),
             UiNodeKind.Stepper => CreateStepper(node, compatibilityContext, modelBySlot),
             UiNodeKind.Select => CreateSelect(node, compatibilityContext, modelBySlot),
+            UiNodeKind.RadioGroup => CreateRadioGroup(node, compatibilityContext, modelBySlot),
+            UiNodeKind.CheckboxGroup => CreateCheckboxGroup(node, compatibilityContext, modelBySlot),
             UiNodeKind.Repeater => CreateRepeater(node, compatibilityContext, repeaterRows, actionPressed),
             _ => CreateUnsupportedPlaceholder(node),
         };
@@ -365,6 +367,84 @@ internal static class ServerDrivenPanelRenderer
         return CreateLabeledSlotControl(node, select);
     }
 
+    private static Control CreateRadioGroup(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        var group = new VBoxContainer
+        {
+            Name = MakeNodeName("RadioGroup", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        AddTitleLabelIfPresent(group, node, "RadioGroupTitle");
+        SetSlotMeta(group, node);
+        string selected = GetStringModelValue(node, modelBySlot);
+        var buttonGroup = new ButtonGroup();
+        if (!string.IsNullOrWhiteSpace(node.SlotId) &&
+            compatibilityContext.TryGetSelectOptions(node.SlotId, out IReadOnlyList<UiSelectOptionDescriptor> options))
+        {
+            for (int i = 0; i < options.Count; i++)
+            {
+                UiSelectOptionDescriptor option = options[i];
+                var button = new CheckBox
+                {
+                    Name = MakeNodeName("RadioOption", option.Value),
+                    Text = option.Label,
+                    Disabled = option.Disabled,
+                    ButtonPressed = string.Equals(option.Value, selected, StringComparison.Ordinal),
+                    ButtonGroup = buttonGroup,
+                    SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                };
+                button.SetMeta("UiOptionValue", option.Value);
+                group.AddChild(button);
+            }
+        }
+
+        return group;
+    }
+
+    private static Control CreateCheckboxGroup(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        var group = new VBoxContainer
+        {
+            Name = MakeNodeName("CheckboxGroup", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        AddTitleLabelIfPresent(group, node, "CheckboxGroupTitle");
+        SetSlotMeta(group, node);
+        HashSet<string> selected = GetStringListModelValue(node, modelBySlot);
+        if (!string.IsNullOrWhiteSpace(node.SlotId) &&
+            compatibilityContext.TryGetSelectOptions(node.SlotId, out IReadOnlyList<UiSelectOptionDescriptor> options))
+        {
+            for (int i = 0; i < options.Count; i++)
+            {
+                UiSelectOptionDescriptor option = options[i];
+                var checkbox = new CheckBox
+                {
+                    Name = MakeNodeName("CheckboxOption", option.Value),
+                    Text = option.Label,
+                    Disabled = option.Disabled,
+                    ButtonPressed = selected.Contains(option.Value),
+                    SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+                    SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                };
+                checkbox.SetMeta("UiOptionValue", option.Value);
+                group.AddChild(checkbox);
+            }
+        }
+
+        return group;
+    }
+
     private static Control CreateRepeater(
         UiSchemaNodeDescriptor node,
         UiSchemaCompatibilityContext compatibilityContext,
@@ -569,6 +649,22 @@ internal static class ServerDrivenPanelRenderer
             && value.BooleanValue;
     }
 
+    private static HashSet<string> GetStringListModelValue(
+        UiSchemaNodeDescriptor node,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        if (!string.IsNullOrWhiteSpace(node.SlotId)
+            && modelBySlot.TryGetValue(node.SlotId, out UiModelSlotValue? value)
+            && value is not null
+            && value.Kind == UiModelValueKind.StringList
+            && value.StringListValue is not null)
+        {
+            return new HashSet<string>(value.StringListValue, StringComparer.Ordinal);
+        }
+
+        return new HashSet<string>(StringComparer.Ordinal);
+    }
+
     private static double GetNumberModelValue(
         UiSchemaNodeDescriptor node,
         IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
@@ -618,6 +714,7 @@ internal static class ServerDrivenPanelRenderer
             UiModelValueKind.Boolean => value.BooleanValue ? "True" : "False",
             UiModelValueKind.Integer => value.IntegerValue.ToString(System.Globalization.CultureInfo.InvariantCulture),
             UiModelValueKind.Number => value.NumberValue.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture),
+            UiModelValueKind.StringList => value.StringListValue is null ? string.Empty : string.Join(", ", value.StringListValue),
             _ => string.Empty,
         };
     }

@@ -6,7 +6,8 @@ public sealed record UiModelSlotValue(
     string? StringValue = null,
     bool BooleanValue = false,
     long IntegerValue = 0,
-    double NumberValue = 0)
+    double NumberValue = 0,
+    IReadOnlyList<string>? StringListValue = null)
 {
     public static UiModelSlotValue Null(string slotId)
     {
@@ -31,6 +32,12 @@ public sealed record UiModelSlotValue(
     public static UiModelSlotValue Number(string slotId, double value)
     {
         return new UiModelSlotValue(slotId, UiModelValueKind.Number, NumberValue: value);
+    }
+
+    public static UiModelSlotValue StringList(string slotId, IReadOnlyList<string> values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        return new UiModelSlotValue(slotId, UiModelValueKind.StringList, StringListValue: values.ToArray());
     }
 
     public UiValidationResult Validate(UiPayloadSlotDescriptor? descriptor = null)
@@ -84,6 +91,30 @@ public sealed record UiModelSlotValue(
             return UiValidationResult.Invalid($"String model slot '{SlotId}' requires a string value.");
         }
 
+        if (Kind == UiModelValueKind.StringList)
+        {
+            if (StringListValue is null)
+            {
+                return UiValidationResult.Invalid($"String list model slot '{SlotId}' requires string list values.");
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < StringListValue.Count; i++)
+            {
+                string value = StringListValue[i];
+                UiValidationResult valueResult = UiValidation.ValidateStableId(value, nameof(StringListValue), UiValidation.MaxIdentityLength);
+                if (!valueResult.IsValid)
+                {
+                    return valueResult;
+                }
+
+                if (!seen.Add(value))
+                {
+                    return UiValidationResult.Invalid($"String list model slot '{SlotId}' contains duplicate value '{value}'.");
+                }
+            }
+        }
+
         if (Kind == UiModelValueKind.Number && (double.IsNaN(NumberValue) || double.IsInfinity(NumberValue)))
         {
             return UiValidationResult.Invalid($"Number model slot '{SlotId}' must be finite.");
@@ -106,6 +137,16 @@ public sealed record UiModelSlotValue(
                 if ((StringValue?.Length ?? 0) > descriptor.MaxStringLength)
                 {
                     return UiValidationResult.Invalid($"String model slot '{SlotId}' cannot exceed {descriptor.MaxStringLength} characters.");
+                }
+
+                break;
+            case UiModelValueKind.StringList:
+                for (int i = 0; i < (StringListValue?.Count ?? 0); i++)
+                {
+                    if (StringListValue![i].Length > descriptor.MaxStringLength)
+                    {
+                        return UiValidationResult.Invalid($"String list model slot '{SlotId}' value cannot exceed {descriptor.MaxStringLength} characters.");
+                    }
                 }
 
                 break;
