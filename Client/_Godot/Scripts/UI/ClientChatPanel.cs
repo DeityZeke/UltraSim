@@ -16,7 +16,7 @@ public partial class ClientChatPanel : PanelContainer
     {
         BuildInterface();
         ApplyViewportLayout();
-        AppendSystemLine("Chat shell ready. Server chat wiring lands in G3.");
+        AppendSystemLine("Chat shell ready.");
     }
 
     public override void _Notification(int what)

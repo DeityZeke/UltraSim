@@ -66,6 +66,7 @@ Server/
       Items/
       Misc/
       Mobiles/
+      Packages/
       Properties/
       Regions/
       Skills/
@@ -78,6 +79,20 @@ Server/
 ```
 
 `Server/RuntimeTemplate/scripts` is example/default server content and modding scaffolding. The exported server package receives a copy of this folder. After export, the server operator owns that copy.
+
+Large cohesive systems should live as packages, not as tentacles spread across every top-level script folder. A future Knives-style chat system should prefer a package shape:
+
+```text
+scripts/Packages/Chat/
+  ChatPackageModule.cs
+  Channels/
+  Commands/
+  UI/
+  Rules/
+  Data/
+```
+
+Top-level folders remain useful for loose content and small standalone scripts. `Packages` is for complete systems an operator should be able to copy, replace, disable, document, or eventually manifest as one unit.
 
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 
@@ -136,6 +151,8 @@ Initial script categories:
   - small bootstrap helpers and glue only; avoid letting this become the default place for everything
 - `Mobiles`
   - player/NPC/creature/follower/mount/vendor definitions and behavior
+- `Packages`
+  - complete bundled systems that should stay together, such as a future chat package with channels, commands, rules, settings panels, and package-local data
 - `Properties`
   - property inspection/edit descriptors and admin reflection helpers
 - `Regions`

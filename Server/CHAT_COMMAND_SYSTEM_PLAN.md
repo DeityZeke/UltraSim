@@ -90,6 +90,35 @@ Planned modules:
 - `IChatCommandModule`
   - script/plugin registration hook for commands
 
+## Script And UI Boundary
+
+The script compiler does not make the core chat transport a script module. The
+following pieces should stay in core/server glue for now:
+
+- `ChatSubmitPacket` / `ChatMessageEventPacket`
+- `ServerChatService` validation, rate limits, and reliable-event publishing
+- client chat event bridge and overhead-chat projection
+- the always-available client chat input panel
+
+Scripted content belongs around the edges:
+
+- commands registered through `IUltraSimScriptContext.Commands`
+- future channel/routing rule providers
+- future chat settings/admin panels
+- optional shard-specific command modules under `RuntimeTemplate/scripts/Commands`
+
+The default `help`, `ping`, and `announce` bootstrap commands can remain core
+until script command facades can express every required behavior cleanly. In
+particular, `announce` needs a first-class chat/system announcement facade
+before it should move into runtime scripts.
+
+The visible chat panel should also remain a local client surface for now, not a
+server-authored schema panel. Chat needs persistent local history, append-only
+message delivery, keyboard focus capture/release, and direct submit packets even
+when no server menu is open. Server-driven schema panels are a better fit for
+chat configuration, moderation tools, channel browsers, or diagnostics than for
+the hot chat input/feed itself.
+
 ## Network Shape
 
 Client to server:
