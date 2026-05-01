@@ -7,4 +7,5 @@ public interface IUltraSimScriptContext
     IUltraSimScriptLogger Logger { get; }
     IUltraSimScriptCommandRegistry Commands { get; }
     IUltraSimScriptUiRegistry UiPanels { get; }
+    IUltraSimScriptDefinitionRegistry Definitions { get; }
 }

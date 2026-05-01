@@ -365,9 +365,14 @@ public sealed class IronDagger : PrefabDefinition<BaseWeapon>
         builder.Set(new InventoryItem(width: 1, height: 2, weight: 1.2f, stackLimit: 1));
         builder.Set(new WeaponData(damageMin: 3, damageMax: 7, speed: 1.45f));
         builder.Set(new Durability(current: 35, max: 35));
+        builder.SetRandom(random => new FireResistance(random.Next(1, 11)));
     }
 }
 ```
+
+Prefab defaults may be constants or per-spawn factories. Randomized values must roll when an entity is spawned, not when the script registers the prefab. For example, `FireResistance = Random(1, 10)` should store a per-spawn value factory in the prefab descriptor so each spawned dagger can receive a different value.
+
+Per-spawn factories should receive an explicit roll context supplied by the spawn/catalog bridge. Do not use `Random.Shared` or global static RNG directly inside prefab registration. The roll context can later carry deterministic seeds, spawn sequence, prefab key, region/world metadata, loot-quality context, or event modifiers without changing prefab authoring shape.
 
 This API is illustrative, not locked. The implementation can choose exact names, but it should preserve the shape:
 
@@ -375,6 +380,17 @@ This API is illustrative, not locked. The implementation can choose exact names,
 - composition output is component sets/archetype descriptors
 - prefab output is registered `PrefabDefinition`
 - spawned objects are ECS entities, not inherited runtime item classes
+- randomized/defaulted component values are evaluated by the spawn path, not at registry time
+
+The first implementation should keep this as a descriptor facade before spawning:
+
+- `ArchetypeShape` and `ArchetypeBuilder` build `ArchetypeDescriptor` records from component types.
+- `PrefabDefinition<TArchetype>` and `PrefabBuilder` build `PrefabDescriptor` records from a registered archetype shape and constant or per-spawn component defaults.
+- `IUltraSimScriptContext.Definitions` owns archetype and prefab registration.
+- prefab registration validates that the referenced archetype key was registered first.
+- the facade may expose stable ECS contracts such as `IComponent<T>`, but not `World`, networking, persistence, or direct runtime mutation.
+
+The later catalog/spawn slice should convert those descriptors into the low-level ECS `PrefabCatalog` / `PrefabDefinition` path and prove `/spawn <prefab-key>` creates a real entity.
 
 ## Live Data Prefab Authoring
 

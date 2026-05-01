@@ -3,11 +3,13 @@ using UltraSim.UI;
 
 namespace UltraSim.Server.Scripting;
 
-public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltraSimScriptLogger, IUltraSimScriptCommandRegistry, IUltraSimScriptUiRegistry
+public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltraSimScriptLogger, IUltraSimScriptCommandRegistry, IUltraSimScriptUiRegistry, IUltraSimScriptDefinitionRegistry
 {
     private readonly List<UltraSimScriptLogEntry> _logEntries = new();
     private readonly Dictionary<string, UltraSimScriptCommandDescriptor> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, UltraSimScriptUiPanelProviderDescriptor> _panelProviders = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ArchetypeDescriptor> _archetypes = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, PrefabDescriptor> _prefabs = new(StringComparer.Ordinal);
 
     public DefaultUltraSimScriptContext(UltraSimRuntimeRootLayout runtimeRoot, string scriptApiVersion = "1")
     {
@@ -20,9 +22,12 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     public IUltraSimScriptLogger Logger => this;
     public IUltraSimScriptCommandRegistry Commands => this;
     public IUltraSimScriptUiRegistry UiPanels => this;
+    public IUltraSimScriptDefinitionRegistry Definitions => this;
     public IReadOnlyList<UltraSimScriptLogEntry> LogEntries => _logEntries;
     public IReadOnlyCollection<UltraSimScriptCommandDescriptor> RegisteredCommands => _commands.Values;
     public IReadOnlyCollection<UltraSimScriptUiPanelProviderDescriptor> RegisteredPanelProviders => _panelProviders.Values;
+    public IReadOnlyCollection<ArchetypeDescriptor> RegisteredArchetypes => _archetypes.Values;
+    public IReadOnlyCollection<PrefabDescriptor> RegisteredPrefabs => _prefabs.Values;
 
     public void Info(string message) => Log(UltraSimScriptLogLevel.Info, message);
 
@@ -85,6 +90,50 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
             return false;
 
         return _panelProviders.TryGetValue(key.Trim(), out provider!);
+    }
+
+    public bool RegisterArchetype<TShape>()
+        where TShape : ArchetypeShape, new()
+    {
+        return RegisterArchetype(new TShape().BuildDescriptor());
+    }
+
+    public bool RegisterArchetype(ArchetypeDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ScriptDefinitionValidation.ValidateStableKey(descriptor.Key, nameof(descriptor.Key));
+        string key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
+        if (_archetypes.ContainsKey(key))
+            return false;
+
+        _archetypes.Add(key, descriptor with { Key = key });
+        return true;
+    }
+
+    public bool RegisterPrefab<TPrefab>()
+        where TPrefab : IUltraSimScriptPrefabDefinition, new()
+    {
+        return RegisterPrefab(new TPrefab().BuildDescriptor());
+    }
+
+    public bool RegisterPrefab(PrefabDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ScriptDefinitionValidation.ValidateStableKey(descriptor.Key, nameof(descriptor.Key));
+        ScriptDefinitionValidation.ValidateStableKey(descriptor.ArchetypeKey, nameof(descriptor.ArchetypeKey));
+        string key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
+        string archetypeKey = ScriptDefinitionValidation.NormalizeKey(descriptor.ArchetypeKey);
+        if (!_archetypes.ContainsKey(archetypeKey))
+        {
+            throw new InvalidOperationException(
+                $"Prefab '{key}' references unregistered archetype '{archetypeKey}'. Register the archetype before registering the prefab.");
+        }
+
+        if (_prefabs.ContainsKey(key))
+            return false;
+
+        _prefabs.Add(key, descriptor with { Key = key, ArchetypeKey = archetypeKey });
+        return true;
     }
 
     public void RegisterCommandsInto(ServerCommandRegistry registry)

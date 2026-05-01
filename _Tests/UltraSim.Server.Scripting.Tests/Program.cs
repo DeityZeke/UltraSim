@@ -1,3 +1,4 @@
+using UltraSim.ECS;
 using UltraSim.Server;
 using UltraSim.Server.Scripting;
 
@@ -8,7 +9,11 @@ internal static class TestRunner
     public static void Run()
     {
         Run(nameof(RuntimeTemplate_CreatesExpectedFolders), RuntimeTemplate_CreatesExpectedFolders);
+        Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
+        Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
+        Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
+        Run(nameof(ScriptCompiler_CompilesLoadsArchetypeAndPrefabModule), ScriptCompiler_CompilesLoadsArchetypeAndPrefabModule);
         Run(nameof(ScriptCompiler_UsesCacheOnCleanSecondCompile), ScriptCompiler_UsesCacheOnCleanSecondCompile);
         Run(nameof(ScriptCompiler_RecompilesWhenSourceChanges), ScriptCompiler_RecompilesWhenSourceChanges);
         Run(nameof(ScriptCompiler_ReturnsStructuredDiagnosticsOnCompileFailure), ScriptCompiler_ReturnsStructuredDiagnosticsOnCompileFailure);
@@ -36,6 +41,69 @@ internal static class TestRunner
         Assert.True(Directory.Exists(temp.Layout.ScriptDiagnosticsCachePath));
         Assert.True(Directory.Exists(temp.Layout.SavesPath));
         Assert.True(Directory.Exists(temp.Layout.BackupsPath));
+    }
+
+    private static void ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors()
+    {
+        ArchetypeDescriptor archetype = new TestBaseBladedWeapon().BuildDescriptor();
+
+        Assert.Equal("items/weapons/bladed/base", archetype.Key);
+        Assert.Equal(4, archetype.Components.Count);
+        Assert.True(archetype.ContainsComponent<TestItemIdentity>());
+        Assert.True(archetype.ContainsComponent<TestInventoryItem>());
+        Assert.True(archetype.ContainsComponent<TestWeaponData>());
+        Assert.True(archetype.ContainsComponent<TestBladedData>());
+
+        PrefabDescriptor prefab = new TestIronDagger().BuildDescriptor();
+
+        Assert.Equal("items/weapons/bladed/iron_dagger", prefab.Key);
+        Assert.Equal("items/weapons/bladed/base", prefab.ArchetypeKey);
+        Assert.Equal(typeof(TestBaseBladedWeapon), prefab.ArchetypeShapeType);
+        Assert.Equal(4, prefab.ComponentValues.Count);
+        Assert.True(prefab.TryGetComponentValue(out TestWeaponData weapon));
+        Assert.Equal(3, weapon.DamageMin);
+        Assert.Equal(7, weapon.DamageMax);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => new TestInvalidWeaponPrefab().BuildDescriptor());
+        Assert.True(ex.Message.Contains(nameof(TestWeaponData), StringComparison.Ordinal));
+    }
+
+    private static void ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime()
+    {
+        PrefabDescriptor prefab = new TestRandomResistDagger().BuildDescriptor();
+
+        PrefabComponentValue resistanceValue = prefab.ComponentValues.Single(static value => value.ComponentType == typeof(TestFireResistance));
+        Assert.Equal(PrefabComponentValueKind.PerSpawnFactory, resistanceValue.Kind);
+        Assert.False(prefab.TryGetComponentValue(out TestFireResistance _));
+
+        var firstContext = new PrefabRollContext(new Random(2), spawnSequence: 1, prefab.Key);
+        var secondContext = new PrefabRollContext(new Random(19), spawnSequence: 2, prefab.Key);
+
+        Assert.True(prefab.TryCreateComponentValue(firstContext, out TestFireResistance firstRoll));
+        Assert.True(prefab.TryCreateComponentValue(secondContext, out TestFireResistance secondRoll));
+        Assert.True(firstRoll.Value >= 1 && firstRoll.Value <= 10);
+        Assert.True(secondRoll.Value >= 1 && secondRoll.Value <= 10);
+        Assert.NotEqual(firstRoll, secondRoll);
+
+        Assert.True(prefab.TryGetComponentValue(out TestWeaponData weapon));
+        Assert.Equal(3, weapon.DamageMin);
+    }
+
+    private static void ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => context.Definitions.RegisterPrefab<TestIronDagger>());
+        Assert.True(ex.Message.Contains("unregistered archetype", StringComparison.Ordinal));
+
+        Assert.True(context.Definitions.RegisterArchetype<TestBaseBladedWeapon>());
+        Assert.False(context.Definitions.RegisterArchetype<TestBaseBladedWeapon>());
+        Assert.True(context.Definitions.RegisterPrefab<TestIronDagger>());
+        Assert.False(context.Definitions.RegisterPrefab<TestIronDagger>());
+        Assert.Equal(1, context.RegisteredArchetypes.Count);
+        Assert.Equal(1, context.RegisteredPrefabs.Count);
+        Assert.Equal("items/weapons/bladed/iron_dagger", context.RegisteredPrefabs.Single().Key);
     }
 
     private static void ScriptCompiler_CompilesLoadsCommandAndPanelModule()
@@ -71,6 +139,32 @@ internal static class TestRunner
         var panel = provider.Provider();
         Assert.Equal("script.message", panel.Schema.Metadata.PanelType);
         Assert.Equal(1, panel.Model.Values.Count);
+    }
+
+    private static void ScriptCompiler_CompilesLoadsArchetypeAndPrefabModule()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        UltraSimRuntimeTemplate.Ensure(temp.Layout);
+        WriteScript(temp.Layout, "Items/IronDaggerModule.cs", IronDaggerModuleScript());
+
+        var compiler = new UltraSimScriptCompiler();
+        UltraSimScriptCompileResult compile = compiler.Compile(new UltraSimScriptCompilerOptions(temp.Layout));
+        Assert.Equal(UltraSimScriptCompileResultKind.Compiled, compile.Kind);
+
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        UltraSimScriptLoadResult load = new UltraSimScriptAssemblyHost().LoadConfigureAndInitialize(compile.AssemblyPath!, context);
+        Assert.True(load.Succeeded, string.Join('\n', load.Errors));
+        Assert.Equal(1, load.ModuleCount);
+        Assert.Equal(1, context.RegisteredArchetypes.Count);
+        Assert.Equal(1, context.RegisteredPrefabs.Count);
+
+        PrefabDescriptor prefab = context.RegisteredPrefabs.Single();
+        Assert.Equal("items/weapons/bladed/iron_dagger", prefab.Key);
+        Assert.Equal("items/weapons/bladed/base", prefab.ArchetypeKey);
+        PrefabComponentValue weapon = prefab.ComponentValues.Single(static value => value.ComponentType.Name == "ScriptWeaponData");
+        object weaponValue = weapon.CreateValue(new PrefabRollContext(new Random(1), prefabKey: prefab.Key));
+        Assert.Equal(3, (int)weapon.ComponentType.GetProperty("DamageMin")!.GetValue(weaponValue)!);
+        Assert.Equal(7, (int)weapon.ComponentType.GetProperty("DamageMax")!.GetValue(weaponValue)!);
     }
 
     private static void ScriptCompiler_UsesCacheOnCleanSecondCompile()
@@ -264,6 +358,72 @@ internal static class TestRunner
         }
         """;
 
+    private static string IronDaggerModuleScript() =>
+        """
+        using UltraSim.ECS;
+        using UltraSim.Server.Scripting;
+
+        public readonly record struct ScriptItemIdentity(int DefinitionId) : IComponent<ScriptItemIdentity>;
+        public readonly record struct ScriptInventoryItem(int Width, int Height, int StackLimit) : IComponent<ScriptInventoryItem>;
+        public readonly record struct ScriptWeaponData(int DamageMin, int DamageMax) : IComponent<ScriptWeaponData>;
+        public readonly record struct ScriptBladedData(int BleedChance) : IComponent<ScriptBladedData>;
+
+        public class ScriptBaseItem : ArchetypeShape
+        {
+            public override string Key => "items/base";
+
+            protected override void Configure(ArchetypeBuilder builder)
+            {
+                builder.AddComponent<ScriptItemIdentity>();
+                builder.AddComponent<ScriptInventoryItem>();
+            }
+        }
+
+        public class ScriptBaseWeapon : ScriptBaseItem
+        {
+            public override string Key => "items/weapons/base";
+
+            protected override void Configure(ArchetypeBuilder builder)
+            {
+                base.Configure(builder);
+                builder.AddComponent<ScriptWeaponData>();
+            }
+        }
+
+        public class ScriptBaseBladedWeapon : ScriptBaseWeapon
+        {
+            public override string Key => "items/weapons/bladed/base";
+
+            protected override void Configure(ArchetypeBuilder builder)
+            {
+                base.Configure(builder);
+                builder.AddComponent<ScriptBladedData>();
+            }
+        }
+
+        public sealed class ScriptIronDagger : PrefabDefinition<ScriptBaseBladedWeapon>
+        {
+            public override string Key => "items/weapons/bladed/iron_dagger";
+
+            protected override void Configure(PrefabBuilder builder)
+            {
+                builder.Set(new ScriptItemIdentity(1001));
+                builder.Set(new ScriptInventoryItem(1, 2, 1));
+                builder.Set(new ScriptWeaponData(3, 7));
+                builder.Set(new ScriptBladedData(12));
+            }
+        }
+
+        public sealed class IronDaggerModule : IUltraSimScriptModule
+        {
+            public void Configure(IUltraSimScriptContext context)
+            {
+                context.Definitions.RegisterArchetype<ScriptBaseBladedWeapon>();
+                context.Definitions.RegisterPrefab<ScriptIronDagger>();
+            }
+        }
+        """;
+
     private static string WriteScript(UltraSimRuntimeRootLayout layout, string relativePath, string source)
     {
         string path = Path.Combine(layout.ScriptsPath, relativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -317,6 +477,93 @@ internal sealed class TempRuntimeRoot : IDisposable
     }
 }
 
+internal readonly record struct TestItemIdentity(int DefinitionId) : IComponent<TestItemIdentity>;
+internal readonly record struct TestInventoryItem(int Width, int Height, int StackLimit) : IComponent<TestInventoryItem>;
+internal readonly record struct TestWeaponData(int DamageMin, int DamageMax) : IComponent<TestWeaponData>;
+internal readonly record struct TestBladedData(int BleedChance) : IComponent<TestBladedData>;
+internal readonly record struct TestFireResistance(int Value) : IComponent<TestFireResistance>;
+
+internal class TestBaseItem : ArchetypeShape
+{
+    public override string Key => "items/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        builder.AddComponent<TestItemIdentity>();
+        builder.AddComponent<TestInventoryItem>();
+    }
+}
+
+internal class TestBaseWeapon : TestBaseItem
+{
+    public override string Key => "items/weapons/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<TestWeaponData>();
+    }
+}
+
+internal class TestEffectBladedWeapon : TestBaseBladedWeapon
+{
+    public override string Key => "items/weapons/bladed/effect";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<TestFireResistance>();
+    }
+}
+
+internal class TestBaseBladedWeapon : TestBaseWeapon
+{
+    public override string Key => "items/weapons/bladed/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<TestBladedData>();
+    }
+}
+
+internal sealed class TestIronDagger : PrefabDefinition<TestBaseBladedWeapon>
+{
+    public override string Key => "items/weapons/bladed/iron_dagger";
+
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new TestItemIdentity(1001));
+        builder.Set(new TestInventoryItem(1, 2, 1));
+        builder.Set(new TestWeaponData(3, 7));
+        builder.Set(new TestBladedData(12));
+    }
+}
+
+internal sealed class TestInvalidWeaponPrefab : PrefabDefinition<TestBaseItem>
+{
+    public override string Key => "items/invalid_weapon";
+
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new TestWeaponData(1, 2));
+    }
+}
+
+internal sealed class TestRandomResistDagger : PrefabDefinition<TestEffectBladedWeapon>
+{
+    public override string Key => "items/weapons/bladed/random_resist_dagger";
+
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new TestItemIdentity(1002));
+        builder.Set(new TestInventoryItem(1, 2, 1));
+        builder.Set(new TestWeaponData(3, 7));
+        builder.Set(new TestBladedData(12));
+        builder.SetRandom(random => new TestFireResistance(random.Next(1, 11)));
+    }
+}
+
 internal static class Assert
 {
     public static void True(bool condition, string? message = null)
@@ -357,5 +604,26 @@ internal static class Assert
     {
         if (!values.Any(predicate))
             throw new InvalidOperationException("Expected matching item.");
+    }
+
+    public static void False(bool condition)
+    {
+        if (condition)
+            throw new InvalidOperationException("Expected condition to be false.");
+    }
+
+    public static TException Throws<TException>(Action action)
+        where TException : Exception
+    {
+        try
+        {
+            action();
+        }
+        catch (TException ex)
+        {
+            return ex;
+        }
+
+        throw new InvalidOperationException($"Expected exception of type {typeof(TException).Name}.");
     }
 }

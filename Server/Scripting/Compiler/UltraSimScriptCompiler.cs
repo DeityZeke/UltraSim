@@ -189,6 +189,7 @@ public sealed class UltraSimScriptCompiler
         AddAssembly(paths, typeof(Enumerable).Assembly);
         AddAssembly(paths, typeof(IUltraSimScriptModule).Assembly);
         AddAssembly(paths, typeof(ServerCommandRegistry).Assembly);
+        AddAssembly(paths, typeof(UltraSim.ECS.IComponent<>).Assembly);
         AddAssembly(paths, typeof(UiPanelBuilder).Assembly);
 
         foreach (string path in paths)

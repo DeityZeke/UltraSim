@@ -1,4 +1,5 @@
 using UltraSim.ECS.Benchmarks.Core;
+using UltraSim.ECS;
 using UltraSim.Server.Scripting;
 
 string outputPath = Path.Combine("_Benchmarks", "results", "server-scripting-benchmarks.json");
@@ -45,6 +46,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios(ScriptBenchmarkFixture cac
         IterationCount = 5,
         Execute = () => RunCacheHit(cacheFixture, 100),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ScriptDefinitions_BuildPrefabDescriptor_1000",
+        Category = "Definitions",
+        Comparable = false,
+        Scale = 1000,
+        WarmupCount = 2,
+        IterationCount = 5,
+        Execute = () => RunBuildPrefabDescriptor(1000),
+    };
 }
 
 static ScenarioMeasurement RunCompileOneModule()
@@ -70,6 +82,18 @@ static ScenarioMeasurement RunCacheHit(ScriptBenchmarkFixture fixture, int itera
             throw new InvalidOperationException($"Expected cache hit, got {result.Kind}.");
 
         checksum += result.CacheKey.Length + result.SourceCount;
+    }
+
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunBuildPrefabDescriptor(int iterations)
+{
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        PrefabDescriptor descriptor = new BenchmarkIronDagger().BuildDescriptor();
+        checksum += descriptor.ComponentValues.Count + descriptor.ArchetypeKey.Length + descriptor.Key.Length;
     }
 
     return new ScenarioMeasurement(iterations, checksum);
@@ -123,5 +147,56 @@ internal sealed class ScriptBenchmarkFixture : IDisposable
         catch
         {
         }
+    }
+}
+
+internal readonly record struct BenchmarkItemIdentity(int DefinitionId) : IComponent<BenchmarkItemIdentity>;
+internal readonly record struct BenchmarkInventoryItem(int Width, int Height, int StackLimit) : IComponent<BenchmarkInventoryItem>;
+internal readonly record struct BenchmarkWeaponData(int DamageMin, int DamageMax) : IComponent<BenchmarkWeaponData>;
+internal readonly record struct BenchmarkBladedData(int BleedChance) : IComponent<BenchmarkBladedData>;
+
+internal class BenchmarkBaseItem : ArchetypeShape
+{
+    public override string Key => "items/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        builder.AddComponent<BenchmarkItemIdentity>();
+        builder.AddComponent<BenchmarkInventoryItem>();
+    }
+}
+
+internal class BenchmarkBaseWeapon : BenchmarkBaseItem
+{
+    public override string Key => "items/weapons/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<BenchmarkWeaponData>();
+    }
+}
+
+internal class BenchmarkBaseBladedWeapon : BenchmarkBaseWeapon
+{
+    public override string Key => "items/weapons/bladed/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<BenchmarkBladedData>();
+    }
+}
+
+internal sealed class BenchmarkIronDagger : PrefabDefinition<BenchmarkBaseBladedWeapon>
+{
+    public override string Key => "items/weapons/bladed/iron_dagger";
+
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new BenchmarkItemIdentity(1001));
+        builder.Set(new BenchmarkInventoryItem(1, 2, 1));
+        builder.Set(new BenchmarkWeaponData(3, 7));
+        builder.Set(new BenchmarkBladedData(12));
     }
 }
