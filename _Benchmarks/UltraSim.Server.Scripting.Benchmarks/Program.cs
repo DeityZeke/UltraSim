@@ -57,6 +57,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios(ScriptBenchmarkFixture cac
         IterationCount = 5,
         Execute = () => RunBuildPrefabDescriptor(1000),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ScriptDefinitions_BuildEcsPrefabCatalog_1000Prefabs",
+        Category = "Definitions",
+        Comparable = false,
+        Scale = 1000,
+        WarmupCount = 2,
+        IterationCount = 5,
+        Execute = () => RunBuildEcsPrefabCatalog(1000),
+    };
 }
 
 static ScenarioMeasurement RunCompileOneModule()
@@ -96,6 +107,29 @@ static ScenarioMeasurement RunBuildPrefabDescriptor(int iterations)
         checksum += descriptor.ComponentValues.Count + descriptor.ArchetypeKey.Length + descriptor.Key.Length;
     }
 
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunBuildEcsPrefabCatalog(int iterations)
+{
+    ArchetypeDescriptor[] archetypes = [new BenchmarkBaseBladedWeapon().BuildDescriptor()];
+    PrefabDescriptor basePrefab = new BenchmarkIronDagger().BuildDescriptor();
+    var prefabs = new PrefabDescriptor[iterations];
+    for (int i = 0; i < iterations; i++)
+    {
+        prefabs[i] = basePrefab with
+        {
+            Key = $"items/weapons/bladed/iron_dagger_{i}",
+        };
+    }
+
+    var schemaBuilder = new EcsSchemaBuilder();
+    ScriptPrefabCatalogBuildResult result = ScriptPrefabCatalogBuilder.Build(
+        archetypes,
+        prefabs,
+        schemaBuilder,
+        new ScriptPrefabCatalogBuildOptions(new Random(7)));
+    long checksum = result.Catalog.Count + result.ArchetypeSignatures.Count;
     return new ScenarioMeasurement(iterations, checksum);
 }
 

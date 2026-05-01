@@ -390,7 +390,14 @@ The first implementation should keep this as a descriptor facade before spawning
 - prefab registration validates that the referenced archetype key was registered first.
 - the facade may expose stable ECS contracts such as `IComponent<T>`, but not `World`, networking, persistence, or direct runtime mutation.
 
-The later catalog/spawn slice should convert those descriptors into the low-level ECS `PrefabCatalog` / `PrefabDefinition` path and prove `/spawn <prefab-key>` creates a real entity.
+The catalog bridge converts those descriptors into the low-level ECS `PrefabCatalog` / `PrefabDefinition` path:
+
+- register every archetype component type into an `EcsSchemaBuilder`
+- build `ArchetypeSignature` values by archetype key
+- translate each `PrefabDescriptor` into an ECS `PrefabDefinition`
+- evaluate constant and per-spawn component values from a `PrefabRollContext` when the ECS prefab applies to a new entity
+
+The next runtime-facing slice should wire that catalog into the movement/server world and prove `/spawn <prefab-key>` creates a real entity.
 
 ## Live Data Prefab Authoring
 

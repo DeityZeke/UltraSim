@@ -12,6 +12,8 @@ internal static class TestRunner
         Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
+        Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
+        Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
         Run(nameof(ScriptCompiler_CompilesLoadsArchetypeAndPrefabModule), ScriptCompiler_CompilesLoadsArchetypeAndPrefabModule);
         Run(nameof(ScriptCompiler_UsesCacheOnCleanSecondCompile), ScriptCompiler_UsesCacheOnCleanSecondCompile);
@@ -32,8 +34,20 @@ internal static class TestRunner
         UltraSimRuntimeTemplate.Ensure(temp.Layout);
 
         Assert.True(Directory.Exists(temp.Layout.ScriptsPath));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Accounts")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Commands")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "ContextMenus")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Customs")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Engines")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Mobiles")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Items")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Misc")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Properties")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Regions")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Skills")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Spells")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Targets")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "UI")));
         Assert.True(Directory.Exists(temp.Layout.DataPrefabsPath));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.DataPrefabsPath, "items")));
         Assert.True(Directory.Exists(temp.Layout.ScriptAssemblyCachePath));
@@ -104,6 +118,59 @@ internal static class TestRunner
         Assert.Equal(1, context.RegisteredArchetypes.Count);
         Assert.Equal(1, context.RegisteredPrefabs.Count);
         Assert.Equal("items/weapons/bladed/iron_dagger", context.RegisteredPrefabs.Single().Key);
+    }
+
+    private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.Definitions.RegisterArchetype<TestBaseBladedWeapon>());
+        Assert.True(context.Definitions.RegisterPrefab<TestIronDagger>());
+
+        var schemaBuilder = new EcsSchemaBuilder();
+        ScriptPrefabCatalogBuildResult result = ScriptPrefabCatalogBuilder.Build(
+            context.RegisteredArchetypes,
+            context.RegisteredPrefabs,
+            schemaBuilder,
+            new ScriptPrefabCatalogBuildOptions(new Random(7)));
+
+        Assert.Equal(1, result.Catalog.Count);
+        Assert.True(result.Catalog.TryResolvePrefab("items/weapons/bladed/iron_dagger", out UltraSim.ECS.PrefabDefinition prefab));
+        Assert.True(result.ArchetypeSignatures.TryGetValue("items/weapons/bladed/base", out ArchetypeSignature? signature));
+        Assert.Equal(4, signature!.ComponentCount);
+        Assert.Equal(4, prefab.Signature.ComponentCount);
+    }
+
+    private static void ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.Definitions.RegisterArchetype<TestEffectBladedWeapon>());
+        Assert.True(context.Definitions.RegisterPrefab<TestSequencedResistDagger>());
+
+        var schemaBuilder = new EcsSchemaBuilder();
+        ScriptPrefabCatalogBuildResult result = ScriptPrefabCatalogBuilder.Build(
+            context.RegisteredArchetypes,
+            context.RegisteredPrefabs,
+            schemaBuilder,
+            new ScriptPrefabCatalogBuildOptions(new Random(7)));
+        var world = new World(schemaBuilder.Build(), new EcsWorldServices
+        {
+            PrefabResolver = result.Catalog,
+        });
+
+        Assert.True(world.TryCreatePrefab("items/weapons/bladed/sequenced_resist_dagger", out Entity first));
+        Assert.True(world.TryCreatePrefab("items/weapons/bladed/sequenced_resist_dagger", out Entity second));
+
+        Assert.True(world.TryGetComponent(first, out TestWeaponData firstWeapon));
+        Assert.True(world.TryGetComponent(second, out TestWeaponData secondWeapon));
+        Assert.Equal(new TestWeaponData(3, 7), firstWeapon);
+        Assert.Equal(new TestWeaponData(3, 7), secondWeapon);
+
+        Assert.True(world.TryGetComponent(first, out TestFireResistance firstResistance));
+        Assert.True(world.TryGetComponent(second, out TestFireResistance secondResistance));
+        Assert.Equal(new TestFireResistance(1), firstResistance);
+        Assert.Equal(new TestFireResistance(2), secondResistance);
     }
 
     private static void ScriptCompiler_CompilesLoadsCommandAndPanelModule()
@@ -561,6 +628,20 @@ internal sealed class TestRandomResistDagger : PrefabDefinition<TestEffectBladed
         builder.Set(new TestWeaponData(3, 7));
         builder.Set(new TestBladedData(12));
         builder.SetRandom(random => new TestFireResistance(random.Next(1, 11)));
+    }
+}
+
+internal sealed class TestSequencedResistDagger : PrefabDefinition<TestEffectBladedWeapon>
+{
+    public override string Key => "items/weapons/bladed/sequenced_resist_dagger";
+
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new TestItemIdentity(1003));
+        builder.Set(new TestInventoryItem(1, 2, 1));
+        builder.Set(new TestWeaponData(3, 7));
+        builder.Set(new TestBladedData(12));
+        builder.SetPerSpawn(context => new TestFireResistance((int)context.SpawnSequence));
     }
 }
 
