@@ -12,6 +12,7 @@ internal static class TestRunner
         Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
+        Run(nameof(ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically), ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically);
         Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
         Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
@@ -126,6 +127,72 @@ internal static class TestRunner
         Assert.Equal(1, context.RegisteredArchetypes.Count);
         Assert.Equal(1, context.RegisteredPrefabs.Count);
         Assert.Equal("items/weapons/bladed/iron_dagger", context.RegisteredPrefabs.Single().Key);
+    }
+
+    private static void ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically()
+    {
+        var registry = new UltraSimReplaceableProviderRegistry<Func<string>>();
+
+        UltraSimReplaceableProviderSetResult<Func<string>> core = registry.SetDefault(
+            "chat.surface",
+            "core.chat",
+            static () => "core");
+        Assert.True(core.Accepted);
+        Assert.True(registry.TryGetActive("chat.surface", out UltraSimReplaceableProviderRegistration<Func<string>> active));
+        Assert.Equal("core.chat", active.Owner);
+        Assert.Equal("core", active.Provider!());
+
+        UltraSimReplaceableProviderSetResult<Func<string>> rich = registry.Replace(
+            "chat.surface",
+            "packages.chat.rich",
+            static () => "rich",
+            priority: 100);
+        Assert.True(rich.Accepted);
+        Assert.True(registry.TryGetActive("chat.surface", out active));
+        Assert.Equal("packages.chat.rich", active.Owner);
+        Assert.Equal("rich", active.Provider!());
+        Assert.True(registry.TryGetState("chat.surface", out UltraSimReplaceableProviderState<Func<string>>? state));
+        Assert.True(state is not null);
+        Assert.Equal(1, state!.SuppressedRegistrations.Count);
+        Assert.Equal("core.chat", state.SuppressedRegistrations[0].Owner);
+
+        UltraSimReplaceableProviderSetResult<Func<string>> conflict = registry.Replace(
+            "chat.surface",
+            "packages.chat.other",
+            static () => "other",
+            priority: 100);
+        Assert.False(conflict.Accepted);
+        Assert.Equal(UltraSimReplaceableProviderSetStatus.RejectedConflict, conflict.Status);
+        Assert.True(conflict.Error.Contains("packages.chat.rich", StringComparison.Ordinal));
+        Assert.True(registry.TryGetActive("chat.surface", out active));
+        Assert.Equal("packages.chat.rich", active.Owner);
+
+        UltraSimReplaceableProviderSetResult<Func<string>> disable = registry.Disable(
+            "chat.surface",
+            "operator.disable_chat",
+            priority: 1000);
+        Assert.True(disable.Accepted);
+        Assert.False(registry.TryGetActive("chat.surface", out _));
+        Assert.True(registry.TryGetState("chat.surface", out state));
+        Assert.True(state!.IsDisabled);
+        Assert.Equal("operator.disable_chat", state.ActiveRegistration!.Owner);
+
+        Assert.True(registry.RemoveOwner("chat.surface", "operator.disable_chat"));
+        Assert.True(registry.TryGetActive("chat.surface", out active));
+        Assert.Equal("packages.chat.rich", active.Owner);
+
+        Assert.True(registry.RemoveOwner("chat.surface", "packages.chat.rich"));
+        Assert.True(registry.TryGetActive("chat.surface", out active));
+        Assert.Equal("core.chat", active.Owner);
+
+        UltraSimReplaceableProviderSetResult<Func<string>> coreReplacement = registry.SetDefault(
+            "chat.surface",
+            "core.chat",
+            static () => "core_v2");
+        Assert.True(coreReplacement.Accepted);
+        Assert.True(coreReplacement.ReplacedRegistration is not null);
+        Assert.True(registry.TryGetActive("chat.surface", out active));
+        Assert.Equal("core_v2", active.Provider!());
     }
 
     private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()

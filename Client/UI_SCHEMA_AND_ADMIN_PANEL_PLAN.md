@@ -84,11 +84,44 @@ screens rather than server-authored schema panels:
   - installed packs, server-required packs, enable/disable order, cache status, and clear-cache tools
 - `ChatFeedInput`
   - local persistent chat feed/input, not a server-driven schema panel for now
+  - should be registered as a replaceable client surface/provider, not hardwired forever
+  - core ships the fallback feed/input; a richer server package can replace the provider with a schema-backed or hybrid chat package
 
 The current placeholder `ClientAppShell` can be evolved toward this v2 screen
 set. It does not need to copy v2 scene files directly, but it should preserve
 the stronger separation v2 had between start, multiplayer/server browser,
 settings, pause, message, and session-status screens.
+
+### Replaceable Core Surfaces
+
+Some built-in UI surfaces should be default implementations, not permanent final
+implementations. Chat is the first expected example:
+
+```text
+chat.surface = CoreChatFeedInput
+scripts/Packages/Chat compiles
+chat.surface = RichChatPackageSurface
+```
+
+This must behave like assignment or priority-based replacement, not event
+subscription. A package should not `+=` another chat window and accidentally
+show both the core chat panel and the rich package panel. The runtime registry
+should expose one active provider per replaceable surface key, with origin and
+priority/override diagnostics so admins can see which package currently owns
+`chat.surface`.
+
+Replacement should be reversible. If the rich chat package is removed, disabled,
+or fails to load, the client falls back to the core chat feed/input unless the
+operator explicitly disables chat UI. Chat visibility should be controlled by
+settings such as:
+
+- chat window/feed enabled
+- overhead/world chat enabled
+- channel tabs enabled
+- rich chat package enabled
+
+This keeps the compiled core usable by itself while allowing a future
+Knives-style chat package to supersede it cleanly.
 
 ### Standard Server-Driven Helpers
 

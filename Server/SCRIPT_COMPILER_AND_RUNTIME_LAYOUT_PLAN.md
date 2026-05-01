@@ -96,6 +96,39 @@ Top-level folders remain useful for loose content and small standalone scripts. 
 
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 
+### Package Replacement Hooks
+
+Script packages should be able to replace selected core providers through an
+explicit single-owner registry. This is especially important for systems where
+the compiled client/server core ships a small fallback but a package may provide
+the real shard-specific experience.
+
+Example:
+
+```text
+core startup:
+  chat.surface = CoreChatFeedInput
+
+script configure:
+  chat.surface = RichChatPackageSurface
+```
+
+This is replacement, not accumulation. Registries for replaceable surfaces,
+commands, panel providers, and system handlers should make the intended policy
+explicit:
+
+- `Set` or `Replace` when there can be only one active handler
+- `Add` only for true fan-out/event cases
+- duplicate owner conflicts fail loudly unless an explicit priority/override
+  rule selects the winner
+- diagnostics report the active owner and any suppressed/replaced owners
+
+A future `scripts/Packages/Chat` package should use this path to supersede the
+core chat surface without causing both chat panels to open. Removing or disabling
+that package should either fall back to the core provider or honor an explicit
+operator setting that disables chat UI entirely. Overhead/world chat and chat
+window/feed visibility should be separate settings.
+
 ## Exported Runtime Root
 
 The exported server folder is the runtime root. Headless, console, and Godot server shells should resolve relative paths from the same root.
