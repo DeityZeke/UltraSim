@@ -68,6 +68,17 @@ static IEnumerable<BenchmarkScenario> CreateScenarios(ScriptBenchmarkFixture cac
         IterationCount = 5,
         Execute = () => RunBuildEcsPrefabCatalog(1000),
     };
+
+    yield return new BenchmarkScenario
+    {
+        Name = "ScriptDefinitions_WorldCreatePrefab_1000",
+        Category = "Spawn",
+        Comparable = false,
+        Scale = 1000,
+        WarmupCount = 2,
+        IterationCount = 5,
+        Execute = () => RunCreatePrefabEntities(1000),
+    };
 }
 
 static ScenarioMeasurement RunCompileOneModule()
@@ -130,6 +141,32 @@ static ScenarioMeasurement RunBuildEcsPrefabCatalog(int iterations)
         schemaBuilder,
         new ScriptPrefabCatalogBuildOptions(new Random(7)));
     long checksum = result.Catalog.Count + result.ArchetypeSignatures.Count;
+    return new ScenarioMeasurement(iterations, checksum);
+}
+
+static ScenarioMeasurement RunCreatePrefabEntities(int iterations)
+{
+    ArchetypeDescriptor[] archetypes = [new BenchmarkBaseBladedWeapon().BuildDescriptor()];
+    PrefabDescriptor prefab = new BenchmarkIronDagger().BuildDescriptor();
+    var schemaBuilder = new EcsSchemaBuilder();
+    ScriptPrefabCatalogBuildResult result = ScriptPrefabCatalogBuilder.Build(
+        archetypes,
+        [prefab],
+        schemaBuilder,
+        new ScriptPrefabCatalogBuildOptions(new Random(7)));
+    World world = new(
+        schemaBuilder.Build(),
+        new EcsWorldServices { PrefabResolver = result.Catalog });
+
+    long checksum = 0;
+    for (int i = 0; i < iterations; i++)
+    {
+        Entity entity = world.CreatePrefab(prefab.Key);
+        checksum += (long)entity.Packed;
+        if (world.TryGetComponent(entity, out BenchmarkWeaponData weapon))
+            checksum += weapon.DamageMin + weapon.DamageMax;
+    }
+
     return new ScenarioMeasurement(iterations, checksum);
 }
 

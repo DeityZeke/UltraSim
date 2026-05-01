@@ -357,8 +357,6 @@ Prefab authoring should bind to an archetype shape and set concrete defaults:
 ```csharp
 public sealed class IronDagger : PrefabDefinition<BaseWeapon>
 {
-    public override string Key => "items/weapons/blades/iron_dagger";
-
     protected override void Configure(PrefabBuilder builder)
     {
         builder.Set(new ItemIdentity("iron_dagger", "Iron Dagger"));
@@ -368,6 +366,19 @@ public sealed class IronDagger : PrefabDefinition<BaseWeapon>
         builder.SetRandom(random => new FireResistance(random.Next(1, 11)));
     }
 }
+```
+
+Prefab keys default to the prefab type's short class name, so the example above registers as `IronDagger` and can be spawned with `/spawn IronDagger`. A script may still override `Key` when it wants a path-like stable key such as `items/weapons/blades/iron_dagger`.
+
+Each prefab descriptor also carries a source name. For script-authored prefabs this is normally the CLR full type name, such as `Scripts.Items.Weapons.IronDagger`; for future data-authored prefabs it may be a URI-like source such as `data://prefabs/items/custom_dagger.json`. The key is the human/operator lookup id. The source name is for diagnostics, provenance, and duplicate-conflict messages.
+
+Duplicate prefab keys are startup/configuration errors, not runtime ambiguity. Registration must fail loudly and list both source names:
+
+```text
+Duplicate prefab key 'IronDagger':
+- Scripts.Items.Weapons.IronDagger
+- Customs.MyShard.Weapons.IronDagger
+Rename one prefab or override Key.
 ```
 
 Prefab defaults may be constants or per-spawn factories. Randomized values must roll when an entity is spawned, not when the script registers the prefab. For example, `FireResistance = Random(1, 10)` should store a per-spawn value factory in the prefab descriptor so each spawned dagger can receive a different value.
@@ -387,7 +398,7 @@ The first implementation should keep this as a descriptor facade before spawning
 - `ArchetypeShape` and `ArchetypeBuilder` build `ArchetypeDescriptor` records from component types.
 - `PrefabDefinition<TArchetype>` and `PrefabBuilder` build `PrefabDescriptor` records from a registered archetype shape and constant or per-spawn component defaults.
 - `IUltraSimScriptContext.Definitions` owns archetype and prefab registration.
-- prefab registration validates that the referenced archetype key was registered first.
+- prefab registration validates that the referenced archetype key was registered first and that the prefab key is globally unique.
 - the facade may expose stable ECS contracts such as `IComponent<T>`, but not `World`, networking, persistence, or direct runtime mutation.
 
 The catalog bridge converts those descriptors into the low-level ECS `PrefabCatalog` / `PrefabDefinition` path:
@@ -397,7 +408,7 @@ The catalog bridge converts those descriptors into the low-level ECS `PrefabCata
 - translate each `PrefabDescriptor` into an ECS `PrefabDefinition`
 - evaluate constant and per-spawn component values from a `PrefabRollContext` when the ECS prefab applies to a new entity
 
-The next runtime-facing slice should wire that catalog into the movement/server world and prove `/spawn <prefab-key>` creates a real entity.
+The movement/server world should build this catalog during startup when script definitions are present, attach it as the world's prefab resolver, and expose a narrow operator proof command such as `/spawn <prefab-key>`. That command should create a real ECS entity through `World.TryCreatePrefab`, not a script-side object, and tests should verify constant component values plus per-spawn factory values land on the entity.
 
 ## Live Data Prefab Authoring
 

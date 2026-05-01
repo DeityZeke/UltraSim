@@ -71,12 +71,17 @@ internal static class TestRunner
         PrefabDescriptor prefab = new TestIronDagger().BuildDescriptor();
 
         Assert.Equal("items/weapons/bladed/iron_dagger", prefab.Key);
+        Assert.Equal(typeof(TestIronDagger).FullName, prefab.SourceName);
         Assert.Equal("items/weapons/bladed/base", prefab.ArchetypeKey);
         Assert.Equal(typeof(TestBaseBladedWeapon), prefab.ArchetypeShapeType);
         Assert.Equal(4, prefab.ComponentValues.Count);
         Assert.True(prefab.TryGetComponentValue(out TestWeaponData weapon));
         Assert.Equal(3, weapon.DamageMin);
         Assert.Equal(7, weapon.DamageMax);
+
+        PrefabDescriptor defaultKeyPrefab = new TestDefaultKeyDagger().BuildDescriptor();
+        Assert.Equal(nameof(TestDefaultKeyDagger), defaultKeyPrefab.Key);
+        Assert.Equal(typeof(TestDefaultKeyDagger).FullName, defaultKeyPrefab.SourceName);
 
         InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() => new TestInvalidWeaponPrefab().BuildDescriptor());
         Assert.True(ex.Message.Contains(nameof(TestWeaponData), StringComparison.Ordinal));
@@ -114,7 +119,10 @@ internal static class TestRunner
         Assert.True(context.Definitions.RegisterArchetype<TestBaseBladedWeapon>());
         Assert.False(context.Definitions.RegisterArchetype<TestBaseBladedWeapon>());
         Assert.True(context.Definitions.RegisterPrefab<TestIronDagger>());
-        Assert.False(context.Definitions.RegisterPrefab<TestIronDagger>());
+        InvalidOperationException duplicate = Assert.Throws<InvalidOperationException>(() => context.Definitions.RegisterPrefab<TestDuplicateIronDagger>());
+        Assert.True(duplicate.Message.Contains("Duplicate prefab key 'items/weapons/bladed/iron_dagger'", StringComparison.Ordinal));
+        Assert.True(duplicate.Message.Contains(typeof(TestIronDagger).FullName!, StringComparison.Ordinal));
+        Assert.True(duplicate.Message.Contains(typeof(TestDuplicateIronDagger).FullName!, StringComparison.Ordinal));
         Assert.Equal(1, context.RegisteredArchetypes.Count);
         Assert.Equal(1, context.RegisteredPrefabs.Count);
         Assert.Equal("items/weapons/bladed/iron_dagger", context.RegisteredPrefabs.Single().Key);
@@ -604,6 +612,30 @@ internal sealed class TestIronDagger : PrefabDefinition<TestBaseBladedWeapon>
         builder.Set(new TestInventoryItem(1, 2, 1));
         builder.Set(new TestWeaponData(3, 7));
         builder.Set(new TestBladedData(12));
+    }
+}
+
+internal sealed class TestDefaultKeyDagger : PrefabDefinition<TestBaseBladedWeapon>
+{
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new TestItemIdentity(1005));
+        builder.Set(new TestInventoryItem(1, 2, 1));
+        builder.Set(new TestWeaponData(4, 8));
+        builder.Set(new TestBladedData(10));
+    }
+}
+
+internal sealed class TestDuplicateIronDagger : PrefabDefinition<TestBaseBladedWeapon>
+{
+    public override string Key => "items/weapons/bladed/iron_dagger";
+
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new TestItemIdentity(1006));
+        builder.Set(new TestInventoryItem(1, 2, 1));
+        builder.Set(new TestWeaponData(4, 8));
+        builder.Set(new TestBladedData(10));
     }
 }
 

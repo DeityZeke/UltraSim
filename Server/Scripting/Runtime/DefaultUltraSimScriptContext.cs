@@ -121,6 +121,8 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
         ArgumentNullException.ThrowIfNull(descriptor);
         ScriptDefinitionValidation.ValidateStableKey(descriptor.Key, nameof(descriptor.Key));
         ScriptDefinitionValidation.ValidateStableKey(descriptor.ArchetypeKey, nameof(descriptor.ArchetypeKey));
+        if (string.IsNullOrWhiteSpace(descriptor.SourceName))
+            throw new ArgumentException("Prefab source name cannot be empty.", nameof(descriptor));
         string key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
         string archetypeKey = ScriptDefinitionValidation.NormalizeKey(descriptor.ArchetypeKey);
         if (!_archetypes.ContainsKey(archetypeKey))
@@ -129,10 +131,13 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
                 $"Prefab '{key}' references unregistered archetype '{archetypeKey}'. Register the archetype before registering the prefab.");
         }
 
-        if (_prefabs.ContainsKey(key))
-            return false;
+        if (_prefabs.TryGetValue(key, out PrefabDescriptor? existing))
+        {
+            throw new InvalidOperationException(
+                $"Duplicate prefab key '{key}':{Environment.NewLine}- {existing.SourceName}{Environment.NewLine}- {descriptor.SourceName}{Environment.NewLine}Rename one prefab or override Key.");
+        }
 
-        _prefabs.Add(key, descriptor with { Key = key, ArchetypeKey = archetypeKey });
+        _prefabs.Add(key, descriptor with { Key = key, SourceName = descriptor.SourceName.Trim(), ArchetypeKey = archetypeKey });
         return true;
     }
 

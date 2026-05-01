@@ -1,25 +1,33 @@
+using UltraSim.ECS;
 using UltraSim.Network;
 using UltraSim.Server.Scripting;
 using UltraSim.UI;
 
 namespace UltraSim.Server.Network;
 
+public delegate bool ServerScriptPrefabSpawner(string prefabKey, out Entity entity);
+
 public sealed class ServerScriptRuntimeBinding
 {
     private readonly DefaultUltraSimScriptContext _scriptContext;
     private readonly ServerUiService _ui;
+    private readonly ServerScriptPrefabSpawner? _spawnPrefab;
     private long _nextScriptPanelSequence;
 
     public ServerScriptRuntimeBinding(
         DefaultUltraSimScriptContext scriptContext,
         ServerCommandRegistry commands,
-        ServerUiService ui)
+        ServerUiService ui,
+        ServerScriptPrefabSpawner? spawnPrefab = null)
     {
         _scriptContext = scriptContext ?? throw new ArgumentNullException(nameof(scriptContext));
         ArgumentNullException.ThrowIfNull(commands);
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+        _spawnPrefab = spawnPrefab;
 
         RegisterPanelOpenCommand(commands);
+        if (_spawnPrefab is not null)
+            RegisterSpawnCommand(commands);
         _scriptContext.RegisterCommandsInto(commands);
     }
 
@@ -74,6 +82,44 @@ public sealed class ServerScriptRuntimeBinding
             },
             prefix: "/",
             helpText: "Open a script-registered UI panel.");
+    }
+
+    private void RegisterSpawnCommand(ServerCommandRegistry commands)
+    {
+        commands.Register(
+            "spawn",
+            (in ServerCommandRequest request, ServerTextCommandInvocation invocation) =>
+            {
+                if (invocation.Arguments.Count == 0)
+                {
+                    request.Reply?.Invoke("Usage: /spawn <prefab-key>");
+                    return;
+                }
+
+                string prefabKey = invocation.Arguments[0].Trim();
+                if (prefabKey.Length == 0)
+                {
+                    request.Reply?.Invoke("Usage: /spawn <prefab-key>");
+                    return;
+                }
+
+                try
+                {
+                    if (_spawnPrefab is null || !_spawnPrefab(prefabKey, out Entity entity))
+                    {
+                        request.Reply?.Invoke($"Unknown or unspawnable prefab '{prefabKey}'.");
+                        return;
+                    }
+
+                    request.Reply?.Invoke($"Spawned prefab '{prefabKey}' as {entity}.");
+                }
+                catch (Exception ex)
+                {
+                    request.Reply?.Invoke($"Spawn failed for prefab '{prefabKey}': {ex.Message}");
+                }
+            },
+            prefix: "/",
+            helpText: "Spawn a registered script prefab.");
     }
 
     private static string SanitizeStableSegment(string value)

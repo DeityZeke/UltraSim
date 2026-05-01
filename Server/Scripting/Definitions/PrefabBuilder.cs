@@ -5,19 +5,23 @@ namespace UltraSim.Server.Scripting;
 public sealed class PrefabBuilder
 {
     private readonly string _key;
+    private readonly string _sourceName;
     private readonly ArchetypeDescriptor _archetype;
     private readonly Type _archetypeShapeType;
     private readonly Dictionary<Type, PrefabComponentValue> _values = new();
 
-    public PrefabBuilder(string key, ArchetypeDescriptor archetype, Type archetypeShapeType)
+    public PrefabBuilder(string key, string sourceName, ArchetypeDescriptor archetype, Type archetypeShapeType)
     {
         ScriptDefinitionValidation.ValidateStableKey(key, nameof(key));
+        if (string.IsNullOrWhiteSpace(sourceName))
+            throw new ArgumentException("sourceName cannot be empty.", nameof(sourceName));
         ArgumentNullException.ThrowIfNull(archetype);
         ArgumentNullException.ThrowIfNull(archetypeShapeType);
         if (!typeof(ArchetypeShape).IsAssignableFrom(archetypeShapeType))
             throw new ArgumentException("Archetype shape type must derive from ArchetypeShape.", nameof(archetypeShapeType));
 
         _key = ScriptDefinitionValidation.NormalizeKey(key);
+        _sourceName = sourceName.Trim();
         _archetype = archetype;
         _archetypeShapeType = archetypeShapeType;
     }
@@ -48,6 +52,7 @@ public sealed class PrefabBuilder
     {
         return new PrefabDescriptor(
             _key,
+            _sourceName,
             _archetype.Key,
             _archetypeShapeType,
             _values.Values

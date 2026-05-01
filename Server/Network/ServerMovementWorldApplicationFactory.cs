@@ -2,6 +2,7 @@ using System.Net;
 using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Network;
 
@@ -46,7 +47,21 @@ public static class ServerMovementWorldApplicationFactory
             _options = options;
             var builder = new EcsSchemaBuilder();
             ComponentId movementId = builder.RegisterComponent<ServerMovementBody>();
-            _world = new World(builder.Build());
+            PrefabCatalog? scriptPrefabCatalog = null;
+            DefaultUltraSimScriptContext? scriptContext = options.ScriptContext;
+            if (scriptContext is not null && scriptContext.RegisteredPrefabs.Count > 0)
+            {
+                ScriptPrefabCatalogBuildResult catalogResult = ScriptPrefabCatalogBuilder.Build(
+                    scriptContext.RegisteredArchetypes,
+                    scriptContext.RegisteredPrefabs,
+                    builder);
+                scriptPrefabCatalog = catalogResult.Catalog;
+            }
+
+            var services = scriptPrefabCatalog is null
+                ? null
+                : new EcsWorldServices { PrefabResolver = scriptPrefabCatalog };
+            _world = new World(builder.Build(), services);
             _playerSignature = new ArchetypeSignature([movementId]);
         }
 

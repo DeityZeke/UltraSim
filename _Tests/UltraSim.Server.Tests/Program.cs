@@ -84,6 +84,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
         Run(nameof(ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession), ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession);
         Run(nameof(ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders), ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders);
+        Run(nameof(ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities), ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
@@ -2896,6 +2897,126 @@ internal static class TestRunner
         Assert.Equal(1L, serverHost.Ui.PublishedPanelOpens);
     }
 
+    private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()
+    {
+        var connectionId = new ConnectionId(1);
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+
+        var runtimeRoot = new UltraSimRuntimeRootLayout(
+            Path.Combine(Path.GetTempPath(), "ultrasim-script-spawn-test"),
+            "scripts",
+            "data",
+            "cache",
+            "cache/scripts",
+            "saves",
+            "backups",
+            "docs");
+        var scriptContext = new DefaultUltraSimScriptContext(runtimeRoot);
+        Assert.True(scriptContext.Definitions.RegisterArchetype<ServerTestScriptEffectWeapon>());
+        Assert.True(scriptContext.Definitions.RegisterPrefab<ServerTestScriptIronDagger>());
+        ScriptPrefabCatalogBuildResult catalogResult = ScriptPrefabCatalogBuilder.Build(
+            scriptContext.RegisteredArchetypes,
+            scriptContext.RegisteredPrefabs,
+            builder);
+
+        World world = new(
+            builder.Build(),
+            new EcsWorldServices { PrefabResolver = catalogResult.Catalog });
+        ArchetypeSignature signature = new([movementId]);
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy,
+            scriptContext: scriptContext);
+        ChatMessageEventPacket? chatMessage = null;
+        var chatEvents = new ClientChatEventBridge(packet => chatMessage = packet);
+        var observerState = new ClientObserverStateBridge(connectionId);
+        var clientHost = new ClientMovementSessionHost(
+            pair.Client,
+            connectionId,
+            new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+            observerState: observerState,
+            chatEvents: chatEvents,
+            maxPollBatch: 8);
+
+        serverHost.Start();
+        clientHost.Start();
+        clientHost.BeginHandshake(100);
+
+        for (int step = 0; step < 10; step++)
+        {
+            serverHost.Pump(101 + step * 2, 0.016f, (uint)(step + 1));
+            clientHost.Pump(102 + step * 2);
+        }
+
+        Assert.True(clientHost.IsReady);
+        Assert.NotNull(serverHost.ScriptBinding);
+
+        chatMessage = null;
+        Assert.True(clientHost.TrySendChat("/spawn ServerTestScriptIronDagger"));
+        serverHost.Pump(240, 0.016f, 24);
+        clientHost.Pump(241);
+        Assert.True(chatMessage.HasValue);
+        Assert.Contains("Spawned prefab 'ServerTestScriptIronDagger' as Entity(", chatMessage.GetValueOrDefault().Text);
+
+        chatMessage = null;
+        Assert.True(clientHost.TrySendChat("/spawn ServerTestScriptIronDagger"));
+        serverHost.Pump(260, 0.016f, 25);
+        clientHost.Pump(261);
+        Assert.True(chatMessage.HasValue);
+        Assert.Contains("Spawned prefab 'ServerTestScriptIronDagger' as Entity(", chatMessage.GetValueOrDefault().Text);
+        Assert.Equal(2L, serverHost.Chat.CommandDispatches);
+
+        var spawned = new List<(Entity Entity, ServerTestScriptItemIdentity Identity, ServerTestScriptWeaponData Weapon, ServerTestScriptFireResistance Resistance)>();
+        foreach (World.QueryChunk<ServerTestScriptItemIdentity, ServerTestScriptWeaponData, ServerTestScriptFireResistance> chunk
+                 in world.QueryChunks<ServerTestScriptItemIdentity, ServerTestScriptWeaponData, ServerTestScriptFireResistance>())
+        {
+            for (int i = 0; i < chunk.Entities.Length; i++)
+                spawned.Add((chunk.Entities[i], chunk.Component1[i], chunk.Component2[i], chunk.Component3[i]));
+        }
+
+        Assert.Equal(2, spawned.Count);
+        Assert.Equal(1001, spawned[0].Identity.DefinitionId);
+        Assert.Equal(new ServerTestScriptWeaponData(3, 7), spawned[0].Weapon);
+        Assert.Equal(1001, spawned[1].Identity.DefinitionId);
+        Assert.Equal(new ServerTestScriptWeaponData(3, 7), spawned[1].Weapon);
+        Assert.SequenceEqual(
+            new[] { 101, 102 },
+            spawned.Select(static item => item.Resistance.Value).OrderBy(static value => value).ToArray());
+        Assert.True(world.Entities.IsAlive(spawned[0].Entity));
+        Assert.True(world.Entities.IsAlive(spawned[1].Entity));
+    }
+
     private static void ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient()
     {
         using var pair = new LoopbackTransportPair();
@@ -3426,6 +3547,54 @@ internal readonly record struct ServerEcsPosition(int X, int Y) : IComponent<Ser
 internal readonly record struct ServerEcsEvent(int EventCode) : IComponent<ServerEcsEvent>;
 internal readonly record struct ServerEcsAoiEvent(int X, int Y, int EventCode) : IComponent<ServerEcsAoiEvent>;
 internal readonly record struct ServerEcsMovementBody(float PositionX, float PositionY, float VelocityX, float VelocityY) : IComponent<ServerEcsMovementBody>;
+internal readonly record struct ServerTestScriptItemIdentity(int DefinitionId) : IComponent<ServerTestScriptItemIdentity>;
+internal readonly record struct ServerTestScriptInventoryItem(int Width, int Height, int StackLimit) : IComponent<ServerTestScriptInventoryItem>;
+internal readonly record struct ServerTestScriptWeaponData(int DamageMin, int DamageMax) : IComponent<ServerTestScriptWeaponData>;
+internal readonly record struct ServerTestScriptFireResistance(int Value) : IComponent<ServerTestScriptFireResistance>;
+
+internal class ServerTestScriptBaseItem : ArchetypeShape
+{
+    public override string Key => "items/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        builder.AddComponent<ServerTestScriptItemIdentity>();
+        builder.AddComponent<ServerTestScriptInventoryItem>();
+    }
+}
+
+internal class ServerTestScriptBaseWeapon : ServerTestScriptBaseItem
+{
+    public override string Key => "items/weapons/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<ServerTestScriptWeaponData>();
+    }
+}
+
+internal class ServerTestScriptEffectWeapon : ServerTestScriptBaseWeapon
+{
+    public override string Key => "items/weapons/effect/base";
+
+    protected override void Configure(ArchetypeBuilder builder)
+    {
+        base.Configure(builder);
+        builder.AddComponent<ServerTestScriptFireResistance>();
+    }
+}
+
+internal sealed class ServerTestScriptIronDagger : PrefabDefinition<ServerTestScriptEffectWeapon>
+{
+    protected override void Configure(PrefabBuilder builder)
+    {
+        builder.Set(new ServerTestScriptItemIdentity(1001));
+        builder.Set(new ServerTestScriptInventoryItem(1, 2, 1));
+        builder.Set(new ServerTestScriptWeaponData(3, 7));
+        builder.SetPerSpawn(context => new ServerTestScriptFireResistance(100 + (int)context.SpawnSequence));
+    }
+}
 
 internal sealed class ServerEcsTestSystem : SystemBase
 {

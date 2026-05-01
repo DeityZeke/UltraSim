@@ -2,6 +2,7 @@ namespace UltraSim.Server.Scripting;
 
 public sealed record PrefabDescriptor(
     string Key,
+    string SourceName,
     string ArchetypeKey,
     Type ArchetypeShapeType,
     IReadOnlyList<PrefabComponentValue> ComponentValues)

@@ -43,10 +43,20 @@ public static class ScriptPrefabCatalogBuilder
         }
 
         var catalog = new PrefabCatalog();
+        var prefabsByKey = new Dictionary<string, PrefabDescriptor>(StringComparer.Ordinal);
         foreach (PrefabDescriptor prefab in prefabs)
         {
             ScriptDefinitionValidation.ValidateStableKey(prefab.Key, nameof(prefab.Key));
             ScriptDefinitionValidation.ValidateStableKey(prefab.ArchetypeKey, nameof(prefab.ArchetypeKey));
+            if (string.IsNullOrWhiteSpace(prefab.SourceName))
+                throw new ArgumentException("Prefab source name cannot be empty.", nameof(prefabs));
+            if (!prefabsByKey.TryAdd(prefab.Key, prefab))
+            {
+                PrefabDescriptor existing = prefabsByKey[prefab.Key];
+                throw new InvalidOperationException(
+                    $"Duplicate prefab key '{prefab.Key}':{Environment.NewLine}- {existing.SourceName}{Environment.NewLine}- {prefab.SourceName}{Environment.NewLine}Rename one prefab or override Key.");
+            }
+
             if (!archetypesByKey.TryGetValue(prefab.ArchetypeKey, out ArchetypeDescriptor? archetype))
             {
                 throw new InvalidOperationException(
