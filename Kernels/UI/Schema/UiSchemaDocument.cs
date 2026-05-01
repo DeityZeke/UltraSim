@@ -8,7 +8,8 @@ public sealed record UiSchemaDocument(
     IReadOnlyList<UiPayloadSlotDescriptor> PayloadSlots,
     IReadOnlyList<UiActionDescriptor> Actions,
     IReadOnlyList<UiStateBindingDescriptor> StateBindings,
-    UiCatalogIdentity? CatalogIdentity = null)
+    UiCatalogIdentity? CatalogIdentity = null,
+    IReadOnlyList<UiSelectOptionDescriptor>? SelectOptions = null)
 {
     public UiValidationResult Validate(
         UiSchemaValidationLimits? limits = null,
@@ -55,6 +56,12 @@ public sealed record UiSchemaDocument(
         if (StateBindings.Count > actualLimits.MaxStateBindings)
         {
             return UiValidationResult.Invalid($"Schema cannot contain more than {actualLimits.MaxStateBindings} state bindings.");
+        }
+
+        IReadOnlyList<UiSelectOptionDescriptor> actualSelectOptions = SelectOptions ?? [];
+        if (actualSelectOptions.Count > actualLimits.MaxSelectOptions)
+        {
+            return UiValidationResult.Invalid($"Schema cannot contain more than {actualLimits.MaxSelectOptions} select options.");
         }
 
         UiValidationResult payloadSlotResult = ValidatePayloadSlots();
@@ -122,6 +129,12 @@ public sealed record UiSchemaDocument(
             return bindingResult;
         }
 
+        UiValidationResult selectOptionResult = ValidateSelectOptions(actualSelectOptions, actualLimits);
+        if (!selectOptionResult.IsValid)
+        {
+            return selectOptionResult;
+        }
+
         UiValidationResult slotReferenceResult = ValidateNodeSlotReferences();
         if (!slotReferenceResult.IsValid)
         {
@@ -135,6 +148,11 @@ public sealed record UiSchemaDocument(
         }
 
         return UiValidationResult.Valid;
+    }
+
+    public IReadOnlyList<UiSelectOptionDescriptor> GetSelectOptions()
+    {
+        return SelectOptions ?? [];
     }
 
     private UiValidationResult ValidateRequiredCapabilities(
@@ -274,6 +292,81 @@ public sealed record UiSchemaDocument(
             if (!slotIds.Add(slot.SlotId))
             {
                 return UiValidationResult.Invalid($"Duplicate payload slot id '{slot.SlotId}'.");
+            }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private UiValidationResult ValidateSelectOptions(
+        IReadOnlyList<UiSelectOptionDescriptor> actualSelectOptions,
+        UiSchemaValidationLimits limits)
+    {
+        var payloadSlotById = new Dictionary<string, UiPayloadSlotDescriptor>(PayloadSlots.Count, StringComparer.Ordinal);
+        for (int i = 0; i < PayloadSlots.Count; i++)
+        {
+            payloadSlotById[PayloadSlots[i].SlotId] = PayloadSlots[i];
+        }
+
+        var selectNodeSlots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = Nodes[i];
+            if (node.Kind != UiNodeKind.Select)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(node.SlotId))
+            {
+                return UiValidationResult.Invalid("Select nodes require a slot id.");
+            }
+
+            if (!payloadSlotById.TryGetValue(node.SlotId, out UiPayloadSlotDescriptor? slot))
+            {
+                return UiValidationResult.Invalid($"Select node slot '{node.SlotId}' is not declared as a payload slot.");
+            }
+
+            if (slot.ValueKind != UiModelValueKind.String)
+            {
+                return UiValidationResult.Invalid($"Select node slot '{node.SlotId}' must be a string payload slot.");
+            }
+
+            selectNodeSlots.Add(node.SlotId);
+        }
+
+        var optionValuesBySlot = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        for (int i = 0; i < actualSelectOptions.Count; i++)
+        {
+            UiSelectOptionDescriptor option = actualSelectOptions[i];
+            UiValidationResult result = option.Validate(limits);
+            if (!result.IsValid)
+            {
+                return result;
+            }
+
+            if (!selectNodeSlots.Contains(option.SlotId))
+            {
+                return UiValidationResult.Invalid($"Select option slot '{option.SlotId}' does not reference a select node.");
+            }
+
+            if (!optionValuesBySlot.TryGetValue(option.SlotId, out HashSet<string>? values))
+            {
+                values = new HashSet<string>(StringComparer.Ordinal);
+                optionValuesBySlot.Add(option.SlotId, values);
+            }
+
+            if (!values.Add(option.Value))
+            {
+                return UiValidationResult.Invalid($"Select slot '{option.SlotId}' contains duplicate option value '{option.Value}'.");
+            }
+        }
+
+        foreach (string slotId in selectNodeSlots)
+        {
+            if (!optionValuesBySlot.ContainsKey(slotId))
+            {
+                return UiValidationResult.Invalid($"Select node slot '{slotId}' requires at least one option.");
             }
         }
 

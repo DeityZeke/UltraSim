@@ -4,6 +4,7 @@ public sealed class UiSchemaCompatibilityContext
 {
     private readonly Dictionary<string, UiPayloadSlotDescriptor> _payloadSlotById;
     private readonly Dictionary<string, UiActionDescriptor> _actionById;
+    private readonly Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> _selectOptionsBySlotId;
     private readonly HashSet<string> _stateBindingSlotIds;
 
     private UiSchemaCompatibilityContext(
@@ -11,18 +12,22 @@ public sealed class UiSchemaCompatibilityContext
         UiCatalogIdentity? catalogIdentity,
         IReadOnlyList<UiPayloadSlotDescriptor> payloadSlots,
         IReadOnlyList<UiActionDescriptor> actions,
+        IReadOnlyList<UiSelectOptionDescriptor> selectOptions,
         IReadOnlyList<UiStateBindingDescriptor> stateBindings,
         Dictionary<string, UiPayloadSlotDescriptor> payloadSlotById,
         Dictionary<string, UiActionDescriptor> actionById,
+        Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> selectOptionsBySlotId,
         HashSet<string> stateBindingSlotIds)
     {
         SchemaIdentity = schemaIdentity;
         CatalogIdentity = catalogIdentity;
         PayloadSlots = payloadSlots;
         Actions = actions;
+        SelectOptions = selectOptions;
         StateBindings = stateBindings;
         _payloadSlotById = payloadSlotById;
         _actionById = actionById;
+        _selectOptionsBySlotId = selectOptionsBySlotId;
         _stateBindingSlotIds = stateBindingSlotIds;
     }
 
@@ -33,6 +38,8 @@ public sealed class UiSchemaCompatibilityContext
     public IReadOnlyList<UiPayloadSlotDescriptor> PayloadSlots { get; }
 
     public IReadOnlyList<UiActionDescriptor> Actions { get; }
+
+    public IReadOnlyList<UiSelectOptionDescriptor> SelectOptions { get; }
 
     public IReadOnlyList<UiStateBindingDescriptor> StateBindings { get; }
 
@@ -74,14 +81,36 @@ public sealed class UiSchemaCompatibilityContext
             stateBindingSlotIds.Add(binding.SlotId);
         }
 
+        IReadOnlyList<UiSelectOptionDescriptor> selectOptions = schema.GetSelectOptions();
+        var groupedSelectOptions = new Dictionary<string, List<UiSelectOptionDescriptor>>(StringComparer.Ordinal);
+        for (int i = 0; i < selectOptions.Count; i++)
+        {
+            UiSelectOptionDescriptor option = selectOptions[i];
+            if (!groupedSelectOptions.TryGetValue(option.SlotId, out List<UiSelectOptionDescriptor>? optionsForSlot))
+            {
+                optionsForSlot = new List<UiSelectOptionDescriptor>();
+                groupedSelectOptions.Add(option.SlotId, optionsForSlot);
+            }
+
+            optionsForSlot.Add(option);
+        }
+
+        var selectOptionsBySlotId = new Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>>(groupedSelectOptions.Count, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, List<UiSelectOptionDescriptor>> pair in groupedSelectOptions)
+        {
+            selectOptionsBySlotId.Add(pair.Key, pair.Value.ToArray());
+        }
+
         context = new UiSchemaCompatibilityContext(
             schema.Identity,
             schema.CatalogIdentity,
             schema.PayloadSlots,
             schema.Actions,
+            selectOptions,
             schema.StateBindings,
             payloadSlotById,
             actionById,
+            selectOptionsBySlotId,
             stateBindingSlotIds);
         return UiValidationResult.Valid;
     }
@@ -116,6 +145,11 @@ public sealed class UiSchemaCompatibilityContext
     public bool TryGetAction(string actionId, out UiActionDescriptor action)
     {
         return _actionById.TryGetValue(actionId, out action!);
+    }
+
+    public bool TryGetSelectOptions(string slotId, out IReadOnlyList<UiSelectOptionDescriptor> options)
+    {
+        return _selectOptionsBySlotId.TryGetValue(slotId, out options!);
     }
 
     public bool HasStateBindingSlot(string slotId)

@@ -74,6 +74,7 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Toggle => CreateToggle(node, modelBySlot),
             UiNodeKind.Slider => CreateSlider(node, compatibilityContext, modelBySlot),
             UiNodeKind.Stepper => CreateStepper(node, compatibilityContext, modelBySlot),
+            UiNodeKind.Select => CreateSelect(node, compatibilityContext, modelBySlot),
             _ => CreateUnsupportedPlaceholder(node),
         };
 
@@ -320,6 +321,45 @@ internal static class ServerDrivenPanelRenderer
 
         SetSlotMeta(stepper, node);
         return CreateLabeledSlotControl(node, stepper);
+    }
+
+    private static Control CreateSelect(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, UiModelSlotValue> modelBySlot)
+    {
+        var select = new OptionButton
+        {
+            Name = MakeNodeName("Select", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        string value = GetStringModelValue(node, modelBySlot);
+        int selectedIndex = -1;
+        if (!string.IsNullOrWhiteSpace(node.SlotId) &&
+            compatibilityContext.TryGetSelectOptions(node.SlotId, out IReadOnlyList<UiSelectOptionDescriptor> options))
+        {
+            for (int i = 0; i < options.Count; i++)
+            {
+                UiSelectOptionDescriptor option = options[i];
+                select.AddItem(option.Label);
+                select.SetItemMetadata(i, option.Value);
+                select.SetItemDisabled(i, option.Disabled);
+                if (selectedIndex < 0 && string.Equals(option.Value, value, StringComparison.Ordinal))
+                {
+                    selectedIndex = i;
+                }
+            }
+        }
+
+        if (selectedIndex >= 0)
+        {
+            select.Select(selectedIndex);
+        }
+
+        SetSlotMeta(select, node);
+        return CreateLabeledSlotControl(node, select);
     }
 
     private static Button CreateButton(

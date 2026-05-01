@@ -344,6 +344,15 @@ internal static class TestRunner
                         section.NumberInput("uiScale", "UI Scale", 1.25, minNumber: 0.5, maxNumber: 3.0);
                         section.Slider("musicVolume", "Music Volume", 0.75, minNumber: 0.0, maxNumber: 1.0);
                         section.Stepper("chatLines", "Chat Lines", 8, minNumber: 1, maxNumber: 20);
+                        section.Select(
+                            "chatChannel",
+                            "Chat Channel",
+                            "guild",
+                            [
+                                new UiSelectOption("local", "Local"),
+                                new UiSelectOption("guild", "Guild"),
+                                new UiSelectOption("party", "Party", Disabled: true)
+                            ]);
                     });
                 });
             })
@@ -359,6 +368,7 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.NumberInput && string.Equals(node.SlotId, "uiScale", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Slider && string.Equals(node.SlotId, "musicVolume", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Stepper && string.Equals(node.SlotId, "chatLines", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Select && string.Equals(node.SlotId, "chatChannel", StringComparison.Ordinal)));
 
         UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.String, nameSlot.ValueKind);
@@ -382,6 +392,14 @@ internal static class TestRunner
         Assert.Equal(1.0, chatSlot.MinNumber);
         Assert.Equal(20.0, chatSlot.MaxNumber);
 
+        UiPayloadSlotDescriptor channelSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "chatChannel", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.String, channelSlot.ValueKind);
+        Assert.Equal(3, built.Schema.GetSelectOptions().Count);
+        Assert.True(built.Schema.GetSelectOptions().Any(option =>
+            string.Equals(option.SlotId, "chatChannel", StringComparison.Ordinal) &&
+            string.Equals(option.Value, "party", StringComparison.Ordinal) &&
+            option.Disabled));
+
         UiModelSlotValue nameValue = built.Model.Values.First(value => string.Equals(value.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal("Test Pilot", nameValue.StringValue);
 
@@ -396,6 +414,19 @@ internal static class TestRunner
 
         UiModelSlotValue chatValue = built.Model.Values.First(value => string.Equals(value.SlotId, "chatLines", StringComparison.Ordinal));
         Assert.Equal(8, chatValue.IntegerValue);
+
+        UiModelSlotValue channelValue = built.Model.Values.First(value => string.Equals(value.SlotId, "chatChannel", StringComparison.Ordinal));
+        Assert.Equal("guild", channelValue.StringValue);
+
+        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(built.Schema, out UiSchemaCompatibilityContext? context));
+        Assert.NotNull(context);
+        Assert.True(context!.TryGetSelectOptions("chatChannel", out IReadOnlyList<UiSelectOptionDescriptor> channelOptions));
+        Assert.Equal(3, channelOptions.Count);
+
+        byte[] encodedSchema = UiContractJsonCodec.Encode(built.Schema);
+        UiSchemaDocument decodedSchema = UiContractJsonCodec.Decode<UiSchemaDocument>(encodedSchema);
+        Assert.Equal(3, decodedSchema.GetSelectOptions().Count);
+        Assert.Valid(decodedSchema.Validate(rendererCapabilities: CreateRendererCapabilities()));
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
         Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
@@ -541,6 +572,36 @@ internal static class TestRunner
             .TryBuild(out _, out string error);
         Assert.False(built);
         Assert.True(error.Contains("metadata panel type", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            UiPanelBuilder
+                .Create("server/main", "smoke.select_duplicate", 1)
+                .Panel(panel => panel.Select(
+                    "chatChannel",
+                    "Chat Channel",
+                    "local",
+                    [
+                        new UiSelectOption("local", "Local"),
+                        new UiSelectOption("local", "Duplicate Local")
+                    ]))
+                .Build();
+        });
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            UiPanelBuilder
+                .Create("server/main", "smoke.select_unknown", 1)
+                .Panel(panel => panel.Select(
+                    "chatChannel",
+                    "Chat Channel",
+                    "staff",
+                    [
+                        new UiSelectOption("local", "Local"),
+                        new UiSelectOption("guild", "Guild")
+                    ]))
+                .Build();
+        });
     }
 
     private static void UiContractJsonCodec_RoundTripsCoreContracts()

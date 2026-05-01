@@ -6,6 +6,7 @@ public sealed record UiSchemaValidationLimits(
     int MaxChildrenPerNode,
     int MaxActions,
     int MaxStateBindings,
+    int MaxSelectOptions,
     int MaxTextLength)
 {
     public static UiSchemaValidationLimits Default { get; } = new(
@@ -14,6 +15,7 @@ public sealed record UiSchemaValidationLimits(
         MaxChildrenPerNode: 256,
         MaxActions: 256,
         MaxStateBindings: 256,
+        MaxSelectOptions: 256,
         MaxTextLength: UiValidation.MaxDisplayTextLength);
 
     public UiValidationResult Validate()
@@ -23,6 +25,7 @@ public sealed record UiSchemaValidationLimits(
             MaxChildrenPerNode < 0 ||
             MaxActions < 0 ||
             MaxStateBindings < 0 ||
+            MaxSelectOptions < 0 ||
             MaxTextLength <= 0)
         {
             return UiValidationResult.Invalid("Schema validation limits must be positive, except action/binding/child limits which may be zero.");

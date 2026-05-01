@@ -15,6 +15,7 @@ public sealed class UiPanelBuilder
     private readonly Dictionary<string, UiPayloadSlotDescriptor> _payloadSlots = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiModelSlotValue> _modelValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiActionDescriptor> _actions = new(StringComparer.Ordinal);
+    private readonly List<UiSelectOptionDescriptor> _selectOptions = new();
     private int _nextNodeId = 1;
     private int _rootNodeId;
 
@@ -94,7 +95,8 @@ public sealed class UiPanelBuilder
             _payloadSlots.Values.ToArray(),
             _actions.Values.ToArray(),
             StateBindings: [],
-            CatalogIdentity: null);
+            CatalogIdentity: null,
+            SelectOptions: _selectOptions.ToArray());
         UiValidationResult schemaResult = schema.Validate();
         if (!schemaResult.IsValid)
         {
@@ -202,6 +204,38 @@ public sealed class UiPanelBuilder
         _actions.Add(descriptor.ActionId, descriptor);
     }
 
+    internal void DeclareSelectOptions(string slotId, IReadOnlyList<UiSelectOption> options)
+    {
+        if (options.Count == 0)
+        {
+            throw new InvalidOperationException($"Select slot '{slotId}' requires at least one option.");
+        }
+
+        var values = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < options.Count; i++)
+        {
+            UiSelectOption option = options[i] ?? throw new InvalidOperationException($"Select slot '{slotId}' cannot contain null options.");
+            var descriptor = new UiSelectOptionDescriptor(
+                slotId,
+                option.Value,
+                option.Label,
+                option.Disabled,
+                option.IconId);
+            UiValidationResult result = descriptor.Validate(UiSchemaValidationLimits.Default);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(result.Error);
+            }
+
+            if (!values.Add(option.Value))
+            {
+                throw new InvalidOperationException($"Select slot '{slotId}' contains duplicate option value '{option.Value}'.");
+            }
+
+            _selectOptions.Add(descriptor);
+        }
+    }
+
     private int AddNode(
         UiNodeKind kind,
         string? slotId,
@@ -268,6 +302,16 @@ public sealed class UiPanelBuilder
                 .Append(action.Availability).Append('|')
                 .Append(action.AvailabilityReason).Append('|')
                 .Append(action.MenuGroupKey).Append('\n');
+        }
+
+        foreach (UiSelectOptionDescriptor option in _selectOptions)
+        {
+            builder.Append("select|")
+                .Append(option.SlotId).Append('|')
+                .Append(option.Value).Append('|')
+                .Append(option.Label).Append('|')
+                .Append(option.Disabled).Append('|')
+                .Append(option.IconId).Append('\n');
         }
 
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));

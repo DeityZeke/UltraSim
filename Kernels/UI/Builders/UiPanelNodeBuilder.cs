@@ -166,6 +166,21 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder Select(
+        string slotId,
+        string label,
+        string value,
+        IReadOnlyList<UiSelectOption> options,
+        int maxStringLength = UiValidation.MaxIdentityLength,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, required, maxStringLength));
+        _owner.SetModelValue(UiModelSlotValue.String(slotId, value));
+        _owner.DeclareSelectOptions(slotId, options);
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Select, slotId, label, actionId: null));
+        return this;
+    }
+
     public UiPanelNodeBuilder Button(
         string actionId,
         string label,
@@ -193,3 +208,9 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 }
+
+public sealed record UiSelectOption(
+    string Value,
+    string Label,
+    bool Disabled = false,
+    string? IconId = null);
