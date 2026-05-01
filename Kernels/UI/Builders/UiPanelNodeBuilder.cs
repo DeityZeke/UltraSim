@@ -36,6 +36,12 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder ScrollRegion(Action<UiPanelNodeBuilder> build)
+    {
+        _childIds.Add(_owner.AddContainer(UiNodeKind.ScrollRegion, build));
+        return this;
+    }
+
     public UiPanelNodeBuilder Text(string text)
     {
         _childIds.Add(_owner.AddLeaf(UiNodeKind.Text, slotId: null, text, actionId: null));
@@ -266,6 +272,33 @@ public sealed class UiPanelNodeBuilder
             availabilityReason,
             menuGroupKey));
         _childIds.Add(_owner.AddLeaf(UiNodeKind.Button, slotId: null, label, actionId));
+        return this;
+    }
+
+    public UiPanelNodeBuilder IconButton(
+        string actionId,
+        string label,
+        string iconId,
+        UiActionRole role = UiActionRole.Normal,
+        UiActionContextKind contextKind = UiActionContextKind.Panel,
+        bool requiresConfirm = false,
+        string? childMenuKey = null,
+        UiActionAvailability availability = UiActionAvailability.Available,
+        string? availabilityReason = null,
+        string? menuGroupKey = null)
+    {
+        _owner.DeclareAction(new UiActionDescriptor(
+            actionId,
+            label,
+            iconId,
+            role,
+            contextKind,
+            requiresConfirm,
+            childMenuKey,
+            availability,
+            availabilityReason,
+            menuGroupKey));
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.IconButton, slotId: null, label, actionId));
         return this;
     }
 }

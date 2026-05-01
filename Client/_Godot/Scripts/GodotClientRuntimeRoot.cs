@@ -16,8 +16,10 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeMessageBoxPanelId = "smoke/message_box/1";
 	private const string SmokeMessageBoxActionId = "smoke.message_box.ok";
 	private const string SmokeRepeaterRowActionId = "smoke.message_box.row.select";
+	private const string SmokeIconActionId = "smoke.message_box.icon";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
 	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
+	private const string SmokeScrollRegionText = "Scrollable server-driven details";
 	private const string SmokeTextInputSlot = "displayName";
 	private const string SmokeToggleSlot = "rememberAccount";
 	private const string SmokeNumberInputSlot = "uiScale";
@@ -799,6 +801,12 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!UiManager.Menus.TryFindServerDrivenText(applied.Panel.PanelInstanceId, SmokeScrollRegionText, out string scrollTextError))
+		{
+			GD.PushError($"Server UI smoke failed: {scrollTextError}");
+			return;
+		}
+
 		if (!UiManager.Menus.TryPressServerDrivenActionButton(applied.Panel.PanelInstanceId, SmokeRepeaterRowActionId, out string rowPressError))
 		{
 			GD.PushError($"Server UI smoke failed: {rowPressError}");
@@ -858,7 +866,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, null, [5]),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -870,6 +878,9 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(16, UiNodeKind.Repeater, SmokeRepeaterSlot, "Characters", [], ActionId: SmokeRepeaterRowActionId),
 				new UiSchemaNodeDescriptor(17, UiNodeKind.RadioGroup, SmokeRadioSlot, "Nameplates", []),
 				new UiSchemaNodeDescriptor(18, UiNodeKind.CheckboxGroup, SmokeCheckboxSlot, "Enabled Channels", []),
+				new UiSchemaNodeDescriptor(19, UiNodeKind.ScrollRegion, null, null, [20, 21]),
+				new UiSchemaNodeDescriptor(20, UiNodeKind.Text, null, SmokeScrollRegionText, []),
+				new UiSchemaNodeDescriptor(21, UiNodeKind.IconButton, null, "Icon Action", [], ActionId: SmokeIconActionId),
 			],
 			PayloadSlots:
 			[
@@ -899,6 +910,14 @@ public partial class GodotClientRuntimeRoot : Node
 					IconId: null,
 					UiActionRole.Primary,
 					UiActionContextKind.Row,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					SmokeIconActionId,
+					"Icon Action",
+					IconId: "icons/ui/smoke",
+					UiActionRole.Normal,
+					UiActionContextKind.Panel,
 					RequiresConfirm: false,
 					ChildMenuKey: null),
 			],

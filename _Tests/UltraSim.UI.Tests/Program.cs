@@ -371,6 +371,11 @@ internal static class TestRunner
                                 new UiSelectOption("guild", "Guild"),
                                 new UiSelectOption("party", "Party", Disabled: true)
                             ]);
+                        section.ScrollRegion(scroll =>
+                        {
+                            scroll.Text("Scrollable connection details");
+                            scroll.IconButton("settings.help", "Help", "icons/ui/help");
+                        });
                         section.Repeater("characters", "Characters");
                     });
                 });
@@ -390,6 +395,10 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Select && string.Equals(node.SlotId, "chatChannel", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.RadioGroup && string.Equals(node.SlotId, "nameplateMode", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.CheckboxGroup && string.Equals(node.SlotId, "enabledChannels", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.ScrollRegion));
+        Assert.True(built.Schema.Nodes.Any(node =>
+            node.Kind == UiNodeKind.IconButton &&
+            string.Equals(node.ActionId, "settings.help", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Repeater && string.Equals(node.SlotId, "characters", StringComparison.Ordinal)));
 
         UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));

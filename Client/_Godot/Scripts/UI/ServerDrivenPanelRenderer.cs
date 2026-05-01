@@ -65,9 +65,11 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Column => CreateColumn(node),
             UiNodeKind.Group => CreateGroup(node),
             UiNodeKind.Section => CreateSection(node),
+            UiNodeKind.ScrollRegion => CreateScrollRegion(node),
             UiNodeKind.Text => CreateText(node),
             UiNodeKind.DynamicText => CreateDynamicText(node, modelBySlot),
             UiNodeKind.Button => CreateButton(node, compatibilityContext, actionPressed),
+            UiNodeKind.IconButton => CreateButton(node, compatibilityContext, actionPressed),
             UiNodeKind.Separator => CreateSeparator(node),
             UiNodeKind.Spacer => CreateSpacer(node),
             UiNodeKind.TextInput => CreateTextInput(node, modelBySlot),
@@ -98,6 +100,17 @@ internal static class ServerDrivenPanelRenderer
                 SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
             };
             panel.AddChild(content);
+            childHost = content;
+        }
+        else if (control is ScrollContainer scroll)
+        {
+            var content = new VBoxContainer
+            {
+                Name = "Content",
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+            };
+            scroll.AddChild(content);
             childHost = content;
         }
 
@@ -191,6 +204,19 @@ internal static class ServerDrivenPanelRenderer
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
         });
         return section;
+    }
+
+    private static ScrollContainer CreateScrollRegion(UiSchemaNodeDescriptor node)
+    {
+        return new ScrollContainer
+        {
+            Name = MakeNodeName("ScrollRegion", node.NodeId),
+            CustomMinimumSize = new Vector2(320.0f, 180.0f),
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
     }
 
     private static Label CreateText(UiSchemaNodeDescriptor node)
