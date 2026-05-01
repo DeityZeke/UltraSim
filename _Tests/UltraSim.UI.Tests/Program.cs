@@ -36,6 +36,7 @@ internal static class TestRunner
         Run(nameof(UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes), UiTooltipDescriptor_RejectsUnknownSlotsAndOversizedShapes);
         Run(nameof(UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments), UiPanelBuilder_BuildsValidatedSchemaModelAndOpenDocuments);
         Run(nameof(UiPanelBuilder_BuildsGroupsSectionsAndFormControls), UiPanelBuilder_BuildsGroupsSectionsAndFormControls);
+        Run(nameof(UiStandardPanels_BuildMessageAndConfirmBoxesWithStableSchema), UiStandardPanels_BuildMessageAndConfirmBoxesWithStableSchema);
         Run(nameof(UiPanelBuilder_RejectsConflictingScopedDeclarations), UiPanelBuilder_RejectsConflictingScopedDeclarations);
         Run(nameof(UiContractJsonCodec_RoundTripsCoreContracts), UiContractJsonCodec_RoundTripsCoreContracts);
         Run(nameof(UiNodeKind_ReservesExpectedEarlyNodeIds), UiNodeKind_ReservesExpectedEarlyNodeIds);
@@ -368,6 +369,54 @@ internal static class TestRunner
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
         Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+    }
+
+    private static void UiStandardPanels_BuildMessageAndConfirmBoxesWithStableSchema()
+    {
+        UiBuiltPanel firstMessage = UiStandardPanels.MessageBox(
+            "server/main",
+            "Welcome",
+            "Hello from the first model payload.");
+        UiBuiltPanel secondMessage = UiStandardPanels.MessageBox(
+            "server/main",
+            "Warning",
+            "Different body, same cached schema.");
+
+        Assert.Equal(UiStandardPanels.MessageBoxPanelType, firstMessage.Schema.Identity.PanelType);
+        Assert.Equal(UiSurfaceTarget.Modal, firstMessage.Schema.Metadata.SurfaceTarget);
+        Assert.Equal(UiFocusMode.Modal, firstMessage.Schema.Metadata.FocusMode);
+        Assert.True(firstMessage.Schema.Metadata.BlocksGameplayInput);
+        Assert.Equal(firstMessage.Schema.Identity.SchemaHashHex, secondMessage.Schema.Identity.SchemaHashHex);
+        Assert.Valid(firstMessage.Schema.Validate(rendererCapabilities: CreateRendererCapabilities()));
+        Assert.Valid(firstMessage.Model.ValidateAgainst(firstMessage.Schema));
+        Assert.Valid(secondMessage.Model.ValidateAgainst(firstMessage.Schema));
+
+        UiModelSlotValue firstTitle = firstMessage.Model.Values.First(value => string.Equals(value.SlotId, UiStandardPanels.TitleSlotId, StringComparison.Ordinal));
+        UiModelSlotValue secondTitle = secondMessage.Model.Values.First(value => string.Equals(value.SlotId, UiStandardPanels.TitleSlotId, StringComparison.Ordinal));
+        Assert.Equal("Welcome", firstTitle.StringValue);
+        Assert.Equal("Warning", secondTitle.StringValue);
+
+        Assert.Equal(1, firstMessage.Schema.Actions.Count);
+        Assert.Equal(UiStandardPanels.MessageOkActionId, firstMessage.Schema.Actions[0].ActionId);
+        Assert.Equal(UiActionRole.Primary, firstMessage.Schema.Actions[0].Role);
+
+        UiBuiltPanel confirm = UiStandardPanels.ConfirmBox(
+            "server/main",
+            "Delete Item",
+            "Delete the selected item?",
+            acceptText: "Delete",
+            cancelText: "Keep");
+        Assert.Equal(UiStandardPanels.ConfirmBoxPanelType, confirm.Schema.Identity.PanelType);
+        Assert.Equal(2, confirm.Schema.Actions.Count);
+        Assert.True(confirm.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, UiStandardPanels.ConfirmAcceptActionId, StringComparison.Ordinal) &&
+            action.Role == UiActionRole.Primary &&
+            string.Equals(action.Label, "Delete", StringComparison.Ordinal)));
+        Assert.True(confirm.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, UiStandardPanels.ConfirmCancelActionId, StringComparison.Ordinal) &&
+            action.Role == UiActionRole.Normal &&
+            string.Equals(action.Label, "Keep", StringComparison.Ordinal)));
+        Assert.Valid(confirm.ToColdOpen("panel/confirm/delete").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
     }
 
     private static void UiPanelBuilder_RejectsConflictingScopedDeclarations()

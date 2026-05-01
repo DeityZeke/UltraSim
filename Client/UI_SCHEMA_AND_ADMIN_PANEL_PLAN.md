@@ -49,6 +49,63 @@ Server-driven schema panels are sibling windows under `MenuCanvasManager`:
 
 `DebugCanvasManager` can host client-local debug overlays, but server-driven admin windows should still use the schema path when they are server-authoritative.
 
+## Guaranteed Panel Set
+
+UltraSim should keep a small guaranteed panel/screen vocabulary so the client and
+server do not invent one-off shells for common flows.
+
+### Client-Local Built-Ins
+
+These must work with no server connection and should remain local Godot/client
+screens rather than server-authored schema panels:
+
+- `StartMenu`
+  - based on old v2 `StartMenuScreen`
+  - launch screen, preview/local mode, server browser, direct connect, settings, quit
+- `ServerBrowser`
+  - based on old v2 `MultiplayerMenuScreen`, but with clearer tab semantics
+  - server/provider/category tabs behave like browser tabs over one stable list/detail workspace
+  - tabs should not feel like unrelated category pages that rebuild the whole menu
+  - direct connect can be an inline modal/pane within this screen
+- `ClientSettings`
+  - based on old v2 `SettingsMenuScreen`
+  - local video/audio/input/UI scale/nameplate/chat/HUD/debug/content-cache settings
+- `PauseOptions`
+  - based on old v2 `PauseMenuScreen`
+  - resume, settings, disconnect/return, and later return-to-character-select when that flow exists
+- `SessionStatus`
+  - based on old v2 `SessionStatusScreen`
+  - connecting, retry, edit connection, disconnected, kicked, handshake failure
+- `LocalMessage`
+  - based on old v2 `MessageMenuScreen`
+  - client-only message/error panel for offline or pre-server states
+- `AssetPackManager`
+  - new required local panel
+  - installed packs, server-required packs, enable/disable order, cache status, and clear-cache tools
+- `ChatFeedInput`
+  - local persistent chat feed/input, not a server-driven schema panel for now
+
+The current placeholder `ClientAppShell` can be evolved toward this v2 screen
+set. It does not need to copy v2 scene files directly, but it should preserve
+the stronger separation v2 had between start, multiplayer/server browser,
+settings, pause, message, and session-status screens.
+
+### Standard Server-Driven Helpers
+
+These should be pre-authored helpers/builders available to server code and
+scripts:
+
+- `MessageBox(title, body, buttonText)`
+- `ConfirmBox(title, body, acceptText, cancelText)`
+- `ChoiceBox(title, body, choices)`
+- `TextPrompt(title, body, placeholder, acceptText, cancelText)`
+- `PagedListPicker(title, rows, actions)`
+- `TabbedSettingsPanel(...)`
+
+These helpers compile to normal schema/model/action documents. They are not
+special renderer-only panels. They exist to keep common server scripts compact
+and consistent.
+
 ## Presentation Runtime Shape
 
 The old v2 client already used the right broad idea:
