@@ -166,11 +166,8 @@ public sealed class ConsoleServerShell
 
     private static void WriteStartupPreamble(TextWriter writer)
     {
-        writer.WriteLine("Core: Created");
-        Version runtime = Environment.Version;
-        writer.WriteLine($"Core: Running on .NET {runtime.Major}.{runtime.Minor}.{runtime.Build}");
-        int processors = Environment.ProcessorCount;
-        writer.WriteLine($"Core: Optimizing for {processors} {(processors == 1 ? "processor" : "processors")}");
+        foreach (string line in ServerHostStartupBanner.Create("Console Server"))
+            writer.WriteLine(line);
         writer.Flush();
     }
 

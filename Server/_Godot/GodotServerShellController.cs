@@ -16,11 +16,8 @@ public sealed class GodotServerShellController : IDisposable
         Options = options ?? throw new ArgumentNullException(nameof(options));
         UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
         UltraSimRuntimeTemplate.Ensure(runtimeRoot);
-        AddStartupLog("Core: Created");
-        Version runtimeVersion = Environment.Version;
-        AddStartupLog($"Core: Running on .NET {runtimeVersion.Major}.{runtimeVersion.Minor}.{runtimeVersion.Build}");
-        int processors = Environment.ProcessorCount;
-        AddStartupLog($"Core: Optimizing for {processors} {(processors == 1 ? "processor" : "processors")}");
+        foreach (string line in ServerHostStartupBanner.Create("Godot Server Shell"))
+            AddStartupLog(line);
         UltraSimScriptStartupResult scriptStartup = new UltraSimScriptStartupService().Run(new UltraSimScriptStartupOptions(runtimeRoot));
         ScriptContext = scriptStartup.Context;
         _startupEvents.AddRange(UltraSimScriptStartupLog.CreateEvents(scriptStartup));

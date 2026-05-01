@@ -41,6 +41,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
         Run(nameof(ServerApplication_SystemRuntimeSnapshots_ReflectHookData), ServerApplication_SystemRuntimeSnapshots_ReflectHookData);
         Run(nameof(ServerApplication_PlayerAndAccountSnapshots_ReflectHookData), ServerApplication_PlayerAndAccountSnapshots_ReflectHookData);
+        Run(nameof(ServerHostStartupBanner_IncludesShellNameAndVersion), ServerHostStartupBanner_IncludesShellNameAndVersion);
         Run(nameof(ServerWrapperDefaults_Use16MillisecondTick), ServerWrapperDefaults_Use16MillisecondTick);
         Run(nameof(ServerHostLoop_Pump_TicksAtFixedStepCadence), ServerHostLoop_Pump_TicksAtFixedStepCadence);
         Run(nameof(ServerHostLoop_Pump_RespectsCatchUpCap), ServerHostLoop_Pump_RespectsCatchUpCap);
@@ -598,6 +599,16 @@ internal static class TestRunner
         Assert.Equal("acct-7", accounts[0].AccountId);
     }
 
+    private static void ServerHostStartupBanner_IncludesShellNameAndVersion()
+    {
+        IReadOnlyList<string> lines = ServerHostStartupBanner.Create("Test Shell");
+
+        Assert.Equal(3, lines.Count);
+        Assert.Contains("UltraSim - Test Shell - Version", lines[0]);
+        Assert.Contains("Core: Running on .NET", lines[1]);
+        Assert.Contains("Core: Optimizing for", lines[2]);
+    }
+
     private static void ServerWrapperDefaults_Use16MillisecondTick()
     {
         Assert.Equal(TimeSpan.FromMilliseconds(16), ServerHostLoopOptions.Default.TickInterval);
@@ -836,7 +847,7 @@ internal static class TestRunner
         string output = stdout.ToString();
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Core: Created", output);
+        Assert.Contains("UltraSim - Headless Server - Version", output);
         Assert.Contains("Scripts: Compiling C# scripts... - done", output);
         Assert.Contains("Scripts: Configuring... - done", output);
         Assert.Contains("Scripts: Initializing... - done", output);
@@ -944,7 +955,7 @@ internal static class TestRunner
         string output = stdout.ToString();
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("Core: Created", output);
+        Assert.Contains("UltraSim - Console Server - Version", output);
         Assert.Contains("Scripts: Compiling C# scripts... - done", output);
         Assert.Contains("Core: Initializing... - done", output);
         Assert.Contains("Core: Starting... - done", output);
