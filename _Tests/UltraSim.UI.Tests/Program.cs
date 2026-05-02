@@ -377,6 +377,7 @@ internal static class TestRunner
                             tabs.Page("chat", "Chat", page => page.Text("Chat settings"));
                         });
                         section.Image("icons/ui/settings");
+                        section.Pager("settingsPage", 1, "settingsTotalPages", 4, "settings.previous", "settings.next");
                         section.ScrollRegion(scroll =>
                         {
                             scroll.Text("Scrollable connection details");
@@ -403,6 +404,7 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.CheckboxGroup && string.Equals(node.SlotId, "enabledChannels", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Tabs && string.Equals(node.SlotId, "settingsTab", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Image && string.Equals(node.Text, "icons/ui/settings", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Pager));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.ScrollRegion));
         Assert.True(built.Schema.Nodes.Any(node =>
             node.Kind == UiNodeKind.IconButton &&
@@ -442,6 +444,9 @@ internal static class TestRunner
         UiPayloadSlotDescriptor settingsTabSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "settingsTab", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.String, settingsTabSlot.ValueKind);
 
+        UiPayloadSlotDescriptor settingsPageSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "settingsPage", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.Integer, settingsPageSlot.ValueKind);
+
         Assert.Equal(11, built.Schema.GetSelectOptions().Count);
         Assert.True(built.Schema.GetSelectOptions().Any(option =>
             string.Equals(option.SlotId, "chatChannel", StringComparison.Ordinal) &&
@@ -476,6 +481,9 @@ internal static class TestRunner
 
         UiModelSlotValue settingsTabValue = built.Model.Values.First(value => string.Equals(value.SlotId, "settingsTab", StringComparison.Ordinal));
         Assert.Equal("account", settingsTabValue.StringValue);
+
+        UiModelSlotValue settingsPageValue = built.Model.Values.First(value => string.Equals(value.SlotId, "settingsPage", StringComparison.Ordinal));
+        Assert.Equal(1, settingsPageValue.IntegerValue);
 
         Assert.Valid(UiSchemaCompatibilityContext.TryCreate(built.Schema, out UiSchemaCompatibilityContext? context));
         Assert.NotNull(context);
@@ -638,6 +646,13 @@ internal static class TestRunner
         Assert.True(firstPicker.Panel.Schema.Nodes.Any(node =>
             node.Kind == UiNodeKind.Repeater &&
             string.Equals(node.ActionId, UiStandardPanels.PagedListRowSelectActionId, StringComparison.Ordinal)));
+        Assert.True(firstPicker.Panel.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Pager));
+        Assert.True(firstPicker.Panel.Model.Values.Any(value =>
+            string.Equals(value.SlotId, UiStandardPanels.PagedListCurrentPageSlotId, StringComparison.Ordinal) &&
+            value.IntegerValue == 1));
+        Assert.True(firstPicker.Panel.Model.Values.Any(value =>
+            string.Equals(value.SlotId, UiStandardPanels.PagedListTotalPagesSlotId, StringComparison.Ordinal) &&
+            value.IntegerValue == 1));
         Assert.Valid(firstPicker.Panel.ToColdOpen("panel/picker/characters").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
 
         UiModelUpdateDocument initialRows = firstPicker.CreateInitialRowsUpdate("panel/picker/characters", 1);

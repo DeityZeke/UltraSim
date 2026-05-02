@@ -14,6 +14,8 @@ public static class UiStandardPanels
     public const string PagedListRowsSlotId = "standard.list.rows";
     public const string PagedListRowLabelSlotId = "standard.list.row.label";
     public const string PagedListRowDescriptionSlotId = "standard.list.row.description";
+    public const string PagedListCurrentPageSlotId = "standard.list.page.current";
+    public const string PagedListTotalPagesSlotId = "standard.list.page.total";
 
     public const string MessageOkActionId = "standard.message.ok";
     public const string ConfirmAcceptActionId = "standard.confirm.accept";
@@ -171,6 +173,8 @@ public static class UiStandardPanels
         string acceptText = "Select",
         string cancelText = "Cancel",
         bool includePagingActions = false,
+        long currentPage = 1,
+        long totalPages = 1,
         string previousText = "Previous",
         string nextText = "Next",
         string panelType = PagedListPickerPanelType,
@@ -207,8 +211,15 @@ public static class UiStandardPanels
                     {
                         if (includePagingActions)
                         {
-                            row.Button(previousActionId, previousText, UiActionRole.Normal);
-                            row.Button(nextActionId, nextText, UiActionRole.Normal);
+                            row.Pager(
+                                PagedListCurrentPageSlotId,
+                                currentPage,
+                                PagedListTotalPagesSlotId,
+                                totalPages,
+                                previousActionId,
+                                nextActionId,
+                                previousText,
+                                nextText);
                         }
 
                         row.Button(cancelActionId, cancelText, UiActionRole.Normal);

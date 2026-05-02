@@ -75,6 +75,29 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder Pager(
+        string currentPageSlotId,
+        long currentPage,
+        string totalPagesSlotId,
+        long totalPages,
+        string previousActionId,
+        string nextActionId,
+        string previousLabel = "Previous",
+        string nextLabel = "Next",
+        string currentPageLabel = "Page",
+        string totalPagesLabel = "Total Pages")
+    {
+        _childIds.Add(_owner.AddContainer(UiNodeKind.Pager, pager =>
+        {
+            pager.Button(previousActionId, previousLabel);
+            pager.DynamicText(currentPageSlotId, currentPageLabel, currentPage, minNumber: 1);
+            pager.Text("/");
+            pager.DynamicText(totalPagesSlotId, totalPagesLabel, totalPages, minNumber: 1);
+            pager.Button(nextActionId, nextLabel);
+        }));
+        return this;
+    }
+
     public UiPanelNodeBuilder Text(string text)
     {
         _childIds.Add(_owner.AddLeaf(UiNodeKind.Text, slotId: null, text, actionId: null));

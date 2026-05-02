@@ -62,6 +62,7 @@ internal static class ServerDrivenPanelRenderer
         {
             UiNodeKind.Panel => CreatePanel(node),
             UiNodeKind.Row => CreateRow(node),
+            UiNodeKind.Pager => CreatePager(node),
             UiNodeKind.Column => CreateColumn(node),
             UiNodeKind.Group => CreateGroup(node),
             UiNodeKind.Section => CreateSection(node),
@@ -188,6 +189,16 @@ internal static class ServerDrivenPanelRenderer
         return new HBoxContainer
         {
             Name = MakeNodeName("Row", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+    }
+
+    private static HBoxContainer CreatePager(UiSchemaNodeDescriptor node)
+    {
+        return new HBoxContainer
+        {
+            Name = MakeNodeName("Pager", node.NodeId),
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };

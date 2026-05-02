@@ -30,6 +30,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeRadioSlot = "nameplateMode";
 	private const string SmokeCheckboxSlot = "enabledChannels";
 	private const string SmokeTabSlot = "settingsTab";
+	private const string SmokeCurrentPageSlot = "currentPage";
+	private const string SmokeTotalPagesSlot = "totalPages";
 	private const string SmokeRepeaterSlot = "characters";
 	private const string SmokeRepeaterRowKey = "character/lira";
 	private const string SmokeRepeaterRowText = "Lira";
@@ -680,6 +682,8 @@ public partial class GodotClientRuntimeRoot : Node
 				UiModelSlotValue.String(SmokeRadioSlot, "party"),
 				UiModelSlotValue.StringList(SmokeCheckboxSlot, ["local", "guild"]),
 				UiModelSlotValue.String(SmokeTabSlot, "account"),
+				UiModelSlotValue.Integer(SmokeCurrentPageSlot, 1),
+				UiModelSlotValue.Integer(SmokeTotalPagesSlot, 4),
 			]);
 		var open = new UiPanelOpenDocument(
 			SmokeMessageBoxPanelId,
@@ -875,7 +879,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, SmokeImageId, []),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Layer, null, null, [27]),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 19, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 28, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -896,6 +900,12 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(25, UiNodeKind.Section, null, "Chat", [26]),
 				new UiSchemaNodeDescriptor(26, UiNodeKind.Text, null, "Chat tab content", []),
 				new UiSchemaNodeDescriptor(27, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
+				new UiSchemaNodeDescriptor(28, UiNodeKind.Pager, null, null, [29, 30, 31, 32, 33]),
+				new UiSchemaNodeDescriptor(29, UiNodeKind.Button, null, "Previous", [], ActionId: "smoke.message_box.previous"),
+				new UiSchemaNodeDescriptor(30, UiNodeKind.DynamicText, SmokeCurrentPageSlot, "Current Page", []),
+				new UiSchemaNodeDescriptor(31, UiNodeKind.Text, null, "/", []),
+				new UiSchemaNodeDescriptor(32, UiNodeKind.DynamicText, SmokeTotalPagesSlot, "Total Pages", []),
+				new UiSchemaNodeDescriptor(33, UiNodeKind.Button, null, "Next", [], ActionId: "smoke.message_box.next"),
 			],
 			PayloadSlots:
 			[
@@ -909,6 +919,8 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiPayloadSlotDescriptor(SmokeRadioSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
 				new UiPayloadSlotDescriptor(SmokeCheckboxSlot, UiModelValueKind.StringList, Required: true, MaxStringLength: 32),
 				new UiPayloadSlotDescriptor(SmokeTabSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
+				new UiPayloadSlotDescriptor(SmokeCurrentPageSlot, UiModelValueKind.Integer, Required: true, MinNumber: 1),
+				new UiPayloadSlotDescriptor(SmokeTotalPagesSlot, UiModelValueKind.Integer, Required: true, MinNumber: 1),
 			],
 			Actions:
 			[
@@ -932,6 +944,22 @@ public partial class GodotClientRuntimeRoot : Node
 					SmokeIconActionId,
 					"Icon Action",
 					IconId: "icons/ui/smoke",
+					UiActionRole.Normal,
+					UiActionContextKind.Panel,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					"smoke.message_box.previous",
+					"Previous",
+					IconId: null,
+					UiActionRole.Normal,
+					UiActionContextKind.Panel,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					"smoke.message_box.next",
+					"Next",
+					IconId: null,
 					UiActionRole.Normal,
 					UiActionContextKind.Panel,
 					RequiresConfirm: false,
