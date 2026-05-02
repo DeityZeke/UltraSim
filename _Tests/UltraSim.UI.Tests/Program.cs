@@ -371,6 +371,11 @@ internal static class TestRunner
                                 new UiSelectOption("guild", "Guild"),
                                 new UiSelectOption("party", "Party", Disabled: true)
                             ]);
+                        section.Tabs("settingsTab", "account", tabs =>
+                        {
+                            tabs.Page("account", "Account", page => page.Text("Account settings"));
+                            tabs.Page("chat", "Chat", page => page.Text("Chat settings"));
+                        });
                         section.ScrollRegion(scroll =>
                         {
                             scroll.Text("Scrollable connection details");
@@ -395,6 +400,7 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Select && string.Equals(node.SlotId, "chatChannel", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.RadioGroup && string.Equals(node.SlotId, "nameplateMode", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.CheckboxGroup && string.Equals(node.SlotId, "enabledChannels", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Tabs && string.Equals(node.SlotId, "settingsTab", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.ScrollRegion));
         Assert.True(built.Schema.Nodes.Any(node =>
             node.Kind == UiNodeKind.IconButton &&
@@ -431,7 +437,10 @@ internal static class TestRunner
         UiPayloadSlotDescriptor enabledChannelsSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "enabledChannels", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.StringList, enabledChannelsSlot.ValueKind);
 
-        Assert.Equal(9, built.Schema.GetSelectOptions().Count);
+        UiPayloadSlotDescriptor settingsTabSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "settingsTab", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.String, settingsTabSlot.ValueKind);
+
+        Assert.Equal(11, built.Schema.GetSelectOptions().Count);
         Assert.True(built.Schema.GetSelectOptions().Any(option =>
             string.Equals(option.SlotId, "chatChannel", StringComparison.Ordinal) &&
             string.Equals(option.Value, "party", StringComparison.Ordinal) &&
@@ -463,17 +472,22 @@ internal static class TestRunner
         Assert.Equal("local", enabledChannelsValue.StringListValue![0]);
         Assert.Equal("guild", enabledChannelsValue.StringListValue[1]);
 
+        UiModelSlotValue settingsTabValue = built.Model.Values.First(value => string.Equals(value.SlotId, "settingsTab", StringComparison.Ordinal));
+        Assert.Equal("account", settingsTabValue.StringValue);
+
         Assert.Valid(UiSchemaCompatibilityContext.TryCreate(built.Schema, out UiSchemaCompatibilityContext? context));
         Assert.NotNull(context);
         Assert.True(context!.TryGetSelectOptions("chatChannel", out IReadOnlyList<UiSelectOptionDescriptor> channelOptions));
         Assert.Equal(3, channelOptions.Count);
         Assert.True(context.TryGetSelectOptions("enabledChannels", out IReadOnlyList<UiSelectOptionDescriptor> enabledChannelOptions));
         Assert.Equal(3, enabledChannelOptions.Count);
+        Assert.True(context.TryGetSelectOptions("settingsTab", out IReadOnlyList<UiSelectOptionDescriptor> tabOptions));
+        Assert.Equal(2, tabOptions.Count);
         Assert.True(context.HasRepeaterSlot("characters"));
 
         byte[] encodedSchema = UiContractJsonCodec.Encode(built.Schema);
         UiSchemaDocument decodedSchema = UiContractJsonCodec.Decode<UiSchemaDocument>(encodedSchema);
-        Assert.Equal(9, decodedSchema.GetSelectOptions().Count);
+        Assert.Equal(11, decodedSchema.GetSelectOptions().Count);
         Assert.Valid(decodedSchema.Validate(rendererCapabilities: CreateRendererCapabilities()));
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");

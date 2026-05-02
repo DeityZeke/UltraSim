@@ -133,11 +133,16 @@ public sealed class UiPanelBuilder
 
     internal int AddContainer(UiNodeKind kind, string? text, Action<UiPanelNodeBuilder> build)
     {
+        return AddContainer(kind, slotId: null, text, build);
+    }
+
+    internal int AddContainer(UiNodeKind kind, string? slotId, string? text, Action<UiPanelNodeBuilder> build)
+    {
         ArgumentNullException.ThrowIfNull(build);
         int nodeId = _nextNodeId++;
         var childBuilder = new UiPanelNodeBuilder(this);
         build(childBuilder);
-        _nodes.Add(new UiSchemaNodeDescriptor(nodeId, kind, null, text, childBuilder.ChildIds.ToArray()));
+        _nodes.Add(new UiSchemaNodeDescriptor(nodeId, kind, slotId, text, childBuilder.ChildIds.ToArray()));
         return nodeId;
     }
 

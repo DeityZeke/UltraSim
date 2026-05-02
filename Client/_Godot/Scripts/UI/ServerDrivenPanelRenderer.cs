@@ -66,6 +66,7 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Group => CreateGroup(node),
             UiNodeKind.Section => CreateSection(node),
             UiNodeKind.ScrollRegion => CreateScrollRegion(node),
+            UiNodeKind.Tabs => CreateTabs(node),
             UiNodeKind.Text => CreateText(node),
             UiNodeKind.DynamicText => CreateDynamicText(node, modelBySlot),
             UiNodeKind.Button => CreateButton(node, compatibilityContext, actionPressed),
@@ -114,6 +115,23 @@ internal static class ServerDrivenPanelRenderer
             childHost = content;
         }
 
+        IReadOnlyList<UiSelectOptionDescriptor>? tabOptions = null;
+        int selectedTabIndex = -1;
+        if (control is TabContainer &&
+            !string.IsNullOrWhiteSpace(node.SlotId) &&
+            compatibilityContext.TryGetSelectOptions(node.SlotId, out IReadOnlyList<UiSelectOptionDescriptor> options))
+        {
+            tabOptions = options;
+            string selectedTabId = GetStringModelValue(node, modelBySlot);
+            for (int i = 0; i < options.Count; i++)
+            {
+                if (selectedTabIndex < 0 && string.Equals(options[i].Value, selectedTabId, StringComparison.Ordinal))
+                {
+                    selectedTabIndex = i;
+                }
+            }
+        }
+
         for (int i = 0; i < node.Children.Count; i++)
         {
             if (!TryBuildNode(
@@ -131,6 +149,16 @@ internal static class ServerDrivenPanelRenderer
             }
 
             childHost.AddChild(child);
+            if (control is TabContainer tabs && tabOptions is not null && i < tabOptions.Count)
+            {
+                tabs.SetTabTitle(i, tabOptions[i].Label);
+                tabs.SetTabDisabled(i, tabOptions[i].Disabled);
+            }
+        }
+
+        if (control is TabContainer tabContainer && selectedTabIndex >= 0)
+        {
+            tabContainer.CurrentTab = selectedTabIndex;
         }
 
         error = string.Empty;
@@ -217,6 +245,19 @@ internal static class ServerDrivenPanelRenderer
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
+    }
+
+    private static TabContainer CreateTabs(UiSchemaNodeDescriptor node)
+    {
+        var tabs = new TabContainer
+        {
+            Name = MakeNodeName("Tabs", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
+        };
+
+        SetSlotMeta(tabs, node);
+        return tabs;
     }
 
     private static Label CreateText(UiSchemaNodeDescriptor node)

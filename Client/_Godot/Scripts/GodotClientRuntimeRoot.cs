@@ -28,6 +28,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeSelectSlot = "chatChannel";
 	private const string SmokeRadioSlot = "nameplateMode";
 	private const string SmokeCheckboxSlot = "enabledChannels";
+	private const string SmokeTabSlot = "settingsTab";
 	private const string SmokeRepeaterSlot = "characters";
 	private const string SmokeRepeaterRowKey = "character/lira";
 	private const string SmokeRepeaterRowText = "Lira";
@@ -677,6 +678,7 @@ public partial class GodotClientRuntimeRoot : Node
 				UiModelSlotValue.String(SmokeSelectSlot, "guild"),
 				UiModelSlotValue.String(SmokeRadioSlot, "party"),
 				UiModelSlotValue.StringList(SmokeCheckboxSlot, ["local", "guild"]),
+				UiModelSlotValue.String(SmokeTabSlot, "account"),
 			]);
 		var open = new UiPanelOpenDocument(
 			SmokeMessageBoxPanelId,
@@ -795,6 +797,12 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeTabSlot, out string tabError))
+		{
+			GD.PushError($"Server UI smoke failed: {tabError}");
+			return;
+		}
+
 		if (!UiManager.Menus.TryFindServerDrivenText(applied.Panel.PanelInstanceId, SmokeRepeaterRowText, out string repeaterTextError))
 		{
 			GD.PushError($"Server UI smoke failed: {repeaterTextError}");
@@ -866,7 +874,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, null, [5]),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 19, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -881,6 +889,11 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(19, UiNodeKind.ScrollRegion, null, null, [20, 21]),
 				new UiSchemaNodeDescriptor(20, UiNodeKind.Text, null, SmokeScrollRegionText, []),
 				new UiSchemaNodeDescriptor(21, UiNodeKind.IconButton, null, "Icon Action", [], ActionId: SmokeIconActionId),
+				new UiSchemaNodeDescriptor(22, UiNodeKind.Tabs, SmokeTabSlot, null, [23, 25]),
+				new UiSchemaNodeDescriptor(23, UiNodeKind.Section, null, "Account", [24]),
+				new UiSchemaNodeDescriptor(24, UiNodeKind.Text, null, "Account tab content", []),
+				new UiSchemaNodeDescriptor(25, UiNodeKind.Section, null, "Chat", [26]),
+				new UiSchemaNodeDescriptor(26, UiNodeKind.Text, null, "Chat tab content", []),
 			],
 			PayloadSlots:
 			[
@@ -893,6 +906,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiPayloadSlotDescriptor(SmokeSelectSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
 				new UiPayloadSlotDescriptor(SmokeRadioSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
 				new UiPayloadSlotDescriptor(SmokeCheckboxSlot, UiModelValueKind.StringList, Required: true, MaxStringLength: 32),
+				new UiPayloadSlotDescriptor(SmokeTabSlot, UiModelValueKind.String, Required: true, MaxStringLength: 32),
 			],
 			Actions:
 			[
@@ -934,6 +948,8 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "local", "Local"),
 				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "guild", "Guild"),
 				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "party", "Party", Disabled: true),
+				new UiSelectOptionDescriptor(SmokeTabSlot, "account", "Account"),
+				new UiSelectOptionDescriptor(SmokeTabSlot, "chat", "Chat"),
 			]);
 	}
 

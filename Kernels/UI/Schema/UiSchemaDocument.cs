@@ -330,10 +330,11 @@ public sealed record UiSchemaDocument(
         }
 
         var optionNodeSlots = new HashSet<string>(StringComparer.Ordinal);
+        var tabChildCountsBySlot = new Dictionary<string, int>(StringComparer.Ordinal);
         for (int i = 0; i < Nodes.Count; i++)
         {
             UiSchemaNodeDescriptor node = Nodes[i];
-            if (node.Kind is not (UiNodeKind.Select or UiNodeKind.RadioGroup or UiNodeKind.CheckboxGroup))
+            if (node.Kind is not (UiNodeKind.Select or UiNodeKind.RadioGroup or UiNodeKind.CheckboxGroup or UiNodeKind.Tabs))
             {
                 continue;
             }
@@ -354,6 +355,16 @@ public sealed record UiSchemaDocument(
             if (slot.ValueKind != expectedKind)
             {
                 return UiValidationResult.Invalid($"{node.Kind} node slot '{node.SlotId}' must be a {expectedKind} payload slot.");
+            }
+
+            if (node.Kind == UiNodeKind.Tabs)
+            {
+                if (node.Children.Count == 0)
+                {
+                    return UiValidationResult.Invalid($"Tabs node slot '{node.SlotId}' requires at least one tab page.");
+                }
+
+                tabChildCountsBySlot[node.SlotId] = node.Children.Count;
             }
 
             optionNodeSlots.Add(node.SlotId);
@@ -388,9 +399,14 @@ public sealed record UiSchemaDocument(
 
         foreach (string slotId in optionNodeSlots)
         {
-            if (!optionValuesBySlot.ContainsKey(slotId))
+            if (!optionValuesBySlot.TryGetValue(slotId, out HashSet<string>? optionValues))
             {
                 return UiValidationResult.Invalid($"Option node slot '{slotId}' requires at least one option.");
+            }
+
+            if (tabChildCountsBySlot.TryGetValue(slotId, out int tabPageCount) && optionValues.Count != tabPageCount)
+            {
+                return UiValidationResult.Invalid($"Tabs node slot '{slotId}' must have exactly one option per tab page.");
             }
         }
 

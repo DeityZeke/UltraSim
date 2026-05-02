@@ -12,6 +12,11 @@ public sealed class UiPanelNodeBuilder
 
     internal IReadOnlyList<int> ChildIds => _childIds;
 
+    internal void AddExistingNode(int nodeId)
+    {
+        _childIds.Add(nodeId);
+    }
+
     public UiPanelNodeBuilder Row(Action<UiPanelNodeBuilder> build)
     {
         _childIds.Add(_owner.AddContainer(UiNodeKind.Row, build));
@@ -39,6 +44,34 @@ public sealed class UiPanelNodeBuilder
     public UiPanelNodeBuilder ScrollRegion(Action<UiPanelNodeBuilder> build)
     {
         _childIds.Add(_owner.AddContainer(UiNodeKind.ScrollRegion, build));
+        return this;
+    }
+
+    public UiPanelNodeBuilder Tabs(
+        string slotId,
+        string selectedTabId,
+        Action<UiTabsBuilder> build,
+        int maxStringLength = UiValidation.MaxIdentityLength,
+        bool required = true)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, required, maxStringLength));
+        _owner.SetModelValue(UiModelSlotValue.String(slotId, selectedTabId));
+        var tabsBuilder = new UiTabsBuilder(_owner);
+        build(tabsBuilder);
+        if (tabsBuilder.Tabs.Count == 0)
+        {
+            throw new InvalidOperationException($"Tabs slot '{slotId}' requires at least one tab.");
+        }
+
+        _owner.DeclareSelectOptions(slotId, tabsBuilder.Tabs);
+        _childIds.Add(_owner.AddContainer(UiNodeKind.Tabs, slotId, text: null, childBuilder =>
+        {
+            for (int i = 0; i < tabsBuilder.PageNodeIds.Count; i++)
+            {
+                childBuilder.AddExistingNode(tabsBuilder.PageNodeIds[i]);
+            }
+        }));
         return this;
     }
 
@@ -308,3 +341,26 @@ public sealed record UiSelectOption(
     string Label,
     bool Disabled = false,
     string? IconId = null);
+
+public sealed class UiTabsBuilder
+{
+    private readonly UiPanelBuilder _owner;
+    private readonly List<UiSelectOption> _tabs = new();
+    private readonly List<int> _pageNodeIds = new();
+
+    internal UiTabsBuilder(UiPanelBuilder owner)
+    {
+        _owner = owner;
+    }
+
+    internal IReadOnlyList<UiSelectOption> Tabs => _tabs;
+
+    internal IReadOnlyList<int> PageNodeIds => _pageNodeIds;
+
+    public UiTabsBuilder Page(string tabId, string label, Action<UiPanelNodeBuilder> build, bool disabled = false, string? iconId = null)
+    {
+        _tabs.Add(new UiSelectOption(tabId, label, disabled, iconId));
+        _pageNodeIds.Add(_owner.AddContainer(UiNodeKind.Section, label, build));
+        return this;
+    }
+}
