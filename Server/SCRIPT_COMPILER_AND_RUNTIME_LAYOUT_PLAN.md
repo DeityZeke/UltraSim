@@ -106,6 +106,12 @@ and world-entry policy should not live in the transport project. Real account
 validation plugs in through a credential-validator seam owned by the accounting
 slice.
 
+`Server/Accounting` is compiled server infrastructure, not script content. It
+owns account records, password hash verification, account state checks, active
+session conflict policy, login rate limiting, and audit records. Scripts may add
+or replace admission panels/flow steps, but a script compile failure must never
+remove the server's ability to reject invalid credentials.
+
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 
 ### Package Replacement Hooks

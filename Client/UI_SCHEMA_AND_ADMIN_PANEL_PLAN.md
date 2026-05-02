@@ -1201,6 +1201,13 @@ Servers may install alternate flows, such as `client_connected -> enter_world` f
 
 `Server/Admission` owns active flow state per connection. When `admission.client_connected` fires after the live session is bound, the runtime opens the active step's panel provider, records the completion event it is waiting for, and advances only when that completion signal succeeds. `Server/Network` only forwards UI action documents and panel opens across the wire. The first login slice uses a narrow credential-validator seam that can be backed by a stub in tests and by the real accounting engine later.
 
+`Server/Accounting` owns the real credential policy: account lookup, password
+hash verification, banned/suspended/pending/locked account states, active-session
+conflict policy, failed-attempt rate limiting, and login audit records. Those are
+compiled server infrastructure, not script package code. Server scripts can
+replace the admission flow around that policy, but they should not be required
+for the server to reject invalid credentials.
+
 Use the shared `SessionAdmission` exclusive group for:
 
 - login
