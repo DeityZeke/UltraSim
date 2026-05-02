@@ -8,4 +8,5 @@ public enum UiActionContextKind : byte
     Entity = 3,
     World = 4,
     Admin = 5,
+    TrustedCredential = 6,
 }

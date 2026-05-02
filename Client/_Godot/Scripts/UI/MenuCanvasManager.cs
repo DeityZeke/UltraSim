@@ -22,6 +22,7 @@ public partial class MenuCanvasManager : CanvasLayer
     public event Action<string>? ChatSubmitted;
     public event Action<ClientUiActionRouteResult>? ServerDrivenActionRouted;
     public event Action<UiActionMenuDescriptor, UiActionDescriptor>? ActionMenuActionPressed;
+    public event Action<ClientUiPanelInstance, UiActionDescriptor>? TrustedCredentialActionRequested;
 
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
@@ -434,6 +435,12 @@ public partial class MenuCanvasManager : CanvasLayer
         if (action.ContextKind == UiActionContextKind.Row && string.IsNullOrWhiteSpace(contextId))
         {
             ServerDrivenActionRouted?.Invoke(ClientUiActionRouteResult.Rejected($"Row action '{action.ActionId}' did not include a row context id."));
+            return;
+        }
+
+        if (action.ContextKind == UiActionContextKind.TrustedCredential)
+        {
+            TrustedCredentialActionRequested?.Invoke(panel, action);
             return;
         }
 

@@ -1176,6 +1176,8 @@ If credentials are considered sensitive enough to avoid the generic panel respon
 
 Trusted credential controls should be explicit in schema metadata. A normal `TextInput` is eligible to participate in generic field submission. A password/credential input is still rendered as an input node, but it is marked as trusted/sensitive and the generic `UiActionRequestDocument.FieldValues` path must reject that slot. The login controller reads those controls and sends credentials through the dedicated admission/auth packet path instead.
 
+The submit action should be equally explicit. A login submit button uses a trusted credential action context, so the renderer can raise it to the trusted login controller instead of sending an ordinary `UiActionRequestDocument`. Generic UI action requests must reject trusted credential actions even if they contain no field values.
+
 If transport encryption later makes generic field submission acceptable, that should be an explicit design decision and documented as such. Until then, treat password fields as dedicated-path controls, not ordinary text inputs.
 
 ## Permissions And Capabilities

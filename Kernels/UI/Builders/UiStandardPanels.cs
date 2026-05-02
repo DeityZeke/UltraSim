@@ -7,10 +7,15 @@ public static class UiStandardPanels
     public const string ChoiceBoxPanelType = "standard.choice_box";
     public const string TextPromptPanelType = "standard.text_prompt";
     public const string PagedListPickerPanelType = "standard.paged_list_picker";
+    public const string LoginPanelType = "admission.login";
 
     public const string TitleSlotId = "standard.title";
     public const string BodySlotId = "standard.body";
     public const string PromptValueSlotId = "standard.prompt.value";
+    public const string LoginUsernameSlotId = "login.username";
+    public const string LoginPasswordSlotId = "login.password";
+    public const string LoginRememberSlotId = "login.remember";
+    public const string LoginStatusSlotId = "login.status";
     public const string PagedListRowsSlotId = "standard.list.rows";
     public const string PagedListRowLabelSlotId = "standard.list.row.label";
     public const string PagedListRowDescriptionSlotId = "standard.list.row.description";
@@ -22,6 +27,8 @@ public static class UiStandardPanels
     public const string ConfirmCancelActionId = "standard.confirm.cancel";
     public const string PromptAcceptActionId = "standard.prompt.accept";
     public const string PromptCancelActionId = "standard.prompt.cancel";
+    public const string LoginSubmitActionId = "login.submit";
+    public const string LoginCancelActionId = "login.cancel";
     public const string PagedListAcceptActionId = "standard.list.accept";
     public const string PagedListCancelActionId = "standard.list.cancel";
     public const string PagedListPreviousActionId = "standard.list.previous";
@@ -231,6 +238,44 @@ public static class UiStandardPanels
         return new UiStandardPagedListPicker(panel, rows.ToArray());
     }
 
+    public static UiBuiltPanel LoginPanel(
+        string serverIdentity,
+        string title = "UltraSim",
+        string body = "Sign in to continue.",
+        string username = "",
+        bool rememberAccount = false,
+        string status = "",
+        string submitText = "Log In",
+        string cancelText = "Back",
+        string panelType = LoginPanelType,
+        int schemaRevision = 1,
+        string submitActionId = LoginSubmitActionId,
+        string cancelActionId = LoginCancelActionId,
+        UiPanelMetadata? metadata = null)
+    {
+        metadata ??= CreateSessionAdmissionMetadata(panelType);
+        return UiPanelBuilder
+            .Create(serverIdentity, panelType, schemaRevision, metadata)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.DynamicText(TitleSlotId, "Title", title, maxStringLength: 160);
+                    column.DynamicText(BodySlotId, "Body", body, maxStringLength: UiValidation.MaxDisplayTextLength);
+                    column.TextInput(LoginUsernameSlotId, "Account", username, maxStringLength: 128);
+                    column.PasswordInput(LoginPasswordSlotId, "Password", maxStringLength: 256);
+                    column.Toggle(LoginRememberSlotId, "Remember Account", rememberAccount);
+                    column.DynamicText(LoginStatusSlotId, "Status", status, maxStringLength: 256);
+                    column.Row(row =>
+                    {
+                        row.Button(cancelActionId, cancelText, UiActionRole.Normal);
+                        row.Button(submitActionId, submitText, UiActionRole.Primary, UiActionContextKind.TrustedCredential);
+                    });
+                });
+            })
+            .Build();
+    }
+
     private static UiPanelMetadata CreateModalMetadata(string panelType)
     {
         return new UiPanelMetadata(
@@ -241,6 +286,21 @@ public static class UiStandardPanels
             ZOrderClass: 10,
             UiOpenPolicy.New,
             UiBackPolicy.CloseAndFocusParent,
+            UiTooltipPolicy.SuppressExternal,
+            BlocksGameplayInput: true,
+            PersistenceKey: null);
+    }
+
+    private static UiPanelMetadata CreateSessionAdmissionMetadata(string panelType)
+    {
+        return new UiPanelMetadata(
+            panelType,
+            UiSurfaceTarget.Exclusive,
+            UiFocusMode.Exclusive,
+            ExclusiveGroup: "SessionAdmission",
+            ZOrderClass: 100,
+            UiOpenPolicy.ReplaceCurrent,
+            UiBackPolicy.SendAction,
             UiTooltipPolicy.SuppressExternal,
             BlocksGameplayInput: true,
             PersistenceKey: null);

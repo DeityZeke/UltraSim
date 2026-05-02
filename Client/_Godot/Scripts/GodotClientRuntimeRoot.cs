@@ -23,6 +23,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeContextMenuActionId = "smoke.context.inspect";
 	private const string SmokeRadialMenuKey = "smoke/radial/root";
 	private const string SmokeRadialMenuActionId = "smoke.radial.talk";
+	private const string SmokeTrustedCredentialActionId = "smoke.message_box.login";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
 	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
 	private const string SmokeImageId = "icons/ui/smoke";
@@ -104,6 +105,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawServerUiRowAction;
 	private bool _smokeSawActionMenuAction;
 	private bool _smokeSawRadialMenuAction;
+	private bool _smokeSawTrustedCredentialAction;
 	private ClientMovementState _lastAuthoritativeOwnerState;
 
 	public override void _Ready()
@@ -161,6 +163,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ServerDrivenPanelRegistry = _serverDrivenPanels;
 			UiManager.Menus.ServerDrivenActionRouted += HandleServerDrivenActionRouted;
 			UiManager.Menus.ActionMenuActionPressed += HandleActionMenuActionPressed;
+			UiManager.Menus.TrustedCredentialActionRequested += HandleTrustedCredentialActionRequested;
 		}
 
 		ScheduleSmokeQuitIfRequested();
@@ -215,6 +218,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
 			UiManager.Menus.ServerDrivenActionRouted -= HandleServerDrivenActionRouted;
 			UiManager.Menus.ActionMenuActionPressed -= HandleActionMenuActionPressed;
+			UiManager.Menus.TrustedCredentialActionRequested -= HandleTrustedCredentialActionRequested;
 		}
 
 		_sessionDriver?.Dispose();
@@ -428,6 +432,15 @@ public partial class GodotClientRuntimeRoot : Node
 		{
 			_smokeSawRadialMenuAction = true;
 			SetStatusText($"Radial menu smoke action routed: {action.ActionId}");
+		}
+	}
+
+	private void HandleTrustedCredentialActionRequested(ClientUiPanelInstance panel, UiActionDescriptor action)
+	{
+		if (string.Equals(action.ActionId, SmokeTrustedCredentialActionId, StringComparison.Ordinal))
+		{
+			_smokeSawTrustedCredentialAction = true;
+			SetStatusText($"Trusted credential smoke action requested: {action.ActionId}");
 		}
 	}
 
@@ -883,6 +896,18 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!UiManager.Menus.TryPressServerDrivenActionButton(applied.Panel.PanelInstanceId, SmokeTrustedCredentialActionId, out string trustedPressError))
+		{
+			GD.PushError($"Server UI smoke failed: {trustedPressError}");
+			return;
+		}
+
+		if (!_smokeSawTrustedCredentialAction)
+		{
+			GD.PushError("Server UI smoke failed: trusted credential action did not route through trusted path.");
+			return;
+		}
+
 		if (!OpenAndPressSmokeActionMenus())
 		{
 			return;
@@ -1026,7 +1051,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, SmokeImageId, []),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Layer, null, null, [27]),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 35, 9, 12, 13, 14, 15, 17, 18, 22, 28, 34, 19, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 35, 36, 9, 12, 13, 14, 15, 17, 18, 22, 28, 34, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -1055,6 +1080,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(33, UiNodeKind.Button, null, "Next", [], ActionId: "smoke.message_box.next"),
 				new UiSchemaNodeDescriptor(34, UiNodeKind.Table, SmokeTableSlot, "Systems", [], ActionId: SmokeTableRowActionId),
 				new UiSchemaNodeDescriptor(35, UiNodeKind.TextInput, SmokePasswordInputSlot, "Password", [], InputSecurity: UiInputSecurity.TrustedCredential),
+				new UiSchemaNodeDescriptor(36, UiNodeKind.Button, null, "Trusted Login", [], ActionId: SmokeTrustedCredentialActionId),
 			],
 			PayloadSlots:
 			[
@@ -1112,6 +1138,14 @@ public partial class GodotClientRuntimeRoot : Node
 					IconId: null,
 					UiActionRole.Normal,
 					UiActionContextKind.Panel,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					SmokeTrustedCredentialActionId,
+					"Trusted Login",
+					IconId: null,
+					UiActionRole.Primary,
+					UiActionContextKind.TrustedCredential,
 					RequiresConfirm: false,
 					ChildMenuKey: null),
 				new UiActionDescriptor(

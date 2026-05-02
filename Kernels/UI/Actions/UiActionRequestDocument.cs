@@ -65,6 +65,11 @@ public sealed record UiActionRequestDocument(
             return UiValidationResult.Invalid($"Action '{ActionId}' is not currently available: {action.Availability}.");
         }
 
+        if (action.ContextKind == UiActionContextKind.TrustedCredential)
+        {
+            return UiValidationResult.Invalid($"Action '{ActionId}' uses the trusted credential path and cannot be submitted as a generic UI action request.");
+        }
+
         if (action.ContextKind == UiActionContextKind.Row && string.IsNullOrWhiteSpace(ContextId))
         {
             return UiValidationResult.Invalid($"Action request for row action '{ActionId}' requires a row context id.");
@@ -132,6 +137,11 @@ public sealed record UiActionRequestDocument(
                 if (action.Availability != UiActionAvailability.Available)
                 {
                     return UiValidationResult.Invalid($"Action '{ActionId}' is not currently available: {action.Availability}.");
+                }
+
+                if (action.ContextKind == UiActionContextKind.TrustedCredential)
+                {
+                    return UiValidationResult.Invalid($"Action '{ActionId}' uses the trusted credential path and cannot be submitted as a generic UI action request.");
                 }
 
                 if (action.ContextKind == UiActionContextKind.Row && string.IsNullOrWhiteSpace(ContextId))
