@@ -19,6 +19,10 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeTableRowActionId = "smoke.message_box.table.inspect";
 	private const string SmokeTableSortActionId = "smoke.message_box.table.sort";
 	private const string SmokeIconActionId = "smoke.message_box.icon";
+	private const string SmokeContextMenuKey = "smoke/context/root";
+	private const string SmokeContextMenuActionId = "smoke.context.inspect";
+	private const string SmokeRadialMenuKey = "smoke/radial/root";
+	private const string SmokeRadialMenuActionId = "smoke.radial.talk";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
 	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
 	private const string SmokeImageId = "icons/ui/smoke";
@@ -97,6 +101,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawServerUiUnsupportedChild;
 	private bool _smokeSawServerUiAction;
 	private bool _smokeSawServerUiRowAction;
+	private bool _smokeSawActionMenuAction;
+	private bool _smokeSawRadialMenuAction;
 	private ClientMovementState _lastAuthoritativeOwnerState;
 
 	public override void _Ready()
@@ -153,6 +159,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ChatSubmitted += HandleChatSubmitted;
 			UiManager.Menus.ServerDrivenPanelRegistry = _serverDrivenPanels;
 			UiManager.Menus.ServerDrivenActionRouted += HandleServerDrivenActionRouted;
+			UiManager.Menus.ActionMenuActionPressed += HandleActionMenuActionPressed;
 		}
 
 		ScheduleSmokeQuitIfRequested();
@@ -206,6 +213,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.PreviewRequested -= HandlePreviewRequested;
 			UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
 			UiManager.Menus.ServerDrivenActionRouted -= HandleServerDrivenActionRouted;
+			UiManager.Menus.ActionMenuActionPressed -= HandleActionMenuActionPressed;
 		}
 
 		_sessionDriver?.Dispose();
@@ -401,6 +409,24 @@ public partial class GodotClientRuntimeRoot : Node
 		if (!result.ReadyToSend)
 		{
 			GD.PushWarning($"Server UI action route failed: {result.Status} {result.Error}");
+		}
+	}
+
+	private void HandleActionMenuActionPressed(UiActionMenuDescriptor menu, UiActionDescriptor action)
+	{
+		if (string.Equals(menu.MenuKey, SmokeContextMenuKey, StringComparison.Ordinal) &&
+			string.Equals(action.ActionId, SmokeContextMenuActionId, StringComparison.Ordinal))
+		{
+			_smokeSawActionMenuAction = true;
+			SetStatusText($"Context menu smoke action routed: {action.ActionId}");
+			return;
+		}
+
+		if (string.Equals(menu.MenuKey, SmokeRadialMenuKey, StringComparison.Ordinal) &&
+			string.Equals(action.ActionId, SmokeRadialMenuActionId, StringComparison.Ordinal))
+		{
+			_smokeSawRadialMenuAction = true;
+			SetStatusText($"Radial menu smoke action routed: {action.ActionId}");
 		}
 	}
 
@@ -849,6 +875,11 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!OpenAndPressSmokeActionMenus())
+		{
+			return;
+		}
+
 		if (!UiManager.Menus.TryPressServerDrivenActionButton(applied.Panel.PanelInstanceId, SmokeMessageBoxActionId, out string pressError))
 		{
 			GD.PushError($"Server UI smoke failed: {pressError}");
@@ -856,6 +887,97 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		SetStatusText("Server UI smoke message box mounted.");
+	}
+
+	private bool OpenAndPressSmokeActionMenus()
+	{
+		if (UiManager?.Menus is null)
+		{
+			GD.PushError("Server UI smoke failed: menu canvas is unavailable for action menus.");
+			return false;
+		}
+
+		var contextMenu = new UiActionMenuDescriptor(
+			SmokeContextMenuKey,
+			UiActionMenuPresentationKind.ContextMenu,
+			UiActionContextKind.Entity,
+			ContextId: "entity:smoke",
+			Actions:
+			[
+				new UiActionDescriptor(
+					SmokeContextMenuActionId,
+					"Inspect",
+					IconId: null,
+					UiActionRole.Normal,
+					UiActionContextKind.Entity,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					"smoke.context.disabled",
+					"Too Far",
+					IconId: null,
+					UiActionRole.Normal,
+					UiActionContextKind.Entity,
+					RequiresConfirm: false,
+					ChildMenuKey: null,
+					UiActionAvailability.OutOfRange,
+					"Move closer"),
+			]);
+		if (!UiManager.Menus.TryShowActionMenu(contextMenu, out string contextError))
+		{
+			GD.PushError($"Server UI smoke failed: {contextError}");
+			return false;
+		}
+
+		if (!UiManager.Menus.TryPressActionMenuButton(SmokeContextMenuKey, SmokeContextMenuActionId, out string contextPressError))
+		{
+			GD.PushError($"Server UI smoke failed: {contextPressError}");
+			return false;
+		}
+
+		if (!_smokeSawActionMenuAction)
+		{
+			GD.PushError("Server UI smoke failed: context menu action did not route.");
+			return false;
+		}
+
+		var radialMenu = new UiActionMenuDescriptor(
+			SmokeRadialMenuKey,
+			UiActionMenuPresentationKind.RadialMenu,
+			UiActionContextKind.Entity,
+			ContextId: "entity:smoke",
+			Actions:
+			[
+				new UiActionDescriptor(
+					SmokeRadialMenuActionId,
+					"Talk",
+					IconId: null,
+					UiActionRole.Primary,
+					UiActionContextKind.Entity,
+					RequiresConfirm: false,
+					ChildMenuKey: "smoke/radial/talk",
+					MenuGroupKey: "social"),
+			],
+			CloseOnFocusLost: false);
+		if (!UiManager.Menus.TryShowActionMenu(radialMenu, out string radialError))
+		{
+			GD.PushError($"Server UI smoke failed: {radialError}");
+			return false;
+		}
+
+		if (!UiManager.Menus.TryPressActionMenuButton(SmokeRadialMenuKey, SmokeRadialMenuActionId, out string radialPressError))
+		{
+			GD.PushError($"Server UI smoke failed: {radialPressError}");
+			return false;
+		}
+
+		if (!_smokeSawRadialMenuAction)
+		{
+			GD.PushError("Server UI smoke failed: radial menu action did not route.");
+			return false;
+		}
+
+		return true;
 	}
 
 	private static UiSchemaDocument CreateSmokeMessageBoxSchema()

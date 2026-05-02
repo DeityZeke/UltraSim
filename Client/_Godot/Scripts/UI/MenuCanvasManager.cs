@@ -12,6 +12,7 @@ public partial class MenuCanvasManager : CanvasLayer
     private readonly ClientAppShellNavigation _navigation = new();
     private readonly ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser();
     private readonly Dictionary<string, Control> _serverDrivenPanels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Control> _actionMenus = new(StringComparer.Ordinal);
     private readonly Dictionary<UiSurfaceTarget, Control> _serverDrivenSurfaceHosts = new();
     private readonly HashSet<string> _blockingServerDrivenPanels = new(StringComparer.Ordinal);
 
@@ -20,6 +21,7 @@ public partial class MenuCanvasManager : CanvasLayer
     public event Action? PreviewRequested;
     public event Action<string>? ChatSubmitted;
     public event Action<ClientUiActionRouteResult>? ServerDrivenActionRouted;
+    public event Action<UiActionMenuDescriptor, UiActionDescriptor>? ActionMenuActionPressed;
 
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
@@ -101,6 +103,79 @@ public partial class MenuCanvasManager : CanvasLayer
 
         _serverDrivenPanels.Clear();
         _blockingServerDrivenPanels.Clear();
+        ClearActionMenus();
+    }
+
+    public bool TryShowActionMenu(UiActionMenuDescriptor menu, out string error)
+    {
+        ArgumentNullException.ThrowIfNull(menu);
+
+        Control? surfaceHost = GetOrCreateServerDrivenSurfaceHost(UiSurfaceTarget.Modal);
+        if (surfaceHost is null)
+        {
+            error = "Action menu surface host is not available.";
+            return false;
+        }
+
+        if (!ActionMenuRenderer.TryBuild(
+            menu,
+            action => RouteActionMenuAction(menu, action),
+            out Control renderedMenu,
+            out error))
+        {
+            return false;
+        }
+
+        CloseActionMenu(menu.MenuKey);
+        _actionMenus[menu.MenuKey] = renderedMenu;
+        surfaceHost.AddChild(renderedMenu);
+        renderedMenu.Position = menu.PresentationKind == UiActionMenuPresentationKind.RadialMenu
+            ? new Vector2(320.0f, 160.0f)
+            : new Vector2(280.0f, 140.0f);
+        renderedMenu.ZIndex = 1000 + _actionMenus.Count;
+        error = string.Empty;
+        return true;
+    }
+
+    public bool CloseActionMenu(string menuKey)
+    {
+        if (!_actionMenus.Remove(menuKey, out Control? renderedMenu))
+        {
+            return false;
+        }
+
+        renderedMenu.QueueFree();
+        return true;
+    }
+
+    public void ClearActionMenus()
+    {
+        foreach (Control menu in _actionMenus.Values)
+        {
+            menu.QueueFree();
+        }
+
+        _actionMenus.Clear();
+    }
+
+    public bool TryPressActionMenuButton(string menuKey, string actionId, out string error)
+    {
+        if (!_actionMenus.TryGetValue(menuKey, out Control? renderedMenu))
+        {
+            error = $"Action menu '{menuKey}' is not mounted.";
+            return false;
+        }
+
+        Button? button = FindActionButton(renderedMenu, actionId);
+        if (button is null)
+        {
+            error = $"Action menu '{menuKey}' does not contain action button '{actionId}'.";
+            return false;
+        }
+
+        button.EmitSignal(BaseButton.SignalName.Pressed);
+        error = string.Empty;
+        return true;
     }
 
     public bool TryFindServerDrivenText(string panelInstanceId, string expectedText, out string error)
@@ -373,6 +448,12 @@ public partial class MenuCanvasManager : CanvasLayer
             resolvedContextId,
             FieldValues: []);
         ServerDrivenActionRouted?.Invoke(ServerDrivenPanelRegistry.ValidateActionRequest(request));
+    }
+
+    private void RouteActionMenuAction(UiActionMenuDescriptor menu, UiActionDescriptor action)
+    {
+        ActionMenuActionPressed?.Invoke(menu, action);
+        CloseActionMenu(menu.MenuKey);
     }
 
     private void ApplyNavigation()

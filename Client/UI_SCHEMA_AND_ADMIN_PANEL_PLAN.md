@@ -576,6 +576,8 @@ Reserving a node id does not mean implementing the renderer immediately. `Invent
 
 `ContextMenu` and `RadialMenu` are interaction surfaces, not long-lived panel shells. They should use the same action/permission/validation model as panels, but their presentation lifetime is usually short and anchored to an item, entity, world position, or selected UI row.
 
+Context/radial descriptors are not normal panel instances. They are short-lived action surfaces rendered from `UiActionMenuDescriptor`: menu key, presentation kind, context kind/id, close policy, and compact server-authored actions. The client may render them above ordinary menu content, but selecting an action still routes the declared action id and explicit context back through the server action path. They should not own model state, row deltas, or hidden panel lifetime.
+
 ## Tooltips, Context Menus, And Interaction Wheels
 
 Tooltips should be first-class metadata on nodes, rows, cells, items, actions, and settings.
