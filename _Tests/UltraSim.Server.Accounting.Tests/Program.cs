@@ -7,11 +7,14 @@ internal static class TestRunner
     public static void Run()
     {
         Run(nameof(Pbkdf2PasswordHashService_VerifiesRejectsAndFlagsWeakEnvelope), Pbkdf2PasswordHashService_VerifiesRejectsAndFlagsWeakEnvelope);
+        Run(nameof(Pbkdf2PasswordHashService_EnvelopeRoundTripsThroughAccountRecord), Pbkdf2PasswordHashService_EnvelopeRoundTripsThroughAccountRecord);
         Run(nameof(DefaultCredentialService_SuccessUpdatesAccountSessionAndAudit), DefaultCredentialService_SuccessUpdatesAccountSessionAndAudit);
         Run(nameof(DefaultCredentialService_RejectsBannedAccountDistinctly), DefaultCredentialService_RejectsBannedAccountDistinctly);
         Run(nameof(DefaultCredentialService_RateLimitsRepeatedFailures), DefaultCredentialService_RateLimitsRepeatedFailures);
         Run(nameof(DefaultCredentialService_DeniesSecondSessionByDefault), DefaultCredentialService_DeniesSecondSessionByDefault);
         Run(nameof(DefaultCredentialService_CanKickExistingSessionWhenConfigured), DefaultCredentialService_CanKickExistingSessionWhenConfigured);
+        Run(nameof(DefaultCredentialService_RejectsPortalTokenMaterial), DefaultCredentialService_RejectsPortalTokenMaterial);
+        Run(nameof(PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword), PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword);
 
         Console.WriteLine("All Server accounting tests passed.");
     }
@@ -27,6 +30,28 @@ internal static class TestRunner
 
         var stronger = new Pbkdf2PasswordHashService(iterations: 120_000);
         Assert.True(stronger.NeedsRehash(hash));
+    }
+
+    private static void Pbkdf2PasswordHashService_EnvelopeRoundTripsThroughAccountRecord()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        string hash = passwords.HashPassword("correct horse battery staple");
+        var account = new ServerAccountRecord(
+            7,
+            "Alice",
+            hash,
+            AccountStatus.Active,
+            now,
+            DateTimeOffset.MinValue,
+            []);
+
+        Assert.True(Pbkdf2PasswordHashService.TryReadEnvelope(account.PasswordHash, out Pbkdf2PasswordHashEnvelope envelope));
+        Assert.Equal(1, envelope.Version);
+        Assert.Equal(100_000, envelope.Iterations);
+        Assert.Equal(32, envelope.SaltLength);
+        Assert.Equal(32, envelope.HashLength);
+        Assert.True(passwords.VerifyPassword("correct horse battery staple", account.PasswordHash));
     }
 
     private static void DefaultCredentialService_SuccessUpdatesAccountSessionAndAudit()
@@ -132,6 +157,48 @@ internal static class TestRunner
         Assert.True(second.Succeeded);
     }
 
+    private static void DefaultCredentialService_RejectsPortalTokenMaterial()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), now);
+        var service = CreateService(accounts, passwords);
+
+        CredentialValidationResult result = service.ValidateLogin(new CredentialValidationRequest(
+            "Alice",
+            "portal-token",
+            "127.0.0.1",
+            "session-a",
+            now,
+            CredentialMaterialKind.PortalSessionToken));
+
+        Assert.Equal(CredentialValidationResultKind.UnsupportedCredentialMaterial, result.Kind);
+    }
+
+    private static void PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var portal = new FakePortalAuthenticator("token-123", "platform-account-7");
+        var provider = new PortalCredentialAuthenticationProvider(
+            portal,
+            new InMemoryLoginRateLimiter(),
+            "server-instance-1");
+
+        CredentialValidationResult result = provider.ValidateLogin(new CredentialValidationRequest(
+            "ignored-by-portal",
+            "token-123",
+            "127.0.0.1",
+            "session-a",
+            now,
+            CredentialMaterialKind.PortalSessionToken));
+
+        Assert.True(result.Succeeded);
+        Assert.Equal("platform-account-7", result.Account!.Username);
+        Assert.Equal(AccountAuthenticationMode.UltraSimPortalAccounts, provider.Mode);
+        Assert.Equal("server-instance-1", portal.LastServerInstanceId);
+    }
+
     private static DefaultCredentialService CreateService(IAccountRegistry accounts, IPasswordHashService passwords)
     {
         return new DefaultCredentialService(
@@ -154,6 +221,32 @@ internal static class TestRunner
             Environment.ExitCode = 1;
             throw;
         }
+    }
+}
+
+internal sealed class FakePortalAuthenticator : IPortalAccountAuthenticator
+{
+    private readonly string _acceptedToken;
+    private readonly string _platformAccountId;
+
+    public FakePortalAuthenticator(string acceptedToken, string platformAccountId)
+    {
+        _acceptedToken = acceptedToken;
+        _platformAccountId = platformAccountId;
+    }
+
+    public string? LastServerInstanceId { get; private set; }
+
+    public PortalAccountAuthenticationResult ValidatePortalSession(
+        string portalSessionToken,
+        string serverInstanceId,
+        string remoteAddress,
+        DateTimeOffset nowUtc)
+    {
+        LastServerInstanceId = serverInstanceId;
+        return string.Equals(portalSessionToken, _acceptedToken, StringComparison.Ordinal)
+            ? PortalAccountAuthenticationResult.Accept(_platformAccountId)
+            : PortalAccountAuthenticationResult.Reject(AccountStatus.LockedOut, "Portal token rejected.");
     }
 }
 

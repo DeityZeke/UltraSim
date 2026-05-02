@@ -112,6 +112,13 @@ session conflict policy, login rate limiting, and audit records. Scripts may add
 or replace admission panels/flow steps, but a script compile failure must never
 remove the server's ability to reject invalid credentials.
 
+Accounting must support both local server accounts and future UltraSim
+portal-backed login. In portal mode the server receives only an opaque
+portal/session credential plus its own server instance id, asks the platform
+service to validate it, and keeps only server-local instance data such as bans,
+kicks, timeouts, character/world records, and audit outcomes. Portal passwords,
+personal data, and platform account history are not passed to the game server.
+
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 
 ### Package Replacement Hooks

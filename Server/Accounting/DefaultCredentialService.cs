@@ -2,6 +2,8 @@ namespace UltraSim.Server.Accounting;
 
 public sealed class DefaultCredentialService : ICredentialService
 {
+    public const string LocalProviderKey = "local.server_accounts";
+
     private readonly IAccountRegistry _accounts;
     private readonly IPasswordHashService _passwords;
     private readonly ILoginRateLimiter _rateLimiter;
@@ -25,9 +27,16 @@ public sealed class DefaultCredentialService : ICredentialService
         _sessionConflictMode = sessionConflictMode;
     }
 
+    public string ProviderKey => LocalProviderKey;
+
+    public AccountAuthenticationMode Mode => AccountAuthenticationMode.LocalServerAccounts;
+
     public CredentialValidationResult ValidateLogin(CredentialValidationRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        if (request.MaterialKind != CredentialMaterialKind.PlainPassword)
+            return Reject(request, CredentialValidationResultKind.UnsupportedCredentialMaterial, "Unsupported login credential type.");
+
         LoginRateLimitResult limit = _rateLimiter.Check(request.Username, request.RemoteAddress, request.NowUtc);
         if (!limit.Allowed)
             return Reject(request, CredentialValidationResultKind.RateLimited, "Too many login attempts. Try again later.", limit.RetryAfter);

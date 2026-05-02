@@ -1208,6 +1208,12 @@ compiled server infrastructure, not script package code. Server scripts can
 replace the admission flow around that policy, but they should not be required
 for the server to reject invalid credentials.
 
+The trusted login packet path must support more than one credential material
+kind. Local-server authentication submits local credential material to the
+server's accounting provider. UltraSim portal-backed authentication submits only
+an opaque portal session/token and server instance id context; the game server
+does not receive portal passwords, personal account data, or platform history.
+
 Use the shared `SessionAdmission` exclusive group for:
 
 - login

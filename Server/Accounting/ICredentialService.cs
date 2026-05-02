@@ -1,6 +1,5 @@
 namespace UltraSim.Server.Accounting;
 
-public interface ICredentialService
+public interface ICredentialService : IAccountAuthenticationProvider
 {
-    CredentialValidationResult ValidateLogin(CredentialValidationRequest request);
 }

@@ -14,6 +14,9 @@ Current first-pass scope:
 - Login audit sink shape.
 - `DefaultCredentialService` that combines lookup, status, password verification,
   session conflict policy, rate limiting, and audit recording.
+- Account authentication provider seam with two explicit modes:
+  - `LocalServerAccounts` for per-server account records and password hashes.
+  - `UltraSimPortalAccounts` for future portal-backed token/session validation.
 
 Password hashing is intentionally interface-backed and envelope-versioned. OWASP
 currently recommends Argon2id as the first choice for new applications; PBKDF2 is
@@ -25,3 +28,11 @@ account registry or admission flow shape.
 Credential bytes must not flow through generic schema UI field values. Admission
 should receive a dedicated trusted login/auth packet and pass a typed
 `CredentialValidationRequest` into `ICredentialService`.
+
+Portal-backed authentication is intentionally modeled as a peer provider, not as
+a special case inside local password verification. In portal mode the game server
+should receive an opaque portal session/token plus its own server instance id,
+ask the platform service to validate it, and keep only server-local policy state
+such as kicks, bans, timeouts, session conflict decisions, and character/world
+data. Personal credential material and platform account history stay with the
+portal/platform account service.

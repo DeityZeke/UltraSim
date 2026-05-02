@@ -10,5 +10,7 @@ public enum CredentialValidationResultKind : byte
     PendingVerification = 5,
     LockedOut = 6,
     AlreadyLoggedIn = 7,
-    RateLimited = 8
+    RateLimited = 8,
+    UnsupportedCredentialMaterial = 9,
+    ExternalProviderUnavailable = 10
 }

@@ -52,6 +52,16 @@ public sealed class Pbkdf2PasswordHashService : IPasswordHashService
         return !TryParse(passwordHash, out int iterations, out _, out _) || iterations < _iterations;
     }
 
+    public static bool TryReadEnvelope(string passwordHash, out Pbkdf2PasswordHashEnvelope envelope)
+    {
+        envelope = default;
+        if (!TryParse(passwordHash, out int iterations, out byte[] salt, out byte[] hash))
+            return false;
+
+        envelope = new Pbkdf2PasswordHashEnvelope(Version: 1, Iterations: iterations, SaltLength: salt.Length, HashLength: hash.Length);
+        return true;
+    }
+
     private static bool TryParse(string passwordHash, out int iterations, out byte[] salt, out byte[] hash)
     {
         iterations = 0;
