@@ -202,6 +202,7 @@ public sealed class ServerMovementSessionHost
 
             ProcessChatInbound(inbound, nowTicks, serverTick);
             ProcessUiActionInbound(inbound);
+            ProcessLoginCredentialInbound(inbound);
 
             long movementInboundStart = Stopwatch.GetTimestamp();
             _movement.ProcessInbound(inbound);
@@ -420,6 +421,41 @@ public sealed class ServerMovementSessionHost
             }
 
             _ui.TryProcessAction(datagram.ConnectionId, datagram.EnvelopePayloadSpan, out _);
+        }
+    }
+
+    private void ProcessLoginCredentialInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        if (_scriptBinding is null)
+            return;
+
+        for (int i = 0; i < inbound.Length; i++)
+        {
+            ref readonly InboundDatagram datagram = ref inbound[i];
+            if (datagram.PacketId != LoginCredentialSubmitPacket.PacketId ||
+                datagram.Plane != LoginCredentialSubmitPacket.Plane ||
+                datagram.PacketClass != LoginCredentialSubmitPacket.PacketClass)
+            {
+                continue;
+            }
+
+            if (!_control.Sessions.TryGetSessionIdByConnection(datagram.ConnectionId, out SessionId sessionId) ||
+                !_control.Sessions.TryGetSnapshot(sessionId, out SessionSnapshot snapshot) ||
+                snapshot.State != ConnectionSessionState.Ready)
+            {
+                continue;
+            }
+
+            var reader = new UltraSim.Network.BitReader(datagram.EnvelopePayloadSpan);
+            LoginCredentialSubmitPacket packet = LoginCredentialSubmitPacket.Deserialize(ref reader);
+            _scriptBinding.Admission.ProcessCredential(
+                datagram.ConnectionId,
+                new AdmissionCredentialRequest(
+                    packet.PanelInstanceId,
+                    packet.ActionId,
+                    packet.Username,
+                    packet.MaterialKind,
+                    packet.MaterialBytes));
         }
     }
 

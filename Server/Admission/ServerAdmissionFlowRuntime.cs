@@ -88,7 +88,11 @@ public sealed class ServerAdmissionFlowRuntime
             connectionId,
             step,
             panelInstanceId,
-            step.CompletesWithEvent);
+            step.CompletesWithEvent,
+            panel.Schema.Actions
+                .Where(static action => action.ContextKind == UiActionContextKind.TrustedCredential)
+                .Select(static action => action.ActionId)
+                .ToHashSet(StringComparer.Ordinal));
         FiredEvents++;
         OpenedPanels++;
         return true;
@@ -133,6 +137,32 @@ public sealed class ServerAdmissionFlowRuntime
             return;
 
         if (request.ContextKind != UiActionContextKind.TrustedCredential)
+            return;
+
+        if (!state.TrustedCredentialActionIds.Contains(request.ActionId))
+            return;
+
+        ServerAdmissionCredentialValidationResult validation =
+            _credentialValidator.ValidateTrustedCredential(connectionId, request);
+        if (!validation.Accepted)
+        {
+            RejectedCredentials++;
+            return;
+        }
+
+        TryCompleteCurrentStep(connectionId, state.WaitingForEvent, out _);
+    }
+
+    public void ProcessCredential(ConnectionId connectionId, AdmissionCredentialRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (!_statesByConnection.TryGetValue(connectionId, out SessionAdmissionState? state))
+            return;
+
+        if (!string.Equals(request.PanelInstanceId, state.PanelInstanceId, StringComparison.Ordinal))
+            return;
+
+        if (!state.TrustedCredentialActionIds.Contains(request.ActionId))
             return;
 
         ServerAdmissionCredentialValidationResult validation =

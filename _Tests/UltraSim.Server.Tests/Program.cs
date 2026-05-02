@@ -3003,16 +3003,13 @@ internal static class TestRunner
         Assert.Equal(login.PanelInstanceId, loginState.PanelInstanceId);
         Assert.Equal("admission.login_verified", loginState.WaitingForEvent);
 
-        var credentialAction = new UiActionRequestDocument(
+        var credentialPacket = new LoginCredentialSubmitPacket(
             login.PanelInstanceId,
-            login.SchemaIdentity,
-            CatalogIdentity: null,
-            ClientSequence: 1,
             "login.submit",
-            UiActionContextKind.TrustedCredential,
-            ContextId: null,
-            FieldValues: []);
-        Assert.True(clientHost.TrySendUiAction(credentialAction));
+            "Alice",
+            LoginCredentialMaterialKind.PlainPassword,
+            [1, 2, 3, 4]);
+        Assert.True(clientHost.TrySendLoginCredential(credentialPacket));
 
         serverHost.Pump(220, 0.016f, 21);
         clientHost.Pump(221);

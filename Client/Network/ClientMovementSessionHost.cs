@@ -290,4 +290,19 @@ public sealed class ClientMovementSessionHost
         _transport.FlushOutbound();
         return true;
     }
+
+    public bool TrySendLoginCredential(LoginCredentialSubmitPacket packet)
+    {
+        if (!IsReady)
+            return false;
+
+        _transport.EnqueueOutbound(new OutboundDatagram(
+            ConnectionId,
+            LoginCredentialSubmitPacket.Plane,
+            LoginCredentialSubmitPacket.PacketClass,
+            LoginCredentialSubmitPacket.Channel,
+            PacketCodec.Encode(packet)));
+        _transport.FlushOutbound();
+        return true;
+    }
 }

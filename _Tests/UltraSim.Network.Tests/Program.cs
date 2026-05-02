@@ -24,6 +24,7 @@ internal static class TestRunner
         Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
         Run(nameof(UiPanelOpenEventPacket_RoundTripsDocumentBytes), UiPanelOpenEventPacket_RoundTripsDocumentBytes);
         Run(nameof(UiActionRequestPacket_RoundTripsDocumentBytes), UiActionRequestPacket_RoundTripsDocumentBytes);
+        Run(nameof(LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial), LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial);
         Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
         Run(nameof(PacketRegistry_DispatchesTypedPacketAndMetadata), PacketRegistry_DispatchesTypedPacketAndMetadata);
         Run(nameof(PacketMetadataRegistry_ResolvesRegisteredPacketMetadata), PacketMetadataRegistry_ResolvesRegisteredPacketMetadata);
@@ -571,6 +572,33 @@ internal static class TestRunner
         var reader = new BitReader(payload);
         UiActionRequestPacket decoded = UiActionRequestPacket.Deserialize(ref reader);
         Assert.True(documentBytes.AsSpan().SequenceEqual(decoded.DocumentBytes));
+    }
+
+    private static void LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial()
+    {
+        byte[] material = [11, 22, 33, 44];
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new LoginCredentialSubmitPacket(
+            "admission/login/1/1",
+            "login.submit",
+            "Alice",
+            LoginCredentialMaterialKind.PortalSessionToken,
+            material));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(LoginCredentialSubmitPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(LoginCredentialSubmitPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.Input, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        LoginCredentialSubmitPacket decoded = LoginCredentialSubmitPacket.Deserialize(ref reader);
+        Assert.Equal("admission/login/1/1", decoded.PanelInstanceId);
+        Assert.Equal("login.submit", decoded.ActionId);
+        Assert.Equal("Alice", decoded.Username);
+        Assert.Equal(LoginCredentialMaterialKind.PortalSessionToken, decoded.MaterialKind);
+        Assert.True(material.AsSpan().SequenceEqual(decoded.MaterialBytes));
     }
 
     private static void RealtimeStateBatchPacket_RoundTripsExpectedItems()

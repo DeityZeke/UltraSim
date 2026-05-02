@@ -7,4 +7,5 @@ public sealed record SessionAdmissionState(
     ConnectionId ConnectionId,
     UltraSimScriptAdmissionFlowStepDescriptor Step,
     string PanelInstanceId,
-    string WaitingForEvent);
+    string WaitingForEvent,
+    IReadOnlySet<string> TrustedCredentialActionIds);

@@ -118,6 +118,9 @@ portal/session credential plus its own server instance id, asks the platform
 service to validate it, and keeps only server-local instance data such as bans,
 kicks, timeouts, character/world records, and audit outcomes. Portal passwords,
 personal data, and platform account history are not passed to the game server.
+Portal token validation is mandatory: production portal authenticators must
+cryptographically verify the token or call the portal authority, not trust a
+client-provided token string.
 
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 

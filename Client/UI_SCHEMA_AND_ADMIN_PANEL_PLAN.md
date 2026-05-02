@@ -1214,6 +1214,13 @@ server's accounting provider. UltraSim portal-backed authentication submits only
 an opaque portal session/token and server instance id context; the game server
 does not receive portal passwords, personal account data, or platform history.
 
+The trusted credential packet is separate from `UiActionRequestDocument`. The
+panel button still declares a `TrustedCredential` action, but the client handler
+reads trusted input controls and sends a dedicated `LoginCredentialSubmitPacket`
+with credential material kind, panel instance id, action id, username, and opaque
+material bytes. Password/token values must not be logged, echoed, or placed in
+generic UI field values.
+
 Use the shared `SessionAdmission` exclusive group for:
 
 - login

@@ -8,4 +8,8 @@ public interface IAdmissionCredentialValidator
     ServerAdmissionCredentialValidationResult ValidateTrustedCredential(
         ConnectionId connectionId,
         UiActionRequestDocument request);
+
+    ServerAdmissionCredentialValidationResult ValidateTrustedCredential(
+        ConnectionId connectionId,
+        AdmissionCredentialRequest request);
 }

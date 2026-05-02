@@ -36,3 +36,8 @@ ask the platform service to validate it, and keep only server-local policy state
 such as kicks, bans, timeouts, session conflict decisions, and character/world
 data. Personal credential material and platform account history stay with the
 portal/platform account service.
+
+`IPortalAccountAuthenticator` implementations must cryptographically validate
+tokens or call the portal authority. A test fake may accept a known token, but a
+production implementation must never trust token text merely because it came from
+a connected client.

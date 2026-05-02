@@ -19,4 +19,15 @@ public sealed class AcceptAllAdmissionCredentialValidator : IAdmissionCredential
             ? ServerAdmissionCredentialValidationResult.Accept()
             : ServerAdmissionCredentialValidationResult.Reject("Trusted credential action is not valid for this connection.");
     }
+
+    public ServerAdmissionCredentialValidationResult ValidateTrustedCredential(
+        ConnectionId connectionId,
+        AdmissionCredentialRequest request)
+    {
+        return connectionId.IsValid &&
+            !string.IsNullOrWhiteSpace(request.PanelInstanceId) &&
+            !string.IsNullOrWhiteSpace(request.ActionId)
+            ? ServerAdmissionCredentialValidationResult.Accept()
+            : ServerAdmissionCredentialValidationResult.Reject("Trusted credential packet is not valid for this connection.");
+    }
 }
