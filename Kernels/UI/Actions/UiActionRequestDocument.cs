@@ -18,13 +18,22 @@ public sealed record UiActionRequestDocument(
             return schemaResult;
         }
 
+        IReadOnlySet<string> trustedInputSlots = schema.GetTrustedInputSlotIds();
         return ValidateAgainstSchemaShape(
             schema.Identity,
             schema.CatalogIdentity,
             schema.Actions,
-            value => TryGetPayloadSlot(schema.PayloadSlots, value.SlotId, out UiPayloadSlotDescriptor descriptor)
-                ? value.Validate(descriptor)
-                : UiValidationResult.Invalid($"Action request contains unknown field slot '{value.SlotId}'."));
+            value =>
+            {
+                if (trustedInputSlots.Contains(value.SlotId))
+                {
+                    return UiValidationResult.Invalid($"Action request cannot include trusted input field slot '{value.SlotId}'.");
+                }
+
+                return TryGetPayloadSlot(schema.PayloadSlots, value.SlotId, out UiPayloadSlotDescriptor descriptor)
+                    ? value.Validate(descriptor)
+                    : UiValidationResult.Invalid($"Action request contains unknown field slot '{value.SlotId}'.");
+            });
     }
 
     public UiValidationResult ValidateAgainst(UiSchemaCompatibilityContext context)
@@ -73,6 +82,11 @@ public sealed record UiActionRequestDocument(
             if (!context.TryGetPayloadSlot(value.SlotId, out UiPayloadSlotDescriptor descriptor))
             {
                 return UiValidationResult.Invalid($"Action request contains unknown field slot '{value.SlotId}'.");
+            }
+
+            if (context.IsTrustedInputSlot(value.SlotId))
+            {
+                return UiValidationResult.Invalid($"Action request cannot include trusted input field slot '{value.SlotId}'.");
             }
 
             UiValidationResult valueResult = value.Validate(descriptor);

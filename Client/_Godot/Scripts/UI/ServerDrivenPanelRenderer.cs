@@ -340,11 +340,17 @@ internal static class ServerDrivenPanelRenderer
             Name = MakeNodeName("TextInput", node.NodeId),
             Text = GetStringModelValue(node, modelBySlot),
             PlaceholderText = node.Text ?? string.Empty,
+            Secret = node.InputSecurity == UiInputSecurity.TrustedCredential,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
 
         SetSlotMeta(input, node);
+        if (node.InputSecurity == UiInputSecurity.TrustedCredential)
+        {
+            input.SetMeta("UiTrustedInput", true);
+        }
+
         return input;
     }
 

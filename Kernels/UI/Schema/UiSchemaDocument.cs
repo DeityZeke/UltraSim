@@ -190,6 +190,23 @@ public sealed record UiSchemaDocument(
         return TableColumns ?? [];
     }
 
+    public IReadOnlySet<string> GetTrustedInputSlotIds()
+    {
+        var trustedSlots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = Nodes[i];
+            if (node.Kind == UiNodeKind.TextInput &&
+                node.InputSecurity == UiInputSecurity.TrustedCredential &&
+                !string.IsNullOrWhiteSpace(node.SlotId))
+            {
+                trustedSlots.Add(node.SlotId);
+            }
+        }
+
+        return trustedSlots;
+    }
+
     private UiValidationResult ValidateRequiredCapabilities(
         UiCapabilityFlags requiredCapabilities,
         UiRendererCapabilities? rendererCapabilities)

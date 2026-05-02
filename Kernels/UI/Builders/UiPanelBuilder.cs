@@ -153,6 +153,20 @@ public sealed class UiPanelBuilder
         return AddNode(kind, slotId, text, children: [], actionId);
     }
 
+    internal int AddTextInputLeaf(string slotId, string text, UiInputSecurity inputSecurity)
+    {
+        int nodeId = _nextNodeId++;
+        _nodes.Add(new UiSchemaNodeDescriptor(
+            nodeId,
+            UiNodeKind.TextInput,
+            slotId,
+            text,
+            [],
+            ActionId: null,
+            InputSecurity: inputSecurity));
+        return nodeId;
+    }
+
     internal void DeclarePayloadSlot(UiPayloadSlotDescriptor descriptor)
     {
         UiValidationResult result = descriptor.Validate();
@@ -317,7 +331,8 @@ public sealed class UiPanelBuilder
                 .Append(node.Kind).Append('|')
                 .Append(node.SlotId).Append('|')
                 .Append(node.Text).Append('|')
-                .Append(node.ActionId).Append('|');
+                .Append(node.ActionId).Append('|')
+                .Append(node.InputSecurity).Append('|');
             for (int childIndex = 0; childIndex < node.Children.Count; childIndex++)
             {
                 if (childIndex > 0)

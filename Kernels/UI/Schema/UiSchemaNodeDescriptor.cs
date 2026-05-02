@@ -7,7 +7,8 @@ public sealed record UiSchemaNodeDescriptor(
     string? Text,
     IReadOnlyList<int> Children,
     UiCapabilityFlags RequiredCapabilities = UiCapabilityFlags.None,
-    string? ActionId = null)
+    string? ActionId = null,
+    UiInputSecurity InputSecurity = UiInputSecurity.Standard)
 {
     public UiValidationResult Validate(UiSchemaValidationLimits limits)
     {
@@ -30,6 +31,16 @@ public sealed record UiSchemaNodeDescriptor(
         if ((RequiredCapabilities & ~UiCapabilitySet.AllKnown) != 0)
         {
             return UiValidationResult.Invalid("Node required capabilities contain unknown values.");
+        }
+
+        if (!UiValidation.IsDefined(InputSecurity))
+        {
+            return UiValidationResult.Invalid("Node input security is invalid.");
+        }
+
+        if (InputSecurity != UiInputSecurity.Standard && Kind != UiNodeKind.TextInput)
+        {
+            return UiValidationResult.Invalid("Only TextInput nodes can declare non-standard input security.");
         }
 
         if (!string.IsNullOrWhiteSpace(SlotId))

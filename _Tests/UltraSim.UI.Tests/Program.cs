@@ -340,6 +340,7 @@ internal static class TestRunner
                     group.Section("Account", section =>
                     {
                         section.TextInput("displayName", "Display Name", "Test Pilot", maxStringLength: 64);
+                        section.PasswordInput("accountPassword", "Password", maxStringLength: 128);
                         section.Toggle("rememberAccount", "Remember Account", true);
                         section.NumberInput("uiScale", "UI Scale", 1.25, minNumber: 0.5, maxNumber: 3.0);
                         section.Slider("musicVolume", "Music Volume", 0.75, minNumber: 0.0, maxNumber: 1.0);
@@ -404,6 +405,10 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Group && string.Equals(node.Text, "Connection", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Section && string.Equals(node.Text, "Account", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.TextInput && string.Equals(node.SlotId, "displayName", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node =>
+            node.Kind == UiNodeKind.TextInput &&
+            string.Equals(node.SlotId, "accountPassword", StringComparison.Ordinal) &&
+            node.InputSecurity == UiInputSecurity.TrustedCredential));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Toggle && string.Equals(node.SlotId, "rememberAccount", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.NumberInput && string.Equals(node.SlotId, "uiScale", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Slider && string.Equals(node.SlotId, "musicVolume", StringComparison.Ordinal)));
@@ -427,6 +432,11 @@ internal static class TestRunner
         UiPayloadSlotDescriptor nameSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.String, nameSlot.ValueKind);
         Assert.Equal(64, nameSlot.MaxStringLength);
+
+        UiPayloadSlotDescriptor passwordSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "accountPassword", StringComparison.Ordinal));
+        Assert.Equal(UiModelValueKind.String, passwordSlot.ValueKind);
+        Assert.Equal(128, passwordSlot.MaxStringLength);
+        Assert.True(built.Schema.GetTrustedInputSlotIds().Contains("accountPassword"));
 
         UiPayloadSlotDescriptor toggleSlot = built.Schema.PayloadSlots.First(slot => string.Equals(slot.SlotId, "rememberAccount", StringComparison.Ordinal));
         Assert.Equal(UiModelValueKind.Boolean, toggleSlot.ValueKind);
@@ -469,6 +479,9 @@ internal static class TestRunner
         UiModelSlotValue nameValue = built.Model.Values.First(value => string.Equals(value.SlotId, "displayName", StringComparison.Ordinal));
         Assert.Equal("Test Pilot", nameValue.StringValue);
 
+        UiModelSlotValue passwordValue = built.Model.Values.First(value => string.Equals(value.SlotId, "accountPassword", StringComparison.Ordinal));
+        Assert.Equal(string.Empty, passwordValue.StringValue);
+
         UiModelSlotValue toggleValue = built.Model.Values.First(value => string.Equals(value.SlotId, "rememberAccount", StringComparison.Ordinal));
         Assert.True(toggleValue.BooleanValue);
 
@@ -506,6 +519,7 @@ internal static class TestRunner
         Assert.Equal(3, enabledChannelOptions.Count);
         Assert.True(context.TryGetSelectOptions("settingsTab", out IReadOnlyList<UiSelectOptionDescriptor> tabOptions));
         Assert.Equal(2, tabOptions.Count);
+        Assert.True(context.IsTrustedInputSlot("accountPassword"));
         Assert.True(context.HasRepeaterSlot("characters"));
         Assert.True(context.HasRepeaterSlot("systems"));
         Assert.True(context.TryGetTableColumns("systems", out IReadOnlyList<UiTableColumnDescriptor> systemColumns));
@@ -527,6 +541,17 @@ internal static class TestRunner
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
         Assert.Valid(cold.ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
+
+        var genericPasswordRequest = new UiActionRequestDocument(
+            "panel/settings/connection",
+            built.Schema.Identity,
+            CatalogIdentity: null,
+            ClientSequence: 1,
+            "settings.help",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: [UiModelSlotValue.String("accountPassword", "do-not-send")]);
+        Assert.InvalidContains(genericPasswordRequest.ValidateAgainst(context), "trusted input");
     }
 
     private static void UiStandardPanels_BuildStandardModalHelpersWithStableSchemas()

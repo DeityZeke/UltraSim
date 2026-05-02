@@ -28,6 +28,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeImageId = "icons/ui/smoke";
 	private const string SmokeScrollRegionText = "Scrollable server-driven details";
 	private const string SmokeTextInputSlot = "displayName";
+	private const string SmokePasswordInputSlot = "accountPassword";
 	private const string SmokeToggleSlot = "rememberAccount";
 	private const string SmokeNumberInputSlot = "uiScale";
 	private const string SmokeSliderSlot = "musicVolume";
@@ -703,6 +704,7 @@ public partial class GodotClientRuntimeRoot : Node
 			[
 				UiModelSlotValue.String("messageText", SmokeMessageBoxText),
 				UiModelSlotValue.String(SmokeTextInputSlot, "Test Pilot"),
+				UiModelSlotValue.String(SmokePasswordInputSlot, string.Empty),
 				UiModelSlotValue.Boolean(SmokeToggleSlot, true),
 				UiModelSlotValue.Number(SmokeNumberInputSlot, 1.25),
 				UiModelSlotValue.Number(SmokeSliderSlot, 0.75),
@@ -788,6 +790,12 @@ public partial class GodotClientRuntimeRoot : Node
 		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeTextInputSlot, out string textInputError))
 		{
 			GD.PushError($"Server UI smoke failed: {textInputError}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokePasswordInputSlot, out string passwordInputError))
+		{
+			GD.PushError($"Server UI smoke failed: {passwordInputError}");
 			return;
 		}
 
@@ -1018,7 +1026,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, SmokeImageId, []),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Layer, null, null, [27]),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 28, 34, 19, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 35, 9, 12, 13, 14, 15, 17, 18, 22, 28, 34, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -1046,11 +1054,13 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(32, UiNodeKind.DynamicText, SmokeTotalPagesSlot, "Total Pages", []),
 				new UiSchemaNodeDescriptor(33, UiNodeKind.Button, null, "Next", [], ActionId: "smoke.message_box.next"),
 				new UiSchemaNodeDescriptor(34, UiNodeKind.Table, SmokeTableSlot, "Systems", [], ActionId: SmokeTableRowActionId),
+				new UiSchemaNodeDescriptor(35, UiNodeKind.TextInput, SmokePasswordInputSlot, "Password", [], InputSecurity: UiInputSecurity.TrustedCredential),
 			],
 			PayloadSlots:
 			[
 				new UiPayloadSlotDescriptor("messageText", UiModelValueKind.String, Required: true, MaxStringLength: 128),
 				new UiPayloadSlotDescriptor(SmokeTextInputSlot, UiModelValueKind.String, Required: true, MaxStringLength: 64),
+				new UiPayloadSlotDescriptor(SmokePasswordInputSlot, UiModelValueKind.String, Required: true, MaxStringLength: 128),
 				new UiPayloadSlotDescriptor(SmokeToggleSlot, UiModelValueKind.Boolean, Required: true),
 				new UiPayloadSlotDescriptor(SmokeNumberInputSlot, UiModelValueKind.Number, Required: true, MinNumber: 0.5, MaxNumber: 3.0),
 				new UiPayloadSlotDescriptor(SmokeSliderSlot, UiModelValueKind.Number, Required: true, MinNumber: 0.0, MaxNumber: 1.0),

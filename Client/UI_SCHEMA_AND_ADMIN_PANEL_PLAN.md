@@ -1174,6 +1174,8 @@ If credentials are considered sensitive enough to avoid the generic panel respon
 - the generic panel response may carry only non-sensitive action intent, such as cancel/back
 - the server challenge/nonce and retry state stay in the trusted auth flow
 
+Trusted credential controls should be explicit in schema metadata. A normal `TextInput` is eligible to participate in generic field submission. A password/credential input is still rendered as an input node, but it is marked as trusted/sensitive and the generic `UiActionRequestDocument.FieldValues` path must reject that slot. The login controller reads those controls and sends credentials through the dedicated admission/auth packet path instead.
+
 If transport encryption later makes generic field submission acceptable, that should be an explicit design decision and documented as such. Until then, treat password fields as dedicated-path controls, not ordinary text inputs.
 
 ## Permissions And Capabilities

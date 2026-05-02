@@ -192,6 +192,18 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder PasswordInput(
+        string slotId,
+        string label,
+        int maxStringLength = UiValidation.MaxDisplayTextLength,
+        bool required = true)
+    {
+        _owner.DeclarePayloadSlot(new UiPayloadSlotDescriptor(slotId, UiModelValueKind.String, required, maxStringLength));
+        _owner.SetModelValue(UiModelSlotValue.String(slotId, string.Empty));
+        _childIds.Add(_owner.AddTextInputLeaf(slotId, label, UiInputSecurity.TrustedCredential));
+        return this;
+    }
+
     public UiPanelNodeBuilder NumberInput(
         string slotId,
         string label,

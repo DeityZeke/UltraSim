@@ -6,6 +6,7 @@ public sealed class UiSchemaCompatibilityContext
     private readonly Dictionary<string, UiActionDescriptor> _actionById;
     private readonly Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> _selectOptionsBySlotId;
     private readonly Dictionary<string, IReadOnlyList<UiTableColumnDescriptor>> _tableColumnsBySlotId;
+    private readonly HashSet<string> _trustedInputSlotIds;
     private readonly HashSet<string> _repeaterSlotIds;
     private readonly HashSet<string> _stateBindingSlotIds;
 
@@ -21,6 +22,7 @@ public sealed class UiSchemaCompatibilityContext
         Dictionary<string, UiActionDescriptor> actionById,
         Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> selectOptionsBySlotId,
         Dictionary<string, IReadOnlyList<UiTableColumnDescriptor>> tableColumnsBySlotId,
+        HashSet<string> trustedInputSlotIds,
         HashSet<string> repeaterSlotIds,
         HashSet<string> stateBindingSlotIds)
     {
@@ -35,6 +37,7 @@ public sealed class UiSchemaCompatibilityContext
         _actionById = actionById;
         _selectOptionsBySlotId = selectOptionsBySlotId;
         _tableColumnsBySlotId = tableColumnsBySlotId;
+        _trustedInputSlotIds = trustedInputSlotIds;
         _repeaterSlotIds = repeaterSlotIds;
         _stateBindingSlotIds = stateBindingSlotIds;
     }
@@ -141,6 +144,8 @@ public sealed class UiSchemaCompatibilityContext
             tableColumnsBySlotId.Add(pair.Key, pair.Value.ToArray());
         }
 
+        var trustedInputSlotIds = new HashSet<string>(schema.GetTrustedInputSlotIds(), StringComparer.Ordinal);
+
         context = new UiSchemaCompatibilityContext(
             schema.Identity,
             schema.CatalogIdentity,
@@ -153,6 +158,7 @@ public sealed class UiSchemaCompatibilityContext
             actionById,
             selectOptionsBySlotId,
             tableColumnsBySlotId,
+            trustedInputSlotIds,
             repeaterSlotIds,
             stateBindingSlotIds);
         return UiValidationResult.Valid;
@@ -198,6 +204,11 @@ public sealed class UiSchemaCompatibilityContext
     public bool TryGetTableColumns(string slotId, out IReadOnlyList<UiTableColumnDescriptor> columns)
     {
         return _tableColumnsBySlotId.TryGetValue(slotId, out columns!);
+    }
+
+    public bool IsTrustedInputSlot(string slotId)
+    {
+        return _trustedInputSlotIds.Contains(slotId);
     }
 
     public bool HasRepeaterSlot(string slotId)
