@@ -24,3 +24,8 @@ one package owns a step at a time, with explicit priority and conflict reporting
 
 Trusted credential fields must use the trusted credential path. Do not submit
 password values through generic `UiActionRequestDocument.FieldValues`.
+
+`AdmissionModule` registers the default panel providers and exposes the default
+step descriptors. The current script context does not yet have a flow-step
+registry, so the descriptors are data for the upcoming admission runtime slice;
+they should not be hard-coded again elsewhere.

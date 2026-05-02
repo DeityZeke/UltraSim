@@ -10,6 +10,7 @@ internal static class TestRunner
     {
         Run(nameof(RuntimeTemplate_CreatesExpectedFolders), RuntimeTemplate_CreatesExpectedFolders);
         Run(nameof(RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi), RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi);
+        Run(nameof(RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders), RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders);
         Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
@@ -77,8 +78,34 @@ internal static class TestRunner
         UltraSimScriptCompileResult result = new UltraSimScriptCompiler().Compile(new UltraSimScriptCompilerOptions(temp.Layout));
 
         Assert.Equal(UltraSimScriptCompileResultKind.Compiled, result.Kind);
-        Assert.Equal(3, result.SourceCount);
+        Assert.True(result.SourceCount >= 6);
         Assert.False(result.Diagnostics.Any(static diagnostic => diagnostic.Severity == UltraSimScriptDiagnosticSeverity.Error));
+    }
+
+    private static void RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        UltraSimRuntimeTemplate.Ensure(temp.Layout);
+        CopyDirectory(
+            Path.Combine(FindRepositoryRoot(), "Server", "RuntimeTemplate", "scripts", "Packages", "Admission"),
+            Path.Combine(temp.Layout.ScriptsPath, "Packages", "Admission"));
+
+        UltraSimScriptCompileResult compile = new UltraSimScriptCompiler().Compile(new UltraSimScriptCompilerOptions(temp.Layout));
+        Assert.Equal(UltraSimScriptCompileResultKind.Compiled, compile.Kind);
+
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        UltraSimScriptLoadResult load = new UltraSimScriptAssemblyHost().LoadConfigureAndInitialize(compile.AssemblyPath!, context);
+
+        Assert.True(load.Succeeded, string.Join('\n', load.Errors));
+        Assert.Equal(1, load.ModuleCount);
+        Assert.Equal(3, context.RegisteredPanelProviders.Count);
+        Assert.True(context.TryGetPanelProvider("admission.panel.login", out UltraSimScriptUiPanelProviderDescriptor loginProvider));
+        Assert.True(context.TryGetPanelProvider("admission.panel.character_select", out UltraSimScriptUiPanelProviderDescriptor selectProvider));
+        Assert.True(context.TryGetPanelProvider("admission.panel.character_create", out UltraSimScriptUiPanelProviderDescriptor createProvider));
+        Assert.Equal("admission.login", loginProvider.Provider().Schema.Identity.PanelType);
+        Assert.Equal("admission.character_select", selectProvider.Provider().Schema.Identity.PanelType);
+        Assert.Equal("admission.character_create", createProvider.Provider().Schema.Identity.PanelType);
+        Assert.True(context.LogEntries.Any(static entry => entry.Message.Contains("Default admission package configured.", StringComparison.Ordinal)));
     }
 
     private static void ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors()
