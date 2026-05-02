@@ -11,6 +11,23 @@ public sealed record ServerAccountRecord(
     bool IsAdmin = false,
     string? StatusReason = null)
 {
+    public ulong[] CharacterSlots { get; init; } = [];
+
+    public int CharacterCount
+    {
+        get
+        {
+            int count = 0;
+            for (int i = 0; i < CharacterSlots.Length; i++)
+            {
+                if (CharacterSlots[i] != 0)
+                    count++;
+            }
+
+            return count;
+        }
+    }
+
     public ServerAccountRecord Normalize()
     {
         string username = string.IsNullOrWhiteSpace(Username)
@@ -29,7 +46,8 @@ public sealed record ServerAccountRecord(
         {
             Username = username,
             PasswordHash = hash,
-            KnownRemoteAddresses = known
+            KnownRemoteAddresses = known,
+            CharacterSlots = CharacterSlots.ToArray()
         };
     }
 
@@ -58,5 +76,70 @@ public sealed record ServerAccountRecord(
         }
 
         return values.ToArray();
+    }
+
+    public int FirstEmptySlot(int maxCharacters)
+    {
+        if (maxCharacters <= 0)
+            return -1;
+
+        int searchLength = Math.Max(CharacterSlots.Length, maxCharacters);
+        for (int i = 0; i < searchLength && i < maxCharacters; i++)
+        {
+            if (i >= CharacterSlots.Length || CharacterSlots[i] == 0)
+                return i;
+        }
+
+        return -1;
+    }
+
+    public bool TryGetSlotIndex(ulong characterId, out int slotIndex)
+    {
+        for (int i = 0; i < CharacterSlots.Length; i++)
+        {
+            if (CharacterSlots[i] == characterId)
+            {
+                slotIndex = i;
+                return true;
+            }
+        }
+
+        slotIndex = -1;
+        return false;
+    }
+
+    public ServerAccountRecord WithCharacterInSlot(int slotIndex, ulong characterId, int maxCharacters)
+    {
+        if (slotIndex < 0 || slotIndex >= maxCharacters)
+            throw new ArgumentOutOfRangeException(nameof(slotIndex));
+        if (characterId == 0)
+            throw new ArgumentOutOfRangeException(nameof(characterId));
+
+        ulong[] slots = ResizeSlots(maxCharacters);
+        slots[slotIndex] = characterId;
+        return this with { CharacterSlots = slots };
+    }
+
+    public ServerAccountRecord WithCharacterRemoved(ulong characterId)
+    {
+        ulong[] slots = CharacterSlots.ToArray();
+        for (int i = 0; i < slots.Length; i++)
+        {
+            if (slots[i] == characterId)
+            {
+                slots[i] = 0;
+                break;
+            }
+        }
+
+        return this with { CharacterSlots = slots };
+    }
+
+    private ulong[] ResizeSlots(int maxCharacters)
+    {
+        int length = Math.Max(maxCharacters, CharacterSlots.Length);
+        var slots = new ulong[length];
+        Array.Copy(CharacterSlots, slots, Math.Min(CharacterSlots.Length, slots.Length));
+        return slots;
     }
 }

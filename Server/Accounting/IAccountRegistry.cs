@@ -14,5 +14,7 @@ public interface IAccountRegistry
 
     bool TryGetById(ulong accountId, out ServerAccountRecord account);
 
+    IReadOnlyList<ServerAccountRecord> GetAccountsSnapshot();
+
     void Update(ServerAccountRecord account);
 }

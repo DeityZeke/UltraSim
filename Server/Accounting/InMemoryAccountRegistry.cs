@@ -44,6 +44,13 @@ public sealed class InMemoryAccountRegistry : IAccountRegistry
         return _accountsById.TryGetValue(accountId, out account!);
     }
 
+    public IReadOnlyList<ServerAccountRecord> GetAccountsSnapshot()
+    {
+        return _accountsById.Values
+            .OrderBy(static account => account.AccountId)
+            .ToArray();
+    }
+
     public void Update(ServerAccountRecord account)
     {
         ArgumentNullException.ThrowIfNull(account);
@@ -61,5 +68,26 @@ public sealed class InMemoryAccountRegistry : IAccountRegistry
 
         _accountsByUsername[normalized.Username] = normalized;
         _accountsById[normalized.AccountId] = normalized;
+    }
+
+    public void LoadSnapshot(IEnumerable<ServerAccountRecord> accounts)
+    {
+        ArgumentNullException.ThrowIfNull(accounts);
+        _accountsByUsername.Clear();
+        _accountsById.Clear();
+        _nextAccountId = 1;
+
+        foreach (ServerAccountRecord account in accounts)
+        {
+            ServerAccountRecord normalized = account.Normalize();
+            if (_accountsById.ContainsKey(normalized.AccountId))
+                throw new InvalidOperationException($"Duplicate account id '{normalized.AccountId}' in account snapshot.");
+            if (_accountsByUsername.ContainsKey(normalized.Username))
+                throw new InvalidOperationException($"Duplicate account username '{normalized.Username}' in account snapshot.");
+
+            _accountsById.Add(normalized.AccountId, normalized);
+            _accountsByUsername.Add(normalized.Username, normalized);
+            _nextAccountId = Math.Max(_nextAccountId, normalized.AccountId + 1);
+        }
     }
 }

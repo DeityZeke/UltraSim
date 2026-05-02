@@ -21,6 +21,22 @@ Current first-pass scope:
   both surface as `InvalidCredentials`; account policy states such as banned,
   suspended, locked out, rate limited, and portal unavailable stay
   machine-readable without sending account-specific prose.
+- Account-backed character records with stable `CharacterId`, owning
+  `AccountId`, slot index, display name, prefab key, timestamps, and last
+  position/yaw snapshot.
+- `AccountCharacterService` for listing, creating, deleting, auto-join lookup,
+  and snapshot updates. Character records store prefab keys, not hardcoded
+  archetype enums, so character creation can select from registered mobile
+  prefabs later.
+- Accounting persistence snapshot and first JSON store:
+  - `AccountingPersistenceSnapshot` captures immutable account + character
+    records from registries.
+  - `JsonAccountingPersistenceStore` writes one account file per account,
+    character files under that account, and an atomic username index.
+  - Writes are temp-file validated and atomically promoted.
+  - Successful overwrites create timestamped rolling backups.
+  - Deleted character records are pruned from disk so they cannot reappear on
+    restart.
 - Account authentication provider seam with two explicit modes:
   - `LocalServerAccounts` for per-server account records and password hashes.
   - `UltraSimPortalAccounts` for future portal-backed token/session validation.
@@ -48,3 +64,22 @@ portal/platform account service.
 tokens or call the portal authority. A test fake may accept a known token, but a
 production implementation must never trust token text merely because it came from
 a connected client.
+
+## Persistence Boundary
+
+The current repo already has an ECS persistence extension with world
+snapshot/restore and a binary adapter, plus `ServerApplication` load/save hooks.
+Accounting persistence must plug into that same server runtime lifecycle rather
+than running as an unrelated save loop. The intended shape mirrors the old v2
+coordinator: capture account/character snapshots and world snapshots at the save
+barrier, then write each subsystem's snapshot through the unified server save
+path.
+
+The JSON accounting store is the first concrete account/character backend and is
+operator-debuggable by design. It is not the final production storage profile.
+Encrypted binary, database-backed stores, async dirty flushing, and account/world
+save coordination should layer on top of the same snapshot/store contract.
+
+Local password mode requires transport encryption before internet deployment.
+The password hash at rest is versioned and salted, but the credential packet
+still carries live credential material to the server.
