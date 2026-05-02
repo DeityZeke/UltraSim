@@ -10,6 +10,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Server\Accounting\UltraSim.Server.Accounting.csproj" />
+    <ProjectReference Include="..\..\Server\Admission\UltraSim.Server.Admission.csproj" />
+    <Reference Include="UltraSim.Network">
+      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.UI">
+      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>

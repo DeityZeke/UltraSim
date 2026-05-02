@@ -122,6 +122,12 @@ Portal token validation is mandatory: production portal authenticators must
 cryptographically verify the token or call the portal authority, not trust a
 client-provided token string.
 
+The admission/accounting bridge should stay as an adapter. Admission owns active
+flow state and trusted panel/action checks; accounting owns credential policy.
+The adapter maps `LoginCredentialSubmitPacket` material into accounting's
+`CredentialValidationRequest` and returns success/failure to admission without
+letting script packages or generic UI actions handle password/token values.
+
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 
 ### Package Replacement Hooks

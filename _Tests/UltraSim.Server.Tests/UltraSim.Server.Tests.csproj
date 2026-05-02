@@ -21,6 +21,10 @@
       <HintPath>..\..\Server\Admission\bin\$(Configuration)\net8.0\UltraSim.Server.Admission.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.Server.Accounting">
+      <HintPath>..\..\Server\Accounting\bin\$(Configuration)\net8.0\UltraSim.Server.Accounting.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="UltraSim.Server.Hosting">
       <HintPath>..\..\Server\Hosting\bin\$(Configuration)\net8.0\UltraSim.Server.Hosting.dll</HintPath>
       <Private>true</Private>
@@ -69,7 +73,7 @@
 
   <Target Name="BuildServerDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\UI\UltraSim.Client.UI.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Admission\UltraSim.Server.Admission.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\Scripting\UltraSim.Server.Scripting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj;..\..\Server\_Godot\UltraSim.Server.Godot.csproj"
+      Projects="..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\UI\UltraSim.Client.UI.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Admission\UltraSim.Server.Admission.csproj;..\..\Server\Accounting\UltraSim.Server.Accounting.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\Scripting\UltraSim.Server.Scripting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj;..\..\Server\_Godot\UltraSim.Server.Godot.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>

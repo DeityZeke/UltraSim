@@ -14,6 +14,9 @@ Current first-pass scope:
 - Login audit sink shape.
 - `DefaultCredentialService` that combines lookup, status, password verification,
   session conflict policy, rate limiting, and audit recording.
+- `AccountingAdmissionCredentialValidator` adapter that maps trusted admission
+  credential packets into `CredentialValidationRequest` and rejects generic UI
+  action credential attempts.
 - Account authentication provider seam with two explicit modes:
   - `LocalServerAccounts` for per-server account records and password hashes.
   - `UltraSimPortalAccounts` for future portal-backed token/session validation.

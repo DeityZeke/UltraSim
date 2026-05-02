@@ -1221,6 +1221,12 @@ with credential material kind, panel instance id, action id, username, and opaqu
 material bytes. Password/token values must not be logged, echoed, or placed in
 generic UI field values.
 
+The server-side accounting adapter is the only path that should turn a trusted
+login packet into an admission success. Failed validation leaves the current
+admission step open; the follow-up presentation slice should publish a model
+delta to the login panel's status slot so the player sees the rejection reason
+without closing or reopening the panel.
+
 Use the shared `SessionAdmission` exclusive group for:
 
 - login

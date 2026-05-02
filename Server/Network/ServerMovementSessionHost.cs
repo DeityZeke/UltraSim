@@ -448,14 +448,21 @@ public sealed class ServerMovementSessionHost
 
             var reader = new UltraSim.Network.BitReader(datagram.EnvelopePayloadSpan);
             LoginCredentialSubmitPacket packet = LoginCredentialSubmitPacket.Deserialize(ref reader);
-            _scriptBinding.Admission.ProcessCredential(
-                datagram.ConnectionId,
-                new AdmissionCredentialRequest(
-                    packet.PanelInstanceId,
-                    packet.ActionId,
-                    packet.Username,
-                    packet.MaterialKind,
-                    packet.MaterialBytes));
+            try
+            {
+                _scriptBinding.Admission.ProcessCredential(
+                    datagram.ConnectionId,
+                    new AdmissionCredentialRequest(
+                        packet.PanelInstanceId,
+                        packet.ActionId,
+                        packet.Username,
+                        packet.MaterialKind,
+                        packet.MaterialBytes));
+            }
+            finally
+            {
+                Array.Clear(packet.MaterialBytes);
+            }
         }
     }
 

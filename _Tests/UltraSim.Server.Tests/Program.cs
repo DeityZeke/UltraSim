@@ -3,6 +3,7 @@ using System.Net;
 using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Server;
+using UltraSim.Server.Accounting;
 using UltraSim.Server.Admission;
 using UltraSim.Server.Console;
 using UltraSim.Server.Godot;
@@ -2955,6 +2956,18 @@ internal static class TestRunner
             SchemaHash: 4,
             ContentHash: 5,
             RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), new DateTimeOffset(2026, 5, 2, 12, 0, 0, TimeSpan.Zero));
+        var credentialValidator = new CountingAdmissionCredentialValidator(new AccountingAdmissionCredentialValidator(
+            new DefaultCredentialService(
+                accounts,
+                passwords,
+                new InMemoryLoginRateLimiter(),
+                new InMemoryAccountSessionTracker()),
+            remoteAddressResolver: static _ => "127.0.0.1",
+            sessionKeyResolver: static connection => $"connection:{connection.Value}",
+            clock: static () => new DateTimeOffset(2026, 5, 2, 12, 1, 0, TimeSpan.Zero)));
         var serverHost = new ServerMovementSessionHost(
             world,
             pair.Server,
@@ -2962,7 +2975,8 @@ internal static class TestRunner
             ProjectMovementState,
             SpawnSession,
             handshakePolicy: handshakePolicy,
-            scriptContext: scriptContext);
+            scriptContext: scriptContext,
+            admissionCredentialValidator: credentialValidator);
         var openedPanels = new List<UiPanelOpenDocument>();
         var uiEvents = new ClientUiEventBridge(openedPanels.Add);
         var observerState = new ClientObserverStateBridge(connectionId);
@@ -3003,16 +3017,34 @@ internal static class TestRunner
         Assert.Equal(login.PanelInstanceId, loginState.PanelInstanceId);
         Assert.Equal("admission.login_verified", loginState.WaitingForEvent);
 
+        var badCredentialPacket = new LoginCredentialSubmitPacket(
+            login.PanelInstanceId,
+            "login.submit",
+            "Alice",
+            LoginCredentialMaterialKind.PlainPassword,
+            "wrong"u8.ToArray());
+        Assert.True(clientHost.TrySendLoginCredential(badCredentialPacket));
+
+        serverHost.Pump(220, 0.016f, 21);
+        clientHost.Pump(221);
+
+        Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState stillLoginState));
+        Assert.Equal(login.PanelInstanceId, stillLoginState.PanelInstanceId);
+        Assert.Equal(1, credentialValidator.PacketValidationCount);
+        Assert.False(credentialValidator.LastPacketAccepted);
+        Assert.Equal(1L, serverHost.ScriptBinding.Admission.RejectedCredentials);
+        Assert.Equal(0L, serverHost.ScriptBinding.Admission.CompletedSteps);
+
         var credentialPacket = new LoginCredentialSubmitPacket(
             login.PanelInstanceId,
             "login.submit",
             "Alice",
             LoginCredentialMaterialKind.PlainPassword,
-            [1, 2, 3, 4]);
+            "swordfish"u8.ToArray());
         Assert.True(clientHost.TrySendLoginCredential(credentialPacket));
 
-        serverHost.Pump(220, 0.016f, 21);
-        clientHost.Pump(221);
+        serverHost.Pump(230, 0.016f, 22);
+        clientHost.Pump(231);
 
         UiPanelOpenDocument characterSelect = openedPanels.Last(panel => panel.SchemaIdentity.PanelType == "admission.character_select");
         Assert.Equal("admission.character_select", characterSelect.SchemaIdentity.PanelType);
@@ -3021,6 +3053,8 @@ internal static class TestRunner
         Assert.Equal("admission.character_selected", selectState.WaitingForEvent);
         Assert.Equal(1L, serverHost.ScriptBinding.Admission.CompletedSteps);
         Assert.Equal(2L, serverHost.ScriptBinding.Admission.OpenedPanels);
+        Assert.Equal(2, credentialValidator.PacketValidationCount);
+        Assert.True(credentialValidator.LastPacketAccepted);
     }
 
     private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()
@@ -3752,6 +3786,36 @@ internal sealed class ServerTestScriptIronDagger : PrefabDefinition<ServerTestSc
         builder.Set(new ServerTestScriptInventoryItem(1, 2, 1));
         builder.Set(new ServerTestScriptWeaponData(3, 7));
         builder.SetPerSpawn(context => new ServerTestScriptFireResistance(100 + (int)context.SpawnSequence));
+    }
+}
+
+internal sealed class CountingAdmissionCredentialValidator : IAdmissionCredentialValidator
+{
+    private readonly IAdmissionCredentialValidator _inner;
+
+    public CountingAdmissionCredentialValidator(IAdmissionCredentialValidator inner)
+    {
+        _inner = inner;
+    }
+
+    public int PacketValidationCount { get; private set; }
+    public bool LastPacketAccepted { get; private set; }
+
+    public ServerAdmissionCredentialValidationResult ValidateTrustedCredential(
+        ConnectionId connectionId,
+        UiActionRequestDocument request)
+    {
+        return _inner.ValidateTrustedCredential(connectionId, request);
+    }
+
+    public ServerAdmissionCredentialValidationResult ValidateTrustedCredential(
+        ConnectionId connectionId,
+        AdmissionCredentialRequest request)
+    {
+        PacketValidationCount++;
+        ServerAdmissionCredentialValidationResult result = _inner.ValidateTrustedCredential(connectionId, request);
+        LastPacketAccepted = result.Accepted;
+        return result;
     }
 }
 

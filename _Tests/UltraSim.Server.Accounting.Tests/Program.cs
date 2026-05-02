@@ -1,4 +1,7 @@
 using UltraSim.Server.Accounting;
+using UltraSim.Network;
+using UltraSim.Server.Admission;
+using UltraSim.UI;
 
 TestRunner.Run();
 
@@ -15,6 +18,9 @@ internal static class TestRunner
         Run(nameof(DefaultCredentialService_CanKickExistingSessionWhenConfigured), DefaultCredentialService_CanKickExistingSessionWhenConfigured);
         Run(nameof(DefaultCredentialService_RejectsPortalTokenMaterial), DefaultCredentialService_RejectsPortalTokenMaterial);
         Run(nameof(PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword), PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword);
+        Run(nameof(AccountingAdmissionCredentialValidator_AcceptsMatchingLocalPasswordPacket), AccountingAdmissionCredentialValidator_AcceptsMatchingLocalPasswordPacket);
+        Run(nameof(AccountingAdmissionCredentialValidator_RejectsWrongLocalPasswordPacket), AccountingAdmissionCredentialValidator_RejectsWrongLocalPasswordPacket);
+        Run(nameof(AccountingAdmissionCredentialValidator_RejectsGenericUiActionAndWrongMaterial), AccountingAdmissionCredentialValidator_RejectsGenericUiActionAndWrongMaterial);
 
         Console.WriteLine("All Server accounting tests passed.");
     }
@@ -197,6 +203,88 @@ internal static class TestRunner
         Assert.Equal("platform-account-7", result.Account!.Username);
         Assert.Equal(AccountAuthenticationMode.UltraSimPortalAccounts, provider.Mode);
         Assert.Equal("server-instance-1", portal.LastServerInstanceId);
+    }
+
+    private static void AccountingAdmissionCredentialValidator_AcceptsMatchingLocalPasswordPacket()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), now);
+        var validator = new AccountingAdmissionCredentialValidator(
+            CreateService(accounts, passwords),
+            remoteAddressResolver: static _ => "127.0.0.1",
+            sessionKeyResolver: static _ => "session-a",
+            clock: () => now.AddSeconds(1));
+
+        ServerAdmissionCredentialValidationResult result = validator.ValidateTrustedCredential(
+            new ConnectionId(7),
+            new AdmissionCredentialRequest(
+                "panel-1",
+                "login.submit",
+                "Alice",
+                LoginCredentialMaterialKind.PlainPassword,
+                "swordfish"u8.ToArray()));
+
+        Assert.True(result.Accepted);
+    }
+
+    private static void AccountingAdmissionCredentialValidator_RejectsGenericUiActionAndWrongMaterial()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), now);
+        var validator = new AccountingAdmissionCredentialValidator(
+            CreateService(accounts, passwords),
+            clock: () => now);
+
+        var genericAction = new UiActionRequestDocument(
+            "panel-1",
+            default,
+            null,
+            1,
+            "login.submit",
+            UiActionContextKind.TrustedCredential,
+            null,
+            []);
+        ServerAdmissionCredentialValidationResult genericResult = validator.ValidateTrustedCredential(new ConnectionId(7), genericAction);
+        Assert.False(genericResult.Accepted);
+
+        ServerAdmissionCredentialValidationResult tokenResult = validator.ValidateTrustedCredential(
+            new ConnectionId(7),
+            new AdmissionCredentialRequest(
+                "panel-1",
+                "login.submit",
+                "Alice",
+                LoginCredentialMaterialKind.PortalSessionToken,
+                "portal-token"u8.ToArray()));
+        Assert.False(tokenResult.Accepted);
+        Assert.True(tokenResult.Error.Length > 0);
+    }
+
+    private static void AccountingAdmissionCredentialValidator_RejectsWrongLocalPasswordPacket()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), now);
+        var validator = new AccountingAdmissionCredentialValidator(
+            CreateService(accounts, passwords),
+            remoteAddressResolver: static _ => "127.0.0.1",
+            sessionKeyResolver: static _ => "session-a",
+            clock: () => now.AddSeconds(1));
+
+        ServerAdmissionCredentialValidationResult result = validator.ValidateTrustedCredential(
+            new ConnectionId(7),
+            new AdmissionCredentialRequest(
+                "panel-1",
+                "login.submit",
+                "Alice",
+                LoginCredentialMaterialKind.PlainPassword,
+                "wrong"u8.ToArray()));
+
+        Assert.False(result.Accepted);
     }
 
     private static DefaultCredentialService CreateService(IAccountRegistry accounts, IPasswordHashService passwords)
