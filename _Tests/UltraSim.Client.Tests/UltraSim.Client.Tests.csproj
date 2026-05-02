@@ -15,6 +15,10 @@
       <HintPath>..\..\Client\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
       <Private>true</Private>
     </Reference>
+    <Reference Include="UltraSim.Client.UI">
+      <HintPath>..\..\Client\UI\bin\$(Configuration)\net8.0\UltraSim.Client.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
     <Reference Include="UltraSim.Client.Network">
       <HintPath>..\..\Client\Network\bin\$(Configuration)\net8.0\UltraSim.Client.Network.dll</HintPath>
       <Private>true</Private>
@@ -30,7 +34,7 @@
   </ItemGroup>
   <Target Name="BuildClientDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj"
+      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\UI\UltraSim.Client.UI.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj"
       Targets="Restore;Build"
       Properties="Configuration=$(Configuration)" />
   </Target>

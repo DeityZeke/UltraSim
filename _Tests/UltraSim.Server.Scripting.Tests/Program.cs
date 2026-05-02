@@ -9,6 +9,7 @@ internal static class TestRunner
     public static void Run()
     {
         Run(nameof(RuntimeTemplate_CreatesExpectedFolders), RuntimeTemplate_CreatesExpectedFolders);
+        Run(nameof(RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi), RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi);
         Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
@@ -41,6 +42,7 @@ internal static class TestRunner
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Customs")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Engines")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Mobiles")));
+        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Packages")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Items")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Misc")));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Properties")));
@@ -56,6 +58,27 @@ internal static class TestRunner
         Assert.True(Directory.Exists(temp.Layout.ScriptDiagnosticsCachePath));
         Assert.True(Directory.Exists(temp.Layout.SavesPath));
         Assert.True(Directory.Exists(temp.Layout.BackupsPath));
+    }
+
+    private static void RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        UltraSimRuntimeTemplate.Ensure(temp.Layout);
+        string sourceRoot = Path.Combine(
+            FindRepositoryRoot(),
+            "Server",
+            "RuntimeTemplate",
+            "scripts",
+            "Packages",
+            "Admission");
+        string destinationRoot = Path.Combine(temp.Layout.ScriptsPath, "Packages", "Admission");
+        CopyDirectory(sourceRoot, destinationRoot);
+
+        UltraSimScriptCompileResult result = new UltraSimScriptCompiler().Compile(new UltraSimScriptCompilerOptions(temp.Layout));
+
+        Assert.Equal(UltraSimScriptCompileResultKind.Compiled, result.Kind);
+        Assert.Equal(3, result.SourceCount);
+        Assert.False(result.Diagnostics.Any(static diagnostic => diagnostic.Severity == UltraSimScriptDiagnosticSeverity.Error));
     }
 
     private static void ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors()
@@ -572,6 +595,41 @@ internal static class TestRunner
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, source);
         return path;
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        string? current = Directory.GetCurrentDirectory();
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (Directory.Exists(Path.Combine(current, "Server", "RuntimeTemplate")))
+                return current;
+
+            current = Directory.GetParent(current)?.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate repository root from current directory.");
+    }
+
+    private static void CopyDirectory(string sourceRoot, string destinationRoot)
+    {
+        if (!Directory.Exists(sourceRoot))
+            throw new DirectoryNotFoundException(sourceRoot);
+
+        foreach (string directory in Directory.EnumerateDirectories(sourceRoot, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(sourceRoot, directory);
+            Directory.CreateDirectory(Path.Combine(destinationRoot, relative));
+        }
+
+        Directory.CreateDirectory(destinationRoot);
+        foreach (string file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(sourceRoot, file);
+            string destination = Path.Combine(destinationRoot, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, overwrite: true);
+        }
     }
 
     private static void Run(string name, Action test)

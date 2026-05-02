@@ -16,6 +16,7 @@ public static class UltraSimRuntimeTemplate
         Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Items"));
         Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Misc"));
         Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Mobiles"));
+        Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Packages"));
         Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Properties"));
         Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Regions"));
         Directory.CreateDirectory(Path.Combine(layout.ScriptsPath, "Skills"));

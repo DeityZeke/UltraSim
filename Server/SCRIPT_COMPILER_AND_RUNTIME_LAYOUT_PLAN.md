@@ -94,6 +94,12 @@ scripts/Packages/Chat/
 
 Top-level folders remain useful for loose content and small standalone scripts. `Packages` is for complete systems an operator should be able to copy, replace, disable, document, or eventually manifest as one unit.
 
+Default server-authored platform flows can also be packages. The default
+admission flow belongs in `scripts/Packages/Admission/`: it owns login,
+character select/create panel definitions, stable admission event names, and the
+step/replacement shape. The UI kernel must not contain admission-specific
+panels; the kernel provides generic schema nodes and trusted-input contracts.
+
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 
 ### Package Replacement Hooks

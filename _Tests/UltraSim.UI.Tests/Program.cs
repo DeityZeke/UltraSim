@@ -662,44 +662,6 @@ internal static class TestRunner
         Assert.Equal("Grace", secondPromptValue.StringValue);
         Assert.Valid(firstPrompt.ToColdOpen("panel/prompt/rename").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
 
-        UiBuiltPanel login = UiStandardPanels.LoginPanel(
-            "server/main",
-            "UltraSim",
-            "Welcome back.",
-            username: "nathan",
-            rememberAccount: true,
-            status: "Ready");
-        Assert.Equal(UiStandardPanels.LoginPanelType, login.Schema.Identity.PanelType);
-        Assert.Equal(UiSurfaceTarget.Exclusive, login.Schema.Metadata.SurfaceTarget);
-        Assert.Equal(UiFocusMode.Exclusive, login.Schema.Metadata.FocusMode);
-        Assert.Equal("SessionAdmission", login.Schema.Metadata.ExclusiveGroup);
-        Assert.True(login.Schema.Metadata.BlocksGameplayInput);
-        Assert.True(login.Schema.Nodes.Any(node =>
-            node.Kind == UiNodeKind.TextInput &&
-            string.Equals(node.SlotId, UiStandardPanels.LoginPasswordSlotId, StringComparison.Ordinal) &&
-            node.InputSecurity == UiInputSecurity.TrustedCredential));
-        Assert.True(login.Schema.Actions.Any(action =>
-            string.Equals(action.ActionId, UiStandardPanels.LoginSubmitActionId, StringComparison.Ordinal) &&
-            action.ContextKind == UiActionContextKind.TrustedCredential));
-        Assert.True(login.Schema.Actions.Any(action =>
-            string.Equals(action.ActionId, UiStandardPanels.LoginCancelActionId, StringComparison.Ordinal) &&
-            action.ContextKind == UiActionContextKind.Panel));
-        Assert.True(login.Schema.GetTrustedInputSlotIds().Contains(UiStandardPanels.LoginPasswordSlotId));
-        Assert.Valid(login.ToColdOpen("panel/login").ValidateCold(rendererCapabilities: CreateRendererCapabilities()));
-        Assert.Valid(UiSchemaCompatibilityContext.TryCreate(login.Schema, out UiSchemaCompatibilityContext? loginContext));
-        Assert.NotNull(loginContext);
-        Assert.True(loginContext!.IsTrustedInputSlot(UiStandardPanels.LoginPasswordSlotId));
-        var genericLoginSubmit = new UiActionRequestDocument(
-            "panel/login",
-            login.Schema.Identity,
-            CatalogIdentity: null,
-            ClientSequence: 1,
-            UiStandardPanels.LoginSubmitActionId,
-            UiActionContextKind.TrustedCredential,
-            ContextId: null,
-            FieldValues: []);
-        Assert.InvalidContains(genericLoginSubmit.ValidateAgainst(loginContext), "trusted credential path");
-
         UiStandardPagedListPicker firstPicker = UiStandardPanels.PagedListPicker(
             "server/main",
             "Choose Character",

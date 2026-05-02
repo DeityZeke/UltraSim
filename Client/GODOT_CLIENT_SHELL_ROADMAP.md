@@ -885,7 +885,7 @@ First UI benchmark report:
 
 Current client/Godot bridge status:
 
-- `Client/Core/UI/ClientUiPanelRegistry` opens panels through the in-memory definition cache, retains validated schema and compatibility context per instance, validates action requests, and applies full/patch/repeater model updates with sequence tracking.
+- `Client/UI/ClientUiPanelRegistry` opens panels through the in-memory definition cache, retains validated schema and compatibility context per instance, validates action requests, and applies full/patch/repeater model updates with sequence tracking.
 - `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` is the first minimal renderer bridge. It renders `Panel`, `Row`, `Column`, static `Text`, model-backed `DynamicText`, `Button`, `Separator`, and `Spacer` nodes from a validated `ClientUiPanelInstance`; unsupported node kinds degrade to inert placeholders.
 - `MenuCanvasManager` can mount, replace, close, and clear server-driven panels on separate menu/modal/exclusive lanes.
 - Godot buttons bound with `ActionId` produce validated client action route results through `ClientUiPanelRegistry.ValidateActionRequest`.

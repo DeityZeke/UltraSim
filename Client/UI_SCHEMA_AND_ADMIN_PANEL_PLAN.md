@@ -1057,6 +1057,8 @@ Implementations can read from client-side entity, inventory, party, session, and
 
 The client runtime should own a resolver registry created during client startup/session runtime composition. Resolvers such as `EntityState`, `InventoryState`, `PartyState`, `SessionState`, and `LocalPlayerState` register by source id/name. The UI runtime asks the registry for the resolver declared by a binding; it should not service-locate gameplay systems directly from individual panel code.
 
+Engine-agnostic client UI state and intent belongs in `Client/UI/`. That project mirrors the UI kernel at the client-runtime layer: panel instance registry, state binding resolver registry, local model update application, and validated action routing. `Client/Core/` remains shell/superstructure and shared client services. `Client/_Godot/Scripts/UI/` is the renderer bridge that turns validated client UI instances into Godot `Control` trees.
+
 State binding rules:
 
 - bindings are declarative and permission-filtered by the server
@@ -1179,6 +1181,37 @@ Trusted credential controls should be explicit in schema metadata. A normal `Tex
 The submit action should be equally explicit. A login submit button uses a trusted credential action context, so the renderer can raise it to the trusted login controller instead of sending an ordinary `UiActionRequestDocument`. Generic UI action requests must reject trusted credential actions even if they contain no field values.
 
 If transport encryption later makes generic field submission acceptable, that should be an explicit design decision and documented as such. Until then, treat password fields as dedicated-path controls, not ordinary text inputs.
+
+## Admission Panels
+
+Login, character select, and character create are server admission-flow panels built on ordinary schema nodes, not UI-kernel standard panels and not bespoke renderer screens.
+
+The UI kernel owns only the vocabulary needed to build them: exclusive surfaces, trusted credential inputs, row repeaters, select controls, and actions. The default server-authored admission package lives under `Server/RuntimeTemplate/scripts/Packages/Admission/`, so custom servers can replace or reorder the flow without changing kernel code.
+
+Admission should be event/step based rather than a monolith. The default shape is:
+
+- `admission.client_connected`
+- login panel
+- `admission.login_verified`
+- character select/create panel
+- `admission.character_selected` or `admission.character_created`
+- `admission.enter_world`
+
+Servers may install alternate flows, such as `client_connected -> enter_world` for local tests or `client_connected -> login_verified -> enter_world` for servers without character selection. Any package can provide a replacement step only through the single-owner replacement registry; replacement is assignment, not accumulation.
+
+Use the shared `SessionAdmission` exclusive group for:
+
+- login
+- character select
+- character create
+- delete/confirm flows that block admission
+- reconnect/error panels that replace admission state
+
+The default login panel owns presentation only. Username, remember-account, retry/status text, and the trusted password input are schema/model slots; the submit action uses the trusted credential action path.
+
+The default character select panel is row-backed and should allow zero rows. A fresh account with no characters should not need a different schema; it can render the same panel with an empty character list and a visible create action. Character rows use stable `characterId` row keys so the server can add, replace, or remove rows if a character is created, deleted, renamed, or updated while the panel is open.
+
+The default character create panel should use normal form controls: name text input, template/select options, start-location/select options, status text, create, and cancel. Template/start options are schema-level options for now; if they become large or content-heavy later, move them to a catalog-backed admission panel instead of turning them into per-open model payload.
 
 ## Permissions And Capabilities
 
