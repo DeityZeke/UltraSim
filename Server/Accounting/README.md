@@ -70,10 +70,10 @@ a connected client.
 The current repo already has an ECS persistence extension with world
 snapshot/restore and a binary adapter, plus `ServerApplication` load/save hooks.
 Accounting persistence must plug into that same server runtime lifecycle rather
-than running as an unrelated save loop. The intended shape mirrors the old v2
-coordinator: capture account/character snapshots and world snapshots at the save
-barrier, then write each subsystem's snapshot through the unified server save
-path.
+than running as an unrelated save loop. `Server/Persistence` provides the first
+unified save-set coordinator: account/character snapshots and world snapshots
+are written into one staged save directory, stamped with one manifest sequence
+and timestamp, and promoted together only after every participant succeeds.
 
 The JSON accounting store is the first concrete account/character backend and is
 operator-debuggable by design. It is not the final production storage profile.
