@@ -81,6 +81,12 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder Image(string imageId)
+    {
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Image, slotId: null, imageId, actionId: null));
+        return this;
+    }
+
     public UiPanelNodeBuilder Separator()
     {
         _childIds.Add(_owner.AddLeaf(UiNodeKind.Separator, slotId: null, text: null, actionId: null));

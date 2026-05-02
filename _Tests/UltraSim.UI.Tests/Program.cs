@@ -376,6 +376,7 @@ internal static class TestRunner
                             tabs.Page("account", "Account", page => page.Text("Account settings"));
                             tabs.Page("chat", "Chat", page => page.Text("Chat settings"));
                         });
+                        section.Image("icons/ui/settings");
                         section.ScrollRegion(scroll =>
                         {
                             scroll.Text("Scrollable connection details");
@@ -401,6 +402,7 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.RadioGroup && string.Equals(node.SlotId, "nameplateMode", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.CheckboxGroup && string.Equals(node.SlotId, "enabledChannels", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Tabs && string.Equals(node.SlotId, "settingsTab", StringComparison.Ordinal)));
+        Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Image && string.Equals(node.Text, "icons/ui/settings", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.ScrollRegion));
         Assert.True(built.Schema.Nodes.Any(node =>
             node.Kind == UiNodeKind.IconButton &&

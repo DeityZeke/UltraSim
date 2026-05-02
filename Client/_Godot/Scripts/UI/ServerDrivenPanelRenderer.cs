@@ -69,6 +69,7 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.Tabs => CreateTabs(node),
             UiNodeKind.Text => CreateText(node),
             UiNodeKind.DynamicText => CreateDynamicText(node, modelBySlot),
+            UiNodeKind.Image => CreateImage(node),
             UiNodeKind.Button => CreateButton(node, compatibilityContext, actionPressed),
             UiNodeKind.IconButton => CreateButton(node, compatibilityContext, actionPressed),
             UiNodeKind.Separator => CreateSeparator(node),
@@ -85,7 +86,7 @@ internal static class ServerDrivenPanelRenderer
             _ => CreateUnsupportedPlaceholder(node),
         };
 
-        if (node.Children.Count > 0 && control is Label or BaseButton or LineEdit or HSeparator)
+        if (node.Children.Count > 0 && control is Label or BaseButton or LineEdit or HSeparator or TextureRect)
         {
             error = $"UI node kind '{node.Kind}' cannot host child controls in the minimal Godot renderer.";
             return false;
@@ -293,6 +294,29 @@ internal static class ServerDrivenPanelRenderer
             SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
+    }
+
+    private static TextureRect CreateImage(UiSchemaNodeDescriptor node)
+    {
+        var image = new TextureRect
+        {
+            Name = MakeNodeName("Image", node.NodeId),
+            CustomMinimumSize = new Vector2(128.0f, 72.0f),
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        if (!string.IsNullOrWhiteSpace(node.Text))
+        {
+            image.SetMeta("UiImageId", node.Text);
+            if (node.Text.StartsWith("res://", StringComparison.Ordinal) ||
+                node.Text.StartsWith("user://", StringComparison.Ordinal))
+            {
+                image.Texture = GD.Load<Texture2D>(node.Text);
+            }
+        }
+
+        return image;
     }
 
     private static LineEdit CreateTextInput(

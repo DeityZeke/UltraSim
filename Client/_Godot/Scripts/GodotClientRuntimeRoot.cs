@@ -19,6 +19,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeIconActionId = "smoke.message_box.icon";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
 	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
+	private const string SmokeImageId = "icons/ui/smoke";
 	private const string SmokeScrollRegionText = "Scrollable server-driven details";
 	private const string SmokeTextInputSlot = "displayName";
 	private const string SmokeToggleSlot = "rememberAccount";
@@ -869,10 +870,10 @@ public partial class GodotClientRuntimeRoot : Node
 			Nodes:
 			[
 				new UiSchemaNodeDescriptor(1, UiNodeKind.Panel, null, null, [2]),
-				new UiSchemaNodeDescriptor(2, UiNodeKind.Column, null, null, [3, 4, 6, 7, 10]),
+				new UiSchemaNodeDescriptor(2, UiNodeKind.Column, null, null, [3, 4, 5, 6, 7, 10]),
 				new UiSchemaNodeDescriptor(3, UiNodeKind.DynamicText, "messageText", "Message", []),
-				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, null, [5]),
-				new UiSchemaNodeDescriptor(5, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
+				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, SmokeImageId, []),
+				new UiSchemaNodeDescriptor(5, UiNodeKind.Layer, null, null, [27]),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
 				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
@@ -894,6 +895,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(24, UiNodeKind.Text, null, "Account tab content", []),
 				new UiSchemaNodeDescriptor(25, UiNodeKind.Section, null, "Chat", [26]),
 				new UiSchemaNodeDescriptor(26, UiNodeKind.Text, null, "Chat tab content", []),
+				new UiSchemaNodeDescriptor(27, UiNodeKind.Text, null, SmokeUnsupportedChildText, []),
 			],
 			PayloadSlots:
 			[
