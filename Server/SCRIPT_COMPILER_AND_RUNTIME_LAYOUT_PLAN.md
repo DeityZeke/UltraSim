@@ -97,8 +97,14 @@ Top-level folders remain useful for loose content and small standalone scripts. 
 Default server-authored platform flows can also be packages. The default
 admission flow belongs in `scripts/Packages/Admission/`: it owns login,
 character select/create panel definitions, stable admission event names, and the
-step/replacement shape. The UI kernel must not contain admission-specific
+step registration shape. The UI kernel must not contain admission-specific
 panels; the kernel provides generic schema nodes and trusted-input contracts.
+`Server/Admission` consumes script-registered steps and tracks active flow state
+per connection. `Server/Network` only feeds it UI action documents and exposes a
+panel gateway; admission progression, account validation, character selection,
+and world-entry policy should not live in the transport project. Real account
+validation plugs in through a credential-validator seam owned by the accounting
+slice.
 
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 

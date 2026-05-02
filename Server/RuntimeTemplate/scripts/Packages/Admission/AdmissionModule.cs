@@ -31,6 +31,10 @@ public sealed class AdmissionModule : IUltraSimScriptModule
                 [
                     new UiSelectOption("haven", "Haven")
                 ]));
+        foreach (UltraSimScriptAdmissionFlowStepDescriptor step in DefaultAdmissionFlow.Steps)
+        {
+            context.Admission.RegisterStep(step);
+        }
 
         context.Logger.Info("Default admission package configured.");
     }

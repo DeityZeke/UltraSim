@@ -38,7 +38,7 @@ public static class UltraSimScriptStartupLog
         if (load is null)
         {
             events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, "Scripts: Configuring... - done (0 modules)"));
-            events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, "Scripts: Initializing... - done (0 modules, 0 commands, 0 panels)"));
+            events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, "Scripts: Initializing... - done (0 modules, 0 commands, 0 panels, 0 admission steps)"));
             return events;
         }
 
@@ -53,8 +53,9 @@ public static class UltraSimScriptStartupLog
         string moduleNoun = result.ModuleCount == 1 ? "module" : "modules";
         string commandNoun = result.CommandCount == 1 ? "command" : "commands";
         string panelNoun = result.PanelProviderCount == 1 ? "panel" : "panels";
+        string stepNoun = result.AdmissionStepCount == 1 ? "admission step" : "admission steps";
         events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, $"Scripts: Configuring... - done ({result.ModuleCount} {moduleNoun})"));
-        events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, $"Scripts: Initializing... - done ({result.ModuleCount} {moduleNoun}, {result.CommandCount} {commandNoun}, {result.PanelProviderCount} {panelNoun})"));
+        events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, $"Scripts: Initializing... - done ({result.ModuleCount} {moduleNoun}, {result.CommandCount} {commandNoun}, {result.PanelProviderCount} {panelNoun}, {result.AdmissionStepCount} {stepNoun})"));
         return events;
     }
 }

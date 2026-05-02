@@ -1197,7 +1197,9 @@ Admission should be event/step based rather than a monolith. The default shape i
 - `admission.character_selected` or `admission.character_created`
 - `admission.enter_world`
 
-Servers may install alternate flows, such as `client_connected -> enter_world` for local tests or `client_connected -> login_verified -> enter_world` for servers without character selection. Any package can provide a replacement step only through the single-owner replacement registry; replacement is assignment, not accumulation.
+Servers may install alternate flows, such as `client_connected -> enter_world` for local tests or `client_connected -> login_verified -> enter_world` for servers without character selection. Any package can provide a replacement step only through the script admission registry; replacement is assignment, not accumulation.
+
+`Server/Admission` owns active flow state per connection. When `admission.client_connected` fires after the live session is bound, the runtime opens the active step's panel provider, records the completion event it is waiting for, and advances only when that completion signal succeeds. `Server/Network` only forwards UI action documents and panel opens across the wire. The first login slice uses a narrow credential-validator seam that can be backed by a stub in tests and by the real accounting engine later.
 
 Use the shared `SessionAdmission` exclusive group for:
 

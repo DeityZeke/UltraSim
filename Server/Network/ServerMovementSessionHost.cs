@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Admission;
 using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Network;
@@ -30,6 +31,7 @@ public sealed class ServerMovementSessionHost
     private readonly SessionLifecycleEvent[] _sessionEvents;
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
     private readonly Dictionary<ConnectionId, uint> _networkEntityIdByConnection = new();
+    private readonly HashSet<ConnectionId> _pendingAdmissionStarts = new();
 
     public ServerMovementSessionHost(
         World world,
@@ -43,6 +45,7 @@ public sealed class ServerMovementSessionHost
         ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
         ServerNetworkSessionRuntimeOptions runtimeOptions = default,
         DefaultUltraSimScriptContext? scriptContext = null,
+        IAdmissionCredentialValidator? admissionCredentialValidator = null,
         bool enableGlobalMovementObserverState = false,
         SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
@@ -75,7 +78,7 @@ public sealed class ServerMovementSessionHost
         _ui = new ServerUiService(orderedEvents);
         ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
         if (scriptContext is not null)
-            _scriptBinding = new ServerScriptRuntimeBinding(scriptContext, _chat.Commands, _ui, world.TryCreatePrefab);
+            _scriptBinding = new ServerScriptRuntimeBinding(scriptContext, _chat.Commands, _ui, world.TryCreatePrefab, admissionCredentialValidator);
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _enableGlobalMovementObserverState = enableGlobalMovementObserverState;
@@ -230,6 +233,7 @@ public sealed class ServerMovementSessionHost
         long runtimeDispatchStart = Stopwatch.GetTimestamp();
         _sessionRuntime.DispatchTick(nowTicks, ConnectionSendBudget.Unlimited, flushOutbound: false);
         runtimeDispatchElapsedTicks += Stopwatch.GetTimestamp() - runtimeDispatchStart;
+        ProcessPendingAdmissionStarts();
 
         if (flushOutbound)
         {
@@ -317,6 +321,8 @@ public sealed class ServerMovementSessionHost
                     _subscriptions.Subscribe(evt.ConnectionId, _globalMovementObserverScope);
                 _entityByConnection[evt.ConnectionId] = spawn.Entity;
                 _networkEntityIdByConnection[evt.ConnectionId] = spawn.NetworkEntityId;
+                if (_scriptBinding is not null)
+                    _pendingAdmissionStarts.Add(evt.ConnectionId);
             }
         }
     }
@@ -345,6 +351,7 @@ public sealed class ServerMovementSessionHost
                     _subscriptions.RemoveConnection(evt.ConnectionId);
                     _entityByConnection.Remove(evt.ConnectionId);
                     _networkEntityIdByConnection.Remove(evt.ConnectionId);
+                    _pendingAdmissionStarts.Remove(evt.ConnectionId);
                     _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
                     if (_despawnSession is null && _world.Entities.IsAlive(entity))
                         _world.Destroy(entity);
@@ -413,6 +420,19 @@ public sealed class ServerMovementSessionHost
             }
 
             _ui.TryProcessAction(datagram.ConnectionId, datagram.EnvelopePayloadSpan, out _);
+        }
+    }
+
+    private void ProcessPendingAdmissionStarts()
+    {
+        if (_scriptBinding is null || _pendingAdmissionStarts.Count == 0)
+            return;
+
+        foreach (ConnectionId connectionId in _pendingAdmissionStarts.ToArray())
+        {
+            _pendingAdmissionStarts.Remove(connectionId);
+            if (_entityByConnection.ContainsKey(connectionId))
+                _scriptBinding.Admission.TryStart(connectionId, out _);
         }
     }
 

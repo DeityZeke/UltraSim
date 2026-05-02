@@ -19,13 +19,18 @@ Default event shape:
 - `admission.enter_world`
 
 Servers may install a shorter flow, such as direct entry on local test shards, or
-insert custom panels between any two events. Replacement must be single-owner:
-one package owns a step at a time, with explicit priority and conflict reporting.
+insert custom panels between any two events. Step ownership is single-owner:
+one package owns the active step for an input event at a time, with explicit
+priority and conflict reporting.
 
 Trusted credential fields must use the trusted credential path. Do not submit
 password values through generic `UiActionRequestDocument.FieldValues`.
 
-`AdmissionModule` registers the default panel providers and exposes the default
-step descriptors. The current script context does not yet have a flow-step
-registry, so the descriptors are data for the upcoming admission runtime slice;
-they should not be hard-coded again elsewhere.
+`AdmissionModule` registers the default panel providers and admission flow steps.
+`Server/Admission` consumes the registered steps; panels only complete their
+local step by emitting the configured completion event. Replacing a step is a
+single-owner assignment for its start event, not `+=` accumulation.
+
+The first runtime implementation validates trusted credential actions through a
+narrow credential-validator seam. The default validator is a test/dev stub; the
+accounting engine owns the real validator when account storage is rebuilt.

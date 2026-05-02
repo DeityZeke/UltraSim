@@ -11,4 +11,5 @@ public sealed record UltraSimScriptStartupResult(
     public int ModuleCount => LoadResult?.ModuleCount ?? 0;
     public int CommandCount => Context.RegisteredCommands.Count;
     public int PanelProviderCount => Context.RegisteredPanelProviders.Count;
+    public int AdmissionStepCount => Context.RegisteredAdmissionSteps.Count;
 }

@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Admission;
 using UltraSim.Server.Scripting;
 using UltraSim.UI;
 
@@ -12,18 +13,25 @@ public sealed class ServerScriptRuntimeBinding
     private readonly DefaultUltraSimScriptContext _scriptContext;
     private readonly ServerUiService _ui;
     private readonly ServerScriptPrefabSpawner? _spawnPrefab;
+    private readonly ServerAdmissionFlowRuntime _admission;
     private long _nextScriptPanelSequence;
 
     public ServerScriptRuntimeBinding(
         DefaultUltraSimScriptContext scriptContext,
         ServerCommandRegistry commands,
         ServerUiService ui,
-        ServerScriptPrefabSpawner? spawnPrefab = null)
+        ServerScriptPrefabSpawner? spawnPrefab = null,
+        IAdmissionCredentialValidator? credentialValidator = null)
     {
         _scriptContext = scriptContext ?? throw new ArgumentNullException(nameof(scriptContext));
         ArgumentNullException.ThrowIfNull(commands);
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
         _spawnPrefab = spawnPrefab;
+        _admission = new ServerAdmissionFlowRuntime(
+            _scriptContext,
+            new ServerUiAdmissionPanelGateway(_ui),
+            credentialValidator);
+        _ui.ActionReceived += _admission.ProcessUiAction;
 
         RegisterPanelOpenCommand(commands);
         if (_spawnPrefab is not null)
@@ -32,6 +40,7 @@ public sealed class ServerScriptRuntimeBinding
     }
 
     public DefaultUltraSimScriptContext ScriptContext => _scriptContext;
+    public ServerAdmissionFlowRuntime Admission => _admission;
 
     private void RegisterPanelOpenCommand(ServerCommandRegistry commands)
     {
@@ -143,5 +152,20 @@ public sealed class ServerScriptRuntimeBinding
         string sanitized = new(buffer[..length]);
         sanitized = sanitized.Trim('/');
         return sanitized.Length == 0 ? "panel" : sanitized;
+    }
+
+    private sealed class ServerUiAdmissionPanelGateway : IAdmissionPanelGateway
+    {
+        private readonly ServerUiService _ui;
+
+        public ServerUiAdmissionPanelGateway(ServerUiService ui)
+        {
+            _ui = ui ?? throw new ArgumentNullException(nameof(ui));
+        }
+
+        public bool TryOpenPanel(ConnectionId connectionId, UiBuiltPanel panel, string panelInstanceId)
+        {
+            return _ui.TryOpenPanel(connectionId, panel, panelInstanceId);
+        }
     }
 }

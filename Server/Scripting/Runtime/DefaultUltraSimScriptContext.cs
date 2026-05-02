@@ -3,11 +3,13 @@ using UltraSim.UI;
 
 namespace UltraSim.Server.Scripting;
 
-public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltraSimScriptLogger, IUltraSimScriptCommandRegistry, IUltraSimScriptUiRegistry, IUltraSimScriptDefinitionRegistry
+public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltraSimScriptLogger, IUltraSimScriptCommandRegistry, IUltraSimScriptUiRegistry, IUltraSimScriptAdmissionRegistry, IUltraSimScriptDefinitionRegistry
 {
     private readonly List<UltraSimScriptLogEntry> _logEntries = new();
     private readonly Dictionary<string, UltraSimScriptCommandDescriptor> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, UltraSimScriptUiPanelProviderDescriptor> _panelProviders = new(StringComparer.Ordinal);
+    private readonly UltraSimReplaceableProviderRegistry<UltraSimScriptAdmissionFlowStepDescriptor> _admissionSteps = new();
+    private readonly HashSet<string> _admissionStepEventKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ArchetypeDescriptor> _archetypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PrefabDescriptor> _prefabs = new(StringComparer.Ordinal);
 
@@ -22,10 +24,28 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     public IUltraSimScriptLogger Logger => this;
     public IUltraSimScriptCommandRegistry Commands => this;
     public IUltraSimScriptUiRegistry UiPanels => this;
+    public IUltraSimScriptAdmissionRegistry Admission => this;
     public IUltraSimScriptDefinitionRegistry Definitions => this;
     public IReadOnlyList<UltraSimScriptLogEntry> LogEntries => _logEntries;
     public IReadOnlyCollection<UltraSimScriptCommandDescriptor> RegisteredCommands => _commands.Values;
     public IReadOnlyCollection<UltraSimScriptUiPanelProviderDescriptor> RegisteredPanelProviders => _panelProviders.Values;
+    public IReadOnlyCollection<UltraSimScriptAdmissionFlowStepDescriptor> RegisteredAdmissionSteps
+    {
+        get
+        {
+            var result = new List<UltraSimScriptAdmissionFlowStepDescriptor>(_admissionStepEventKeys.Count);
+            foreach (string eventKey in _admissionStepEventKeys)
+            {
+                if (_admissionSteps.TryGetActive(eventKey, out UltraSimReplaceableProviderRegistration<UltraSimScriptAdmissionFlowStepDescriptor> registration) &&
+                    registration.Provider is not null)
+                {
+                    result.Add(registration.Provider);
+                }
+            }
+
+            return result;
+        }
+    }
     public IReadOnlyCollection<ArchetypeDescriptor> RegisteredArchetypes => _archetypes.Values;
     public IReadOnlyCollection<PrefabDescriptor> RegisteredPrefabs => _prefabs.Values;
 
@@ -90,6 +110,43 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
             return false;
 
         return _panelProviders.TryGetValue(key.Trim(), out provider!);
+    }
+
+    public bool RegisterStep(UltraSimScriptAdmissionFlowStepDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        UltraSimScriptAdmissionFlowStepDescriptor normalized = descriptor.NormalizeAndValidate();
+        UltraSimReplaceableProviderSetResult<UltraSimScriptAdmissionFlowStepDescriptor> result =
+            _admissionSteps.Replace(
+                normalized.StartsOnEvent,
+                normalized.OwnerKey,
+                normalized,
+                origin: "script",
+                normalized.Priority);
+        if (!result.Accepted)
+        {
+            throw new InvalidOperationException(result.Error);
+        }
+
+        _admissionStepEventKeys.Add(normalized.StartsOnEvent);
+        return true;
+    }
+
+    public bool TryGetAdmissionStep(string startsOnEvent, out UltraSimScriptAdmissionFlowStepDescriptor descriptor)
+    {
+        descriptor = default!;
+        if (string.IsNullOrWhiteSpace(startsOnEvent))
+            return false;
+
+        string normalized = ScriptDefinitionValidation.NormalizeKey(startsOnEvent);
+        if (!_admissionSteps.TryGetActive(normalized, out UltraSimReplaceableProviderRegistration<UltraSimScriptAdmissionFlowStepDescriptor> registration) ||
+            registration.Provider is null)
+        {
+            return false;
+        }
+
+        descriptor = registration.Provider;
+        return true;
     }
 
     public bool RegisterArchetype<TShape>()

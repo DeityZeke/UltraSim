@@ -3,6 +3,7 @@ using System.Net;
 using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Server;
+using UltraSim.Server.Admission;
 using UltraSim.Server.Console;
 using UltraSim.Server.Godot;
 using UltraSim.Server.Hosting;
@@ -84,6 +85,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
         Run(nameof(ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession), ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession);
         Run(nameof(ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders), ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders);
+        Run(nameof(ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect), ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect);
         Run(nameof(ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities), ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
@@ -2897,6 +2899,133 @@ internal static class TestRunner
         Assert.Equal(1L, serverHost.Ui.PublishedPanelOpens);
     }
 
+    private static void ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect()
+    {
+        var connectionId = new ConnectionId(1);
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var runtimeRoot = new UltraSimRuntimeRootLayout(
+            Path.Combine(Path.GetTempPath(), "ultrasim-admission-flow-test"),
+            "scripts",
+            "data",
+            "cache",
+            "cache/scripts",
+            "saves",
+            "backups",
+            "docs");
+        var scriptContext = new DefaultUltraSimScriptContext(runtimeRoot);
+        Assert.True(scriptContext.UiPanels.RegisterPanelProvider("admission.panel.login", CreateTestAdmissionLoginPanel));
+        Assert.True(scriptContext.UiPanels.RegisterPanelProvider("admission.panel.character_select", CreateTestAdmissionCharacterSelectPanel));
+        Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
+            "test.login",
+            ServerAdmissionFlowRuntime.DefaultClientConnectedEvent,
+            "admission.login_verified",
+            "admission.panel.login")));
+        Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
+            "test.character_select",
+            "admission.login_verified",
+            "admission.character_selected",
+            "admission.panel.character_select")));
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy,
+            scriptContext: scriptContext);
+        var openedPanels = new List<UiPanelOpenDocument>();
+        var uiEvents = new ClientUiEventBridge(openedPanels.Add);
+        var observerState = new ClientObserverStateBridge(connectionId);
+        var clientHost = new ClientMovementSessionHost(
+            pair.Client,
+            connectionId,
+            new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+            observerState: observerState,
+            uiEvents: uiEvents,
+            maxPollBatch: 8);
+
+        serverHost.Start();
+        clientHost.Start();
+        clientHost.BeginHandshake(100);
+
+        for (int step = 0; step < 10; step++)
+        {
+            serverHost.Pump(101 + step * 2, 0.016f, (uint)(step + 1));
+            clientHost.Pump(102 + step * 2);
+        }
+
+        Assert.True(clientHost.IsReady);
+        for (int step = 0; step < 10 && !openedPanels.Any(panel => panel.SchemaIdentity.PanelType == "admission.login"); step++)
+        {
+            serverHost.Pump(160 + step * 2, 0.016f, (uint)(11 + step));
+            clientHost.Pump(161 + step * 2);
+        }
+
+        Assert.NotNull(serverHost.ScriptBinding);
+        if (!openedPanels.Any(panel => panel.SchemaIdentity.PanelType == "admission.login"))
+        {
+            throw new InvalidOperationException(
+                $"Expected admission login panel. received={openedPanels.Count}, published={serverHost.Ui.PublishedPanelOpens}, opened={serverHost.ScriptBinding!.Admission.OpenedPanels}, rejectedEvents={serverHost.ScriptBinding.Admission.RejectedEvents}");
+        }
+
+        UiPanelOpenDocument login = openedPanels.Last(panel => panel.SchemaIdentity.PanelType == "admission.login");
+        Assert.True(serverHost.ScriptBinding!.Admission.TryGetState(connectionId, out SessionAdmissionState loginState));
+        Assert.Equal(login.PanelInstanceId, loginState.PanelInstanceId);
+        Assert.Equal("admission.login_verified", loginState.WaitingForEvent);
+
+        var credentialAction = new UiActionRequestDocument(
+            login.PanelInstanceId,
+            login.SchemaIdentity,
+            CatalogIdentity: null,
+            ClientSequence: 1,
+            "login.submit",
+            UiActionContextKind.TrustedCredential,
+            ContextId: null,
+            FieldValues: []);
+        Assert.True(clientHost.TrySendUiAction(credentialAction));
+
+        serverHost.Pump(220, 0.016f, 21);
+        clientHost.Pump(221);
+
+        UiPanelOpenDocument characterSelect = openedPanels.Last(panel => panel.SchemaIdentity.PanelType == "admission.character_select");
+        Assert.Equal("admission.character_select", characterSelect.SchemaIdentity.PanelType);
+        Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState selectState));
+        Assert.Equal(characterSelect.PanelInstanceId, selectState.PanelInstanceId);
+        Assert.Equal("admission.character_selected", selectState.WaitingForEvent);
+        Assert.Equal(1L, serverHost.ScriptBinding.Admission.CompletedSteps);
+        Assert.Equal(2L, serverHost.ScriptBinding.Admission.OpenedPanels);
+    }
+
     private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()
     {
         var connectionId = new ConnectionId(1);
@@ -3370,6 +3499,39 @@ internal static class TestRunner
                 {
                     column.DynamicText("message", "Message", "Hello over the live network path.", maxStringLength: 128);
                     column.Row(row => row.Button("network.ok", "OK", UiActionRole.Primary));
+                });
+            })
+            .Build();
+    }
+
+    private static UiBuiltPanel CreateTestAdmissionLoginPanel()
+    {
+        return UiPanelBuilder
+            .Create("server/admission/test", "admission.login", 1)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.DynamicText("login.title", "Title", "Login");
+                    column.TextInput("login.username", "Account", "", maxStringLength: 128);
+                    column.PasswordInput("login.password", "Password", maxStringLength: 256);
+                    column.Button("login.submit", "Log In", UiActionRole.Primary, UiActionContextKind.TrustedCredential);
+                });
+            })
+            .Build();
+    }
+
+    private static UiBuiltPanel CreateTestAdmissionCharacterSelectPanel()
+    {
+        return UiPanelBuilder
+            .Create("server/admission/test", "admission.character_select", 1)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.DynamicText("character_select.title", "Title", "Select Character");
+                    column.DynamicText("character_select.status", "Status", "Account accepted.");
+                    column.Button("character_select.create", "Create", UiActionRole.Primary);
                 });
             })
             .Build();

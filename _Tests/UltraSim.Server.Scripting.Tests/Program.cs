@@ -11,6 +11,7 @@ internal static class TestRunner
         Run(nameof(RuntimeTemplate_CreatesExpectedFolders), RuntimeTemplate_CreatesExpectedFolders);
         Run(nameof(RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi), RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi);
         Run(nameof(RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders), RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders);
+        Run(nameof(AdmissionRegistry_CustomStepReplacesDefaultForSameEvent), AdmissionRegistry_CustomStepReplacesDefaultForSameEvent);
         Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
@@ -78,7 +79,7 @@ internal static class TestRunner
         UltraSimScriptCompileResult result = new UltraSimScriptCompiler().Compile(new UltraSimScriptCompilerOptions(temp.Layout));
 
         Assert.Equal(UltraSimScriptCompileResultKind.Compiled, result.Kind);
-        Assert.True(result.SourceCount >= 6);
+        Assert.True(result.SourceCount >= 5);
         Assert.False(result.Diagnostics.Any(static diagnostic => diagnostic.Severity == UltraSimScriptDiagnosticSeverity.Error));
     }
 
@@ -99,13 +100,52 @@ internal static class TestRunner
         Assert.True(load.Succeeded, string.Join('\n', load.Errors));
         Assert.Equal(1, load.ModuleCount);
         Assert.Equal(3, context.RegisteredPanelProviders.Count);
+        Assert.Equal(3, context.RegisteredAdmissionSteps.Count);
         Assert.True(context.TryGetPanelProvider("admission.panel.login", out UltraSimScriptUiPanelProviderDescriptor loginProvider));
         Assert.True(context.TryGetPanelProvider("admission.panel.character_select", out UltraSimScriptUiPanelProviderDescriptor selectProvider));
         Assert.True(context.TryGetPanelProvider("admission.panel.character_create", out UltraSimScriptUiPanelProviderDescriptor createProvider));
+        Assert.True(context.TryGetAdmissionStep("admission.client_connected", out UltraSimScriptAdmissionFlowStepDescriptor loginStep));
+        Assert.Equal("admission.panel.login", loginStep.PanelProviderKey);
+        Assert.Equal("admission.login_verified", loginStep.CompletesWithEvent);
         Assert.Equal("admission.login", loginProvider.Provider().Schema.Identity.PanelType);
         Assert.Equal("admission.character_select", selectProvider.Provider().Schema.Identity.PanelType);
         Assert.Equal("admission.character_create", createProvider.Provider().Schema.Identity.PanelType);
         Assert.True(context.LogEntries.Any(static entry => entry.Message.Contains("Default admission package configured.", StringComparison.Ordinal)));
+    }
+
+    private static void AdmissionRegistry_CustomStepReplacesDefaultForSameEvent()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        UltraSimRuntimeTemplate.Ensure(temp.Layout);
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+
+        Assert.True(context.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
+            "core.login",
+            "admission.client_connected",
+            "admission.login_verified",
+            "admission.panel.login",
+            Priority: 100)));
+        Assert.True(context.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
+            "custom.direct_world",
+            "admission.client_connected",
+            "admission.enter_world",
+            "custom.panel.direct_world",
+            Priority: 200)));
+
+        Assert.True(context.TryGetAdmissionStep("admission.client_connected", out UltraSimScriptAdmissionFlowStepDescriptor step));
+        Assert.Equal("custom.direct_world", step.OwnerKey);
+        Assert.Equal("admission.enter_world", step.CompletesWithEvent);
+        Assert.Equal("custom.panel.direct_world", step.PanelProviderKey);
+        Assert.Equal(1, context.RegisteredAdmissionSteps.Count);
+
+        InvalidOperationException ex = Assert.Throws<InvalidOperationException>(() =>
+            context.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
+                "other.custom",
+                "admission.client_connected",
+                "admission.other",
+                "other.panel",
+                Priority: 200)));
+        Assert.True(ex.Message.Contains("already has owner 'custom.direct_world'", StringComparison.Ordinal));
     }
 
     private static void ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors()
@@ -497,9 +537,10 @@ internal static class TestRunner
         Assert.Equal(1, startup.ModuleCount);
         Assert.Equal(1, startup.CommandCount);
         Assert.Equal(1, startup.PanelProviderCount);
+        Assert.Equal(0, startup.AdmissionStepCount);
         Assert.True(joined.Contains("Scripts: Compiling C# scripts... - done", StringComparison.Ordinal));
         Assert.True(joined.Contains("Scripts: Configuring... - done (1 module)", StringComparison.Ordinal));
-        Assert.True(joined.Contains("Scripts: Initializing... - done (1 module, 1 command, 1 panel)", StringComparison.Ordinal));
+        Assert.True(joined.Contains("Scripts: Initializing... - done (1 module, 1 command, 1 panel, 0 admission steps)", StringComparison.Ordinal));
     }
 
     private static string HelloModuleScript(string commandName) =>
