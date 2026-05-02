@@ -1223,9 +1223,11 @@ generic UI field values.
 
 The server-side accounting adapter is the only path that should turn a trusted
 login packet into an admission success. Failed validation leaves the current
-admission step open; the follow-up presentation slice should publish a model
-delta to the login panel's status slot so the player sees the rejection reason
-without closing or reopening the panel.
+admission step open and publishes a model delta to the login panel's configured
+status slot. The delta carries a machine-readable failure reason such as
+`InvalidCredentials`, `RateLimited`, `Banned`, or `ExternalProviderUnavailable`;
+clients map those codes to local display text and should use a generic fallback
+for unknown codes.
 
 Use the shared `SessionAdmission` exclusive group for:
 

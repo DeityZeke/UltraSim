@@ -127,6 +127,10 @@ flow state and trusted panel/action checks; accounting owns credential policy.
 The adapter maps `LoginCredentialSubmitPacket` material into accounting's
 `CredentialValidationRequest` and returns success/failure to admission without
 letting script packages or generic UI actions handle password/token values.
+Failed credentials do not advance the flow. If the active admission step declares
+a failure status slot, admission publishes a normal UI model delta containing a
+machine-readable failure reason code; the client maps that code to local display
+text.
 
 The template should not contain generated compiler output, saves, logs, backups, or cache files.
 

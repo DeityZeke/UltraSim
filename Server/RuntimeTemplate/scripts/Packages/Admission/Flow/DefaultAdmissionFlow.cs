@@ -12,7 +12,8 @@ public static class DefaultAdmissionFlow
             AdmissionFlowEvents.ClientConnected,
             AdmissionFlowEvents.LoginVerified,
             AdmissionPanelProviderKeys.Login,
-            Priority: 0),
+            Priority: 0,
+            FailureStatusSlotId: AdmissionPanels.LoginStatusSlotId),
         new UltraSimScriptAdmissionFlowStepDescriptor(
             "admission.default.character_select",
             AdmissionFlowEvents.LoginVerified,

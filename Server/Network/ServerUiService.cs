@@ -13,7 +13,9 @@ public sealed class ServerUiService
     }
 
     public long PublishedPanelOpens { get; private set; }
+    public long PublishedModelUpdates { get; private set; }
     public long RejectedPanelOpens { get; private set; }
+    public long RejectedModelUpdates { get; private set; }
     public long ReceivedActions { get; private set; }
     public long RejectedActions { get; private set; }
 
@@ -40,6 +42,23 @@ public sealed class ServerUiService
             PacketClass.ReliableEvent,
             PacketCodec.Encode(new UiPanelOpenEventPacket(documentBytes)));
         PublishedPanelOpens++;
+        return true;
+    }
+
+    public bool TryUpdatePanel(ConnectionId connectionId, UiModelUpdateDocument update)
+    {
+        if (!connectionId.IsValid)
+        {
+            RejectedModelUpdates++;
+            return false;
+        }
+
+        byte[] documentBytes = UiContractJsonCodec.Encode(update);
+        _orderedEvents.Publish(
+            ServerUiScopes.ForConnection(connectionId),
+            PacketClass.ReliableEvent,
+            PacketCodec.Encode(new UiModelUpdateEventPacket(documentBytes)));
+        PublishedModelUpdates++;
         return true;
     }
 

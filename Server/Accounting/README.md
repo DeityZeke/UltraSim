@@ -17,6 +17,10 @@ Current first-pass scope:
 - `AccountingAdmissionCredentialValidator` adapter that maps trusted admission
   credential packets into `CredentialValidationRequest` and rejects generic UI
   action credential attempts.
+- Admission-facing failure reason mapping. Unknown accounts and wrong passwords
+  both surface as `InvalidCredentials`; account policy states such as banned,
+  suspended, locked out, rate limited, and portal unavailable stay
+  machine-readable without sending account-specific prose.
 - Account authentication provider seam with two explicit modes:
   - `LocalServerAccounts` for per-server account records and password hashes.
   - `UltraSimPortalAccounts` for future portal-backed token/session validation.

@@ -29,6 +29,7 @@ public sealed class AccountingAdmissionCredentialValidator : IAdmissionCredentia
         UiActionRequestDocument request)
     {
         return ServerAdmissionCredentialValidationResult.Reject(
+            AdmissionCredentialFailureReason.UnsupportedCredential,
             "Trusted credential values must use the dedicated login credential packet.");
     }
 
@@ -40,14 +41,20 @@ public sealed class AccountingAdmissionCredentialValidator : IAdmissionCredentia
             return ServerAdmissionCredentialValidationResult.Reject("Credential packet requires a valid connection.");
 
         if (string.IsNullOrWhiteSpace(request.Username))
-            return ServerAdmissionCredentialValidationResult.Reject("Username is required.");
+            return ServerAdmissionCredentialValidationResult.Reject(
+                AdmissionCredentialFailureReason.InvalidCredentials,
+                "Username is required.");
 
         if (!TryMapMaterialKind(request.MaterialKind, out CredentialMaterialKind materialKind))
-            return ServerAdmissionCredentialValidationResult.Reject("Unsupported credential material kind.");
+            return ServerAdmissionCredentialValidationResult.Reject(
+                AdmissionCredentialFailureReason.UnsupportedCredential,
+                "Unsupported credential material kind.");
 
         string secret = DecodeMaterial(request.MaterialBytes.Span);
         if (string.IsNullOrWhiteSpace(secret))
-            return ServerAdmissionCredentialValidationResult.Reject("Credential material is required.");
+            return ServerAdmissionCredentialValidationResult.Reject(
+                AdmissionCredentialFailureReason.InvalidCredentials,
+                "Credential material is required.");
 
         var validationRequest = new CredentialValidationRequest(
             request.Username,
@@ -59,7 +66,27 @@ public sealed class AccountingAdmissionCredentialValidator : IAdmissionCredentia
         CredentialValidationResult result = _provider.ValidateLogin(validationRequest);
         return result.Succeeded
             ? ServerAdmissionCredentialValidationResult.Accept()
-            : ServerAdmissionCredentialValidationResult.Reject(result.PublicMessage);
+            : ServerAdmissionCredentialValidationResult.Reject(
+                MapFailureReason(result.Kind),
+                result.PublicMessage);
+    }
+
+    private static AdmissionCredentialFailureReason MapFailureReason(CredentialValidationResultKind kind)
+    {
+        return kind switch
+        {
+            CredentialValidationResultKind.UnknownAccount => AdmissionCredentialFailureReason.InvalidCredentials,
+            CredentialValidationResultKind.InvalidPassword => AdmissionCredentialFailureReason.InvalidCredentials,
+            CredentialValidationResultKind.Banned => AdmissionCredentialFailureReason.Banned,
+            CredentialValidationResultKind.Suspended => AdmissionCredentialFailureReason.Suspended,
+            CredentialValidationResultKind.PendingVerification => AdmissionCredentialFailureReason.PendingVerification,
+            CredentialValidationResultKind.LockedOut => AdmissionCredentialFailureReason.LockedOut,
+            CredentialValidationResultKind.AlreadyLoggedIn => AdmissionCredentialFailureReason.AlreadyLoggedIn,
+            CredentialValidationResultKind.RateLimited => AdmissionCredentialFailureReason.RateLimited,
+            CredentialValidationResultKind.UnsupportedCredentialMaterial => AdmissionCredentialFailureReason.UnsupportedCredential,
+            CredentialValidationResultKind.ExternalProviderUnavailable => AdmissionCredentialFailureReason.ExternalProviderUnavailable,
+            _ => AdmissionCredentialFailureReason.Rejected
+        };
     }
 
     private static bool TryMapMaterialKind(

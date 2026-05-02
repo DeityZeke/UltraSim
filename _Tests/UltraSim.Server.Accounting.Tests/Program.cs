@@ -250,6 +250,7 @@ internal static class TestRunner
             []);
         ServerAdmissionCredentialValidationResult genericResult = validator.ValidateTrustedCredential(new ConnectionId(7), genericAction);
         Assert.False(genericResult.Accepted);
+        Assert.Equal(AdmissionCredentialFailureReason.UnsupportedCredential, genericResult.FailureReason);
 
         ServerAdmissionCredentialValidationResult tokenResult = validator.ValidateTrustedCredential(
             new ConnectionId(7),
@@ -260,6 +261,7 @@ internal static class TestRunner
                 LoginCredentialMaterialKind.PortalSessionToken,
                 "portal-token"u8.ToArray()));
         Assert.False(tokenResult.Accepted);
+        Assert.Equal(AdmissionCredentialFailureReason.UnsupportedCredential, tokenResult.FailureReason);
         Assert.True(tokenResult.Error.Length > 0);
     }
 
@@ -285,6 +287,7 @@ internal static class TestRunner
                 "wrong"u8.ToArray()));
 
         Assert.False(result.Accepted);
+        Assert.Equal(AdmissionCredentialFailureReason.InvalidCredentials, result.FailureReason);
     }
 
     private static DefaultCredentialService CreateService(IAccountRegistry accounts, IPasswordHashService passwords)

@@ -13,6 +13,7 @@ public sealed class ServerAdmissionFlowRuntime
     private readonly IAdmissionCredentialValidator _credentialValidator;
     private readonly Dictionary<ConnectionId, SessionAdmissionState> _statesByConnection = new();
     private long _nextPanelSequence;
+    private long _nextModelUpdateSequence;
 
     public ServerAdmissionFlowRuntime(
         DefaultUltraSimScriptContext scriptContext,
@@ -88,6 +89,8 @@ public sealed class ServerAdmissionFlowRuntime
             connectionId,
             step,
             panelInstanceId,
+            panel.Schema.Identity,
+            panel.Schema.CatalogIdentity,
             step.CompletesWithEvent,
             panel.Schema.Actions
                 .Where(static action => action.ContextKind == UiActionContextKind.TrustedCredential)
@@ -147,6 +150,7 @@ public sealed class ServerAdmissionFlowRuntime
         if (!validation.Accepted)
         {
             RejectedCredentials++;
+            TryPublishCredentialFailure(connectionId, state, validation);
             return;
         }
 
@@ -170,10 +174,33 @@ public sealed class ServerAdmissionFlowRuntime
         if (!validation.Accepted)
         {
             RejectedCredentials++;
+            TryPublishCredentialFailure(connectionId, state, validation);
             return;
         }
 
         TryCompleteCurrentStep(connectionId, state.WaitingForEvent, out _);
+    }
+
+    private void TryPublishCredentialFailure(
+        ConnectionId connectionId,
+        SessionAdmissionState state,
+        ServerAdmissionCredentialValidationResult validation)
+    {
+        if (string.IsNullOrWhiteSpace(state.Step.FailureStatusSlotId))
+            return;
+
+        long sequence = Interlocked.Increment(ref _nextModelUpdateSequence);
+        var update = new UiModelUpdateDocument(
+            state.PanelInstanceId,
+            state.SchemaIdentity,
+            state.CatalogIdentity,
+            sequence,
+            UiModelUpdateKind.SlotPatch,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.String(state.Step.FailureStatusSlotId, validation.FailureReason.ToString())],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        _panels.TryUpdatePanel(connectionId, update);
     }
 
     private static string SanitizeStableSegment(string value)

@@ -23,6 +23,7 @@ internal static class TestRunner
         Run(nameof(ChatSubmitPacket_RoundTripsSubmittedText), ChatSubmitPacket_RoundTripsSubmittedText);
         Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
         Run(nameof(UiPanelOpenEventPacket_RoundTripsDocumentBytes), UiPanelOpenEventPacket_RoundTripsDocumentBytes);
+        Run(nameof(UiModelUpdateEventPacket_RoundTripsDocumentBytes), UiModelUpdateEventPacket_RoundTripsDocumentBytes);
         Run(nameof(UiActionRequestPacket_RoundTripsDocumentBytes), UiActionRequestPacket_RoundTripsDocumentBytes);
         Run(nameof(LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial), LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial);
         Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
@@ -571,6 +572,24 @@ internal static class TestRunner
 
         var reader = new BitReader(payload);
         UiActionRequestPacket decoded = UiActionRequestPacket.Deserialize(ref reader);
+        Assert.True(documentBytes.AsSpan().SequenceEqual(decoded.DocumentBytes));
+    }
+
+    private static void UiModelUpdateEventPacket_RoundTripsDocumentBytes()
+    {
+        byte[] documentBytes = [5, 4, 3, 2, 1];
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new UiModelUpdateEventPacket(documentBytes));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(UiModelUpdateEventPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(UiModelUpdateEventPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.State, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        UiModelUpdateEventPacket decoded = UiModelUpdateEventPacket.Deserialize(ref reader);
         Assert.True(documentBytes.AsSpan().SequenceEqual(decoded.DocumentBytes));
     }
 

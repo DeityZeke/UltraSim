@@ -60,6 +60,7 @@ internal static class TestRunner
         Run(nameof(ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps), ClientObserverEventBridge_AllowSequenceGaps_AppliesScopedFanoutGaps);
         Run(nameof(ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedChatEventsBeforeGenericApply);
         Run(nameof(ClientObserverEventBridge_RoutesNestedUiOpenEventsBeforeGenericApply), ClientObserverEventBridge_RoutesNestedUiOpenEventsBeforeGenericApply);
+        Run(nameof(ClientObserverEventBridge_RoutesNestedUiModelUpdatesBeforeGenericApply), ClientObserverEventBridge_RoutesNestedUiModelUpdatesBeforeGenericApply);
         Run(nameof(ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState), ClientMovementNetworkBridge_LoopbackRoundTripsMovementInputAndAuthoritativeState);
         Run(nameof(ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip), ClientMovementSessionHost_ControlPlaneHandshakeAndPing_RoundTrip);
         Run(nameof(ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents), ClientMovementSessionHost_Pump_EmitsReliableEventAckForContiguousObserverEvents);
@@ -1588,6 +1589,44 @@ internal static class TestRunner
         Assert.Equal("panel/status/network", ui.LastPanelInstanceId);
         Assert.True(opened is not null);
         Assert.Equal(open.PanelInstanceId, opened!.PanelInstanceId);
+        Assert.Equal(0, genericApplyCount);
+    }
+
+    private static void ClientObserverEventBridge_RoutesNestedUiModelUpdatesBeforeGenericApply()
+    {
+        UiModelUpdateDocument? appliedUpdate = null;
+        int genericApplyCount = 0;
+        var ui = new ClientUiEventBridge(modelUpdate: update => appliedUpdate = update);
+        var bridge = ClientObserverEventBridge.CreateSpanFastPath(
+            new ConnectionId(9),
+            (_, _) => genericApplyCount++);
+        bridge.UiEvents = ui;
+
+        UiSchemaDocument schema = CreateClientUiSchema();
+        var updateDocument = new UiModelUpdateDocument(
+            "panel/status/network",
+            schema.Identity,
+            null,
+            1,
+            UiModelUpdateKind.SlotPatch,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.String("status.text", "InvalidCredentials")],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        ImmutablePayloadBuffer uiPayload = PacketCodec.Encode(
+            new UiModelUpdateEventPacket(UiContractJsonCodec.Encode(updateDocument)));
+        ImmutablePayloadBuffer frame = PacketCodec.Encode(new ReliableEventFramePacket(10, uiPayload));
+        InboundDatagram[] inbound =
+        [
+            new(new ConnectionId(9), NetworkPlane.State, PacketClass.ReliableEvent, ChannelType.ReliableOrdered, frame.Memory),
+        ];
+
+        Assert.Equal(1, bridge.ProcessInbound(inbound));
+        Assert.Equal(1, ui.LastReceivedModelUpdateCount);
+        Assert.Equal(1, ui.LastAppliedModelUpdateCount);
+        Assert.Equal("panel/status/network", ui.LastPanelInstanceId);
+        Assert.True(appliedUpdate is not null);
+        Assert.Equal(updateDocument.PanelInstanceId, appliedUpdate!.PanelInstanceId);
         Assert.Equal(0, genericApplyCount);
     }
 

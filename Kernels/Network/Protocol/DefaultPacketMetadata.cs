@@ -17,6 +17,7 @@ public static class DefaultPacketMetadata
         registry.Register<ChatSubmitPacket>();
         registry.Register<ChatMessageEventPacket>();
         registry.Register<UiPanelOpenEventPacket>();
+        registry.Register<UiModelUpdateEventPacket>();
         registry.Register<UiActionRequestPacket>();
         registry.Register<LoginCredentialSubmitPacket>();
         registry.Register<RealtimeStateFramePacket>();

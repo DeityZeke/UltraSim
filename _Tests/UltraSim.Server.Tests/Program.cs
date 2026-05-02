@@ -2927,7 +2927,8 @@ internal static class TestRunner
             "test.login",
             ServerAdmissionFlowRuntime.DefaultClientConnectedEvent,
             "admission.login_verified",
-            "admission.panel.login")));
+            "admission.panel.login",
+            FailureStatusSlotId: "login.status")));
         Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
             "test.character_select",
             "admission.login_verified",
@@ -2978,7 +2979,8 @@ internal static class TestRunner
             scriptContext: scriptContext,
             admissionCredentialValidator: credentialValidator);
         var openedPanels = new List<UiPanelOpenDocument>();
-        var uiEvents = new ClientUiEventBridge(openedPanels.Add);
+        var modelUpdates = new List<UiModelUpdateDocument>();
+        var uiEvents = new ClientUiEventBridge(openedPanels.Add, modelUpdates.Add);
         var observerState = new ClientObserverStateBridge(connectionId);
         var clientHost = new ClientMovementSessionHost(
             pair.Client,
@@ -3034,6 +3036,12 @@ internal static class TestRunner
         Assert.False(credentialValidator.LastPacketAccepted);
         Assert.Equal(1L, serverHost.ScriptBinding.Admission.RejectedCredentials);
         Assert.Equal(0L, serverHost.ScriptBinding.Admission.CompletedSteps);
+        Assert.Equal(1L, serverHost.Ui.PublishedModelUpdates);
+        UiModelUpdateDocument loginFailureUpdate = modelUpdates.Last(update => update.PanelInstanceId == login.PanelInstanceId);
+        Assert.Equal(UiModelUpdateKind.SlotPatch, loginFailureUpdate.Kind);
+        Assert.True(loginFailureUpdate.SlotValues.Any(
+            value => value.SlotId == "login.status" &&
+                value.StringValue == AdmissionCredentialFailureReason.InvalidCredentials.ToString()));
 
         var credentialPacket = new LoginCredentialSubmitPacket(
             login.PanelInstanceId,
@@ -3546,6 +3554,7 @@ internal static class TestRunner
                     column.DynamicText("login.title", "Title", "Login");
                     column.TextInput("login.username", "Account", "", maxStringLength: 128);
                     column.PasswordInput("login.password", "Password", maxStringLength: 256);
+                    column.DynamicText("login.status", "Status", "", maxStringLength: 128);
                     column.Button("login.submit", "Log In", UiActionRole.Primary, UiActionContextKind.TrustedCredential);
                 });
             })

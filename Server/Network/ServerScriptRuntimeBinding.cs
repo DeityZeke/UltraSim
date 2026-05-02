@@ -167,5 +167,10 @@ public sealed class ServerScriptRuntimeBinding
         {
             return _ui.TryOpenPanel(connectionId, panel, panelInstanceId);
         }
+
+        public bool TryUpdatePanel(ConnectionId connectionId, UiModelUpdateDocument update)
+        {
+            return _ui.TryUpdatePanel(connectionId, update);
+        }
     }
 }
