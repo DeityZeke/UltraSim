@@ -378,6 +378,15 @@ internal static class TestRunner
                         });
                         section.Image("icons/ui/settings");
                         section.Pager("settingsPage", 1, "settingsTotalPages", 4, "settings.previous", "settings.next");
+                        section.Table(
+                            "systems",
+                            "Systems",
+                            [
+                                new UiTableColumn("systemName", "System", UiModelValueKind.String, Sortable: true, SortActionId: "systems.sort.name"),
+                                new UiTableColumn("systemEnabled", "Enabled", UiModelValueKind.Boolean)
+                            ],
+                            rowActionId: "systems.inspect",
+                            rowActionLabel: "Inspect");
                         section.ScrollRegion(scroll =>
                         {
                             scroll.Text("Scrollable connection details");
@@ -405,6 +414,10 @@ internal static class TestRunner
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Tabs && string.Equals(node.SlotId, "settingsTab", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Image && string.Equals(node.Text, "icons/ui/settings", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.Pager));
+        Assert.True(built.Schema.Nodes.Any(node =>
+            node.Kind == UiNodeKind.Table &&
+            string.Equals(node.SlotId, "systems", StringComparison.Ordinal) &&
+            string.Equals(node.ActionId, "systems.inspect", StringComparison.Ordinal)));
         Assert.True(built.Schema.Nodes.Any(node => node.Kind == UiNodeKind.ScrollRegion));
         Assert.True(built.Schema.Nodes.Any(node =>
             node.Kind == UiNodeKind.IconButton &&
@@ -494,10 +507,22 @@ internal static class TestRunner
         Assert.True(context.TryGetSelectOptions("settingsTab", out IReadOnlyList<UiSelectOptionDescriptor> tabOptions));
         Assert.Equal(2, tabOptions.Count);
         Assert.True(context.HasRepeaterSlot("characters"));
+        Assert.True(context.HasRepeaterSlot("systems"));
+        Assert.True(context.TryGetTableColumns("systems", out IReadOnlyList<UiTableColumnDescriptor> systemColumns));
+        Assert.Equal(2, systemColumns.Count);
+        Assert.True(systemColumns[0].Sortable);
+        Assert.Equal("systems.sort.name", systemColumns[0].SortActionId);
+        Assert.True(built.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, "systems.inspect", StringComparison.Ordinal) &&
+            action.ContextKind == UiActionContextKind.Row));
+        Assert.True(built.Schema.Actions.Any(action =>
+            string.Equals(action.ActionId, "systems.sort.name", StringComparison.Ordinal) &&
+            action.ContextKind == UiActionContextKind.Panel));
 
         byte[] encodedSchema = UiContractJsonCodec.Encode(built.Schema);
         UiSchemaDocument decodedSchema = UiContractJsonCodec.Decode<UiSchemaDocument>(encodedSchema);
         Assert.Equal(11, decodedSchema.GetSelectOptions().Count);
+        Assert.Equal(2, decodedSchema.GetTableColumns().Count);
         Assert.Valid(decodedSchema.Validate(rendererCapabilities: CreateRendererCapabilities()));
 
         UiPanelOpenDocument cold = built.ToColdOpen("panel/settings/connection");
@@ -753,7 +778,21 @@ internal static class TestRunner
             })
             .TryBuild(out _, out string duplicateRepeaterError);
         Assert.False(duplicateRepeaterBuilt);
-        Assert.True(duplicateRepeaterError.Contains("Duplicate repeater", StringComparison.OrdinalIgnoreCase));
+        Assert.True(duplicateRepeaterError.Contains("Duplicate row-backed", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Throws<InvalidOperationException>(() =>
+        {
+            UiPanelBuilder
+                .Create("server/main", "smoke.table_duplicate_column", 1)
+                .Panel(panel => panel.Table(
+                    "systems",
+                    "Systems",
+                    [
+                        new UiTableColumn("name", "Name"),
+                        new UiTableColumn("name", "Duplicate Name")
+                    ]))
+                .Build();
+        });
     }
 
     private static void UiContractJsonCodec_RoundTripsCoreContracts()
@@ -991,6 +1030,36 @@ internal static class TestRunner
             ]
         };
         Assert.InvalidContains(panelActionOnRepeater.Validate(rendererCapabilities: CreateRendererCapabilities()), "row context");
+
+        UiSchemaDocument tableWithPanelAction = valid with
+        {
+            Nodes =
+            [
+                valid.Nodes[0] with { Children = [2, 99] },
+                .. valid.Nodes.Skip(1),
+                new UiSchemaNodeDescriptor(99, UiNodeKind.Table, "systems", "Systems", [], ActionId: "hud.open_character"),
+            ],
+            TableColumns =
+            [
+                new UiTableColumnDescriptor("systems", "name", "Name", UiModelValueKind.String)
+            ],
+        };
+        Assert.InvalidContains(tableWithPanelAction.Validate(rendererCapabilities: CreateRendererCapabilities()), "row context");
+
+        UiSchemaDocument tableWithUnknownSortAction = tableWithPanelAction with
+        {
+            Nodes =
+            [
+                .. tableWithPanelAction.Nodes.Select(static node => node.Kind == UiNodeKind.Table
+                    ? node with { ActionId = null }
+                    : node)
+            ],
+            TableColumns =
+            [
+                new UiTableColumnDescriptor("systems", "name", "Name", UiModelValueKind.String, Sortable: true, SortActionId: "systems.sort.name")
+            ],
+        };
+        Assert.InvalidContains(tableWithUnknownSortAction.Validate(rendererCapabilities: CreateRendererCapabilities()), "not declared");
     }
 
     private static void UiModelDocument_ValidatesPayloadSlotsAgainstSchema()

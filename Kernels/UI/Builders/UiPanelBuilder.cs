@@ -16,6 +16,7 @@ public sealed class UiPanelBuilder
     private readonly Dictionary<string, UiModelSlotValue> _modelValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiActionDescriptor> _actions = new(StringComparer.Ordinal);
     private readonly List<UiSelectOptionDescriptor> _selectOptions = new();
+    private readonly List<UiTableColumnDescriptor> _tableColumns = new();
     private int _nextNodeId = 1;
     private int _rootNodeId;
 
@@ -96,7 +97,8 @@ public sealed class UiPanelBuilder
             _actions.Values.ToArray(),
             StateBindings: [],
             CatalogIdentity: null,
-            SelectOptions: _selectOptions.ToArray());
+            SelectOptions: _selectOptions.ToArray(),
+            TableColumns: _tableColumns.ToArray());
         UiValidationResult schemaResult = schema.Validate();
         if (!schemaResult.IsValid)
         {
@@ -241,6 +243,52 @@ public sealed class UiPanelBuilder
         }
     }
 
+    internal void DeclareTableColumns(string tableSlotId, IReadOnlyList<UiTableColumn> columns)
+    {
+        if (columns.Count == 0)
+        {
+            throw new InvalidOperationException($"Table slot '{tableSlotId}' requires at least one column.");
+        }
+
+        var cellSlots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < columns.Count; i++)
+        {
+            UiTableColumn column = columns[i] ?? throw new InvalidOperationException($"Table slot '{tableSlotId}' cannot contain null columns.");
+            var descriptor = new UiTableColumnDescriptor(
+                tableSlotId,
+                column.CellSlotId,
+                column.Label,
+                column.ValueKind,
+                column.Sortable,
+                column.SortActionId,
+                column.IconId);
+            UiValidationResult result = descriptor.Validate(UiSchemaValidationLimits.Default);
+            if (!result.IsValid)
+            {
+                throw new InvalidOperationException(result.Error);
+            }
+
+            if (!cellSlots.Add(column.CellSlotId))
+            {
+                throw new InvalidOperationException($"Table slot '{tableSlotId}' contains duplicate cell slot '{column.CellSlotId}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(column.SortActionId))
+            {
+                DeclareAction(new UiActionDescriptor(
+                    column.SortActionId,
+                    column.Label,
+                    column.IconId,
+                    UiActionRole.Normal,
+                    UiActionContextKind.Panel,
+                    RequiresConfirm: false,
+                    ChildMenuKey: null));
+            }
+
+            _tableColumns.Add(descriptor);
+        }
+    }
+
     private int AddNode(
         UiNodeKind kind,
         string? slotId,
@@ -317,6 +365,18 @@ public sealed class UiPanelBuilder
                 .Append(option.Label).Append('|')
                 .Append(option.Disabled).Append('|')
                 .Append(option.IconId).Append('\n');
+        }
+
+        foreach (UiTableColumnDescriptor column in _tableColumns)
+        {
+            builder.Append("table|")
+                .Append(column.TableSlotId).Append('|')
+                .Append(column.CellSlotId).Append('|')
+                .Append(column.Label).Append('|')
+                .Append(column.ValueKind).Append('|')
+                .Append(column.Sortable).Append('|')
+                .Append(column.SortActionId).Append('|')
+                .Append(column.IconId).Append('\n');
         }
 
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString()));

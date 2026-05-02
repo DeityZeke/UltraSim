@@ -16,6 +16,8 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeMessageBoxPanelId = "smoke/message_box/1";
 	private const string SmokeMessageBoxActionId = "smoke.message_box.ok";
 	private const string SmokeRepeaterRowActionId = "smoke.message_box.row.select";
+	private const string SmokeTableRowActionId = "smoke.message_box.table.inspect";
+	private const string SmokeTableSortActionId = "smoke.message_box.table.sort";
 	private const string SmokeIconActionId = "smoke.message_box.icon";
 	private const string SmokeMessageBoxText = "Server-driven smoke message";
 	private const string SmokeUnsupportedChildText = "Unsupported node child survived";
@@ -33,6 +35,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private const string SmokeCurrentPageSlot = "currentPage";
 	private const string SmokeTotalPagesSlot = "totalPages";
 	private const string SmokeRepeaterSlot = "characters";
+	private const string SmokeTableSlot = "systems";
 	private const string SmokeRepeaterRowKey = "character/lira";
 	private const string SmokeRepeaterRowText = "Lira";
 
@@ -714,7 +717,15 @@ public partial class GodotClientRuntimeRoot : Node
 					SmokeRepeaterSlot,
 					SmokeRepeaterRowKey,
 					UiRepeaterRowUpdateKind.Add,
-					[UiModelSlotValue.String("name", SmokeRepeaterRowText)])
+					[UiModelSlotValue.String("name", SmokeRepeaterRowText)]),
+				new UiRepeaterRowDelta(
+					SmokeTableSlot,
+					"system/chat",
+					UiRepeaterRowUpdateKind.Add,
+					[
+						UiModelSlotValue.String("systemName", "Chat"),
+						UiModelSlotValue.Boolean("systemEnabled", true)
+					])
 			]);
 		ClientUiModelUpdateApplyResult applied = _serverDrivenPanels.ApplyModelUpdate(rowUpdate);
 		if (!applied.Applied || applied.Panel is null)
@@ -787,6 +798,12 @@ public partial class GodotClientRuntimeRoot : Node
 		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeRepeaterSlot, out string repeaterError))
 		{
 			GD.PushError($"Server UI smoke failed: {repeaterError}");
+			return;
+		}
+
+		if (!UiManager.Menus.TryFindServerDrivenSlotControl(applied.Panel.PanelInstanceId, SmokeTableSlot, out string tableError))
+		{
+			GD.PushError($"Server UI smoke failed: {tableError}");
 			return;
 		}
 
@@ -879,7 +896,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(4, UiNodeKind.Image, null, SmokeImageId, []),
 				new UiSchemaNodeDescriptor(5, UiNodeKind.Layer, null, null, [27]),
 				new UiSchemaNodeDescriptor(6, UiNodeKind.Separator, null, null, []),
-				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 28, 19, 16]),
+				new UiSchemaNodeDescriptor(7, UiNodeKind.Group, null, "Smoke Settings", [8, 9, 12, 13, 14, 15, 17, 18, 22, 28, 34, 19, 16]),
 				new UiSchemaNodeDescriptor(8, UiNodeKind.TextInput, SmokeTextInputSlot, "Display Name", []),
 				new UiSchemaNodeDescriptor(9, UiNodeKind.Toggle, SmokeToggleSlot, "Remember Account", []),
 				new UiSchemaNodeDescriptor(10, UiNodeKind.Row, null, null, [11]),
@@ -906,6 +923,7 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSchemaNodeDescriptor(31, UiNodeKind.Text, null, "/", []),
 				new UiSchemaNodeDescriptor(32, UiNodeKind.DynamicText, SmokeTotalPagesSlot, "Total Pages", []),
 				new UiSchemaNodeDescriptor(33, UiNodeKind.Button, null, "Next", [], ActionId: "smoke.message_box.next"),
+				new UiSchemaNodeDescriptor(34, UiNodeKind.Table, SmokeTableSlot, "Systems", [], ActionId: SmokeTableRowActionId),
 			],
 			PayloadSlots:
 			[
@@ -949,6 +967,22 @@ public partial class GodotClientRuntimeRoot : Node
 					RequiresConfirm: false,
 					ChildMenuKey: null),
 				new UiActionDescriptor(
+					SmokeTableRowActionId,
+					"Inspect",
+					IconId: null,
+					UiActionRole.Normal,
+					UiActionContextKind.Row,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
+					SmokeTableSortActionId,
+					"System",
+					IconId: null,
+					UiActionRole.Normal,
+					UiActionContextKind.Panel,
+					RequiresConfirm: false,
+					ChildMenuKey: null),
+				new UiActionDescriptor(
 					"smoke.message_box.previous",
 					"Previous",
 					IconId: null,
@@ -980,6 +1014,11 @@ public partial class GodotClientRuntimeRoot : Node
 				new UiSelectOptionDescriptor(SmokeCheckboxSlot, "party", "Party", Disabled: true),
 				new UiSelectOptionDescriptor(SmokeTabSlot, "account", "Account"),
 				new UiSelectOptionDescriptor(SmokeTabSlot, "chat", "Chat"),
+			],
+			TableColumns:
+			[
+				new UiTableColumnDescriptor(SmokeTableSlot, "systemName", "System", UiModelValueKind.String, Sortable: true, SortActionId: SmokeTableSortActionId),
+				new UiTableColumnDescriptor(SmokeTableSlot, "systemEnabled", "Enabled", UiModelValueKind.Boolean),
 			]);
 	}
 

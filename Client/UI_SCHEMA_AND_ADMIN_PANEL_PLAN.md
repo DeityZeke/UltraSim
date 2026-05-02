@@ -963,6 +963,8 @@ Tables need:
 - row actions
 - dense mode for admin panels
 
+The table data path should remain the same row-delta path used by repeaters. A `Table` node declares a stable row-backed slot id, while schema-level table column descriptors declare ordered cell slot ids, labels, value kinds, and optional sort action ids. The model/update stream sends row keys plus per-row cell values; it does not resend column metadata. This keeps high-churn admin lists compact while preserving enough schema metadata for dense renderers and sortable headers.
+
 Future ECS panels will need:
 
 - systems table

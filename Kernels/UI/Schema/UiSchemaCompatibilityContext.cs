@@ -5,6 +5,7 @@ public sealed class UiSchemaCompatibilityContext
     private readonly Dictionary<string, UiPayloadSlotDescriptor> _payloadSlotById;
     private readonly Dictionary<string, UiActionDescriptor> _actionById;
     private readonly Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> _selectOptionsBySlotId;
+    private readonly Dictionary<string, IReadOnlyList<UiTableColumnDescriptor>> _tableColumnsBySlotId;
     private readonly HashSet<string> _repeaterSlotIds;
     private readonly HashSet<string> _stateBindingSlotIds;
 
@@ -15,9 +16,11 @@ public sealed class UiSchemaCompatibilityContext
         IReadOnlyList<UiActionDescriptor> actions,
         IReadOnlyList<UiSelectOptionDescriptor> selectOptions,
         IReadOnlyList<UiStateBindingDescriptor> stateBindings,
+        IReadOnlyList<UiTableColumnDescriptor> tableColumns,
         Dictionary<string, UiPayloadSlotDescriptor> payloadSlotById,
         Dictionary<string, UiActionDescriptor> actionById,
         Dictionary<string, IReadOnlyList<UiSelectOptionDescriptor>> selectOptionsBySlotId,
+        Dictionary<string, IReadOnlyList<UiTableColumnDescriptor>> tableColumnsBySlotId,
         HashSet<string> repeaterSlotIds,
         HashSet<string> stateBindingSlotIds)
     {
@@ -27,9 +30,11 @@ public sealed class UiSchemaCompatibilityContext
         Actions = actions;
         SelectOptions = selectOptions;
         StateBindings = stateBindings;
+        TableColumns = tableColumns;
         _payloadSlotById = payloadSlotById;
         _actionById = actionById;
         _selectOptionsBySlotId = selectOptionsBySlotId;
+        _tableColumnsBySlotId = tableColumnsBySlotId;
         _repeaterSlotIds = repeaterSlotIds;
         _stateBindingSlotIds = stateBindingSlotIds;
     }
@@ -45,6 +50,8 @@ public sealed class UiSchemaCompatibilityContext
     public IReadOnlyList<UiSelectOptionDescriptor> SelectOptions { get; }
 
     public IReadOnlyList<UiStateBindingDescriptor> StateBindings { get; }
+
+    public IReadOnlyList<UiTableColumnDescriptor> TableColumns { get; }
 
     public static UiValidationResult TryCreate(
         UiSchemaDocument schema,
@@ -88,7 +95,7 @@ public sealed class UiSchemaCompatibilityContext
         for (int i = 0; i < schema.Nodes.Count; i++)
         {
             UiSchemaNodeDescriptor node = schema.Nodes[i];
-            if (node.Kind == UiNodeKind.Repeater && !string.IsNullOrWhiteSpace(node.SlotId))
+            if (node.Kind is UiNodeKind.Repeater or UiNodeKind.Table && !string.IsNullOrWhiteSpace(node.SlotId))
             {
                 repeaterSlotIds.Add(node.SlotId);
             }
@@ -114,6 +121,26 @@ public sealed class UiSchemaCompatibilityContext
             selectOptionsBySlotId.Add(pair.Key, pair.Value.ToArray());
         }
 
+        IReadOnlyList<UiTableColumnDescriptor> tableColumns = schema.GetTableColumns();
+        var groupedTableColumns = new Dictionary<string, List<UiTableColumnDescriptor>>(StringComparer.Ordinal);
+        for (int i = 0; i < tableColumns.Count; i++)
+        {
+            UiTableColumnDescriptor column = tableColumns[i];
+            if (!groupedTableColumns.TryGetValue(column.TableSlotId, out List<UiTableColumnDescriptor>? columnsForTable))
+            {
+                columnsForTable = new List<UiTableColumnDescriptor>();
+                groupedTableColumns.Add(column.TableSlotId, columnsForTable);
+            }
+
+            columnsForTable.Add(column);
+        }
+
+        var tableColumnsBySlotId = new Dictionary<string, IReadOnlyList<UiTableColumnDescriptor>>(groupedTableColumns.Count, StringComparer.Ordinal);
+        foreach (KeyValuePair<string, List<UiTableColumnDescriptor>> pair in groupedTableColumns)
+        {
+            tableColumnsBySlotId.Add(pair.Key, pair.Value.ToArray());
+        }
+
         context = new UiSchemaCompatibilityContext(
             schema.Identity,
             schema.CatalogIdentity,
@@ -121,9 +148,11 @@ public sealed class UiSchemaCompatibilityContext
             schema.Actions,
             selectOptions,
             schema.StateBindings,
+            tableColumns,
             payloadSlotById,
             actionById,
             selectOptionsBySlotId,
+            tableColumnsBySlotId,
             repeaterSlotIds,
             stateBindingSlotIds);
         return UiValidationResult.Valid;
@@ -164,6 +193,11 @@ public sealed class UiSchemaCompatibilityContext
     public bool TryGetSelectOptions(string slotId, out IReadOnlyList<UiSelectOptionDescriptor> options)
     {
         return _selectOptionsBySlotId.TryGetValue(slotId, out options!);
+    }
+
+    public bool TryGetTableColumns(string slotId, out IReadOnlyList<UiTableColumnDescriptor> columns)
+    {
+        return _tableColumnsBySlotId.TryGetValue(slotId, out columns!);
     }
 
     public bool HasRepeaterSlot(string slotId)

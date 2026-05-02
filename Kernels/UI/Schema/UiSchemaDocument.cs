@@ -9,7 +9,8 @@ public sealed record UiSchemaDocument(
     IReadOnlyList<UiActionDescriptor> Actions,
     IReadOnlyList<UiStateBindingDescriptor> StateBindings,
     UiCatalogIdentity? CatalogIdentity = null,
-    IReadOnlyList<UiSelectOptionDescriptor>? SelectOptions = null)
+    IReadOnlyList<UiSelectOptionDescriptor>? SelectOptions = null,
+    IReadOnlyList<UiTableColumnDescriptor>? TableColumns = null)
 {
     public UiValidationResult Validate(
         UiSchemaValidationLimits? limits = null,
@@ -63,6 +64,8 @@ public sealed record UiSchemaDocument(
         {
             return UiValidationResult.Invalid($"Schema cannot contain more than {actualLimits.MaxSelectOptions} select options.");
         }
+
+        IReadOnlyList<UiTableColumnDescriptor> actualTableColumns = TableColumns ?? [];
 
         UiValidationResult payloadSlotResult = ValidatePayloadSlots();
         if (!payloadSlotResult.IsValid)
@@ -141,6 +144,12 @@ public sealed record UiSchemaDocument(
             return repeaterResult;
         }
 
+        UiValidationResult tableResult = ValidateTableNodes(actualTableColumns, actualLimits, rendererCapabilities);
+        if (!tableResult.IsValid)
+        {
+            return tableResult;
+        }
+
         UiValidationResult slotReferenceResult = ValidateNodeSlotReferences();
         if (!slotReferenceResult.IsValid)
         {
@@ -162,7 +171,7 @@ public sealed record UiSchemaDocument(
         for (int i = 0; i < Nodes.Count; i++)
         {
             UiSchemaNodeDescriptor node = Nodes[i];
-            if (node.Kind == UiNodeKind.Repeater && !string.IsNullOrWhiteSpace(node.SlotId))
+            if (node.Kind is UiNodeKind.Repeater or UiNodeKind.Table && !string.IsNullOrWhiteSpace(node.SlotId))
             {
                 repeaterSlots.Add(node.SlotId);
             }
@@ -174,6 +183,11 @@ public sealed record UiSchemaDocument(
     public IReadOnlyList<UiSelectOptionDescriptor> GetSelectOptions()
     {
         return SelectOptions ?? [];
+    }
+
+    public IReadOnlyList<UiTableColumnDescriptor> GetTableColumns()
+    {
+        return TableColumns ?? [];
     }
 
     private UiValidationResult ValidateRequiredCapabilities(
@@ -419,19 +433,90 @@ public sealed record UiSchemaDocument(
         for (int i = 0; i < Nodes.Count; i++)
         {
             UiSchemaNodeDescriptor node = Nodes[i];
-            if (node.Kind != UiNodeKind.Repeater)
+            if (node.Kind is not (UiNodeKind.Repeater or UiNodeKind.Table))
             {
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(node.SlotId))
             {
-                return UiValidationResult.Invalid("Repeater nodes require a slot id.");
+                return UiValidationResult.Invalid($"{node.Kind} nodes require a slot id.");
             }
 
             if (!repeaterSlots.Add(node.SlotId))
             {
-                return UiValidationResult.Invalid($"Duplicate repeater slot id '{node.SlotId}'.");
+                return UiValidationResult.Invalid($"Duplicate row-backed slot id '{node.SlotId}'.");
+            }
+        }
+
+        return UiValidationResult.Valid;
+    }
+
+    private UiValidationResult ValidateTableNodes(
+        IReadOnlyList<UiTableColumnDescriptor> actualTableColumns,
+        UiSchemaValidationLimits limits,
+        UiRendererCapabilities? rendererCapabilities)
+    {
+        var tableSlots = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            UiSchemaNodeDescriptor node = Nodes[i];
+            if (node.Kind != UiNodeKind.Table)
+            {
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(node.SlotId))
+            {
+                return UiValidationResult.Invalid("Table nodes require a slot id.");
+            }
+
+            tableSlots.Add(node.SlotId);
+        }
+
+        var columnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var actionIds = new HashSet<string>(Actions.Select(static action => action.ActionId), StringComparer.Ordinal);
+        for (int i = 0; i < actualTableColumns.Count; i++)
+        {
+            UiTableColumnDescriptor column = actualTableColumns[i];
+            UiValidationResult columnResult = column.Validate(limits);
+            if (!columnResult.IsValid)
+            {
+                return columnResult;
+            }
+
+            if (!tableSlots.Contains(column.TableSlotId))
+            {
+                return UiValidationResult.Invalid($"Table column slot '{column.TableSlotId}' does not reference a table node.");
+            }
+
+            if (!columnsByTable.TryGetValue(column.TableSlotId, out HashSet<string>? columnSlots))
+            {
+                columnSlots = new HashSet<string>(StringComparer.Ordinal);
+                columnsByTable.Add(column.TableSlotId, columnSlots);
+            }
+
+            if (!columnSlots.Add(column.CellSlotId))
+            {
+                return UiValidationResult.Invalid($"Table slot '{column.TableSlotId}' contains duplicate cell slot '{column.CellSlotId}'.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(column.SortActionId) && !actionIds.Contains(column.SortActionId))
+            {
+                return UiValidationResult.Invalid($"Table column sort action '{column.SortActionId}' is not declared in schema actions.");
+            }
+        }
+
+        foreach (string tableSlot in tableSlots)
+        {
+            if (!columnsByTable.TryGetValue(tableSlot, out HashSet<string>? columns) || columns.Count == 0)
+            {
+                return UiValidationResult.Invalid($"Table node slot '{tableSlot}' requires at least one column.");
+            }
+
+            if (rendererCapabilities is not null && columns.Count > rendererCapabilities.MaxTableColumns)
+            {
+                return UiValidationResult.Invalid($"Table node slot '{tableSlot}' cannot contain more than {rendererCapabilities.MaxTableColumns} columns for this renderer.");
             }
         }
 
@@ -451,7 +536,7 @@ public sealed record UiSchemaDocument(
                 continue;
             }
 
-            if (Nodes[i].Kind == UiNodeKind.Repeater)
+            if (Nodes[i].Kind is UiNodeKind.Repeater or UiNodeKind.Table)
             {
                 continue;
             }
@@ -483,7 +568,7 @@ public sealed record UiSchemaDocument(
                 continue;
             }
 
-            if (node.Kind is not (UiNodeKind.Button or UiNodeKind.IconButton or UiNodeKind.Repeater))
+            if (node.Kind is not (UiNodeKind.Button or UiNodeKind.IconButton or UiNodeKind.Repeater or UiNodeKind.Table))
             {
                 return UiValidationResult.Invalid($"Node kind '{node.Kind}' cannot declare an action id.");
             }
@@ -496,6 +581,11 @@ public sealed record UiSchemaDocument(
             if (node.Kind == UiNodeKind.Repeater && action.ContextKind != UiActionContextKind.Row)
             {
                 return UiValidationResult.Invalid($"Repeater node action '{node.ActionId}' must use row context.");
+            }
+
+            if (node.Kind == UiNodeKind.Table && action.ContextKind != UiActionContextKind.Row)
+            {
+                return UiValidationResult.Invalid($"Table node action '{node.ActionId}' must use row context.");
             }
         }
 

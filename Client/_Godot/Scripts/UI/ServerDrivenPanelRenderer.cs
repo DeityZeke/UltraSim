@@ -84,10 +84,11 @@ internal static class ServerDrivenPanelRenderer
             UiNodeKind.RadioGroup => CreateRadioGroup(node, compatibilityContext, modelBySlot),
             UiNodeKind.CheckboxGroup => CreateCheckboxGroup(node, compatibilityContext, modelBySlot),
             UiNodeKind.Repeater => CreateRepeater(node, compatibilityContext, repeaterRows, actionPressed),
+            UiNodeKind.Table => CreateTable(node, compatibilityContext, repeaterRows, actionPressed),
             _ => CreateUnsupportedPlaceholder(node),
         };
 
-        if (node.Children.Count > 0 && control is Label or BaseButton or LineEdit or HSeparator or TextureRect)
+        if (node.Children.Count > 0 && control is Label or BaseButton or LineEdit or HSeparator or TextureRect or GridContainer)
         {
             error = $"UI node kind '{node.Kind}' cannot host child controls in the minimal Godot renderer.";
             return false;
@@ -616,6 +617,139 @@ internal static class ServerDrivenPanelRenderer
         }
 
         return container;
+    }
+
+    private static Control CreateTable(
+        UiSchemaNodeDescriptor node,
+        UiSchemaCompatibilityContext compatibilityContext,
+        IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> repeaterRows,
+        Action<UiActionDescriptor, string?>? actionPressed)
+    {
+        var container = new VBoxContainer
+        {
+            Name = MakeNodeName("Table", node.NodeId),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        AddTitleLabelIfPresent(container, node, "TableTitle");
+        SetSlotMeta(container, node);
+        if (string.IsNullOrWhiteSpace(node.SlotId) ||
+            !compatibilityContext.TryGetTableColumns(node.SlotId, out IReadOnlyList<UiTableColumnDescriptor> columns))
+        {
+            return container;
+        }
+
+        UiActionDescriptor? rowAction = null;
+        if (!string.IsNullOrWhiteSpace(node.ActionId))
+        {
+            _ = compatibilityContext.TryGetAction(node.ActionId, out rowAction);
+        }
+
+        var grid = new GridContainer
+        {
+            Name = MakeNodeName("TableGrid", node.NodeId),
+            Columns = columns.Count + (rowAction is not null ? 1 : 0),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+        };
+
+        for (int i = 0; i < columns.Count; i++)
+        {
+            UiTableColumnDescriptor column = columns[i];
+            Control header = CreateTableHeader(column, compatibilityContext, actionPressed);
+            grid.AddChild(header);
+        }
+
+        if (rowAction is not null)
+        {
+            grid.AddChild(new Label
+            {
+                Name = MakeNodeName("TableHeader", "action"),
+                Text = string.Empty,
+                SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            });
+        }
+
+        if (repeaterRows.TryGetValue(node.SlotId, out IReadOnlyDictionary<string, ClientUiRepeaterRowState>? rows))
+        {
+            foreach (ClientUiRepeaterRowState rowState in rows.Values)
+            {
+                var valuesBySlot = new Dictionary<string, UiModelSlotValue>(rowState.Values.Count, StringComparer.Ordinal);
+                for (int i = 0; i < rowState.Values.Count; i++)
+                {
+                    UiModelSlotValue value = rowState.Values[i];
+                    valuesBySlot[value.SlotId] = value;
+                }
+
+                for (int i = 0; i < columns.Count; i++)
+                {
+                    UiTableColumnDescriptor column = columns[i];
+                    grid.AddChild(new Label
+                    {
+                        Name = MakeNodeName("TableCell", $"{rowState.RowKey}_{column.CellSlotId}"),
+                        Text = valuesBySlot.TryGetValue(column.CellSlotId, out UiModelSlotValue? value)
+                            ? FormatModelValue(value)
+                            : string.Empty,
+                        SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                        SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                    });
+                }
+
+                if (rowAction is not null && actionPressed is not null)
+                {
+                    var button = new Button
+                    {
+                        Name = MakeNodeName("TableRowAction", rowState.RowKey),
+                        Text = rowAction.Label,
+                        Disabled = rowAction.Availability != UiActionAvailability.Available,
+                        SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd,
+                        SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                    };
+                    button.SetMeta("UiActionId", rowAction.ActionId);
+                    button.SetMeta("UiRowKey", rowState.RowKey);
+                    string rowKey = rowState.RowKey;
+                    button.Pressed += () => actionPressed(rowAction, rowKey);
+                    grid.AddChild(button);
+                }
+            }
+        }
+
+        container.AddChild(grid);
+        return container;
+    }
+
+    private static Control CreateTableHeader(
+        UiTableColumnDescriptor column,
+        UiSchemaCompatibilityContext compatibilityContext,
+        Action<UiActionDescriptor, string?>? actionPressed)
+    {
+        if (column.Sortable &&
+            !string.IsNullOrWhiteSpace(column.SortActionId) &&
+            compatibilityContext.TryGetAction(column.SortActionId, out UiActionDescriptor? action) &&
+            actionPressed is not null)
+        {
+            var button = new Button
+            {
+                Name = MakeNodeName("TableHeaderSort", column.CellSlotId),
+                Text = column.Label,
+                Disabled = action.Availability != UiActionAvailability.Available,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+            };
+            button.SetMeta("UiActionId", action.ActionId);
+            button.Pressed += () => actionPressed(action, null);
+            return button;
+        }
+
+        return new Label
+        {
+            Name = MakeNodeName("TableHeader", column.CellSlotId),
+            Text = column.Label,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+        };
     }
 
     private static Button CreateButton(

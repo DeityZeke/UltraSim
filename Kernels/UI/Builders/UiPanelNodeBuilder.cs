@@ -310,6 +310,39 @@ public sealed class UiPanelNodeBuilder
         return this;
     }
 
+    public UiPanelNodeBuilder Table(
+        string slotId,
+        string label,
+        IReadOnlyList<UiTableColumn> columns,
+        string? rowActionId = null,
+        string rowActionLabel = "Select",
+        UiActionRole rowActionRole = UiActionRole.Normal,
+        bool rowActionRequiresConfirm = false,
+        string? rowActionIconId = null,
+        UiActionAvailability rowActionAvailability = UiActionAvailability.Available,
+        string? rowActionAvailabilityReason = null,
+        string? rowActionMenuGroupKey = null)
+    {
+        _owner.DeclareTableColumns(slotId, columns);
+        if (!string.IsNullOrWhiteSpace(rowActionId))
+        {
+            _owner.DeclareAction(new UiActionDescriptor(
+                rowActionId,
+                rowActionLabel,
+                rowActionIconId,
+                rowActionRole,
+                UiActionContextKind.Row,
+                rowActionRequiresConfirm,
+                ChildMenuKey: null,
+                rowActionAvailability,
+                rowActionAvailabilityReason,
+                rowActionMenuGroupKey));
+        }
+
+        _childIds.Add(_owner.AddLeaf(UiNodeKind.Table, slotId, label, rowActionId));
+        return this;
+    }
+
     public UiPanelNodeBuilder Button(
         string actionId,
         string label,
@@ -369,6 +402,14 @@ public sealed record UiSelectOption(
     string Value,
     string Label,
     bool Disabled = false,
+    string? IconId = null);
+
+public sealed record UiTableColumn(
+    string CellSlotId,
+    string Label,
+    UiModelValueKind ValueKind = UiModelValueKind.String,
+    bool Sortable = false,
+    string? SortActionId = null,
     string? IconId = null);
 
 public sealed class UiTabsBuilder
