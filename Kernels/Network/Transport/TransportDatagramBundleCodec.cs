@@ -65,8 +65,12 @@ internal static class TransportDatagramBundleCodec
             if (packedCount > 0 && requiredBytes > maxDatagramBytes)
                 break;
 
-            if (HeaderSize + OffsetSize + payload.Length > maxDatagramBytes)
-                throw new InvalidOperationException("Single envelope exceeds transport datagram capacity.");
+            int singleEnvelopeBytes = HeaderSize + OffsetSize + payload.Length;
+            if (singleEnvelopeBytes > maxDatagramBytes)
+            {
+                throw new InvalidOperationException(
+                    $"Single envelope exceeds transport datagram capacity: envelope={payload.Length} bytes, bundledDatagram={singleEnvelopeBytes} bytes, maxDatagram={maxDatagramBytes} bytes.");
+            }
 
             payloadBytes += payload.Length;
             packedCount++;

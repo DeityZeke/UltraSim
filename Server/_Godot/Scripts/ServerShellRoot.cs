@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using Godot;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Godot;
 
@@ -11,6 +12,7 @@ public partial class ServerShellRoot : Control
 
 	private readonly Queue<string> _outputLines = new();
 
+	private GodotServerShellOptions? _options;
 	private GodotServerShellController? _controller;
 	private RichTextLabel? _outputLog;
 	private LineEdit? _commandLine;
@@ -42,20 +44,13 @@ public partial class ServerShellRoot : Control
 		ConfigureWindow();
 		BuildInterface();
 
-		GodotServerShellOptions options = ReadShellOptions(out bool startOnReady);
-		_controller = new GodotServerShellController(options);
-		_controller.EventRaised += HandleServerEvent;
-		foreach (ServerApplicationEvent startupEvent in _controller.StartupEvents)
-		{
-			HandleServerEvent(startupEvent);
-		}
-
+		_options = ReadShellOptions(out bool startOnReady);
 		AppendOutput("INFO", "Godot operator shell ready.");
 		AppendOutput("INFO", "Use the right-side controls or the command field below the output pane.");
 		if (startOnReady)
 		{
-			AppendOutput("INFO", $"Auto-starting movement server on UDP port {options.NetworkPort}.");
-			_controller.Start();
+			AppendOutput("INFO", $"Auto-starting movement server on UDP port {_options.NetworkPort}.");
+			ExecuteCommand(ServerControlCommand.Start());
 		}
 
 		RefreshStatus();
@@ -695,6 +690,22 @@ public partial class ServerShellRoot : Control
 	private void ExecuteCommand(ServerControlCommand command)
 	{
 		if (_controller is null)
+		{
+			if (command.Kind != ServerControlCommandKind.Start)
+			{
+				AppendOutput("ERROR", "Server runtime is not started yet.");
+				RefreshStatus();
+				return;
+			}
+
+			if (!TryEnsureController())
+			{
+				RefreshStatus();
+				return;
+			}
+		}
+
+		if (_controller is null)
 			return;
 
 		ServerCommandResult result = _controller.Execute(command);
@@ -705,7 +716,10 @@ public partial class ServerShellRoot : Control
 	private void PrintStatusSnapshot()
 	{
 		if (_controller is null)
+		{
+			AppendOutput("STATUS", $"profile={(_options?.ProfileName ?? GodotServerShellOptions.Default.ProfileName)} state=ShellReady ticks=0 sessions=0/0");
 			return;
+		}
 
 		ServerStatusSnapshot status = _controller.GetStatusSnapshot();
 		ServerMetricsSnapshot metrics = _controller.GetMetricsSnapshot();
@@ -763,10 +777,92 @@ public partial class ServerShellRoot : Control
 		RefreshStatus();
 	}
 
+	private bool TryEnsureController()
+	{
+		if (_controller is not null)
+			return true;
+
+		GodotServerShellOptions options = _options ?? ReadShellOptions(out _);
+		try
+		{
+			_controller = new GodotServerShellController(options);
+		}
+		catch (UltraSimScriptStartupException ex)
+		{
+			ReportScriptStartupFailure(ex);
+			return false;
+		}
+
+		_controller.EventRaised += HandleServerEvent;
+		foreach (ServerApplicationEvent startupEvent in _controller.StartupEvents)
+		{
+			HandleServerEvent(startupEvent);
+		}
+
+		return true;
+	}
+
+	private void ReportScriptStartupFailure(UltraSimScriptStartupException exception)
+	{
+		foreach (ServerApplicationEvent startupEvent in UltraSimScriptStartupLog.CreateEvents(exception.Result))
+			HandleServerEvent(startupEvent);
+
+		AppendOutput("FAULT", exception.Message);
+		int emitted = 0;
+		foreach (UltraSimScriptCompileDiagnostic diagnostic in exception.Result.CompileResult.Diagnostics)
+		{
+			if (diagnostic.Severity != UltraSimScriptDiagnosticSeverity.Error)
+				continue;
+
+			string file = string.IsNullOrWhiteSpace(diagnostic.FilePath)
+				? "<unknown>"
+				: System.IO.Path.GetFileName(diagnostic.FilePath);
+			AppendOutput("SCRIPT", $"{diagnostic.Id} {file}:{diagnostic.Line}:{diagnostic.Column} {diagnostic.Message}");
+			emitted++;
+			if (emitted >= 8)
+				break;
+		}
+
+		if (exception.Result.ErrorCount > emitted)
+			AppendOutput("SCRIPT", $"{exception.Result.ErrorCount - emitted} additional script error(s) omitted; see cache/scripts/diagnostics.");
+
+		if (_stateValue is not null)
+			_stateValue.Text = "ScriptFault";
+
+		RefreshControls(ServerApplicationState.Faulted);
+	}
+
 	private void RefreshStatus()
 	{
 		if (_controller is null)
+		{
+			if (_profileValue is not null)
+				_profileValue.Text = _options?.ProfileName ?? GodotServerShellOptions.Default.ProfileName;
+
+			if (_stateValue is not null)
+				_stateValue.Text = "ShellReady";
+
+			if (_ticksValue is not null)
+				_ticksValue.Text = "0";
+
+			if (_sessionsValue is not null)
+				_sessionsValue.Text = "0/0";
+
+			if (_playersSummaryValue is not null)
+				_playersSummaryValue.Text = "No active players.";
+
+			if (_accountsSummaryValue is not null)
+				_accountsSummaryValue.Text = "No accounts loaded.";
+
+			if (_performanceSummaryValue is not null)
+				_performanceSummaryValue.Text = "Waiting for Start.";
+
+			if (_performanceLog is not null)
+				_performanceLog.Text = "Server systems will appear after Start.";
+
+			RefreshControls(ServerApplicationState.Created);
 			return;
+		}
 
 		ServerStatusSnapshot status = _controller.GetStatusSnapshot();
 		ServerMetricsSnapshot metrics = _controller.GetMetricsSnapshot();
@@ -857,7 +953,7 @@ public partial class ServerShellRoot : Control
 	private void RefreshControls(ServerApplicationState state)
 	{
 		bool hasController = _controller is not null;
-		bool canStart = hasController && state is ServerApplicationState.Created or ServerApplicationState.Initialized or ServerApplicationState.Stopped;
+		bool canStart = !hasController || state is ServerApplicationState.Created or ServerApplicationState.Initialized or ServerApplicationState.Stopped;
 		bool canStop = hasController && state != ServerApplicationState.Created && state != ServerApplicationState.Stopped;
 		bool canSave = hasController && state is ServerApplicationState.Initialized or ServerApplicationState.Running or ServerApplicationState.Faulted;
 		bool canRestart = hasController && state != ServerApplicationState.Created;
@@ -882,15 +978,16 @@ public partial class ServerShellRoot : Control
 			_statusButton.Disabled = !hasController;
 
 		if (_runButton is not null)
-			_runButton.Disabled = !hasController;
+			_runButton.Disabled = false;
 
 		if (_commandLine is not null)
-			_commandLine.Editable = hasController;
+			_commandLine.Editable = true;
 	}
 
 	private void AppendOutput(string category, string message, DateTimeOffset? timestamp = null)
 	{
-		string line = $"{(timestamp ?? DateTimeOffset.Now):HH:mm:ss}  {category.PadRight(6)}  {message}";
+		DateTimeOffset displayTime = (timestamp ?? DateTimeOffset.Now).ToLocalTime();
+		string line = $"{displayTime:HH:mm:ss}  {category.PadRight(6)}  {message}";
 		GD.Print($"UltraSim server: {line}");
 		_outputLines.Enqueue(line);
 

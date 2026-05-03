@@ -6,6 +6,7 @@ using UltraSim.Client.Godot.Mobiles;
 using UltraSim.Client.Godot.UI;
 using UltraSim.Client.Godot.World;
 using UltraSim.Client.UI;
+using UltraSim.Network;
 using UltraSim.UI;
 
 namespace UltraSim.Client.Godot;
@@ -79,6 +80,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeServerUiMessageBox;
 	private bool _smokeRequireServerUiMessageBox;
 	private bool _smokeRequireServerUiAction;
+	private string? _smokeRequiredServerUiPanelType;
 	private double _smokeReconnectAfterSeconds = -1.0;
 	private double _smokeChatAfterSeconds = -1.0;
 	private double _smokeMoveAfterSeconds = -1.0;
@@ -103,6 +105,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private bool _smokeSawServerUiUnsupportedChild;
 	private bool _smokeSawServerUiAction;
 	private bool _smokeSawServerUiRowAction;
+	private bool _smokeSawRequiredServerUiPanel;
 	private bool _smokeSawActionMenuAction;
 	private bool _smokeSawRadialMenuAction;
 	private bool _smokeSawTrustedCredentialAction;
@@ -119,6 +122,7 @@ public partial class GodotClientRuntimeRoot : Node
 		_smokeServerUiMessageBox = HasUserArg("--us-smoke-server-ui-message-box");
 		_smokeRequireServerUiMessageBox = HasUserArg("--us-smoke-require-server-ui-message-box");
 		_smokeRequireServerUiAction = HasUserArg("--us-smoke-require-server-ui-action");
+		_smokeRequiredServerUiPanelType = ReadStringUserArg("--us-smoke-require-server-ui-panel=");
 		_smokeReconnectAfterSeconds = ReadPositiveUserArg("--us-smoke-reconnect-after=");
 		_smokeChatAfterSeconds = ReadPositiveUserArg("--us-smoke-chat-after=");
 		_smokeMoveAfterSeconds = ReadPositiveUserArg("--us-smoke-move-after=");
@@ -152,7 +156,9 @@ public partial class GodotClientRuntimeRoot : Node
 			HandleOwnerMovementState,
 			HandleObserverState,
 			HandleObserverStateReset,
-			HandleSessionFailed);
+			HandleSessionFailed,
+			HandleUiPanelOpen,
+			HandleUiModelUpdate);
 		ApplyNetworkDriverUserOptions(_sessionDriver);
 		if (UiManager?.Menus is not null)
 		{
@@ -163,7 +169,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ServerDrivenPanelRegistry = _serverDrivenPanels;
 			UiManager.Menus.ServerDrivenActionRouted += HandleServerDrivenActionRouted;
 			UiManager.Menus.ActionMenuActionPressed += HandleActionMenuActionPressed;
-			UiManager.Menus.TrustedCredentialActionRequested += HandleTrustedCredentialActionRequested;
+			UiManager.Menus.LoginCredentialSubmitRequested += HandleLoginCredentialSubmitRequested;
 		}
 
 		ScheduleSmokeQuitIfRequested();
@@ -218,7 +224,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ChatSubmitted -= HandleChatSubmitted;
 			UiManager.Menus.ServerDrivenActionRouted -= HandleServerDrivenActionRouted;
 			UiManager.Menus.ActionMenuActionPressed -= HandleActionMenuActionPressed;
-			UiManager.Menus.TrustedCredentialActionRequested -= HandleTrustedCredentialActionRequested;
+			UiManager.Menus.LoginCredentialSubmitRequested -= HandleLoginCredentialSubmitRequested;
 		}
 
 		_sessionDriver?.Dispose();
@@ -390,30 +396,79 @@ public partial class GodotClientRuntimeRoot : Node
 		UiManager?.Menus?.AppendSystemChatLine("Chat is not connected yet.");
 	}
 
+	private void HandleUiPanelOpen(UiPanelOpenDocument document)
+	{
+		ClientUiPanelOpenResult opened = _serverDrivenPanels.OpenPanel(document, rendererCapabilities: CreateSmokeRendererCapabilities());
+		if (!opened.Opened || opened.Panel is null)
+		{
+			GD.PushWarning($"Server UI open failed: {opened.Status} {opened.Error}");
+			return;
+		}
+
+		string mountError = string.Empty;
+		if (UiManager?.Menus?.TryMountServerDrivenPanel(opened.Panel, out mountError) != true)
+		{
+			GD.PushWarning($"Server UI mount failed: {mountError}");
+			return;
+		}
+
+		if (!string.IsNullOrWhiteSpace(_smokeRequiredServerUiPanelType) &&
+			string.Equals(document.SchemaIdentity.PanelType, _smokeRequiredServerUiPanelType, StringComparison.Ordinal))
+		{
+			_smokeSawRequiredServerUiPanel = true;
+		}
+
+		SetStatusText($"Server UI opened: {document.SchemaIdentity.PanelType}");
+	}
+
+	private void HandleUiModelUpdate(UiModelUpdateDocument document)
+	{
+		ClientUiModelUpdateApplyResult applied = _serverDrivenPanels.ApplyModelUpdate(document);
+		if (!applied.Applied || applied.Panel is null)
+		{
+			GD.PushWarning($"Server UI update failed: {applied.Status} {applied.Error}");
+			return;
+		}
+
+		string mountError = string.Empty;
+		if (UiManager?.Menus?.TryMountServerDrivenPanel(applied.Panel, out mountError) != true)
+		{
+			GD.PushWarning($"Server UI remount failed: {mountError}");
+		}
+	}
+
 	private void HandleServerDrivenActionRouted(ClientUiActionRouteResult result)
 	{
-		if (result.ReadyToSend &&
-			result.Request is not null &&
-			string.Equals(result.Request.ActionId, SmokeRepeaterRowActionId, StringComparison.Ordinal) &&
-			string.Equals(result.Request.ContextId, SmokeRepeaterRowKey, StringComparison.Ordinal))
-		{
-			_smokeSawServerUiRowAction = true;
-			SetStatusText($"Server UI smoke row action routed: {result.Request.ContextId}");
-			return;
-		}
-
-		if (result.ReadyToSend &&
-			result.Request is not null &&
-			string.Equals(result.Request.ActionId, SmokeMessageBoxActionId, StringComparison.Ordinal))
-		{
-			_smokeSawServerUiAction = true;
-			SetStatusText($"Server UI smoke action routed: {result.Request.ActionId}");
-			return;
-		}
-
 		if (!result.ReadyToSend)
 		{
 			GD.PushWarning($"Server UI action route failed: {result.Status} {result.Error}");
+			return;
+		}
+
+		if (result.Request is null)
+		{
+			GD.PushWarning("Server UI action route did not produce a request.");
+			return;
+		}
+
+		bool smokeAction = false;
+		if (string.Equals(result.Request.ActionId, SmokeRepeaterRowActionId, StringComparison.Ordinal) &&
+			string.Equals(result.Request.ContextId, SmokeRepeaterRowKey, StringComparison.Ordinal))
+		{
+			_smokeSawServerUiRowAction = true;
+			smokeAction = true;
+			SetStatusText($"Server UI smoke row action routed: {result.Request.ContextId}");
+		}
+		else if (string.Equals(result.Request.ActionId, SmokeMessageBoxActionId, StringComparison.Ordinal))
+		{
+			_smokeSawServerUiAction = true;
+			smokeAction = true;
+			SetStatusText($"Server UI smoke action routed: {result.Request.ActionId}");
+		}
+
+		if (_sessionDriver?.TrySendUiAction(result.Request) != true && !smokeAction)
+		{
+			UiManager?.Menus?.AppendSystemChatLine("UI action is not connected yet.");
 		}
 	}
 
@@ -435,12 +490,27 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 	}
 
-	private void HandleTrustedCredentialActionRequested(ClientUiPanelInstance panel, UiActionDescriptor action)
+	private void HandleLoginCredentialSubmitRequested(LoginCredentialSubmitPacket packet)
 	{
-		if (string.Equals(action.ActionId, SmokeTrustedCredentialActionId, StringComparison.Ordinal))
+		if (string.Equals(packet.ActionId, SmokeTrustedCredentialActionId, StringComparison.Ordinal))
 		{
 			_smokeSawTrustedCredentialAction = true;
-			SetStatusText($"Trusted credential smoke action requested: {action.ActionId}");
+			SetStatusText($"Trusted credential smoke packet built: {packet.ActionId}");
+		}
+
+		bool sent;
+		try
+		{
+			sent = _sessionDriver?.TrySendLoginCredential(packet) == true;
+		}
+		finally
+		{
+			Array.Clear(packet.MaterialBytes);
+		}
+
+		if (!sent)
+		{
+			UiManager?.Menus?.AppendSystemChatLine("Login is not connected yet.");
 		}
 	}
 
@@ -683,6 +753,13 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (!string.IsNullOrWhiteSpace(_smokeRequiredServerUiPanelType) && !_smokeSawRequiredServerUiPanel)
+		{
+			GD.PushError($"UltraSim client smoke failed: server UI panel '{_smokeRequiredServerUiPanelType}' did not mount.");
+			GetTree().Quit(1);
+			return;
+		}
+
 		if (_smokeRequireDisconnected)
 		{
 			if (!_smokeSawDisconnected)
@@ -717,7 +794,7 @@ public partial class GodotClientRuntimeRoot : Node
 			[
 				UiModelSlotValue.String("messageText", SmokeMessageBoxText),
 				UiModelSlotValue.String(SmokeTextInputSlot, "Test Pilot"),
-				UiModelSlotValue.String(SmokePasswordInputSlot, string.Empty),
+				UiModelSlotValue.String(SmokePasswordInputSlot, "smoke-password"),
 				UiModelSlotValue.Boolean(SmokeToggleSlot, true),
 				UiModelSlotValue.Number(SmokeNumberInputSlot, 1.25),
 				UiModelSlotValue.Number(SmokeSliderSlot, 0.75),

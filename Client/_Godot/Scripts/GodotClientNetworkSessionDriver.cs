@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using UltraSim.Network;
+using UltraSim.UI;
 
 namespace UltraSim.Client.Godot;
 
@@ -12,6 +13,8 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     private readonly ClientLatestStateFrameSpanApplier? _observerStateSink;
     private readonly Action? _observerStateReset;
     private readonly Action<string>? _sessionFailedSink;
+    private readonly Action<UiPanelOpenDocument>? _uiOpenSink;
+    private readonly Action<UiModelUpdateDocument>? _uiModelUpdateSink;
     private ClientMovementSessionHost? _host;
     private UdpSocketNetworkTransport? _transport;
     private readonly PongProbePacket[] _pongScratch = new PongProbePacket[8];
@@ -40,7 +43,9 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         Action<ClientMovementStateReceiveResult> ownerMovementSink,
         ClientLatestStateFrameSpanApplier? observerStateSink = null,
         Action? observerStateReset = null,
-        Action<string>? sessionFailedSink = null)
+        Action<string>? sessionFailedSink = null,
+        Action<UiPanelOpenDocument>? uiOpenSink = null,
+        Action<UiModelUpdateDocument>? uiModelUpdateSink = null)
     {
         _statusSink = statusSink ?? throw new ArgumentNullException(nameof(statusSink));
         _chatSink = chatSink ?? throw new ArgumentNullException(nameof(chatSink));
@@ -48,6 +53,8 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _observerStateSink = observerStateSink;
         _observerStateReset = observerStateReset;
         _sessionFailedSink = sessionFailedSink;
+        _uiOpenSink = uiOpenSink;
+        _uiModelUpdateSink = uiModelUpdateSink;
     }
 
     public bool IsRunning => _host?.IsRunning == true;
@@ -89,6 +96,8 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
             new ConnectionId(1),
             (_, _) => { });
         observerEvents.ChatEvents = chatEvents;
+        var uiEvents = new ClientUiEventBridge(_uiOpenSink, _uiModelUpdateSink);
+        observerEvents.UiEvents = uiEvents;
 
         var host = new ClientMovementSessionHost(
             transport,
@@ -96,7 +105,8 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
             new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
             observerState: observerState,
             observerEvents: observerEvents,
-            chatEvents: chatEvents);
+            chatEvents: chatEvents,
+            uiEvents: uiEvents);
 
         transport.Start();
         host.Start();
@@ -156,6 +166,16 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     public bool TrySendChat(string text)
     {
         return _host?.TrySendChat(text) == true;
+    }
+
+    public bool TrySendUiAction(UiActionRequestDocument request)
+    {
+        return _host?.TrySendUiAction(request) == true;
+    }
+
+    public bool TrySendLoginCredential(LoginCredentialSubmitPacket packet)
+    {
+        return _host?.TrySendLoginCredential(packet) == true;
     }
 
     public bool TrySendMovementInput(ClientMovementInput input, ClientMovementState predictedState)

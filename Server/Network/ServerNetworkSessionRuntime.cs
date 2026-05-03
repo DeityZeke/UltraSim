@@ -91,6 +91,7 @@ public sealed class ServerNetworkSessionRuntime
 
         _stateByConnection.TryAdd(connectionId, default);
         _nextReliableEventSequenceByConnection.TryAdd(connectionId, 1);
+        _baselineOrderedGlobalSequenceByConnection.TryAdd(connectionId, _orderedEvents.GetSnapshot().NewestAvailableSequence);
     }
 
     public bool UnbindConnection(ConnectionId connectionId)
@@ -250,7 +251,14 @@ public sealed class ServerNetworkSessionRuntime
         int filteredSnapshotCount = CopyFilteredLatestSnapshot(subscriptions, _filteredSnapshotScratch);
         LatestStateSnapshot latestSnapshot = _latestState.GetSnapshot();
         OrderedEventSnapshot orderedSnapshot = _orderedEvents.GetSnapshot();
-        _baselineOrderedGlobalSequenceByConnection[connectionId] = orderedSnapshot.NewestAvailableSequence;
+        if (_baselineAcks.TryGetLastAcknowledged(connectionId, out _))
+        {
+            _baselineOrderedGlobalSequenceByConnection[connectionId] = orderedSnapshot.NewestAvailableSequence;
+        }
+        else
+        {
+            _baselineOrderedGlobalSequenceByConnection.TryAdd(connectionId, orderedSnapshot.NewestAvailableSequence);
+        }
         ulong highestFilteredSequence = 0;
         for (int i = 0; i < filteredSnapshotCount; i++)
         {

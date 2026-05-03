@@ -24,6 +24,7 @@ internal static class TestRunner
         Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
         Run(nameof(UiPanelOpenEventPacket_RoundTripsDocumentBytes), UiPanelOpenEventPacket_RoundTripsDocumentBytes);
         Run(nameof(UiModelUpdateEventPacket_RoundTripsDocumentBytes), UiModelUpdateEventPacket_RoundTripsDocumentBytes);
+        Run(nameof(UiDocumentChunkEventPacket_RoundTripsChunkMetadataAndBytes), UiDocumentChunkEventPacket_RoundTripsChunkMetadataAndBytes);
         Run(nameof(UiActionRequestPacket_RoundTripsDocumentBytes), UiActionRequestPacket_RoundTripsDocumentBytes);
         Run(nameof(LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial), LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial);
         Run(nameof(RealtimeStateBatchPacket_RoundTripsExpectedItems), RealtimeStateBatchPacket_RoundTripsExpectedItems);
@@ -86,6 +87,7 @@ internal static class TestRunner
         Run(nameof(LoopbackTransportPair_RoundTripsDatagrams), LoopbackTransportPair_RoundTripsDatagrams);
         Run(nameof(LoopbackTransport_Stop_BlocksFurtherPollOutput), LoopbackTransport_Stop_BlocksFurtherPollOutput);
         Run(nameof(UdpSocketTransport_FlushOutbound_BundlesSameConnectionPackets), UdpSocketTransport_FlushOutbound_BundlesSameConnectionPackets);
+        Run(nameof(UdpSocketTransport_FlushOutbound_RejectsOversizedSingleEnvelopeWithCapacityDetail), UdpSocketTransport_FlushOutbound_RejectsOversizedSingleEnvelopeWithCapacityDetail);
         Run(nameof(UdpSocketTransport_AsyncFlushOutbound_BundlesSameConnectionPackets), UdpSocketTransport_AsyncFlushOutbound_BundlesSameConnectionPackets);
         Run(nameof(UdpSocketTransport_AsyncReceive_RoundTripsDatagrams), UdpSocketTransport_AsyncReceive_RoundTripsDatagrams);
         Run(nameof(UdpSocketTransport_RoundTripsDatagrams), UdpSocketTransport_RoundTripsDatagrams);
@@ -314,6 +316,47 @@ internal static class TestRunner
             Assert.Equal((ushort)(i + 1), packet.Sequence);
             Assert.Equal((uint)((i + 1) * 10), packet.ClientTick);
         }
+    }
+
+    private static void UdpSocketTransport_FlushOutbound_RejectsOversizedSingleEnvelopeWithCapacityDetail()
+    {
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        using var server = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata,
+            MaxDatagramBytes: 64));
+        server.Start();
+
+        var serverEndPoint = (IPEndPoint)Assert.NotNull(server.LocalEndPoint);
+        using var client = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+            new IPEndPoint(IPAddress.Loopback, 0),
+            metadata,
+            serverEndPoint,
+            new ConnectionId(1),
+            AllowDynamicConnections: false,
+            MaxDatagramBytes: 64));
+        client.Start();
+
+        client.EnqueueOutbound(new OutboundDatagram(
+            new ConnectionId(1),
+            NetworkPlane.State,
+            PacketClass.ReliableEvent,
+            ChannelType.ReliableOrdered,
+            ImmutablePayloadBuffer.CopyFrom(new byte[96])));
+
+        try
+        {
+            client.FlushOutbound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            Assert.True(ex.Message.Contains("exceeds transport datagram capacity", StringComparison.Ordinal));
+            Assert.True(ex.Message.Contains("envelope=96 bytes", StringComparison.Ordinal));
+            Assert.True(ex.Message.Contains("maxDatagram=64 bytes", StringComparison.Ordinal));
+            return;
+        }
+
+        throw new InvalidOperationException("Expected oversized datagram flush to fail.");
     }
 
     private static void UdpSocketTransport_AsyncFlushOutbound_BundlesSameConnectionPackets()
@@ -591,6 +634,33 @@ internal static class TestRunner
         var reader = new BitReader(payload);
         UiModelUpdateEventPacket decoded = UiModelUpdateEventPacket.Deserialize(ref reader);
         Assert.True(documentBytes.AsSpan().SequenceEqual(decoded.DocumentBytes));
+    }
+
+    private static void UiDocumentChunkEventPacket_RoundTripsChunkMetadataAndBytes()
+    {
+        byte[] chunkBytes = [1, 3, 5, 7, 9];
+        ImmutablePayloadBuffer encoded = PacketCodec.Encode(new UiDocumentChunkEventPacket(
+            UiDocumentChunkKind.PanelOpen,
+            "open:panel/login/1",
+            ChunkIndex: 2,
+            ChunkCount: 4,
+            chunkBytes));
+
+        Assert.True(PacketCodec.TryDecodeEnvelope(encoded.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(UiDocumentChunkEventPacket.PacketId, header.PacketId);
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(UiDocumentChunkEventPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.State, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
+
+        var reader = new BitReader(payload);
+        UiDocumentChunkEventPacket decoded = UiDocumentChunkEventPacket.Deserialize(ref reader);
+        Assert.Equal(UiDocumentChunkKind.PanelOpen, decoded.Kind);
+        Assert.Equal("open:panel/login/1", decoded.TransferId);
+        Assert.Equal((ushort)2, decoded.ChunkIndex);
+        Assert.Equal((ushort)4, decoded.ChunkCount);
+        Assert.True(chunkBytes.AsSpan().SequenceEqual(decoded.ChunkBytes));
     }
 
     private static void LoginCredentialSubmitPacket_RoundTripsTrustedCredentialMaterial()

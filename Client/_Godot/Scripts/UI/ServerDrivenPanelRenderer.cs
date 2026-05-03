@@ -36,7 +36,7 @@ internal static class ServerDrivenPanelRenderer
 
         root.Name = MakeNodeName("ServerPanel", panel.PanelInstanceId);
         root.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
-        root.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+        root.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         root.SizeFlagsVertical = Control.SizeFlags.ShrinkBegin;
         return true;
     }
@@ -100,7 +100,7 @@ internal static class ServerDrivenPanelRenderer
             var content = new VBoxContainer
             {
                 Name = "Content",
-                SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
                 SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
             };
             panel.AddChild(content);
@@ -174,9 +174,9 @@ internal static class ServerDrivenPanelRenderer
         {
             Name = MakeNodeName("Panel", node.NodeId),
             MouseFilter = Control.MouseFilterEnum.Stop,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
-            CustomMinimumSize = new Vector2(260.0f, 0.0f),
+            CustomMinimumSize = new Vector2(560.0f, 0.0f),
         };
         panel.AddThemeConstantOverride("margin_left", 10);
         panel.AddThemeConstantOverride("margin_top", 10);
@@ -190,7 +190,7 @@ internal static class ServerDrivenPanelRenderer
         return new HBoxContainer
         {
             Name = MakeNodeName("Row", node.NodeId),
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -200,7 +200,7 @@ internal static class ServerDrivenPanelRenderer
         return new HBoxContainer
         {
             Name = MakeNodeName("Pager", node.NodeId),
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -210,7 +210,7 @@ internal static class ServerDrivenPanelRenderer
         return new VBoxContainer
         {
             Name = MakeNodeName("Column", node.NodeId),
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -220,7 +220,7 @@ internal static class ServerDrivenPanelRenderer
         var group = new VBoxContainer
         {
             Name = MakeNodeName("Group", node.NodeId),
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
 
@@ -233,7 +233,7 @@ internal static class ServerDrivenPanelRenderer
         var section = new VBoxContainer
         {
             Name = MakeNodeName("Section", node.NodeId),
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
 
@@ -280,7 +280,7 @@ internal static class ServerDrivenPanelRenderer
             Name = MakeNodeName("Text", node.NodeId),
             Text = node.Text ?? string.Empty,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -303,7 +303,7 @@ internal static class ServerDrivenPanelRenderer
             Name = MakeNodeName("DynamicText", node.NodeId),
             Text = text,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -774,7 +774,7 @@ internal static class ServerDrivenPanelRenderer
             Name = MakeNodeName("Button", node.NodeId),
             Text = node.Text ?? action?.Label ?? "Button",
             Disabled = action is null || action.Availability != UiActionAvailability.Available,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
 
@@ -804,7 +804,7 @@ internal static class ServerDrivenPanelRenderer
             Name = MakeNodeName("Spacer", node.NodeId),
             CustomMinimumSize = new Vector2(0.0f, 8.0f),
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -815,7 +815,7 @@ internal static class ServerDrivenPanelRenderer
         {
             Name = MakeNodeName($"Unsupported_{node.Kind}", node.NodeId),
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         };
     }
@@ -852,7 +852,7 @@ internal static class ServerDrivenPanelRenderer
             Name = MakeNodeName(prefix, node.NodeId),
             Text = node.Text,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
         });
     }

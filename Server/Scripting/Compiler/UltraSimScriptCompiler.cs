@@ -276,6 +276,21 @@ public sealed class UltraSimScriptCompiler
     {
         if (!string.IsNullOrWhiteSpace(assembly.Location) && File.Exists(assembly.Location))
             paths.Add(Path.GetFullPath(assembly.Location));
+
+        string? assemblyName = assembly.GetName().Name;
+        if (!string.IsNullOrWhiteSpace(assemblyName))
+            AddAssemblyFromBaseDirectory(paths, assemblyName);
+    }
+
+    private static void AddAssemblyFromBaseDirectory(SortedSet<string> paths, string assemblyName)
+    {
+        string? directory = AppContext.BaseDirectory;
+        if (string.IsNullOrWhiteSpace(directory))
+            return;
+
+        string path = Path.Combine(directory, assemblyName + ".dll");
+        if (File.Exists(path))
+            paths.Add(Path.GetFullPath(path));
     }
 
     private static bool IsUltraSimReference(AssemblyName identity) =>

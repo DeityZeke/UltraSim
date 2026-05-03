@@ -39,7 +39,8 @@ public sealed class ClientMovementSessionHost
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _control = new NetworkControlPlaneHost(NetworkControlPlaneRole.Client, transport, clientHello: clientHello);
         _movement = new ClientMovementNetworkBridge(transport, connectionId, sequencer, predictionStore, interpolation);
-        _observerState = observerState;
+        bool hasObserverEvents = observerEvents is not null || chatEvents is not null || uiEvents is not null;
+        _observerState = observerState ?? (hasObserverEvents ? new ClientObserverStateBridge(connectionId) : null);
         _observerEvents = observerEvents ?? (chatEvents is null && uiEvents is null
             ? null
             : ClientObserverEventBridge.CreateSpanFastPath(connectionId, (_, payload) => uiEvents?.TryProcessEventPayload(payload)));

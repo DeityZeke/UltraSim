@@ -14,4 +14,11 @@
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\RuntimeTemplate\**\*">
+      <Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

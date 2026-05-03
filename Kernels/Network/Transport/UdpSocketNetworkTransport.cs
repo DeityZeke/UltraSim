@@ -490,6 +490,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
 
                     try
                     {
+                        EnsureFitsDatagramCapacity(outboundPayload.Length, _options.MaxDatagramBytes);
                         long sendStart = Stopwatch.GetTimestamp();
                         socket.SendTo(outboundPayload.Span, SocketFlags.None, remote);
                         long sendEnd = Stopwatch.GetTimestamp();
@@ -1073,6 +1074,7 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
                 {
                     try
                     {
+                        EnsureFitsDatagramCapacity(datagrams[index].Payload.Length, _options.MaxDatagramBytes);
                         long sendStart = Stopwatch.GetTimestamp();
                         socket.SendTo(datagrams[index].Payload.Span, SocketFlags.None, remote);
                         long sendEnd = Stopwatch.GetTimestamp();
@@ -1181,5 +1183,14 @@ CompleteFlush:
         foreach (List<OutboundDatagram> list in flushByConnection.Values)
             total += list.Count;
         return total;
+    }
+
+    private static void EnsureFitsDatagramCapacity(int payloadBytes, int maxDatagramBytes)
+    {
+        if (payloadBytes <= maxDatagramBytes)
+            return;
+
+        throw new InvalidOperationException(
+            $"Outbound envelope exceeds transport datagram capacity: envelope={payloadBytes} bytes, maxDatagram={maxDatagramBytes} bytes.");
     }
 }

@@ -114,12 +114,13 @@ public static class ServerMovementWorldApplicationFactory
                 ApplyMovementInput,
                 ProjectMovementState,
                 SpawnSession,
-                DespawnSession,
-                ProjectCharacterPosition,
-                ApplyCharacterPosition,
-                WriteSelectedCharacterSnapshot,
+                despawnSession: DespawnSession,
+                characterPositionProjector: ProjectCharacterPosition,
+                characterPositionApplier: ApplyCharacterPosition,
+                selectedCharacterSnapshotWriter: WriteSelectedCharacterSnapshot,
                 handshakePolicy: handshakePolicy,
                 sessionPolicy: sessionPolicy,
+                allocateNetworkEntityId: AllocateNetworkEntityId,
                 scriptContext: _options.ScriptContext,
                 admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(
                     _characterService,
@@ -335,13 +336,19 @@ public static class ServerMovementWorldApplicationFactory
 
         private ServerMovementSessionSpawn SpawnSession(World world, ConnectionId connectionId)
         {
-            uint networkEntityId = _nextNetworkEntityId++;
+            uint networkEntityId = AllocateNetworkEntityId(connectionId);
             Entity entity = world.CreateDefault(_playerSignature);
             float spawnIndex = networkEntityId - 1;
             float x = (spawnIndex % 16) * 1.5f;
             float y = MathF.Floor(spawnIndex / 16) * 1.5f;
             world.SetComponent(entity, new ServerMovementBody(x, y, 0f, 0f));
             return new ServerMovementSessionSpawn(entity, networkEntityId);
+        }
+
+        private uint AllocateNetworkEntityId(ConnectionId connectionId)
+        {
+            _ = connectionId;
+            return _nextNetworkEntityId++;
         }
 
         private bool TryBindSelectedCharacter(ConnectionId connectionId, ServerCharacterRecord character)

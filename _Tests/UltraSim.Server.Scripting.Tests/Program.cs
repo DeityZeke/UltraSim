@@ -30,6 +30,7 @@ internal static class TestRunner
         Run(nameof(ScriptCompiler_CorruptCacheFallsBackToCleanCompile), ScriptCompiler_CorruptCacheFallsBackToCleanCompile);
         Run(nameof(ScriptCompiler_DoesNotTouchSavesOrBackups), ScriptCompiler_DoesNotTouchSavesOrBackups);
         Run(nameof(ScriptCompiler_DoesNotExposeGodotReferencesByDefault), ScriptCompiler_DoesNotExposeGodotReferencesByDefault);
+        Run(nameof(ScriptCompiler_DoesNotExposeNetworkReferencesByDefault), ScriptCompiler_DoesNotExposeNetworkReferencesByDefault);
         Run(nameof(ScriptStartup_ProducesRunUoStylePhaseSummaryFromRealResults), ScriptStartup_ProducesRunUoStylePhaseSummaryFromRealResults);
 
         Console.WriteLine("All Server scripting tests passed.");
@@ -589,6 +590,32 @@ internal static class TestRunner
 
         Assert.Equal(UltraSimScriptCompileResultKind.Failed, result.Kind);
         Assert.True(result.Diagnostics.Any(static diagnostic => diagnostic.Message.Contains("Godot", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static void ScriptCompiler_DoesNotExposeNetworkReferencesByDefault()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        UltraSimRuntimeTemplate.Ensure(temp.Layout);
+        WriteScript(
+            temp.Layout,
+            "NetworkLeak.cs",
+            """
+            using UltraSim.Network;
+            using UltraSim.Server.Scripting;
+
+            public sealed class NetworkLeak : IUltraSimScriptModule
+            {
+                public void Configure(IUltraSimScriptContext context)
+                {
+                    _ = ChatSubmitPacket.PacketId;
+                }
+            }
+            """);
+
+        UltraSimScriptCompileResult result = new UltraSimScriptCompiler().Compile(new UltraSimScriptCompilerOptions(temp.Layout));
+
+        Assert.Equal(UltraSimScriptCompileResultKind.Failed, result.Kind);
+        Assert.True(result.Diagnostics.Any(static diagnostic => diagnostic.Message.Contains("Network", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static void ScriptStartup_ProducesRunUoStylePhaseSummaryFromRealResults()

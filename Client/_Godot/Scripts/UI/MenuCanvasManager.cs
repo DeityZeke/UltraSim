@@ -2,6 +2,7 @@ using Godot;
 using UltraSim.Client;
 using UltraSim.Client.UI;
 using UltraSim.Discovery;
+using UltraSim.Network;
 using UltraSim.UI;
 
 namespace UltraSim.Client.Godot.UI;
@@ -22,7 +23,7 @@ public partial class MenuCanvasManager : CanvasLayer
     public event Action<string>? ChatSubmitted;
     public event Action<ClientUiActionRouteResult>? ServerDrivenActionRouted;
     public event Action<UiActionMenuDescriptor, UiActionDescriptor>? ActionMenuActionPressed;
-    public event Action<ClientUiPanelInstance, UiActionDescriptor>? TrustedCredentialActionRequested;
+    public event Action<LoginCredentialSubmitPacket>? LoginCredentialSubmitRequested;
 
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
@@ -79,6 +80,8 @@ public partial class MenuCanvasManager : CanvasLayer
 
         surfaceHost.AddChild(renderedPanel);
         ApplyServerPanelPlacement(renderedPanel, panel.Metadata);
+        WireTrustedCredentialSubmitShortcuts(panel, renderedPanel);
+        ApplyChatVisibility();
         error = string.Empty;
         return true;
     }
@@ -92,6 +95,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
         _blockingServerDrivenPanels.Remove(panelInstanceId);
         renderedPanel.QueueFree();
+        ApplyChatVisibility();
         return true;
     }
 
@@ -105,6 +109,7 @@ public partial class MenuCanvasManager : CanvasLayer
         _serverDrivenPanels.Clear();
         _blockingServerDrivenPanels.Clear();
         ClearActionMenus();
+        ApplyChatVisibility();
     }
 
     public bool TryShowActionMenu(UiActionMenuDescriptor menu, out string error)
@@ -440,7 +445,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
         if (action.ContextKind == UiActionContextKind.TrustedCredential)
         {
-            TrustedCredentialActionRequested?.Invoke(panel, action);
+            HandleTrustedCredentialAction(panel, action);
             return;
         }
 
@@ -457,10 +462,101 @@ public partial class MenuCanvasManager : CanvasLayer
         ServerDrivenActionRouted?.Invoke(ServerDrivenPanelRegistry.ValidateActionRequest(request));
     }
 
+    private void HandleTrustedCredentialAction(ClientUiPanelInstance panel, UiActionDescriptor action)
+    {
+        if (!TryBuildLoginCredentialPacket(panel, action, out LoginCredentialSubmitPacket packet, out string error))
+        {
+            AppendSystemChatLine(error);
+            GD.PushWarning(error);
+            return;
+        }
+
+        if (LoginCredentialSubmitRequested is null)
+        {
+            Array.Clear(packet.MaterialBytes);
+            AppendSystemChatLine("Login is not connected yet.");
+            return;
+        }
+
+        LoginCredentialSubmitRequested.Invoke(packet);
+    }
+
+    private bool TryBuildLoginCredentialPacket(
+        ClientUiPanelInstance panel,
+        UiActionDescriptor action,
+        out LoginCredentialSubmitPacket packet,
+        out string error)
+    {
+        packet = default;
+        if (!_serverDrivenPanels.TryGetValue(panel.PanelInstanceId, out Control? renderedPanel))
+        {
+            error = $"Login panel '{panel.PanelInstanceId}' is not mounted.";
+            return false;
+        }
+
+        if (!TryReadLineEditSlot(renderedPanel, "login.username", out string username) &&
+            !TryReadFirstStandardLineEdit(renderedPanel, out username))
+        {
+            error = "Login panel does not contain a username field.";
+            return false;
+        }
+
+        if (!TryReadLineEditSlot(renderedPanel, "login.password", out string password) &&
+            !TryReadTrustedLineEdit(renderedPanel, out password))
+        {
+            error = "Login panel does not contain a password field.";
+            return false;
+        }
+
+        username = username.Trim();
+        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
+        {
+            error = "Username and password are required.";
+            return false;
+        }
+
+        packet = new LoginCredentialSubmitPacket(
+            panel.PanelInstanceId,
+            action.ActionId,
+            username,
+            LoginCredentialMaterialKind.PlainPassword,
+            System.Text.Encoding.UTF8.GetBytes(password));
+        error = string.Empty;
+        return true;
+    }
+
     private void RouteActionMenuAction(UiActionMenuDescriptor menu, UiActionDescriptor action)
     {
         ActionMenuActionPressed?.Invoke(menu, action);
         CloseActionMenu(menu.MenuKey);
+    }
+
+    private static void WireTrustedCredentialSubmitShortcuts(ClientUiPanelInstance panel, Control renderedPanel)
+    {
+        UiActionDescriptor? trustedAction = null;
+        for (int i = 0; i < panel.Schema.Actions.Count; i++)
+        {
+            UiActionDescriptor action = panel.Schema.Actions[i];
+            if (action.ContextKind == UiActionContextKind.TrustedCredential)
+            {
+                trustedAction = action;
+                break;
+            }
+        }
+
+        if (trustedAction is null)
+        {
+            return;
+        }
+
+        Button? button = FindActionButton(renderedPanel, trustedAction.ActionId);
+        LineEdit? input = FindTrustedLineEdit(renderedPanel) ?? FindLineEditSlot(renderedPanel, "login.password");
+        if (button is null || input is null)
+        {
+            return;
+        }
+
+        input.TextSubmitted += _ => button.EmitSignal(BaseButton.SignalName.Pressed);
     }
 
     private void ApplyNavigation()
@@ -476,7 +572,22 @@ public partial class MenuCanvasManager : CanvasLayer
 
         if (_chatPanel is not null)
         {
-            _chatPanel.Visible = _navigation.IsInSession;
+            ApplyChatVisibility();
+        }
+    }
+
+    private void ApplyChatVisibility()
+    {
+        if (_chatPanel is null)
+        {
+            return;
+        }
+
+        bool shouldShowChat = _navigation.IsInSession && _blockingServerDrivenPanels.Count == 0;
+        _chatPanel.Visible = shouldShowChat;
+        if (!shouldShowChat && _chatPanel.HasInputFocus)
+        {
+            _chatPanel.ReleaseInputFocus();
         }
     }
 
@@ -504,10 +615,32 @@ public partial class MenuCanvasManager : CanvasLayer
         return host;
     }
 
-    private static void ApplyServerPanelPlacement(Control panel, UiPanelMetadata metadata)
+    private void ApplyServerPanelPlacement(Control panel, UiPanelMetadata metadata)
     {
-        panel.Position = new Vector2(24.0f + metadata.ZOrderClass * 8.0f, 96.0f + metadata.ZOrderClass * 8.0f);
         panel.ZIndex = metadata.ZOrderClass;
+        if (metadata.SurfaceTarget is UiSurfaceTarget.Modal or UiSurfaceTarget.Exclusive)
+        {
+            panel.CustomMinimumSize = new Vector2(Mathf.Max(panel.CustomMinimumSize.X, 560.0f), panel.CustomMinimumSize.Y);
+            CenterServerPanel(panel);
+            panel.Resized += () => CenterServerPanel(panel);
+            return;
+        }
+
+        panel.Position = new Vector2(24.0f, 96.0f);
+    }
+
+    private void CenterServerPanel(Control panel)
+    {
+        Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
+        Vector2 minimumSize = panel.GetCombinedMinimumSize();
+        Vector2 targetSize = new(
+            Mathf.Max(Mathf.Max(panel.Size.X, minimumSize.X), panel.CustomMinimumSize.X),
+            Mathf.Max(Mathf.Max(panel.Size.Y, minimumSize.Y), panel.CustomMinimumSize.Y));
+
+        panel.Size = targetSize;
+        panel.Position = new Vector2(
+            Mathf.Max(16.0f, (viewportSize.X - targetSize.X) * 0.5f),
+            Mathf.Max(16.0f, (viewportSize.Y - targetSize.Y) * 0.5f));
     }
 
     private static bool PanelBlocksGameplayInput(UiPanelMetadata metadata)
@@ -564,6 +697,107 @@ public partial class MenuCanvasManager : CanvasLayer
         return false;
     }
 
+    private static bool TryReadLineEditSlot(Node root, string slotId, out string text)
+    {
+        LineEdit? input = FindLineEditSlot(root, slotId);
+        if (input is null)
+        {
+            text = string.Empty;
+            return false;
+        }
+
+        text = input.Text ?? string.Empty;
+        return true;
+    }
+
+    private static bool TryReadFirstStandardLineEdit(Node root, out string text)
+    {
+        LineEdit? input = FindFirstStandardLineEdit(root);
+        if (input is null)
+        {
+            text = string.Empty;
+            return false;
+        }
+
+        text = input.Text ?? string.Empty;
+        return true;
+    }
+
+    private static bool TryReadTrustedLineEdit(Node root, out string text)
+    {
+        LineEdit? input = FindTrustedLineEdit(root);
+        if (input is null)
+        {
+            text = string.Empty;
+            return false;
+        }
+
+        text = input.Text ?? string.Empty;
+        return true;
+    }
+
+    private static LineEdit? FindLineEditSlot(Node root, string slotId)
+    {
+        if (root is LineEdit input &&
+            input.HasMeta("UiSlotId") &&
+            string.Equals(input.GetMeta("UiSlotId").ToString(), slotId, StringComparison.Ordinal))
+        {
+            return input;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            LineEdit? found = FindLineEditSlot(child, slotId);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static LineEdit? FindFirstStandardLineEdit(Node root)
+    {
+        if (root is LineEdit input &&
+            (!input.HasMeta("UiTrustedInput") || !input.GetMeta("UiTrustedInput").AsBool()))
+        {
+            return input;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            LineEdit? found = FindFirstStandardLineEdit(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static LineEdit? FindTrustedLineEdit(Node root)
+    {
+        if (root is LineEdit input &&
+            input.HasMeta("UiTrustedInput") &&
+            input.GetMeta("UiTrustedInput").AsBool())
+        {
+            return input;
+        }
+
+        foreach (Node child in root.GetChildren())
+        {
+            LineEdit? found = FindTrustedLineEdit(child);
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     private static Button? FindActionButton(Node root, string actionId)
     {
         if (root is Button button &&
@@ -596,7 +830,11 @@ public partial class MenuCanvasManager : CanvasLayer
 
     private bool ShouldFocusChat(InputEvent @event)
     {
-        if (!_navigation.IsInSession || _navigation.IsMenuVisible || _chatPanel?.HasInputFocus == true)
+        if (!_navigation.IsInSession ||
+            _navigation.IsMenuVisible ||
+            _blockingServerDrivenPanels.Count > 0 ||
+            _chatPanel?.Visible != true ||
+            _chatPanel.HasInputFocus)
         {
             return false;
         }

@@ -19,6 +19,13 @@
     </Reference>
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="..\RuntimeTemplate\**\*">
+      <Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <Target Name="BuildServerGodotNetworkDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
       Projects="..\Network\UltraSim.Server.Network.csproj;..\Scripting\UltraSim.Server.Scripting.csproj"

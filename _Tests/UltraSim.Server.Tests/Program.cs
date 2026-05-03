@@ -7,6 +7,7 @@ using UltraSim.Server.Accounting;
 using UltraSim.Server.Admission;
 using UltraSim.Server.Console;
 using UltraSim.Server.Godot;
+using UltraSim.Server.Gameplay;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
 using UltraSim.Server.Network;
@@ -86,8 +87,10 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor), ServerMovementSessionHost_StateBaselineAck_SeedsReliableEventAckFloor);
         Run(nameof(ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline), ServerMovementSessionHost_OwnsSubscriptionsAndDispatchesPublishedBaseline);
         Run(nameof(ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession), ServerMovementSessionHost_RoutesUiOpenAndActionOverLiveSession);
+        Run(nameof(ServerUiService_ChunksOversizedColdOpenBelowDefaultUdpDatagramCapacity), ServerUiService_ChunksOversizedColdOpenBelowDefaultUdpDatagramCapacity);
         Run(nameof(ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders), ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders);
         Run(nameof(ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect), ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect);
+        Run(nameof(ServerMovementSessionHost_RuntimeTemplateAdmissionPackage_OpensLoginPanel), ServerMovementSessionHost_RuntimeTemplateAdmissionPackage_OpensLoginPanel);
         Run(nameof(ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities), ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities);
         Run(nameof(ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator), ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator);
         Run(nameof(ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings), ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings);
@@ -2736,12 +2739,10 @@ internal static class TestRunner
             handshakePolicy: handshakePolicy);
         UiPanelOpenDocument? opened = null;
         var uiEvents = new ClientUiEventBridge(document => opened = document);
-        var observerState = new ClientObserverStateBridge(connectionId);
         var clientHost = new ClientMovementSessionHost(
             pair.Client,
             connectionId,
             new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
-            observerState: observerState,
             uiEvents: uiEvents,
             maxPollBatch: 8);
 
@@ -2795,6 +2796,44 @@ internal static class TestRunner
         Assert.Equal(action.ActionId, receivedAction!.ActionId);
         Assert.Equal(action.ClientSequence, receivedAction.ClientSequence);
         Assert.Equal(1L, serverHost.Ui.ReceivedActions);
+    }
+
+    private static void ServerUiService_ChunksOversizedColdOpenBelowDefaultUdpDatagramCapacity()
+    {
+        var orderedEvents = new OrderedEventStream(capacity: 128);
+        var ui = new ServerUiService(orderedEvents);
+        UiBuiltPanel panel = UiPanelBuilder
+            .Create("server/test", "large.cold_open", 1)
+            .Panel(root =>
+            {
+                root.Column(column =>
+                {
+                    for (int i = 0; i < 180; i++)
+                    {
+                        column.DynamicText($"large.slot.{i}", $"Label {i}", $"Value {i}", maxStringLength: 64);
+                    }
+                });
+            })
+            .Build();
+
+        Assert.True(ui.TryOpenPanel(new ConnectionId(7), panel, "panel/large/login"));
+
+        var entries = new OrderedEventEntry[128];
+        OrderedEventDrainResult drain = orderedEvents.DrainSince(new OrderedEventCursor(1), entries);
+        Assert.True(drain.Count > 1);
+        for (int i = 0; i < drain.Count; i++)
+        {
+            OrderedEventEntry entry = entries[i];
+            Assert.True(PacketCodec.TryDecodeEnvelope(entry.Payload.Span, out PacketEnvelopeHeader header, out _));
+            Assert.Equal(UiDocumentChunkEventPacket.PacketId, header.PacketId);
+
+            ImmutablePayloadBuffer framed = PacketCodec.Encode(new ReliableEventFramePacket(entry.Sequence, entry.Payload));
+            if (framed.Length > 2048)
+            {
+                throw new InvalidOperationException(
+                    $"Chunked UI reliable frame exceeded default UDP datagram capacity: {framed.Length} bytes.");
+            }
+        }
     }
 
     private static void ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders()
@@ -3086,6 +3125,9 @@ internal static class TestRunner
         Assert.True(serverHost.ScriptBinding!.Admission.TryGetState(connectionId, out SessionAdmissionState loginState));
         Assert.Equal(login.PanelInstanceId, loginState.PanelInstanceId);
         Assert.Equal("admission.login_verified", loginState.WaitingForEvent);
+        Assert.Equal(1, serverHost.BoundConnectionCount);
+        Assert.False(serverHost.TryGetBoundEntity(connectionId, out _));
+        Assert.Equal(0, serverHost.Movement.BindingCount);
 
         var badCredentialPacket = new LoginCredentialSubmitPacket(
             login.PanelInstanceId,
@@ -3213,6 +3255,9 @@ internal static class TestRunner
         Assert.Equal("Borin", selected.CharacterName);
         Assert.Equal("mobiles/human", selected.PrefabKey);
         Assert.True(selected.UsedPrefabEntity);
+        Assert.True(serverHost.TryGetBoundEntity(connectionId, out Entity selectedEntity));
+        Assert.Equal(selected.Entity, selectedEntity);
+        Assert.Equal(1, serverHost.Movement.BindingCount);
         Assert.True(world.TryGetComponent(selected.Entity, out ServerEcsMovementBody selectedBody));
         Assert.Equal(0f, selectedBody.PositionX);
         Assert.Equal(0f, selectedBody.PositionY);
@@ -3235,6 +3280,109 @@ internal static class TestRunner
             .Single(character => character.Name == "Borin");
         Assert.Equal(new CharacterPositionSnapshot(40f, 9f, 0f, 0f), savedBorin.Position);
         Assert.Equal(new DateTimeOffset(2026, 5, 2, 12, 3, 0, TimeSpan.Zero), savedBorin.LastPlayedUtc);
+    }
+
+    private static void ServerMovementSessionHost_RuntimeTemplateAdmissionPackage_OpensLoginPanel()
+    {
+        var connectionId = new ConnectionId(1);
+        using var temp = ServerTestRuntimeRoot.Create();
+        UltraSimRuntimeRootLayout layout = UltraSimRuntimeRootResolver.FromRoot(temp.Path);
+        UltraSimRuntimeTemplate.Ensure(layout);
+        CopyDirectory(
+            Path.Combine(FindRepositoryRoot(), "Server", "RuntimeTemplate", "scripts"),
+            layout.ScriptsPath);
+
+        UltraSimScriptStartupResult startup = new UltraSimScriptStartupService().Run(new UltraSimScriptStartupOptions(layout));
+        Assert.True(startup.CompileResult.Succeeded);
+        Assert.NotNull(startup.LoadResult);
+        Assert.True(startup.LoadResult!.Succeeded);
+        DefaultUltraSimScriptContext scriptContext = startup.Context;
+        Assert.True(scriptContext.RegisteredAdmissionSteps.Count > 0);
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerMovementBody>();
+        ScriptPrefabCatalogBuildResult catalogResult = ScriptPrefabCatalogBuilder.Build(
+            scriptContext.RegisteredArchetypes,
+            scriptContext.RegisteredPrefabs,
+            builder);
+        ArchetypeSignature signature = new([movementId]);
+        World world = new(
+            builder.Build(),
+            new EcsWorldServices { PrefabResolver = catalogResult.Catalog });
+
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            Entity entity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(entity, new ServerMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(entity, 1);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var openedPanels = new List<UiPanelOpenDocument>();
+        var uiEvents = new ClientUiEventBridge(openedPanels.Add);
+        var observerState = new ClientObserverStateBridge(connectionId);
+        var clientHost = new ClientMovementSessionHost(
+            pair.Client,
+            connectionId,
+            new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
+            observerState: observerState,
+            uiEvents: uiEvents,
+            maxPollBatch: 8);
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy,
+            scriptContext: scriptContext);
+
+        serverHost.Start();
+        clientHost.Start();
+        clientHost.BeginHandshake(100);
+
+        // Repeated baseline sends before the first client ack must not skip admission UI
+        // published after the connection was bound.
+        for (int step = 0; step < 4; step++)
+        {
+            serverHost.Pump(101 + step, 0.016f, (uint)(step + 1));
+        }
+
+        for (int step = 0; step < 30 && !openedPanels.Any(panel => panel.SchemaIdentity.PanelType == "admission.login"); step++)
+        {
+            clientHost.Pump(120 + step * 2);
+            serverHost.Pump(121 + step * 2, 0.016f, (uint)(step + 5));
+        }
+
+        Assert.True(clientHost.IsReady);
+        Assert.True(serverHost.ScriptBinding is not null);
+        if (!openedPanels.Any(panel => panel.SchemaIdentity.PanelType == "admission.login"))
+        {
+            throw new InvalidOperationException(
+                $"Expected runtime template admission login panel. received={openedPanels.Count}, published={serverHost.Ui.PublishedPanelOpens}, opened={serverHost.ScriptBinding!.Admission.OpenedPanels}, rejectedEvents={serverHost.ScriptBinding.Admission.RejectedEvents}");
+        }
+        Assert.True(serverHost.ScriptBinding!.Admission.TryGetState(connectionId, out SessionAdmissionState loginState));
+        Assert.Equal("admission.login_verified", loginState.WaitingForEvent);
+        Assert.False(serverHost.TryGetBoundEntity(connectionId, out _));
+        Assert.Equal(0, serverHost.Movement.BindingCount);
     }
 
     private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()
@@ -3916,6 +4064,46 @@ internal static class TestRunner
         MethodInfo? method = contract.GetMethod(name, parameterTypes);
         Assert.NotNull(method);
         Assert.Equal(returnType, method!.ReturnType);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        string current = Directory.GetCurrentDirectory();
+        while (!string.IsNullOrWhiteSpace(current))
+        {
+            if (Directory.Exists(Path.Combine(current, "Server", "RuntimeTemplate")) &&
+                Directory.Exists(Path.Combine(current, "Kernels")) &&
+                Directory.Exists(Path.Combine(current, "_Tests")))
+            {
+                return current;
+            }
+
+            string? parent = Directory.GetParent(current)?.FullName;
+            if (string.Equals(parent, current, StringComparison.Ordinal))
+                break;
+            current = parent ?? string.Empty;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate UltraSim repository root.");
+    }
+
+    private static void CopyDirectory(string sourceRoot, string destinationRoot)
+    {
+        if (!Directory.Exists(sourceRoot))
+            throw new DirectoryNotFoundException(sourceRoot);
+
+        Directory.CreateDirectory(destinationRoot);
+        foreach (string directory in Directory.EnumerateDirectories(sourceRoot, "*", SearchOption.AllDirectories))
+        {
+            Directory.CreateDirectory(directory.Replace(sourceRoot, destinationRoot, StringComparison.Ordinal));
+        }
+
+        foreach (string file in Directory.EnumerateFiles(sourceRoot, "*", SearchOption.AllDirectories))
+        {
+            string destination = file.Replace(sourceRoot, destinationRoot, StringComparison.Ordinal);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            File.Copy(file, destination, overwrite: true);
+        }
     }
 
     private static void Run(string name, Action test)

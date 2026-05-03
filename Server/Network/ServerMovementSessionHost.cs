@@ -23,6 +23,7 @@ public sealed class ServerMovementSessionHost
     private readonly ServerChatService _chat;
     private readonly ServerUiService _ui;
     private readonly ServerScriptRuntimeBinding? _scriptBinding;
+    private readonly ServerMovementNetworkEntityIdAllocator? _allocateNetworkEntityId;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly ServerCharacterPositionProjector? _characterPositionProjector;
@@ -30,14 +31,17 @@ public sealed class ServerMovementSessionHost
     private readonly ServerSelectedCharacterSnapshotWriter? _selectedCharacterSnapshotWriter;
     private readonly Func<DateTimeOffset> _snapshotClock;
     private readonly bool _enableGlobalMovementObserverState;
+    private readonly bool _requiresAdmission;
     private readonly SubscriptionKey _globalMovementObserverScope;
     private readonly InboundDatagram[] _inboundScratch;
     private readonly ControlPlaneEvent[] _controlEvents;
     private readonly SessionLifecycleEvent[] _sessionEvents;
+    private readonly HashSet<ConnectionId> _boundConnections = new();
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
     private readonly Dictionary<ConnectionId, uint> _networkEntityIdByConnection = new();
     private readonly Dictionary<ConnectionId, ServerSelectedCharacterSession> _selectedCharactersByConnection = new();
     private readonly HashSet<ConnectionId> _pendingAdmissionStarts = new();
+    private uint _nextAdmissionNetworkEntityId = 1;
 
     public ServerMovementSessionHost(
         World world,
@@ -54,6 +58,7 @@ public sealed class ServerMovementSessionHost
         SessionAdmissionPolicy sessionPolicy = default,
         ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
         ServerNetworkSessionRuntimeOptions runtimeOptions = default,
+        ServerMovementNetworkEntityIdAllocator? allocateNetworkEntityId = null,
         DefaultUltraSimScriptContext? scriptContext = null,
         IAdmissionCredentialValidator? admissionCredentialValidator = null,
         IAdmissionRuntimePolicy? admissionRuntimePolicy = null,
@@ -98,6 +103,8 @@ public sealed class ServerMovementSessionHost
                 admissionCredentialValidator,
                 admissionRuntimePolicy);
         }
+        _requiresAdmission = scriptContext?.RegisteredAdmissionSteps.Count > 0;
+        _allocateNetworkEntityId = allocateNetworkEntityId;
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _characterPositionProjector = characterPositionProjector;
@@ -124,12 +131,12 @@ public sealed class ServerMovementSessionHost
     public ReliableEventAckTracker ReliableEventAcks => _sessionRuntime.ReliableEventAcks;
     public StateBaselineAckTracker StateBaselineAcks => _sessionRuntime.BaselineAcks;
     public ServerPumpProfileSnapshot LastPumpProfile { get; private set; }
-    public int BoundConnectionCount => _entityByConnection.Count;
+    public int BoundConnectionCount => _boundConnections.Count;
 
     public int CopyBoundConnections(Span<ConnectionId> destination)
     {
         int count = 0;
-        foreach (ConnectionId connectionId in _entityByConnection.Keys)
+        foreach (ConnectionId connectionId in _boundConnections)
         {
             if (count >= destination.Length)
                 break;
@@ -154,29 +161,42 @@ public sealed class ServerMovementSessionHost
     public bool TryEnterWorld(ConnectionId connectionId, ServerCharacterRecord character)
     {
         ArgumentNullException.ThrowIfNull(character);
-        if (!_entityByConnection.TryGetValue(connectionId, out Entity currentEntity) ||
+        if (!_boundConnections.Contains(connectionId) ||
             !_networkEntityIdByConnection.TryGetValue(connectionId, out uint networkEntityId))
         {
             return false;
         }
 
-        Entity sessionEntity = currentEntity;
+        bool hadEntity = _entityByConnection.TryGetValue(connectionId, out Entity currentEntity);
+        Entity sessionEntity = hadEntity ? currentEntity : default;
         bool usedPrefabEntity = false;
         if (_world.TryCreatePrefab(character.PrefabKey, out Entity prefabEntity))
         {
-            _movement.Unbind(connectionId);
-            if (_despawnSession is not null)
+            if (hadEntity)
             {
-                _despawnSession(_world, connectionId, currentEntity);
-            }
-            else if (_world.Entities.IsAlive(currentEntity))
-            {
-                _world.Destroy(currentEntity);
+                _movement.Unbind(connectionId);
+                if (_despawnSession is not null)
+                {
+                    _despawnSession(_world, connectionId, currentEntity);
+                }
+                else if (_world.Entities.IsAlive(currentEntity))
+                {
+                    _world.Destroy(currentEntity);
+                }
             }
 
             sessionEntity = prefabEntity;
             usedPrefabEntity = true;
             _entityByConnection[connectionId] = sessionEntity;
+            _movement.Bind(connectionId, sessionEntity, networkEntityId);
+        }
+        else if (!hadEntity)
+        {
+            ServerMovementSessionSpawn spawn = _spawnSession(_world, connectionId);
+            sessionEntity = spawn.Entity;
+            networkEntityId = spawn.NetworkEntityId;
+            _entityByConnection[connectionId] = sessionEntity;
+            _networkEntityIdByConnection[connectionId] = networkEntityId;
             _movement.Bind(connectionId, sessionEntity, networkEntityId);
         }
 
@@ -364,7 +384,7 @@ public sealed class ServerMovementSessionHost
 
     private void SendDisconnectNotices(SessionDisconnectReason reason, long nowTicks)
     {
-        foreach (ConnectionId connectionId in _entityByConnection.Keys)
+        foreach (ConnectionId connectionId in _boundConnections)
             _control.SendDisconnectNotice(connectionId, reason, nowTicks);
     }
 
@@ -381,20 +401,27 @@ public sealed class ServerMovementSessionHost
                 ControlPlaneEvent evt = _controlEvents[i];
                 if (evt.Kind != ControlPlaneEventKind.HandshakeAccepted)
                     continue;
-                if (_entityByConnection.ContainsKey(evt.ConnectionId))
+                if (_boundConnections.Contains(evt.ConnectionId))
                     continue;
 
-                ServerMovementSessionSpawn spawn = _spawnSession(_world, evt.ConnectionId);
-                _movement.Bind(evt.ConnectionId, spawn.Entity, spawn.NetworkEntityId);
+                _boundConnections.Add(evt.ConnectionId);
                 _sessionRuntime.BindConnection(evt.ConnectionId);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerChatScopes.System);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerUiScopes.ForConnection(evt.ConnectionId));
                 if (_enableGlobalMovementObserverState)
                     _subscriptions.Subscribe(evt.ConnectionId, _globalMovementObserverScope);
+
+                if (_requiresAdmission)
+                {
+                    _networkEntityIdByConnection[evt.ConnectionId] = ReserveNetworkEntityId(evt.ConnectionId);
+                    _pendingAdmissionStarts.Add(evt.ConnectionId);
+                    continue;
+                }
+
+                ServerMovementSessionSpawn spawn = _spawnSession(_world, evt.ConnectionId);
+                _movement.Bind(evt.ConnectionId, spawn.Entity, spawn.NetworkEntityId);
                 _entityByConnection[evt.ConnectionId] = spawn.Entity;
                 _networkEntityIdByConnection[evt.ConnectionId] = spawn.NetworkEntityId;
-                if (_scriptBinding is not null)
-                    _pendingAdmissionStarts.Add(evt.ConnectionId);
             }
         }
     }
@@ -416,19 +443,23 @@ public sealed class ServerMovementSessionHost
                     continue;
                 }
 
-                if (_entityByConnection.TryGetValue(evt.ConnectionId, out Entity entity))
+                if (_boundConnections.Remove(evt.ConnectionId))
                 {
-                    TrySnapshotSelectedCharacter(evt.ConnectionId, entity);
-                    _movement.Unbind(evt.ConnectionId);
+                    if (_entityByConnection.TryGetValue(evt.ConnectionId, out Entity entity))
+                    {
+                        TrySnapshotSelectedCharacter(evt.ConnectionId, entity);
+                        _movement.Unbind(evt.ConnectionId);
+                        _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
+                        if (_despawnSession is null && _world.Entities.IsAlive(entity))
+                            _world.Destroy(entity);
+                    }
+
                     _sessionRuntime.UnbindConnection(evt.ConnectionId);
                     _subscriptions.RemoveConnection(evt.ConnectionId);
                     _entityByConnection.Remove(evt.ConnectionId);
                     _networkEntityIdByConnection.Remove(evt.ConnectionId);
                     _selectedCharactersByConnection.Remove(evt.ConnectionId);
                     _pendingAdmissionStarts.Remove(evt.ConnectionId);
-                    _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
-                    if (_despawnSession is null && _world.Entities.IsAlive(entity))
-                        _world.Destroy(entity);
                 }
 
                 if (evt.CurrentState == ConnectionSessionState.Disconnected)
@@ -563,7 +594,7 @@ public sealed class ServerMovementSessionHost
         foreach (ConnectionId connectionId in _pendingAdmissionStarts.ToArray())
         {
             _pendingAdmissionStarts.Remove(connectionId);
-            if (_entityByConnection.ContainsKey(connectionId))
+            if (_boundConnections.Contains(connectionId))
                 _scriptBinding.Admission.TryStart(connectionId, out _);
         }
     }
@@ -582,5 +613,13 @@ public sealed class ServerMovementSessionHost
     {
         for (int i = 0; i < inbound.Length; i++)
             inbound[i].Dispose();
+    }
+
+    private uint ReserveNetworkEntityId(ConnectionId connectionId)
+    {
+        uint networkEntityId = _allocateNetworkEntityId?.Invoke(connectionId) ?? _nextAdmissionNetworkEntityId++;
+        if (networkEntityId == 0)
+            throw new InvalidOperationException("Reserved network entity id cannot be zero.");
+        return networkEntityId;
     }
 }
