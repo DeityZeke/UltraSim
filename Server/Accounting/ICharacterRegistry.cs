@@ -18,6 +18,8 @@ public interface ICharacterRegistry
 
     IReadOnlyList<ServerCharacterRecord> GetCharactersSnapshot();
 
+    void LoadSnapshot(IEnumerable<ServerCharacterRecord> characters);
+
     void UpdateCharacter(ServerCharacterRecord character);
 
     bool DeleteCharacter(ulong characterId);

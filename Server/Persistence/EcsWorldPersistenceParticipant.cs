@@ -30,4 +30,17 @@ public sealed class EcsWorldPersistenceParticipant : IServerPersistenceParticipa
         adapter.Save(_world, writer);
         return new ServerPersistenceArtifact(Name, _relativePath);
     }
+
+    public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
+    {
+        if (!string.Equals(artifact.Name, Name, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Expected world artifact, got '{artifact.Name}'.");
+        if (!string.Equals(artifact.RelativePath, _relativePath, StringComparison.Ordinal))
+            throw new InvalidOperationException($"World artifact path '{artifact.RelativePath}' does not match expected path '{_relativePath}'.");
+
+        string path = Path.Combine(saveSetRoot, artifact.RelativePath);
+        using var reader = new BinaryDataReader(path);
+        var adapter = new BinaryWorldPersistenceAdapter(new PersistenceTypeRegistry());
+        adapter.Load(_world, reader);
+    }
 }

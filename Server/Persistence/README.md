@@ -19,6 +19,15 @@ Current scope:
   the staged save-set.
 - `EcsWorldPersistenceParticipant` writes the current ECS binary world snapshot
   into the staged save-set.
+- Load runs participants in registration order, so account/character state can
+  be restored before world entities that may reference account or character ids.
+- Startup recovery is conservative:
+  - pending save-set directories are warnings and are deleted, never promoted;
+  - valid `current` save-sets load first;
+  - corrupt or incomplete `current` save-sets fall back to the newest valid
+    backup;
+  - if a backup manifest has a higher sequence than `current`, the load result
+    reports a warning instead of silently ignoring the mismatch.
 
 This is intentionally the coordination layer above the existing pieces:
 
@@ -29,6 +38,6 @@ This is intentionally the coordination layer above the existing pieces:
 - `Server/Core` owns `ServerApplicationHooks.Save` / `Load` and save metrics.
 
 The next integration slice should attach this coordinator to the real
-`ServerApplicationHooks.Save` and later `Load` path used by the movement server
-factory. Dirty flushing, async writes, recovery prompts, and richer retention
+`ServerApplicationHooks.Save` / `Load` path used by the movement server factory.
+Dirty flushing, async writes, operator recovery prompts, and richer retention
 policies should layer on top of this save-set contract.

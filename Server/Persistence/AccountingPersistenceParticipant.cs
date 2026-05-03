@@ -26,4 +26,15 @@ public sealed class AccountingPersistenceParticipant : IServerPersistencePartici
         store.Save(AccountingPersistenceSnapshot.Capture(_accounts, _characters));
         return new ServerPersistenceArtifact(Name, _options.AccountsDirectory);
     }
+
+    public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
+    {
+        if (!string.Equals(artifact.Name, Name, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Expected accounting artifact, got '{artifact.Name}'.");
+
+        var store = new JsonAccountingPersistenceStore(saveSetRoot, _options);
+        AccountingPersistenceSnapshot snapshot = store.Load();
+        _accounts.LoadSnapshot(snapshot.Accounts);
+        _characters.LoadSnapshot(snapshot.Characters);
+    }
 }

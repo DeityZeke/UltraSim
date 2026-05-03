@@ -10,7 +10,10 @@ internal static class TestRunner
     public static void Run()
     {
         Run(nameof(ServerPersistenceCoordinator_Save_WritesAccountingAndWorldUnderSharedManifest), ServerPersistenceCoordinator_Save_WritesAccountingAndWorldUnderSharedManifest);
+        Run(nameof(ServerPersistenceCoordinator_Load_RestoresAccountingBeforeWorld), ServerPersistenceCoordinator_Load_RestoresAccountingBeforeWorld);
         Run(nameof(ServerPersistenceCoordinator_FailureDoesNotPromotePendingSaveSet), ServerPersistenceCoordinator_FailureDoesNotPromotePendingSaveSet);
+        Run(nameof(ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup), ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup);
+        Run(nameof(ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent), ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent);
         Run(nameof(ServerPersistenceCoordinator_RotatesWholeSaveSetBackups), ServerPersistenceCoordinator_RotatesWholeSaveSetBackups);
 
         Console.WriteLine("All Server persistence tests passed.");
@@ -71,6 +74,67 @@ internal static class TestRunner
         }
     }
 
+    private static void ServerPersistenceCoordinator_Load_RestoresAccountingBeforeWorld()
+    {
+        string root = CreateTempRoot("server_persistence_load");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var accounts = new InMemoryAccountRegistry();
+            ServerAccountRecord account = accounts.CreateAccount("Alice", "hash", now);
+            var characters = new InMemoryCharacterRegistry();
+            var characterService = new AccountCharacterService(accounts, characters);
+            CharacterCreateResult created = characterService.TryCreateCharacter(
+                account.AccountId,
+                "Asha",
+                "mobiles/human/female",
+                now,
+                new CharacterPositionSnapshot(5, 6, 7, 8));
+            Assert.True(created.Succeeded);
+
+            World saveWorld = CreateWorld(out ComponentId persistentPositionId);
+            Entity entity = saveWorld.CreateDefault(new ArchetypeSignature([persistentPositionId]));
+            Assert.True(saveWorld.SetComponent(entity, new PersistentPosition(91)));
+
+            var saveCoordinator = new ServerPersistenceCoordinator(
+                root,
+                [
+                    new AccountingPersistenceParticipant(accounts, characters),
+                    new EcsWorldPersistenceParticipant(saveWorld)
+                ]);
+            Assert.True(saveCoordinator.Save(now).Succeeded);
+
+            var loadedAccounts = new InMemoryAccountRegistry();
+            var loadedCharacters = new InMemoryCharacterRegistry();
+            World loadedWorld = CreateWorld(out _);
+            var loadCoordinator = new ServerPersistenceCoordinator(
+                root,
+                [
+                    new AccountingPersistenceParticipant(loadedAccounts, loadedCharacters),
+                    new EcsWorldPersistenceParticipant(loadedWorld)
+                ]);
+
+            ServerPersistenceLoadResult loaded = loadCoordinator.Load();
+
+            Assert.True(loaded.Succeeded);
+            Assert.False(loaded.StartedFresh);
+            Assert.False(loaded.LoadedBackup);
+            Assert.Equal(1UL, loaded.Manifest!.SaveSequence);
+            Assert.True(loadedAccounts.TryGetByUsername("Alice", out ServerAccountRecord loadedAccount));
+            Assert.Equal(created.Character!.CharacterId, loadedAccount.CharacterSlots[0]);
+            Assert.True(loadedCharacters.TryGetCharacter(created.Character.CharacterId, out ServerCharacterRecord loadedCharacter));
+            Assert.Equal(new CharacterPositionSnapshot(5, 6, 7, 8), loadedCharacter.Position);
+
+            var view = new WorldPersistenceView(loadedWorld, ReadOnlySpan<ComponentId>.Empty, excludeEmpty: true);
+            Assert.Equal(1, view.EntityCount);
+            Assert.SequenceEqual(new PersistentPosition[] { new(91) }, view.Archetypes[0].GetComponentSpan<PersistentPosition>(persistentPositionId).ToArray());
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
     private static void ServerPersistenceCoordinator_FailureDoesNotPromotePendingSaveSet()
     {
         string root = CreateTempRoot("server_persistence_failure");
@@ -100,6 +164,72 @@ internal static class TestRunner
             Assert.Equal(1UL, currentManifest.SaveSequence);
             Assert.False(File.Exists(Path.Combine(coordinator.CurrentSaveSetRoot, "partial.txt")));
             Assert.False(Directory.Exists(Path.Combine(root, ".pending")));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup()
+    {
+        string root = CreateTempRoot("server_persistence_recovery");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 1));
+            Assert.True(coordinator.Save(now).Succeeded);
+            Assert.True(coordinator.Save(now.AddSeconds(1)).Succeeded);
+
+            Directory.CreateDirectory(Path.Combine(root, ".pending", "interrupted-save"));
+            File.WriteAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "save_manifest.json"), "{ broken json");
+
+            var loader = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 1),
+                initialSaveSequence: 2);
+            ServerPersistenceLoadResult loaded = loader.Load();
+
+            Assert.True(loaded.Succeeded);
+            Assert.True(loaded.LoadedBackup);
+            Assert.False(loaded.StartedFresh);
+            Assert.Equal(1UL, loaded.Manifest!.SaveSequence);
+            Assert.False(Directory.Exists(Path.Combine(root, ".pending")));
+            Assert.Contains("Removed pending save-set", string.Join('\n', loaded.Warnings));
+            Assert.Contains("Current save-set is not loadable", string.Join('\n', loaded.Warnings));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent()
+    {
+        string root = CreateTempRoot("server_persistence_sequence_warning");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var currentCoordinator = new ServerPersistenceCoordinator(root, [new SequenceFileParticipant()]);
+            Assert.True(currentCoordinator.Save(now).Succeeded);
+
+            string backupRoot = Path.Combine(root, "backups", "save-newer-than-current");
+            CopyDirectory(currentCoordinator.CurrentSaveSetRoot, backupRoot);
+            string manifestPath = Path.Combine(backupRoot, "save_manifest.json");
+            string manifest = File.ReadAllText(manifestPath).Replace("\"saveSequence\": 1", "\"saveSequence\": 9");
+            File.WriteAllText(manifestPath, manifest);
+
+            var loader = new ServerPersistenceCoordinator(root, [new SequenceFileParticipant()]);
+            ServerPersistenceLoadResult loaded = loader.Load();
+
+            Assert.True(loaded.Succeeded);
+            Assert.False(loaded.LoadedBackup);
+            Assert.Equal(1UL, loaded.Manifest!.SaveSequence);
+            Assert.Contains("newer than current", string.Join('\n', loaded.Warnings));
         }
         finally
         {
@@ -151,6 +281,15 @@ internal static class TestRunner
             Directory.Delete(root, recursive: true);
     }
 
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (string directory in Directory.GetDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(directory.Replace(source, destination, StringComparison.Ordinal));
+        foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
+            File.Copy(file, file.Replace(source, destination, StringComparison.Ordinal), overwrite: true);
+    }
+
     private static void Run(string name, Action test)
     {
         try
@@ -200,17 +339,28 @@ internal static class TestRunner
             File.WriteAllText(path, _content);
             return new ServerPersistenceArtifact(Name, _relativePath);
         }
+
+        public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
+        {
+            _ = File.ReadAllText(Path.Combine(saveSetRoot, artifact.RelativePath));
+        }
     }
 
     private sealed class SequenceFileParticipant : IServerPersistenceParticipant
     {
         public string Name => "sequence";
+        public string? LoadedSequence { get; private set; }
 
         public ServerPersistenceArtifact Save(string saveSetRoot, ServerPersistenceMetadata metadata)
         {
             const string relativePath = "sequence.txt";
             File.WriteAllText(Path.Combine(saveSetRoot, relativePath), metadata.SaveSequence.ToString());
             return new ServerPersistenceArtifact(Name, relativePath);
+        }
+
+        public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
+        {
+            LoadedSequence = File.ReadAllText(Path.Combine(saveSetRoot, artifact.RelativePath));
         }
     }
 
@@ -226,6 +376,11 @@ internal static class TestRunner
         public ServerPersistenceArtifact Save(string saveSetRoot, ServerPersistenceMetadata metadata)
         {
             throw new InvalidOperationException("forced participant failure");
+        }
+
+        public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
+        {
+            throw new InvalidOperationException("forced participant load failure");
         }
     }
 }

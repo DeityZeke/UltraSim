@@ -90,14 +90,44 @@ public sealed class ServerPersistenceCoordinator
     public bool TryLoadCurrentManifest(out ServerPersistenceSaveManifest manifest)
     {
         string path = Path.Combine(CurrentSaveSetRoot, "save_manifest.json");
-        if (!File.Exists(path))
+        return TryReadManifest(path, out manifest, out _);
+    }
+
+    public ServerPersistenceLoadResult Load()
+    {
+        var warnings = new List<string>();
+        CleanupPendingSaveSets(warnings);
+
+        List<SaveSetCandidate> candidates = CollectLoadCandidates(warnings);
+        if (candidates.Count == 0)
+            return ServerPersistenceLoadResult.Fresh(warnings);
+
+        SaveSetCandidate? current = candidates.FirstOrDefault(static candidate => !candidate.IsBackup);
+        if (current is not null)
         {
-            manifest = default!;
-            return false;
+            ulong highestBackupSequence = candidates
+                .Where(static candidate => candidate.IsBackup)
+                .Select(static candidate => candidate.Manifest.SaveSequence)
+                .DefaultIfEmpty(0UL)
+                .Max();
+            if (highestBackupSequence > current.Manifest.SaveSequence)
+            {
+                warnings.Add($"A backup save-set has sequence {highestBackupSequence}, newer than current sequence {current.Manifest.SaveSequence}.");
+            }
         }
 
-        manifest = ReadManifest(path);
-        return true;
+        foreach (SaveSetCandidate candidate in candidates)
+        {
+            if (TryLoadCandidate(candidate, warnings, out ServerPersistenceLoadResult result))
+            {
+                _nextSaveSequence = Math.Max(_nextSaveSequence, candidate.Manifest.SaveSequence);
+                return result;
+            }
+        }
+
+        return ServerPersistenceLoadResult.Failure(
+            [new ServerPersistenceSaveFailure("coordinator", "No valid save-set could be loaded.")],
+            warnings);
     }
 
     private string CreatePendingSaveSetRoot(ServerPersistenceMetadata metadata)
@@ -166,6 +196,122 @@ public sealed class ServerPersistenceCoordinator
         return manifest;
     }
 
+    private bool TryReadManifest(
+        string path,
+        out ServerPersistenceSaveManifest manifest,
+        out string error)
+    {
+        manifest = default!;
+        error = string.Empty;
+        if (!File.Exists(path))
+        {
+            error = $"Save manifest '{path}' does not exist.";
+            return false;
+        }
+
+        try
+        {
+            manifest = ReadManifest(path);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+    }
+
+    private List<SaveSetCandidate> CollectLoadCandidates(List<string> warnings)
+    {
+        var candidates = new List<SaveSetCandidate>();
+        string currentManifestPath = Path.Combine(CurrentSaveSetRoot, "save_manifest.json");
+        if (TryReadManifest(currentManifestPath, out ServerPersistenceSaveManifest currentManifest, out string currentError))
+        {
+            candidates.Add(new SaveSetCandidate(CurrentSaveSetRoot, currentManifest, IsBackup: false));
+        }
+        else if (Directory.Exists(CurrentSaveSetRoot))
+        {
+            warnings.Add($"Current save-set is not loadable: {currentError}");
+        }
+
+        string backupRoot = Path.Combine(_rootDirectory, _options.BackupsDirectoryName);
+        if (!Directory.Exists(backupRoot))
+            return candidates;
+
+        foreach (string backupDirectory in Directory.EnumerateDirectories(backupRoot, "save-*"))
+        {
+            string manifestPath = Path.Combine(backupDirectory, "save_manifest.json");
+            if (TryReadManifest(manifestPath, out ServerPersistenceSaveManifest backupManifest, out string backupError))
+            {
+                candidates.Add(new SaveSetCandidate(backupDirectory, backupManifest, IsBackup: true));
+            }
+            else
+            {
+                warnings.Add($"Backup save-set '{backupDirectory}' is not loadable: {backupError}");
+            }
+        }
+
+        return candidates
+            .OrderBy(static candidate => candidate.IsBackup ? 1 : 0)
+            .ThenByDescending(static candidate => candidate.Manifest.SaveSequence)
+            .ToList();
+    }
+
+    private bool TryLoadCandidate(
+        SaveSetCandidate candidate,
+        List<string> warnings,
+        out ServerPersistenceLoadResult result)
+    {
+        Dictionary<string, ServerPersistenceArtifact> artifactsByName;
+        try
+        {
+            artifactsByName = candidate.Manifest.Artifacts.ToDictionary(
+                static artifact => artifact.Name,
+                StringComparer.Ordinal);
+        }
+        catch (ArgumentException ex)
+        {
+            warnings.Add($"Save-set '{candidate.Root}' has duplicate participant artifacts: {ex.Message}");
+            result = default!;
+            return false;
+        }
+
+        for (int i = 0; i < _participants.Length; i++)
+        {
+            IServerPersistenceParticipant participant = _participants[i];
+            if (!artifactsByName.ContainsKey(participant.Name))
+            {
+                warnings.Add($"Save-set '{candidate.Root}' is missing participant artifact '{participant.Name}'.");
+                result = default!;
+                return false;
+            }
+        }
+
+        for (int i = 0; i < _participants.Length; i++)
+        {
+            IServerPersistenceParticipant participant = _participants[i];
+            ServerPersistenceArtifact artifact = artifactsByName[participant.Name];
+
+            try
+            {
+                participant.Load(candidate.Root, candidate.Manifest.Metadata, artifact);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Save-set '{candidate.Root}' failed to load participant '{participant.Name}': {ex.Message}");
+                result = default!;
+                return false;
+            }
+        }
+
+        result = ServerPersistenceLoadResult.Loaded(
+            candidate.Root,
+            candidate.Manifest,
+            candidate.IsBackup,
+            warnings);
+        return true;
+    }
+
     private static void DeleteDirectoryIfExists(string path)
     {
         if (Directory.Exists(path))
@@ -183,4 +329,19 @@ public sealed class ServerPersistenceCoordinator
             Directory.Delete(parent);
         }
     }
+
+    private void CleanupPendingSaveSets(List<string> warnings)
+    {
+        string pendingDirectory = Path.Combine(_rootDirectory, _options.PendingDirectoryName);
+        if (!Directory.Exists(pendingDirectory))
+            return;
+
+        Directory.Delete(pendingDirectory, recursive: true);
+        warnings.Add("Removed pending save-set directory left by an interrupted save.");
+    }
+
+    private sealed record SaveSetCandidate(
+        string Root,
+        ServerPersistenceSaveManifest Manifest,
+        bool IsBackup);
 }

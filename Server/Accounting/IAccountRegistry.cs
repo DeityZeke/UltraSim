@@ -16,5 +16,7 @@ public interface IAccountRegistry
 
     IReadOnlyList<ServerAccountRecord> GetAccountsSnapshot();
 
+    void LoadSnapshot(IEnumerable<ServerAccountRecord> accounts);
+
     void Update(ServerAccountRecord account);
 }
