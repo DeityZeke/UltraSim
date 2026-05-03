@@ -24,9 +24,9 @@ public static class ServerMovementWorldApplicationFactory
             new ServerApplicationHooks
             {
                 Start = _ => runtime.Start(),
-                Load = _ => runtime.Load(),
+                Load = app => runtime.Load(app),
                 Tick = (_, deltaSeconds) => runtime.Tick(deltaSeconds),
-                Save = _ => runtime.Save(),
+                Save = app => runtime.Save(app),
                 Stop = _ => runtime.Stop(),
                 IsAcceptingConnections = _ => runtime.IsAcceptingConnections,
                 GetActiveSessions = _ => runtime.ActiveSessions,
@@ -114,7 +114,7 @@ public static class ServerMovementWorldApplicationFactory
             _host.Start();
         }
 
-        public void Load()
+        public void Load(ServerApplication app)
         {
             ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
             ServerPersistenceLoadResult result = coordinator.Load();
@@ -128,6 +128,8 @@ public static class ServerMovementWorldApplicationFactory
 
             if (result.Manifest is not null)
                 _lastSaveSequence = result.Manifest.SaveSequence;
+
+            EmitPersistenceLoadLogs(app, result);
         }
 
         public void Tick(float deltaSeconds)
@@ -141,7 +143,7 @@ public static class ServerMovementWorldApplicationFactory
             _lastPumpElapsedTicks = Stopwatch.GetTimestamp() - start;
         }
 
-        public void Save()
+        public void Save(ServerApplication app)
         {
             ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
             ServerPersistenceSaveResult result = coordinator.Save(DateTimeOffset.UtcNow);
@@ -154,6 +156,7 @@ public static class ServerMovementWorldApplicationFactory
             }
 
             _lastSaveSequence = result.Metadata.SaveSequence;
+            app.Log($"Persistence: Saved save-set sequence {result.Metadata.SaveSequence}.");
         }
 
         public void Stop()
@@ -279,6 +282,24 @@ public static class ServerMovementWorldApplicationFactory
                     new EcsWorldPersistenceParticipant(_world)
                 ],
                 initialSaveSequence: _lastSaveSequence);
+        }
+
+        private static void EmitPersistenceLoadLogs(ServerApplication app, ServerPersistenceLoadResult result)
+        {
+            for (int i = 0; i < result.Warnings.Count; i++)
+                app.Log($"Persistence: Warning: {result.Warnings[i]}");
+
+            if (result.StartedFresh)
+            {
+                app.Log("Persistence: No save-set found; starting fresh.");
+                return;
+            }
+
+            if (result.Manifest is null)
+                return;
+
+            string source = result.LoadedBackup ? "backup save-set" : "save-set";
+            app.Log($"Persistence: Loaded {source} sequence {result.Manifest.SaveSequence}.");
         }
 
         private static long SecondsToTicks(double seconds)

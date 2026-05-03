@@ -11,6 +11,7 @@ public interface IServerApplication
     void Tick(float deltaSeconds);
     void RequestSave();
     bool Save();
+    void Log(string message);
     void Stop();
     void Restart();
 

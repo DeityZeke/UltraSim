@@ -104,6 +104,14 @@ public sealed class ServerApplication : IServerApplication
         return true;
     }
 
+    public void Log(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        RaiseEvent(ServerApplicationEventKind.Log, message.Trim(), State);
+    }
+
     public void Stop()
     {
         if (State == ServerApplicationState.Stopped)

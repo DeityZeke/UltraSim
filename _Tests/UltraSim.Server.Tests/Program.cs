@@ -34,6 +34,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_Start_AutoInitializesFromCreated), ServerApplication_Start_AutoInitializesFromCreated);
         Run(nameof(ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick), ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick);
         Run(nameof(ServerApplication_Save_ExecutesImmediately), ServerApplication_Save_ExecutesImmediately);
+        Run(nameof(ServerApplication_Log_RaisesOperatorLogEvent), ServerApplication_Log_RaisesOperatorLogEvent);
         Run(nameof(ServerApplication_Stop_FromCreated_MovesDirectlyToStopped), ServerApplication_Stop_FromCreated_MovesDirectlyToStopped);
         Run(nameof(ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook), ServerApplication_Stop_WithSaveOnStop_PerformsSaveBeforeStopHook);
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
@@ -89,6 +90,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect), ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect);
         Run(nameof(ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities), ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities);
         Run(nameof(ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator), ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator);
+        Run(nameof(ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings), ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
@@ -377,6 +379,19 @@ internal static class TestRunner
         Assert.True(result);
         Assert.Equal(1, saves);
         Assert.Equal(ServerApplicationState.Running, app.State);
+    }
+
+    private static void ServerApplication_Log_RaisesOperatorLogEvent()
+    {
+        ServerApplicationEvent? observed = null;
+        var app = new ServerApplication(new ServerApplicationOptions("test"));
+        app.EventRaised += evt => observed = evt;
+
+        app.Log("  operator note  ");
+
+        Assert.True(observed.HasValue);
+        Assert.Equal(ServerApplicationEventKind.Log, observed.GetValueOrDefault().Kind);
+        Assert.Equal("operator note", observed.GetValueOrDefault().Message);
     }
 
     private static void ServerApplication_Stop_FromCreated_MovesDirectlyToStopped()
@@ -3218,6 +3233,41 @@ internal static class TestRunner
 
         Assert.Contains("\"saveSequence\": 2", File.ReadAllText(manifestPath));
         Assert.Equal(1, Directory.GetDirectories(Path.Combine(persistenceRoot, "backups"), "save-*").Length);
+    }
+
+    private static void ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings()
+    {
+        using ServerTestRuntimeRoot root = ServerTestRuntimeRoot.Create();
+        string persistenceRoot = Path.Combine(root.Path, "saves");
+
+        IServerApplication first = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+            "persistence-warning-test",
+            Port: 0,
+            SaveOnStop: false,
+            EnableAsyncFlush: false,
+            PersistenceRoot: persistenceRoot));
+        first.Initialize();
+        Assert.True(first.Save());
+        Assert.True(first.Save());
+
+        Directory.CreateDirectory(Path.Combine(persistenceRoot, ".pending", "interrupted-save"));
+        File.WriteAllText(Path.Combine(persistenceRoot, "current", "save_manifest.json"), "{ broken json");
+
+        var observed = new List<ServerApplicationEvent>();
+        IServerApplication second = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+            "persistence-warning-test",
+            Port: 0,
+            SaveOnStop: false,
+            EnableAsyncFlush: false,
+            PersistenceRoot: persistenceRoot));
+        second.EventRaised += observed.Add;
+        second.Start();
+        second.Stop();
+
+        string logText = string.Join('\n', observed.Where(static evt => evt.Kind == ServerApplicationEventKind.Log).Select(static evt => evt.Message));
+        Assert.Contains("Persistence: Warning: Removed pending save-set", logText);
+        Assert.Contains("Persistence: Warning: Current save-set is not loadable", logText);
+        Assert.Contains("Persistence: Loaded backup save-set sequence 1.", logText);
     }
 
     private static void ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient()
