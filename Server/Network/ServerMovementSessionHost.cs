@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Accounting;
 using UltraSim.Server.Admission;
 using UltraSim.Server.Scripting;
 
@@ -31,6 +32,7 @@ public sealed class ServerMovementSessionHost
     private readonly SessionLifecycleEvent[] _sessionEvents;
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
     private readonly Dictionary<ConnectionId, uint> _networkEntityIdByConnection = new();
+    private readonly Dictionary<ConnectionId, ServerSelectedCharacterSession> _selectedCharactersByConnection = new();
     private readonly HashSet<ConnectionId> _pendingAdmissionStarts = new();
 
     public ServerMovementSessionHost(
@@ -128,6 +130,53 @@ public sealed class ServerMovementSessionHost
     public bool TryGetBoundEntity(ConnectionId connectionId, out Entity entity)
     {
         return _entityByConnection.TryGetValue(connectionId, out entity);
+    }
+
+    public bool TryGetSelectedCharacter(
+        ConnectionId connectionId,
+        out ServerSelectedCharacterSession selectedCharacter)
+    {
+        return _selectedCharactersByConnection.TryGetValue(connectionId, out selectedCharacter!);
+    }
+
+    public bool TryEnterWorld(ConnectionId connectionId, ServerCharacterRecord character)
+    {
+        ArgumentNullException.ThrowIfNull(character);
+        if (!_entityByConnection.TryGetValue(connectionId, out Entity currentEntity) ||
+            !_networkEntityIdByConnection.TryGetValue(connectionId, out uint networkEntityId))
+        {
+            return false;
+        }
+
+        Entity sessionEntity = currentEntity;
+        bool usedPrefabEntity = false;
+        if (_world.TryCreatePrefab(character.PrefabKey, out Entity prefabEntity))
+        {
+            _movement.Unbind(connectionId);
+            if (_despawnSession is not null)
+            {
+                _despawnSession(_world, connectionId, currentEntity);
+            }
+            else if (_world.Entities.IsAlive(currentEntity))
+            {
+                _world.Destroy(currentEntity);
+            }
+
+            sessionEntity = prefabEntity;
+            usedPrefabEntity = true;
+            _entityByConnection[connectionId] = sessionEntity;
+            _movement.Bind(connectionId, sessionEntity, networkEntityId);
+        }
+
+        _selectedCharactersByConnection[connectionId] = new ServerSelectedCharacterSession(
+            connectionId,
+            character.AccountId,
+            character.CharacterId,
+            character.Name,
+            character.PrefabKey,
+            sessionEntity,
+            usedPrefabEntity);
+        return true;
     }
 
     public void Start() => _control.Start();
@@ -361,6 +410,7 @@ public sealed class ServerMovementSessionHost
                     _subscriptions.RemoveConnection(evt.ConnectionId);
                     _entityByConnection.Remove(evt.ConnectionId);
                     _networkEntityIdByConnection.Remove(evt.ConnectionId);
+                    _selectedCharactersByConnection.Remove(evt.ConnectionId);
                     _pendingAdmissionStarts.Remove(evt.ConnectionId);
                     _despawnSession?.Invoke(_world, evt.ConnectionId, entity);
                     if (_despawnSession is null && _world.Entities.IsAlive(entity))

@@ -34,7 +34,8 @@ single-owner assignment for its start event, not `+=` accumulation.
 Non-credential buttons route through explicit action routes on the active step.
 For example, the default character select step maps `character_select.create` to
 `admission.character_create_requested`, while its row-level play action maps to
-`admission.character_selected`. These routes are data on the step, not hardcoded
+`admission.enter_world`. The character create submit action also maps to
+`admission.enter_world`. These routes are data on the step, not hardcoded
 in the network or UI renderer.
 
 Dynamic data comes from the server runtime policy, not from the static script

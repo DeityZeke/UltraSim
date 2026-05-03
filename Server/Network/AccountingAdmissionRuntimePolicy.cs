@@ -5,6 +5,10 @@ using UltraSim.UI;
 
 namespace UltraSim.Server.Network;
 
+public delegate bool AccountingAdmissionCharacterBinder(
+    ConnectionId connectionId,
+    ServerCharacterRecord character);
+
 public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
 {
     public const string CharacterSelectPanelType = "admission.character_select";
@@ -13,19 +17,23 @@ public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
     public const string CharacterSelectRowNameSlotId = "character_select.row.name";
     public const string CharacterSelectRowSummarySlotId = "character_select.row.summary";
     public const string CharacterSelectStatusSlotId = "character_select.status";
+    public const string CharacterSelectPlayActionId = "character_select.play";
     public const string CharacterCreateNameSlotId = "character_create.name";
     public const string CharacterCreateTemplateSlotId = "character_create.template";
     public const string CharacterCreateStatusSlotId = "character_create.status";
     public const string CharacterCreateSubmitActionId = "character_create.submit";
 
     private readonly AccountCharacterService _characters;
+    private readonly AccountingAdmissionCharacterBinder? _bindCharacter;
     private readonly Func<DateTimeOffset> _clock;
 
     public AccountingAdmissionRuntimePolicy(
         AccountCharacterService characters,
+        AccountingAdmissionCharacterBinder? bindCharacter = null,
         Func<DateTimeOffset>? clock = null)
     {
         _characters = characters ?? throw new ArgumentNullException(nameof(characters));
+        _bindCharacter = bindCharacter;
         _clock = clock ?? (static () => DateTimeOffset.UtcNow);
     }
 
@@ -81,6 +89,12 @@ public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
     public AdmissionActionRouteResult EvaluateActionRoute(AdmissionActionRouteContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        if (string.Equals(context.State.SchemaIdentity.PanelType, CharacterSelectPanelType, StringComparison.Ordinal) &&
+            string.Equals(context.Request.ActionId, CharacterSelectPlayActionId, StringComparison.Ordinal))
+        {
+            return EvaluateCharacterPlay(context);
+        }
+
         if (!string.Equals(context.State.SchemaIdentity.PanelType, CharacterCreatePanelType, StringComparison.Ordinal) ||
             !string.Equals(context.Request.ActionId, CharacterCreateSubmitActionId, StringComparison.Ordinal))
         {
@@ -99,9 +113,50 @@ public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
             name,
             prefabKey,
             _clock());
-        return result.Succeeded
+        if (!result.Succeeded || result.Character is null)
+            return AdmissionActionRouteResult.StayOnStep(CharacterCreateStatusSlotId, result.Error);
+
+        return TryBindCharacter(context.ConnectionId, result.Character)
             ? AdmissionActionRouteResult.Complete(context.Route.CompletesWithEvent)
-            : AdmissionActionRouteResult.StayOnStep(CharacterCreateStatusSlotId, result.Error);
+            : AdmissionActionRouteResult.StayOnStep(CharacterCreateStatusSlotId, "Character could not enter the world.");
+    }
+
+    private AdmissionActionRouteResult EvaluateCharacterPlay(AdmissionActionRouteContext context)
+    {
+        if (context.State.AccountId == 0)
+        {
+            return AdmissionActionRouteResult.StayOnStep(CharacterSelectStatusSlotId, "Login session expired.");
+        }
+
+        if (!ulong.TryParse(context.Request.ContextId, out ulong characterId) || characterId == 0)
+        {
+            return AdmissionActionRouteResult.StayOnStep(CharacterSelectStatusSlotId, "Choose a character.");
+        }
+
+        ServerCharacterRecord? selected = null;
+        IReadOnlyList<ServerCharacterRecord> characters = _characters.GetCharactersForAccount(context.State.AccountId);
+        for (int i = 0; i < characters.Count; i++)
+        {
+            if (characters[i].CharacterId == characterId)
+            {
+                selected = characters[i];
+                break;
+            }
+        }
+
+        if (selected is null)
+        {
+            return AdmissionActionRouteResult.StayOnStep(CharacterSelectStatusSlotId, "Character is not available.");
+        }
+
+        return TryBindCharacter(context.ConnectionId, selected)
+            ? AdmissionActionRouteResult.Complete(context.Route.CompletesWithEvent)
+            : AdmissionActionRouteResult.StayOnStep(CharacterSelectStatusSlotId, "Character could not enter the world.");
+    }
+
+    private bool TryBindCharacter(ConnectionId connectionId, ServerCharacterRecord character)
+    {
+        return _bindCharacter?.Invoke(connectionId, character) ?? true;
     }
 
     private static string GetStringField(UiActionRequestDocument request, string slotId)

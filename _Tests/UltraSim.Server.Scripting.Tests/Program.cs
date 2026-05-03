@@ -112,8 +112,10 @@ internal static class TestRunner
         Assert.True(selectStep.TryGetActionRoute("character_select.create", UiActionContextKind.Panel, out UltraSimScriptAdmissionActionRouteDescriptor createRoute));
         Assert.Equal("admission.character_create_requested", createRoute.CompletesWithEvent);
         Assert.True(selectStep.TryGetActionRoute("character_select.play", UiActionContextKind.Row, out UltraSimScriptAdmissionActionRouteDescriptor playRoute));
-        Assert.Equal("admission.character_selected", playRoute.CompletesWithEvent);
+        Assert.Equal("admission.enter_world", playRoute.CompletesWithEvent);
         Assert.True(context.TryGetAdmissionStep("admission.character_create_requested", out UltraSimScriptAdmissionFlowStepDescriptor createStep));
+        Assert.True(createStep.TryGetActionRoute("character_create.submit", UiActionContextKind.Panel, out UltraSimScriptAdmissionActionRouteDescriptor submitRoute));
+        Assert.Equal("admission.enter_world", submitRoute.CompletesWithEvent);
         Assert.True(createStep.TryGetActionRoute("character_create.cancel", UiActionContextKind.Panel, out UltraSimScriptAdmissionActionRouteDescriptor cancelRoute));
         Assert.Equal("admission.login_verified", cancelRoute.CompletesWithEvent);
         Assert.Equal("admission.login", loginProvider.Provider().Schema.Identity.PanelType);

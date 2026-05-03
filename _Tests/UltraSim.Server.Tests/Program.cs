@@ -2923,8 +2923,21 @@ internal static class TestRunner
         var connectionId = new ConnectionId(1);
         var builder = new EcsSchemaBuilder();
         ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
-        World world = new(builder.Build());
         ArchetypeSignature signature = new([movementId]);
+        var prefabCatalog = new PrefabCatalog();
+        prefabCatalog.Add(
+            "mobiles/human/female",
+            PrefabDefinition.Create(
+                signature,
+                (archetype, slot) => archetype.GetComponentSpan<ServerEcsMovementBody>(movementId)[slot] = new ServerEcsMovementBody(15f, 5f, 0f, 0f)));
+        prefabCatalog.Add(
+            "mobiles/human/male",
+            PrefabDefinition.Create(
+                signature,
+                (archetype, slot) => archetype.GetComponentSpan<ServerEcsMovementBody>(movementId)[slot] = new ServerEcsMovementBody(25f, 7f, 0f, 0f)));
+        World world = new(
+            builder.Build(),
+            new EcsWorldServices { PrefabResolver = prefabCatalog });
         using var pair = new LoopbackTransportPair();
         pair.Server.Start();
         pair.Client.Start();
@@ -2964,7 +2977,7 @@ internal static class TestRunner
             "admission.panel.character_create",
             ActionRoutes:
             [
-                new UltraSimScriptAdmissionActionRouteDescriptor("character_create.submit", "admission.character_created"),
+                new UltraSimScriptAdmissionActionRouteDescriptor("character_create.submit", "admission.enter_world"),
                 new UltraSimScriptAdmissionActionRouteDescriptor("character_create.cancel", "admission.login_verified")
             ])));
 
@@ -3010,7 +3023,8 @@ internal static class TestRunner
             remoteAddressResolver: static _ => "127.0.0.1",
             sessionKeyResolver: static connection => $"connection:{connection.Value}",
             clock: static () => new DateTimeOffset(2026, 5, 2, 12, 1, 0, TimeSpan.Zero)));
-        var serverHost = new ServerMovementSessionHost(
+        ServerMovementSessionHost? serverHost = null;
+        serverHost = new ServerMovementSessionHost(
             world,
             pair.Server,
             ApplyMovementInput,
@@ -3021,6 +3035,8 @@ internal static class TestRunner
             admissionCredentialValidator: credentialValidator,
             admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(
                 characterService,
+                bindCharacter: (selectedConnection, selectedCharacter) =>
+                    serverHost?.TryEnterWorld(selectedConnection, selectedCharacter) ?? false,
                 clock: static () => new DateTimeOffset(2026, 5, 2, 12, 2, 0, TimeSpan.Zero)));
         var openedPanels = new List<UiPanelOpenDocument>();
         var modelUpdates = new List<UiModelUpdateDocument>();
@@ -3185,6 +3201,13 @@ internal static class TestRunner
         IReadOnlyList<ServerCharacterRecord> accountCharacters = characterService.GetCharactersForAccount(account.AccountId);
         Assert.Equal(2, accountCharacters.Count);
         Assert.True(accountCharacters.Any(character => character.Name == "Borin" && character.PrefabKey == "mobiles/human/male"));
+        Assert.True(serverHost.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected));
+        Assert.Equal("Borin", selected.CharacterName);
+        Assert.Equal("mobiles/human/male", selected.PrefabKey);
+        Assert.True(selected.UsedPrefabEntity);
+        Assert.True(world.TryGetComponent(selected.Entity, out ServerEcsMovementBody selectedBody));
+        Assert.Equal(25f, selectedBody.PositionX);
+        Assert.Equal(7f, selectedBody.PositionY);
         Assert.Equal(3L, serverHost.ScriptBinding.Admission.CompletedSteps);
     }
 

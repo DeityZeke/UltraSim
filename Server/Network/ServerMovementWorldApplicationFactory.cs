@@ -115,7 +115,9 @@ public static class ServerMovementWorldApplicationFactory
                 handshakePolicy: handshakePolicy,
                 sessionPolicy: sessionPolicy,
                 scriptContext: _options.ScriptContext,
-                admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(new AccountCharacterService(_accounts, _characters)),
+                admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(
+                    new AccountCharacterService(_accounts, _characters),
+                    bindCharacter: TryBindSelectedCharacter),
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }
@@ -238,11 +240,13 @@ public static class ServerMovementWorldApplicationFactory
             for (int i = 0; i < count; i++)
             {
                 ConnectionId connectionId = connections[i];
+                bool hasSelected = host.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected);
                 players[i] = new ServerPlayerSessionSnapshot(
                     connectionId.Value.ToString(),
-                    $"Player {connectionId.Value}",
-                    "local",
-                    "Ready");
+                    hasSelected ? selected.CharacterName : $"Player {connectionId.Value}",
+                    hasSelected ? selected.AccountId.ToString() : "local",
+                    hasSelected ? "InWorld" : "Ready",
+                    hasSelected ? $"character={selected.CharacterId} prefab={selected.PrefabKey}" : string.Empty);
             }
 
             return players;
@@ -299,6 +303,11 @@ public static class ServerMovementWorldApplicationFactory
             float y = MathF.Floor(spawnIndex / 16) * 1.5f;
             world.SetComponent(entity, new ServerMovementBody(x, y, 0f, 0f));
             return new ServerMovementSessionSpawn(entity, networkEntityId);
+        }
+
+        private bool TryBindSelectedCharacter(ConnectionId connectionId, ServerCharacterRecord character)
+        {
+            return _host?.TryEnterWorld(connectionId, character) ?? false;
         }
 
         private ServerPersistenceCoordinator CreatePersistenceCoordinator()

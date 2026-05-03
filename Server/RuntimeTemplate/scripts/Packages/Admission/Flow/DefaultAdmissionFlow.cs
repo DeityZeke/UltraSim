@@ -25,7 +25,7 @@ public static class DefaultAdmissionFlow
             [
                 new UltraSimScriptAdmissionActionRouteDescriptor(
                     AdmissionPanels.CharacterSelectPlayActionId,
-                    AdmissionFlowEvents.CharacterSelected,
+                    AdmissionFlowEvents.EnterWorld,
                     UiActionContextKind.Row),
                 new UltraSimScriptAdmissionActionRouteDescriptor(
                     AdmissionPanels.CharacterSelectCreateActionId,
@@ -41,7 +41,7 @@ public static class DefaultAdmissionFlow
             [
                 new UltraSimScriptAdmissionActionRouteDescriptor(
                     AdmissionPanels.CharacterCreateSubmitActionId,
-                    AdmissionFlowEvents.CharacterCreated),
+                    AdmissionFlowEvents.EnterWorld),
                 new UltraSimScriptAdmissionActionRouteDescriptor(
                     AdmissionPanels.CharacterCreateCancelActionId,
                     AdmissionFlowEvents.LoginVerified)
