@@ -1,6 +1,7 @@
 using UltraSim.ECS;
 using UltraSim.Server;
 using UltraSim.Server.Scripting;
+using UltraSim.UI;
 
 TestRunner.Run();
 
@@ -107,6 +108,14 @@ internal static class TestRunner
         Assert.True(context.TryGetAdmissionStep("admission.client_connected", out UltraSimScriptAdmissionFlowStepDescriptor loginStep));
         Assert.Equal("admission.panel.login", loginStep.PanelProviderKey);
         Assert.Equal("admission.login_verified", loginStep.CompletesWithEvent);
+        Assert.True(context.TryGetAdmissionStep("admission.login_verified", out UltraSimScriptAdmissionFlowStepDescriptor selectStep));
+        Assert.True(selectStep.TryGetActionRoute("character_select.create", UiActionContextKind.Panel, out UltraSimScriptAdmissionActionRouteDescriptor createRoute));
+        Assert.Equal("admission.character_create_requested", createRoute.CompletesWithEvent);
+        Assert.True(selectStep.TryGetActionRoute("character_select.play", UiActionContextKind.Row, out UltraSimScriptAdmissionActionRouteDescriptor playRoute));
+        Assert.Equal("admission.character_selected", playRoute.CompletesWithEvent);
+        Assert.True(context.TryGetAdmissionStep("admission.character_create_requested", out UltraSimScriptAdmissionFlowStepDescriptor createStep));
+        Assert.True(createStep.TryGetActionRoute("character_create.cancel", UiActionContextKind.Panel, out UltraSimScriptAdmissionActionRouteDescriptor cancelRoute));
+        Assert.Equal("admission.login_verified", cancelRoute.CompletesWithEvent);
         Assert.Equal("admission.login", loginProvider.Provider().Schema.Identity.PanelType);
         Assert.Equal("admission.character_select", selectProvider.Provider().Schema.Identity.PanelType);
         Assert.Equal("admission.character_create", createProvider.Provider().Schema.Identity.PanelType);

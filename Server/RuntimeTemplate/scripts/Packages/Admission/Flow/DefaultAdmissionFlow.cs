@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UltraSim.Server.Scripting;
+using UltraSim.UI;
 
 namespace UltraSim.Scripts.Packages.Admission;
 
@@ -19,12 +20,28 @@ public static class DefaultAdmissionFlow
             AdmissionFlowEvents.LoginVerified,
             AdmissionFlowEvents.CharacterSelected,
             AdmissionPanelProviderKeys.CharacterSelect,
-            Priority: 0),
+            Priority: 0,
+            ActionRoutes:
+            [
+                new UltraSimScriptAdmissionActionRouteDescriptor(
+                    AdmissionPanels.CharacterSelectPlayActionId,
+                    AdmissionFlowEvents.CharacterSelected,
+                    UiActionContextKind.Row),
+                new UltraSimScriptAdmissionActionRouteDescriptor(
+                    AdmissionPanels.CharacterSelectCreateActionId,
+                    AdmissionFlowEvents.CharacterCreateRequested)
+            ]),
         new UltraSimScriptAdmissionFlowStepDescriptor(
             "admission.default.character_create",
             AdmissionFlowEvents.CharacterCreateRequested,
             AdmissionFlowEvents.CharacterCreated,
             AdmissionPanelProviderKeys.CharacterCreate,
-            Priority: 0)
+            Priority: 0,
+            ActionRoutes:
+            [
+                new UltraSimScriptAdmissionActionRouteDescriptor(
+                    AdmissionPanels.CharacterCreateCancelActionId,
+                    AdmissionFlowEvents.LoginVerified)
+            ])
     ];
 }

@@ -12,6 +12,7 @@ Current scope:
 
 - Per-connection active admission state.
 - Script-registered flow steps from `IUltraSimScriptAdmissionRegistry`.
+- Explicit action routes on active steps for non-credential panel actions.
 - Single-owner replacement semantics through the script registry.
 - A narrow `IAdmissionCredentialValidator` seam.
 - A dev/test `AcceptAllAdmissionCredentialValidator` until the accounting engine

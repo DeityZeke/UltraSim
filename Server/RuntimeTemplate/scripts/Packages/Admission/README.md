@@ -31,6 +31,12 @@ password values through generic `UiActionRequestDocument.FieldValues`.
 local step by emitting the configured completion event. Replacing a step is a
 single-owner assignment for its start event, not `+=` accumulation.
 
+Non-credential buttons route through explicit action routes on the active step.
+For example, the default character select step maps `character_select.create` to
+`admission.character_create_requested`, while its row-level play action maps to
+`admission.character_selected`. These routes are data on the step, not hardcoded
+in the network or UI renderer.
+
 The first runtime implementation validates trusted credential actions through a
 narrow credential-validator seam. The default validator is a test/dev stub; the
 accounting engine owns the real validator when account storage is rebuilt.

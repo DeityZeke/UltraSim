@@ -11,4 +11,5 @@ public sealed record SessionAdmissionState(
     UiSchemaIdentity SchemaIdentity,
     UiCatalogIdentity? CatalogIdentity,
     string WaitingForEvent,
-    IReadOnlySet<string> TrustedCredentialActionIds);
+    IReadOnlySet<string> TrustedCredentialActionIds,
+    ulong AccountId = 0);

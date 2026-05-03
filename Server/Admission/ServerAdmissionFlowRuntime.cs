@@ -95,7 +95,10 @@ public sealed class ServerAdmissionFlowRuntime
             panel.Schema.Actions
                 .Where(static action => action.ContextKind == UiActionContextKind.TrustedCredential)
                 .Select(static action => action.ActionId)
-                .ToHashSet(StringComparer.Ordinal));
+                .ToHashSet(StringComparer.Ordinal),
+            AccountId: _statesByConnection.TryGetValue(connectionId, out SessionAdmissionState? previous)
+                ? previous.AccountId
+                : 0);
         FiredEvents++;
         OpenedPanels++;
         return true;
@@ -116,19 +119,7 @@ public sealed class ServerAdmissionFlowRuntime
             return false;
         }
 
-        _statesByConnection.Remove(connectionId);
-        CompletedSteps++;
-        if (TryFireEvent(connectionId, completedEvent, out string nextError))
-            return true;
-
-        if (nextError.StartsWith("No admission step is registered", StringComparison.Ordinal))
-        {
-            error = string.Empty;
-            return true;
-        }
-
-        error = nextError;
-        return false;
+        return CompleteCurrentStep(connectionId, state, completedEvent, out error);
     }
 
     public void ProcessUiAction(ConnectionId connectionId, UiActionRequestDocument request)
@@ -140,7 +131,17 @@ public sealed class ServerAdmissionFlowRuntime
             return;
 
         if (request.ContextKind != UiActionContextKind.TrustedCredential)
+        {
+            if (request.ContextKind == UiActionContextKind.Row &&
+                string.IsNullOrWhiteSpace(request.ContextId))
+            {
+                return;
+            }
+
+            if (state.Step.TryGetActionRoute(request.ActionId, request.ContextKind, out UltraSimScriptAdmissionActionRouteDescriptor route))
+                CompleteCurrentStep(connectionId, state, route.CompletesWithEvent, out _);
             return;
+        }
 
         if (!state.TrustedCredentialActionIds.Contains(request.ActionId))
             return;
@@ -154,7 +155,7 @@ public sealed class ServerAdmissionFlowRuntime
             return;
         }
 
-        TryCompleteCurrentStep(connectionId, state.WaitingForEvent, out _);
+        CompleteCurrentStep(connectionId, state with { AccountId = validation.AccountId }, state.WaitingForEvent, out _);
     }
 
     public void ProcessCredential(ConnectionId connectionId, AdmissionCredentialRequest request)
@@ -178,7 +179,33 @@ public sealed class ServerAdmissionFlowRuntime
             return;
         }
 
-        TryCompleteCurrentStep(connectionId, state.WaitingForEvent, out _);
+        CompleteCurrentStep(connectionId, state with { AccountId = validation.AccountId }, state.WaitingForEvent, out _);
+    }
+
+    private bool CompleteCurrentStep(
+        ConnectionId connectionId,
+        SessionAdmissionState state,
+        string completedEvent,
+        out string error)
+    {
+        error = string.Empty;
+        _statesByConnection.Remove(connectionId);
+        CompletedSteps++;
+        if (TryFireEvent(connectionId, completedEvent, out string nextError))
+        {
+            if (_statesByConnection.TryGetValue(connectionId, out SessionAdmissionState? nextState))
+                _statesByConnection[connectionId] = nextState with { AccountId = state.AccountId };
+            return true;
+        }
+
+        if (nextError.StartsWith("No admission step is registered", StringComparison.Ordinal))
+        {
+            error = string.Empty;
+            return true;
+        }
+
+        error = nextError;
+        return false;
     }
 
     private void TryPublishCredentialFailure(

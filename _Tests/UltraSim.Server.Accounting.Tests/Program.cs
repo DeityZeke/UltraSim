@@ -486,7 +486,7 @@ internal static class TestRunner
         DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
         var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
         var accounts = new InMemoryAccountRegistry();
-        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), now);
+        ServerAccountRecord account = accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), now);
         var validator = new AccountingAdmissionCredentialValidator(
             CreateService(accounts, passwords),
             remoteAddressResolver: static _ => "127.0.0.1",
@@ -503,6 +503,7 @@ internal static class TestRunner
                 "swordfish"u8.ToArray()));
 
         Assert.True(result.Accepted);
+        Assert.Equal(account.AccountId, result.AccountId);
     }
 
     private static void AccountingAdmissionCredentialValidator_RejectsGenericUiActionAndWrongMaterial()

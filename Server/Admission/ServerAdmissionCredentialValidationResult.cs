@@ -3,14 +3,21 @@ namespace UltraSim.Server.Admission;
 public readonly record struct ServerAdmissionCredentialValidationResult(
     bool Accepted,
     AdmissionCredentialFailureReason FailureReason,
-    string Error)
+    string Error,
+    ulong AccountId = 0)
 {
     public static ServerAdmissionCredentialValidationResult Accept()
+    {
+        return Accept(0);
+    }
+
+    public static ServerAdmissionCredentialValidationResult Accept(ulong accountId)
     {
         return new ServerAdmissionCredentialValidationResult(
             true,
             AdmissionCredentialFailureReason.None,
-            string.Empty);
+            string.Empty,
+            accountId);
     }
 
     public static ServerAdmissionCredentialValidationResult Reject(string error)
@@ -28,6 +35,7 @@ public readonly record struct ServerAdmissionCredentialValidationResult(
         return new ServerAdmissionCredentialValidationResult(
             false,
             reason,
-            string.IsNullOrWhiteSpace(error) ? "Rejected." : error);
+            string.IsNullOrWhiteSpace(error) ? "Rejected." : error,
+            0);
     }
 }

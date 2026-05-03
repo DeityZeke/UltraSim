@@ -2941,6 +2941,7 @@ internal static class TestRunner
         var scriptContext = new DefaultUltraSimScriptContext(runtimeRoot);
         Assert.True(scriptContext.UiPanels.RegisterPanelProvider("admission.panel.login", CreateTestAdmissionLoginPanel));
         Assert.True(scriptContext.UiPanels.RegisterPanelProvider("admission.panel.character_select", CreateTestAdmissionCharacterSelectPanel));
+        Assert.True(scriptContext.UiPanels.RegisterPanelProvider("admission.panel.character_create", CreateTestAdmissionCharacterCreatePanel));
         Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
             "test.login",
             ServerAdmissionFlowRuntime.DefaultClientConnectedEvent,
@@ -2951,7 +2952,20 @@ internal static class TestRunner
             "test.character_select",
             "admission.login_verified",
             "admission.character_selected",
-            "admission.panel.character_select")));
+            "admission.panel.character_select",
+            ActionRoutes:
+            [
+                new UltraSimScriptAdmissionActionRouteDescriptor("character_select.create", "admission.character_create_requested")
+            ])));
+        Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
+            "test.character_create",
+            "admission.character_create_requested",
+            "admission.character_created",
+            "admission.panel.character_create",
+            ActionRoutes:
+            [
+                new UltraSimScriptAdmissionActionRouteDescriptor("character_create.cancel", "admission.login_verified")
+            ])));
 
         void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
         {
@@ -2977,7 +2991,7 @@ internal static class TestRunner
             RequiredFeatures: FeatureFlags.SharedPayloadFanout);
         var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
         var accounts = new InMemoryAccountRegistry();
-        accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), new DateTimeOffset(2026, 5, 2, 12, 0, 0, TimeSpan.Zero));
+        ServerAccountRecord account = accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), new DateTimeOffset(2026, 5, 2, 12, 0, 0, TimeSpan.Zero));
         var credentialValidator = new CountingAdmissionCredentialValidator(new AccountingAdmissionCredentialValidator(
             new DefaultCredentialService(
                 accounts,
@@ -3077,10 +3091,33 @@ internal static class TestRunner
         Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState selectState));
         Assert.Equal(characterSelect.PanelInstanceId, selectState.PanelInstanceId);
         Assert.Equal("admission.character_selected", selectState.WaitingForEvent);
+        Assert.Equal(account.AccountId, selectState.AccountId);
         Assert.Equal(1L, serverHost.ScriptBinding.Admission.CompletedSteps);
         Assert.Equal(2L, serverHost.ScriptBinding.Admission.OpenedPanels);
         Assert.Equal(2, credentialValidator.PacketValidationCount);
         Assert.True(credentialValidator.LastPacketAccepted);
+
+        var createAction = new UiActionRequestDocument(
+            characterSelect.PanelInstanceId,
+            characterSelect.SchemaIdentity,
+            characterSelect.CatalogIdentity,
+            1,
+            "character_select.create",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues: []);
+        Assert.True(clientHost.TrySendUiAction(createAction));
+
+        serverHost.Pump(240, 0.016f, 23);
+        clientHost.Pump(241);
+
+        UiPanelOpenDocument characterCreate = openedPanels.Last(panel => panel.SchemaIdentity.PanelType == "admission.character_create");
+        Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState createState));
+        Assert.Equal(characterCreate.PanelInstanceId, createState.PanelInstanceId);
+        Assert.Equal("admission.character_created", createState.WaitingForEvent);
+        Assert.Equal(account.AccountId, createState.AccountId);
+        Assert.Equal(2L, serverHost.ScriptBinding.Admission.CompletedSteps);
+        Assert.Equal(3L, serverHost.ScriptBinding.Admission.OpenedPanels);
     }
 
     private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()
@@ -3670,6 +3707,23 @@ internal static class TestRunner
                     column.DynamicText("character_select.title", "Title", "Select Character");
                     column.DynamicText("character_select.status", "Status", "Account accepted.");
                     column.Button("character_select.create", "Create", UiActionRole.Primary);
+                });
+            })
+            .Build();
+    }
+
+    private static UiBuiltPanel CreateTestAdmissionCharacterCreatePanel()
+    {
+        return UiPanelBuilder
+            .Create("server/admission/test", "admission.character_create", 1)
+            .Panel(panel =>
+            {
+                panel.Column(column =>
+                {
+                    column.DynamicText("character_create.title", "Title", "Create Character");
+                    column.TextInput("character_create.name", "Name", "", maxStringLength: 64);
+                    column.Button("character_create.cancel", "Back", UiActionRole.Normal);
+                    column.Button("character_create.submit", "Create", UiActionRole.Primary);
                 });
             })
             .Build();

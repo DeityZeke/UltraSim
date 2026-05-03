@@ -65,7 +65,7 @@ public sealed class AccountingAdmissionCredentialValidator : IAdmissionCredentia
             materialKind);
         CredentialValidationResult result = _provider.ValidateLogin(validationRequest);
         return result.Succeeded
-            ? ServerAdmissionCredentialValidationResult.Accept()
+            ? ServerAdmissionCredentialValidationResult.Accept(result.Account?.AccountId ?? 0)
             : ServerAdmissionCredentialValidationResult.Reject(
                 MapFailureReason(result.Kind),
                 result.PublicMessage);
