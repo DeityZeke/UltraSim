@@ -23,6 +23,10 @@ Current scope:
   `ServerApplicationHooks.Load` / `Save`; shell `save`, deferred save requests,
   save-on-stop, and startup load all use the same save-set path when the movement
   world application is enabled.
+- The movement server exposes a `Persistence` system runtime snapshot with the
+  last save sequence, load source, warning count, failure count, and current
+  save-set path in its detail field, so operator/admin status views can surface
+  persistence state without a dedicated persistence UI.
 - Load runs participants in registration order, so account/character state can
   be restored before world entities that may reference account or character ids.
 - Startup recovery is conservative:
@@ -43,3 +47,21 @@ This is intentionally the coordination layer above the existing pieces:
 
 Dirty flushing, async writes, operator recovery prompts, and richer retention
 policies should layer on top of this save-set contract.
+
+## Operator status snapshot
+
+Movement-world server applications expose persistence health through the existing
+`ServerSystemRuntimeSnapshot` stream instead of a separate persistence-specific
+status API. The snapshot uses:
+
+- `Name = "Persistence"` and `Stage = "Persistence"`.
+- `Manual = true`, because persistence is triggered by load/save hooks rather
+  than a fixed per-tick system.
+- `UpdateCount` as the last completed save sequence.
+- `ControlCount` as the warning count from the last load.
+- `Detail` as a compact operator string:
+  `sequence=<n> load=<fresh|current|backup> warnings=<n> failures=<n> path=<current-save-root>`.
+
+Admin panels should treat this as status text, not as a command surface. Recovery
+actions such as restoring a backup or discarding a corrupt current save-set should
+be explicit operator commands layered on top of the coordinator.

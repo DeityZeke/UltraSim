@@ -161,6 +161,7 @@ public sealed class ServerPersistenceCoordinator
         }
 
         Directory.Move(pendingRoot, current);
+        DeleteEmptyParentDirectory(pendingRoot);
     }
 
     private void PruneBackups(string backupRoot)
@@ -321,7 +322,12 @@ public sealed class ServerPersistenceCoordinator
     private static void DeletePendingSaveSet(string pendingRoot)
     {
         DeleteDirectoryIfExists(pendingRoot);
-        string? parent = Path.GetDirectoryName(pendingRoot);
+        DeleteEmptyParentDirectory(pendingRoot);
+    }
+
+    private static void DeleteEmptyParentDirectory(string childPath)
+    {
+        string? parent = Path.GetDirectoryName(childPath);
         if (!string.IsNullOrWhiteSpace(parent) &&
             Directory.Exists(parent) &&
             !Directory.EnumerateFileSystemEntries(parent).Any())

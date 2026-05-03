@@ -47,6 +47,11 @@ public static class ServerMovementWorldApplicationFactory
         private uint _nextNetworkEntityId = 1;
         private uint _serverTick;
         private ulong _lastSaveSequence;
+        private bool _lastLoadStartedFresh;
+        private bool _lastLoadUsedBackup;
+        private int _lastPersistenceWarningCount;
+        private int _lastPersistenceFailureCount;
+        private string _lastPersistencePath = string.Empty;
         private long _lastPumpElapsedTicks;
 
         public Runtime(ServerMovementWorldApplicationOptions options)
@@ -128,6 +133,11 @@ public static class ServerMovementWorldApplicationFactory
 
             if (result.Manifest is not null)
                 _lastSaveSequence = result.Manifest.SaveSequence;
+            _lastLoadStartedFresh = result.StartedFresh;
+            _lastLoadUsedBackup = result.LoadedBackup;
+            _lastPersistenceWarningCount = result.Warnings.Count;
+            _lastPersistenceFailureCount = result.Failures.Count;
+            _lastPersistencePath = result.SaveSetRoot ?? coordinator.CurrentSaveSetRoot;
 
             EmitPersistenceLoadLogs(app, result);
         }
@@ -149,6 +159,8 @@ public static class ServerMovementWorldApplicationFactory
             ServerPersistenceSaveResult result = coordinator.Save(DateTimeOffset.UtcNow);
             if (!result.Succeeded)
             {
+                _lastPersistenceFailureCount = result.Failures.Count == 0 ? 1 : result.Failures.Count;
+                _lastPersistencePath = coordinator.CurrentSaveSetRoot;
                 string message = result.Failures.Count == 0
                     ? "Server persistence save failed."
                     : string.Join("; ", result.Failures.Select(static failure => $"{failure.ParticipantName}: {failure.Message}"));
@@ -156,6 +168,8 @@ public static class ServerMovementWorldApplicationFactory
             }
 
             _lastSaveSequence = result.Metadata.SaveSequence;
+            _lastPersistenceFailureCount = 0;
+            _lastPersistencePath = coordinator.CurrentSaveSetRoot;
             app.Log($"Persistence: Saved save-set sequence {result.Metadata.SaveSequence}.");
         }
 
@@ -177,8 +191,8 @@ public static class ServerMovementWorldApplicationFactory
             double lastMilliseconds = _lastPumpElapsedTicks <= 0
                 ? 0d
                 : _lastPumpElapsedTicks * 1000d / Stopwatch.Frequency;
-            return new[]
-            {
+            return
+            [
                 new ServerSystemRuntimeSnapshot(
                     "NetworkSession",
                     "Network",
@@ -193,7 +207,22 @@ public static class ServerMovementWorldApplicationFactory
                     PeakUpdateMilliseconds: lastMilliseconds,
                     MinUpdateMilliseconds: lastMilliseconds,
                     ControlCount: ActiveSessions),
-            };
+                new ServerSystemRuntimeSnapshot(
+                    "Persistence",
+                    "Persistence",
+                    Enabled: true,
+                    Manual: true,
+                    PeriodTicks: 0,
+                    StartOffset: 0,
+                    LastRunTick: _serverTick,
+                    UpdateCount: _lastSaveSequence > long.MaxValue ? long.MaxValue : (long)_lastSaveSequence,
+                    LastUpdateMilliseconds: 0d,
+                    AverageUpdateMilliseconds: 0d,
+                    PeakUpdateMilliseconds: 0d,
+                    MinUpdateMilliseconds: 0d,
+                    ControlCount: _lastPersistenceWarningCount,
+                    Detail: BuildPersistenceDetail()),
+            ];
         }
 
         public IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot()
@@ -282,6 +311,19 @@ public static class ServerMovementWorldApplicationFactory
                     new EcsWorldPersistenceParticipant(_world)
                 ],
                 initialSaveSequence: _lastSaveSequence);
+        }
+
+        private string BuildPersistenceDetail()
+        {
+            string path = string.IsNullOrWhiteSpace(_lastPersistencePath)
+                ? CreatePersistenceCoordinator().CurrentSaveSetRoot
+                : _lastPersistencePath;
+            string mode = _lastLoadStartedFresh
+                ? "fresh"
+                : _lastLoadUsedBackup
+                    ? "backup"
+                    : "current";
+            return $"sequence={_lastSaveSequence} load={mode} warnings={_lastPersistenceWarningCount} failures={_lastPersistenceFailureCount} path={path}";
         }
 
         private static void EmitPersistenceLoadLogs(ServerApplication app, ServerPersistenceLoadResult result)

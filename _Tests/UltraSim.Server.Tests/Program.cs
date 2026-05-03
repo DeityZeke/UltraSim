@@ -199,7 +199,8 @@ internal static class TestRunner
             AverageUpdateMilliseconds: 0.5,
             PeakUpdateMilliseconds: 1.5,
             MinUpdateMilliseconds: 0.1,
-            ControlCount: 2);
+            ControlCount: 2,
+            Detail: "zone=island-a");
 
         Assert.Equal("Movement", snapshot.Name);
         Assert.Equal("Movement", snapshot.Stage);
@@ -214,6 +215,7 @@ internal static class TestRunner
         Assert.Equal(1.5, snapshot.PeakUpdateMilliseconds);
         Assert.Equal(0.1, snapshot.MinUpdateMilliseconds);
         Assert.Equal(2, snapshot.ControlCount);
+        Assert.Equal("zone=island-a", snapshot.Detail);
     }
 
     private static void ServerPlayerSessionSnapshot_PreservesSuppliedValues()
@@ -3229,10 +3231,16 @@ internal static class TestRunner
             PersistenceRoot: persistenceRoot));
         second.Start();
         Assert.True(second.Save());
+        IReadOnlyList<ServerSystemRuntimeSnapshot> secondSystems = second.GetSystemRuntimeSnapshots();
         second.Stop();
 
         Assert.Contains("\"saveSequence\": 2", File.ReadAllText(manifestPath));
         Assert.Equal(1, Directory.GetDirectories(Path.Combine(persistenceRoot, "backups"), "save-*").Length);
+        ServerSystemRuntimeSnapshot persistence = secondSystems.First(snapshot => snapshot.Name == "Persistence");
+        Assert.Equal(2L, persistence.UpdateCount);
+        Assert.Equal(0, persistence.ControlCount);
+        Assert.Contains("sequence=2", persistence.Detail);
+        Assert.Contains("load=current", persistence.Detail);
     }
 
     private static void ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings()
@@ -3262,12 +3270,17 @@ internal static class TestRunner
             PersistenceRoot: persistenceRoot));
         second.EventRaised += observed.Add;
         second.Start();
+        ServerSystemRuntimeSnapshot persistence = second.GetSystemRuntimeSnapshots().First(snapshot => snapshot.Name == "Persistence");
         second.Stop();
 
         string logText = string.Join('\n', observed.Where(static evt => evt.Kind == ServerApplicationEventKind.Log).Select(static evt => evt.Message));
         Assert.Contains("Persistence: Warning: Removed pending save-set", logText);
         Assert.Contains("Persistence: Warning: Current save-set is not loadable", logText);
         Assert.Contains("Persistence: Loaded backup save-set sequence 1.", logText);
+        Assert.Equal(1L, persistence.UpdateCount);
+        Assert.Equal(2, persistence.ControlCount);
+        Assert.Contains("load=backup", persistence.Detail);
+        Assert.Contains("warnings=2", persistence.Detail);
     }
 
     private static void ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient()

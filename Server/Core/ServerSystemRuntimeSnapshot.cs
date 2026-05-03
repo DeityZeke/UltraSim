@@ -13,4 +13,5 @@ public readonly record struct ServerSystemRuntimeSnapshot(
     double AverageUpdateMilliseconds,
     double PeakUpdateMilliseconds,
     double MinUpdateMilliseconds,
-    int ControlCount);
+    int ControlCount,
+    string Detail = "");
