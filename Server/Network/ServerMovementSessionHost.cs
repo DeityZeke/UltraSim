@@ -25,6 +25,10 @@ public sealed class ServerMovementSessionHost
     private readonly ServerScriptRuntimeBinding? _scriptBinding;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
+    private readonly ServerCharacterPositionProjector? _characterPositionProjector;
+    private readonly ServerCharacterPositionApplier? _characterPositionApplier;
+    private readonly ServerSelectedCharacterSnapshotWriter? _selectedCharacterSnapshotWriter;
+    private readonly Func<DateTimeOffset> _snapshotClock;
     private readonly bool _enableGlobalMovementObserverState;
     private readonly SubscriptionKey _globalMovementObserverScope;
     private readonly InboundDatagram[] _inboundScratch;
@@ -42,6 +46,10 @@ public sealed class ServerMovementSessionHost
         ServerEcsMovementStateProjector projectState,
         ServerMovementSessionSpawner spawnSession,
         ServerMovementSessionDespawner? despawnSession = null,
+        ServerCharacterPositionProjector? characterPositionProjector = null,
+        ServerCharacterPositionApplier? characterPositionApplier = null,
+        ServerSelectedCharacterSnapshotWriter? selectedCharacterSnapshotWriter = null,
+        Func<DateTimeOffset>? snapshotClock = null,
         HandshakePolicy handshakePolicy = default,
         SessionAdmissionPolicy sessionPolicy = default,
         ServerMovementOwnerCorrectionPolicy ownerCorrectionPolicy = default,
@@ -92,6 +100,10 @@ public sealed class ServerMovementSessionHost
         }
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
+        _characterPositionProjector = characterPositionProjector;
+        _characterPositionApplier = characterPositionApplier;
+        _selectedCharacterSnapshotWriter = selectedCharacterSnapshotWriter;
+        _snapshotClock = snapshotClock ?? (static () => DateTimeOffset.UtcNow);
         _enableGlobalMovementObserverState = enableGlobalMovementObserverState;
         _globalMovementObserverScope = globalMovementObserverScope.IsValid
             ? globalMovementObserverScope
@@ -168,6 +180,7 @@ public sealed class ServerMovementSessionHost
             _movement.Bind(connectionId, sessionEntity, networkEntityId);
         }
 
+        _characterPositionApplier?.Invoke(_world, sessionEntity, character.Position);
         _selectedCharactersByConnection[connectionId] = new ServerSelectedCharacterSession(
             connectionId,
             character.AccountId,
@@ -405,6 +418,7 @@ public sealed class ServerMovementSessionHost
 
                 if (_entityByConnection.TryGetValue(evt.ConnectionId, out Entity entity))
                 {
+                    TrySnapshotSelectedCharacter(evt.ConnectionId, entity);
                     _movement.Unbind(evt.ConnectionId);
                     _sessionRuntime.UnbindConnection(evt.ConnectionId);
                     _subscriptions.RemoveConnection(evt.ConnectionId);
@@ -421,6 +435,22 @@ public sealed class ServerMovementSessionHost
                     _control.Sessions.TryRemoveDisconnected(evt.SessionId, nowTicks);
             }
         }
+    }
+
+    private bool TrySnapshotSelectedCharacter(ConnectionId connectionId, Entity entity)
+    {
+        if (!_selectedCharactersByConnection.TryGetValue(connectionId, out ServerSelectedCharacterSession? selected) ||
+            _characterPositionProjector is null ||
+            _selectedCharacterSnapshotWriter is null ||
+            !_world.Entities.IsAlive(entity))
+        {
+            return false;
+        }
+
+        if (!_characterPositionProjector(_world, entity, out CharacterPositionSnapshot position))
+            return false;
+
+        return _selectedCharacterSnapshotWriter(connectionId, selected, position, _snapshotClock());
     }
 
     private void ProcessChatInbound(ReadOnlySpan<InboundDatagram> inbound, long nowTicks, uint serverTick)

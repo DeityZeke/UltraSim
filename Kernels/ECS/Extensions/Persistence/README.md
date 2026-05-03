@@ -31,11 +31,19 @@ Current intentional limits:
   - a narrow single-stream binary adapter on top of that model
 - `IDataReader` / `IDataWriter` remain minimal adapter seams
 - system persistence still uses only the existing `SystemBase.Serialize/Deserialize` hooks
-- broader multi-file save-set/manifest work is still deferred
-- component versioned bit-level serialization now has a working `BitWriter` / `BitReader` base, but broader schema/version database work is still deferred
+- multi-file save-set/manifest coordination now lives above this extension in
+  `Server/Persistence`; the ECS extension remains responsible for world
+  snapshot/restore and component binary serialization only
+- component versioned bit-level serialization now has a working `BitWriter` /
+  `BitReader` base, but broader schema/version database work is still deferred
+- a future source-generator pass should generate component serializers,
+  migration content records, and admin metadata from annotated component fields;
+  that generated output should feed this component persistence layer, not create
+  entity classes or bypass ECS dirty tracking
 
 Expected future work:
 
 - system-owned state persistence
-- richer type/version databases and manifest work
+- richer component type/version databases
+- source-generated component serializer and migration scaffolding
 - broader file-backed save/load pipelines

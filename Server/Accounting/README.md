@@ -32,6 +32,10 @@ Current first-pass scope:
   `AccountCharacterService` to publish character-select rows and create
   character records from the server-authored admission panels. Accounting owns
   the records and validation; admission owns the flow state.
+- Selected character position snapshots are restored when the movement host
+  enters the world and updated on disconnect through host-provided
+  projection/apply delegates. Accounting stores the stable record; the movement
+  host decides how live ECS position is projected into that record.
 - Accounting persistence snapshot and first JSON store:
   - `AccountingPersistenceSnapshot` captures immutable account + character
     records from registries.

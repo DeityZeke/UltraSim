@@ -1,6 +1,8 @@
 # Server Script Compiler And Runtime Layout Plan
 
-Purpose: define the RunUO-style server script compiler, exported server folder layout, and source-controlled runtime template before login, character flow, inventory viewers, crafting, vendors, and admin panels move into server-authored content.
+Purpose: define and maintain the RunUO-style server script compiler, exported
+server folder layout, and source-controlled runtime template used by
+server-authored admission, UI, prefab, and future gameplay content.
 
 This is server startup/plugin infrastructure. It is not part of the UI kernel, not part of the client patch stream, and not a way to send executable code to clients.
 
@@ -599,6 +601,63 @@ The live authoring path should be auditable:
 
 This feature is intentionally future work. The first script compiler slice should not implement it. The script compiler and prefab facade should simply avoid decisions that would make data-authored live prefabs second-class later.
 
+## Future ECS Component Serialization Generation
+
+ModernUO's source-generated serialization pattern is a useful reference, but
+UltraSim should adapt it to ECS components rather than copying an `Item` /
+`Mobile` object model.
+
+The likely UltraSim shape is:
+
+```csharp
+[EcsComponentPersistence(version: 1)]
+public partial record struct WeaponState
+{
+    [PersistentField(0)]
+    [AdminEditable(AccessLevel.GameMaster)]
+    public int Durability { get; init; }
+
+    [PersistentField(1)]
+    [AdminEditable(AccessLevel.GameMaster)]
+    public int PoisonCharges { get; init; }
+}
+```
+
+The generated output should target component serializers, migration content
+records, admin/edit metadata, and dirty/edit helper metadata. It should not
+generate entity classes or a parallel script object hierarchy.
+
+The entity save shape should remain component-oriented:
+
+```text
+EntityId
+PrefabKey / archetype key
+Component: ItemIdentity v0
+Component: InventoryItem v0
+Component: WeaponData v2
+Component: WeaponState v1
+```
+
+Rules to preserve:
+
+- prefabs are spawn templates; existing entities save as component data
+- dirty tracking comes from `World.SetComponent(...)` and ECS mutation paths, not
+  arbitrary property setters on live objects
+- component field indices are stable and versioned
+- adding/removing/retyping persistent fields requires a component version bump
+- migrations should be explicit, such as `MigrateFrom(V0Content content)`
+- type aliases can map renamed component types for old saves
+- after-load hooks should restart timers or rebuild derived state through ECS
+  systems or server bridge lifecycle, not inside low-level deserialization loops
+- generated admin metadata can power inspector panels and live content builders
+  without making the UI kernel know gameplay types
+
+This should start with compiled core/gameplay components after the current
+save-set coordinator and binary ECS persistence format stabilize. Script-compiled
+components can use the same idea later, but source generators inside the Roslyn
+script compile/cache path are a second moving part and should not block the
+first production persistence path.
+
 ## Cache Location
 
 Default generated compiler output should live outside `scripts/`:
@@ -694,21 +753,27 @@ Do not silently keep accepting actions against stale provider instances after re
 
 Scripts should compile against stable server APIs, not arbitrary project internals.
 
-The first `IUltraSimScriptContext` should stay deliberately small:
+`IUltraSimScriptContext` should stay deliberately small and grow through explicit
+facades:
 
 - logging
 - command registration
 - UI panel provider registration
-- definition registries only as they are intentionally introduced
+- definition registries for intentionally exposed archetype/prefab authoring
 - server/runtime metadata that is safe for scripts to read
 
-Do not expose accounts, inventory, networking, persistence, or direct ECS world mutation in slice 1. Add each of those later through deliberate facades when a feature needs them.
+Do not expose accounts, inventory, networking, persistence, or direct ECS world
+mutation through the script context by default. Add each of those later through
+deliberate facades when a feature needs them. The existing archetype/prefab
+facade exposes descriptor registration, not arbitrary live world mutation.
 
 Initial reference set should include:
 
 - `UltraSim.Server.Core`
 - server script API assembly, if split out later
 - `UltraSim.UI` for schema contracts/builders that are explicitly safe for scripts
+- `UltraSim.ECS` only through stable component/prefab authoring contracts that
+  the script compiler deliberately references
 - server-side UI service/glue interfaces, exposed through a stable facade
 - inventory/server inventory facades once gameplay inventory panels are scripted
 - selected BCL assemblies
@@ -797,44 +862,33 @@ plugins/
 
 That future system needs capability registration, version compatibility, restart-only load rules, and a clearer trust boundary. It should not block the first script compiler.
 
-## First Implementation Slice
+## Implemented Script Runtime Baseline
 
-Keep the first proof small.
+The first script compiler/runtime proof is implemented:
 
-1. Add runtime-root resolver shared by headless, console, and Godot server shells.
-2. Add runtime template folders and README.
-3. Add script compiler service with:
-   - source discovery from `scripts/**/*.cs`
-   - Roslyn compile
-   - structured diagnostics
-   - cache manifest
-   - cache hit/miss result
-4. Add minimal script API/context:
-   - logging
-   - command or startup registration
-   - UI panel provider registration using `UiPanelBuilder`
-   - no accounts/inventory/network/persistence/direct-world facades yet
-5. Add one script-authored message/admin panel.
-6. Add tests:
-   - compile success
-   - compile failure diagnostics
-   - compile-failure startup/smoke proves the server fails fast with structured diagnostics
-   - warning-as-error option defaults off but can fail compile when enabled
-   - cache hit after clean second compile
-   - cache miss after source change
-   - corrupt cache or failed cached assembly load falls back to clean compile
-   - generated output stays under `cache/scripts`, not `scripts`
-   - script compile does not create or modify `saves`, `backups`, or runtime world files
-   - script trying to reference Godot fails unless a future explicit server-side Godot reference mode is intentionally added
-   - script registration discovery
-   - script-authored UI panel opens through existing server UI service
-7. Add a headless/console smoke:
-   - disposable runtime root
-   - template scripts copied in
-   - compile succeeds
-   - startup logs script compile phase
+- runtime-root/template folder creation
+- source discovery from `scripts/**/*.cs`
+- Roslyn compile with structured diagnostics
+- content/reference/options/API/compiler-version cache manifest
+- clean cache hits and source-change cache misses
+- corrupt cache fallback to clean compile
+- warning-as-error option
+- startup phase summary with real warning/error/module/definition counts
+- `IUltraSimScriptModule` discovery with `Configure` and `Initialize`
+- script command registration
+- script UI panel provider registration through `UiPanelBuilder`
+- admission package panels and replaceable admission steps under
+  `RuntimeTemplate/scripts/Packages/Admission`
+- archetype/prefab descriptor authoring through script facades
+- `BaseMobile -> BaseHumanoid -> Human` stock mobile chain and `mobiles/human`
+  prefab
+- prefab class-name keys with source-name diagnostics
+- per-spawn random value factories evaluated at entity spawn time
+- ECS prefab catalog bridge and `/spawn <prefab-key>` proof
+- live loopback proof for script command dispatch, script panel open, admission
+  flow, character creation, and script-authored prefab spawning
 
-The first runtime binding should prove that registrations are not just counted at startup:
+The runtime binding proves that registrations are not just counted at startup:
 
 - script commands are registered into the live `ServerCommandRegistry` used by chat/console command dispatch
 - script UI panel providers are openable through the existing `ServerUiService`
@@ -842,7 +896,8 @@ The first runtime binding should prove that registrations are not just counted a
 - opening a script panel must still use the normal server-driven UI packet path and normal per-connection UI scope
 - provider build failures should reply with a structured error and must not crash the session host
 
-This binding is still deliberately narrow. It does not expose inventory, accounts, persistence, or direct ECS world mutation to scripts.
+This binding is still deliberately narrow. It does not expose inventory,
+accounts, persistence, or direct ECS world mutation to scripts.
 
 ## Security Boundary
 

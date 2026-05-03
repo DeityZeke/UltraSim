@@ -401,7 +401,10 @@ The client should expose stable protocol/UI/content/presentation hooks that serv
 
 Future live content builders, such as an in-game item/prefab designer, should save validated data-authored prefab descriptors through server registries rather than generating C# or using script cache output. The client UI can provide the authoring surface, but scripts/plugins/core code still define new executable behavior and new component types.
 
-Implementation gate: once the minimal server-driven UI path is live end-to-end (builder-authored server panel opens on the Godot client and button actions route back to the server), pause before expanding into login, character select/create, inventory, crafting, vendors, and admin menus. At that point, plan, implement, and test the server-side C# script compiler/runtime setup.
+Implementation gate: complete. The minimal server-driven UI path reached the
+builder-authored live smoke, and the server-side C# script compiler/runtime setup
+now exists before login, character select/create, inventory, crafting, vendors,
+and admin menus expand further.
 
 Canonical plan: [Server Script Compiler And Runtime Layout Plan](../Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md).
 
@@ -886,17 +889,17 @@ First UI benchmark report:
 Current client/Godot bridge status:
 
 - `Client/UI/ClientUiPanelRegistry` opens panels through the in-memory definition cache, retains validated schema and compatibility context per instance, validates action requests, and applies full/patch/repeater model updates with sequence tracking.
-- `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` is the first minimal renderer bridge. It renders `Panel`, `Row`, `Column`, static `Text`, model-backed `DynamicText`, `Button`, `Separator`, and `Spacer` nodes from a validated `ClientUiPanelInstance`; unsupported node kinds degrade to inert placeholders.
+- `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` now renders the normal menu/settings vocabulary: `Panel`, `Row`, `Column`, `Group`, `Section`, `ScrollRegion`, `Tabs`, `Pager`, static `Text`, model-backed `DynamicText`, `Image`, `Button`, `IconButton`, `Separator`, `Spacer`, `TextInput`, trusted password-style `TextInput`, `NumberInput`, `Toggle`, `Slider`, `Stepper`, `Select`, `RadioGroup`, `CheckboxGroup`, `Repeater`, and `Table`; unsupported node kinds degrade to inert placeholders.
 - `MenuCanvasManager` can mount, replace, close, and clear server-driven panels on separate menu/modal/exclusive lanes.
 - Godot buttons bound with `ActionId` produce validated client action route results through `ClientUiPanelRegistry.ValidateActionRequest`.
-- The local Godot smoke flag `--us-smoke-server-ui-message-box` cold-opens a server-driven message-box schema, mounts it into the menu lane, verifies model-backed dynamic text, and presses the rendered OK button through validated action routing. This is a renderer/client-runtime smoke, not yet a network UI packet smoke.
+- The local Godot smoke flag `--us-smoke-server-ui-message-box` cold-opens a server-driven message-box schema, mounts it into the menu lane, verifies model-backed dynamic text, and presses the rendered OK button through validated action routing.
+- The live loopback path now proves server UI open, client receipt/render, client action, and server receipt over the real reliable event path.
 
 Next G6/UI steps:
 
-1. Add renderer-side model update/re-render or diff application for open instances.
-2. Add UI open/action packet routing over the live client/server network path, then upgrade the local message-box smoke into a true server-to-client smoke.
-3. Add the first narrow server-side panel builder API and prove a builder-authored message box over the live path.
-4. Before expanding into login/character/inventory/crafting/admin panels, plan, implement, and test the RunUO-style server script compiler/runtime setup described above.
-5. Add server-driven tooltip/context menu rendering after basic panel action flow and script-hosted panel registration are proven.
+1. Wire the Godot-side trusted login handler so username/password controls send the dedicated credential packet instead of test-built credentials.
+2. Continue admission panel polish for character select/create/delete on top of the server-authored package.
+3. Add richer tooltip presentation and inventory viewer surfaces after the login/character path is human-usable.
+4. Keep discovery/portal integration and official registry adapter separate from local/manual discovery polish.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.

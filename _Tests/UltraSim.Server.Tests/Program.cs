@@ -3025,6 +3025,19 @@ internal static class TestRunner
             ApplyMovementInput,
             ProjectMovementState,
             SpawnSession,
+            characterPositionProjector: ProjectAdmissionCharacterPosition,
+            characterPositionApplier: ApplyAdmissionCharacterPosition,
+            selectedCharacterSnapshotWriter: (snapshotConnection, selectedCharacter, position, nowUtc) =>
+            {
+                _ = snapshotConnection;
+                return characterService.TryUpdateCharacterSnapshot(
+                    selectedCharacter.CharacterId,
+                    nowUtc,
+                    selectedCharacter.PrefabKey,
+                    position,
+                    out ServerCharacterRecord _);
+            },
+            snapshotClock: static () => new DateTimeOffset(2026, 5, 2, 12, 3, 0, TimeSpan.Zero),
             handshakePolicy: handshakePolicy,
             scriptContext: scriptContext,
             admissionCredentialValidator: credentialValidator,
@@ -3201,9 +3214,27 @@ internal static class TestRunner
         Assert.Equal("mobiles/human", selected.PrefabKey);
         Assert.True(selected.UsedPrefabEntity);
         Assert.True(world.TryGetComponent(selected.Entity, out ServerEcsMovementBody selectedBody));
-        Assert.Equal(25f, selectedBody.PositionX);
-        Assert.Equal(7f, selectedBody.PositionY);
+        Assert.Equal(0f, selectedBody.PositionX);
+        Assert.Equal(0f, selectedBody.PositionY);
         Assert.Equal(3L, serverHost.ScriptBinding.Admission.CompletedSteps);
+
+        selectedBody = selectedBody with
+        {
+            PositionX = 40f,
+            PositionY = 9f,
+            VelocityX = 1f,
+            VelocityY = 2f,
+        };
+        Assert.True(world.SetComponent(selected.Entity, selectedBody));
+        Assert.True(clientHost.SendDisconnectNotice(SessionDisconnectReason.Closed, 300));
+        serverHost.Pump(301, 0.016f, 26);
+
+        Assert.Equal(0, serverHost.BoundConnectionCount);
+        Assert.False(serverHost.TryGetSelectedCharacter(connectionId, out _));
+        ServerCharacterRecord savedBorin = characterService.GetCharactersForAccount(account.AccountId)
+            .Single(character => character.Name == "Borin");
+        Assert.Equal(new CharacterPositionSnapshot(40f, 9f, 0f, 0f), savedBorin.Position);
+        Assert.Equal(new DateTimeOffset(2026, 5, 2, 12, 3, 0, TimeSpan.Zero), savedBorin.LastPlayedUtc);
     }
 
     private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()
@@ -3813,6 +3844,39 @@ internal static class TestRunner
                 });
             })
             .Build();
+    }
+
+    private static bool ProjectAdmissionCharacterPosition(
+        World movementWorld,
+        Entity movementEntity,
+        out CharacterPositionSnapshot position)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body))
+        {
+            position = default;
+            return false;
+        }
+
+        position = new CharacterPositionSnapshot(body.PositionX, body.PositionY, 0f, 0f);
+        return true;
+    }
+
+    private static bool ApplyAdmissionCharacterPosition(
+        World movementWorld,
+        Entity movementEntity,
+        CharacterPositionSnapshot position)
+    {
+        if (!movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body))
+            return false;
+
+        body = body with
+        {
+            PositionX = position.X,
+            PositionY = position.Y,
+            VelocityX = 0f,
+            VelocityY = 0f,
+        };
+        return movementWorld.SetComponent(movementEntity, body);
     }
 
     private static int PollUntilNonZero<TState>(Func<TState, int> poll, TState state, int maxAttempts)

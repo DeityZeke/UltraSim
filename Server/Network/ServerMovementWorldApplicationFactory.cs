@@ -43,6 +43,7 @@ public static class ServerMovementWorldApplicationFactory
         private readonly ArchetypeSignature _playerSignature;
         private readonly InMemoryAccountRegistry _accounts = new();
         private readonly InMemoryCharacterRegistry _characters = new();
+        private readonly AccountCharacterService _characterService;
         private UdpSocketNetworkTransport? _transport;
         private ServerMovementSessionHost? _host;
         private uint _nextNetworkEntityId = 1;
@@ -58,6 +59,7 @@ public static class ServerMovementWorldApplicationFactory
         public Runtime(ServerMovementWorldApplicationOptions options)
         {
             _options = options;
+            _characterService = new AccountCharacterService(_accounts, _characters);
             var builder = new EcsSchemaBuilder();
             ComponentId movementId = builder.RegisterComponent<ServerMovementBody>();
             PrefabCatalog? scriptPrefabCatalog = null;
@@ -113,11 +115,14 @@ public static class ServerMovementWorldApplicationFactory
                 ProjectMovementState,
                 SpawnSession,
                 DespawnSession,
+                ProjectCharacterPosition,
+                ApplyCharacterPosition,
+                WriteSelectedCharacterSnapshot,
                 handshakePolicy: handshakePolicy,
                 sessionPolicy: sessionPolicy,
                 scriptContext: _options.ScriptContext,
                 admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(
-                    new AccountCharacterService(_accounts, _characters),
+                    _characterService,
                     bindCharacter: TryBindSelectedCharacter),
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
@@ -295,6 +300,39 @@ public static class ServerMovementWorldApplicationFactory
             return true;
         }
 
+        private static bool ProjectCharacterPosition(
+            World world,
+            Entity entity,
+            out CharacterPositionSnapshot position)
+        {
+            if (!world.TryGetComponent(entity, out ServerMovementBody body))
+            {
+                position = default;
+                return false;
+            }
+
+            position = new CharacterPositionSnapshot(body.PositionX, body.PositionY, 0f, 0f);
+            return true;
+        }
+
+        private static bool ApplyCharacterPosition(
+            World world,
+            Entity entity,
+            CharacterPositionSnapshot position)
+        {
+            if (!world.TryGetComponent(entity, out ServerMovementBody body))
+                return false;
+
+            body = body with
+            {
+                PositionX = position.X,
+                PositionY = position.Y,
+                VelocityX = 0f,
+                VelocityY = 0f,
+            };
+            return world.SetComponent(entity, body);
+        }
+
         private ServerMovementSessionSpawn SpawnSession(World world, ConnectionId connectionId)
         {
             uint networkEntityId = _nextNetworkEntityId++;
@@ -309,6 +347,20 @@ public static class ServerMovementWorldApplicationFactory
         private bool TryBindSelectedCharacter(ConnectionId connectionId, ServerCharacterRecord character)
         {
             return _host?.TryEnterWorld(connectionId, character) ?? false;
+        }
+
+        private bool WriteSelectedCharacterSnapshot(
+            ConnectionId connectionId,
+            ServerSelectedCharacterSession selectedCharacter,
+            CharacterPositionSnapshot position,
+            DateTimeOffset nowUtc)
+        {
+            return _characterService.TryUpdateCharacterSnapshot(
+                selectedCharacter.CharacterId,
+                nowUtc,
+                selectedCharacter.PrefabKey,
+                position,
+                out _);
         }
 
         private ServerPersistenceCoordinator CreatePersistenceCoordinator()

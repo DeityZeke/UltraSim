@@ -21,6 +21,7 @@ Current default host tick rate:
 - movement-world session defaults are `5s` auth timeout and `10s` ready keepalive timeout; silent UDP clients are unbound and removed by the shared session host
 - graceful movement-world shutdown sends explicit server-disconnect control notices before closing transport
 - clean movement client exits send explicit client-disconnect control notices so the shared movement host unbinds/despawns immediately
+- selected character sessions snapshot their current movement position on disconnect before the entity is unbound/despawned, then restore that snapshot on the next world entry
 - Godot server smokes can use `--us-smoke-require-empty-sessions` to fail if active movement sessions remain bound at smoke quit, with `--us-smoke-empty-session-grace=seconds` to wait through disconnect cleanup
 
 Current `Server/Network` state:

@@ -427,6 +427,13 @@ Admin UI should show definition origin and editability. A script-authored prefab
 
 The builder UI should reflect server-side authoring rules: duplicate prefab keys are hard errors, only registered client/server assets should be selectable, assets can declare compatible base archetype categories, and edit mode should be protected by a server-held edit lease so two staff users do not overwrite each other. Save should report validation, dangling-reference, collision, and stale-revision diagnostics directly in the panel.
 
+Future ModernUO-style serialization generation should feed this metadata path by
+annotating ECS component fields, not entity classes. Generated component
+serializers, migration records, command/admin edit descriptors, and tooltip
+invalidation hints can make admin inspectors and live builders richer, but the
+UI still consumes descriptors and model values. It should not know about
+concrete C# component types or generated serializer methods.
+
 ### Composite Helpers
 
 Composite helpers are authoring sugar only. They should not become new protocol primitives unless they need unique renderer behavior.
@@ -1442,7 +1449,7 @@ The schema work needed for that:
 
 ### UI-3B: Server Script Compiler Gate
 
-After the minimal renderer, live UI open/action packet path, and first builder-authored message-box smoke are working, pause before login/character/menu expansion to plan, implement, and test the server-side C# script compiler/runtime setup.
+Status: complete. After the minimal renderer, live UI open/action packet path, and first builder-authored message-box smoke were working, the project paused and implemented the server-side C# script compiler/runtime setup before expanding login/character/menu content.
 
 Canonical plan: [Server Script Compiler And Runtime Layout Plan](../Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md).
 

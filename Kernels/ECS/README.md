@@ -159,8 +159,10 @@ Current practical status:
   - no richer prefab import/catalog pipeline yet,
 - persistence work is now partially landed but still intentionally narrow:
   - in-memory snapshot capture/restore exists,
-  - file-backed save/load adapters do not,
-  - manifest/type-database/versioning work is still deferred,
+  - a narrow binary world save/load adapter exists,
+  - server-level save-set manifest/recovery work exists above the kernel in
+    `Server/Persistence`,
+  - richer component type-database/versioning work is still deferred,
 - the main remaining competitive gaps are now concentrated in a narrow destroy/dirty-drain path set rather than in core architecture.
 
 Accepted current tradeoffs:
@@ -172,7 +174,8 @@ Accepted current tradeoffs:
 Still intentionally deferred:
 
 - broader prefab runtime work beyond the current startup slice,
-- broader persistence runtime/file-format work beyond the current startup slice,
+- richer component persistence versioning and generated serializer tooling beyond
+  the current binary adapter,
 - broader integration helpers and higher-level tooling.
 
 ## Phase 2 Prefabs
@@ -233,12 +236,16 @@ Current persistence policy:
 - the current slice now includes both:
   - an in-memory grouped entity snapshot/restore path,
   - a narrow single-stream binary save/load adapter built on that snapshot shape,
+- server-level save-set manifests, backup rotation, participant ordering, and
+  recovery policy now live in `Server/Persistence` above this extension,
 - restore currently appends compatible persistent entities into a target world and marks restored components dirty.
 
 Still deferred for later Phase 2 slices:
 
-- richer type-database and manifest work,
+- richer component type/version database work,
 - deeper versioned component serialization beyond the current in-memory shape,
+- source-generated component serializer/migration scaffolding for annotated ECS
+  components,
 - broader system-owned persistence tooling.
 
 ## Scheduler Guidance

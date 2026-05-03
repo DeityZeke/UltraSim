@@ -11,8 +11,10 @@ Current focus:
 - Godot client shell validation on the rebuilt network/runtime shape
 - direct-connect movement/chat/observer smoke against the current server
 - restoring old v2 client features cleanly on top of the new runtime boundaries
-- preparing the content/cache and server-driven UI schema path for login and character flow
-- after the live server-driven UI message-box path works, plan, implement, and test the RunUO-style server C# script compiler before expanding into login/character/inventory/crafting/admin panel content
+- wiring the Godot-side login and character flow to the now-working
+  server-driven admission/accounting path
+- continuing server-driven UI schema/rendering slices before inventory,
+  crafting, vendor, and admin panel content grows on top
 
 Schema/admin UI planning:
 
@@ -69,10 +71,17 @@ What now exists:
   - first server-driven UI renderer bridge:
     - `MenuCanvasManager` hosts server-driven menu, modal, and exclusive surface lanes separately
     - validated open panel instances can mount into Godot controls
-    - initial renderer supports `Panel`, `Row`, `Column`, `Text`, `DynamicText`, `Button`, `Separator`, and `Spacer`
+    - renderer supports core layout/content/control nodes: `Panel`, `Row`,
+      `Column`, `Group`, `Section`, `ScrollRegion`, `Tabs`, `Pager`, `Text`,
+      `DynamicText`, `Image`, `Button`, `IconButton`, `Separator`, `Spacer`,
+      `TextInput`, trusted password-style `TextInput`, `NumberInput`, `Toggle`,
+      `Slider`, `Stepper`, `Select`, `RadioGroup`, `CheckboxGroup`, `Repeater`,
+      and `Table`
     - unsupported node kinds degrade to inert placeholders instead of crashing older clients
     - button presses route through the retained panel instance and `ClientUiPanelRegistry.ValidateActionRequest`
-    - repeaters, inventory viewers, tooltips, and network send callbacks are intentionally deferred to the next renderer slices
+    - context/radial action menus have a Godot renderer path
+    - inventory viewers and richer tooltip presentation are intentionally
+      deferred to their dedicated slices
 
 Current benchmark note:
 

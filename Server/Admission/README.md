@@ -18,8 +18,9 @@ Current scope:
   character creation before an action route advances.
 - Single-owner replacement semantics through the script registry.
 - A narrow `IAdmissionCredentialValidator` seam.
-- A dev/test `AcceptAllAdmissionCredentialValidator` until the accounting engine
-  supplies real username/password/session policy validation.
+- A dev/test `AcceptAllAdmissionCredentialValidator` for isolated flow tests.
+- The default movement server wires an accounting-backed admission policy and
+  credential validator for real account, character, and world-entry behavior.
 
 The real credential path must remain packet-bound and trusted. Password or
 challenge-response data must not travel through generic UI field values.

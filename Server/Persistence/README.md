@@ -19,6 +19,11 @@ Current scope:
   the staged save-set.
 - `EcsWorldPersistenceParticipant` writes the current ECS binary world snapshot
   into the staged save-set.
+- ECS component serialization is still owned by `Kernels/ECS/Extensions/Persistence`.
+  A future source-generator pass should generate component serializers,
+  migration records, and admin metadata for component structs; the server
+  coordinator should continue to treat that as one participant inside the
+  save-set rather than becoming a component serializer itself.
 - The movement server factory now wires this coordinator into
   `ServerApplicationHooks.Load` / `Save`; shell `save`, deferred save requests,
   save-on-stop, and startup load all use the same save-set path when the movement

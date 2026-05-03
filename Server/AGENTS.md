@@ -81,6 +81,10 @@ Important rules:
 - data-authored prefabs must register into the same ECS prefab/runtime registries as script-authored prefabs; they may compose existing registered components/archetype descriptors, but new CLR component types or executable behavior require scripts/plugins/core code
 - live-authored prefab saves must reject duplicate keys, use edit leases for concurrent staff edits, validate against registered assets/components/archetypes, and atomically swap registry snapshots
 - dependent systems should collect rows from active registries and surface missing references through diagnostics; do not broadcast bespoke prefab-delete messages into every feature as the primary consistency mechanism
+- future ModernUO-style serialization generation should target annotated ECS
+  component fields and generate component serializers/migrations/admin metadata;
+  do not reintroduce Item/Mobile entity-class serialization or property-setter
+  dirty tracking outside ECS mutation paths
 - most customization should compile as scripts; defer true custom-kernel/plugin loading until a real use case requires it
 - headless, console, and Godot wrappers must use the same runtime-root resolver and script host
 
