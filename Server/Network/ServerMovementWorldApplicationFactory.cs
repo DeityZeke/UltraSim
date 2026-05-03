@@ -3,6 +3,7 @@ using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
 using UltraSim.Server.Accounting;
+using UltraSim.Server.Gameplay;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Scripting;
 

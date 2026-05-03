@@ -16,3 +16,9 @@ Default platform packages that are still server-authored also live under
 panel builders plus stable admission event names. Servers register or replace
 those steps through the script admission registry instead of modifying kernel
 code.
+
+`Mobiles/` contains entity-backed mobile archetypes and prefabs. The stock
+template registers a wide `BaseMobile -> BaseHumanoid -> Human` archetype chain
+and the `mobiles/human` prefab. Sex and reproduction state live on the
+`BaseMobile` component set, so human, animal, and creature systems can filter
+that data without requiring separate male/female archetypes by default.

@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Server\Scripting\UltraSim.Server.Scripting.csproj" />
+    <ProjectReference Include="..\..\Server\Gameplay\UltraSim.Server.Gameplay.csproj" />
     <ProjectReference Include="..\..\Server\Core\UltraSim.Server.Core.csproj" />
     <ProjectReference Include="..\..\Kernels\UI\UltraSim.UI.csproj" />
   </ItemGroup>

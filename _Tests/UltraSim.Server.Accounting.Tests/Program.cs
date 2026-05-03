@@ -228,12 +228,12 @@ internal static class TestRunner
         CharacterCreateResult first = service.TryCreateCharacter(
             account.AccountId,
             "Asha",
-            "mobiles/human/female",
+            "mobiles/human",
             now);
         CharacterCreateResult second = service.TryCreateCharacter(
             account.AccountId,
             "Borin",
-            "mobiles/human/male",
+            "mobiles/human",
             now.AddSeconds(1));
 
         Assert.True(first.Succeeded);
@@ -242,7 +242,7 @@ internal static class TestRunner
         Assert.Equal(2, listed.Count);
         Assert.Equal(first.Character!.CharacterId, listed[0].CharacterId);
         Assert.Equal(second.Character!.CharacterId, listed[1].CharacterId);
-        Assert.Equal("mobiles/human/female", listed[0].PrefabKey);
+        Assert.Equal("mobiles/human", listed[0].PrefabKey);
 
         Assert.True(service.TryDeleteCharacter(account.AccountId, first.Character.CharacterId, out ServerAccountRecord? afterDelete));
         Assert.True(afterDelete is not null);
@@ -268,12 +268,12 @@ internal static class TestRunner
         CharacterCreateResult first = service.TryCreateCharacter(
             account.AccountId,
             "Asha",
-            "mobiles/human/female",
+            "mobiles/human",
             now);
         CharacterCreateResult second = service.TryCreateCharacter(
             account.AccountId,
             "Borin",
-            "mobiles/human/male",
+            "mobiles/human",
             now);
 
         Assert.True(first.Succeeded);
@@ -292,7 +292,7 @@ internal static class TestRunner
         CharacterCreateResult created = service.TryCreateCharacter(
             account.AccountId,
             "Asha",
-            "mobiles/human/female",
+            "mobiles/human",
             now);
         Assert.True(created.Succeeded);
 
@@ -300,11 +300,11 @@ internal static class TestRunner
         Assert.True(service.TryUpdateCharacterSnapshot(
             created.Character!.CharacterId,
             now.AddMinutes(1),
-            "mobiles/human/female_veteran",
+            "mobiles/human_veteran",
             snapshot,
             out ServerCharacterRecord updated));
 
-        Assert.Equal("mobiles/human/female_veteran", updated.PrefabKey);
+        Assert.Equal("mobiles/human_veteran", updated.PrefabKey);
         Assert.Equal(snapshot, updated.Position);
         Assert.Equal(now.AddMinutes(1), updated.LastPlayedUtc);
     }
@@ -317,8 +317,8 @@ internal static class TestRunner
         var characters = new InMemoryCharacterRegistry();
         var service = new AccountCharacterService(accounts, characters, new AccountCharacterOptions(MaxCharactersPerAccount: 3));
 
-        CharacterCreateResult first = service.TryCreateCharacter(account.AccountId, "Asha", "mobiles/human/female", now);
-        CharacterCreateResult second = service.TryCreateCharacter(account.AccountId, "Borin", "mobiles/human/male", now);
+        CharacterCreateResult first = service.TryCreateCharacter(account.AccountId, "Asha", "mobiles/human", now);
+        CharacterCreateResult second = service.TryCreateCharacter(account.AccountId, "Borin", "mobiles/human", now);
         Assert.True(first.Succeeded);
         Assert.True(second.Succeeded);
         Assert.True(service.TryDeleteCharacter(account.AccountId, first.Character!.CharacterId, out _));
@@ -351,7 +351,7 @@ internal static class TestRunner
             CharacterCreateResult created = service.TryCreateCharacter(
                 account.AccountId,
                 "Asha",
-                "mobiles/human/female",
+                "mobiles/human",
                 now,
                 new CharacterPositionSnapshot(1, 2, 3, 4));
             Assert.True(created.Succeeded);
@@ -364,7 +364,7 @@ internal static class TestRunner
             Assert.Equal(1, loaded.Characters.Count);
             Assert.Equal("Alice", loaded.Accounts[0].Username);
             Assert.Equal(created.Character!.CharacterId, loaded.Accounts[0].CharacterSlots[0]);
-            Assert.Equal("mobiles/human/female", loaded.Characters[0].PrefabKey);
+            Assert.Equal("mobiles/human", loaded.Characters[0].PrefabKey);
             Assert.Equal(new CharacterPositionSnapshot(1, 2, 3, 4), loaded.Characters[0].Position);
             Assert.True(File.Exists(Path.Combine(root, "accounts", "index.json")));
         }
@@ -415,7 +415,7 @@ internal static class TestRunner
             CharacterCreateResult created = service.TryCreateCharacter(
                 account.AccountId,
                 "Asha",
-                "mobiles/human/female",
+                "mobiles/human",
                 now);
             Assert.True(created.Succeeded);
 
@@ -473,7 +473,7 @@ internal static class TestRunner
         CharacterCreateResult created = service.TryCreateCharacter(
             account.AccountId,
             "Asha",
-            "mobiles/human/female",
+            "mobiles/human",
             now);
 
         Assert.True(created.Succeeded);

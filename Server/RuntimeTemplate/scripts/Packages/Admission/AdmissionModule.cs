@@ -26,7 +26,7 @@ public sealed class AdmissionModule : IUltraSimScriptModule
             () => AdmissionPanels.CharacterCreatePanel(
                 ServerIdentity,
                 [
-                    new UiSelectOption("wanderer", "Wanderer")
+                    new UiSelectOption("mobiles/human", "Human")
                 ],
                 [
                     new UiSelectOption("haven", "Haven")

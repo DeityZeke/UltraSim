@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using UltraSim.Server;
+using UltraSim.Server.Gameplay;
 using UltraSim.UI;
 
 namespace UltraSim.Server.Scripting;
@@ -189,6 +190,7 @@ public sealed class UltraSimScriptCompiler
         AddAssembly(paths, typeof(Enumerable).Assembly);
         AddAssembly(paths, typeof(IUltraSimScriptModule).Assembly);
         AddAssembly(paths, typeof(ServerCommandRegistry).Assembly);
+        AddAssembly(paths, typeof(ServerMovementBody).Assembly);
         AddAssembly(paths, typeof(UltraSim.ECS.IComponent<>).Assembly);
         AddAssembly(paths, typeof(UiPanelBuilder).Assembly);
 

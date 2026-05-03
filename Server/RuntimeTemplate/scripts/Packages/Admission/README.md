@@ -13,9 +13,7 @@ Default event shape:
 - `admission.login_requested`
 - `admission.login_verified`
 - `admission.character_select_requested`
-- `admission.character_selected`
 - `admission.character_create_requested`
-- `admission.character_created`
 - `admission.enter_world`
 
 Servers may install a shorter flow, such as direct entry on local test shards, or
@@ -43,6 +41,11 @@ schema. The default movement server uses accounting to publish character rows
 when the select panel opens and to validate/create character records when
 `character_create.submit` is pressed. Custom packages can replace the panels or
 steps while keeping that same event-driven shape.
+
+The default character-create panel offers the stock `mobiles/human` prefab
+registered from `scripts/Mobiles/`. Servers can replace the panel or options,
+but stored character records should continue to use prefab keys rather than
+hardcoded archetype enums.
 
 The first runtime implementation validates trusted credential actions through a
 narrow credential-validator seam. The default validator is a test/dev stub; the

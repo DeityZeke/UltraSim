@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Server;
+using UltraSim.Server.Gameplay;
 using UltraSim.Server.Scripting;
 using UltraSim.UI;
 
@@ -12,6 +13,7 @@ internal static class TestRunner
         Run(nameof(RuntimeTemplate_CreatesExpectedFolders), RuntimeTemplate_CreatesExpectedFolders);
         Run(nameof(RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi), RuntimeTemplate_AdmissionPackageCompilesAgainstScriptApi);
         Run(nameof(RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders), RuntimeTemplate_AdmissionPackageLoadsModuleAndRegistersProviders);
+        Run(nameof(RuntimeTemplate_DefaultScriptsCompileLoadAndBuildMobilePrefabs), RuntimeTemplate_DefaultScriptsCompileLoadAndBuildMobilePrefabs);
         Run(nameof(AdmissionRegistry_CustomStepReplacesDefaultForSameEvent), AdmissionRegistry_CustomStepReplacesDefaultForSameEvent);
         Run(nameof(ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors), ScriptDefinitions_BuildInheritedArchetypeAndPrefabDescriptors);
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
@@ -122,6 +124,61 @@ internal static class TestRunner
         Assert.Equal("admission.character_select", selectProvider.Provider().Schema.Identity.PanelType);
         Assert.Equal("admission.character_create", createProvider.Provider().Schema.Identity.PanelType);
         Assert.True(context.LogEntries.Any(static entry => entry.Message.Contains("Default admission package configured.", StringComparison.Ordinal)));
+    }
+
+    private static void RuntimeTemplate_DefaultScriptsCompileLoadAndBuildMobilePrefabs()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        UltraSimRuntimeTemplate.Ensure(temp.Layout);
+        CopyDirectory(
+            Path.Combine(FindRepositoryRoot(), "Server", "RuntimeTemplate", "scripts"),
+            temp.Layout.ScriptsPath);
+
+        UltraSimScriptCompileResult compile = new UltraSimScriptCompiler().Compile(new UltraSimScriptCompilerOptions(temp.Layout));
+        Assert.Equal(UltraSimScriptCompileResultKind.Compiled, compile.Kind);
+        Assert.True(compile.SourceCount >= 6);
+
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        UltraSimScriptLoadResult load = new UltraSimScriptAssemblyHost().LoadConfigureAndInitialize(compile.AssemblyPath!, context);
+
+        Assert.True(load.Succeeded, string.Join('\n', load.Errors));
+        Assert.Equal(2, load.ModuleCount);
+        Assert.True(context.RegisteredArchetypes.Any(static archetype =>
+            archetype.Key == "mobiles/base" &&
+            archetype.ContainsComponent<ServerMovementBody>() &&
+            archetype.ContainsComponent<BiologicalProfile>()));
+        Assert.True(context.RegisteredArchetypes.Any(static archetype =>
+            archetype.Key == "mobiles/humanoid/base" &&
+            archetype.ContainsComponent<ServerMovementBody>() &&
+            archetype.ContainsComponent<BiologicalProfile>() &&
+            archetype.ContainsComponent<HumanoidProfile>()));
+        Assert.True(context.RegisteredArchetypes.Any(static archetype =>
+            archetype.Key == "mobiles/human/base" &&
+            archetype.ContainsComponent<ServerMovementBody>() &&
+            archetype.ContainsComponent<BiologicalProfile>() &&
+            archetype.ContainsComponent<HumanoidProfile>() &&
+            archetype.ContainsComponent<HumanProfile>()));
+        Assert.True(context.RegisteredPrefabs.Any(static prefab => prefab.Key == "mobiles/human"));
+
+        var schemaBuilder = new EcsSchemaBuilder();
+        ScriptPrefabCatalogBuildResult catalog = ScriptPrefabCatalogBuilder.Build(
+            context.RegisteredArchetypes,
+            context.RegisteredPrefabs,
+            schemaBuilder);
+        var world = new World(schemaBuilder.Build(), new EcsWorldServices
+        {
+            PrefabResolver = catalog.Catalog,
+        });
+
+        Assert.True(world.TryCreatePrefab("mobiles/human", out Entity human));
+        Assert.True(world.TryGetComponent(human, out ServerMovementBody movement));
+        Assert.True(world.TryGetComponent(human, out BiologicalProfile biology));
+        Assert.True(world.TryGetComponent(human, out HumanoidProfile humanoid));
+        Assert.True(world.TryGetComponent(human, out HumanProfile humanProfile));
+        Assert.Equal(new ServerMovementBody(0f, 0f, 0f, 0f), movement);
+        Assert.Equal(new BiologicalProfile(BiologicalSex.Male, CanBreed: true, Maturity: 1f, LineageSeed: 0UL), biology);
+        Assert.Equal(new HumanoidProfile(SkeletonKind: 0), humanoid);
+        Assert.Equal(new HumanProfile(Variant: 0), humanProfile);
     }
 
     private static void AdmissionRegistry_CustomStepReplacesDefaultForSameEvent()

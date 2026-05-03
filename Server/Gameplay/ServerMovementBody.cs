@@ -1,6 +1,6 @@
 using UltraSim.ECS;
 
-namespace UltraSim.Server.Network;
+namespace UltraSim.Server.Gameplay;
 
 public readonly record struct ServerMovementBody(
     float PositionX,

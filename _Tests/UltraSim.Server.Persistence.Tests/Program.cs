@@ -32,7 +32,7 @@ internal static class TestRunner
             CharacterCreateResult created = characterService.TryCreateCharacter(
                 account.AccountId,
                 "Asha",
-                "mobiles/human/female",
+                "mobiles/human",
                 now);
             Assert.True(created.Succeeded);
 
@@ -87,7 +87,7 @@ internal static class TestRunner
             CharacterCreateResult created = characterService.TryCreateCharacter(
                 account.AccountId,
                 "Asha",
-                "mobiles/human/female",
+                "mobiles/human",
                 now,
                 new CharacterPositionSnapshot(5, 6, 7, 8));
             Assert.True(created.Succeeded);

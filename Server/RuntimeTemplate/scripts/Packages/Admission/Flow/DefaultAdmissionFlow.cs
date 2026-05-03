@@ -18,7 +18,7 @@ public static class DefaultAdmissionFlow
         new UltraSimScriptAdmissionFlowStepDescriptor(
             "admission.default.character_select",
             AdmissionFlowEvents.LoginVerified,
-            AdmissionFlowEvents.CharacterSelected,
+            AdmissionFlowEvents.EnterWorld,
             AdmissionPanelProviderKeys.CharacterSelect,
             Priority: 0,
             ActionRoutes:
@@ -34,7 +34,7 @@ public static class DefaultAdmissionFlow
         new UltraSimScriptAdmissionFlowStepDescriptor(
             "admission.default.character_create",
             AdmissionFlowEvents.CharacterCreateRequested,
-            AdmissionFlowEvents.CharacterCreated,
+            AdmissionFlowEvents.EnterWorld,
             AdmissionPanelProviderKeys.CharacterCreate,
             Priority: 0,
             ActionRoutes:

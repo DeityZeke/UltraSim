@@ -2926,12 +2926,7 @@ internal static class TestRunner
         ArchetypeSignature signature = new([movementId]);
         var prefabCatalog = new PrefabCatalog();
         prefabCatalog.Add(
-            "mobiles/human/female",
-            PrefabDefinition.Create(
-                signature,
-                (archetype, slot) => archetype.GetComponentSpan<ServerEcsMovementBody>(movementId)[slot] = new ServerEcsMovementBody(15f, 5f, 0f, 0f)));
-        prefabCatalog.Add(
-            "mobiles/human/male",
+            "mobiles/human",
             PrefabDefinition.Create(
                 signature,
                 (archetype, slot) => archetype.GetComponentSpan<ServerEcsMovementBody>(movementId)[slot] = new ServerEcsMovementBody(25f, 7f, 0f, 0f)));
@@ -2964,7 +2959,7 @@ internal static class TestRunner
         Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
             "test.character_select",
             "admission.login_verified",
-            "admission.character_selected",
+            "admission.enter_world",
             "admission.panel.character_select",
             ActionRoutes:
             [
@@ -2973,7 +2968,7 @@ internal static class TestRunner
         Assert.True(scriptContext.Admission.RegisterStep(new UltraSimScriptAdmissionFlowStepDescriptor(
             "test.character_create",
             "admission.character_create_requested",
-            "admission.character_created",
+            "admission.enter_world",
             "admission.panel.character_create",
             ActionRoutes:
             [
@@ -3011,7 +3006,7 @@ internal static class TestRunner
         CharacterCreateResult seededCharacter = characterService.TryCreateCharacter(
             account.AccountId,
             "Asha",
-            "mobiles/human/female",
+            "mobiles/human",
             new DateTimeOffset(2026, 5, 2, 12, 0, 30, TimeSpan.Zero));
         Assert.True(seededCharacter.Succeeded);
         var credentialValidator = new CountingAdmissionCredentialValidator(new AccountingAdmissionCredentialValidator(
@@ -3118,7 +3113,7 @@ internal static class TestRunner
         Assert.Equal("admission.character_select", characterSelect.SchemaIdentity.PanelType);
         Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState selectState));
         Assert.Equal(characterSelect.PanelInstanceId, selectState.PanelInstanceId);
-        Assert.Equal("admission.character_selected", selectState.WaitingForEvent);
+        Assert.Equal("admission.enter_world", selectState.WaitingForEvent);
         Assert.Equal(account.AccountId, selectState.AccountId);
         Assert.Equal(1L, serverHost.ScriptBinding.Admission.CompletedSteps);
         Assert.Equal(2L, serverHost.ScriptBinding.Admission.OpenedPanels);
@@ -3147,7 +3142,7 @@ internal static class TestRunner
         UiPanelOpenDocument characterCreate = openedPanels.Last(panel => panel.SchemaIdentity.PanelType == "admission.character_create");
         Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState createState));
         Assert.Equal(characterCreate.PanelInstanceId, createState.PanelInstanceId);
-        Assert.Equal("admission.character_created", createState.WaitingForEvent);
+        Assert.Equal("admission.enter_world", createState.WaitingForEvent);
         Assert.Equal(account.AccountId, createState.AccountId);
         Assert.Equal(2L, serverHost.ScriptBinding.Admission.CompletedSteps);
         Assert.Equal(3L, serverHost.ScriptBinding.Admission.OpenedPanels);
@@ -3163,7 +3158,7 @@ internal static class TestRunner
             FieldValues:
             [
                 UiModelSlotValue.String("character_create.name", "Bo"),
-                UiModelSlotValue.String("character_create.template", "mobiles/human/male")
+                UiModelSlotValue.String("character_create.template", "mobiles/human")
             ]);
         Assert.True(clientHost.TrySendUiAction(invalidCreateSubmit));
 
@@ -3190,7 +3185,7 @@ internal static class TestRunner
             FieldValues:
             [
                 UiModelSlotValue.String("character_create.name", "Borin"),
-                UiModelSlotValue.String("character_create.template", "mobiles/human/male")
+                UiModelSlotValue.String("character_create.template", "mobiles/human")
             ]);
         Assert.True(clientHost.TrySendUiAction(createSubmit));
 
@@ -3200,10 +3195,10 @@ internal static class TestRunner
         Assert.False(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out _));
         IReadOnlyList<ServerCharacterRecord> accountCharacters = characterService.GetCharactersForAccount(account.AccountId);
         Assert.Equal(2, accountCharacters.Count);
-        Assert.True(accountCharacters.Any(character => character.Name == "Borin" && character.PrefabKey == "mobiles/human/male"));
+        Assert.True(accountCharacters.Any(character => character.Name == "Borin" && character.PrefabKey == "mobiles/human"));
         Assert.True(serverHost.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected));
         Assert.Equal("Borin", selected.CharacterName);
-        Assert.Equal("mobiles/human/male", selected.PrefabKey);
+        Assert.Equal("mobiles/human", selected.PrefabKey);
         Assert.True(selected.UsedPrefabEntity);
         Assert.True(world.TryGetComponent(selected.Entity, out ServerEcsMovementBody selectedBody));
         Assert.Equal(25f, selectedBody.PositionX);
