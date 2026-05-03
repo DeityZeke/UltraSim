@@ -46,6 +46,7 @@ public sealed class ServerMovementSessionHost
         ServerNetworkSessionRuntimeOptions runtimeOptions = default,
         DefaultUltraSimScriptContext? scriptContext = null,
         IAdmissionCredentialValidator? admissionCredentialValidator = null,
+        IAdmissionRuntimePolicy? admissionRuntimePolicy = null,
         bool enableGlobalMovementObserverState = false,
         SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
@@ -78,7 +79,15 @@ public sealed class ServerMovementSessionHost
         _ui = new ServerUiService(orderedEvents);
         ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
         if (scriptContext is not null)
-            _scriptBinding = new ServerScriptRuntimeBinding(scriptContext, _chat.Commands, _ui, world.TryCreatePrefab, admissionCredentialValidator);
+        {
+            _scriptBinding = new ServerScriptRuntimeBinding(
+                scriptContext,
+                _chat.Commands,
+                _ui,
+                world.TryCreatePrefab,
+                admissionCredentialValidator,
+                admissionRuntimePolicy);
+        }
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _enableGlobalMovementObserverState = enableGlobalMovementObserverState;

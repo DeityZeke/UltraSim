@@ -115,6 +115,7 @@ public static class ServerMovementWorldApplicationFactory
                 handshakePolicy: handshakePolicy,
                 sessionPolicy: sessionPolicy,
                 scriptContext: _options.ScriptContext,
+                admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(new AccountCharacterService(_accounts, _characters)),
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }

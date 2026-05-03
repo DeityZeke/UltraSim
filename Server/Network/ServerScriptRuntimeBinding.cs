@@ -21,7 +21,8 @@ public sealed class ServerScriptRuntimeBinding
         ServerCommandRegistry commands,
         ServerUiService ui,
         ServerScriptPrefabSpawner? spawnPrefab = null,
-        IAdmissionCredentialValidator? credentialValidator = null)
+        IAdmissionCredentialValidator? credentialValidator = null,
+        IAdmissionRuntimePolicy? admissionRuntimePolicy = null)
     {
         _scriptContext = scriptContext ?? throw new ArgumentNullException(nameof(scriptContext));
         ArgumentNullException.ThrowIfNull(commands);
@@ -30,7 +31,8 @@ public sealed class ServerScriptRuntimeBinding
         _admission = new ServerAdmissionFlowRuntime(
             _scriptContext,
             new ServerUiAdmissionPanelGateway(_ui),
-            credentialValidator);
+            credentialValidator,
+            admissionRuntimePolicy);
         _ui.ActionReceived += _admission.ProcessUiAction;
 
         RegisterPanelOpenCommand(commands);

@@ -2964,6 +2964,7 @@ internal static class TestRunner
             "admission.panel.character_create",
             ActionRoutes:
             [
+                new UltraSimScriptAdmissionActionRouteDescriptor("character_create.submit", "admission.character_created"),
                 new UltraSimScriptAdmissionActionRouteDescriptor("character_create.cancel", "admission.login_verified")
             ])));
 
@@ -2992,6 +2993,14 @@ internal static class TestRunner
         var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
         var accounts = new InMemoryAccountRegistry();
         ServerAccountRecord account = accounts.CreateAccount("Alice", passwords.HashPassword("swordfish"), new DateTimeOffset(2026, 5, 2, 12, 0, 0, TimeSpan.Zero));
+        var characters = new InMemoryCharacterRegistry();
+        var characterService = new AccountCharacterService(accounts, characters, new AccountCharacterOptions(MaxCharactersPerAccount: 3));
+        CharacterCreateResult seededCharacter = characterService.TryCreateCharacter(
+            account.AccountId,
+            "Asha",
+            "mobiles/human/female",
+            new DateTimeOffset(2026, 5, 2, 12, 0, 30, TimeSpan.Zero));
+        Assert.True(seededCharacter.Succeeded);
         var credentialValidator = new CountingAdmissionCredentialValidator(new AccountingAdmissionCredentialValidator(
             new DefaultCredentialService(
                 accounts,
@@ -3009,7 +3018,10 @@ internal static class TestRunner
             SpawnSession,
             handshakePolicy: handshakePolicy,
             scriptContext: scriptContext,
-            admissionCredentialValidator: credentialValidator);
+            admissionCredentialValidator: credentialValidator,
+            admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(
+                characterService,
+                clock: static () => new DateTimeOffset(2026, 5, 2, 12, 2, 0, TimeSpan.Zero)));
         var openedPanels = new List<UiPanelOpenDocument>();
         var modelUpdates = new List<UiModelUpdateDocument>();
         var uiEvents = new ClientUiEventBridge(openedPanels.Add, modelUpdates.Add);
@@ -3096,6 +3108,11 @@ internal static class TestRunner
         Assert.Equal(2L, serverHost.ScriptBinding.Admission.OpenedPanels);
         Assert.Equal(2, credentialValidator.PacketValidationCount);
         Assert.True(credentialValidator.LastPacketAccepted);
+        UiModelUpdateDocument rowUpdate = modelUpdates.Last(update => update.PanelInstanceId == characterSelect.PanelInstanceId);
+        Assert.Equal(UiModelUpdateKind.RepeaterRows, rowUpdate.Kind);
+        Assert.True(rowUpdate.RowDeltas.Any(row =>
+            row.RowKey == seededCharacter.Character!.CharacterId.ToString() &&
+            row.Values.Any(value => value.SlotId == "character_select.row.name" && value.StringValue == "Asha")));
 
         var createAction = new UiActionRequestDocument(
             characterSelect.PanelInstanceId,
@@ -3118,6 +3135,57 @@ internal static class TestRunner
         Assert.Equal(account.AccountId, createState.AccountId);
         Assert.Equal(2L, serverHost.ScriptBinding.Admission.CompletedSteps);
         Assert.Equal(3L, serverHost.ScriptBinding.Admission.OpenedPanels);
+
+        var invalidCreateSubmit = new UiActionRequestDocument(
+            characterCreate.PanelInstanceId,
+            characterCreate.SchemaIdentity,
+            characterCreate.CatalogIdentity,
+            2,
+            "character_create.submit",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues:
+            [
+                UiModelSlotValue.String("character_create.name", "Bo"),
+                UiModelSlotValue.String("character_create.template", "mobiles/human/male")
+            ]);
+        Assert.True(clientHost.TrySendUiAction(invalidCreateSubmit));
+
+        serverHost.Pump(250, 0.016f, 24);
+        clientHost.Pump(251);
+
+        Assert.True(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out SessionAdmissionState stillCreateState));
+        Assert.Equal(characterCreate.PanelInstanceId, stillCreateState.PanelInstanceId);
+        Assert.Equal(1, characterService.GetCharactersForAccount(account.AccountId).Count);
+        UiModelUpdateDocument createFailureUpdate = modelUpdates.Last(update => update.PanelInstanceId == characterCreate.PanelInstanceId);
+        Assert.Equal(UiModelUpdateKind.SlotPatch, createFailureUpdate.Kind);
+        Assert.True(createFailureUpdate.SlotValues.Any(value =>
+            value.SlotId == "character_create.status" &&
+            value.StringValue == "Character name must be a minimum of 3 characters."));
+
+        var createSubmit = new UiActionRequestDocument(
+            characterCreate.PanelInstanceId,
+            characterCreate.SchemaIdentity,
+            characterCreate.CatalogIdentity,
+            3,
+            "character_create.submit",
+            UiActionContextKind.Panel,
+            ContextId: null,
+            FieldValues:
+            [
+                UiModelSlotValue.String("character_create.name", "Borin"),
+                UiModelSlotValue.String("character_create.template", "mobiles/human/male")
+            ]);
+        Assert.True(clientHost.TrySendUiAction(createSubmit));
+
+        serverHost.Pump(260, 0.016f, 25);
+        clientHost.Pump(261);
+
+        Assert.False(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out _));
+        IReadOnlyList<ServerCharacterRecord> accountCharacters = characterService.GetCharactersForAccount(account.AccountId);
+        Assert.Equal(2, accountCharacters.Count);
+        Assert.True(accountCharacters.Any(character => character.Name == "Borin" && character.PrefabKey == "mobiles/human/male"));
+        Assert.Equal(3L, serverHost.ScriptBinding.Admission.CompletedSteps);
     }
 
     private static void ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities()

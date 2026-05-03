@@ -37,6 +37,12 @@ For example, the default character select step maps `character_select.create` to
 `admission.character_selected`. These routes are data on the step, not hardcoded
 in the network or UI renderer.
 
+Dynamic data comes from the server runtime policy, not from the static script
+schema. The default movement server uses accounting to publish character rows
+when the select panel opens and to validate/create character records when
+`character_create.submit` is pressed. Custom packages can replace the panels or
+steps while keeping that same event-driven shape.
+
 The first runtime implementation validates trusted credential actions through a
 narrow credential-validator seam. The default validator is a test/dev stub; the
 accounting engine owns the real validator when account storage is rebuilt.

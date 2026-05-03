@@ -28,6 +28,10 @@ Current first-pass scope:
   and snapshot updates. Character records store prefab keys, not hardcoded
   archetype enums, so character creation can select from registered mobile
   prefabs later.
+- The movement server's accounting-backed admission runtime policy uses
+  `AccountCharacterService` to publish character-select rows and create
+  character records from the server-authored admission panels. Accounting owns
+  the records and validation; admission owns the flow state.
 - Accounting persistence snapshot and first JSON store:
   - `AccountingPersistenceSnapshot` captures immutable account + character
     records from registries.

@@ -40,6 +40,9 @@ public static class DefaultAdmissionFlow
             ActionRoutes:
             [
                 new UltraSimScriptAdmissionActionRouteDescriptor(
+                    AdmissionPanels.CharacterCreateSubmitActionId,
+                    AdmissionFlowEvents.CharacterCreated),
+                new UltraSimScriptAdmissionActionRouteDescriptor(
                     AdmissionPanels.CharacterCreateCancelActionId,
                     AdmissionFlowEvents.LoginVerified)
             ])

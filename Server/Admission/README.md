@@ -13,6 +13,9 @@ Current scope:
 - Per-connection active admission state.
 - Script-registered flow steps from `IUltraSimScriptAdmissionRegistry`.
 - Explicit action routes on active steps for non-credential panel actions.
+- Optional `IAdmissionRuntimePolicy` hooks for server-owned dynamic behavior,
+  such as publishing character-select rows after a panel opens or validating
+  character creation before an action route advances.
 - Single-owner replacement semantics through the script registry.
 - A narrow `IAdmissionCredentialValidator` seam.
 - A dev/test `AcceptAllAdmissionCredentialValidator` until the accounting engine
@@ -20,3 +23,10 @@ Current scope:
 
 The real credential path must remain packet-bound and trusted. Password or
 challenge-response data must not travel through generic UI field values.
+
+Admission flow stays generic: it opens the script-selected panel, tracks the
+active step, validates credential completion, and evaluates explicit action
+routes. Domain-specific policy belongs in a runtime policy implementation above
+this layer. The default movement server uses an accounting-backed policy to
+populate character rows and create character records, but the admission kernel
+does not depend on accounting.

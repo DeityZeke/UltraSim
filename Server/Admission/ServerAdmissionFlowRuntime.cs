@@ -11,6 +11,7 @@ public sealed class ServerAdmissionFlowRuntime
     private readonly DefaultUltraSimScriptContext _scriptContext;
     private readonly IAdmissionPanelGateway _panels;
     private readonly IAdmissionCredentialValidator _credentialValidator;
+    private readonly IAdmissionRuntimePolicy _runtimePolicy;
     private readonly Dictionary<ConnectionId, SessionAdmissionState> _statesByConnection = new();
     private long _nextPanelSequence;
     private long _nextModelUpdateSequence;
@@ -18,11 +19,13 @@ public sealed class ServerAdmissionFlowRuntime
     public ServerAdmissionFlowRuntime(
         DefaultUltraSimScriptContext scriptContext,
         IAdmissionPanelGateway panels,
-        IAdmissionCredentialValidator? credentialValidator = null)
+        IAdmissionCredentialValidator? credentialValidator = null,
+        IAdmissionRuntimePolicy? runtimePolicy = null)
     {
         _scriptContext = scriptContext ?? throw new ArgumentNullException(nameof(scriptContext));
         _panels = panels ?? throw new ArgumentNullException(nameof(panels));
         _credentialValidator = credentialValidator ?? AcceptAllAdmissionCredentialValidator.Instance;
+        _runtimePolicy = runtimePolicy ?? AdmissionRuntimePolicyDefaults.Instance;
     }
 
     public long FiredEvents { get; private set; }
@@ -42,6 +45,14 @@ public sealed class ServerAdmissionFlowRuntime
     }
 
     public bool TryFireEvent(ConnectionId connectionId, string eventName, out string error)
+    {
+        ulong accountId = _statesByConnection.TryGetValue(connectionId, out SessionAdmissionState? previous)
+            ? previous.AccountId
+            : 0;
+        return TryFireEvent(connectionId, eventName, accountId, out error);
+    }
+
+    private bool TryFireEvent(ConnectionId connectionId, string eventName, ulong accountId, out string error)
     {
         error = string.Empty;
         if (!connectionId.IsValid)
@@ -85,7 +96,7 @@ public sealed class ServerAdmissionFlowRuntime
             return false;
         }
 
-        _statesByConnection[connectionId] = new SessionAdmissionState(
+        var state = new SessionAdmissionState(
             connectionId,
             step,
             panelInstanceId,
@@ -96,9 +107,14 @@ public sealed class ServerAdmissionFlowRuntime
                 .Where(static action => action.ContextKind == UiActionContextKind.TrustedCredential)
                 .Select(static action => action.ActionId)
                 .ToHashSet(StringComparer.Ordinal),
-            AccountId: _statesByConnection.TryGetValue(connectionId, out SessionAdmissionState? previous)
-                ? previous.AccountId
-                : 0);
+            AccountId: accountId);
+        _statesByConnection[connectionId] = state;
+        _runtimePolicy.OnStepOpened(new AdmissionStepOpenedContext(
+            connectionId,
+            state,
+            panel,
+            _panels,
+            NextModelUpdateSequence));
         FiredEvents++;
         OpenedPanels++;
         return true;
@@ -139,7 +155,22 @@ public sealed class ServerAdmissionFlowRuntime
             }
 
             if (state.Step.TryGetActionRoute(request.ActionId, request.ContextKind, out UltraSimScriptAdmissionActionRouteDescriptor route))
-                CompleteCurrentStep(connectionId, state, route.CompletesWithEvent, out _);
+            {
+                AdmissionActionRouteResult result = _runtimePolicy.EvaluateActionRoute(new AdmissionActionRouteContext(
+                    connectionId,
+                    state,
+                    request,
+                    route));
+                if (result.ShouldComplete)
+                {
+                    CompleteCurrentStep(connectionId, state, result.CompletedEvent, out _);
+                }
+                else
+                {
+                    TryPublishRouteFailure(connectionId, state, result);
+                }
+            }
+
             return;
         }
 
@@ -191,12 +222,8 @@ public sealed class ServerAdmissionFlowRuntime
         error = string.Empty;
         _statesByConnection.Remove(connectionId);
         CompletedSteps++;
-        if (TryFireEvent(connectionId, completedEvent, out string nextError))
-        {
-            if (_statesByConnection.TryGetValue(connectionId, out SessionAdmissionState? nextState))
-                _statesByConnection[connectionId] = nextState with { AccountId = state.AccountId };
+        if (TryFireEvent(connectionId, completedEvent, state.AccountId, out string nextError))
             return true;
-        }
 
         if (nextError.StartsWith("No admission step is registered", StringComparison.Ordinal))
         {
@@ -216,7 +243,7 @@ public sealed class ServerAdmissionFlowRuntime
         if (string.IsNullOrWhiteSpace(state.Step.FailureStatusSlotId))
             return;
 
-        long sequence = Interlocked.Increment(ref _nextModelUpdateSequence);
+        long sequence = NextModelUpdateSequence();
         var update = new UiModelUpdateDocument(
             state.PanelInstanceId,
             state.SchemaIdentity,
@@ -228,6 +255,36 @@ public sealed class ServerAdmissionFlowRuntime
             ClearedSlotIds: [],
             RowDeltas: []);
         _panels.TryUpdatePanel(connectionId, update);
+    }
+
+    private void TryPublishRouteFailure(
+        ConnectionId connectionId,
+        SessionAdmissionState state,
+        AdmissionActionRouteResult result)
+    {
+        if (string.IsNullOrWhiteSpace(result.FailureStatusSlotId) ||
+            string.IsNullOrWhiteSpace(result.FailureStatusValue))
+        {
+            return;
+        }
+
+        long sequence = NextModelUpdateSequence();
+        var update = new UiModelUpdateDocument(
+            state.PanelInstanceId,
+            state.SchemaIdentity,
+            state.CatalogIdentity,
+            sequence,
+            UiModelUpdateKind.SlotPatch,
+            ScopeId: null,
+            SlotValues: [UiModelSlotValue.String(result.FailureStatusSlotId, result.FailureStatusValue)],
+            ClearedSlotIds: [],
+            RowDeltas: []);
+        _panels.TryUpdatePanel(connectionId, update);
+    }
+
+    private long NextModelUpdateSequence()
+    {
+        return Interlocked.Increment(ref _nextModelUpdateSequence);
     }
 
     private static string SanitizeStableSegment(string value)
