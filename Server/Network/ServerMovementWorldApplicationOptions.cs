@@ -11,7 +11,8 @@ public sealed record ServerMovementWorldApplicationOptions(
     float MovementSpeed = 4.0f,
     double SessionAuthTimeoutSeconds = 5.0,
     double SessionKeepAliveTimeoutSeconds = 10.0,
-    DefaultUltraSimScriptContext? ScriptContext = null)
+    DefaultUltraSimScriptContext? ScriptContext = null,
+    string? PersistenceRoot = null)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");
 }

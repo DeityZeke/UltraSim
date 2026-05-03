@@ -2,6 +2,8 @@ using System.Net;
 using System.Diagnostics;
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Accounting;
+using UltraSim.Server.Persistence;
 using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Network;
@@ -22,7 +24,9 @@ public static class ServerMovementWorldApplicationFactory
             new ServerApplicationHooks
             {
                 Start = _ => runtime.Start(),
+                Load = _ => runtime.Load(),
                 Tick = (_, deltaSeconds) => runtime.Tick(deltaSeconds),
+                Save = _ => runtime.Save(),
                 Stop = _ => runtime.Stop(),
                 IsAcceptingConnections = _ => runtime.IsAcceptingConnections,
                 GetActiveSessions = _ => runtime.ActiveSessions,
@@ -36,10 +40,13 @@ public static class ServerMovementWorldApplicationFactory
         private readonly ServerMovementWorldApplicationOptions _options;
         private readonly World _world;
         private readonly ArchetypeSignature _playerSignature;
+        private readonly InMemoryAccountRegistry _accounts = new();
+        private readonly InMemoryCharacterRegistry _characters = new();
         private UdpSocketNetworkTransport? _transport;
         private ServerMovementSessionHost? _host;
         private uint _nextNetworkEntityId = 1;
         private uint _serverTick;
+        private ulong _lastSaveSequence;
         private long _lastPumpElapsedTicks;
 
         public Runtime(ServerMovementWorldApplicationOptions options)
@@ -107,6 +114,22 @@ public static class ServerMovementWorldApplicationFactory
             _host.Start();
         }
 
+        public void Load()
+        {
+            ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
+            ServerPersistenceLoadResult result = coordinator.Load();
+            if (!result.Succeeded)
+            {
+                string message = result.Failures.Count == 0
+                    ? "Server persistence load failed."
+                    : string.Join("; ", result.Failures.Select(static failure => $"{failure.ParticipantName}: {failure.Message}"));
+                throw new InvalidOperationException(message);
+            }
+
+            if (result.Manifest is not null)
+                _lastSaveSequence = result.Manifest.SaveSequence;
+        }
+
         public void Tick(float deltaSeconds)
         {
             ServerMovementSessionHost? host = _host;
@@ -116,6 +139,21 @@ public static class ServerMovementWorldApplicationFactory
             long start = Stopwatch.GetTimestamp();
             host.Pump(Stopwatch.GetTimestamp(), deltaSeconds, ++_serverTick);
             _lastPumpElapsedTicks = Stopwatch.GetTimestamp() - start;
+        }
+
+        public void Save()
+        {
+            ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
+            ServerPersistenceSaveResult result = coordinator.Save(DateTimeOffset.UtcNow);
+            if (!result.Succeeded)
+            {
+                string message = result.Failures.Count == 0
+                    ? "Server persistence save failed."
+                    : string.Join("; ", result.Failures.Select(static failure => $"{failure.ParticipantName}: {failure.Message}"));
+                throw new InvalidOperationException(message);
+            }
+
+            _lastSaveSequence = result.Metadata.SaveSequence;
         }
 
         public void Stop()
@@ -228,6 +266,19 @@ public static class ServerMovementWorldApplicationFactory
             float y = MathF.Floor(spawnIndex / 16) * 1.5f;
             world.SetComponent(entity, new ServerMovementBody(x, y, 0f, 0f));
             return new ServerMovementSessionSpawn(entity, networkEntityId);
+        }
+
+        private ServerPersistenceCoordinator CreatePersistenceCoordinator()
+        {
+            string root = _options.PersistenceRoot ??
+                Path.Combine(AppContext.BaseDirectory, "saves", _options.ProfileName);
+            return new ServerPersistenceCoordinator(
+                root,
+                [
+                    new AccountingPersistenceParticipant(_accounts, _characters),
+                    new EcsWorldPersistenceParticipant(_world)
+                ],
+                initialSaveSequence: _lastSaveSequence);
         }
 
         private static long SecondsToTicks(double seconds)

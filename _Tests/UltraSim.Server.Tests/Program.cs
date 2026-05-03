@@ -88,6 +88,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders), ServerMovementSessionHost_BindsScriptCommandsAndPanelProviders);
         Run(nameof(ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect), ServerMovementSessionHost_AdmissionFlow_OpensLoginThenCharacterSelect);
         Run(nameof(ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities), ServerMovementSessionHost_ScriptSpawnCommandCreatesPrefabEntities);
+        Run(nameof(ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator), ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
@@ -3183,6 +3184,40 @@ internal static class TestRunner
             spawned.Select(static item => item.Resistance.Value).OrderBy(static value => value).ToArray());
         Assert.True(world.Entities.IsAlive(spawned[0].Entity));
         Assert.True(world.Entities.IsAlive(spawned[1].Entity));
+    }
+
+    private static void ServerMovementWorldApplication_SaveLoad_UsesUnifiedPersistenceCoordinator()
+    {
+        using ServerTestRuntimeRoot root = ServerTestRuntimeRoot.Create();
+        string persistenceRoot = Path.Combine(root.Path, "saves");
+
+        IServerApplication first = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+            "persistence-hook-test",
+            Port: 0,
+            SaveOnStop: false,
+            EnableAsyncFlush: false,
+            PersistenceRoot: persistenceRoot));
+        first.Initialize();
+        Assert.True(first.Save());
+
+        string manifestPath = Path.Combine(persistenceRoot, "current", "save_manifest.json");
+        Assert.True(File.Exists(manifestPath));
+        Assert.Contains("\"saveSequence\": 1", File.ReadAllText(manifestPath));
+        Assert.True(File.Exists(Path.Combine(persistenceRoot, "current", "accounts", "index.json")));
+        Assert.True(File.Exists(Path.Combine(persistenceRoot, "current", "world", "entities.bin")));
+
+        IServerApplication second = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+            "persistence-hook-test",
+            Port: 0,
+            SaveOnStop: false,
+            EnableAsyncFlush: false,
+            PersistenceRoot: persistenceRoot));
+        second.Start();
+        Assert.True(second.Save());
+        second.Stop();
+
+        Assert.Contains("\"saveSequence\": 2", File.ReadAllText(manifestPath));
+        Assert.Equal(1, Directory.GetDirectories(Path.Combine(persistenceRoot, "backups"), "save-*").Length);
     }
 
     private static void ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient()

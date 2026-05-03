@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Admission\UltraSim.Server.Admission.csproj" />
+    <ProjectReference Include="..\Persistence\UltraSim.Server.Persistence.csproj" />
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
     <Reference Include="UltraSim.Server.Core">
       <HintPath>..\Core\bin\$(Configuration)\net8.0\UltraSim.Server.Core.dll</HintPath>
@@ -29,7 +30,7 @@
 
   <Target Name="BuildServerNetworkDependencies" BeforeTargets="PrepareForBuild">
     <MSBuild
-      Projects="..\Core\UltraSim.Server.Core.csproj;..\Scripting\UltraSim.Server.Scripting.csproj;..\Admission\UltraSim.Server.Admission.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj"
+      Projects="..\Core\UltraSim.Server.Core.csproj;..\Scripting\UltraSim.Server.Scripting.csproj;..\Admission\UltraSim.Server.Admission.csproj;..\Persistence\UltraSim.Server.Persistence.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj"
       Targets="Build"
       Properties="Configuration=$(Configuration)" />
   </Target>
