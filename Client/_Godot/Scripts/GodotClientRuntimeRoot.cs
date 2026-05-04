@@ -56,6 +56,7 @@ public partial class GodotClientRuntimeRoot : Node
 
 	private readonly List<double> _smokeDisconnectAtSeconds = new();
 	private readonly ClientUiPanelRegistry _serverDrivenPanels = new();
+	private readonly ClientMovementInputSendThrottle _movementInputSendThrottle = new(immediateFlagMask: MovementInputPacket.JumpFlag);
 
 	public ClientCharacterWorld? CharacterWorld { get; private set; }
 	public LocalPlayerController? LocalPlayerController { get; private set; }
@@ -325,6 +326,7 @@ public partial class GodotClientRuntimeRoot : Node
 
 		_lastDirectConnectRequest = request;
 		_wasSessionReady = false;
+		_movementInputSendThrottle.Reset();
 		CharacterWorld?.ClearAllActors();
 		UiManager?.Menus?.ShowSessionStatus();
 	}
@@ -365,6 +367,7 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		_sessionDriver?.Disconnect();
 		_wasSessionReady = false;
+		_movementInputSendThrottle.Reset();
 		_smokeSawDisconnected = true;
 		ClearSessionWorld();
 		UiManager?.Menus?.ClearServerDrivenPanels();
@@ -374,6 +377,7 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		_sessionDriver?.Disconnect();
 		_wasSessionReady = false;
+		_movementInputSendThrottle.Reset();
 		_smokeSawDisconnected = true;
 		ClearSessionWorld();
 		UiManager?.Menus?.ShowServerBrowser();
@@ -387,6 +391,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private void HandleSessionFailed(string status)
 	{
 		_wasSessionReady = false;
+		_movementInputSendThrottle.Reset();
 		_smokeSawDisconnected = true;
 		_smokeSawSessionFailed = true;
 		_smokeSessionFailureStatus = status;
@@ -592,6 +597,7 @@ public partial class GodotClientRuntimeRoot : Node
 			LocalPlayerController is null ||
 			LocalPlayerController.ControlledCharacter is null)
 		{
+			_movementInputSendThrottle.Reset();
 			return;
 		}
 
@@ -617,8 +623,18 @@ public partial class GodotClientRuntimeRoot : Node
 
 		global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
 		float speed = sprintPressed ? LiveMoveSpeed * 1.75f : LiveMoveSpeed;
-		float velocityX = input.MoveX / 100.0f * speed;
-		float velocityY = input.MoveY / 100.0f * speed;
+		float inputX = Mathf.Clamp(input.MoveX / 100.0f, -1.0f, 1.0f);
+		float inputY = Mathf.Clamp(input.MoveY / 100.0f, -1.0f, 1.0f);
+		float magnitudeSquared = (inputX * inputX) + (inputY * inputY);
+		if (magnitudeSquared > 1.0f)
+		{
+			float inverseMagnitude = 1.0f / Mathf.Sqrt(magnitudeSquared);
+			inputX *= inverseMagnitude;
+			inputY *= inverseMagnitude;
+		}
+
+		float velocityX = inputX * speed;
+		float velocityY = inputY * speed;
 		var predicted = new ClientMovementState(
 			position.X + velocityX * (float)delta,
 			position.Z + velocityY * (float)delta,
@@ -627,8 +643,11 @@ public partial class GodotClientRuntimeRoot : Node
 
 		ApplyLocalPredictedMovement(predicted, hasMoveInput || hasSmokeMoveInput, jumpPressed);
 
-		_localClientTick++;
-		_sessionDriver.TrySendMovementInput(input, predicted);
+		if (_movementInputSendThrottle.ShouldSend(input, delta))
+		{
+			_localClientTick++;
+			_sessionDriver.TrySendMovementInput(input, predicted);
+		}
 	}
 
 	private void ApplyLocalPredictedMovement(in ClientMovementState predicted, bool isMoving, bool jumpPressed)

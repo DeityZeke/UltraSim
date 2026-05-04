@@ -10,6 +10,8 @@ namespace UltraSim.Server.Network;
 /// </summary>
 public sealed class ServerEcsMovementNetworkBridge
 {
+    private const byte AllowedInputFlags = MovementInputPacket.SprintFlag | MovementInputPacket.JumpFlag;
+
     private readonly record struct BindingState(
         Entity Entity,
         uint NetworkEntityId,
@@ -28,6 +30,7 @@ public sealed class ServerEcsMovementNetworkBridge
     private readonly ServerMovementOwnerCorrectionPolicy _ownerCorrectionPolicy;
     private readonly Dictionary<ConnectionId, BindingState> _bindings = new();
     private readonly List<ConnectionId> _connectionScratch = new();
+    private readonly HashSet<ConnectionId> _acceptedInputConnections = new();
 
     public ServerEcsMovementNetworkBridge(
         World world,
@@ -79,6 +82,7 @@ public sealed class ServerEcsMovementNetworkBridge
     {
         LastReceivedInputCount = 0;
         LastIgnoredInputCount = 0;
+        _acceptedInputConnections.Clear();
 
         var inbound = new InboundDatagram[64];
         while (true)
@@ -87,7 +91,7 @@ public sealed class ServerEcsMovementNetworkBridge
             if (count == 0)
                 break;
 
-            ProcessInbound(inbound.AsSpan(0, count));
+            ProcessInboundBatch(inbound.AsSpan(0, count));
             DisposeInbound(inbound.AsSpan(0, count));
 
             if (count < inbound.Length)
@@ -98,6 +102,14 @@ public sealed class ServerEcsMovementNetworkBridge
     }
 
     public int ProcessInbound(ReadOnlySpan<InboundDatagram> inbound)
+    {
+        LastReceivedInputCount = 0;
+        LastIgnoredInputCount = 0;
+        _acceptedInputConnections.Clear();
+        return ProcessInboundBatch(inbound);
+    }
+
+    private int ProcessInboundBatch(ReadOnlySpan<InboundDatagram> inbound)
     {
         int processed = 0;
         for (int i = 0; i < inbound.Length; i++)
@@ -240,6 +252,12 @@ public sealed class ServerEcsMovementNetworkBridge
             return;
         }
 
+        if (!IsValidMovementInput(packet))
+        {
+            LastIgnoredInputCount++;
+            return;
+        }
+
         if (state.LastReceivedInputSequence != 0 && !SequenceGt(packet.InputSequence, state.LastReceivedInputSequence))
         {
             LastIgnoredInputCount++;
@@ -252,7 +270,21 @@ public sealed class ServerEcsMovementNetworkBridge
             HasInput = true,
             LastReceivedInputSequence = packet.InputSequence,
         };
-        LastReceivedInputCount++;
+        if (_acceptedInputConnections.Add(connectionId))
+        {
+            LastReceivedInputCount++;
+        }
+        else
+        {
+            LastIgnoredInputCount++;
+        }
+    }
+
+    private static bool IsValidMovementInput(in MovementInputPacket packet)
+    {
+        return (packet.Flags & ~AllowedInputFlags) == 0
+            && packet.MoveX is >= -100 and <= 100
+            && packet.MoveY is >= -100 and <= 100;
     }
 
     private static bool SequenceGt(ushort left, ushort right)

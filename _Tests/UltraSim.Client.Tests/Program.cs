@@ -16,6 +16,8 @@ internal static class TestRunner
     {
         Run(nameof(ClientConnectionState_PreservesExpectedValues), ClientConnectionState_PreservesExpectedValues);
         Run(nameof(ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs), ClientInputSequencer_QueuesCopiesAndAcknowledgesInputs);
+        Run(nameof(ClientMovementInputSendThrottle_SendsStartsStopsChangesAndHeldHeartbeats), ClientMovementInputSendThrottle_SendsStartsStopsChangesAndHeldHeartbeats);
+        Run(nameof(ClientMovementInputSendThrottle_SendsImmediateEdgeFlags), ClientMovementInputSendThrottle_SendsImmediateEdgeFlags);
         Run(nameof(ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture), ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture);
         Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
         Run(nameof(ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary), ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary);
@@ -105,6 +107,32 @@ internal static class TestRunner
         copied = sequencer.CopyPendingTo(scratch);
         Assert.Equal(1, copied);
         Assert.Equal(second, scratch[0]);
+    }
+
+    private static void ClientMovementInputSendThrottle_SendsStartsStopsChangesAndHeldHeartbeats()
+    {
+        var throttle = new ClientMovementInputSendThrottle(heartbeatSeconds: 0.06d);
+
+        Assert.False(throttle.ShouldSend(new ClientMovementInput(0, 0, 0), 0.016d));
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(100, 0, 0), 0.001d));
+        Assert.False(throttle.ShouldSend(new ClientMovementInput(100, 0, 0), 0.020d));
+        Assert.False(throttle.ShouldSend(new ClientMovementInput(100, 0, 0), 0.039d));
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(100, 0, 0), 0.001d));
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(0, 100, 0), 0.001d));
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(0, 0, 0), 0.001d));
+        Assert.False(throttle.ShouldSend(new ClientMovementInput(0, 0, 0), 0.100d));
+    }
+
+    private static void ClientMovementInputSendThrottle_SendsImmediateEdgeFlags()
+    {
+        var throttle = new ClientMovementInputSendThrottle(heartbeatSeconds: 1.0d, immediateFlagMask: 0b0000_0010);
+
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(0, 0, 0b0000_0010), 0.001d));
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(0, 0, 0b0000_0010), 0.001d));
+
+        throttle.Reset();
+        Assert.False(throttle.ShouldSend(new ClientMovementInput(0, 0, 0), 0.001d));
+        Assert.True(throttle.ShouldSend(new ClientMovementInput(0, 100, 0), 0.001d));
     }
 
     private static void ClientInputFocusState_BlocksMovementForTextMenusAndExplicitCapture()

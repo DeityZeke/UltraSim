@@ -53,6 +53,7 @@ What now exists:
     - state-binding resolver registry stub for future entity/inventory/party/session cache adapters
 - `Client/Network`
   - movement input send path over `Kernels/Network`
+  - movement input send throttling: immediate start/change/stop/edge sends plus a `60 ms` unchanged-held-input heartbeat
   - authoritative movement-state receive path
   - prediction acknowledgement hook
   - correction-magnitude tracking against predicted owner state

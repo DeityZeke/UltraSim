@@ -462,8 +462,18 @@ public static class ServerMovementWorldApplicationFactory
             float movementSpeed = (input.Flags & MovementInputPacket.SprintFlag) != 0
                 ? _options.MovementSpeed * SprintMovementMultiplier
                 : _options.MovementSpeed;
-            float velocityX = input.MoveX / 100f * movementSpeed;
-            float velocityY = input.MoveY / 100f * movementSpeed;
+            float inputX = Math.Clamp(input.MoveX / 100f, -1f, 1f);
+            float inputY = Math.Clamp(input.MoveY / 100f, -1f, 1f);
+            float magnitudeSquared = (inputX * inputX) + (inputY * inputY);
+            if (magnitudeSquared > 1f)
+            {
+                float inverseMagnitude = 1f / MathF.Sqrt(magnitudeSquared);
+                inputX *= inverseMagnitude;
+                inputY *= inverseMagnitude;
+            }
+
+            float velocityX = inputX * movementSpeed;
+            float velocityY = inputY * movementSpeed;
             body = body with
             {
                 VelocityX = velocityX,

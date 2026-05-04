@@ -27,10 +27,13 @@ Current default host tick rate:
 ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 
 - movement remains server-authoritative; client prediction is presentation only
-- packet throttling should become an explicit per-connection control-plane and
-  movement-plane policy before public server exposure
-- speed-hack prevention belongs at the movement-intent validation point: reject
-  or correct any claimed movement that exceeds what the entity's current
+- the Godot client sends movement immediately on start/change/stop/jump, then
+  falls back to a `60 ms` unchanged-held-input heartbeat (`~16.67 Hz`)
+- the server movement bridge rejects unknown input flags and movement axes
+  outside `[-100, 100]`, coalesces same-poll bursts to the newest valid intent,
+  and counts the discarded packet attempts for operator visibility
+- speed-hack prevention belongs at the movement-intent/application point: clamp
+  and normalize movement vectors so the entity cannot exceed what its current
   movement state can physically produce for the tick window
 - movement request queuing and validation order should stay deterministic so
   smoothness fixes do not become client trust
@@ -54,6 +57,8 @@ Current `Server/Network` state:
   - owner-state projection back into `MovementStatePacket`
   - the same narrow slice now also works over the real UDP transport after control-plane handshake
   - `ServerMovementSessionHost` now keeps control-plane handshake and movement on one shared live transport poll path
+  - movement input validation rejects impossible axes/unknown flags before ECS application
+  - same-poll movement bursts are coalesced to the latest valid input, preserving the newest direction while dropping spam
 - this is still the correct join point; `Kernels/ECS` and `Kernels/Network` remain separate
 
 Current recommended gameplay publish policy:

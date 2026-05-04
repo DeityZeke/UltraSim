@@ -82,6 +82,8 @@ internal static class TestRunner
         Run(nameof(ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams), ServerEcsWorldNetworkPublisher_ScheduleAndDispatch_ProducesScopedDatagrams);
         Run(nameof(ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement), ServerClientMovementBridges_Loopback_RoundTripAuthoritativeMovement);
         Run(nameof(ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement), ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement);
+        Run(nameof(ServerEcsMovementNetworkBridge_RejectsInvalidMovementInputs), ServerEcsMovementNetworkBridge_RejectsInvalidMovementInputs);
+        Run(nameof(ServerEcsMovementNetworkBridge_CoalescesBurstToLatestValidInput), ServerEcsMovementNetworkBridge_CoalescesBurstToLatestValidInput);
         Run(nameof(ServerEcsMovementNetworkBridge_PublishObserverMovementStates_EmitsNetworkEntityPayload), ServerEcsMovementNetworkBridge_PublishObserverMovementStates_EmitsNetworkEntityPayload);
         Run(nameof(ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates), ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates);
         Run(nameof(ServerMovementSessionHost_TracksReliableEventAcksFromClient), ServerMovementSessionHost_TracksReliableEventAcksFromClient);
@@ -2064,9 +2066,9 @@ internal static class TestRunner
         server.Bind(new ConnectionId(1), entity, networkEntityId: 77);
 
         bool sent = client.TrySendInput(
-            new ClientMovementInput(160, -80, 1),
+            new ClientMovementInput(80, -40, 1),
             clientTick: 1000,
-            predictedState: new ClientMovementState(1.6f, -0.8f, 1.6f, -0.8f),
+            predictedState: new ClientMovementState(0.8f, -0.4f, 0.8f, -0.4f),
             out ClientMovementInputSendResult sendResult);
         Assert.True(sent);
         Assert.Equal((ushort)1, sendResult.Sequence);
@@ -2082,10 +2084,10 @@ internal static class TestRunner
         Assert.Equal(1, server.LastSentStateCount);
 
         Assert.True(world.TryGetComponent(entity, out ServerEcsMovementBody authoritative));
-        Assert.AlmostEqual(0.8f, authoritative.PositionX);
-        Assert.AlmostEqual(-0.4f, authoritative.PositionY);
-        Assert.AlmostEqual(1.6f, authoritative.VelocityX);
-        Assert.AlmostEqual(-0.8f, authoritative.VelocityY);
+        Assert.AlmostEqual(0.4f, authoritative.PositionX);
+        Assert.AlmostEqual(-0.2f, authoritative.PositionY);
+        Assert.AlmostEqual(0.8f, authoritative.VelocityX);
+        Assert.AlmostEqual(-0.4f, authoritative.VelocityY);
 
         Assert.Equal(1, client.PollInbound());
         Assert.Equal((ushort)1, client.LastReceiveResult.LastProcessedInputSequence);
@@ -2104,10 +2106,10 @@ internal static class TestRunner
                 from.VelocityX + (to.VelocityX - from.VelocityX) * alpha,
                 from.VelocityY + (to.VelocityY - from.VelocityY) * alpha),
             out ClientMovementState sampled));
-        Assert.AlmostEqual(0.8f, sampled.PositionX);
-        Assert.AlmostEqual(-0.4f, sampled.PositionY);
-        Assert.AlmostEqual(1.6f, sampled.VelocityX);
-        Assert.AlmostEqual(-0.8f, sampled.VelocityY);
+        Assert.AlmostEqual(0.4f, sampled.PositionX);
+        Assert.AlmostEqual(-0.2f, sampled.PositionY);
+        Assert.AlmostEqual(0.8f, sampled.VelocityX);
+        Assert.AlmostEqual(-0.4f, sampled.VelocityY);
     }
 
     private static void ServerClientMovementBridges_UdpHandshakeThenMovement_RoundTripAuthoritativeMovement()
@@ -2190,9 +2192,9 @@ internal static class TestRunner
         server.Bind(new ConnectionId(1), entity, networkEntityId: 88);
 
         Assert.True(client.TrySendInput(
-            new ClientMovementInput(120, 40, 1),
+            new ClientMovementInput(90, 40, 1),
             clientTick: 1000,
-            predictedState: new ClientMovementState(1.2f, 0.4f, 1.2f, 0.4f),
+            predictedState: new ClientMovementState(0.9f, 0.4f, 0.9f, 0.4f),
             out ClientMovementInputSendResult sendResult));
         Assert.Equal((ushort)1, sendResult.Sequence);
 
@@ -2207,10 +2209,113 @@ internal static class TestRunner
         Assert.Equal((ushort)1, client.LastReceiveResult.LastProcessedInputSequence);
 
         Assert.True(world.TryGetComponent(entity, out ServerEcsMovementBody authoritative));
-        Assert.AlmostEqual(0.6f, authoritative.PositionX);
+        Assert.AlmostEqual(0.45f, authoritative.PositionX);
         Assert.AlmostEqual(0.2f, authoritative.PositionY);
-        Assert.AlmostEqual(1.2f, authoritative.VelocityX);
+        Assert.AlmostEqual(0.9f, authoritative.VelocityX);
         Assert.AlmostEqual(0.4f, authoritative.VelocityY);
+    }
+
+    private static void ServerEcsMovementNetworkBridge_RejectsInvalidMovementInputs()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        Entity entity = world.CreateDefault(new ArchetypeSignature([movementId]));
+        Assert.True(world.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+
+        using var pair = new LoopbackTransportPair();
+        pair.Client.Start();
+        pair.Server.Start();
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            body = body with
+            {
+                VelocityX = input.MoveX / 100f,
+                VelocityY = input.MoveY / 100f,
+            };
+            Assert.True(movementWorld.SetComponent(movementEntity, body));
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            packet = new MovementStatePacket(networkEntityId, serverTick, lastProcessedInputSequence, body.PositionX, body.PositionY, body.VelocityX, body.VelocityY);
+            return true;
+        }
+
+        var client = new ClientMovementNetworkBridge(pair.Client, new ConnectionId(1));
+        var server = new ServerEcsMovementNetworkBridge(world, pair.Server, ApplyMovementInput, ProjectMovementState);
+        server.Bind(new ConnectionId(1), entity, networkEntityId: 90);
+
+        Assert.True(client.TrySendInput(new ClientMovementInput(101, 0, 0), 1, default, out _));
+        Assert.True(client.TrySendInput(new ClientMovementInput(0, 0, 0b1000_0000), 2, default, out _));
+        pair.Client.FlushOutbound();
+
+        Assert.Equal(0, server.PollInputs());
+        Assert.Equal(0, server.LastReceivedInputCount);
+        Assert.Equal(2, server.LastIgnoredInputCount);
+        Assert.Equal(1, server.AdvanceAndSend(0.5f, serverTick: 1));
+        Assert.True(world.TryGetComponent(entity, out ServerEcsMovementBody body));
+        Assert.AlmostEqual(0f, body.VelocityX);
+        Assert.AlmostEqual(0f, body.VelocityY);
+    }
+
+    private static void ServerEcsMovementNetworkBridge_CoalescesBurstToLatestValidInput()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        Entity entity = world.CreateDefault(new ArchetypeSignature([movementId]));
+        Assert.True(world.SetComponent(entity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+
+        using var pair = new LoopbackTransportPair();
+        pair.Client.Start();
+        pair.Server.Start();
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            float velocityX = input.MoveX / 100f;
+            float velocityY = input.MoveY / 100f;
+            body = body with
+            {
+                VelocityX = velocityX,
+                VelocityY = velocityY,
+                PositionX = body.PositionX + velocityX * deltaSeconds,
+                PositionY = body.PositionY + velocityY * deltaSeconds,
+            };
+            Assert.True(movementWorld.SetComponent(movementEntity, body));
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
+        {
+            Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
+            packet = new MovementStatePacket(networkEntityId, serverTick, lastProcessedInputSequence, body.PositionX, body.PositionY, body.VelocityX, body.VelocityY);
+            return true;
+        }
+
+        var client = new ClientMovementNetworkBridge(pair.Client, new ConnectionId(1));
+        var server = new ServerEcsMovementNetworkBridge(world, pair.Server, ApplyMovementInput, ProjectMovementState);
+        server.Bind(new ConnectionId(1), entity, networkEntityId: 91);
+
+        Assert.True(client.TrySendInput(new ClientMovementInput(100, 0, 0), 1, default, out _));
+        Assert.True(client.TrySendInput(new ClientMovementInput(0, 100, 0), 2, default, out _));
+        Assert.True(client.TrySendInput(new ClientMovementInput(-50, 25, 0), 3, default, out _));
+        pair.Client.FlushOutbound();
+
+        Assert.Equal(1, server.PollInputs());
+        Assert.Equal(1, server.LastReceivedInputCount);
+        Assert.Equal(2, server.LastIgnoredInputCount);
+        Assert.Equal(1, server.AdvanceAndSend(0.5f, serverTick: 2));
+
+        Assert.True(world.TryGetComponent(entity, out ServerEcsMovementBody authoritative));
+        Assert.AlmostEqual(-0.25f, authoritative.PositionX);
+        Assert.AlmostEqual(0.125f, authoritative.PositionY);
+
+        Assert.Equal(1, client.PollInbound());
+        Assert.Equal((ushort)3, client.LastReceiveResult.LastProcessedInputSequence);
     }
 
     private static void ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement()
@@ -2314,7 +2419,7 @@ internal static class TestRunner
         for (int i = 0; i < clients.Count; i++)
         {
             Assert.True(clients[i].Host.TrySendInput(
-                new ClientMovementInput((short)(100 + i * 10), (short)(20 + i * 5), 1),
+                new ClientMovementInput((short)(80 + i * 5), (short)(20 + i * 5), 1),
                 clientTick: (uint)(1000 + i),
                 predictedState: new ClientMovementState(),
                 out _));
