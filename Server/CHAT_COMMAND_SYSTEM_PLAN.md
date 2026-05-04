@@ -125,6 +125,14 @@ Current command-prefix policy:
 - script commands and built-in script helper commands such as `panel`/`spawn` are normalized onto that same prefix when bound into the live movement host.
 - unprefixed console-only commands can still exist for operator shell flows, but they are not chat command declaration symbols.
 
+Current command permission policy:
+
+- `ServerCommandRegistry` can be constructed with a `ServerAccessRuleRegistry`.
+- commands default to a normalized `command.<name>` permission key, for example `command.spawn`.
+- commands can still declare a legacy `minAccessLevel`; the access registry uses that as a compatibility fallback after direct denies, rule denies, direct grants, and rule grants.
+- `ServerCommandRequest` carries optional runtime rule keys, direct permission grants, and direct permission denies.
+- this lets account/session metadata grant commands without hard-coded integer levels, while still keeping old access-level paths working during migration.
+
 The visible chat panel should also remain a local client surface for now, not a
 server-authored schema panel. Chat needs persistent local history, append-only
 message delivery, keyboard focus capture/release, and direct submit packets even

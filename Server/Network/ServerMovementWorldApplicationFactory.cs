@@ -163,6 +163,7 @@ public static class ServerMovementWorldApplicationFactory
                 operatorLog: (connectionId, message) =>
                     _operatorLog?.Invoke($"Client: {ResolveRemoteAddress(connectionId)}: {message}"),
                 commandPrefix: _options.CommandPrefix,
+                accessRules: _options.AccessRules,
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }

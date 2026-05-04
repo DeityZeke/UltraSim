@@ -8,5 +8,6 @@ public interface IUltraSimScriptCommandRegistry
         string helpText = "",
         int minAccessLevel = 0,
         string prefix = "/",
-        IEnumerable<string>? aliases = null);
+        IEnumerable<string>? aliases = null,
+        string? permissionKey = null);
 }

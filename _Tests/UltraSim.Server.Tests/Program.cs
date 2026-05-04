@@ -44,6 +44,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
         Run(nameof(ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs), ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs);
         Run(nameof(ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat), ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat);
+        Run(nameof(ServerCommandRegistry_EvaluatesPermissionKeysAndLegacyBridge), ServerCommandRegistry_EvaluatesPermissionKeysAndLegacyBridge);
         Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
@@ -591,6 +592,47 @@ internal static class TestRunner
         Assert.True(registry.TryDispatch(in consoleRequest, out ServerCommandDispatchResult result));
         Assert.Equal(ServerCommandDispatchStatus.Executed, result.Status);
         Assert.True(invoked);
+    }
+
+    private static void ServerCommandRegistry_EvaluatesPermissionKeysAndLegacyBridge()
+    {
+        var access = new ServerAccessRuleRegistry();
+        access.RegisterOrReplace(new ServerAccessRuleDescriptor(
+            "staff",
+            "Staff",
+            grants: ["command.spawn"]));
+
+        var registry = new ServerCommandRegistry("/", access);
+        int invocations = 0;
+        registry.Register(
+            "spawn",
+            (in ServerCommandRequest _, ServerTextCommandInvocation _) => invocations++,
+            minAccessLevel: 100);
+
+        var ruleRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "/spawn mobile",
+            AccessRuleKeys: ["staff"]);
+        Assert.True(registry.TryDispatch(in ruleRequest, out ServerCommandDispatchResult ruleResult));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, ruleResult.Status);
+        Assert.Equal(1, invocations);
+
+        var legacyRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "/spawn mobile",
+            AccessLevel: 100);
+        Assert.True(registry.TryDispatch(in legacyRequest, out ServerCommandDispatchResult legacyResult));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, legacyResult.Status);
+        Assert.Equal(2, invocations);
+
+        var deniedRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "/spawn mobile",
+            AccessLevel: 100,
+            DirectPermissionDenies: ["command.spawn"]);
+        Assert.True(registry.TryDispatch(in deniedRequest, out ServerCommandDispatchResult deniedResult));
+        Assert.Equal(ServerCommandDispatchStatus.PermissionDenied, deniedResult.Status);
+        Assert.Equal(2, invocations);
     }
 
     private static void ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix()

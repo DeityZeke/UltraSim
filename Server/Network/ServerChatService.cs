@@ -65,6 +65,9 @@ public sealed class ServerChatService
                 sender.ConnectionId,
                 sender.EntityId,
                 sender.DisplayName,
+                AccessRuleKeys: sender.AccessRuleKeys,
+                DirectPermissionGrants: sender.DirectPermissionGrants,
+                DirectPermissionDenies: sender.DirectPermissionDenies,
                 Reply: reply => PublishSystemTo(localScope, reply, serverTick));
 
             if (_commands.TryDispatch(in request, out ServerCommandDispatchResult result))

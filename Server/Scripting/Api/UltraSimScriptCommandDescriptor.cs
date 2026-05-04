@@ -6,4 +6,5 @@ public sealed record UltraSimScriptCommandDescriptor(
     int MinAccessLevel,
     string HelpText,
     Action<UltraSimScriptCommandContext> Handler,
-    IReadOnlyList<string> Aliases);
+    IReadOnlyList<string> Aliases,
+    string PermissionKey);

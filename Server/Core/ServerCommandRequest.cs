@@ -9,4 +9,7 @@ public readonly record struct ServerCommandRequest(
     ulong EntityId = 0,
     string SenderName = "",
     string TargetContext = "",
+    IReadOnlyList<string>? AccessRuleKeys = null,
+    IReadOnlyList<string>? DirectPermissionGrants = null,
+    IReadOnlyList<string>? DirectPermissionDenies = null,
     Action<string>? Reply = null);

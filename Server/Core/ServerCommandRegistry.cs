@@ -9,15 +9,18 @@ public sealed class ServerCommandRegistry
         public required string Name { get; init; }
         public required string Prefix { get; init; }
         public required int MinAccessLevel { get; init; }
+        public required string PermissionKey { get; init; }
         public required string HelpText { get; init; }
         public required ServerTextCommandHandler Handler { get; init; }
     }
 
     private readonly Dictionary<string, CommandEntry> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _prefixes = new();
+    private readonly ServerAccessRuleRegistry? _accessRules;
 
-    public ServerCommandRegistry(string commandPrefix = "/")
+    public ServerCommandRegistry(string commandPrefix = "/", ServerAccessRuleRegistry? accessRules = null)
     {
+        _accessRules = accessRules;
         AddPrefix(commandPrefix);
     }
 
@@ -46,7 +49,8 @@ public sealed class ServerCommandRegistry
         string prefix = "/",
         int minAccessLevel = 0,
         string? helpText = null,
-        IEnumerable<string>? aliases = null)
+        IEnumerable<string>? aliases = null,
+        string? permissionKey = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Command name cannot be empty.", nameof(name));
@@ -60,6 +64,9 @@ public sealed class ServerCommandRegistry
             Name = name.Trim(),
             Prefix = prefix.Trim(),
             MinAccessLevel = minAccessLevel,
+            PermissionKey = string.IsNullOrWhiteSpace(permissionKey)
+                ? ServerCommandPermissionKeys.ForCommandName(name)
+                : ServerAccessKey.NormalizePermissionKey(permissionKey),
             HelpText = helpText ?? string.Empty,
             Handler = handler,
         };
@@ -115,7 +122,7 @@ public sealed class ServerCommandRegistry
             return true;
         }
 
-        if (request.AccessLevel < entry.MinAccessLevel)
+        if (!CanExecute(in request, entry))
         {
             result = ServerCommandDispatchResult.PermissionDenied(entry.Name);
             return true;
@@ -182,6 +189,21 @@ public sealed class ServerCommandRegistry
 
         _commands.Add(key, entry);
         return true;
+    }
+
+    private bool CanExecute(in ServerCommandRequest request, CommandEntry entry)
+    {
+        if (_accessRules is null)
+            return request.AccessLevel >= entry.MinAccessLevel;
+
+        var accessRequest = new ServerAccessEvaluationRequest(
+            entry.PermissionKey,
+            request.AccessRuleKeys,
+            request.DirectPermissionGrants,
+            request.DirectPermissionDenies,
+            request.AccessLevel,
+            entry.MinAccessLevel);
+        return _accessRules.Evaluate(accessRequest).IsAllowed;
     }
 
     private bool TryMatchPrefix(string raw, ServerCommandSource source, out string prefix)

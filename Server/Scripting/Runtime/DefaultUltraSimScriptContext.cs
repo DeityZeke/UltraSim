@@ -64,7 +64,8 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
         string helpText = "",
         int minAccessLevel = 0,
         string prefix = "/",
-        IEnumerable<string>? aliases = null)
+        IEnumerable<string>? aliases = null,
+        string? permissionKey = null)
     {
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Command name cannot be empty.", nameof(name));
@@ -87,7 +88,10 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
             minAccessLevel,
             helpText ?? string.Empty,
             handler,
-            aliasArray);
+            aliasArray,
+            string.IsNullOrWhiteSpace(permissionKey)
+                ? ServerCommandPermissionKeys.ForCommandName(trimmedName)
+                : ServerAccessKey.NormalizePermissionKey(permissionKey));
         _commands.Add(key, descriptor);
         return true;
     }
@@ -229,7 +233,8 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
                 prefix,
                 descriptor.MinAccessLevel,
                 descriptor.HelpText,
-                descriptor.Aliases);
+                descriptor.Aliases,
+                descriptor.PermissionKey);
         }
     }
 

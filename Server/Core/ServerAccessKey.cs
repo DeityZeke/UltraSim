@@ -1,6 +1,6 @@
 namespace UltraSim.Server;
 
-internal static class ServerAccessKey
+public static class ServerAccessKey
 {
     public static string NormalizeRuleKey(string key)
         => NormalizeKey(key, "Rule key");
