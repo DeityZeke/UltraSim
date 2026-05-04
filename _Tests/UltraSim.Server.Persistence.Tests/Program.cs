@@ -18,6 +18,9 @@ internal static class TestRunner
         Run(nameof(ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly), ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly);
         Run(nameof(ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent), ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent);
         Run(nameof(ServerPersistenceCoordinator_RotatesWholeSaveSetBackups), ServerPersistenceCoordinator_RotatesWholeSaveSetBackups);
+        Run(nameof(ServerPersistenceCoordinator_RestoreBackup_PromotesBackupAndCreatesSafetyBackup), ServerPersistenceCoordinator_RestoreBackup_PromotesBackupAndCreatesSafetyBackup);
+        Run(nameof(ServerPersistenceCoordinator_RestoreBackup_RejectsUnsafeBackupName), ServerPersistenceCoordinator_RestoreBackup_RejectsUnsafeBackupName);
+        Run(nameof(ServerPersistenceCoordinator_RestoreBackup_FailureLeavesCurrentUntouched), ServerPersistenceCoordinator_RestoreBackup_FailureLeavesCurrentUntouched);
         Run(nameof(ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths), ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths);
 
         Console.WriteLine("All Server persistence tests passed.");
@@ -377,6 +380,90 @@ internal static class TestRunner
             Assert.Equal(1, backups.Length);
             Assert.True(Path.GetFileName(backups[0]).StartsWith("Most Recent (", StringComparison.Ordinal));
             Assert.Contains("3", File.ReadAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "sequence.txt")));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_RestoreBackup_PromotesBackupAndCreatesSafetyBackup()
+    {
+        string root = CreateTempRoot("server_persistence_restore");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 1));
+            Assert.True(coordinator.Save(now).Succeeded);
+            Assert.True(coordinator.Save(now.AddSeconds(1)).Succeeded);
+
+            IReadOnlyList<ServerPersistenceBackupSnapshot> backups = coordinator.ListBackups();
+            Assert.Equal(1, backups.Count);
+            Assert.Equal(1UL, backups[0].Manifest.SaveSequence);
+
+            ServerPersistenceRestoreResult restored = coordinator.RestoreBackup(
+                backups[0].DirectoryName,
+                now.AddMinutes(1));
+
+            Assert.True(restored.Succeeded);
+            Assert.Equal(1UL, restored.Manifest!.SaveSequence);
+            Assert.True(restored.SafetyBackupRoot is not null);
+            Assert.True(Directory.Exists(restored.SafetyBackupRoot!));
+            Assert.Equal("1", File.ReadAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "sequence.txt")));
+            Assert.Equal("2", File.ReadAllText(Path.Combine(restored.SafetyBackupRoot!, "sequence.txt")));
+            Assert.True(Directory.Exists(backups[0].RootPath));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_RestoreBackup_RejectsUnsafeBackupName()
+    {
+        string root = CreateTempRoot("server_persistence_restore_unsafe");
+        try
+        {
+            var coordinator = new ServerPersistenceCoordinator(root, [new SequenceFileParticipant()]);
+
+            ServerPersistenceRestoreResult restored = coordinator.RestoreBackup("../Most Recent", DateTimeOffset.UtcNow);
+
+            Assert.False(restored.Succeeded);
+            Assert.Contains("not safe", restored.Failures[0].Message);
+            Assert.False(Directory.Exists(Path.Combine(root, ".pending")));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_RestoreBackup_FailureLeavesCurrentUntouched()
+    {
+        string root = CreateTempRoot("server_persistence_restore_failure");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 1));
+            Assert.True(coordinator.Save(now).Succeeded);
+            Assert.True(coordinator.Save(now.AddSeconds(1)).Succeeded);
+
+            string backupDirectory = coordinator.ListBackups()[0].DirectoryName;
+            string manifestPath = Path.Combine(root, "backups", backupDirectory, "save_manifest.json");
+            File.WriteAllText(manifestPath, "{ broken json");
+
+            ServerPersistenceRestoreResult restored = coordinator.RestoreBackup(backupDirectory, now.AddMinutes(1));
+
+            Assert.False(restored.Succeeded);
+            Assert.True(!string.IsNullOrWhiteSpace(restored.Failures[0].Message));
+            Assert.Equal("2", File.ReadAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "sequence.txt")));
+            Assert.False(Directory.Exists(Path.Combine(root, ".pending")));
         }
         finally
         {

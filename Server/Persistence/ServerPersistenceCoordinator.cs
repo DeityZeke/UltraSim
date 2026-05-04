@@ -118,6 +118,84 @@ public sealed class ServerPersistenceCoordinator
         return TryReadManifest(path, out manifest, out _);
     }
 
+    public IReadOnlyList<ServerPersistenceBackupSnapshot> ListBackups()
+    {
+        string backupRoot = BackupRootDirectory;
+        if (!Directory.Exists(backupRoot))
+            return [];
+
+        var backups = new List<ServerPersistenceBackupSnapshot>();
+        foreach (string backupDirectory in Directory.EnumerateDirectories(backupRoot))
+        {
+            string manifestPath = Path.Combine(backupDirectory, "save_manifest.json");
+            if (!TryReadManifest(manifestPath, out ServerPersistenceSaveManifest manifest, out _))
+                continue;
+
+            backups.Add(new ServerPersistenceBackupSnapshot(
+                Path.GetFileName(backupDirectory),
+                backupDirectory,
+                manifest));
+        }
+
+        return backups
+            .OrderByDescending(static backup => backup.Manifest.SaveSequence)
+            .ToArray();
+    }
+
+    public ServerPersistenceRestoreResult RestoreBackup(
+        string backupDirectoryName,
+        DateTimeOffset restoredUtc)
+    {
+        var warnings = new List<string>();
+        string pendingRoot = string.Empty;
+        try
+        {
+            string backupPath = ResolveBackupDirectoryPath(backupDirectoryName);
+            string manifestPath = Path.Combine(backupPath, "save_manifest.json");
+            if (!TryReadManifest(manifestPath, out ServerPersistenceSaveManifest manifest, out string manifestError))
+            {
+                return ServerPersistenceRestoreResult.Failure(
+                    backupDirectoryName,
+                    [new ServerPersistenceSaveFailure("coordinator", manifestError)],
+                    warnings);
+            }
+
+            ValidateBackupArtifacts(backupPath, manifest);
+
+            pendingRoot = CreateRestorePendingRoot();
+            CopyDirectory(backupPath, pendingRoot);
+
+            string? safetyBackupRoot = null;
+            if (CurrentSaveSetDirectoryHasEntries())
+            {
+                Directory.CreateDirectory(BackupRootDirectory);
+                safetyBackupRoot = CreatePreRestoreBackupPath(BackupRootDirectory, restoredUtc);
+                MoveCurrentSaveSetToBackup(safetyBackupRoot);
+            }
+
+            PromotePendingSaveSetToCurrent(pendingRoot);
+            pendingRoot = string.Empty;
+            _nextSaveSequence = Math.Max(_nextSaveSequence, manifest.SaveSequence);
+
+            return ServerPersistenceRestoreResult.Success(
+                backupDirectoryName,
+                CurrentSaveSetRoot,
+                safetyBackupRoot,
+                manifest,
+                warnings);
+        }
+        catch (Exception ex)
+        {
+            if (!string.IsNullOrWhiteSpace(pendingRoot))
+                DeletePendingSaveSet(pendingRoot);
+
+            return ServerPersistenceRestoreResult.Failure(
+                backupDirectoryName,
+                [new ServerPersistenceSaveFailure("coordinator", ex.Message)],
+                warnings);
+        }
+    }
+
     public ServerPersistenceLoadResult Load()
     {
         var totalStopwatch = Stopwatch.StartNew();
@@ -223,6 +301,53 @@ public sealed class ServerPersistenceCoordinator
                 "Recovery mode 'RequireCurrent' requires a loadable current save-set.",
             _ => "No valid save-set could be loaded.",
         };
+    }
+
+    private string ResolveBackupDirectoryPath(string backupDirectoryName)
+    {
+        if (string.IsNullOrWhiteSpace(backupDirectoryName))
+            throw new ArgumentException("Backup directory name is required.", nameof(backupDirectoryName));
+        if (Path.IsPathRooted(backupDirectoryName) ||
+            backupDirectoryName.Contains(Path.DirectorySeparatorChar) ||
+            backupDirectoryName.Contains(Path.AltDirectorySeparatorChar) ||
+            backupDirectoryName.Contains('\\') ||
+            backupDirectoryName is "." or "..")
+        {
+            throw new InvalidOperationException($"Backup directory name '{backupDirectoryName}' is not safe.");
+        }
+
+        string backupRoot = BackupRootDirectory;
+        string backupPath = Path.GetFullPath(Path.Combine(backupRoot, backupDirectoryName));
+        if (!IsSameOrChildPath(backupPath, backupRoot) || PathsEqual(backupPath, backupRoot))
+            throw new InvalidOperationException($"Backup directory name '{backupDirectoryName}' is not safe.");
+        if (!Directory.Exists(backupPath))
+            throw new DirectoryNotFoundException($"Backup save-set '{backupDirectoryName}' was not found.");
+
+        return backupPath;
+    }
+
+    private static void ValidateBackupArtifacts(
+        string backupRoot,
+        ServerPersistenceSaveManifest manifest)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < manifest.Artifacts.Count; i++)
+        {
+            ServerPersistenceArtifact artifact = manifest.Artifacts[i];
+            if (!names.Add(artifact.Name))
+                throw new InvalidOperationException($"Backup save-set has duplicate participant artifact '{artifact.Name}'.");
+
+            _ = MeasureArtifact(backupRoot, artifact);
+        }
+    }
+
+    private string CreateRestorePendingRoot()
+    {
+        string pendingDirectory = PendingDirectory;
+        Directory.CreateDirectory(pendingDirectory);
+        string path = Path.Combine(pendingDirectory, $"restore-{Guid.NewGuid():N}");
+        DeleteDirectoryIfExists(path);
+        return path;
     }
 
     private string CreatePendingSaveSetRoot(ServerPersistenceMetadata metadata)
@@ -566,6 +691,20 @@ public sealed class ServerPersistenceCoordinator
         return FormatBackupDirectory(backupRoot, slots[^1], timeStamp);
     }
 
+    private static string CreatePreRestoreBackupPath(string backupRoot, DateTimeOffset restoredUtc)
+    {
+        string path = FormatBackupDirectory(backupRoot, "Pre-Restore Backup", FormatBackupTimestamp(restoredUtc));
+        if (!Directory.Exists(path))
+            return path;
+
+        for (int i = 2; ; i++)
+        {
+            string candidate = $"{path} #{i.ToString(CultureInfo.InvariantCulture)}";
+            if (!Directory.Exists(candidate))
+                return candidate;
+        }
+    }
+
     private static string[] GetBackupSlotNames(int backupCount) =>
         backupCount <= 1
             ? ["Most Recent"]
@@ -741,5 +880,26 @@ public sealed class ServerPersistenceCoordinator
         }
 
         File.Move(source, destination);
+    }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(source, directory);
+            Directory.CreateDirectory(Path.Combine(destination, relative));
+        }
+
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(source, file);
+            string target = Path.Combine(destination, relative);
+            string? targetDirectory = Path.GetDirectoryName(target);
+            if (!string.IsNullOrWhiteSpace(targetDirectory))
+                Directory.CreateDirectory(targetDirectory);
+
+            File.Copy(file, target, overwrite: true);
+        }
     }
 }

@@ -54,6 +54,10 @@ Current scope:
   - `CurrentThenBackups` is the default RunUO-like recovery path;
   - `CurrentOnly` refuses to load backups, so a bad current save fails loudly;
   - `RequireCurrent` refuses both backup-only and fresh-start recovery.
+- `ListBackups()` and `RestoreBackup(...)` provide the operator primitive for
+  backup recovery. Restore copies the selected backup through a pending restore
+  directory first, validates the backup manifest/artifacts, and moves the
+  previous current save-set into `Pre-Restore Backup (...)` before promotion.
 - Save/load results include total elapsed milliseconds and per-participant
   timings. The movement server folds those into the existing `Persistence`
   runtime snapshot detail as sequence, load source, warnings, failures, file
@@ -81,13 +85,14 @@ The current modular path now covers the high-value coordination pieces:
 - artifact metadata and per-participant timing telemetry;
 - safe participant artifact path validation;
 - shell/runtime status exposure through the `Persistence` system snapshot.
+- explicit backup listing and restore primitives with a pre-restore safety
+  backup.
 
 Still worth reworking/expanding next:
 
 - add an operator recovery prompt/path on top of the non-interactive recovery
   modes;
-- add an operator restore command that promotes a named backup to current with a
-  pre-restore safety backup;
+- expose backup listing/restore through shell/admin commands;
 - make retention richer than slot count alone, such as manual keep markers,
   hourly/daily generations, or size limits;
 - add artifact checksums so load can detect content drift, not just missing files
