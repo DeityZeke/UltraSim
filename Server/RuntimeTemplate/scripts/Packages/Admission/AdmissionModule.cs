@@ -29,6 +29,20 @@ public sealed class AdmissionModule : IUltraSimScriptModule
             context.Admission.RegisterStep(step);
         }
 
+        UltraSimRuntimeContentGroupOperationResult group = context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/admission",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Default Admission",
+                "Login, character selection, and character creation flow.",
+                "scripts/Packages/Admission",
+                "1"));
+        if (!group.Accepted &&
+            group.Status != UltraSimRuntimeContentGroupOperationStatus.DuplicateKey)
+        {
+            throw new InvalidOperationException(group.Error);
+        }
+
         context.Logger.Info("Default admission package configured.");
     }
 

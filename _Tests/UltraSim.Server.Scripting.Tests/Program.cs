@@ -19,6 +19,7 @@ internal static class TestRunner
         Run(nameof(ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime), ScriptDefinitions_PerSpawnFactoriesRollAtSpawnTime);
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
         Run(nameof(ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically), ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically);
+        Run(nameof(RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages), RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages);
         Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
         Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
@@ -91,6 +92,10 @@ internal static class TestRunner
         Assert.Equal(1, load.ModuleCount);
         Assert.Equal(3, context.RegisteredPanelProviders.Count);
         Assert.Equal(3, context.RegisteredAdmissionSteps.Count);
+        Assert.Equal(1, context.RuntimeContentGroups.Count);
+        Assert.True(context.RuntimeContentGroups.TryGet("packages/admission", out UltraSimRuntimeContentGroupSnapshot admissionGroup));
+        Assert.True(admissionGroup.IsMounted);
+        Assert.Equal(UltraSimRuntimeContentGroupKind.ScriptPackage, admissionGroup.Descriptor.Kind);
         Assert.True(context.TryGetPanelProvider("admission.panel.login", out UltraSimScriptUiPanelProviderDescriptor loginProvider));
         Assert.True(context.TryGetPanelProvider("admission.panel.character_select", out UltraSimScriptUiPanelProviderDescriptor selectProvider));
         Assert.True(context.TryGetPanelProvider("admission.panel.character_create", out UltraSimScriptUiPanelProviderDescriptor createProvider));
@@ -338,6 +343,60 @@ internal static class TestRunner
         Assert.True(coreReplacement.ReplacedRegistration is not null);
         Assert.True(registry.TryGetActive("chat.surface", out active));
         Assert.Equal("core_v2", active.Provider!());
+    }
+
+    private static void RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages()
+    {
+        DateTimeOffset now = new(2026, 5, 4, 10, 0, 0, TimeSpan.Zero);
+        var registry = new UltraSimRuntimeContentGroupRegistry(() => now);
+        var descriptor = new UltraSimRuntimeContentGroupDescriptor(
+            "packages/spawning",
+            UltraSimRuntimeContentGroupKind.SpawnPackage,
+            "Default Spawning",
+            "RunUO-style spawner behavior.",
+            "scripts/Packages/Spawning",
+            "1");
+
+        UltraSimRuntimeContentGroupOperationResult registered = registry.Register(descriptor, mounted: false);
+        Assert.True(registered.Accepted);
+        Assert.False(registered.Snapshot!.IsMounted);
+        Assert.Equal(now, registered.Snapshot.UpdatedUtc);
+        Assert.Equal(1, registry.Count);
+
+        UltraSimRuntimeContentGroupOperationResult duplicate = registry.Register(descriptor);
+        Assert.False(duplicate.Accepted);
+        Assert.Equal(UltraSimRuntimeContentGroupOperationStatus.DuplicateKey, duplicate.Status);
+
+        now = now.AddSeconds(5);
+        UltraSimRuntimeContentGroupOperationResult mounted = registry.Mount("packages/spawning");
+        Assert.True(mounted.Accepted);
+        Assert.True(mounted.Snapshot!.IsMounted);
+        Assert.Equal(now, mounted.Snapshot.UpdatedUtc);
+        Assert.Equal(1, registry.Snapshot(mountedOnly: true).Count);
+
+        UltraSimRuntimeContentGroupOperationResult alreadyMounted = registry.Mount("packages/spawning");
+        Assert.False(alreadyMounted.Accepted);
+        Assert.Equal(UltraSimRuntimeContentGroupOperationStatus.AlreadyMounted, alreadyMounted.Status);
+
+        now = now.AddSeconds(5);
+        UltraSimRuntimeContentGroupOperationResult unmounted = registry.Unmount("packages/spawning");
+        Assert.True(unmounted.Accepted);
+        Assert.False(unmounted.Snapshot!.IsMounted);
+        Assert.Equal(0, registry.Snapshot(mountedOnly: true).Count);
+
+        UltraSimRuntimeContentGroupOperationResult unknown = registry.Mount("packages/missing");
+        Assert.False(unknown.Accepted);
+        Assert.Equal(UltraSimRuntimeContentGroupOperationStatus.UnknownKey, unknown.Status);
+
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        UltraSimRuntimeContentGroupOperationResult contextGroup = context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/custom",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Custom Package"));
+        Assert.True(contextGroup.Accepted);
+        Assert.Equal(1, context.RuntimeContentGroups.Count);
     }
 
     private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()

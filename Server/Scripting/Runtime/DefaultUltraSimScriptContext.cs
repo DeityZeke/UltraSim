@@ -12,6 +12,7 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     private readonly HashSet<string> _admissionStepEventKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ArchetypeDescriptor> _archetypes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PrefabDescriptor> _prefabs = new(StringComparer.Ordinal);
+    private readonly UltraSimRuntimeContentGroupRegistry _contentGroups = new();
 
     public DefaultUltraSimScriptContext(UltraSimRuntimeRootLayout runtimeRoot, string scriptApiVersion = "1")
     {
@@ -26,6 +27,7 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     public IUltraSimScriptUiRegistry UiPanels => this;
     public IUltraSimScriptAdmissionRegistry Admission => this;
     public IUltraSimScriptDefinitionRegistry Definitions => this;
+    public IUltraSimScriptContentGroupRegistry ContentGroups => _contentGroups;
     public IReadOnlyList<UltraSimScriptLogEntry> LogEntries => _logEntries;
     public IReadOnlyCollection<UltraSimScriptCommandDescriptor> RegisteredCommands => _commands.Values;
     public IReadOnlyCollection<UltraSimScriptUiPanelProviderDescriptor> RegisteredPanelProviders => _panelProviders.Values;
@@ -48,6 +50,7 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     }
     public IReadOnlyCollection<ArchetypeDescriptor> RegisteredArchetypes => _archetypes.Values;
     public IReadOnlyCollection<PrefabDescriptor> RegisteredPrefabs => _prefabs.Values;
+    public UltraSimRuntimeContentGroupRegistry RuntimeContentGroups => _contentGroups;
 
     public void Info(string message) => Log(UltraSimScriptLogLevel.Info, message);
 

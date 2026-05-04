@@ -41,7 +41,6 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 Current foundational/server-platform task list:
 
 - access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
-- runtime content group mount/unmount registry for prefab/script/spawn packages
 - command-registry integration with permission keys instead of only legacy integer access levels
 - account persistence for assigned access rules/direct grants/direct denies
 - backup compression option, likely ZSTD for backup archives while leaving live saves uncompressed
@@ -79,6 +78,14 @@ Current spawner primitive foundation:
 - `ServerSpawnerRegistry` resolves stable spawn-set keys and hashes to admin-readable metadata.
 - ECS components intentionally store the stable `ulong` hash instead of strings; admin panels and commands resolve display text through the registry.
 - Actual spawn execution, live content group mount/unmount, smart player-proximity activation, and spawner persistence remain later slices.
+
+Current runtime content group foundation:
+
+- `UltraSimRuntimeContentGroupRegistry` tracks named package-like units and whether they are mounted.
+- content group descriptors carry kind, display name, description, origin path, and version.
+- `IUltraSimScriptContext.ContentGroups` exposes registration/mount/unmount to script packages.
+- the stock Admission package registers `packages/admission` as a mounted script package.
+- this is metadata/lifecycle state only for now; actual unload of commands, panels, prefab definitions, and spawn sets remains a later implementation layer.
 
 Current `Server/Network` state:
 

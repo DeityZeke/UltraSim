@@ -9,4 +9,5 @@ public interface IUltraSimScriptContext
     IUltraSimScriptUiRegistry UiPanels { get; }
     IUltraSimScriptAdmissionRegistry Admission { get; }
     IUltraSimScriptDefinitionRegistry Definitions { get; }
+    IUltraSimScriptContentGroupRegistry ContentGroups { get; }
 }

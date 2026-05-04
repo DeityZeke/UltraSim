@@ -82,6 +82,14 @@ scripts/Packages/Chat/
 
 Top-level folders remain useful for loose content and small standalone scripts. `Packages` is for complete systems an operator should be able to copy, replace, disable, document, or eventually manifest as one unit.
 
+Current runtime content group state:
+
+- packages can register themselves through `IUltraSimScriptContext.ContentGroups`.
+- `UltraSimRuntimeContentGroupRegistry` records descriptor metadata and mounted/unmounted state.
+- descriptors carry key, kind, display name, description, origin path, and version.
+- this registry is intentionally a lifecycle/metadata layer first; command, panel, prefab, and spawn-set unregister/reload behavior will be layered on top later.
+- the stock Admission package now registers itself as `packages/admission`.
+
 Default server-authored platform flows can also be packages. The default
 admission flow belongs in `scripts/Packages/Admission/`: it owns login,
 character select/create panel definitions, stable admission event names, and the
