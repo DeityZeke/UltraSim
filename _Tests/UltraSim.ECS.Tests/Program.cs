@@ -38,6 +38,7 @@ internal static class TestRunner
         Run(nameof(StructuralQueue_MixedOperations_UseDeterministicPhaseOrder), StructuralQueue_MixedOperations_UseDeterministicPhaseOrder);
         Run(nameof(StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty), StructuralQueue_DestroySparseVictims_PreservesRemainingDataAndMarksDirty);
         Run(nameof(QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal), QueryArchetypes_AndGetComponent_ExposeReadOnlyTraversal);
+        Run(nameof(World_InspectEntity_CapturesComponentSummariesAndFields), World_InspectEntity_CapturesComponentSummariesAndFields);
         Run(nameof(ReadOnlyQuery_AndChunkIteration_FilterByArchetype), ReadOnlyQuery_AndChunkIteration_FilterByArchetype);
         Run(nameof(QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes), QueryCaches_RefreshWhenStructuralChangesCreateNewArchetypes);
         Run(nameof(PatchQuery_UpdatesMatchedRowsAndMarksDirty), PatchQuery_UpdatesMatchedRowsAndMarksDirty);
@@ -849,6 +850,45 @@ internal static class TestRunner
             allArchetypes++;
 
         Assert.Equal(3, allArchetypes);
+    }
+
+    private static void World_InspectEntity_CapturesComponentSummariesAndFields()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<Position>();
+        ComponentId velocityId = builder.RegisterComponent<Velocity>();
+        var world = new World(builder.Build());
+
+        Entity entity = world.CreateDefault(new ArchetypeSignature([positionId, velocityId]));
+
+        Assert.True(world.SetComponent(entity, new Position(12)));
+        Assert.True(world.SetComponent(entity, new Velocity(-3)));
+        Assert.True(world.TryInspectEntity(entity, out EntityInspectionSnapshot snapshot));
+        Assert.Equal(entity, snapshot.Entity);
+        Assert.Equal(2, snapshot.ArchetypeComponentCount);
+        Assert.Equal(2, snapshot.Components.Count);
+
+        EntityComponentInspectionSnapshot position = snapshot.Components.Single(static component => component.DisplayName == nameof(Position));
+        Assert.Equal(positionId, position.ComponentId);
+        Assert.Contains(nameof(Position), position.TypeName);
+        Assert.Contains("12", position.ValuePreview);
+        Assert.Equal(1, position.Fields.Count);
+        Assert.Equal("X", position.Fields[0].Name);
+        Assert.Equal("12", position.Fields[0].Value);
+
+        EntityComponentInspectionSnapshot velocity = snapshot.Components.Single(static component => component.DisplayName == nameof(Velocity));
+        Assert.Equal(velocityId, velocity.ComponentId);
+        Assert.Contains("-3", velocity.ValuePreview);
+        Assert.Equal("X", velocity.Fields[0].Name);
+        Assert.Equal("-3", velocity.Fields[0].Value);
+
+        world.Destroy(entity);
+
+        Assert.False(world.TryInspectEntity(entity, out EntityInspectionSnapshot deadSnapshot));
+        Assert.Equal(entity, deadSnapshot.Entity);
+        Assert.Equal(0, deadSnapshot.ArchetypeComponentCount);
+        Assert.Equal(0, deadSnapshot.Components.Count);
+        Assert.Throws<InvalidOperationException>(() => world.InspectEntity(entity));
     }
 
     private static void ReadOnlyQuery_AndChunkIteration_FilterByArchetype()

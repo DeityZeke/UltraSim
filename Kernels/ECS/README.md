@@ -291,6 +291,7 @@ What exists now:
 - `SystemSettings` can still adjust schedule-level concerns such as cadence, offset, and stage,
 - `SystemRuntimeSnapshot` exposes system name, schedule metadata, enabled/manual state, live timing data, and optional control descriptors,
 - `SystemBase.ControlDescriptors` is an empty-by-default seam for future control-plane integration,
+- `World.TryInspectEntity`/`World.InspectEntity` expose read-only entity component summaries and public field/value snapshots for future admin `[props]`-style panels,
 - timing values populate when `ProfilingEnabled` is on, so future performance panels can consume live per-system metrics without forcing a full settings subsystem now.
 
 What is intentionally deferred:
