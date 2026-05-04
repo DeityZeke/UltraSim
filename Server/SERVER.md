@@ -41,9 +41,10 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 Current foundational/server-platform task list:
 
 - access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
-- admin facade over ECS entity inspection snapshots for `[props]`-style panels and commands
 - spawner component primitives: enabled state, radius, spawn-set key, and admin-visible metadata
 - runtime content group mount/unmount registry for prefab/script/spawn packages
+- command-registry integration with permission keys instead of only legacy integer access levels
+- account persistence for assigned access rules/direct grants/direct denies
 - backup compression option, likely ZSTD for backup archives while leaving live saves uncompressed
 - parallel persistence participant snapshot fan-out once save payload preparation becomes heavy
 - region/rule framework when terrain and world regions become concrete
@@ -63,6 +64,14 @@ Current access/permission foundation:
 - Permission keys are normalized strings such as `admin.entity.inspect`, `command.spawn`, or wildcard families such as `admin.entity.*`.
 - Denies win over grants, direct subject denies win before rule denies, and legacy integer `AccessLevel` remains available as a bridge for current command paths.
 - Account persistence, UI editing, audit logging, and command-registry permission-key integration are intentionally later layers.
+
+Current admin inspection foundation:
+
+- `Kernels/ECS` owns raw read-only entity/component/field snapshots through `World.TryInspectEntity`.
+- `Server/Network` owns the server-facing `ServerEntityInspectionService` facade.
+- The facade evaluates an optional `ServerAccessEvaluationRequest` before reading the ECS snapshot.
+- `ServerAdminPermissionKeys.EntityInspect` is the first named admin permission key and maps to `admin.entity.inspect`.
+- Future `[props]` commands and schema admin panels should call this facade rather than reaching directly into ECS internals.
 
 Current `Server/Network` state:
 

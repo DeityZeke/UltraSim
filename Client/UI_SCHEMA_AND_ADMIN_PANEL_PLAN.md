@@ -1009,7 +1009,7 @@ Future ECS panels will need:
 Current ECS foundation:
 
 - `World.TryInspectEntity`/`World.InspectEntity` return read-only snapshots with component ids, component type names, value previews, and public field values.
-- Higher-level admin panels should consume those snapshots through a server/admin facade rather than reaching into engine internals directly.
+- Higher-level admin panels should consume those snapshots through `ServerEntityInspectionService`, which wraps them with server access checks and clean denied/not-found statuses.
 - Editing remains deliberately out of scope for this first layer; mutation needs permissions, validation, audit logging, and typed command handlers.
 
 ## Live Updates And Telemetry

@@ -45,6 +45,7 @@ internal static class TestRunner
         Run(nameof(ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat), ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat);
         Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
+        Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
@@ -673,6 +674,63 @@ internal static class TestRunner
         Assert.Equal(2, registry.Snapshot().Count);
         Assert.True(registry.Remove("builder"));
         Assert.Equal(1, registry.Count);
+    }
+
+    private static void ServerEntityInspectionService_GatesAndReturnsEcsSnapshot()
+    {
+        var builder = new EcsSchemaBuilder();
+        ComponentId positionId = builder.RegisterComponent<ServerEcsPosition>();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        var world = new World(builder.Build());
+        Entity entity = world.CreateDefault(new ArchetypeSignature([positionId, movementId]));
+        Assert.True(world.SetComponent(entity, new ServerEcsPosition(10, 20)));
+        Assert.True(world.SetComponent(entity, new ServerEcsMovementBody(1.5f, 2.5f, 3.5f, 4.5f)));
+
+        var accessRules = new ServerAccessRuleRegistry();
+        accessRules.RegisterOrReplace(new ServerAccessRuleDescriptor(
+            "staff",
+            "Staff",
+            grants: [ServerAdminPermissionKeys.EntityInspect]));
+        var service = new ServerEntityInspectionService(world, accessRules);
+
+        ServerEntityInspectionResult allowed = service.Inspect(new ServerEntityInspectionRequest(
+            entity,
+            new ServerAccessEvaluationRequest(
+                ServerAdminPermissionKeys.EntityInspect,
+                ruleKeys: ["staff"])));
+
+        Assert.True(allowed.Succeeded);
+        Assert.Equal(ServerEntityInspectionStatus.Success, allowed.Status);
+        Assert.NotNull(allowed.Snapshot);
+        Assert.Equal(entity, allowed.Snapshot!.Entity);
+        Assert.Equal(2, allowed.Snapshot.Components.Count);
+        EntityComponentInspectionSnapshot position = allowed.Snapshot.Components.Single(static component => component.DisplayName == nameof(ServerEcsPosition));
+        Assert.Equal(positionId, position.ComponentId);
+        Assert.True(position.Fields.Any(static field => field.Name == "X" && field.Value == "10"));
+        Assert.True(position.Fields.Any(static field => field.Name == "Y" && field.Value == "20"));
+
+        ServerEntityInspectionResult denied = service.Inspect(new ServerEntityInspectionRequest(
+            entity,
+            new ServerAccessEvaluationRequest(
+                ServerAdminPermissionKeys.EntityInspect,
+                directDenies: [ServerAdminPermissionKeys.EntityInspect],
+                ruleKeys: ["staff"])));
+
+        Assert.False(denied.Succeeded);
+        Assert.Equal(ServerEntityInspectionStatus.PermissionDenied, denied.Status);
+        Assert.NotNull(denied.AccessDecision);
+        Assert.Equal(ServerAccessDecisionReason.DirectDeny, denied.AccessDecision!.Reason);
+        Assert.Equal(ServerAdminPermissionKeys.EntityInspect, denied.AccessDecision.MatchedPermissionKey);
+
+        world.Destroy(entity);
+        ServerEntityInspectionResult missing = service.Inspect(new ServerEntityInspectionRequest(
+            entity,
+            new ServerAccessEvaluationRequest(
+                ServerAdminPermissionKeys.EntityInspect,
+                ruleKeys: ["staff"])));
+
+        Assert.False(missing.Succeeded);
+        Assert.Equal(ServerEntityInspectionStatus.EntityNotFound, missing.Status);
     }
 
     private static void ServerChatService_AnnounceCommandPublishesSystemEvent()
