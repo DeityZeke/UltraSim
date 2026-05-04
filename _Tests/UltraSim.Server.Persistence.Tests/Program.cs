@@ -15,6 +15,7 @@ internal static class TestRunner
         Run(nameof(ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup), ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup);
         Run(nameof(ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent), ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent);
         Run(nameof(ServerPersistenceCoordinator_RotatesWholeSaveSetBackups), ServerPersistenceCoordinator_RotatesWholeSaveSetBackups);
+        Run(nameof(ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths), ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths);
 
         Console.WriteLine("All Server persistence tests passed.");
     }
@@ -55,6 +56,16 @@ internal static class TestRunner
             Assert.Equal(2, manifest.Artifacts.Count);
             Assert.Equal("accounting", manifest.Artifacts[0].Name);
             Assert.Equal("world", manifest.Artifacts[1].Name);
+            Assert.Equal("directory", manifest.Artifacts[0].Kind);
+            Assert.True(manifest.Artifacts[0].FileCount > 0);
+            Assert.True(manifest.Artifacts[0].SizeBytes > 0);
+            Assert.Equal("file", manifest.Artifacts[1].Kind);
+            Assert.Equal(1, manifest.Artifacts[1].FileCount);
+            Assert.True(manifest.Artifacts[1].SizeBytes > 0);
+            Assert.True(result.Timing.TotalMilliseconds >= 0d);
+            Assert.Equal(2, result.Timing.Participants.Count);
+            Assert.Equal("accounting", result.Timing.Participants[0].ParticipantName);
+            Assert.Equal(manifest.Artifacts[0].SizeBytes, result.Timing.Participants[0].SizeBytes);
 
             var loadedAccounting = new JsonAccountingPersistenceStore(coordinator.CurrentSaveSetRoot).Load();
             Assert.Equal(1, loadedAccounting.Accounts.Count);
@@ -120,6 +131,10 @@ internal static class TestRunner
             Assert.False(loaded.StartedFresh);
             Assert.False(loaded.LoadedBackup);
             Assert.Equal(1UL, loaded.Manifest!.SaveSequence);
+            Assert.True(loaded.Timing.TotalMilliseconds >= 0d);
+            Assert.Equal(2, loaded.Timing.Participants.Count);
+            Assert.Equal("world", loaded.Timing.Participants[1].ParticipantName);
+            Assert.True(loaded.Timing.Participants[1].SizeBytes > 0);
             Assert.True(loadedAccounts.TryGetByUsername("Alice", out ServerAccountRecord loadedAccount));
             Assert.Equal(created.Character!.CharacterId, loadedAccount.CharacterSlots[0]);
             Assert.True(loadedCharacters.TryGetCharacter(created.Character.CharacterId, out ServerCharacterRecord loadedCharacter));
@@ -265,6 +280,30 @@ internal static class TestRunner
         }
     }
 
+    private static void ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths()
+    {
+        string root = CreateTempRoot("server_persistence_unsafe_artifact");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new UnsafePathParticipant()]);
+
+            ServerPersistenceSaveResult result = coordinator.Save(now);
+
+            Assert.False(result.Succeeded);
+            Assert.Equal("unsafe", result.Failures[0].ParticipantName);
+            Assert.Contains("safe relative path", result.Failures[0].Message);
+            Assert.False(File.Exists(Path.Combine(root, "save_manifest.json")));
+            Assert.False(Directory.Exists(Path.Combine(root, ".pending")));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
     private static World CreateWorld(out ComponentId persistentPositionId)
     {
         var builder = new EcsSchemaBuilder();
@@ -383,6 +422,22 @@ internal static class TestRunner
         public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
         {
             throw new InvalidOperationException("forced participant load failure");
+        }
+    }
+
+    private sealed class UnsafePathParticipant : IServerPersistenceParticipant
+    {
+        public string Name => "unsafe";
+
+        public ServerPersistenceArtifact Save(string saveSetRoot, ServerPersistenceMetadata metadata)
+        {
+            string path = Path.Combine(saveSetRoot, "unsafe.txt");
+            File.WriteAllText(path, "not promoted");
+            return new ServerPersistenceArtifact(Name, "../unsafe.txt");
+        }
+
+        public void Load(string saveSetRoot, ServerPersistenceMetadata metadata, ServerPersistenceArtifact artifact)
+        {
         }
     }
 }

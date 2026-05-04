@@ -10,11 +10,16 @@ Current scope:
   directory first.
 - A successful save writes `save_manifest.json` with one save sequence and
   timestamp shared by every participant.
+- The manifest records each participant artifact's relative path, artifact kind
+  (`file` or `directory`), file count, and byte count. Those facts are also
+  returned in save/load timing results for operator status surfaces.
 - The staged directory is promoted into the live save root only after every
   participant succeeds. In exported runtimes, that live save root is `saves/`
   itself.
 - Failed saves delete their pending directory and leave the live save root
   untouched.
+- Participant artifact paths are validated as safe save-set-relative paths before
+  promotion/load. A bad participant cannot point outside `saves/`.
 - Whole save-set backups are rotated as directories, rather than letting account
   and world backups drift independently. The default rotation follows the RunUO
   naming shape: `Most Recent (...)`, `Second Backup (...)`, and
@@ -44,6 +49,49 @@ Current scope:
   - corrupt or incomplete live save roots fall back to the newest valid backup;
   - if a backup manifest has a higher sequence than the live save root, the load
     result reports a warning instead of silently ignoring the mismatch.
+- Save/load results include total elapsed milliseconds and per-participant
+  timings. The movement server folds those into the existing `Persistence`
+  runtime snapshot detail as sequence, load source, warnings, failures, file
+  count, byte count, and current save-set path.
+
+## V2 Comparison Checkpoint
+
+The v2 persistence path had a richer operational shape than the first modular
+rewrite:
+
+- staged world writes with a final manifest/commit step;
+- explicit save/load timing snapshots;
+- recovery-mode concepts for incomplete optional sections;
+- root save-set validation;
+- autosave/save-on-stop hooks;
+- account persistence backup rotation;
+- RunUO-inspired operator ergonomics for current saves and backups.
+
+The current modular path now covers the high-value coordination pieces:
+
+- shared account + ECS world save-set under one `saves/` root;
+- whole-save backup rotation under root `backups/`;
+- pending-save cleanup and fallback to valid backups;
+- local-time RunUO-style backup names;
+- artifact metadata and per-participant timing telemetry;
+- safe participant artifact path validation;
+- shell/runtime status exposure through the `Persistence` system snapshot.
+
+Still worth reworking/expanding next:
+
+- move recovery policy from hard-coded conservative behavior into explicit
+  options (`abort`, `load current only`, `fallback to backup`, future operator
+  prompt);
+- add an operator restore command that promotes a named backup to current with a
+  pre-restore safety backup;
+- make retention richer than slot count alone, such as manual keep markers,
+  hourly/daily generations, or size limits;
+- add artifact checksums so load can detect content drift, not just missing files
+  or changed sizes;
+- split ECS world persistence into richer artifacts again when gameplay data
+  grows beyond the single `world/entities.bin` participant;
+- eventually revive background snapshot/write behavior if autosave cost becomes
+  visible on live ticks.
 
 This is intentionally the coordination layer above the existing pieces:
 

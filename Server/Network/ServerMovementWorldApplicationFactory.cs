@@ -62,6 +62,8 @@ public static class ServerMovementWorldApplicationFactory
         private int _lastPersistenceWarningCount;
         private int _lastPersistenceFailureCount;
         private string _lastPersistencePath = string.Empty;
+        private long _lastPersistenceBytes;
+        private int _lastPersistenceFileCount;
         private ulong _lastPersistenceRunTick;
         private long _persistenceOperationCount;
         private long _lastPersistenceElapsedTicks;
@@ -181,6 +183,7 @@ public static class ServerMovementWorldApplicationFactory
             _lastPersistenceWarningCount = result.Warnings.Count;
             _lastPersistenceFailureCount = result.Failures.Count;
             _lastPersistencePath = result.SaveSetRoot ?? coordinator.CurrentSaveSetRoot;
+            RecordPersistenceArtifacts(result.Timing);
 
             EmitPersistenceLoadLogs(app, result);
         }
@@ -206,6 +209,7 @@ public static class ServerMovementWorldApplicationFactory
             {
                 _lastPersistenceFailureCount = result.Failures.Count == 0 ? 1 : result.Failures.Count;
                 _lastPersistencePath = coordinator.CurrentSaveSetRoot;
+                RecordPersistenceArtifacts(result.Timing);
                 string message = result.Failures.Count == 0
                     ? "Server persistence save failed."
                     : string.Join("; ", result.Failures.Select(static failure => $"{failure.ParticipantName}: {failure.Message}"));
@@ -215,7 +219,8 @@ public static class ServerMovementWorldApplicationFactory
             _lastSaveSequence = result.Metadata.SaveSequence;
             _lastPersistenceFailureCount = 0;
             _lastPersistencePath = coordinator.CurrentSaveSetRoot;
-            app.Log($"Persistence: Saved save-set sequence {result.Metadata.SaveSequence}.");
+            RecordPersistenceArtifacts(result.Timing);
+            app.Log($"Persistence: Saved save-set sequence {result.Metadata.SaveSequence} in {result.Timing.TotalMilliseconds:F2} ms ({_lastPersistenceBytes} bytes).");
         }
 
         public void Stop()
@@ -535,6 +540,21 @@ public static class ServerMovementWorldApplicationFactory
             _minPersistenceElapsedMilliseconds = Math.Min(_minPersistenceElapsedMilliseconds, elapsedMilliseconds);
         }
 
+        private void RecordPersistenceArtifacts(ServerPersistenceTiming timing)
+        {
+            long bytes = 0;
+            int files = 0;
+            for (int i = 0; i < timing.Participants.Count; i++)
+            {
+                ServerPersistenceParticipantTiming participant = timing.Participants[i];
+                bytes += participant.SizeBytes;
+                files += participant.FileCount;
+            }
+
+            _lastPersistenceBytes = bytes;
+            _lastPersistenceFileCount = files;
+        }
+
         private static double TicksToMilliseconds(long elapsedTicks)
         {
             return elapsedTicks <= 0 ? 0d : elapsedTicks * 1000d / Stopwatch.Frequency;
@@ -550,7 +570,7 @@ public static class ServerMovementWorldApplicationFactory
                 : _lastLoadUsedBackup
                     ? "backup"
                     : "current";
-            return $"sequence={_lastSaveSequence} load={mode} warnings={_lastPersistenceWarningCount} failures={_lastPersistenceFailureCount} path={path}";
+            return $"sequence={_lastSaveSequence} load={mode} warnings={_lastPersistenceWarningCount} failures={_lastPersistenceFailureCount} files={_lastPersistenceFileCount} bytes={_lastPersistenceBytes} path={path}";
         }
 
         private static void EmitPersistenceLoadLogs(ServerApplication app, ServerPersistenceLoadResult result)

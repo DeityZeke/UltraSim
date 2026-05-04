@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -43,9 +44,11 @@ public sealed class ServerPersistenceCoordinator
 
     public ServerPersistenceSaveResult Save(ServerPersistenceMetadata metadata)
     {
+        var totalStopwatch = Stopwatch.StartNew();
         string pendingRoot = CreatePendingSaveSetRoot(metadata);
         var artifacts = new List<ServerPersistenceArtifact>(_participants.Length);
         var failures = new List<ServerPersistenceSaveFailure>();
+        var timings = new List<ServerPersistenceParticipantTiming>(_participants.Length);
 
         try
         {
@@ -55,7 +58,17 @@ public sealed class ServerPersistenceCoordinator
                 IServerPersistenceParticipant participant = _participants[i];
                 try
                 {
-                    artifacts.Add(participant.Save(pendingRoot, metadata));
+                    var participantStopwatch = Stopwatch.StartNew();
+                    ServerPersistenceArtifact artifact = participant.Save(pendingRoot, metadata);
+                    participantStopwatch.Stop();
+
+                    ServerPersistenceArtifact measuredArtifact = MeasureArtifact(pendingRoot, artifact);
+                    artifacts.Add(measuredArtifact);
+                    timings.Add(new ServerPersistenceParticipantTiming(
+                        participant.Name,
+                        TicksToMilliseconds(participantStopwatch.ElapsedTicks),
+                        measuredArtifact.SizeBytes,
+                        measuredArtifact.FileCount));
                 }
                 catch (Exception ex)
                 {
@@ -67,7 +80,11 @@ public sealed class ServerPersistenceCoordinator
             if (failures.Count > 0)
             {
                 DeletePendingSaveSet(pendingRoot);
-                return ServerPersistenceSaveResult.Failure(metadata, failures);
+                totalStopwatch.Stop();
+                return ServerPersistenceSaveResult.Failure(
+                    metadata,
+                    failures,
+                    new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), timings));
             }
 
             var manifest = new ServerPersistenceSaveManifest(
@@ -77,13 +94,21 @@ public sealed class ServerPersistenceCoordinator
                 artifacts);
             WriteManifest(pendingRoot, manifest);
             PromotePendingSaveSet(pendingRoot, metadata);
-            return ServerPersistenceSaveResult.Success(metadata, manifest);
+            totalStopwatch.Stop();
+            return ServerPersistenceSaveResult.Success(
+                metadata,
+                manifest,
+                new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), timings));
         }
         catch (Exception ex)
         {
             DeletePendingSaveSet(pendingRoot);
             failures.Add(new ServerPersistenceSaveFailure("coordinator", ex.Message));
-            return ServerPersistenceSaveResult.Failure(metadata, failures);
+            totalStopwatch.Stop();
+            return ServerPersistenceSaveResult.Failure(
+                metadata,
+                failures,
+                new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), timings));
         }
     }
 
@@ -95,12 +120,18 @@ public sealed class ServerPersistenceCoordinator
 
     public ServerPersistenceLoadResult Load()
     {
+        var totalStopwatch = Stopwatch.StartNew();
         var warnings = new List<string>();
         CleanupPendingSaveSets(warnings);
 
         List<SaveSetCandidate> candidates = CollectLoadCandidates(warnings);
         if (candidates.Count == 0)
-            return ServerPersistenceLoadResult.Fresh(warnings);
+        {
+            totalStopwatch.Stop();
+            return ServerPersistenceLoadResult.Fresh(
+                warnings,
+                new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), []));
+        }
 
         SaveSetCandidate? current = candidates.FirstOrDefault(static candidate => !candidate.IsBackup);
         if (current is not null)
@@ -118,16 +149,18 @@ public sealed class ServerPersistenceCoordinator
 
         foreach (SaveSetCandidate candidate in candidates)
         {
-            if (TryLoadCandidate(candidate, warnings, out ServerPersistenceLoadResult result))
+            if (TryLoadCandidate(candidate, warnings, totalStopwatch, out ServerPersistenceLoadResult result))
             {
                 _nextSaveSequence = Math.Max(_nextSaveSequence, candidate.Manifest.SaveSequence);
                 return result;
             }
         }
 
+        totalStopwatch.Stop();
         return ServerPersistenceLoadResult.Failure(
             [new ServerPersistenceSaveFailure("coordinator", "No valid save-set could be loaded.")],
-            warnings);
+            warnings,
+            new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), []));
     }
 
     private string CreatePendingSaveSetRoot(ServerPersistenceMetadata metadata)
@@ -246,8 +279,10 @@ public sealed class ServerPersistenceCoordinator
     private bool TryLoadCandidate(
         SaveSetCandidate candidate,
         List<string> warnings,
+        Stopwatch totalStopwatch,
         out ServerPersistenceLoadResult result)
     {
+        var timings = new List<ServerPersistenceParticipantTiming>(_participants.Length);
         Dictionary<string, ServerPersistenceArtifact> artifactsByName;
         try
         {
@@ -280,7 +315,15 @@ public sealed class ServerPersistenceCoordinator
 
             try
             {
-                participant.Load(candidate.Root, candidate.Manifest.Metadata, artifact);
+                ServerPersistenceArtifact measuredArtifact = MeasureArtifact(candidate.Root, artifact);
+                var participantStopwatch = Stopwatch.StartNew();
+                participant.Load(candidate.Root, candidate.Manifest.Metadata, measuredArtifact);
+                participantStopwatch.Stop();
+                timings.Add(new ServerPersistenceParticipantTiming(
+                    participant.Name,
+                    TicksToMilliseconds(participantStopwatch.ElapsedTicks),
+                    measuredArtifact.SizeBytes,
+                    measuredArtifact.FileCount));
             }
             catch (Exception ex)
             {
@@ -290,11 +333,13 @@ public sealed class ServerPersistenceCoordinator
             }
         }
 
+        totalStopwatch.Stop();
         result = ServerPersistenceLoadResult.Loaded(
             candidate.Root,
             candidate.Manifest,
             candidate.IsBackup,
-            warnings);
+            warnings,
+            new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), timings));
         return true;
     }
 
@@ -302,6 +347,99 @@ public sealed class ServerPersistenceCoordinator
     {
         if (Directory.Exists(path))
             Directory.Delete(path, recursive: true);
+    }
+
+    private static ServerPersistenceArtifact MeasureArtifact(string saveSetRoot, ServerPersistenceArtifact artifact)
+    {
+        if (string.IsNullOrWhiteSpace(artifact.Name))
+            throw new InvalidOperationException("Persistence artifact name is required.");
+        if (string.IsNullOrWhiteSpace(artifact.RelativePath))
+            throw new InvalidOperationException($"Persistence artifact '{artifact.Name}' has no relative path.");
+
+        string fullPath = ResolveArtifactPath(saveSetRoot, artifact.RelativePath);
+        string kind;
+        long sizeBytes;
+        int fileCount;
+
+        if (File.Exists(fullPath))
+        {
+            kind = "file";
+            sizeBytes = new FileInfo(fullPath).Length;
+            fileCount = 1;
+        }
+        else if (Directory.Exists(fullPath))
+        {
+            kind = "directory";
+            sizeBytes = 0;
+            fileCount = 0;
+            foreach (string file in Directory.EnumerateFiles(fullPath, "*", SearchOption.AllDirectories))
+            {
+                sizeBytes += new FileInfo(file).Length;
+                fileCount++;
+            }
+        }
+        else
+        {
+            throw new FileNotFoundException(
+                $"Persistence artifact '{artifact.Name}' was not found under the save-set.",
+                fullPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(artifact.Kind) &&
+            !string.Equals(artifact.Kind, kind, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Persistence artifact '{artifact.Name}' expected kind '{artifact.Kind}' but found '{kind}'.");
+        }
+
+        if (artifact.SizeBytes > 0 && artifact.SizeBytes != sizeBytes)
+        {
+            throw new InvalidOperationException(
+                $"Persistence artifact '{artifact.Name}' expected {artifact.SizeBytes} bytes but found {sizeBytes} bytes.");
+        }
+
+        if (artifact.FileCount > 0 && artifact.FileCount != fileCount)
+        {
+            throw new InvalidOperationException(
+                $"Persistence artifact '{artifact.Name}' expected {artifact.FileCount} files but found {fileCount} files.");
+        }
+
+        return artifact with
+        {
+            RelativePath = NormalizeArtifactRelativePath(artifact.RelativePath),
+            Kind = kind,
+            SizeBytes = sizeBytes,
+            FileCount = fileCount,
+        };
+    }
+
+    private static string ResolveArtifactPath(string saveSetRoot, string relativePath)
+    {
+        string normalized = NormalizeArtifactRelativePath(relativePath);
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(saveSetRoot));
+        string fullPath = Path.GetFullPath(Path.Combine(root, normalized));
+        if (!IsSameOrChildPath(fullPath, root))
+            throw new InvalidOperationException($"Persistence artifact path '{relativePath}' escapes the save-set root.");
+
+        return fullPath;
+    }
+
+    private static string NormalizeArtifactRelativePath(string relativePath)
+    {
+        string normalized = relativePath.Replace('\\', '/').Trim('/');
+        if (string.IsNullOrWhiteSpace(normalized) ||
+            Path.IsPathRooted(normalized) ||
+            normalized.Split('/').Any(static part => part is "." or ".." or ""))
+        {
+            throw new InvalidOperationException($"Persistence artifact path '{relativePath}' is not a safe relative path.");
+        }
+
+        return normalized;
+    }
+
+    private static double TicksToMilliseconds(long elapsedTicks)
+    {
+        return elapsedTicks <= 0 ? 0d : elapsedTicks * 1000d / Stopwatch.Frequency;
     }
 
     private static void DeletePendingSaveSet(string pendingRoot)

@@ -7,9 +7,12 @@ public sealed record ServerPersistenceLoadResult(
     string? SaveSetRoot,
     ServerPersistenceSaveManifest? Manifest,
     IReadOnlyList<string> Warnings,
-    IReadOnlyList<ServerPersistenceSaveFailure> Failures)
+    IReadOnlyList<ServerPersistenceSaveFailure> Failures,
+    ServerPersistenceTiming Timing)
 {
-    public static ServerPersistenceLoadResult Fresh(IReadOnlyList<string>? warnings = null)
+    public static ServerPersistenceLoadResult Fresh(
+        IReadOnlyList<string>? warnings = null,
+        ServerPersistenceTiming? timing = null)
     {
         return new ServerPersistenceLoadResult(
             Succeeded: true,
@@ -18,14 +21,16 @@ public sealed record ServerPersistenceLoadResult(
             SaveSetRoot: null,
             Manifest: null,
             Warnings: warnings ?? [],
-            Failures: []);
+            Failures: [],
+            Timing: timing ?? ServerPersistenceTiming.Empty);
     }
 
     public static ServerPersistenceLoadResult Loaded(
         string saveSetRoot,
         ServerPersistenceSaveManifest manifest,
         bool loadedBackup,
-        IReadOnlyList<string>? warnings = null)
+        IReadOnlyList<string>? warnings = null,
+        ServerPersistenceTiming? timing = null)
     {
         return new ServerPersistenceLoadResult(
             Succeeded: true,
@@ -34,12 +39,14 @@ public sealed record ServerPersistenceLoadResult(
             SaveSetRoot: saveSetRoot,
             Manifest: manifest,
             Warnings: warnings ?? [],
-            Failures: []);
+            Failures: [],
+            Timing: timing ?? ServerPersistenceTiming.Empty);
     }
 
     public static ServerPersistenceLoadResult Failure(
         IReadOnlyList<ServerPersistenceSaveFailure> failures,
-        IReadOnlyList<string>? warnings = null)
+        IReadOnlyList<string>? warnings = null,
+        ServerPersistenceTiming? timing = null)
     {
         return new ServerPersistenceLoadResult(
             Succeeded: false,
@@ -48,6 +55,7 @@ public sealed record ServerPersistenceLoadResult(
             SaveSetRoot: null,
             Manifest: null,
             Warnings: warnings ?? [],
-            Failures: failures);
+            Failures: failures,
+            Timing: timing ?? ServerPersistenceTiming.Empty);
     }
 }

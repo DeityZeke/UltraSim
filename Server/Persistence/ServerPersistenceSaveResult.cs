@@ -4,19 +4,22 @@ public sealed record ServerPersistenceSaveResult(
     bool Succeeded,
     ServerPersistenceMetadata Metadata,
     ServerPersistenceSaveManifest? Manifest,
-    IReadOnlyList<ServerPersistenceSaveFailure> Failures)
+    IReadOnlyList<ServerPersistenceSaveFailure> Failures,
+    ServerPersistenceTiming Timing)
 {
     public static ServerPersistenceSaveResult Success(
         ServerPersistenceMetadata metadata,
-        ServerPersistenceSaveManifest manifest)
+        ServerPersistenceSaveManifest manifest,
+        ServerPersistenceTiming timing)
     {
-        return new ServerPersistenceSaveResult(true, metadata, manifest, []);
+        return new ServerPersistenceSaveResult(true, metadata, manifest, [], timing);
     }
 
     public static ServerPersistenceSaveResult Failure(
         ServerPersistenceMetadata metadata,
-        IReadOnlyList<ServerPersistenceSaveFailure> failures)
+        IReadOnlyList<ServerPersistenceSaveFailure> failures,
+        ServerPersistenceTiming? timing = null)
     {
-        return new ServerPersistenceSaveResult(false, metadata, null, failures);
+        return new ServerPersistenceSaveResult(false, metadata, null, failures, timing ?? ServerPersistenceTiming.Empty);
     }
 }
