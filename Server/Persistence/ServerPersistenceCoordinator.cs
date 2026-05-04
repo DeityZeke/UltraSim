@@ -124,17 +124,27 @@ public sealed class ServerPersistenceCoordinator
         var warnings = new List<string>();
         CleanupPendingSaveSets(warnings);
 
+        bool currentHasEntries = CurrentSaveSetDirectoryHasEntries();
         List<SaveSetCandidate> candidates = CollectLoadCandidates(warnings);
-        if (candidates.Count == 0)
+        SaveSetCandidate? current = candidates.FirstOrDefault(static candidate => !candidate.IsBackup);
+        SaveSetCandidate[] loadCandidates = ResolveLoadCandidates(candidates, current, currentHasEntries, warnings);
+        if (loadCandidates.Length == 0)
         {
             totalStopwatch.Stop();
+            if (ShouldFailWhenNoLoadCandidates(currentHasEntries, candidates))
+            {
+                return ServerPersistenceLoadResult.Failure(
+                    [new ServerPersistenceSaveFailure("coordinator", BuildNoLoadCandidateFailureMessage())],
+                    warnings,
+                    new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), []));
+            }
+
             return ServerPersistenceLoadResult.Fresh(
                 warnings,
                 new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), []));
         }
 
-        SaveSetCandidate? current = candidates.FirstOrDefault(static candidate => !candidate.IsBackup);
-        if (current is not null)
+        if (_options.RecoveryMode == ServerPersistenceRecoveryMode.CurrentThenBackups && current is not null)
         {
             ulong highestBackupSequence = candidates
                 .Where(static candidate => candidate.IsBackup)
@@ -147,7 +157,7 @@ public sealed class ServerPersistenceCoordinator
             }
         }
 
-        foreach (SaveSetCandidate candidate in candidates)
+        foreach (SaveSetCandidate candidate in loadCandidates)
         {
             if (TryLoadCandidate(candidate, warnings, totalStopwatch, out ServerPersistenceLoadResult result))
             {
@@ -161,6 +171,58 @@ public sealed class ServerPersistenceCoordinator
             [new ServerPersistenceSaveFailure("coordinator", "No valid save-set could be loaded.")],
             warnings,
             new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), []));
+    }
+
+    private SaveSetCandidate[] ResolveLoadCandidates(
+        List<SaveSetCandidate> candidates,
+        SaveSetCandidate? current,
+        bool currentHasEntries,
+        List<string> warnings)
+    {
+        int backupCount = candidates.Count(static candidate => candidate.IsBackup);
+        return _options.RecoveryMode switch
+        {
+            ServerPersistenceRecoveryMode.CurrentOnly or ServerPersistenceRecoveryMode.RequireCurrent
+                when current is not null => [current],
+
+            ServerPersistenceRecoveryMode.CurrentOnly => ResolveCurrentOnlyWithoutCurrent(backupCount, warnings),
+
+            ServerPersistenceRecoveryMode.RequireCurrent => [],
+            _ => candidates.ToArray(),
+        };
+    }
+
+    private static SaveSetCandidate[] ResolveCurrentOnlyWithoutCurrent(int backupCount, List<string> warnings)
+    {
+        if (backupCount > 0)
+        {
+            warnings.Add(
+                $"Recovery mode '{ServerPersistenceRecoveryMode.CurrentOnly}' ignored {backupCount.ToString(CultureInfo.InvariantCulture)} backup save-set(s).");
+        }
+
+        return [];
+    }
+
+    private bool ShouldFailWhenNoLoadCandidates(
+        bool currentHasEntries,
+        List<SaveSetCandidate> candidates)
+    {
+        return _options.RecoveryMode == ServerPersistenceRecoveryMode.RequireCurrent ||
+            currentHasEntries ||
+            (_options.RecoveryMode == ServerPersistenceRecoveryMode.CurrentOnly &&
+                candidates.Any(static candidate => candidate.IsBackup));
+    }
+
+    private string BuildNoLoadCandidateFailureMessage()
+    {
+        return _options.RecoveryMode switch
+        {
+            ServerPersistenceRecoveryMode.CurrentOnly =>
+                "Recovery mode 'CurrentOnly' did not find a loadable current save-set.",
+            ServerPersistenceRecoveryMode.RequireCurrent =>
+                "Recovery mode 'RequireCurrent' requires a loadable current save-set.",
+            _ => "No valid save-set could be loaded.",
+        };
     }
 
     private string CreatePendingSaveSetRoot(ServerPersistenceMetadata metadata)

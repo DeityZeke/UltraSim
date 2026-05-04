@@ -45,10 +45,15 @@ Current scope:
   be restored before world entities that may reference account or character ids.
 - Startup recovery is conservative:
   - pending save-set directories are warnings and are deleted, never promoted;
-  - the live save root loads first;
-  - corrupt or incomplete live save roots fall back to the newest valid backup;
+  - by default, the live save root loads first;
+  - by default, corrupt or incomplete live save roots fall back to the newest
+    valid backup;
   - if a backup manifest has a higher sequence than the live save root, the load
     result reports a warning instead of silently ignoring the mismatch.
+- `ServerPersistenceSaveSetOptions.RecoveryMode` makes recovery explicit:
+  - `CurrentThenBackups` is the default RunUO-like recovery path;
+  - `CurrentOnly` refuses to load backups, so a bad current save fails loudly;
+  - `RequireCurrent` refuses both backup-only and fresh-start recovery.
 - Save/load results include total elapsed milliseconds and per-participant
   timings. The movement server folds those into the existing `Persistence`
   runtime snapshot detail as sequence, load source, warnings, failures, file
@@ -79,9 +84,8 @@ The current modular path now covers the high-value coordination pieces:
 
 Still worth reworking/expanding next:
 
-- move recovery policy from hard-coded conservative behavior into explicit
-  options (`abort`, `load current only`, `fallback to backup`, future operator
-  prompt);
+- add an operator recovery prompt/path on top of the non-interactive recovery
+  modes;
 - add an operator restore command that promotes a named backup to current with a
   pre-restore safety backup;
 - make retention richer than slot count alone, such as manual keep markers,

@@ -13,6 +13,9 @@ internal static class TestRunner
         Run(nameof(ServerPersistenceCoordinator_Load_RestoresAccountingBeforeWorld), ServerPersistenceCoordinator_Load_RestoresAccountingBeforeWorld);
         Run(nameof(ServerPersistenceCoordinator_FailureDoesNotPromotePendingSaveSet), ServerPersistenceCoordinator_FailureDoesNotPromotePendingSaveSet);
         Run(nameof(ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup), ServerPersistenceCoordinator_Load_CleansPendingAndFallsBackToBackup);
+        Run(nameof(ServerPersistenceCoordinator_Load_FailsCorruptCurrentWithoutBackup), ServerPersistenceCoordinator_Load_FailsCorruptCurrentWithoutBackup);
+        Run(nameof(ServerPersistenceCoordinator_Load_CurrentOnlyDoesNotFallbackToBackup), ServerPersistenceCoordinator_Load_CurrentOnlyDoesNotFallbackToBackup);
+        Run(nameof(ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly), ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly);
         Run(nameof(ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent), ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent);
         Run(nameof(ServerPersistenceCoordinator_RotatesWholeSaveSetBackups), ServerPersistenceCoordinator_RotatesWholeSaveSetBackups);
         Run(nameof(ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths), ServerPersistenceCoordinator_RejectsUnsafeArtifactPaths);
@@ -223,6 +226,107 @@ internal static class TestRunner
         }
     }
 
+    private static void ServerPersistenceCoordinator_Load_FailsCorruptCurrentWithoutBackup()
+    {
+        string root = CreateTempRoot("server_persistence_corrupt_current");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 0));
+            Assert.True(coordinator.Save(now).Succeeded);
+            File.WriteAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "save_manifest.json"), "{ broken json");
+
+            var loader = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 0),
+                initialSaveSequence: 1);
+            ServerPersistenceLoadResult loaded = loader.Load();
+
+            Assert.False(loaded.Succeeded);
+            Assert.False(loaded.StartedFresh);
+            Assert.Contains("Current save-set is not loadable", string.Join('\n', loaded.Warnings));
+            Assert.Contains("No valid save-set", loaded.Failures[0].Message);
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_Load_CurrentOnlyDoesNotFallbackToBackup()
+    {
+        string root = CreateTempRoot("server_persistence_current_only");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(BackupCount: 1));
+            Assert.True(coordinator.Save(now).Succeeded);
+            Assert.True(coordinator.Save(now.AddSeconds(1)).Succeeded);
+            File.WriteAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "save_manifest.json"), "{ broken json");
+
+            var loader = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(
+                    BackupCount: 1,
+                    RecoveryMode: ServerPersistenceRecoveryMode.CurrentOnly),
+                initialSaveSequence: 2);
+            ServerPersistenceLoadResult loaded = loader.Load();
+
+            Assert.False(loaded.Succeeded);
+            Assert.False(loaded.LoadedBackup);
+            Assert.Contains("CurrentOnly", loaded.Failures[0].Message);
+            Assert.Contains("ignored 1 backup", string.Join('\n', loaded.Warnings));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly()
+    {
+        string root = CreateTempRoot("server_persistence_require_current");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var coordinator = new ServerPersistenceCoordinator(root, [new SequenceFileParticipant()]);
+            Assert.True(coordinator.Save(now).Succeeded);
+
+            string backupRoot = Path.Combine(root, "backups", "Most Recent (2-5-2026 12-00-00)");
+            CopyDirectory(coordinator.CurrentSaveSetRoot, backupRoot);
+            foreach (string entry in Directory.EnumerateFileSystemEntries(root).ToArray())
+            {
+                if (string.Equals(Path.GetFileName(entry), "backups", StringComparison.Ordinal))
+                    continue;
+
+                DeleteFileSystemEntry(entry);
+            }
+
+            var loader = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                new ServerPersistenceSaveSetOptions(RecoveryMode: ServerPersistenceRecoveryMode.RequireCurrent),
+                initialSaveSequence: 1);
+            ServerPersistenceLoadResult loaded = loader.Load();
+
+            Assert.False(loaded.Succeeded);
+            Assert.False(loaded.LoadedBackup);
+            Assert.Contains("RequireCurrent", loaded.Failures[0].Message);
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
     private static void ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent()
     {
         string root = CreateTempRoot("server_persistence_sequence_warning");
@@ -329,6 +433,18 @@ internal static class TestRunner
             Directory.CreateDirectory(directory.Replace(source, destination, StringComparison.Ordinal));
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
             File.Copy(file, file.Replace(source, destination, StringComparison.Ordinal), overwrite: true);
+    }
+
+    private static void DeleteFileSystemEntry(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+            return;
+        }
+
+        if (File.Exists(path))
+            File.Delete(path);
     }
 
     private static void Run(string name, Action test)
