@@ -67,7 +67,7 @@ What now exists:
   - persistent world/map/dynamic/effects/camera containers
   - persistent world/HUD/menu/debug UI layers
   - preview actor, local controller, orbit camera, v2-style nameplate/overhead-chat projection
-  - world UI presentation settings for nameplates, overhead chat, chat panel visibility, visible label budget, and UI scale persisted in `user://client_settings.cfg`
+  - world UI presentation settings for nameplates, overhead chat, overhead health bars, chat panel visibility, visible label budget, and UI scale persisted in `user://client_settings.cfg`
   - local app shell, manual/provider-backed server browser rows, direct connect, in-session menu, chat panel
   - initial UDP session driver wiring for movement, observer state, chat, ping/status, and disconnect
   - first server-driven UI renderer bridge:

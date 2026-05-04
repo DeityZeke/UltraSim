@@ -11,6 +11,7 @@ public partial class WorldCanvasManager : CanvasLayer
     [Export(PropertyHint.Range, "0.25,10.0,0.25,or_greater")] public double OverheadChatSeconds { get; set; } = 4.0;
     [Export] public bool ShowOverheadChatBubbles { get; set; } = true;
     [Export] public bool ShowNameplates { get; set; } = true;
+    [Export] public bool ShowOverheadHealthBars { get; set; } = true;
     [Export(PropertyHint.Range, "1,256,1")] public int MaxVisibleWorldUi { get; set; } = 32;
     [Export(PropertyHint.Range, "0.5,3.0,0.05")] public float WorldUiScale { get; set; } = 1.0f;
     [Export(PropertyHint.Range, "0,96,1")] public float ScreenVerticalOffsetPixels { get; set; } = 24.0f;
@@ -25,6 +26,7 @@ public partial class WorldCanvasManager : CanvasLayer
     public ClientCharacterWorld? CharacterWorld { get; private set; }
 
     private readonly Dictionary<ulong, ActorOverlay> _overlays = new();
+    private readonly Dictionary<ulong, ActorCombatHealthState> _combatHealthStates = new();
     private readonly List<VisibleActorOverlay> _visibleOverlays = new();
     private readonly List<ulong> _removeScratch = new();
     private Control? _overlayRoot;
@@ -57,6 +59,25 @@ public partial class WorldCanvasManager : CanvasLayer
         }
     }
 
+    public void SetActorCombatHealth(ulong entityId, bool isInCombat, bool hasHealth, float healthFraction)
+    {
+        if (entityId == 0)
+        {
+            return;
+        }
+
+        if (!isInCombat || !hasHealth)
+        {
+            _combatHealthStates.Remove(entityId);
+            return;
+        }
+
+        _combatHealthStates[entityId] = new ActorCombatHealthState(
+            IsInCombat: true,
+            HasHealth: true,
+            HealthFraction: Mathf.Clamp(healthFraction, 0.0f, 1.0f));
+    }
+
     public void ClearAll()
     {
         foreach (ulong entityId in _overlays.Keys)
@@ -71,6 +92,7 @@ public partial class WorldCanvasManager : CanvasLayer
 
         _removeScratch.Clear();
         _visibleOverlays.Clear();
+        _combatHealthStates.Clear();
     }
 
     private void UpdateProjectedOverlays(float deltaSeconds)
@@ -109,7 +131,8 @@ public partial class WorldCanvasManager : CanvasLayer
             string displayName = ResolveDisplayName(entityId, character);
             bool showNameplate = revealNameplates && !string.IsNullOrWhiteSpace(displayName);
             bool showChat = ShowOverheadChatBubbles && overlay.ChatLines.Count > 0;
-            if (!showNameplate && !showChat && !showDebugIds)
+            bool showHealthBar = ShouldShowHealthBar(entityId, out float healthFraction);
+            if (!showNameplate && !showChat && !showDebugIds && !showHealthBar)
             {
                 continue;
             }
@@ -121,8 +144,10 @@ public partial class WorldCanvasManager : CanvasLayer
                 screen,
                 distanceSquared,
                 displayName,
+                healthFraction,
                 showNameplate,
                 showChat,
+                showHealthBar,
                 showDebugIds));
         }
 
@@ -146,6 +171,7 @@ public partial class WorldCanvasManager : CanvasLayer
             if (!CharacterWorld.Characters.ContainsKey(entityId))
             {
                 _removeScratch.Add(entityId);
+                _combatHealthStates.Remove(entityId);
             }
         }
 
@@ -179,6 +205,7 @@ public partial class WorldCanvasManager : CanvasLayer
         var previousChatLabel = CreateOverlayLabel(new Color(0.86f, 0.88f, 0.92f));
         var currentChatLabel = CreateOverlayLabel(Colors.White);
         var nameLabel = CreateOverlayLabel(new Color(1.0f, 0.93f, 0.66f));
+        Control healthBar = CreateHealthBar(out ColorRect healthFill);
 
         previousChatLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         currentChatLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
@@ -188,10 +215,11 @@ public partial class WorldCanvasManager : CanvasLayer
         root.AddChild(debugLabel);
         root.AddChild(previousChatLabel);
         root.AddChild(currentChatLabel);
+        root.AddChild(healthBar);
         root.AddChild(nameLabel);
         _overlayRoot!.AddChild(root);
 
-        var overlay = new ActorOverlay(entityId, root, debugLabel, previousChatLabel, currentChatLabel, nameLabel);
+        var overlay = new ActorOverlay(entityId, root, debugLabel, previousChatLabel, currentChatLabel, healthBar, healthFill, nameLabel);
         _overlays.Add(entityId, overlay);
         return overlay;
     }
@@ -231,6 +259,34 @@ public partial class WorldCanvasManager : CanvasLayer
         return label;
     }
 
+    private static Control CreateHealthBar(out ColorRect fill)
+    {
+        var root = new Control
+        {
+            CustomMinimumSize = new Vector2(78.0f, 8.0f),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false
+        };
+
+        var background = new ColorRect
+        {
+            Color = new Color(0.02f, 0.025f, 0.03f, 0.88f),
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        background.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        root.AddChild(background);
+
+        fill = new ColorRect
+        {
+            Color = new Color(0.25f, 0.88f, 0.34f, 0.94f),
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        fill.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        root.AddChild(fill);
+
+        return root;
+    }
+
     private void UpdateOverlayVisual(in VisibleActorOverlay visible)
     {
         ActorOverlay overlay = visible.Overlay;
@@ -248,6 +304,14 @@ public partial class WorldCanvasManager : CanvasLayer
         overlay.PreviousChatLabel.Text = previousChat;
         overlay.CurrentChatLabel.Visible = !string.IsNullOrWhiteSpace(currentChat);
         overlay.CurrentChatLabel.Text = currentChat;
+        overlay.HealthBarRoot.Visible = visible.ShowHealthBar;
+        if (visible.ShowHealthBar)
+        {
+            float healthFraction = Mathf.Clamp(visible.HealthFraction, 0.0f, 1.0f);
+            overlay.HealthBarFill.Scale = new Vector2(healthFraction, 1.0f);
+            overlay.HealthBarFill.Color = ResolveHealthColor(healthFraction);
+        }
+
         overlay.NameLabel.Visible = visible.ShowNameplate;
         overlay.NameLabel.Text = visible.ShowNameplate ? visible.DisplayName : string.Empty;
 
@@ -261,7 +325,32 @@ public partial class WorldCanvasManager : CanvasLayer
             overlay.DebugLabel.Visible ||
             overlay.PreviousChatLabel.Visible ||
             overlay.CurrentChatLabel.Visible ||
+            overlay.HealthBarRoot.Visible ||
             overlay.NameLabel.Visible;
+    }
+
+    private bool ShouldShowHealthBar(ulong entityId, out float healthFraction)
+    {
+        healthFraction = 0.0f;
+        if (!ShowOverheadHealthBars ||
+            !_combatHealthStates.TryGetValue(entityId, out ActorCombatHealthState state) ||
+            !state.IsInCombat ||
+            !state.HasHealth)
+        {
+            return false;
+        }
+
+        healthFraction = Mathf.Clamp(state.HealthFraction, 0.0f, 1.0f);
+        return true;
+    }
+
+    private static Color ResolveHealthColor(float healthFraction)
+    {
+        if (healthFraction <= 0.25f)
+            return new Color(0.92f, 0.2f, 0.16f, 0.95f);
+        if (healthFraction <= 0.55f)
+            return new Color(0.95f, 0.78f, 0.22f, 0.95f);
+        return new Color(0.25f, 0.88f, 0.34f, 0.94f);
     }
 
     private static void PruneExpiredChatLines(ActorOverlay overlay, float deltaSeconds)
@@ -346,13 +435,20 @@ public partial class WorldCanvasManager : CanvasLayer
 
     private readonly record struct ChatLine(string Text, float TtlSeconds);
 
+    private readonly record struct ActorCombatHealthState(
+        bool IsInCombat,
+        bool HasHealth,
+        float HealthFraction);
+
     private readonly record struct VisibleActorOverlay(
         ActorOverlay Overlay,
         Vector2 ScreenPosition,
         float DistanceSquared,
         string DisplayName,
+        float HealthFraction,
         bool ShowNameplate,
         bool ShowChat,
+        bool ShowHealthBar,
         bool ShowDebugId);
 
     private sealed class ActorOverlay
@@ -363,6 +459,8 @@ public partial class WorldCanvasManager : CanvasLayer
             Label debugLabel,
             Label previousChatLabel,
             Label currentChatLabel,
+            Control healthBarRoot,
+            ColorRect healthBarFill,
             Label nameLabel)
         {
             EntityId = entityId;
@@ -370,6 +468,8 @@ public partial class WorldCanvasManager : CanvasLayer
             DebugLabel = debugLabel;
             PreviousChatLabel = previousChatLabel;
             CurrentChatLabel = currentChatLabel;
+            HealthBarRoot = healthBarRoot;
+            HealthBarFill = healthBarFill;
             NameLabel = nameLabel;
         }
 
@@ -378,6 +478,8 @@ public partial class WorldCanvasManager : CanvasLayer
         public Label DebugLabel { get; }
         public Label PreviousChatLabel { get; }
         public Label CurrentChatLabel { get; }
+        public Control HealthBarRoot { get; }
+        public ColorRect HealthBarFill { get; }
         public Label NameLabel { get; }
         public List<ChatLine> ChatLines { get; } = new(2);
     }

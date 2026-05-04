@@ -1285,6 +1285,25 @@ Panels and controls can carry capability metadata:
 
 The server decides. The client uses this for presentation only.
 
+## Foundational Presentation Hooks
+
+Overhead health bars are a presentation hook, not a combat/content commitment.
+The client should expose a persisted setting for showing them, but the bars only
+render when server presentation state marks an entity as in combat and supplies
+a health fraction. Until the real health/combat components exist, missing health
+state means no bar. Pull-off health tabs, target health collectors, and richer
+combat frames can build on the same entity-state binding later.
+
+The next foundational admin/content work should stay focused on reusable
+platform primitives before content packages:
+
+- a RunUO `[props]`-style entity/component inspector;
+- a dynamic capability/permission registry rather than a hard access enum;
+- runtime content package/group mount and unload tracking;
+- RunUO-style spawner primitives backed by ECS state and prefab groups;
+- clear script-author guidance that XmlSpawner-style attachments map to ECS
+  component add/remove, not a parallel attachment subsystem.
+
 ## Styling And Assets
 
 Schema should reference logical styles and assets:

@@ -405,6 +405,14 @@ public partial class MenuCanvasManager : CanvasLayer
                 SavePresentationSettings();
             }
         };
+        appShell.OverheadHealthBarVisibilityChanged += enabled =>
+        {
+            if (_worldCanvas is not null)
+            {
+                _worldCanvas.ShowOverheadHealthBars = enabled;
+                SavePresentationSettings();
+            }
+        };
         appShell.ChatPanelVisibilityChanged += enabled =>
         {
             _showChatPanel = enabled;
@@ -716,6 +724,7 @@ public partial class MenuCanvasManager : CanvasLayer
         _appShell.SetPresentationSettings(
             _worldCanvas.ShowOverheadChatBubbles,
             _worldCanvas.ShowNameplates,
+            _worldCanvas.ShowOverheadHealthBars,
             _showChatPanel,
             _worldCanvas.MaxVisibleWorldUi,
             _worldCanvas.WorldUiScale);
@@ -758,6 +767,10 @@ public partial class MenuCanvasManager : CanvasLayer
             WorldUiSettingsSection,
             "show_nameplates",
             _worldCanvas.ShowNameplates);
+        _worldCanvas.ShowOverheadHealthBars = (bool)config.GetValue(
+            WorldUiSettingsSection,
+            "show_overhead_health_bars",
+            _worldCanvas.ShowOverheadHealthBars);
         _worldCanvas.MaxVisibleWorldUi = Math.Clamp(
             (int)config.GetValue(WorldUiSettingsSection, "max_visible_world_ui", _worldCanvas.MaxVisibleWorldUi),
             1,
@@ -781,6 +794,7 @@ public partial class MenuCanvasManager : CanvasLayer
         _ = config.Load(ClientSettingsPath);
         config.SetValue(WorldUiSettingsSection, "show_overhead_chat", _worldCanvas.ShowOverheadChatBubbles);
         config.SetValue(WorldUiSettingsSection, "show_nameplates", _worldCanvas.ShowNameplates);
+        config.SetValue(WorldUiSettingsSection, "show_overhead_health_bars", _worldCanvas.ShowOverheadHealthBars);
         config.SetValue(WorldUiSettingsSection, "max_visible_world_ui", _worldCanvas.MaxVisibleWorldUi);
         config.SetValue(WorldUiSettingsSection, "world_ui_scale", _worldCanvas.WorldUiScale);
         config.SetValue(ChatSettingsSection, "show_chat_panel", _showChatPanel);

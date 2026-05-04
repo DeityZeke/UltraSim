@@ -4,7 +4,10 @@ public readonly record struct EntityPresentationEventPacket(
     ulong EntityId,
     string DisplayName,
     string DefinitionId,
-    ulong ServerTick) : IPacket<EntityPresentationEventPacket>
+    ulong ServerTick,
+    bool IsInCombat = false,
+    bool HasHealth = false,
+    float HealthFraction = 0.0f) : IPacket<EntityPresentationEventPacket>
 {
     public static ushort PacketId => 0x0302;
     public static NetworkPlane Plane => NetworkPlane.State;
@@ -17,6 +20,9 @@ public readonly record struct EntityPresentationEventPacket(
         writer.WriteString(DisplayName ?? string.Empty);
         writer.WriteString(DefinitionId ?? string.Empty);
         writer.WriteUInt64(ServerTick);
+        writer.WriteBool(IsInCombat);
+        writer.WriteBool(HasHealth);
+        writer.WriteSingle(HealthFraction);
     }
 
     public static EntityPresentationEventPacket Deserialize(ref BitReader reader)
@@ -25,6 +31,9 @@ public readonly record struct EntityPresentationEventPacket(
             reader.ReadUInt64(),
             reader.ReadString(),
             reader.ReadString(),
-            reader.ReadUInt64());
+            reader.ReadUInt64(),
+            reader.ReadBool(),
+            reader.ReadBool(),
+            reader.ReadSingle());
     }
 }

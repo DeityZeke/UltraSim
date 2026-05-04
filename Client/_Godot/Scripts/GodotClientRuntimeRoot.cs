@@ -561,6 +561,11 @@ public partial class GodotClientRuntimeRoot : Node
 	{
 		CharacterWorld?.SetActorDefinition(packet.EntityId, packet.DefinitionId);
 		CharacterWorld?.SetActorDisplayName(packet.EntityId, packet.DisplayName);
+		UiManager?.World?.SetActorCombatHealth(
+			packet.EntityId,
+			packet.IsInCombat,
+			packet.HasHealth,
+			packet.HealthFraction);
 	}
 
 	private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)

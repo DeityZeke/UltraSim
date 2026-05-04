@@ -1531,6 +1531,14 @@ internal static class TestRunner
         var stateReader = new BitReader(statePayload);
         MovementStatePacket decodedState = MovementStatePacket.Deserialize(ref stateReader);
         Assert.Equal(state, decodedState);
+
+        var presentation = new EntityPresentationEventPacket(88, "Asha", "mobiles/human", 501, IsInCombat: true, HasHealth: true, HealthFraction: 0.625f);
+        ImmutablePayloadBuffer encodedPresentation = PacketCodec.Encode(presentation);
+        Assert.True(PacketCodec.TryDecodeEnvelope(encodedPresentation.Span, out PacketEnvelopeHeader presentationHeader, out ReadOnlySpan<byte> presentationPayload));
+        Assert.Equal(EntityPresentationEventPacket.PacketId, presentationHeader.PacketId);
+        var presentationReader = new BitReader(presentationPayload);
+        EntityPresentationEventPacket decodedPresentation = EntityPresentationEventPacket.Deserialize(ref presentationReader);
+        Assert.Equal(presentation, decodedPresentation);
     }
 
     private static void ClientObserverStateBridge_AppliesNewestRealtimeFramesOnly()

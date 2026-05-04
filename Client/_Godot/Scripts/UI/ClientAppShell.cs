@@ -17,6 +17,7 @@ public partial class ClientAppShell : Control
     public event Action? BackRequested;
     public event Action<bool>? OverheadChatVisibilityChanged;
     public event Action<bool>? NameplateVisibilityChanged;
+    public event Action<bool>? OverheadHealthBarVisibilityChanged;
     public event Action<bool>? ChatPanelVisibilityChanged;
     public event Action<int>? MaxVisibleWorldUiChanged;
     public event Action<float>? WorldUiScaleChanged;
@@ -52,6 +53,7 @@ public partial class ClientAppShell : Control
     private string _lastPortText = "42042";
     private bool _showOverheadChat = true;
     private bool _showNameplates = true;
+    private bool _showOverheadHealthBars = true;
     private bool _showChatPanel = true;
     private int _maxVisibleWorldUi = 32;
     private float _worldUiScale = 1.0f;
@@ -153,12 +155,14 @@ public partial class ClientAppShell : Control
     public void SetPresentationSettings(
         bool showOverheadChat,
         bool showNameplates,
+        bool showOverheadHealthBars,
         bool showChatPanel,
         int maxVisibleWorldUi,
         float worldUiScale)
     {
         _showOverheadChat = showOverheadChat;
         _showNameplates = showNameplates;
+        _showOverheadHealthBars = showOverheadHealthBars;
         _showChatPanel = showChatPanel;
         _maxVisibleWorldUi = Math.Clamp(maxVisibleWorldUi, 1, 256);
         _worldUiScale = Mathf.Clamp(worldUiScale, 0.5f, 3.0f);
@@ -587,6 +591,11 @@ public partial class ClientAppShell : Control
         {
             _showNameplates = enabled;
             NameplateVisibilityChanged?.Invoke(enabled);
+        }));
+        column.AddChild(CreateCheckBox("Show overhead health bars", _showOverheadHealthBars, enabled =>
+        {
+            _showOverheadHealthBars = enabled;
+            OverheadHealthBarVisibilityChanged?.Invoke(enabled);
         }));
         column.AddChild(CreateCheckBox("Show chat panel", _showChatPanel, enabled =>
         {
