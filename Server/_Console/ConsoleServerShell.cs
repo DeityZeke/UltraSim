@@ -160,6 +160,7 @@ public sealed class ConsoleServerShell
                 SaveOnStop: options.SaveOnStop,
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
                 SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
+                MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
                 ScriptContext: ScriptContext))
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,

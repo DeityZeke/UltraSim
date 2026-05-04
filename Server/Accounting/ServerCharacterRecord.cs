@@ -8,7 +8,8 @@ public sealed record ServerCharacterRecord(
     string PrefabKey,
     DateTimeOffset CreatedUtc,
     DateTimeOffset LastPlayedUtc,
-    CharacterPositionSnapshot Position)
+    CharacterPositionSnapshot Position,
+    string BiologicalSex = "male")
 {
     public ServerCharacterRecord Normalize()
     {
@@ -25,11 +26,19 @@ public sealed record ServerCharacterRecord(
         string prefabKey = string.IsNullOrWhiteSpace(PrefabKey)
             ? throw new ArgumentException("Character prefab key is required.", nameof(PrefabKey))
             : PrefabKey.Trim();
+        string biologicalSex = string.IsNullOrWhiteSpace(BiologicalSex)
+            ? "male"
+            : BiologicalSex.Trim().ToLowerInvariant();
+        if (biologicalSex is not ("male" or "female"))
+        {
+            throw new ArgumentException("Character biological sex must be 'male' or 'female'.", nameof(BiologicalSex));
+        }
 
         return this with
         {
             Name = name,
-            PrefabKey = prefabKey
+            PrefabKey = prefabKey,
+            BiologicalSex = biologicalSex
         };
     }
 

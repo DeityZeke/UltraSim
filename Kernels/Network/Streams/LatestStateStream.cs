@@ -111,6 +111,21 @@ public sealed class LatestStateStream
         }
     }
 
+    public bool Remove(ulong itemKey, SubscriptionKey scopeKey = default)
+    {
+        if (itemKey == 0)
+            throw new ArgumentOutOfRangeException(nameof(itemKey));
+
+        lock (_sync)
+        {
+            bool removed = _entriesByKey.Remove(new EntryKey(itemKey, scopeKey));
+            if (removed)
+                _orderedSnapshotDirty = true;
+
+            return removed;
+        }
+    }
+
     public LatestStateDrainResult DrainSince(LatestStateCursor cursor, Span<LatestStateUpdate> destination)
     {
         lock (_sync)

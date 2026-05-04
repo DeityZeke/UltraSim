@@ -170,6 +170,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ServerDrivenActionRouted += HandleServerDrivenActionRouted;
 			UiManager.Menus.ActionMenuActionPressed += HandleActionMenuActionPressed;
 			UiManager.Menus.LoginCredentialSubmitRequested += HandleLoginCredentialSubmitRequested;
+			UiManager.Menus.AdmissionLogoutRequested += HandleAdmissionLoginCancelRequested;
 		}
 
 		ScheduleSmokeQuitIfRequested();
@@ -225,6 +226,7 @@ public partial class GodotClientRuntimeRoot : Node
 			UiManager.Menus.ServerDrivenActionRouted -= HandleServerDrivenActionRouted;
 			UiManager.Menus.ActionMenuActionPressed -= HandleActionMenuActionPressed;
 			UiManager.Menus.LoginCredentialSubmitRequested -= HandleLoginCredentialSubmitRequested;
+			UiManager.Menus.AdmissionLogoutRequested -= HandleAdmissionLoginCancelRequested;
 		}
 
 		_sessionDriver?.Dispose();
@@ -363,6 +365,16 @@ public partial class GodotClientRuntimeRoot : Node
 		_wasSessionReady = false;
 		_smokeSawDisconnected = true;
 		ClearSessionWorld();
+		UiManager?.Menus?.ClearServerDrivenPanels();
+	}
+
+	private void HandleAdmissionLoginCancelRequested()
+	{
+		_sessionDriver?.Disconnect();
+		_wasSessionReady = false;
+		_smokeSawDisconnected = true;
+		ClearSessionWorld();
+		UiManager?.Menus?.ShowServerBrowser();
 	}
 
 	private void HandlePreviewRequested()
@@ -451,6 +463,13 @@ public partial class GodotClientRuntimeRoot : Node
 			return;
 		}
 
+		if (string.Equals(result.Request.SchemaIdentity.PanelType, "admission.login", StringComparison.Ordinal) &&
+			string.Equals(result.Request.ActionId, "login.cancel", StringComparison.Ordinal))
+		{
+			HandleAdmissionLoginCancelRequested();
+			return;
+		}
+
 		bool smokeAction = false;
 		if (string.Equals(result.Request.ActionId, SmokeRepeaterRowActionId, StringComparison.Ordinal) &&
 			string.Equals(result.Request.ContextId, SmokeRepeaterRowKey, StringComparison.Ordinal))
@@ -533,6 +552,7 @@ public partial class GodotClientRuntimeRoot : Node
 	private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)
 	{
 		_lastAuthoritativeOwnerState = result.AuthoritativeState;
+		UiManager?.Menus?.ClearAdmissionPanels();
 		if (result.LastProcessedInputSequence != 0)
 		{
 			_smokeOwnerMovementCount++;
@@ -568,27 +588,41 @@ public partial class GodotClientRuntimeRoot : Node
 
 		bool hasMoveInput = LocalPlayerController.TryReadMoveDirection(out Vector3 moveDirection);
 		bool hasSmokeMoveInput = TryReadSmokeMoveInput(out short smokeMoveX, out short smokeMoveY);
+		bool sprintPressed = !hasSmokeMoveInput && hasMoveInput && LocalPlayerController.ReadSprintPressed();
+		bool jumpPressed = !hasSmokeMoveInput && LocalPlayerController.ReadJumpJustPressed();
+		byte movementFlags = 0;
+		if (sprintPressed)
+		{
+			movementFlags |= MovementInputPacket.SprintFlag;
+		}
+
+		if (jumpPressed)
+		{
+			movementFlags |= MovementInputPacket.JumpFlag;
+		}
+
 		var input = new ClientMovementInput(
 			MoveX: hasSmokeMoveInput ? smokeMoveX : hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.X, -1.0f, 1.0f) * 100.0f) : (short)0,
 			MoveY: hasSmokeMoveInput ? smokeMoveY : hasMoveInput ? (short)Mathf.RoundToInt(Mathf.Clamp(moveDirection.Z, -1.0f, 1.0f) * 100.0f) : (short)0,
-			Flags: 0);
+			Flags: movementFlags);
 
 		global::Godot.Vector3 position = LocalPlayerController.ControlledCharacter.GlobalPosition;
-		float velocityX = input.MoveX / 100.0f * LiveMoveSpeed;
-		float velocityY = input.MoveY / 100.0f * LiveMoveSpeed;
+		float speed = sprintPressed ? LiveMoveSpeed * 1.75f : LiveMoveSpeed;
+		float velocityX = input.MoveX / 100.0f * speed;
+		float velocityY = input.MoveY / 100.0f * speed;
 		var predicted = new ClientMovementState(
 			position.X + velocityX * (float)delta,
 			position.Z + velocityY * (float)delta,
 			velocityX,
 			velocityY);
 
-		ApplyLocalPredictedMovement(predicted, hasMoveInput || hasSmokeMoveInput);
+		ApplyLocalPredictedMovement(predicted, hasMoveInput || hasSmokeMoveInput, jumpPressed);
 
 		_localClientTick++;
 		_sessionDriver.TrySendMovementInput(input, predicted);
 	}
 
-	private void ApplyLocalPredictedMovement(in ClientMovementState predicted, bool isMoving)
+	private void ApplyLocalPredictedMovement(in ClientMovementState predicted, bool isMoving, bool jumpPressed)
 	{
 		if (LocalPlayerController?.ControlledCharacter is null)
 		{
@@ -597,6 +631,11 @@ public partial class GodotClientRuntimeRoot : Node
 
 		CharacterRoot character = LocalPlayerController.ControlledCharacter;
 		character.GlobalPosition = new Vector3(predicted.PositionX, 0.0f, predicted.PositionY);
+		if (jumpPressed)
+		{
+			character.TriggerPresentationJump();
+		}
+
 		if (isMoving)
 		{
 			float yawDegrees = Mathf.RadToDeg(Mathf.Atan2(predicted.VelocityX, predicted.VelocityY));

@@ -18,7 +18,7 @@ public static class ServerHostLogFormatter
             return new[] { new ServerHostLogLine("SAVE", "World: Saving...") };
 
         if (evt.Kind == ServerApplicationEventKind.SaveCompleted)
-            return new[] { new ServerHostLogLine("SAVE", "World: Saving... - done") };
+            return new[] { new ServerHostLogLine("SAVE", $"World: Saving... - done{FormatDurationSuffix(evt.Duration)}") };
 
         if (evt.Kind == ServerApplicationEventKind.Log)
             return new[] { new ServerHostLogLine("LOG", evt.Message) };
@@ -41,7 +41,7 @@ public static class ServerHostLogFormatter
                 new ServerHostLogLine("CORE", "Core: Starting... - done"),
                 new ServerHostLogLine("WORLD", "World: Loading..."),
             },
-            ServerApplicationState.Running => new[] { new ServerHostLogLine("WORLD", "World: Loading... - done") },
+            ServerApplicationState.Running => new[] { new ServerHostLogLine("WORLD", $"World: Loading... - done{FormatDurationSuffix(evt.Duration)}") },
             ServerApplicationState.Saving => new[] { new ServerHostLogLine("WORLD", "World: Saving...") },
             ServerApplicationState.Stopping => new[] { new ServerHostLogLine("CORE", "Core: Stopping...") },
             ServerApplicationState.Stopped => new[] { new ServerHostLogLine("CORE", "Core: Stopping... - done") },
@@ -49,5 +49,17 @@ public static class ServerHostLogFormatter
             ServerApplicationState.Faulted => new[] { new ServerHostLogLine("FAULT", "Core: Runtime... failed", IsError: true) },
             _ => new[] { new ServerHostLogLine("STATE", evt.Message) },
         };
+    }
+
+    private static string FormatDurationSuffix(TimeSpan? duration)
+    {
+        if (!duration.HasValue)
+            return string.Empty;
+
+        TimeSpan value = duration.Value;
+        string formatted = value.TotalSeconds < 1.0d
+            ? $"{value.TotalMilliseconds:0.##} ms"
+            : $"{value.TotalSeconds:0.##} seconds";
+        return $" in {formatted}";
     }
 }

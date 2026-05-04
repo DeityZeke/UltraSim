@@ -61,6 +61,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     public bool IsReady => _host?.IsReady == true;
     public ClientPumpProfileSnapshot LastPumpProfile => _host?.LastPumpProfile ?? default;
     public SessionId SessionId => _host?.SessionId ?? default;
+    public double LastRawPingRoundTripMilliseconds { get; private set; } = -1.0;
     public double LastPingRoundTripMilliseconds { get; private set; } = -1.0;
     public ClientMovementSessionHost? Host => _host;
 
@@ -120,6 +121,8 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _handshakeAttempts = 1;
         _sessionFailed = false;
         _lastPongTicks = 0;
+        LastRawPingRoundTripMilliseconds = -1.0;
+        LastPingRoundTripMilliseconds = -1.0;
         _statusSink($"Connecting to {request.Host}:{request.Port}... attempt 1/{Math.Max(1, MaxHandshakeAttempts)}");
         error = string.Empty;
         return true;
@@ -217,6 +220,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _handshakeAttempts = 0;
         _sessionFailed = false;
         _pingSentAtTicks.Clear();
+        LastRawPingRoundTripMilliseconds = -1.0;
         LastPingRoundTripMilliseconds = -1.0;
         _statusSink(status);
     }
@@ -319,7 +323,10 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
                     continue;
                 }
 
-                LastPingRoundTripMilliseconds = (nowTicks - sentTicks) * 1000.0 / Stopwatch.Frequency;
+                LastRawPingRoundTripMilliseconds = (nowTicks - sentTicks) * 1000.0 / Stopwatch.Frequency;
+                LastPingRoundTripMilliseconds = LastPingRoundTripMilliseconds < 0.0
+                    ? LastRawPingRoundTripMilliseconds
+                    : (LastPingRoundTripMilliseconds * 0.75) + (LastRawPingRoundTripMilliseconds * 0.25);
                 _lastPongTicks = nowTicks;
             }
 

@@ -15,3 +15,7 @@ public delegate void ServerMovementSessionDespawner(
     World world,
     ConnectionId connectionId,
     Entity entity);
+
+public delegate void ServerAccountSessionEnder(
+    ConnectionId connectionId,
+    ulong accountId);

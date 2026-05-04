@@ -39,6 +39,16 @@ public sealed class ServerAdmissionFlowRuntime
         return _statesByConnection.TryGetValue(connectionId, out state!);
     }
 
+    public bool TryClearConnection(ConnectionId connectionId, out ulong accountId)
+    {
+        accountId = 0;
+        if (!_statesByConnection.Remove(connectionId, out SessionAdmissionState? state))
+            return false;
+
+        accountId = state.AccountId;
+        return true;
+    }
+
     public bool TryStart(ConnectionId connectionId, out string error)
     {
         return TryFireEvent(connectionId, DefaultClientConnectedEvent, out error);

@@ -13,6 +13,7 @@ public partial class MenuCanvasManager : CanvasLayer
     private readonly ClientAppShellNavigation _navigation = new();
     private readonly ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser();
     private readonly Dictionary<string, Control> _serverDrivenPanels = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, UiPanelMetadata> _serverDrivenPanelMetadata = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Control> _actionMenus = new(StringComparer.Ordinal);
     private readonly Dictionary<UiSurfaceTarget, Control> _serverDrivenSurfaceHosts = new();
     private readonly HashSet<string> _blockingServerDrivenPanels = new(StringComparer.Ordinal);
@@ -24,6 +25,7 @@ public partial class MenuCanvasManager : CanvasLayer
     public event Action<ClientUiActionRouteResult>? ServerDrivenActionRouted;
     public event Action<UiActionMenuDescriptor, UiActionDescriptor>? ActionMenuActionPressed;
     public event Action<LoginCredentialSubmitPacket>? LoginCredentialSubmitRequested;
+    public event Action? AdmissionLogoutRequested;
 
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
@@ -71,15 +73,17 @@ public partial class MenuCanvasManager : CanvasLayer
             return false;
         }
 
-        CloseServerDrivenPanel(panel.PanelInstanceId);
+        ClosePanelsReplacedBy(panel);
+        CloseMountedServerDrivenPanel(panel.PanelInstanceId);
         _serverDrivenPanels[panel.PanelInstanceId] = renderedPanel;
+        _serverDrivenPanelMetadata[panel.PanelInstanceId] = panel.Metadata;
         if (PanelBlocksGameplayInput(panel.Metadata))
         {
             _blockingServerDrivenPanels.Add(panel.PanelInstanceId);
         }
 
         surfaceHost.AddChild(renderedPanel);
-        ApplyServerPanelPlacement(renderedPanel, panel.Metadata);
+        ApplyServerPanelPlacement(renderedPanel, panel);
         WireTrustedCredentialSubmitShortcuts(panel, renderedPanel);
         ApplyChatVisibility();
         error = string.Empty;
@@ -88,13 +92,24 @@ public partial class MenuCanvasManager : CanvasLayer
 
     public bool CloseServerDrivenPanel(string panelInstanceId)
     {
+        return CloseMountedServerDrivenPanel(panelInstanceId, closeRegistry: true);
+    }
+
+    private bool CloseMountedServerDrivenPanel(string panelInstanceId, bool closeRegistry = false)
+    {
         if (!_serverDrivenPanels.Remove(panelInstanceId, out Control? renderedPanel))
         {
             return false;
         }
 
+        _serverDrivenPanelMetadata.Remove(panelInstanceId);
         _blockingServerDrivenPanels.Remove(panelInstanceId);
         renderedPanel.QueueFree();
+        if (closeRegistry)
+        {
+            ServerDrivenPanelRegistry?.ClosePanel(panelInstanceId);
+        }
+
         ApplyChatVisibility();
         return true;
     }
@@ -107,9 +122,28 @@ public partial class MenuCanvasManager : CanvasLayer
         }
 
         _serverDrivenPanels.Clear();
+        _serverDrivenPanelMetadata.Clear();
         _blockingServerDrivenPanels.Clear();
+        ServerDrivenPanelRegistry?.Clear();
         ClearActionMenus();
         ApplyChatVisibility();
+    }
+
+    public void ClearAdmissionPanels()
+    {
+        var admissionPanelIds = new List<string>();
+        foreach (string panelId in _serverDrivenPanels.Keys)
+        {
+            if (panelId.StartsWith("admission/", StringComparison.Ordinal))
+            {
+                admissionPanelIds.Add(panelId);
+            }
+        }
+
+        for (int i = 0; i < admissionPanelIds.Count; i++)
+        {
+            CloseMountedServerDrivenPanel(admissionPanelIds[i], closeRegistry: true);
+        }
     }
 
     public bool TryShowActionMenu(UiActionMenuDescriptor menu, out string error)
@@ -348,8 +382,17 @@ public partial class MenuCanvasManager : CanvasLayer
         ApplyNavigation();
     }
 
+    public void ShowServerBrowser()
+    {
+        ClearServerDrivenPanels();
+        _navigation.LeaveSession(ClientAppScreen.ServerBrowser);
+        ApplyNavigation();
+        _ = RefreshServerBrowserAsync();
+    }
+
     public void ShowConnectionError(string? message = null)
     {
+        ClearServerDrivenPanels();
         _navigation.LeaveSession(ClientAppScreen.Error);
         ApplyNavigation();
         if (!string.IsNullOrWhiteSpace(message))
@@ -431,6 +474,12 @@ public partial class MenuCanvasManager : CanvasLayer
 
     private void RouteServerDrivenAction(ClientUiPanelInstance panel, UiActionDescriptor action, string? contextId)
     {
+        if (IsAdmissionLogoutAction(panel, action))
+        {
+            AdmissionLogoutRequested?.Invoke();
+            return;
+        }
+
         if (ServerDrivenPanelRegistry is null)
         {
             ServerDrivenActionRouted?.Invoke(ClientUiActionRouteResult.Rejected("Server-driven UI action registry is not attached."));
@@ -458,8 +507,17 @@ public partial class MenuCanvasManager : CanvasLayer
             action.ActionId,
             action.ContextKind,
             resolvedContextId,
-            FieldValues: []);
+            FieldValues: CollectServerDrivenFieldValues(panel));
         ServerDrivenActionRouted?.Invoke(ServerDrivenPanelRegistry.ValidateActionRequest(request));
+    }
+
+    private static bool IsAdmissionLogoutAction(ClientUiPanelInstance panel, UiActionDescriptor action)
+    {
+        return
+            (string.Equals(panel.SchemaIdentity.PanelType, "admission.login", StringComparison.Ordinal) &&
+             string.Equals(action.ActionId, "login.cancel", StringComparison.Ordinal)) ||
+            (string.Equals(panel.SchemaIdentity.PanelType, "admission.character_select", StringComparison.Ordinal) &&
+             string.Equals(action.ActionId, "character_select.back", StringComparison.Ordinal));
     }
 
     private void HandleTrustedCredentialAction(ClientUiPanelInstance panel, UiActionDescriptor action)
@@ -615,32 +673,90 @@ public partial class MenuCanvasManager : CanvasLayer
         return host;
     }
 
-    private void ApplyServerPanelPlacement(Control panel, UiPanelMetadata metadata)
+    private void ApplyServerPanelPlacement(Control renderedPanel, ClientUiPanelInstance panel)
     {
-        panel.ZIndex = metadata.ZOrderClass;
+        UiPanelMetadata metadata = panel.Metadata;
+        renderedPanel.ZIndex = metadata.ZOrderClass;
         if (metadata.SurfaceTarget is UiSurfaceTarget.Modal or UiSurfaceTarget.Exclusive)
         {
-            panel.CustomMinimumSize = new Vector2(Mathf.Max(panel.CustomMinimumSize.X, 560.0f), panel.CustomMinimumSize.Y);
-            CenterServerPanel(panel);
-            panel.Resized += () => CenterServerPanel(panel);
+            Vector2 preferredSize = ResolvePreferredServerPanelSize(renderedPanel, panel);
+            renderedPanel.CustomMinimumSize = preferredSize;
+            renderedPanel.SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter;
+            renderedPanel.SizeFlagsVertical = Control.SizeFlags.ShrinkCenter;
+            CenterServerPanel(renderedPanel, preferredSize);
+            renderedPanel.Resized += () => CenterServerPanel(renderedPanel, preferredSize);
             return;
         }
 
-        panel.Position = new Vector2(24.0f, 96.0f);
+        renderedPanel.SetAnchorsPreset(Control.LayoutPreset.TopLeft);
+        renderedPanel.Position = new Vector2(24.0f, 96.0f);
     }
 
-    private void CenterServerPanel(Control panel)
+    private void CenterServerPanel(Control panel, Vector2 preferredSize)
     {
-        Vector2 viewportSize = GetViewport().GetVisibleRect().Size;
         Vector2 minimumSize = panel.GetCombinedMinimumSize();
         Vector2 targetSize = new(
-            Mathf.Max(Mathf.Max(panel.Size.X, minimumSize.X), panel.CustomMinimumSize.X),
-            Mathf.Max(Mathf.Max(panel.Size.Y, minimumSize.Y), panel.CustomMinimumSize.Y));
+            Mathf.Max(preferredSize.X, minimumSize.X),
+            preferredSize.Y > 0.0f ? preferredSize.Y : minimumSize.Y);
 
-        panel.Size = targetSize;
-        panel.Position = new Vector2(
-            Mathf.Max(16.0f, (viewportSize.X - targetSize.X) * 0.5f),
-            Mathf.Max(16.0f, (viewportSize.Y - targetSize.Y) * 0.5f));
+        panel.AnchorLeft = 0.5f;
+        panel.AnchorRight = 0.5f;
+        panel.AnchorTop = 0.5f;
+        panel.AnchorBottom = 0.5f;
+        panel.OffsetLeft = targetSize.X * -0.5f;
+        panel.OffsetRight = targetSize.X * 0.5f;
+        panel.OffsetTop = targetSize.Y * -0.5f;
+        panel.OffsetBottom = targetSize.Y * 0.5f;
+    }
+
+    private static Vector2 ResolvePreferredServerPanelSize(Control renderedPanel, ClientUiPanelInstance panel)
+    {
+        return panel.SchemaIdentity.PanelType switch
+        {
+            "admission.login" => new Vector2(560.0f, 280.0f),
+            "admission.character_select" => new Vector2(560.0f, 360.0f),
+            "admission.character_create" => new Vector2(560.0f, 400.0f),
+            _ => new Vector2(Mathf.Max(renderedPanel.CustomMinimumSize.X, 560.0f), renderedPanel.CustomMinimumSize.Y),
+        };
+    }
+
+    private void ClosePanelsReplacedBy(ClientUiPanelInstance panel)
+    {
+        if (panel.Metadata.OpenPolicy != UiOpenPolicy.ReplaceCurrent)
+        {
+            return;
+        }
+
+        var replacedPanelIds = new List<string>();
+        foreach ((string panelId, UiPanelMetadata metadata) in _serverDrivenPanelMetadata)
+        {
+            if (string.Equals(panelId, panel.PanelInstanceId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (ShouldReplaceMountedPanel(metadata, panel.Metadata))
+            {
+                replacedPanelIds.Add(panelId);
+            }
+        }
+
+        for (int i = 0; i < replacedPanelIds.Count; i++)
+        {
+            CloseMountedServerDrivenPanel(replacedPanelIds[i], closeRegistry: true);
+        }
+    }
+
+    private static bool ShouldReplaceMountedPanel(UiPanelMetadata mounted, UiPanelMetadata incoming)
+    {
+        if (!string.IsNullOrWhiteSpace(incoming.ExclusiveGroup) &&
+            string.Equals(mounted.ExclusiveGroup, incoming.ExclusiveGroup, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return mounted.SurfaceTarget == incoming.SurfaceTarget &&
+               incoming.FocusMode is UiFocusMode.Modal or UiFocusMode.Exclusive;
     }
 
     private static bool PanelBlocksGameplayInput(UiPanelMetadata metadata)
@@ -796,6 +912,102 @@ public partial class MenuCanvasManager : CanvasLayer
         }
 
         return null;
+    }
+
+    private IReadOnlyList<UiModelSlotValue> CollectServerDrivenFieldValues(ClientUiPanelInstance panel)
+    {
+        if (!_serverDrivenPanels.TryGetValue(panel.PanelInstanceId, out Control? renderedPanel))
+        {
+            return [];
+        }
+
+        var valuesBySlot = new Dictionary<string, UiModelSlotValue>(StringComparer.Ordinal);
+        CollectFieldValues(renderedPanel, valuesBySlot);
+        return valuesBySlot.Values.ToArray();
+    }
+
+    private static void CollectFieldValues(Node node, Dictionary<string, UiModelSlotValue> valuesBySlot)
+    {
+        if (node is Control control &&
+            control.HasMeta("UiSlotId") &&
+            control.GetMeta("UiSlotId").ToString() is { Length: > 0 } slotId)
+        {
+            UiModelSlotValue? value = TryReadControlValue(control, slotId);
+            if (value is not null)
+            {
+                valuesBySlot[slotId] = value;
+            }
+        }
+
+        foreach (Node child in node.GetChildren())
+        {
+            CollectFieldValues(child, valuesBySlot);
+        }
+    }
+
+    private static UiModelSlotValue? TryReadControlValue(Control control, string slotId)
+    {
+        if (control.HasMeta("UiTrustedInput") && control.GetMeta("UiTrustedInput").AsBool())
+        {
+            return null;
+        }
+
+        return control switch
+        {
+            LineEdit input => UiModelSlotValue.String(slotId, input.Text ?? string.Empty),
+            OptionButton select => UiModelSlotValue.String(slotId, ReadSelectedOptionValue(select)),
+            CheckBox checkbox when !checkbox.HasMeta("UiOptionValue") => UiModelSlotValue.Boolean(slotId, checkbox.ButtonPressed),
+            SpinBox input => UiModelSlotValue.Number(slotId, input.Value),
+            HSlider slider => UiModelSlotValue.Number(slotId, slider.Value),
+            _ => TryReadOptionGroupValue(control, slotId)
+        };
+    }
+
+    private static UiModelSlotValue? TryReadOptionGroupValue(Control control, string slotId)
+    {
+        var selected = new List<string>();
+        bool sawGroupedOption = false;
+        foreach (Node child in control.GetChildren())
+        {
+            if (child is not CheckBox checkbox || !checkbox.HasMeta("UiOptionValue"))
+            {
+                continue;
+            }
+
+            sawGroupedOption |= checkbox.ButtonGroup is not null;
+            if (checkbox.ButtonPressed)
+            {
+                string? optionValue = checkbox.GetMeta("UiOptionValue").ToString();
+                if (!string.IsNullOrWhiteSpace(optionValue))
+                {
+                    selected.Add(optionValue);
+                }
+            }
+        }
+
+        if (selected.Count == 0)
+        {
+            return null;
+        }
+
+        return sawGroupedOption
+            ? UiModelSlotValue.String(slotId, selected[0])
+            : UiModelSlotValue.StringList(slotId, selected);
+    }
+
+    private static string ReadSelectedOptionValue(OptionButton select)
+    {
+        int selected = select.Selected;
+        if (selected >= 0)
+        {
+            Variant metadata = select.GetItemMetadata(selected);
+            if (metadata.VariantType != Variant.Type.Nil)
+            {
+                return metadata.ToString();
+            }
+        }
+
+        return string.Empty;
     }
 
     private static Button? FindActionButton(Node root, string actionId)

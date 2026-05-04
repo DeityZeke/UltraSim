@@ -129,6 +129,11 @@ public sealed class UdpSocketNetworkTransport : INetworkTransport
     public TransportFlushProfileSnapshot LastFlushProfile { get; private set; }
     public TransportPollProfileSnapshot LastPollProfile { get; private set; }
 
+    public bool TryGetRemoteEndPoint(ConnectionId connectionId, out IPEndPoint? remoteEndPoint)
+    {
+        return TryGetRemote(connectionId, out remoteEndPoint);
+    }
+
     public void Start()
     {
         ThrowIfDisposed();

@@ -16,6 +16,7 @@ public partial class LocalPlayerController : Node
 
     public CharacterRoot? ControlledCharacter { get; private set; }
     public OrbitFollowCameraRig? CameraRig { get; private set; }
+    private bool _fallbackJumpWasPressed;
 
     public override void _Ready()
     {
@@ -81,9 +82,28 @@ public partial class LocalPlayerController : Node
             return Vector2.Zero;
         }
 
-        float horizontal = GetMovementAxis("move_left", "move_right", Key.A, Key.D);
-        float vertical = GetMovementAxis("move_forward", "move_back", Key.W, Key.S);
+        float horizontal = GetMovementAxis(new[] { "walk_left", "move_left" }, new[] { "walk_right", "move_right" }, Key.A, Key.D);
+        float vertical = GetMovementAxis(new[] { "walk_forward", "move_forward" }, new[] { "walk_back", "move_back" }, Key.W, Key.S);
         return new Vector2(horizontal, vertical);
+    }
+
+    public bool ReadSprintPressed()
+    {
+        if (IsGameplayInputBlocked())
+            return false;
+
+        return IsAnyActionPressed(new[] { "sprint" }) || Input.IsKeyPressed(Key.Shift);
+    }
+
+    public bool ReadJumpJustPressed()
+    {
+        if (IsGameplayInputBlocked())
+            return false;
+
+        bool fallbackPressed = Input.IsKeyPressed(Key.Space);
+        bool fallbackJustPressed = fallbackPressed && !_fallbackJumpWasPressed;
+        _fallbackJumpWasPressed = fallbackPressed;
+        return IsAnyActionJustPressed(new[] { "jump" }) || fallbackJustPressed;
     }
 
     public void SetControlledCharacter(CharacterRoot? character)
@@ -145,16 +165,45 @@ public partial class LocalPlayerController : Node
         return (cameraRight * input.X) + (cameraForward * -input.Y);
     }
 
-    private static float GetMovementAxis(string negativeAction, string positiveAction, Key negativeKey, Key positiveKey)
+    private static float GetMovementAxis(string[] negativeActions, string[] positiveActions, Key negativeKey, Key positiveKey)
     {
-        bool negativePressed = InputMap.HasAction(negativeAction)
-            ? Input.IsActionPressed(negativeAction)
-            : Input.IsKeyPressed(negativeKey);
-        bool positivePressed = InputMap.HasAction(positiveAction)
-            ? Input.IsActionPressed(positiveAction)
-            : Input.IsKeyPressed(positiveKey);
+        bool negativePressed = IsAnyActionPressed(negativeActions) || Input.IsKeyPressed(negativeKey);
+        bool positivePressed = IsAnyActionPressed(positiveActions) || Input.IsKeyPressed(positiveKey);
 
         return (positivePressed ? 1.0f : 0.0f) - (negativePressed ? 1.0f : 0.0f);
+    }
+
+    private static bool IsAnyActionPressed(string[] actions)
+    {
+        for (int i = 0; i < actions.Length; i++)
+        {
+            if (InputMap.HasAction(actions[i]) && Input.IsActionPressed(actions[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsAnyActionJustPressed(string[] actions)
+    {
+        for (int i = 0; i < actions.Length; i++)
+        {
+            if (InputMap.HasAction(actions[i]) && Input.IsActionJustPressed(actions[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    private bool IsGameplayInputBlocked()
+    {
+        var focus = new ClientInputFocusState(
+            TextInputFocused: IsTextInputFocused(),
+            MenuOpen: false,
+            ModalInputCaptured: false,
+            ExplicitGameplayBlock: GameplayInputBlocked);
+
+        return focus.BlocksGameplayMovement;
     }
 
     private bool IsTextInputFocused()

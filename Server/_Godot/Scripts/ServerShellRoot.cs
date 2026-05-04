@@ -28,7 +28,9 @@ public partial class ServerShellRoot : Control
 	private Button? _stopButton;
 	private Button? _saveButton;
 	private Button? _restartButton;
+	private Button? _restartWithoutSaveButton;
 	private Button? _shutdownButton;
+	private Button? _shutdownWithoutSaveButton;
 	private Button? _statusButton;
 	private Button? _runButton;
 	private bool _smokeRequireEmptySessions;
@@ -85,6 +87,7 @@ public partial class ServerShellRoot : Control
 		int networkPort = GodotServerShellOptions.Default.NetworkPort;
 		double sessionAuthTimeoutSeconds = GodotServerShellOptions.Default.SessionAuthTimeoutSeconds;
 		double sessionKeepAliveTimeoutSeconds = GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+		int maxAutoCreatedAccountsPerRemoteAddress = GodotServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
 		bool enableMovementWorld = GodotServerShellOptions.Default.EnableMovementWorld;
 		string? runtimeRootPath = GodotServerShellOptions.Default.RuntimeRootPath;
 		startOnReady = false;
@@ -150,6 +153,13 @@ public partial class ServerShellRoot : Control
 					maxCatchUpTicks = parsedMaxCatchUpTicks;
 				}
 			}
+			else if (arg.StartsWith("--us-server-max-auto-created-accounts-per-ip=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-max-auto-created-accounts-per-ip=".Length..], out int parsedAccountLimit) && parsedAccountLimit >= 0)
+				{
+					maxAutoCreatedAccountsPerRemoteAddress = parsedAccountLimit;
+				}
+			}
 		}
 
 		return new GodotServerShellOptions(
@@ -160,6 +170,7 @@ public partial class ServerShellRoot : Control
 			NetworkPort: networkPort,
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+			MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
 			RuntimeRootPath: runtimeRootPath);
 	}
 
@@ -401,14 +412,18 @@ public partial class ServerShellRoot : Control
 		_stopButton = CreateCommandButton("Stop", ServerControlCommand.Stop(), panelSoft, text);
 		_saveButton = CreateCommandButton("Save", ServerControlCommand.Save(), panelSoft, text);
 		_restartButton = CreateCommandButton("Restart", ServerControlCommand.Restart(), panelSoft, text);
+		_restartWithoutSaveButton = CreateCommandButton("Restart No Save", ServerControlCommand.RestartWithoutSave(), panelSoft, text);
 		_shutdownButton = CreateCommandButton("Shutdown", ServerControlCommand.Shutdown(), panelSoft, text);
+		_shutdownWithoutSaveButton = CreateCommandButton("Shutdown No Save", ServerControlCommand.ShutdownWithoutSave(), panelSoft, text);
 		_statusButton = CreateStatusButton(panelSoft, text);
 
 		rightColumn.AddChild(_startButton);
 		rightColumn.AddChild(_stopButton);
 		rightColumn.AddChild(_saveButton);
 		rightColumn.AddChild(_restartButton);
+		rightColumn.AddChild(_restartWithoutSaveButton);
 		rightColumn.AddChild(_shutdownButton);
+		rightColumn.AddChild(_shutdownWithoutSaveButton);
 		rightColumn.AddChild(_statusButton);
 
 		var separator = new HSeparator();
@@ -661,7 +676,7 @@ public partial class ServerShellRoot : Control
 		if (string.Equals(raw, "help", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(raw, "?", StringComparison.OrdinalIgnoreCase))
 		{
-			AppendOutput("HELP", "Commands: start, status, save, restart, stop, shutdown, quit, exit, help");
+			AppendOutput("HELP", "Commands: start, status, save, restart, restart-nosave, stop, shutdown, shutdown-nosave, quit, exit, help");
 			return;
 		}
 
@@ -671,8 +686,20 @@ public partial class ServerShellRoot : Control
 			"status" => ServerControlCommand.Status(),
 			"save" => ServerControlCommand.Save(),
 			"restart" => ServerControlCommand.Restart(),
+			"restart-nosave" => ServerControlCommand.RestartWithoutSave(),
+			"restart-no-save" => ServerControlCommand.RestartWithoutSave(),
+			"restart nosave" => ServerControlCommand.RestartWithoutSave(),
+			"restart no-save" => ServerControlCommand.RestartWithoutSave(),
+			"restart without-save" => ServerControlCommand.RestartWithoutSave(),
+			"restart --no-save" => ServerControlCommand.RestartWithoutSave(),
 			"stop" => ServerControlCommand.Stop(),
 			"shutdown" => ServerControlCommand.Shutdown(),
+			"shutdown-nosave" => ServerControlCommand.ShutdownWithoutSave(),
+			"shutdown-no-save" => ServerControlCommand.ShutdownWithoutSave(),
+			"shutdown nosave" => ServerControlCommand.ShutdownWithoutSave(),
+			"shutdown no-save" => ServerControlCommand.ShutdownWithoutSave(),
+			"shutdown without-save" => ServerControlCommand.ShutdownWithoutSave(),
+			"shutdown --no-save" => ServerControlCommand.ShutdownWithoutSave(),
 			"quit" => ServerControlCommand.Shutdown(),
 			"exit" => ServerControlCommand.Shutdown(),
 			_ => null,
@@ -971,8 +998,14 @@ public partial class ServerShellRoot : Control
 		if (_restartButton is not null)
 			_restartButton.Disabled = !canRestart;
 
+		if (_restartWithoutSaveButton is not null)
+			_restartWithoutSaveButton.Disabled = !canRestart;
+
 		if (_shutdownButton is not null)
 			_shutdownButton.Disabled = !canShutdown;
+
+		if (_shutdownWithoutSaveButton is not null)
+			_shutdownWithoutSaveButton.Disabled = !canShutdown;
 
 		if (_statusButton is not null)
 			_statusButton.Disabled = !hasController;

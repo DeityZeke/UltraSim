@@ -20,6 +20,7 @@ public static class ConsoleServerArgumentParser
         int networkPort = ConsoleServerShellOptions.Default.NetworkPort;
         double sessionAuthTimeoutSeconds = ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+        int maxAutoCreatedAccountsPerRemoteAddress = ConsoleServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
         string? runtimeRootPath = ConsoleServerShellOptions.Default.RuntimeRootPath;
 
         for (int i = 0; i < args.Length; i++)
@@ -148,6 +149,19 @@ public static class ConsoleServerArgumentParser
                 continue;
             }
 
+            if (string.Equals(key, "--max-auto-created-accounts-per-ip", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out maxAutoCreatedAccountsPerRemoteAddress) || maxAutoCreatedAccountsPerRemoteAddress < 0)
+                {
+                    options = ConsoleServerShellOptions.Default;
+                    error = $"Invalid max auto-created accounts per IP '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
             if (string.Equals(key, "--run-for-seconds", StringComparison.OrdinalIgnoreCase))
             {
                 if (!double.TryParse(value, out double seconds) || seconds < 0d)
@@ -203,6 +217,7 @@ public static class ConsoleServerArgumentParser
             NetworkPort: networkPort,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+            MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
             RuntimeRootPath: runtimeRootPath);
         error = null;
         showHelp = false;
@@ -219,6 +234,7 @@ public static class ConsoleServerArgumentParser
           --port=<0-65535>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
+          --max-auto-created-accounts-per-ip=<n>
           --run-for-seconds=<seconds>
           --idle-delay-ms=<n>
           --no-movement-world
@@ -232,8 +248,10 @@ public static class ConsoleServerArgumentParser
           status
           save
           restart
+          restart-nosave
           stop
           shutdown
+          shutdown-nosave
           help
         """;
 }

@@ -19,9 +19,10 @@ public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
     public const string CharacterSelectStatusSlotId = "character_select.status";
     public const string CharacterSelectPlayActionId = "character_select.play";
     public const string CharacterCreateNameSlotId = "character_create.name";
-    public const string CharacterCreateTemplateSlotId = "character_create.template";
+    public const string CharacterCreateSexSlotId = "character_create.sex";
     public const string CharacterCreateStatusSlotId = "character_create.status";
     public const string CharacterCreateSubmitActionId = "character_create.submit";
+    public const string DefaultCharacterPrefabKey = "mobiles/human";
 
     private readonly AccountCharacterService _characters;
     private readonly AccountingAdmissionCharacterBinder? _bindCharacter;
@@ -107,12 +108,16 @@ public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
         }
 
         string name = GetStringField(context.Request, CharacterCreateNameSlotId);
-        string prefabKey = GetStringField(context.Request, CharacterCreateTemplateSlotId);
+        string biologicalSex = GetStringField(context.Request, CharacterCreateSexSlotId);
+        if (string.IsNullOrWhiteSpace(biologicalSex))
+            biologicalSex = "male";
+
         CharacterCreateResult result = _characters.TryCreateCharacter(
             context.State.AccountId,
             name,
-            prefabKey,
-            _clock());
+            DefaultCharacterPrefabKey,
+            _clock(),
+            biologicalSex: biologicalSex);
         if (!result.Succeeded || result.Character is null)
             return AdmissionActionRouteResult.StayOnStep(CharacterCreateStatusSlotId, result.Error);
 
@@ -194,6 +199,6 @@ public sealed class AccountingAdmissionRuntimePolicy : IAdmissionRuntimePolicy
 
     private static string BuildCharacterSummary(ServerCharacterRecord character)
     {
-        return $"Slot {character.SlotIndex + 1} - {character.PrefabKey}";
+        return $"Slot {character.SlotIndex + 1}";
     }
 }

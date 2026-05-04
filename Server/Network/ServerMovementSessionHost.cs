@@ -3,6 +3,7 @@ using UltraSim.ECS;
 using UltraSim.Network;
 using UltraSim.Server.Accounting;
 using UltraSim.Server.Admission;
+using UltraSim.Server.Gameplay;
 using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Network;
@@ -26,9 +27,11 @@ public sealed class ServerMovementSessionHost
     private readonly ServerMovementNetworkEntityIdAllocator? _allocateNetworkEntityId;
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
+    private readonly ServerAccountSessionEnder? _endAccountSession;
     private readonly ServerCharacterPositionProjector? _characterPositionProjector;
     private readonly ServerCharacterPositionApplier? _characterPositionApplier;
     private readonly ServerSelectedCharacterSnapshotWriter? _selectedCharacterSnapshotWriter;
+    private readonly Action<ConnectionId, string>? _operatorLog;
     private readonly Func<DateTimeOffset> _snapshotClock;
     private readonly bool _enableGlobalMovementObserverState;
     private readonly bool _requiresAdmission;
@@ -50,6 +53,7 @@ public sealed class ServerMovementSessionHost
         ServerEcsMovementStateProjector projectState,
         ServerMovementSessionSpawner spawnSession,
         ServerMovementSessionDespawner? despawnSession = null,
+        ServerAccountSessionEnder? endAccountSession = null,
         ServerCharacterPositionProjector? characterPositionProjector = null,
         ServerCharacterPositionApplier? characterPositionApplier = null,
         ServerSelectedCharacterSnapshotWriter? selectedCharacterSnapshotWriter = null,
@@ -62,6 +66,7 @@ public sealed class ServerMovementSessionHost
         DefaultUltraSimScriptContext? scriptContext = null,
         IAdmissionCredentialValidator? admissionCredentialValidator = null,
         IAdmissionRuntimePolicy? admissionRuntimePolicy = null,
+        Action<ConnectionId, string>? operatorLog = null,
         bool enableGlobalMovementObserverState = false,
         SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
@@ -107,9 +112,11 @@ public sealed class ServerMovementSessionHost
         _allocateNetworkEntityId = allocateNetworkEntityId;
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
+        _endAccountSession = endAccountSession;
         _characterPositionProjector = characterPositionProjector;
         _characterPositionApplier = characterPositionApplier;
         _selectedCharacterSnapshotWriter = selectedCharacterSnapshotWriter;
+        _operatorLog = operatorLog;
         _snapshotClock = snapshotClock ?? (static () => DateTimeOffset.UtcNow);
         _enableGlobalMovementObserverState = enableGlobalMovementObserverState;
         _globalMovementObserverScope = globalMovementObserverScope.IsValid
@@ -201,6 +208,7 @@ public sealed class ServerMovementSessionHost
         }
 
         _characterPositionApplier?.Invoke(_world, sessionEntity, character.Position);
+        ApplyCharacterProfile(sessionEntity, character);
         _selectedCharactersByConnection[connectionId] = new ServerSelectedCharacterSession(
             connectionId,
             character.AccountId,
@@ -210,6 +218,20 @@ public sealed class ServerMovementSessionHost
             sessionEntity,
             usedPrefabEntity);
         return true;
+    }
+
+    private void ApplyCharacterProfile(Entity entity, ServerCharacterRecord character)
+    {
+        if (!_world.Schema.TryGetComponentId(typeof(BiologicalProfile), out _))
+            return;
+
+        if (!_world.TryGetComponent(entity, out BiologicalProfile profile))
+            return;
+
+        BiologicalSex sex = character.BiologicalSex.Equals("female", StringComparison.OrdinalIgnoreCase)
+            ? BiologicalSex.Female
+            : BiologicalSex.Male;
+        _world.SetComponent(entity, profile with { Sex = sex });
     }
 
     public void Start() => _control.Start();
@@ -405,6 +427,7 @@ public sealed class ServerMovementSessionHost
                     continue;
 
                 _boundConnections.Add(evt.ConnectionId);
+                _operatorLog?.Invoke(evt.ConnectionId, "Connected");
                 _sessionRuntime.BindConnection(evt.ConnectionId);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerChatScopes.System);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerUiScopes.ForConnection(evt.ConnectionId));
@@ -445,6 +468,9 @@ public sealed class ServerMovementSessionHost
 
                 if (_boundConnections.Remove(evt.ConnectionId))
                 {
+                    _selectedCharactersByConnection.TryGetValue(
+                        evt.ConnectionId,
+                        out ServerSelectedCharacterSession? selectedCharacter);
                     if (_entityByConnection.TryGetValue(evt.ConnectionId, out Entity entity))
                     {
                         TrySnapshotSelectedCharacter(evt.ConnectionId, entity);
@@ -454,18 +480,54 @@ public sealed class ServerMovementSessionHost
                             _world.Destroy(entity);
                     }
 
+                    if (_enableGlobalMovementObserverState &&
+                        _networkEntityIdByConnection.TryGetValue(evt.ConnectionId, out uint networkEntityId))
+                    {
+                        _worldPublisher.LatestStateStream.Remove(
+                            ServerEcsNetworkItemKeys.GetObservedMovementItemKey(networkEntityId),
+                            _globalMovementObserverScope);
+                    }
+
                     _sessionRuntime.UnbindConnection(evt.ConnectionId);
                     _subscriptions.RemoveConnection(evt.ConnectionId);
                     _entityByConnection.Remove(evt.ConnectionId);
                     _networkEntityIdByConnection.Remove(evt.ConnectionId);
                     _selectedCharactersByConnection.Remove(evt.ConnectionId);
                     _pendingAdmissionStarts.Remove(evt.ConnectionId);
+                    EndAdmissionAndAccountSession(evt.ConnectionId, selectedCharacter);
+                    _operatorLog?.Invoke(evt.ConnectionId, FormatDisconnectMessage(evt.DisconnectReason));
+                }
+                else
+                {
+                    EndAdmissionAndAccountSession(evt.ConnectionId, selectedCharacter: null);
                 }
 
                 if (evt.CurrentState == ConnectionSessionState.Disconnected)
                     _control.Sessions.TryRemoveDisconnected(evt.SessionId, nowTicks);
             }
         }
+    }
+
+    private void EndAdmissionAndAccountSession(
+        ConnectionId connectionId,
+        ServerSelectedCharacterSession? selectedCharacter)
+    {
+        ulong accountId = selectedCharacter?.AccountId ?? 0;
+        if (_scriptBinding?.Admission.TryClearConnection(connectionId, out ulong admissionAccountId) == true &&
+            accountId == 0)
+        {
+            accountId = admissionAccountId;
+        }
+
+        if (accountId != 0)
+            _endAccountSession?.Invoke(connectionId, accountId);
+    }
+
+    private static string FormatDisconnectMessage(SessionDisconnectReason reason)
+    {
+        return reason == SessionDisconnectReason.None
+            ? "Disconnected"
+            : $"Disconnected ({reason})";
     }
 
     private bool TrySnapshotSelectedCharacter(ConnectionId connectionId, Entity entity)

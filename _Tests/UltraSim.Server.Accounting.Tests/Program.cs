@@ -16,6 +16,8 @@ internal static class TestRunner
         Run(nameof(DefaultCredentialService_RateLimitsRepeatedFailures), DefaultCredentialService_RateLimitsRepeatedFailures);
         Run(nameof(DefaultCredentialService_DeniesSecondSessionByDefault), DefaultCredentialService_DeniesSecondSessionByDefault);
         Run(nameof(DefaultCredentialService_CanKickExistingSessionWhenConfigured), DefaultCredentialService_CanKickExistingSessionWhenConfigured);
+        Run(nameof(DefaultCredentialService_AutoCreateUsesConfigurableRemoteAddressQuota), DefaultCredentialService_AutoCreateUsesConfigurableRemoteAddressQuota);
+        Run(nameof(DefaultCredentialService_EmitsOperatorEventsForCreateSuccessAndFailure), DefaultCredentialService_EmitsOperatorEventsForCreateSuccessAndFailure);
         Run(nameof(DefaultCredentialService_RejectsPortalTokenMaterial), DefaultCredentialService_RejectsPortalTokenMaterial);
         Run(nameof(PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword), PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword);
         Run(nameof(AccountCharacterService_CreatesListsAndDeletesCharactersBySlot), AccountCharacterService_CreatesListsAndDeletesCharactersBySlot);
@@ -170,6 +172,96 @@ internal static class TestRunner
         CredentialValidationResult second = service.ValidateLogin(new CredentialValidationRequest("Alice", "swordfish", "127.0.0.2", "session-b", now.AddSeconds(1)));
 
         Assert.True(second.Succeeded);
+    }
+
+    private static void DefaultCredentialService_AutoCreateUsesConfigurableRemoteAddressQuota()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        var sessions = new InMemoryAccountSessionTracker();
+        accounts.CreateAccount("StaffCreated", passwords.HashPassword("temporary"), now.AddMinutes(-1));
+        var service = new DefaultCredentialService(
+            accounts,
+            passwords,
+            new InMemoryLoginRateLimiter(),
+            sessions,
+            autoCreateUnknownAccounts: true,
+            maxAutoCreatedAccountsPerRemoteAddress: 1);
+
+        CredentialValidationResult first = service.ValidateLogin(new CredentialValidationRequest(
+            "Alice",
+            "swordfish",
+            "127.0.0.1",
+            "session-a",
+            now));
+        Assert.True(first.Succeeded);
+
+        sessions.EndSession(first.Account!.AccountId, "session-a");
+        CredentialValidationResult second = service.ValidateLogin(new CredentialValidationRequest(
+            "Bob",
+            "swordfish",
+            "127.0.0.1",
+            "session-b",
+            now.AddSeconds(1)));
+
+        Assert.False(second.Succeeded);
+        Assert.Equal(CredentialValidationResultKind.UnknownAccount, second.Kind);
+        Assert.Equal("This IP address has reached the account creation limit (1).", second.PublicMessage);
+
+        CredentialValidationResult staffCreated = service.ValidateLogin(new CredentialValidationRequest(
+            "StaffCreated",
+            "temporary",
+            "127.0.0.1",
+            "session-c",
+            now.AddSeconds(2)));
+
+        Assert.True(staffCreated.Succeeded);
+    }
+
+    private static void DefaultCredentialService_EmitsOperatorEventsForCreateSuccessAndFailure()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var passwords = new Pbkdf2PasswordHashService(iterations: 100_000);
+        var accounts = new InMemoryAccountRegistry();
+        var sessions = new InMemoryAccountSessionTracker();
+        var events = new List<AccountOperatorEvent>();
+        var service = new DefaultCredentialService(
+            accounts,
+            passwords,
+            new InMemoryLoginRateLimiter(),
+            sessions,
+            autoCreateUnknownAccounts: true,
+            maxAutoCreatedAccountsPerRemoteAddress: 2,
+            operatorEvents: events.Add);
+
+        CredentialValidationResult created = service.ValidateLogin(new CredentialValidationRequest(
+            "Alice",
+            "swordfish",
+            "127.0.0.1",
+            "session-a",
+            now));
+
+        Assert.True(created.Succeeded);
+        Assert.Equal(2, events.Count);
+        Assert.Equal(AccountOperatorEventKind.AccountCreated, events[0].Kind);
+        Assert.Equal(AccountOperatorEventKind.LoginSucceeded, events[1].Kind);
+        Assert.Equal("Alice", events[0].Username);
+        Assert.Equal("127.0.0.1", events[0].RemoteAddress);
+
+        sessions.EndSession(created.Account!.AccountId, "session-a");
+        CredentialValidationResult failed = service.ValidateLogin(new CredentialValidationRequest(
+            "Alice",
+            "wrong",
+            "127.0.0.1",
+            "session-b",
+            now.AddSeconds(1)));
+
+        Assert.False(failed.Succeeded);
+        Assert.Equal(3, events.Count);
+        Assert.Equal(AccountOperatorEventKind.LoginFailed, events[2].Kind);
+        Assert.Equal(CredentialValidationResultKind.InvalidPassword, events[2].ResultKind);
+        Assert.Equal("Invalid username or password.", events[2].PublicMessage);
     }
 
     private static void DefaultCredentialService_RejectsPortalTokenMaterial()

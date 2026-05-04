@@ -203,6 +203,22 @@ Does not own:
 - server gameplay/session/account flow
 - alternate lifecycle semantics
 
+## Operator Session Log Parity
+
+The old v2 Godot server shell emitted useful RunUO-style session/account lines.
+The rewritten runtime now emits these through the shared server/accounting path
+so headless, console, and Godot shells display the same operator-facing events:
+
+- `Client: {ip}: Connected`
+- `Client: {ip}: Login - Invalid credentials for '{username}': {reason}`
+- `Client: {ip}: Creating new account '{username}'`
+- `Client: {ip}: Login - Valid credentials for '{username}'`
+- `Client: {ip}: Disconnected ({reason})`
+
+Still reserved for the IP policy slice:
+
+- `Client: {ip}: IP rejected - {reason}`
+
 ### `Server/Discovery`
 
 Owns:

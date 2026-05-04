@@ -23,14 +23,7 @@ public sealed class AdmissionModule : IUltraSimScriptModule
         RegisterPanelProvider(
             context,
             AdmissionPanelProviderKeys.CharacterCreate,
-            () => AdmissionPanels.CharacterCreatePanel(
-                ServerIdentity,
-                [
-                    new UiSelectOption("mobiles/human", "Human")
-                ],
-                [
-                    new UiSelectOption("haven", "Haven")
-                ]));
+            () => AdmissionPanels.CharacterCreatePanel(ServerIdentity));
         foreach (UltraSimScriptAdmissionFlowStepDescriptor step in DefaultAdmissionFlow.Steps)
         {
             context.Admission.RegisterStep(step);

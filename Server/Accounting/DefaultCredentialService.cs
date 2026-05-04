@@ -10,6 +10,9 @@ public sealed class DefaultCredentialService : ICredentialService
     private readonly IAccountSessionTracker _sessions;
     private readonly IAccountAuditSink? _audit;
     private readonly AccountSessionConflictMode _sessionConflictMode;
+    private readonly bool _autoCreateUnknownAccounts;
+    private readonly int _maxAutoCreatedAccountsPerRemoteAddress;
+    private readonly Action<AccountOperatorEvent>? _operatorEvents;
 
     public DefaultCredentialService(
         IAccountRegistry accounts,
@@ -17,7 +20,10 @@ public sealed class DefaultCredentialService : ICredentialService
         ILoginRateLimiter rateLimiter,
         IAccountSessionTracker sessions,
         IAccountAuditSink? audit = null,
-        AccountSessionConflictMode sessionConflictMode = AccountSessionConflictMode.DenySecondLogin)
+        AccountSessionConflictMode sessionConflictMode = AccountSessionConflictMode.DenySecondLogin,
+        bool autoCreateUnknownAccounts = false,
+        int maxAutoCreatedAccountsPerRemoteAddress = 0,
+        Action<AccountOperatorEvent>? operatorEvents = null)
     {
         _accounts = accounts ?? throw new ArgumentNullException(nameof(accounts));
         _passwords = passwords ?? throw new ArgumentNullException(nameof(passwords));
@@ -25,6 +31,9 @@ public sealed class DefaultCredentialService : ICredentialService
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _audit = audit;
         _sessionConflictMode = sessionConflictMode;
+        _autoCreateUnknownAccounts = autoCreateUnknownAccounts;
+        _maxAutoCreatedAccountsPerRemoteAddress = Math.Max(0, maxAutoCreatedAccountsPerRemoteAddress);
+        _operatorEvents = operatorEvents;
     }
 
     public string ProviderKey => LocalProviderKey;
@@ -43,8 +52,38 @@ public sealed class DefaultCredentialService : ICredentialService
 
         if (!_accounts.TryGetByUsername(request.Username, out ServerAccountRecord account))
         {
-            _rateLimiter.RecordFailure(request.Username, request.RemoteAddress, request.NowUtc);
-            return Reject(request, CredentialValidationResultKind.UnknownAccount, "Invalid username or password.");
+            if (!_autoCreateUnknownAccounts)
+            {
+                _rateLimiter.RecordFailure(request.Username, request.RemoteAddress, request.NowUtc);
+                return Reject(request, CredentialValidationResultKind.UnknownAccount, "Invalid username or password.");
+            }
+
+            if (!TryValidateAutoCreateUsername(request.Username, out string usernameError))
+            {
+                _rateLimiter.RecordFailure(request.Username, request.RemoteAddress, request.NowUtc);
+                return Reject(request, CredentialValidationResultKind.UnknownAccount, usernameError);
+            }
+
+            if (_maxAutoCreatedAccountsPerRemoteAddress > 0 &&
+                CountAccountsForRemoteAddress(request.RemoteAddress) >= _maxAutoCreatedAccountsPerRemoteAddress)
+            {
+                _rateLimiter.RecordFailure(request.Username, request.RemoteAddress, request.NowUtc);
+                return Reject(
+                    request,
+                    CredentialValidationResultKind.UnknownAccount,
+                    $"This IP address has reached the account creation limit ({_maxAutoCreatedAccountsPerRemoteAddress}).");
+            }
+
+            account = _accounts.CreateAccount(
+                request.Username,
+                _passwords.HashPassword(request.Password),
+                request.NowUtc);
+            EmitOperatorEvent(
+                request,
+                AccountOperatorEventKind.AccountCreated,
+                CredentialValidationResultKind.Success,
+                account.AccountId,
+                "Account created.");
         }
 
         CredentialValidationResult? statusResult = ValidateAccountStatus(request, account);
@@ -69,7 +108,65 @@ public sealed class DefaultCredentialService : ICredentialService
 
         _accounts.Update(updated);
         RecordAudit(request, CredentialValidationResultKind.Success, updated.AccountId);
+        EmitOperatorEvent(
+            request,
+            AccountOperatorEventKind.LoginSucceeded,
+            CredentialValidationResultKind.Success,
+            updated.AccountId,
+            "Login accepted.");
         return CredentialValidationResult.Success(updated);
+    }
+
+    private static bool TryValidateAutoCreateUsername(string username, out string error)
+    {
+        string trimmed = username?.Trim() ?? string.Empty;
+        if (trimmed.Length < 3)
+        {
+            error = "Username must be a minimum of 3 characters.";
+            return false;
+        }
+
+        if (trimmed.Length > 32)
+        {
+            error = "Username cannot exceed 32 characters.";
+            return false;
+        }
+
+        for (int i = 0; i < trimmed.Length; i++)
+        {
+            if (!char.IsLetterOrDigit(trimmed[i]))
+            {
+                error = "Username cannot contain special characters. A-Z and 0-9 only.";
+                return false;
+            }
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    private int CountAccountsForRemoteAddress(string remoteAddress)
+    {
+        if (string.IsNullOrWhiteSpace(remoteAddress))
+            return 0;
+
+        string normalized = remoteAddress.Trim();
+        int count = 0;
+        IReadOnlyList<ServerAccountRecord> accounts = _accounts.GetAccountsSnapshot();
+        for (int i = 0; i < accounts.Count; i++)
+        {
+            string[] known = accounts[i].KnownRemoteAddresses;
+            for (int j = 0; j < known.Length; j++)
+            {
+                if (string.Equals(known[j], normalized, StringComparison.Ordinal))
+                {
+                    count++;
+                    break;
+                }
+            }
+        }
+
+        return count;
     }
 
     private CredentialValidationResult? ValidateAccountStatus(
@@ -94,6 +191,7 @@ public sealed class DefaultCredentialService : ICredentialService
         ulong? accountId = null)
     {
         RecordAudit(request, kind, accountId);
+        EmitOperatorEvent(request, AccountOperatorEventKind.LoginFailed, kind, accountId, publicMessage);
         return CredentialValidationResult.Reject(kind, publicMessage);
     }
 
@@ -104,6 +202,7 @@ public sealed class DefaultCredentialService : ICredentialService
         TimeSpan? retryAfter)
     {
         RecordAudit(request, kind, accountId: null);
+        EmitOperatorEvent(request, AccountOperatorEventKind.LoginFailed, kind, accountId: null, publicMessage);
         return CredentialValidationResult.Reject(kind, publicMessage, retryAfter);
     }
 
@@ -116,5 +215,23 @@ public sealed class DefaultCredentialService : ICredentialService
             request.SessionKey,
             kind,
             accountId));
+    }
+
+    private void EmitOperatorEvent(
+        CredentialValidationRequest request,
+        AccountOperatorEventKind eventKind,
+        CredentialValidationResultKind resultKind,
+        ulong? accountId,
+        string publicMessage)
+    {
+        _operatorEvents?.Invoke(new AccountOperatorEvent(
+            request.NowUtc,
+            request.Username,
+            request.RemoteAddress,
+            request.SessionKey,
+            eventKind,
+            resultKind,
+            accountId,
+            publicMessage));
     }
 }

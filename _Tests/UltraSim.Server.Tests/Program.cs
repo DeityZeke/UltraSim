@@ -123,9 +123,11 @@ internal static class TestRunner
         Assert.Equal(ServerControlCommandKind.Start, ServerControlCommand.Start().Kind);
         Assert.Equal(ServerControlCommandKind.Stop, ServerControlCommand.Stop().Kind);
         Assert.Equal(ServerControlCommandKind.Restart, ServerControlCommand.Restart().Kind);
+        Assert.Equal("without-save", ServerControlCommand.RestartWithoutSave().Argument);
         Assert.Equal(ServerControlCommandKind.Save, ServerControlCommand.Save().Kind);
         Assert.Equal(ServerControlCommandKind.Status, ServerControlCommand.Status().Kind);
         Assert.Equal(ServerControlCommandKind.Shutdown, ServerControlCommand.Shutdown().Kind);
+        Assert.Equal("without-save", ServerControlCommand.ShutdownWithoutSave().Argument);
 
         var command = new ServerControlCommand(ServerControlCommandKind.Status, "detail");
         Assert.Equal("detail", command.Argument);
@@ -449,8 +451,25 @@ internal static class TestRunner
         Assert.Equal(ServerCommandResultKind.Accepted, saveResult.Kind);
         Assert.Equal(1, saves);
 
-        Assert.True(app.TryExecuteCommand(ServerControlCommand.Stop(), out ServerCommandResult stopResult));
-        Assert.Equal(ServerCommandResultKind.Accepted, stopResult.Kind);
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.RestartWithoutSave(), out ServerCommandResult restartNoSaveResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, restartNoSaveResult.Kind);
+        Assert.Equal(1, saves);
+        Assert.Equal(ServerApplicationState.Running, app.State);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Restart(), out ServerCommandResult restartResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, restartResult.Kind);
+        Assert.Equal(2, saves);
+        Assert.Equal(ServerApplicationState.Running, app.State);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.ShutdownWithoutSave(), out ServerCommandResult shutdownNoSaveResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, shutdownNoSaveResult.Kind);
+        Assert.Equal(2, saves);
+        Assert.Equal(ServerApplicationState.Stopped, app.State);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Start(), out _));
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.Shutdown(), out ServerCommandResult shutdownResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, shutdownResult.Kind);
+        Assert.Equal(3, saves);
         Assert.Equal(ServerApplicationState.Stopped, app.State);
     }
 
@@ -644,16 +663,19 @@ internal static class TestRunner
         Assert.Equal(42042, HeadlessServerShellOptions.Default.NetworkPort);
         Assert.Equal(5.0, HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal(1, HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(16, ConsoleServerShellOptions.Default.TickMilliseconds);
         Assert.True(ConsoleServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, ConsoleServerShellOptions.Default.NetworkPort);
         Assert.Equal(5.0, ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal(1, ConsoleServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(16, GodotServerShellOptions.Default.TickMilliseconds);
         Assert.True(GodotServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, GodotServerShellOptions.Default.NetworkPort);
         Assert.Equal(5.0, GodotServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal(1, GodotServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
     }
 
     private static void ServerApplication_SystemRuntimeSnapshots_ReflectHookData()
@@ -828,6 +850,7 @@ internal static class TestRunner
             "--port=0",
             "--session-auth-timeout-seconds=6.5",
             "--session-keepalive-timeout-seconds=13.25",
+            "--max-auto-created-accounts-per-ip=2",
             "--run-for-seconds=0.25",
             "--idle-delay-ms=2",
             "--no-auto-start",
@@ -852,6 +875,7 @@ internal static class TestRunner
         Assert.Equal(0, options.NetworkPort);
         Assert.Equal(6.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(13.25, options.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal(2, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(TimeSpan.FromSeconds(0.25), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(2), options.IdleDelay);
     }
@@ -925,6 +949,7 @@ internal static class TestRunner
             "--port=0",
             "--session-auth-timeout-seconds=7.5",
             "--session-keepalive-timeout-seconds=14.25",
+            "--max-auto-created-accounts-per-ip=3",
             "--run-for-seconds=0.5",
             "--idle-delay-ms=3",
             "--no-auto-start",
@@ -949,6 +974,7 @@ internal static class TestRunner
         Assert.Equal(0, options.NetworkPort);
         Assert.Equal(7.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(14.25, options.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal(3, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(TimeSpan.FromSeconds(0.5), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(3), options.IdleDelay);
     }
@@ -960,7 +986,11 @@ internal static class TestRunner
         Assert.Equal(ServerControlCommandKind.Status, ConsoleShellCommandParser.Parse("status").Command.Kind);
         Assert.Equal(ServerControlCommandKind.Save, ConsoleShellCommandParser.Parse("save").Command.Kind);
         Assert.Equal(ServerControlCommandKind.Restart, ConsoleShellCommandParser.Parse("restart").Command.Kind);
+        Assert.Equal("without-save", ConsoleShellCommandParser.Parse("restart-nosave").Command.Argument);
+        Assert.Equal("without-save", ConsoleShellCommandParser.Parse("restart --no-save").Command.Argument);
         Assert.Equal(ServerControlCommandKind.Shutdown, ConsoleShellCommandParser.Parse("quit").Command.Kind);
+        Assert.Equal("without-save", ConsoleShellCommandParser.Parse("shutdown-nosave").Command.Argument);
+        Assert.Equal("without-save", ConsoleShellCommandParser.Parse("shutdown --no-save").Command.Argument);
         Assert.Equal(ConsoleShellDirectiveKind.Invalid, ConsoleShellCommandParser.Parse("bogus").Kind);
     }
 
@@ -3048,12 +3078,14 @@ internal static class TestRunner
             "mobiles/human",
             new DateTimeOffset(2026, 5, 2, 12, 0, 30, TimeSpan.Zero));
         Assert.True(seededCharacter.Succeeded);
+        var accountSessions = new InMemoryAccountSessionTracker();
+        var credentialService = new DefaultCredentialService(
+            accounts,
+            passwords,
+            new InMemoryLoginRateLimiter(),
+            accountSessions);
         var credentialValidator = new CountingAdmissionCredentialValidator(new AccountingAdmissionCredentialValidator(
-            new DefaultCredentialService(
-                accounts,
-                passwords,
-                new InMemoryLoginRateLimiter(),
-                new InMemoryAccountSessionTracker()),
+            credentialService,
             remoteAddressResolver: static _ => "127.0.0.1",
             sessionKeyResolver: static connection => $"connection:{connection.Value}",
             clock: static () => new DateTimeOffset(2026, 5, 2, 12, 1, 0, TimeSpan.Zero)));
@@ -3064,6 +3096,8 @@ internal static class TestRunner
             ApplyMovementInput,
             ProjectMovementState,
             SpawnSession,
+            endAccountSession: (endedConnection, accountId) =>
+                accountSessions.EndSession(accountId, $"connection:{endedConnection.Value}"),
             characterPositionProjector: ProjectAdmissionCharacterPosition,
             characterPositionApplier: ApplyAdmissionCharacterPosition,
             selectedCharacterSnapshotWriter: (snapshotConnection, selectedCharacter, position, nowUtc) =>
@@ -3213,7 +3247,7 @@ internal static class TestRunner
             FieldValues:
             [
                 UiModelSlotValue.String("character_create.name", "Bo"),
-                UiModelSlotValue.String("character_create.template", "mobiles/human")
+                UiModelSlotValue.String("character_create.sex", "female")
             ]);
         Assert.True(clientHost.TrySendUiAction(invalidCreateSubmit));
 
@@ -3240,7 +3274,7 @@ internal static class TestRunner
             FieldValues:
             [
                 UiModelSlotValue.String("character_create.name", "Borin"),
-                UiModelSlotValue.String("character_create.template", "mobiles/human")
+                UiModelSlotValue.String("character_create.sex", "female")
             ]);
         Assert.True(clientHost.TrySendUiAction(createSubmit));
 
@@ -3250,7 +3284,10 @@ internal static class TestRunner
         Assert.False(serverHost.ScriptBinding.Admission.TryGetState(connectionId, out _));
         IReadOnlyList<ServerCharacterRecord> accountCharacters = characterService.GetCharactersForAccount(account.AccountId);
         Assert.Equal(2, accountCharacters.Count);
-        Assert.True(accountCharacters.Any(character => character.Name == "Borin" && character.PrefabKey == "mobiles/human"));
+        Assert.True(accountCharacters.Any(character =>
+            character.Name == "Borin" &&
+            character.PrefabKey == "mobiles/human" &&
+            character.BiologicalSex == "female"));
         Assert.True(serverHost.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected));
         Assert.Equal("Borin", selected.CharacterName);
         Assert.Equal("mobiles/human", selected.PrefabKey);
@@ -3280,6 +3317,19 @@ internal static class TestRunner
             .Single(character => character.Name == "Borin");
         Assert.Equal(new CharacterPositionSnapshot(40f, 9f, 0f, 0f), savedBorin.Position);
         Assert.Equal(new DateTimeOffset(2026, 5, 2, 12, 3, 0, TimeSpan.Zero), savedBorin.LastPlayedUtc);
+        var latestMovement = new LatestStateUpdate[8];
+        int latestCount = serverHost.WorldPublisher.LatestStateStream.CopySnapshotForScopes(
+            [ServerEcsNetworkScopes.SimulationGlobal],
+            latestMovement);
+        ulong disconnectedMovementKey = ServerEcsNetworkItemKeys.GetObservedMovementItemKey(1);
+        Assert.False(latestMovement.AsSpan(0, latestCount).ToArray().Any(update => update.ItemKey == disconnectedMovementKey));
+        CredentialValidationResult relog = credentialService.ValidateLogin(new CredentialValidationRequest(
+            "Alice",
+            "swordfish",
+            "127.0.0.1",
+            "connection:2",
+            new DateTimeOffset(2026, 5, 2, 12, 4, 0, TimeSpan.Zero)));
+        Assert.True(relog.Succeeded);
     }
 
     private static void ServerMovementSessionHost_RuntimeTemplateAdmissionPackage_OpensLoginPanel()
@@ -3694,13 +3744,16 @@ internal static class TestRunner
             SchemaHash: 4,
             ContentHash: 5,
             RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var operatorLog = new List<string>();
         var serverHost = new ServerMovementSessionHost(
             world,
             pair.Server,
             ApplyMovementInput,
             ProjectMovementState,
             SpawnSession,
-            handshakePolicy: handshakePolicy);
+            handshakePolicy: handshakePolicy,
+            operatorLog: (connection, message) =>
+                operatorLog.Add($"{connection.Value}:{message}"));
         serverHost.Start();
 
         var clientHost = new ClientMovementSessionHost(
@@ -3719,6 +3772,7 @@ internal static class TestRunner
         Assert.True(clientHost.IsReady);
         Assert.Equal(1, serverHost.BoundConnectionCount);
         Assert.True(world.Entities.IsAlive(spawnedEntity));
+        Assert.Contains("1:Connected", string.Join('\n', operatorLog));
 
         Assert.True(clientHost.SendDisconnectNotice(SessionDisconnectReason.Closed, 200));
         serverHost.Pump(201, 0.016f, 100);
@@ -3727,6 +3781,7 @@ internal static class TestRunner
         Assert.False(world.Entities.IsAlive(spawnedEntity));
         Assert.Equal(0, serverHost.Control.Sessions.GetMetricsSnapshot().TotalSessions);
         Assert.Equal(0, serverHost.Control.Sessions.GetMetricsSnapshot().TimeoutDisconnects);
+        Assert.Contains("1:Disconnected (Closed)", string.Join('\n', operatorLog));
     }
 
     private static void ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities()

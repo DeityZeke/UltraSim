@@ -19,7 +19,7 @@ public static class UltraSimScriptStartupLog
             events.Add(new ServerApplicationEvent(
                 ServerApplicationEventKind.Log,
                 now,
-                $"Scripts: Compiling C# scripts... - failed ({result.WarningCount} warnings, {result.ErrorCount} errors, {compile.SourceCount} {sourceNoun})"));
+                $"Scripts: Compiling C# scripts... - failed ({result.WarningCount} warnings, {result.ErrorCount} errors, {compile.SourceCount} {sourceNoun}) in {FormatDuration(result.CompileDuration)}"));
             foreach (UltraSimScriptCompileDiagnostic diagnostic in compile.Diagnostics)
             {
                 if (diagnostic.Severity == UltraSimScriptDiagnosticSeverity.Error)
@@ -32,7 +32,7 @@ public static class UltraSimScriptStartupLog
         events.Add(new ServerApplicationEvent(
             ServerApplicationEventKind.Log,
             now,
-            $"Scripts: Compiling C# scripts... - done ({result.WarningCount} warnings, {result.ErrorCount} errors, {compile.SourceCount} {sourceNoun}{cached})"));
+            $"Scripts: Compiling C# scripts... - done ({result.WarningCount} warnings, {result.ErrorCount} errors, {compile.SourceCount} {sourceNoun}{cached}) in {FormatDuration(result.CompileDuration)}"));
 
         UltraSimScriptLoadResult? load = result.LoadResult;
         if (load is null)
@@ -57,5 +57,12 @@ public static class UltraSimScriptStartupLog
         events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, $"Scripts: Configuring... - done ({result.ModuleCount} {moduleNoun})"));
         events.Add(new ServerApplicationEvent(ServerApplicationEventKind.Log, now, $"Scripts: Initializing... - done ({result.ModuleCount} {moduleNoun}, {result.CommandCount} {commandNoun}, {result.PanelProviderCount} {panelNoun}, {result.AdmissionStepCount} {stepNoun})"));
         return events;
+    }
+
+    private static string FormatDuration(TimeSpan duration)
+    {
+        return duration.TotalSeconds < 1.0d
+            ? $"{duration.TotalMilliseconds:0.##} ms"
+            : $"{duration.TotalSeconds:0.##} seconds";
     }
 }

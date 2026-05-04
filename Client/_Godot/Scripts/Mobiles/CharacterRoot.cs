@@ -18,6 +18,9 @@ public partial class CharacterRoot : Node3D
     public bool IsMoving { get; private set; }
 
     private Node? _visualInstance;
+    private float _jumpElapsedSeconds = -1.0f;
+    private const float PresentationJumpDurationSeconds = 0.36f;
+    private const float PresentationJumpHeight = 0.38f;
 
     public override void _Ready()
     {
@@ -27,6 +30,11 @@ public partial class CharacterRoot : Node3D
         {
             ApplyDefinition(Definition ?? CreateFallbackDefinition());
         }
+    }
+
+    public override void _Process(double delta)
+    {
+        UpdatePresentationJump((float)delta);
     }
 
     public void ApplyDefinition(MobileDefinition definition)
@@ -70,6 +78,11 @@ public partial class CharacterRoot : Node3D
         IsMoving = isMoving;
     }
 
+    public void TriggerPresentationJump()
+    {
+        _jumpElapsedSeconds = 0.0f;
+    }
+
     private void CacheNodes()
     {
         VisualRoot ??= GetOrCreateChild<Node3D>(this, "VisualRoot");
@@ -89,6 +102,23 @@ public partial class CharacterRoot : Node3D
 
         _visualInstance.QueueFree();
         _visualInstance = null;
+    }
+
+    private void UpdatePresentationJump(float deltaSeconds)
+    {
+        if (_jumpElapsedSeconds < 0.0f)
+            return;
+
+        _jumpElapsedSeconds += Mathf.Max(0.0f, deltaSeconds);
+        float normalized = Mathf.Clamp(_jumpElapsedSeconds / PresentationJumpDurationSeconds, 0.0f, 1.0f);
+        float y = Mathf.Sin(normalized * Mathf.Pi) * PresentationJumpHeight;
+        VisualRoot.Position = new Vector3(0.0f, y, 0.0f);
+
+        if (normalized >= 1.0f)
+        {
+            _jumpElapsedSeconds = -1.0f;
+            VisualRoot.Position = Vector3.Zero;
+        }
     }
 
     private static Node3D CreateFallbackVisual(MobileDefinition definition)

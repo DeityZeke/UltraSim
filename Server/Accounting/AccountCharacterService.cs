@@ -42,7 +42,8 @@ public sealed class AccountCharacterService
         string name,
         string prefabKey,
         DateTimeOffset nowUtc,
-        CharacterPositionSnapshot? position = null)
+        CharacterPositionSnapshot? position = null,
+        string biologicalSex = "male")
     {
         if (!_accounts.TryGetById(accountId, out ServerAccountRecord account))
             return CharacterCreateResult.Reject("Account not found.");
@@ -67,7 +68,8 @@ public sealed class AccountCharacterService
             name.Trim(),
             prefabKey.Trim(),
             nowUtc,
-            position ?? CharacterPositionSnapshot.Origin);
+            position ?? CharacterPositionSnapshot.Origin,
+            biologicalSex);
         ServerAccountRecord updatedAccount = account.WithCharacterInSlot(
             slotIndex,
             character.CharacterId,

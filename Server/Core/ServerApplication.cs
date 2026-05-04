@@ -61,10 +61,12 @@ public sealed class ServerApplication : IServerApplication
             _hooks.Start?.Invoke(this);
 
             TransitionTo(ServerApplicationState.Loading);
+            long loadStart = Stopwatch.GetTimestamp();
             _hooks.Load?.Invoke(this);
+            TimeSpan loadDuration = Stopwatch.GetElapsedTime(loadStart);
 
             _startedAtUtc = DateTimeOffset.UtcNow;
-            TransitionTo(ServerApplicationState.Running);
+            TransitionTo(ServerApplicationState.Running, loadDuration);
         });
     }
 
@@ -114,6 +116,11 @@ public sealed class ServerApplication : IServerApplication
 
     public void Stop()
     {
+        Stop(Options.SaveOnStop);
+    }
+
+    public void Stop(bool saveBeforeStop)
+    {
         if (State == ServerApplicationState.Stopped)
             return;
 
@@ -128,7 +135,7 @@ public sealed class ServerApplication : IServerApplication
         {
             TransitionTo(ServerApplicationState.Stopping);
 
-            if (Options.SaveOnStop)
+            if (saveBeforeStop)
                 SaveCore();
 
             _hooks.Stop?.Invoke(this);
@@ -139,12 +146,24 @@ public sealed class ServerApplication : IServerApplication
 
     public void Restart()
     {
+        Restart(saveBeforeRestart: true);
+    }
+
+    public void Restart(bool saveBeforeRestart)
+    {
         EnsureState(nameof(Restart), ServerApplicationState.Initialized, ServerApplicationState.Running, ServerApplicationState.Stopped, ServerApplicationState.Faulted);
         ExecuteLifecycleOperation(nameof(Restart), () =>
         {
+            ServerApplicationState previousState = State;
             TransitionTo(ServerApplicationState.Restarting);
 
-            if (State != ServerApplicationState.Stopped)
+            if (saveBeforeRestart &&
+                previousState is ServerApplicationState.Initialized or ServerApplicationState.Running or ServerApplicationState.Faulted)
+            {
+                SaveCore();
+            }
+
+            if (previousState != ServerApplicationState.Stopped)
             {
                 _hooks.Stop?.Invoke(this);
                 _saveRequested = false;
@@ -228,7 +247,6 @@ public sealed class ServerApplication : IServerApplication
                     return true;
 
                 case ServerControlCommandKind.Stop:
-                case ServerControlCommandKind.Shutdown:
                     if (State == ServerApplicationState.Stopped)
                     {
                         result = ServerCommandResult.NoOp("runtime already stopped");
@@ -239,9 +257,26 @@ public sealed class ServerApplication : IServerApplication
                     result = ServerCommandResult.Accepted("runtime stopped");
                     return true;
 
+                case ServerControlCommandKind.Shutdown:
+                    if (State == ServerApplicationState.Stopped)
+                    {
+                        result = ServerCommandResult.NoOp("runtime already stopped");
+                        return true;
+                    }
+
+                    bool shutdownWithoutSave = IsWithoutSave(command);
+                    Stop(saveBeforeStop: !shutdownWithoutSave);
+                    result = ServerCommandResult.Accepted(shutdownWithoutSave
+                        ? "runtime stopped without save"
+                        : "runtime stopped");
+                    return true;
+
                 case ServerControlCommandKind.Restart:
-                    Restart();
-                    result = ServerCommandResult.Accepted("runtime restarted");
+                    bool restartWithoutSave = IsWithoutSave(command);
+                    Restart(saveBeforeRestart: !restartWithoutSave);
+                    result = ServerCommandResult.Accepted(restartWithoutSave
+                        ? "runtime restarted without save"
+                        : "runtime restarted");
                     return true;
 
                 case ServerControlCommandKind.Save:
@@ -269,10 +304,18 @@ public sealed class ServerApplication : IServerApplication
     {
         ServerApplicationState previousState = State;
         TransitionTo(ServerApplicationState.Saving);
+        long saveStart = Stopwatch.GetTimestamp();
         _hooks.Save?.Invoke(this);
+        TimeSpan saveDuration = Stopwatch.GetElapsedTime(saveStart);
         _totalCompletedSaves++;
-        RaiseEvent(ServerApplicationEventKind.SaveCompleted, "save completed", ServerApplicationState.Saving);
-        TransitionTo(previousState == ServerApplicationState.Saving ? ServerApplicationState.Initialized : previousState);
+        RaiseEvent(ServerApplicationEventKind.SaveCompleted, "save completed", ServerApplicationState.Saving, saveDuration);
+        State = previousState == ServerApplicationState.Saving ? ServerApplicationState.Initialized : previousState;
+    }
+
+    private static bool IsWithoutSave(ServerControlCommand command)
+    {
+        return string.Equals(command.Argument, "without-save", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command.Argument, "no-save", StringComparison.OrdinalIgnoreCase);
     }
 
     private void ExecuteLifecycleOperation(string operation, Action action)
@@ -297,13 +340,13 @@ public sealed class ServerApplication : IServerApplication
         RaiseEvent(ServerApplicationEventKind.Faulted, $"{operation}: {fault.Message}", ServerApplicationState.Faulted);
     }
 
-    private void TransitionTo(ServerApplicationState nextState)
+    private void TransitionTo(ServerApplicationState nextState, TimeSpan? duration = null)
     {
         if (State == nextState)
             return;
 
         State = nextState;
-        RaiseEvent(ServerApplicationEventKind.StateChanged, $"state changed: {nextState}", nextState);
+        RaiseEvent(ServerApplicationEventKind.StateChanged, $"state changed: {nextState}", nextState, duration);
     }
 
     private void EnsureState(string operation, params ServerApplicationState[] validStates)
@@ -317,12 +360,17 @@ public sealed class ServerApplication : IServerApplication
         throw new InvalidOperationException($"{operation} is not valid while runtime state is {State}.");
     }
 
-    private void RaiseEvent(ServerApplicationEventKind kind, string message, ServerApplicationState? state)
+    private void RaiseEvent(
+        ServerApplicationEventKind kind,
+        string message,
+        ServerApplicationState? state,
+        TimeSpan? duration = null)
     {
         EventRaised?.Invoke(new ServerApplicationEvent(
             kind,
             DateTimeOffset.UtcNow,
             message,
-            state));
+            state,
+            duration));
     }
 }

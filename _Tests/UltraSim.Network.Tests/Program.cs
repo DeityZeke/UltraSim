@@ -49,6 +49,7 @@ internal static class TestRunner
         Run(nameof(LatestStateStream_PartialDrain_AdvancesCursor), LatestStateStream_PartialDrain_AdvancesCursor);
         Run(nameof(LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted), LatestStateStream_CopySnapshot_ReturnsAllUpdatesSorted);
         Run(nameof(LatestStateStream_CopySnapshotForScopes_FiltersAndPreservesSequenceOrder), LatestStateStream_CopySnapshotForScopes_FiltersAndPreservesSequenceOrder);
+        Run(nameof(LatestStateStream_Remove_EvictsItemFromFutureSnapshots), LatestStateStream_Remove_EvictsItemFromFutureSnapshots);
         Run(nameof(ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection), ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection);
         Run(nameof(ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection), ConnectionLatestStateDeltaPlanner_FiltersSnapshotAgainstLastSentPerConnection);
         Run(nameof(OrderedEventStream_DrainsInOrderAndAdvancesCursor), OrderedEventStream_DrainsInOrderAndAdvancesCursor);
@@ -1324,6 +1325,23 @@ internal static class TestRunner
         Assert.Equal(fourth, batch[2].Sequence);
         Assert.Equal(scopeC, batch[2].ScopeKey);
         Assert.False(batch[..count].Contains(new LatestStateUpdate(200, second, scopeB, PacketClass.Realtime, ImmutablePayloadBuffer.CopyFrom([2]))));
+    }
+
+    private static void LatestStateStream_Remove_EvictsItemFromFutureSnapshots()
+    {
+        var stream = new LatestStateStream();
+        SubscriptionKey scope = new(11);
+        stream.Publish(100, scope, ImmutablePayloadBuffer.CopyFrom([1]));
+        stream.Publish(200, scope, ImmutablePayloadBuffer.CopyFrom([2]));
+
+        Assert.True(stream.Remove(100, scope));
+        Assert.False(stream.Remove(100, scope));
+
+        var batch = new LatestStateUpdate[4];
+        int count = stream.CopySnapshotForScopes([scope], batch);
+
+        Assert.Equal(1, count);
+        Assert.Equal((ulong)200, batch[0].ItemKey);
     }
 
     private static void ConnectionLatestStateSentTracker_TracksStableItemIdentityPerConnection()

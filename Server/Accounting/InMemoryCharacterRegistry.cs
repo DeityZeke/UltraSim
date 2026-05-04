@@ -14,7 +14,8 @@ public sealed class InMemoryCharacterRegistry : ICharacterRegistry
         string name,
         string prefabKey,
         DateTimeOffset nowUtc,
-        CharacterPositionSnapshot position)
+        CharacterPositionSnapshot position,
+        string biologicalSex = "male")
     {
         var character = new ServerCharacterRecord(
             _nextCharacterId++,
@@ -24,7 +25,8 @@ public sealed class InMemoryCharacterRegistry : ICharacterRegistry
             prefabKey,
             nowUtc,
             nowUtc,
-            position).Normalize();
+            position,
+            biologicalSex).Normalize();
 
         _charactersById.Add(character.CharacterId, character);
         if (!_characterIdsByAccount.TryGetValue(accountId, out List<ulong>? ids))

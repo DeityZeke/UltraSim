@@ -1851,6 +1851,7 @@ internal static class TestRunner
         Assert.Equal((uint)100, input.ClientTick);
         Assert.Equal((short)300, input.MoveX);
         Assert.Equal((short)-200, input.MoveY);
+        Assert.Equal((byte)3, input.Flags);
 
         ImmutablePayloadBuffer statePayload = PacketCodec.Encode(new MovementStatePacket(
             NetworkEntityId: 42,

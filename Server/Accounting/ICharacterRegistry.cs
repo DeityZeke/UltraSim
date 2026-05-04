@@ -10,7 +10,8 @@ public interface ICharacterRegistry
         string name,
         string prefabKey,
         DateTimeOffset nowUtc,
-        CharacterPositionSnapshot position);
+        CharacterPositionSnapshot position,
+        string biologicalSex = "male");
 
     bool TryGetCharacter(ulong characterId, out ServerCharacterRecord character);
 

@@ -10,6 +10,9 @@ public readonly record struct MovementInputPacket(
     short MoveY,
     byte Flags) : IPacket<MovementInputPacket>
 {
+    public const byte SprintFlag = 1 << 0;
+    public const byte JumpFlag = 1 << 1;
+
     public static ushort PacketId => 0x0200;
     public static NetworkPlane Plane => NetworkPlane.Input;
     public static PacketClass PacketClass => PacketClass.Realtime;

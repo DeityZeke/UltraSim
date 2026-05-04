@@ -24,7 +24,7 @@ public static class ServerMovementWorldApplicationFactory
             new ServerApplicationOptions(options.ProfileName, SaveOnStop: options.SaveOnStop),
             new ServerApplicationHooks
             {
-                Start = _ => runtime.Start(),
+                Start = app => runtime.Start(app),
                 Load = app => runtime.Load(app),
                 Tick = (_, deltaSeconds) => runtime.Tick(deltaSeconds),
                 Save = app => runtime.Save(app),
@@ -44,6 +44,13 @@ public static class ServerMovementWorldApplicationFactory
         private readonly InMemoryAccountRegistry _accounts = new();
         private readonly InMemoryCharacterRegistry _characters = new();
         private readonly AccountCharacterService _characterService;
+        private readonly Pbkdf2PasswordHashService _passwords = new();
+        private readonly InMemoryLoginRateLimiter _loginRateLimiter = new();
+        private readonly InMemoryAccountSessionTracker _accountSessions = new();
+        private readonly InMemoryAccountAuditSink _accountAudit = new();
+        private readonly DefaultCredentialService _credentialService;
+        private Action<string>? _operatorLog;
+        private const float SprintMovementMultiplier = 1.75f;
         private UdpSocketNetworkTransport? _transport;
         private ServerMovementSessionHost? _host;
         private uint _nextNetworkEntityId = 1;
@@ -60,6 +67,15 @@ public static class ServerMovementWorldApplicationFactory
         {
             _options = options;
             _characterService = new AccountCharacterService(_accounts, _characters);
+            _credentialService = new DefaultCredentialService(
+                _accounts,
+                _passwords,
+                _loginRateLimiter,
+                _accountSessions,
+                _accountAudit,
+                autoCreateUnknownAccounts: true,
+                maxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
+                operatorEvents: LogAccountOperatorEvent);
             var builder = new EcsSchemaBuilder();
             ComponentId movementId = builder.RegisterComponent<ServerMovementBody>();
             PrefabCatalog? scriptPrefabCatalog = null;
@@ -84,8 +100,9 @@ public static class ServerMovementWorldApplicationFactory
 
         public int ActiveSessions => _host?.BoundConnectionCount ?? 0;
 
-        public void Start()
+        public void Start(ServerApplication app)
         {
+            _operatorLog = app.Log;
             if (_host is not null)
                 return;
 
@@ -115,6 +132,7 @@ public static class ServerMovementWorldApplicationFactory
                 ProjectMovementState,
                 SpawnSession,
                 despawnSession: DespawnSession,
+                endAccountSession: EndAccountSession,
                 characterPositionProjector: ProjectCharacterPosition,
                 characterPositionApplier: ApplyCharacterPosition,
                 selectedCharacterSnapshotWriter: WriteSelectedCharacterSnapshot,
@@ -122,9 +140,15 @@ public static class ServerMovementWorldApplicationFactory
                 sessionPolicy: sessionPolicy,
                 allocateNetworkEntityId: AllocateNetworkEntityId,
                 scriptContext: _options.ScriptContext,
+                admissionCredentialValidator: new AccountingAdmissionCredentialValidator(
+                    _credentialService,
+                    ResolveRemoteAddress,
+                    ResolveAccountSessionKey),
                 admissionRuntimePolicy: new AccountingAdmissionRuntimePolicy(
                     _characterService,
                     bindCharacter: TryBindSelectedCharacter),
+                operatorLog: (connectionId, message) =>
+                    _operatorLog?.Invoke($"Client: {ResolveRemoteAddress(connectionId)}: {message}"),
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }
@@ -189,6 +213,55 @@ public static class ServerMovementWorldApplicationFactory
             _host = null;
             _transport?.Dispose();
             _transport = null;
+            _operatorLog = null;
+        }
+
+        private void LogAccountOperatorEvent(AccountOperatorEvent evt)
+        {
+            Action<string>? log = _operatorLog;
+            if (log is null)
+                return;
+
+            string username = string.IsNullOrWhiteSpace(evt.Username)
+                ? "<empty>"
+                : evt.Username.Trim();
+            string remote = string.IsNullOrWhiteSpace(evt.RemoteAddress)
+                ? "unknown"
+                : evt.RemoteAddress.Trim();
+
+            string message = evt.Kind switch
+            {
+                AccountOperatorEventKind.AccountCreated =>
+                    $"Client: {remote}: Creating new account '{username}'",
+                AccountOperatorEventKind.LoginSucceeded =>
+                    $"Client: {remote}: Login - Valid credentials for '{username}'",
+                AccountOperatorEventKind.LoginFailed =>
+                    $"Client: {remote}: Login - Invalid credentials for '{username}': {evt.PublicMessage}",
+                _ => $"Client: {remote}: Login - {evt.ResultKind} for '{username}'",
+            };
+
+            log(message);
+        }
+
+        private string ResolveRemoteAddress(ConnectionId connectionId)
+        {
+            if (_transport?.TryGetRemoteEndPoint(connectionId, out IPEndPoint? remoteEndPoint) == true &&
+                remoteEndPoint is not null)
+            {
+                return remoteEndPoint.Address.ToString();
+            }
+
+            return $"connection:{connectionId.Value}";
+        }
+
+        private static string ResolveAccountSessionKey(ConnectionId connectionId)
+        {
+            return $"connection:{connectionId.Value}";
+        }
+
+        private void EndAccountSession(ConnectionId connectionId, ulong accountId)
+        {
+            _accountSessions.EndSession(accountId, ResolveAccountSessionKey(connectionId));
         }
 
         public void Dispose()
@@ -264,8 +337,11 @@ public static class ServerMovementWorldApplicationFactory
             if (!world.TryGetComponent(entity, out ServerMovementBody body))
                 return;
 
-            float velocityX = input.MoveX / 100f * _options.MovementSpeed;
-            float velocityY = input.MoveY / 100f * _options.MovementSpeed;
+            float movementSpeed = (input.Flags & MovementInputPacket.SprintFlag) != 0
+                ? _options.MovementSpeed * SprintMovementMultiplier
+                : _options.MovementSpeed;
+            float velocityX = input.MoveX / 100f * movementSpeed;
+            float velocityY = input.MoveY / 100f * movementSpeed;
             body = body with
             {
                 VelocityX = velocityX,

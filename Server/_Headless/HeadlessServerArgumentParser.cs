@@ -20,6 +20,7 @@ public static class HeadlessServerArgumentParser
         int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
         double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+        int maxAutoCreatedAccountsPerRemoteAddress = HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
         string? runtimeRootPath = HeadlessServerShellOptions.Default.RuntimeRootPath;
 
         for (int i = 0; i < args.Length; i++)
@@ -148,6 +149,19 @@ public static class HeadlessServerArgumentParser
                 continue;
             }
 
+            if (string.Equals(key, "--max-auto-created-accounts-per-ip", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out maxAutoCreatedAccountsPerRemoteAddress) || maxAutoCreatedAccountsPerRemoteAddress < 0)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid max auto-created accounts per IP '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
             if (string.Equals(key, "--run-for-seconds", StringComparison.OrdinalIgnoreCase))
             {
                 if (!double.TryParse(value, out double seconds) || seconds < 0d)
@@ -203,6 +217,7 @@ public static class HeadlessServerArgumentParser
             NetworkPort: networkPort,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+            MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
             RuntimeRootPath: runtimeRootPath);
         error = null;
         showHelp = false;
@@ -219,6 +234,7 @@ public static class HeadlessServerArgumentParser
           --port=<0-65535>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
+          --max-auto-created-accounts-per-ip=<n>
           --run-for-seconds=<seconds>
           --idle-delay-ms=<n>
           --no-movement-world

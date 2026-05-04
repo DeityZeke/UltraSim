@@ -20,8 +20,7 @@ public static class AdmissionPanels
     public const string CharacterSelectRowSummarySlotId = "character_select.row.summary";
     public const string CharacterSelectStatusSlotId = "character_select.status";
     public const string CharacterCreateNameSlotId = "character_create.name";
-    public const string CharacterCreateTemplateSlotId = "character_create.template";
-    public const string CharacterCreateStartSlotId = "character_create.start";
+    public const string CharacterCreateSexSlotId = "character_create.sex";
     public const string CharacterCreateStatusSlotId = "character_create.status";
 
     public const string LoginSubmitActionId = "login.submit";
@@ -116,13 +115,10 @@ public static class AdmissionPanels
 
     public static UiBuiltPanel CharacterCreatePanel(
         string serverIdentity,
-        IReadOnlyList<UiSelectOption> templates,
-        IReadOnlyList<UiSelectOption> starts,
         string title = "Create Character",
-        string body = "Choose a name and starting template.",
+        string body = "Choose a name and presentation.",
         string name = "",
-        string selectedTemplate = "",
-        string selectedStart = "",
+        string selectedSex = "male",
         string status = "",
         string createText = "Create",
         string cancelText = "Back",
@@ -132,20 +128,12 @@ public static class AdmissionPanels
         string cancelActionId = CharacterCreateCancelActionId,
         UiPanelMetadata? metadata = null)
     {
-        ArgumentNullException.ThrowIfNull(templates);
-        ArgumentNullException.ThrowIfNull(starts);
-        if (templates.Count == 0)
-        {
-            throw new InvalidOperationException("CharacterCreatePanel requires at least one template option.");
-        }
-
-        if (starts.Count == 0)
-        {
-            throw new InvalidOperationException("CharacterCreatePanel requires at least one start option.");
-        }
-
-        selectedTemplate = string.IsNullOrWhiteSpace(selectedTemplate) ? templates[0].Value : selectedTemplate;
-        selectedStart = string.IsNullOrWhiteSpace(selectedStart) ? starts[0].Value : selectedStart;
+        UiSelectOption[] sexOptions =
+        [
+            new UiSelectOption("male", "Male"),
+            new UiSelectOption("female", "Female")
+        ];
+        selectedSex = string.IsNullOrWhiteSpace(selectedSex) ? "male" : selectedSex;
         metadata ??= CreateSessionAdmissionMetadata(panelType);
         return UiPanelBuilder
             .Create(serverIdentity, panelType, schemaRevision, metadata)
@@ -156,8 +144,7 @@ public static class AdmissionPanels
                     column.DynamicText(UiStandardPanels.TitleSlotId, "Title", title, maxStringLength: 160);
                     column.DynamicText(UiStandardPanels.BodySlotId, "Body", body, maxStringLength: UiValidation.MaxDisplayTextLength);
                     column.TextInput(CharacterCreateNameSlotId, "Name", name, maxStringLength: 64);
-                    column.Select(CharacterCreateTemplateSlotId, "Template", selectedTemplate, templates);
-                    column.Select(CharacterCreateStartSlotId, "Start", selectedStart, starts);
+                    column.Select(CharacterCreateSexSlotId, "Sex", selectedSex, sexOptions);
                     column.DynamicText(CharacterCreateStatusSlotId, "Status", status, maxStringLength: 256);
                     column.Row(row =>
                     {

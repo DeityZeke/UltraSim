@@ -3,7 +3,9 @@ namespace UltraSim.Server.Scripting;
 public sealed record UltraSimScriptStartupResult(
     UltraSimScriptCompileResult CompileResult,
     UltraSimScriptLoadResult? LoadResult,
-    DefaultUltraSimScriptContext Context)
+    DefaultUltraSimScriptContext Context,
+    TimeSpan CompileDuration,
+    TimeSpan LoadDuration)
 {
     public bool Succeeded => CompileResult.Succeeded && (LoadResult is null || LoadResult.Succeeded);
     public int WarningCount => CompileResult.Diagnostics.Count(static diagnostic => diagnostic.Severity == UltraSimScriptDiagnosticSeverity.Warning);
