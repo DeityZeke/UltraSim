@@ -406,6 +406,10 @@ internal static class TestRunner
         DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
         var accounts = new InMemoryAccountRegistry();
         ServerAccountRecord account = accounts.CreateAccount("Alice", "hash", now);
+        accounts.Update(account.WithAccessMetadata(
+            ruleKeys: ["Staff", "builder"],
+            directGrants: ["Command.Spawn"],
+            directDenies: ["admin.account.delete"]));
         var characters = new InMemoryCharacterRegistry();
         var service = new AccountCharacterService(accounts, characters, new AccountCharacterOptions(MaxCharactersPerAccount: 3));
 
@@ -425,6 +429,9 @@ internal static class TestRunner
         Assert.True(loadedAccounts.TryGetById(account.AccountId, out ServerAccountRecord loadedAccount));
         Assert.Equal(0UL, loadedAccount.CharacterSlots[0]);
         Assert.Equal(second.Character!.CharacterId, loadedAccount.CharacterSlots[1]);
+        Assert.True(loadedAccount.AccessRuleKeys.SequenceEqual(["builder", "staff"]));
+        Assert.True(loadedAccount.DirectPermissionGrants.SequenceEqual(["command.spawn"]));
+        Assert.True(loadedAccount.DirectPermissionDenies.SequenceEqual(["admin.account.delete"]));
         IReadOnlyList<ServerCharacterRecord> listed = loadedService.GetCharactersForAccount(account.AccountId);
         Assert.Equal(1, listed.Count);
         Assert.Equal(second.Character.CharacterId, listed[0].CharacterId);
@@ -438,6 +445,10 @@ internal static class TestRunner
             DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
             var accounts = new InMemoryAccountRegistry();
             ServerAccountRecord account = accounts.CreateAccount("Alice", "hash", now);
+            accounts.Update(account.WithAccessMetadata(
+                ruleKeys: ["staff"],
+                directGrants: ["command.panel"],
+                directDenies: ["command.shutdown"]));
             var characters = new InMemoryCharacterRegistry();
             var service = new AccountCharacterService(accounts, characters);
             CharacterCreateResult created = service.TryCreateCharacter(
@@ -456,9 +467,16 @@ internal static class TestRunner
             Assert.Equal(1, loaded.Characters.Count);
             Assert.Equal("Alice", loaded.Accounts[0].Username);
             Assert.Equal(created.Character!.CharacterId, loaded.Accounts[0].CharacterSlots[0]);
+            Assert.True(loaded.Accounts[0].AccessRuleKeys.SequenceEqual(["staff"]));
+            Assert.True(loaded.Accounts[0].DirectPermissionGrants.SequenceEqual(["command.panel"]));
+            Assert.True(loaded.Accounts[0].DirectPermissionDenies.SequenceEqual(["command.shutdown"]));
             Assert.Equal("mobiles/human", loaded.Characters[0].PrefabKey);
             Assert.Equal(new CharacterPositionSnapshot(1, 2, 3, 4), loaded.Characters[0].Position);
             Assert.True(File.Exists(Path.Combine(root, "accounts", "index.json")));
+            string accountJson = File.ReadAllText(Path.Combine(root, "accounts", "00000000000000000001.json"));
+            Assert.Contains("\"accessRuleKeys\"", accountJson);
+            Assert.Contains("\"directPermissionGrants\"", accountJson);
+            Assert.Contains("\"directPermissionDenies\"", accountJson);
         }
         finally
         {

@@ -12,6 +12,12 @@ Current first-pass scope:
 - Login rate-limit interface and in-memory implementation.
 - Active-session conflict tracking.
 - Login audit sink shape.
+- Account access metadata for runtime command/admin permissions:
+  - named access rule keys such as `staff` or `builder`.
+  - direct permission grants such as `command.spawn`.
+  - direct permission denies such as `admin.account.delete`.
+  - metadata is normalized, persisted with the account record, and available to
+    the movement host for chat command dispatch.
 - `DefaultCredentialService` that combines lookup, status, password verification,
   session conflict policy, rate limiting, and audit recording.
 - `AccountingAdmissionCredentialValidator` adapter that maps trusted admission

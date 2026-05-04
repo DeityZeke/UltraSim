@@ -1,3 +1,5 @@
+using UltraSim.Server;
+
 namespace UltraSim.Server.Accounting;
 
 public sealed record ServerAccountRecord(
@@ -12,6 +14,12 @@ public sealed record ServerAccountRecord(
     string? StatusReason = null)
 {
     public ulong[] CharacterSlots { get; init; } = [];
+
+    public string[] AccessRuleKeys { get; init; } = [];
+
+    public string[] DirectPermissionGrants { get; init; } = [];
+
+    public string[] DirectPermissionDenies { get; init; } = [];
 
     public int CharacterCount
     {
@@ -47,7 +55,23 @@ public sealed record ServerAccountRecord(
             Username = username,
             PasswordHash = hash,
             KnownRemoteAddresses = known,
-            CharacterSlots = CharacterSlots.ToArray()
+            CharacterSlots = CharacterSlots.ToArray(),
+            AccessRuleKeys = ServerAccessKey.NormalizeRuleSet(AccessRuleKeys),
+            DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(DirectPermissionGrants),
+            DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(DirectPermissionDenies)
+        };
+    }
+
+    public ServerAccountRecord WithAccessMetadata(
+        IEnumerable<string>? ruleKeys = null,
+        IEnumerable<string>? directGrants = null,
+        IEnumerable<string>? directDenies = null)
+    {
+        return this with
+        {
+            AccessRuleKeys = ServerAccessKey.NormalizeRuleSet(ruleKeys),
+            DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(directGrants),
+            DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(directDenies)
         };
     }
 

@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Admission\UltraSim.Server.Admission.csproj" />
+    <ProjectReference Include="..\Core\UltraSim.Server.Core.csproj" />
     <ProjectReference Include="..\..\Kernels\Network\UltraSim.Network.csproj" />
     <ProjectReference Include="..\..\Kernels\UI\UltraSim.UI.csproj" />
   </ItemGroup>

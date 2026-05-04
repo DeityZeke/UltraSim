@@ -41,7 +41,6 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 Current foundational/server-platform task list:
 
 - access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
-- account persistence for assigned access rules/direct grants/direct denies
 - backup compression option, likely ZSTD for backup archives while leaving live saves uncompressed
 - parallel persistence participant snapshot fan-out once save payload preparation becomes heavy
 - region/rule framework when terrain and world regions become concrete
@@ -62,7 +61,9 @@ Current access/permission foundation:
 - Denies win over grants, direct subject denies win before rule denies, and legacy integer `AccessLevel` remains available as a bridge for current command paths.
 - `ServerCommandRegistry` now evaluates command permission keys when constructed with a `ServerAccessRuleRegistry`.
 - Commands default to `command.<name>` permission keys, can still declare a legacy minimum access level, and can be overridden with direct grants/denies on the command request.
-- Account persistence, UI editing, and audit logging are intentionally later layers.
+- Accounts now persist access rule keys plus direct permission grants and denies.
+- The movement host attaches selected-account access metadata to chat command requests when accounting is available.
+- UI editing and audit logging are intentionally later layers.
 
 Current admin inspection foundation:
 

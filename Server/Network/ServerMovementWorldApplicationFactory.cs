@@ -146,6 +146,7 @@ public static class ServerMovementWorldApplicationFactory
                 SpawnSession,
                 despawnSession: DespawnSession,
                 endAccountSession: EndAccountSession,
+                getAccountAccessMetadata: _accounts.TryGetById,
                 characterPositionProjector: ProjectCharacterPosition,
                 characterPositionApplier: ApplyCharacterPosition,
                 selectedCharacterSnapshotWriter: WriteSelectedCharacterSnapshot,

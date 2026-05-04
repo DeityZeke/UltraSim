@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using UltraSim.Network;
+using UltraSim.Server.Accounting;
 
 namespace UltraSim.Server.Network;
 
@@ -19,3 +20,7 @@ public delegate void ServerMovementSessionDespawner(
 public delegate void ServerAccountSessionEnder(
     ConnectionId connectionId,
     ulong accountId);
+
+public delegate bool ServerAccountAccessMetadataProvider(
+    ulong accountId,
+    out ServerAccountRecord account);

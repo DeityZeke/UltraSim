@@ -50,6 +50,7 @@ internal static class TestRunner
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
         Run(nameof(ServerSpawnerPrimitives_MapEcsHashToAdminMetadata), ServerSpawnerPrimitives_MapEcsHashToAdminMetadata);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
+        Run(nameof(ServerChatService_CommandsUseSenderAccessMetadata), ServerChatService_CommandsUseSenderAccessMetadata);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
         Run(nameof(ServerApplication_SystemRuntimeSnapshots_ReflectHookData), ServerApplication_SystemRuntimeSnapshots_ReflectHookData);
@@ -858,6 +859,50 @@ internal static class TestRunner
         Assert.Equal(ServerChatChannelIds.System, packet.ChannelId);
         Assert.Equal("Maintenance in 10 minutes", packet.Text);
         Assert.Equal(ChatMessageFlags.System | ChatMessageFlags.Announcement, packet.Flags);
+    }
+
+    private static void ServerChatService_CommandsUseSenderAccessMetadata()
+    {
+        var access = new ServerAccessRuleRegistry();
+        access.RegisterOrReplace(new ServerAccessRuleDescriptor(
+            "staff",
+            "Staff",
+            grants: ["command.spawn"]));
+        var orderedEvents = new OrderedEventStream(capacity: 8);
+        var registry = new ServerCommandRegistry("/", access);
+        var chat = new ServerChatService(
+            orderedEvents,
+            registry,
+            new ServerChatOptions(MinTicksBetweenMessages: 0));
+        int invocations = 0;
+        registry.Register(
+            "spawn",
+            (in ServerCommandRequest _, ServerTextCommandInvocation _) => invocations++,
+            minAccessLevel: 100);
+
+        var sender = new ServerChatSenderContext(
+            SessionId: 1,
+            ConnectionId: 7,
+            EntityId: 42,
+            DisplayName: "Asha",
+            AccessRuleKeys: ["staff"]);
+        Assert.True(chat.TryHandleSubmit(sender, "/spawn mobiles/orc", ServerChatScopes.System, 1, 1));
+        Assert.Equal(1, invocations);
+        Assert.Equal(1L, chat.CommandDispatches);
+
+        var denied = sender with { SessionId = 2, DirectPermissionDenies = ["command.spawn"] };
+        Assert.True(chat.TryHandleSubmit(denied, "/spawn mobiles/orc", ServerChatScopes.System, 2, 2));
+        Assert.Equal(1, invocations);
+
+        OrderedEventEntry[] entries = new OrderedEventEntry[4];
+        OrderedEventDrainResult drain = orderedEvents.DrainSince(new OrderedEventCursor(0), entries);
+        Assert.Equal(OrderedEventDrainStatus.Success, drain.Status);
+        Assert.Equal(1, drain.Count);
+        Assert.True(PacketCodec.TryDecodeEnvelope(entries[0].Payload.Span, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> payload));
+        Assert.Equal(ChatMessageEventPacket.PacketId, header.PacketId);
+        var reader = new UltraSim.Network.BitReader(payload);
+        ChatMessageEventPacket packet = ChatMessageEventPacket.Deserialize(ref reader);
+        Assert.Equal("Permission denied.", packet.Text);
     }
 
     private static void ServerApplication_Faults_WhenHookThrows()

@@ -28,6 +28,7 @@ public sealed class ServerMovementSessionHost
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly ServerAccountSessionEnder? _endAccountSession;
+    private readonly ServerAccountAccessMetadataProvider? _getAccountAccessMetadata;
     private readonly ServerCharacterPositionProjector? _characterPositionProjector;
     private readonly ServerCharacterPositionApplier? _characterPositionApplier;
     private readonly ServerSelectedCharacterSnapshotWriter? _selectedCharacterSnapshotWriter;
@@ -54,6 +55,7 @@ public sealed class ServerMovementSessionHost
         ServerMovementSessionSpawner spawnSession,
         ServerMovementSessionDespawner? despawnSession = null,
         ServerAccountSessionEnder? endAccountSession = null,
+        ServerAccountAccessMetadataProvider? getAccountAccessMetadata = null,
         ServerCharacterPositionProjector? characterPositionProjector = null,
         ServerCharacterPositionApplier? characterPositionApplier = null,
         ServerSelectedCharacterSnapshotWriter? selectedCharacterSnapshotWriter = null,
@@ -119,6 +121,7 @@ public sealed class ServerMovementSessionHost
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _endAccountSession = endAccountSession;
+        _getAccountAccessMetadata = getAccountAccessMetadata;
         _characterPositionProjector = characterPositionProjector;
         _characterPositionApplier = characterPositionApplier;
         _selectedCharacterSnapshotWriter = selectedCharacterSnapshotWriter;
@@ -577,16 +580,34 @@ public sealed class ServerMovementSessionHost
             var reader = new UltraSim.Network.BitReader(datagram.EnvelopePayloadSpan);
             ChatSubmitPacket packet = ChatSubmitPacket.Deserialize(ref reader);
             _networkEntityIdByConnection.TryGetValue(datagram.ConnectionId, out uint networkEntityId);
-            string displayName = _selectedCharactersByConnection.TryGetValue(
+            bool hasSelectedCharacter = _selectedCharactersByConnection.TryGetValue(
                 datagram.ConnectionId,
-                out ServerSelectedCharacterSession? selectedCharacter)
-                    ? selectedCharacter.CharacterName
-                    : $"Player {datagram.ConnectionId.Value}";
+                out ServerSelectedCharacterSession? selectedCharacter);
+            string displayName = hasSelectedCharacter
+                ? selectedCharacter!.CharacterName
+                : $"Player {datagram.ConnectionId.Value}";
+            int accessLevel = 0;
+            IReadOnlyList<string>? accessRuleKeys = null;
+            IReadOnlyList<string>? directPermissionGrants = null;
+            IReadOnlyList<string>? directPermissionDenies = null;
+            if (hasSelectedCharacter &&
+                _getAccountAccessMetadata?.Invoke(selectedCharacter!.AccountId, out ServerAccountRecord account) == true)
+            {
+                accessLevel = account.IsAdmin ? 100 : 0;
+                accessRuleKeys = account.AccessRuleKeys;
+                directPermissionGrants = account.DirectPermissionGrants;
+                directPermissionDenies = account.DirectPermissionDenies;
+            }
+
             var sender = new ServerChatSenderContext(
                 sessionId.Value,
                 datagram.ConnectionId.Value,
                 networkEntityId,
-                displayName);
+                displayName,
+                accessLevel,
+                accessRuleKeys,
+                directPermissionGrants,
+                directPermissionDenies);
 
             _chat.TryHandleSubmit(
                 sender,
