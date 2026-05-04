@@ -18,10 +18,10 @@ public partial class UiManager : Node
 
     public override void _Ready()
     {
-        World = ResolveNode<WorldCanvasManager>(WorldCanvasPath);
-        Hud = ResolveNode<HudCanvasManager>(HudCanvasPath);
-        Menus = ResolveNode<MenuCanvasManager>(MenuCanvasPath);
-        Debug = ResolveNode<DebugCanvasManager>(DebugCanvasPath);
+        World = ResolveNode<WorldCanvasManager>(WorldCanvasPath, "World");
+        Hud = ResolveNode<HudCanvasManager>(HudCanvasPath, "HUD");
+        Menus = ResolveNode<MenuCanvasManager>(MenuCanvasPath, "Menus");
+        Debug = ResolveNode<DebugCanvasManager>(DebugCanvasPath, "Debug");
         Menus?.SetWorldCanvas(World);
         SetStatusText("Booting client shell");
     }
@@ -37,11 +37,18 @@ public partial class UiManager : Node
         Hud?.SetNetworkSummaryText(text);
     }
 
-    private TNode? ResolveNode<TNode>(NodePath? path)
+    private TNode? ResolveNode<TNode>(NodePath? path, string fallbackName)
         where TNode : Node
     {
-        return path is null || path.IsEmpty
-            ? null
-            : GetNodeOrNull<TNode>(path);
+        if (path is not null && !path.IsEmpty)
+        {
+            TNode? node = GetNodeOrNull<TNode>(path);
+            if (node is not null)
+            {
+                return node;
+            }
+        }
+
+        return GetNodeOrNull<TNode>(fallbackName);
     }
 }

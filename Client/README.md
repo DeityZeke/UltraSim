@@ -65,8 +65,9 @@ What now exists:
   - first Godot content/cache service adapter over `Client/Core/Content`
   - persistent world/map/dynamic/effects/camera containers
   - persistent world/HUD/menu/debug UI layers
-  - preview actor, local controller, orbit camera, nameplate/overhead-chat projection
-  - local app shell, manual server browser row, direct connect, in-session menu, chat panel
+  - preview actor, local controller, orbit camera, v2-style nameplate/overhead-chat projection
+  - world UI presentation settings for nameplates, overhead chat, chat panel visibility, visible label budget, and UI scale persisted in `user://client_settings.cfg`
+  - local app shell, manual/provider-backed server browser rows, direct connect, in-session menu, chat panel
   - initial UDP session driver wiring for movement, observer state, chat, ping/status, and disconnect
   - first server-driven UI renderer bridge:
     - `MenuCanvasManager` hosts server-driven menu, modal, and exclusive surface lanes separately

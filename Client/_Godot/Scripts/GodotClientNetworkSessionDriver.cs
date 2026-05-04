@@ -9,6 +9,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
 {
     private readonly Action<string> _statusSink;
     private readonly Action<ChatMessageEventPacket> _chatSink;
+    private readonly Action<EntityPresentationEventPacket>? _presentationSink;
     private readonly Action<ClientMovementStateReceiveResult> _ownerMovementSink;
     private readonly ClientLatestStateFrameSpanApplier? _observerStateSink;
     private readonly Action? _observerStateReset;
@@ -40,6 +41,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     public GodotClientNetworkSessionDriver(
         Action<string> statusSink,
         Action<ChatMessageEventPacket> chatSink,
+        Action<EntityPresentationEventPacket>? presentationSink,
         Action<ClientMovementStateReceiveResult> ownerMovementSink,
         ClientLatestStateFrameSpanApplier? observerStateSink = null,
         Action? observerStateReset = null,
@@ -49,6 +51,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     {
         _statusSink = statusSink ?? throw new ArgumentNullException(nameof(statusSink));
         _chatSink = chatSink ?? throw new ArgumentNullException(nameof(chatSink));
+        _presentationSink = presentationSink;
         _ownerMovementSink = ownerMovementSink ?? throw new ArgumentNullException(nameof(ownerMovementSink));
         _observerStateSink = observerStateSink;
         _observerStateReset = observerStateReset;
@@ -95,7 +98,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
                 _observerStateReset);
         var observerEvents = ClientObserverEventBridge.CreateSpanFastPath(
             new ConnectionId(1),
-            (_, _) => { });
+            (_, payload) => TryHandlePresentationEvent(payload));
         observerEvents.ChatEvents = chatEvents;
         var uiEvents = new ClientUiEventBridge(_uiOpenSink, _uiModelUpdateSink);
         observerEvents.UiEvents = uiEvents;
@@ -126,6 +129,19 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
         _statusSink($"Connecting to {request.Host}:{request.Port}... attempt 1/{Math.Max(1, MaxHandshakeAttempts)}");
         error = string.Empty;
         return true;
+    }
+
+    private void TryHandlePresentationEvent(ReadOnlySpan<byte> payload)
+    {
+        if (_presentationSink is null ||
+            !PacketCodec.TryDecodeEnvelope(payload, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> innerPayload) ||
+            header.PacketId != EntityPresentationEventPacket.PacketId)
+        {
+            return;
+        }
+
+        var reader = new BitReader(innerPayload);
+        _presentationSink(EntityPresentationEventPacket.Deserialize(ref reader));
     }
 
     public void Pump()

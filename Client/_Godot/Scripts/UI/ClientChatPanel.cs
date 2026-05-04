@@ -98,7 +98,6 @@ public partial class ClientChatPanel : PanelContainer
             return;
         }
 
-        _history?.AppendText($"> {text}\n");
         ChatSubmitted?.Invoke(text);
         if (_input is not null)
         {

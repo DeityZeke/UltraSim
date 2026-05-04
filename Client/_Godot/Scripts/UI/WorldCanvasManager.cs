@@ -13,42 +13,71 @@ public partial class WorldCanvasManager : CanvasLayer
     [Export] public bool ShowNameplates { get; set; } = true;
     [Export(PropertyHint.Range, "1,256,1")] public int MaxVisibleWorldUi { get; set; } = 32;
     [Export(PropertyHint.Range, "0.5,3.0,0.05")] public float WorldUiScale { get; set; } = 1.0f;
+    [Export(PropertyHint.Range, "0,96,1")] public float ScreenVerticalOffsetPixels { get; set; } = 24.0f;
+    [Export] public Key NameplateRevealKey { get; set; } = Key.Alt;
+    [Export] public string NameplateRevealAction { get; set; } = "Show_Nameplates";
+    [Export] public string DebugRevealAction { get; set; } = "Show_Debug";
+    [Export] public string NameplateTemplate { get; set; } = "{name}";
+    [Export] public string OwnerNameplateTemplate { get; set; } = "{name}";
+    [Export] public string UnknownNameTemplate { get; set; } = "Entity {entityId}";
+    [Export] public string OverheadChatTemplate { get; set; } = "{text}";
 
     public ClientCharacterWorld? CharacterWorld { get; private set; }
 
     private readonly Dictionary<ulong, ActorOverlay> _overlays = new();
+    private readonly List<VisibleActorOverlay> _visibleOverlays = new();
     private readonly List<ulong> _removeScratch = new();
+    private Control? _overlayRoot;
 
     public override void _Ready()
     {
         CharacterWorld = CharacterWorldPath is null || CharacterWorldPath.IsEmpty
             ? null
             : GetNodeOrNull<ClientCharacterWorld>(CharacterWorldPath);
+        EnsureOverlayRoot();
     }
 
     public override void _Process(double delta)
     {
-        UpdateProjectedOverlays();
+        UpdateProjectedOverlays((float)delta);
     }
 
     public void ShowOverheadChat(ulong entityId, string text)
     {
-        if (!ShowOverheadChatBubbles || entityId == 0 || string.IsNullOrWhiteSpace(text))
+        if (entityId == 0 || string.IsNullOrWhiteSpace(text))
         {
             return;
         }
 
         ActorOverlay overlay = GetOrCreateOverlay(entityId);
-        overlay.ChatLabel.Text = text.Trim();
-        overlay.ChatLabel.Visible = true;
-        overlay.ChatExpiresAtSeconds = Time.GetTicksMsec() / 1000.0 + OverheadChatSeconds;
+        overlay.ChatLines.Add(new ChatLine(text.Trim(), Mathf.Max(0.01f, (float)OverheadChatSeconds)));
+        while (overlay.ChatLines.Count > 2)
+        {
+            overlay.ChatLines.RemoveAt(0);
+        }
     }
 
-    private void UpdateProjectedOverlays()
+    public void ClearAll()
+    {
+        foreach (ulong entityId in _overlays.Keys)
+        {
+            _removeScratch.Add(entityId);
+        }
+
+        for (int i = 0; i < _removeScratch.Count; i++)
+        {
+            RemoveOverlay(_removeScratch[i]);
+        }
+
+        _removeScratch.Clear();
+        _visibleOverlays.Clear();
+    }
+
+    private void UpdateProjectedOverlays(float deltaSeconds)
     {
         if (CharacterWorld is null)
         {
-            ClearOverlays();
+            ClearAll();
             return;
         }
 
@@ -59,33 +88,56 @@ public partial class WorldCanvasManager : CanvasLayer
             return;
         }
 
-        double nowSeconds = Time.GetTicksMsec() / 1000.0;
-        int visibleCount = 0;
-        int maxVisible = Math.Max(0, MaxVisibleWorldUi);
-        float uiScale = Mathf.Clamp(WorldUiScale, 0.5f, 3.0f);
+        bool revealNameplates = ShowNameplates || IsNameplateRevealRequested();
+        bool showDebugIds = IsDebugRevealRequested();
+        _visibleOverlays.Clear();
+
         foreach (KeyValuePair<ulong, CharacterRoot> pair in CharacterWorld.Characters)
         {
             ulong entityId = pair.Key;
             CharacterRoot character = pair.Value;
             ActorOverlay overlay = GetOrCreateOverlay(entityId);
-            overlay.NameLabel.Text = ResolveDisplayName(entityId, character);
-            overlay.NameLabel.Scale = new Vector2(uiScale, uiScale);
-            overlay.ChatLabel.Scale = new Vector2(uiScale, uiScale);
+            overlay.Root.Visible = false;
+            PruneExpiredChatLines(overlay, deltaSeconds);
 
             Vector3 anchor = character.NameplatePivot.GlobalPosition;
-            bool visible = !camera.IsPositionBehind(anchor) && visibleCount < maxVisible;
-            overlay.NameLabel.Visible = visible && ShowNameplates;
-            overlay.ChatLabel.Visible = visible && ShowOverheadChatBubbles && overlay.ChatExpiresAtSeconds > nowSeconds;
-
-            if (!visible)
+            if (camera.IsPositionBehind(anchor))
             {
                 continue;
             }
 
-            visibleCount++;
-            Vector2 screen = camera.UnprojectPosition(anchor);
-            overlay.NameLabel.Position = new Vector2(screen.X - overlay.NameLabel.Size.X * uiScale * 0.5f, screen.Y - 20.0f);
-            overlay.ChatLabel.Position = new Vector2(screen.X - overlay.ChatLabel.Size.X * uiScale * 0.5f, screen.Y - 48.0f);
+            string displayName = ResolveDisplayName(entityId, character);
+            bool showNameplate = revealNameplates && !string.IsNullOrWhiteSpace(displayName);
+            bool showChat = ShowOverheadChatBubbles && overlay.ChatLines.Count > 0;
+            if (!showNameplate && !showChat && !showDebugIds)
+            {
+                continue;
+            }
+
+            Vector2 screen = camera.UnprojectPosition(anchor) + new Vector2(0.0f, -ScreenVerticalOffsetPixels);
+            float distanceSquared = camera.GlobalPosition.DistanceSquaredTo(anchor);
+            _visibleOverlays.Add(new VisibleActorOverlay(
+                overlay,
+                screen,
+                distanceSquared,
+                displayName,
+                showNameplate,
+                showChat,
+                showDebugIds));
+        }
+
+        _visibleOverlays.Sort(static (left, right) => left.DistanceSquared.CompareTo(right.DistanceSquared));
+
+        int maxVisible = Math.Max(0, MaxVisibleWorldUi);
+        for (int i = 0; i < _visibleOverlays.Count; i++)
+        {
+            VisibleActorOverlay visible = _visibleOverlays[i];
+            if (i >= maxVisible)
+            {
+                continue;
+            }
+
+            UpdateOverlayVisual(visible);
         }
 
         _removeScratch.Clear();
@@ -103,6 +155,7 @@ public partial class WorldCanvasManager : CanvasLayer
         }
 
         _removeScratch.Clear();
+        _visibleOverlays.Clear();
     }
 
     private ActorOverlay GetOrCreateOverlay(ulong entityId)
@@ -112,58 +165,173 @@ public partial class WorldCanvasManager : CanvasLayer
             return existing;
         }
 
-        var overlay = new ActorOverlay(CreateOverlayLabel(), CreateOverlayLabel());
-        overlay.ChatLabel.Visible = false;
-        AddChild(overlay.NameLabel);
-        AddChild(overlay.ChatLabel);
+        EnsureOverlayRoot();
+
+        var root = new VBoxContainer
+        {
+            Name = $"WorldUi_{entityId}",
+            Alignment = BoxContainer.AlignmentMode.Center,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            Visible = false
+        };
+
+        var debugLabel = CreateOverlayLabel(new Color(0.65f, 0.78f, 1.0f));
+        var previousChatLabel = CreateOverlayLabel(new Color(0.86f, 0.88f, 0.92f));
+        var currentChatLabel = CreateOverlayLabel(Colors.White);
+        var nameLabel = CreateOverlayLabel(new Color(1.0f, 0.93f, 0.66f));
+
+        previousChatLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        currentChatLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        previousChatLabel.CustomMinimumSize = new Vector2(220.0f, 0.0f);
+        currentChatLabel.CustomMinimumSize = new Vector2(220.0f, 0.0f);
+
+        root.AddChild(debugLabel);
+        root.AddChild(previousChatLabel);
+        root.AddChild(currentChatLabel);
+        root.AddChild(nameLabel);
+        _overlayRoot!.AddChild(root);
+
+        var overlay = new ActorOverlay(entityId, root, debugLabel, previousChatLabel, currentChatLabel, nameLabel);
         _overlays.Add(entityId, overlay);
         return overlay;
     }
 
-    private static Label CreateOverlayLabel()
+    private void EnsureOverlayRoot()
+    {
+        if (_overlayRoot is not null)
+        {
+            return;
+        }
+
+        _overlayRoot = new Control
+        {
+            Name = "WorldUiRoot",
+            MouseFilter = Control.MouseFilterEnum.Ignore
+        };
+        _overlayRoot.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        _overlayRoot.OffsetLeft = 0.0f;
+        _overlayRoot.OffsetTop = 0.0f;
+        _overlayRoot.OffsetRight = 0.0f;
+        _overlayRoot.OffsetBottom = 0.0f;
+        AddChild(_overlayRoot);
+    }
+
+    private static Label CreateOverlayLabel(Color fontColor)
     {
         var label = new Label
         {
             HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
             MouseFilter = Control.MouseFilterEnum.Ignore,
-            Size = new Vector2(180.0f, 20.0f)
+            ClipText = false
         };
-        label.AddThemeColorOverride("font_color", Colors.White);
+        label.AddThemeColorOverride("font_color", fontColor);
         label.AddThemeColorOverride("font_outline_color", Colors.Black);
         label.AddThemeConstantOverride("outline_size", 4);
         return label;
     }
 
-    private static string ResolveDisplayName(ulong entityId, CharacterRoot character)
+    private void UpdateOverlayVisual(in VisibleActorOverlay visible)
     {
-        string? displayName = character.Definition?.DisplayName;
-        return string.IsNullOrWhiteSpace(displayName)
-            ? $"Entity {entityId}"
-            : displayName;
+        ActorOverlay overlay = visible.Overlay;
+        overlay.DebugLabel.Visible = visible.ShowDebugId;
+        overlay.DebugLabel.Text = visible.ShowDebugId ? $"Entity {visible.Overlay.EntityId}" : string.Empty;
+
+        string previousChat = visible.ShowChat && overlay.ChatLines.Count > 1
+            ? FormatOverheadChat(overlay.ChatLines[^2].Text)
+            : string.Empty;
+        string currentChat = visible.ShowChat && overlay.ChatLines.Count > 0
+            ? FormatOverheadChat(overlay.ChatLines[^1].Text)
+            : string.Empty;
+
+        overlay.PreviousChatLabel.Visible = !string.IsNullOrWhiteSpace(previousChat);
+        overlay.PreviousChatLabel.Text = previousChat;
+        overlay.CurrentChatLabel.Visible = !string.IsNullOrWhiteSpace(currentChat);
+        overlay.CurrentChatLabel.Text = currentChat;
+        overlay.NameLabel.Visible = visible.ShowNameplate;
+        overlay.NameLabel.Text = visible.ShowNameplate ? visible.DisplayName : string.Empty;
+
+        float uiScale = Mathf.Clamp(WorldUiScale, 0.5f, 3.0f);
+        overlay.Root.ResetSize();
+        Vector2 size = overlay.Root.GetCombinedMinimumSize();
+        overlay.Root.Size = size;
+        overlay.Root.Scale = new Vector2(uiScale, uiScale);
+        overlay.Root.Position = visible.ScreenPosition - new Vector2(size.X * uiScale * 0.5f, size.Y * uiScale);
+        overlay.Root.Visible =
+            overlay.DebugLabel.Visible ||
+            overlay.PreviousChatLabel.Visible ||
+            overlay.CurrentChatLabel.Visible ||
+            overlay.NameLabel.Visible;
+    }
+
+    private static void PruneExpiredChatLines(ActorOverlay overlay, float deltaSeconds)
+    {
+        for (int i = overlay.ChatLines.Count - 1; i >= 0; i--)
+        {
+            ChatLine line = overlay.ChatLines[i];
+            float remaining = Mathf.Max(0.0f, line.TtlSeconds - Mathf.Max(0.0f, deltaSeconds));
+            if (remaining <= 0.0f)
+            {
+                overlay.ChatLines.RemoveAt(i);
+                continue;
+            }
+
+            overlay.ChatLines[i] = line with { TtlSeconds = remaining };
+        }
+    }
+
+    private string ResolveDisplayName(ulong entityId, CharacterRoot character)
+    {
+        string? displayName = !string.IsNullOrWhiteSpace(character.DisplayNameOverride)
+            ? character.DisplayNameOverride
+            : character.Definition?.DisplayName;
+        string resolvedName = string.IsNullOrWhiteSpace(displayName)
+            ? FormatTemplate(UnknownNameTemplate, entityId, string.Empty, string.Empty)
+            : displayName.Trim();
+        string template = CharacterWorld?.LocalControlledEntityId == entityId
+            ? OwnerNameplateTemplate
+            : NameplateTemplate;
+        return FormatTemplate(template, entityId, resolvedName, string.Empty);
+    }
+
+    private string FormatOverheadChat(string text)
+    {
+        return FormatTemplate(OverheadChatTemplate, 0, string.Empty, text.Trim());
+    }
+
+    private static string FormatTemplate(string template, ulong entityId, string name, string text)
+    {
+        string effectiveTemplate = string.IsNullOrWhiteSpace(template) ? "{name}" : template;
+        return effectiveTemplate
+            .Replace("{entityId}", entityId.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+            .Replace("{name}", name, StringComparison.Ordinal)
+            .Replace("{text}", text, StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private bool IsNameplateRevealRequested()
+    {
+        if (!string.IsNullOrWhiteSpace(NameplateRevealAction) && InputMap.HasAction(NameplateRevealAction))
+        {
+            return Input.IsActionPressed(NameplateRevealAction);
+        }
+
+        return Input.IsKeyPressed(NameplateRevealKey);
+    }
+
+    private bool IsDebugRevealRequested()
+    {
+        return !string.IsNullOrWhiteSpace(DebugRevealAction) &&
+            InputMap.HasAction(DebugRevealAction) &&
+            Input.IsActionPressed(DebugRevealAction);
     }
 
     private void HideOverlays()
     {
         foreach (ActorOverlay overlay in _overlays.Values)
         {
-            overlay.NameLabel.Visible = false;
-            overlay.ChatLabel.Visible = false;
+            overlay.Root.Visible = false;
         }
-    }
-
-    private void ClearOverlays()
-    {
-        foreach (ulong entityId in _overlays.Keys)
-        {
-            _removeScratch.Add(entityId);
-        }
-
-        for (int i = 0; i < _removeScratch.Count; i++)
-        {
-            RemoveOverlay(_removeScratch[i]);
-        }
-
-        _removeScratch.Clear();
     }
 
     private void RemoveOverlay(ulong entityId)
@@ -173,20 +341,44 @@ public partial class WorldCanvasManager : CanvasLayer
             return;
         }
 
-        overlay.NameLabel.QueueFree();
-        overlay.ChatLabel.QueueFree();
+        overlay.Root.QueueFree();
     }
+
+    private readonly record struct ChatLine(string Text, float TtlSeconds);
+
+    private readonly record struct VisibleActorOverlay(
+        ActorOverlay Overlay,
+        Vector2 ScreenPosition,
+        float DistanceSquared,
+        string DisplayName,
+        bool ShowNameplate,
+        bool ShowChat,
+        bool ShowDebugId);
 
     private sealed class ActorOverlay
     {
-        public ActorOverlay(Label nameLabel, Label chatLabel)
+        public ActorOverlay(
+            ulong entityId,
+            VBoxContainer root,
+            Label debugLabel,
+            Label previousChatLabel,
+            Label currentChatLabel,
+            Label nameLabel)
         {
+            EntityId = entityId;
+            Root = root;
+            DebugLabel = debugLabel;
+            PreviousChatLabel = previousChatLabel;
+            CurrentChatLabel = currentChatLabel;
             NameLabel = nameLabel;
-            ChatLabel = chatLabel;
         }
 
+        public ulong EntityId { get; }
+        public VBoxContainer Root { get; }
+        public Label DebugLabel { get; }
+        public Label PreviousChatLabel { get; }
+        public Label CurrentChatLabel { get; }
         public Label NameLabel { get; }
-        public Label ChatLabel { get; }
-        public double ChatExpiresAtSeconds { get; set; }
+        public List<ChatLine> ChatLines { get; } = new(2);
     }
 }

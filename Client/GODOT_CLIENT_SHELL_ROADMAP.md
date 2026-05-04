@@ -510,8 +510,9 @@ Deliver:
 - session status screen
 - in-session options/pause screen
 - `HudCanvasManager` with minimal status/ping text
-- `WorldCanvasManager` with nameplate/overhead-chat projection
+- `WorldCanvasManager` with v2-style nameplate/overhead-chat projection
 - shared chat panel shell under menu layer
+- persisted local presentation settings for nameplates, overhead chat, chat panel visibility, visible world-UI budget, and world-UI scale
 
 Done when:
 
@@ -519,7 +520,7 @@ Done when:
 - preview mode can enter a visible world/HUD state
 - Esc opens/closes in-session options without destroying the shell
 - chat panel focus blocks movement input
-- nameplates/overhead labels project from actor anchors
+- nameplates/overhead labels project from actor anchors, support reveal/debug actions, and keep overhead chat stacked/pruned by TTL
 
 Validation:
 
@@ -891,15 +892,16 @@ Current client/Godot bridge status:
 - `Client/UI/ClientUiPanelRegistry` opens panels through the in-memory definition cache, retains validated schema and compatibility context per instance, validates action requests, and applies full/patch/repeater model updates with sequence tracking.
 - `Client/_Godot/Scripts/UI/ServerDrivenPanelRenderer.cs` now renders the normal menu/settings vocabulary: `Panel`, `Row`, `Column`, `Group`, `Section`, `ScrollRegion`, `Tabs`, `Pager`, static `Text`, model-backed `DynamicText`, `Image`, `Button`, `IconButton`, `Separator`, `Spacer`, `TextInput`, trusted password-style `TextInput`, `NumberInput`, `Toggle`, `Slider`, `Stepper`, `Select`, `RadioGroup`, `CheckboxGroup`, `Repeater`, and `Table`; unsupported node kinds degrade to inert placeholders.
 - `MenuCanvasManager` can mount, replace, close, and clear server-driven panels on separate menu/modal/exclusive lanes.
+- `WorldCanvasManager` now mirrors the old v2 presentation behavior closely enough for the current shell: a persistent world-UI root, distance-prioritized labels, two-line overhead chat with TTL pruning, nameplate reveal/debug actions, and configurable text templates.
+- Local presentation settings now persist under `user://client_settings.cfg` for overhead chat, nameplates, chat panel visibility, visible world-UI budget, and world-UI scale.
 - Godot buttons bound with `ActionId` produce validated client action route results through `ClientUiPanelRegistry.ValidateActionRequest`.
 - The local Godot smoke flag `--us-smoke-server-ui-message-box` cold-opens a server-driven message-box schema, mounts it into the menu lane, verifies model-backed dynamic text, and presses the rendered OK button through validated action routing.
 - The live loopback path now proves server UI open, client receipt/render, client action, and server receipt over the real reliable event path.
 
 Next G6/UI steps:
 
-1. Wire the Godot-side trusted login handler so username/password controls send the dedicated credential packet instead of test-built credentials.
-2. Continue admission panel polish for character select/create/delete on top of the server-authored package.
-3. Add richer tooltip presentation and inventory viewer surfaces after the login/character path is human-usable.
-4. Keep discovery/portal integration and official registry adapter separate from local/manual discovery polish.
+1. Continue admission panel polish for character select/create/delete on top of the server-authored package.
+2. Add richer tooltip presentation after the login/character path is human-usable.
+3. Keep discovery/portal integration and official registry adapter separate from local/manual discovery polish.
 
 The only meaningful pre-G6 caveat is the official registry adapter. The manual/provider-backed discovery path is in place and tested; the official query adapter can be added when the portal/registry endpoint exists and should not block UI/schema kernel work.

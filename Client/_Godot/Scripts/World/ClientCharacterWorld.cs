@@ -17,6 +17,8 @@ public partial class ClientCharacterWorld : Node3D
     [Export] public Vector3 PreviewSpawnPosition { get; set; } = Vector3.Zero;
 
     private readonly Dictionary<ulong, CharacterRoot> _characters = new();
+    private readonly Dictionary<ulong, string> _pendingDisplayNames = new();
+    private readonly Dictionary<ulong, string> _pendingDefinitionIds = new();
     private readonly List<ulong> _remoteRemovalScratch = new();
     private LocalPlayerController? _localPlayerController;
     private MobileCatalogNode? _mobileCatalogNode;
@@ -55,10 +57,20 @@ public partial class ClientCharacterWorld : Node3D
         AddChild(character);
         _characters.Add(entityId, character);
 
-        MobileDefinition? definition = _mobileCatalogNode?.Resolve(definitionId) ?? DefaultMobileDefinition;
+        string effectiveDefinitionId = _pendingDefinitionIds.TryGetValue(entityId, out string? pendingDefinitionId)
+            ? pendingDefinitionId
+            : definitionId;
+        MobileDefinition? definition = _mobileCatalogNode?.Resolve(effectiveDefinitionId) ?? DefaultMobileDefinition;
         if (definition is not null)
         {
             character.ApplyDefinition(definition);
+        }
+
+        _pendingDefinitionIds.Remove(entityId);
+
+        if (_pendingDisplayNames.Remove(entityId, out string? displayName))
+        {
+            character.SetDisplayNameOverride(displayName);
         }
 
         return character;
@@ -88,12 +100,60 @@ public partial class ClientCharacterWorld : Node3D
 
     public void SetActorDefinition(ulong entityId, string definitionId)
     {
-        CharacterRoot character = GetOrCreateCharacter(entityId, definitionId);
-        MobileDefinition? definition = _mobileCatalogNode?.Resolve(definitionId) ?? DefaultMobileDefinition;
+        if (entityId == 0)
+        {
+            return;
+        }
+
+        string cleanDefinitionId = string.IsNullOrWhiteSpace(definitionId)
+            ? string.Empty
+            : definitionId.Trim();
+        if (!_characters.TryGetValue(entityId, out CharacterRoot? character))
+        {
+            if (cleanDefinitionId.Length == 0)
+            {
+                _pendingDefinitionIds.Remove(entityId);
+            }
+            else
+            {
+                _pendingDefinitionIds[entityId] = cleanDefinitionId;
+            }
+
+            return;
+        }
+
+        MobileDefinition? definition = _mobileCatalogNode?.Resolve(cleanDefinitionId) ?? DefaultMobileDefinition;
         if (definition is not null)
         {
             character.ApplyDefinition(definition);
         }
+    }
+
+    public void SetActorDisplayName(ulong entityId, string displayName)
+    {
+        if (entityId == 0)
+        {
+            return;
+        }
+
+        string cleanDisplayName = string.IsNullOrWhiteSpace(displayName)
+            ? string.Empty
+            : displayName.Trim();
+        if (!_characters.TryGetValue(entityId, out CharacterRoot? character))
+        {
+            if (cleanDisplayName.Length == 0)
+            {
+                _pendingDisplayNames.Remove(entityId);
+            }
+            else
+            {
+                _pendingDisplayNames[entityId] = cleanDisplayName;
+            }
+
+            return;
+        }
+
+        character.SetDisplayNameOverride(cleanDisplayName);
     }
 
     public void SetLocalControlledEntityId(ulong entityId)
@@ -118,9 +178,13 @@ public partial class ClientCharacterWorld : Node3D
     {
         if (!_characters.Remove(entityId, out CharacterRoot? character))
         {
+            _pendingDisplayNames.Remove(entityId);
+            _pendingDefinitionIds.Remove(entityId);
             return;
         }
 
+        _pendingDisplayNames.Remove(entityId);
+        _pendingDefinitionIds.Remove(entityId);
         if (_localPlayerController?.ControlledCharacter == character)
         {
             _localPlayerController.SetControlledCharacter(null);
@@ -137,6 +201,8 @@ public partial class ClientCharacterWorld : Node3D
         }
 
         _characters.Clear();
+        _pendingDisplayNames.Clear();
+        _pendingDefinitionIds.Clear();
         LocalControlledEntityId = 0;
         _localPlayerController?.SetControlledCharacter(null);
     }

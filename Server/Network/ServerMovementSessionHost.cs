@@ -209,14 +209,17 @@ public sealed class ServerMovementSessionHost
 
         _characterPositionApplier?.Invoke(_world, sessionEntity, character.Position);
         ApplyCharacterProfile(sessionEntity, character);
+        string presentationDefinitionId = ResolveClientMobileDefinitionId(character);
         _selectedCharactersByConnection[connectionId] = new ServerSelectedCharacterSession(
             connectionId,
             character.AccountId,
             character.CharacterId,
             character.Name,
             character.PrefabKey,
+            presentationDefinitionId,
             sessionEntity,
             usedPrefabEntity);
+        PublishSelectedEntityPresentations();
         return true;
     }
 
@@ -568,11 +571,16 @@ public sealed class ServerMovementSessionHost
             var reader = new UltraSim.Network.BitReader(datagram.EnvelopePayloadSpan);
             ChatSubmitPacket packet = ChatSubmitPacket.Deserialize(ref reader);
             _networkEntityIdByConnection.TryGetValue(datagram.ConnectionId, out uint networkEntityId);
+            string displayName = _selectedCharactersByConnection.TryGetValue(
+                datagram.ConnectionId,
+                out ServerSelectedCharacterSession? selectedCharacter)
+                    ? selectedCharacter.CharacterName
+                    : $"Player {datagram.ConnectionId.Value}";
             var sender = new ServerChatSenderContext(
                 sessionId.Value,
                 datagram.ConnectionId.Value,
                 networkEntityId,
-                $"Player {datagram.ConnectionId.Value}");
+                displayName);
 
             _chat.TryHandleSubmit(
                 sender,
@@ -581,6 +589,48 @@ public sealed class ServerMovementSessionHost
                 nowTicks,
                 serverTick);
         }
+    }
+
+    private static string ResolveClientMobileDefinitionId(ServerCharacterRecord character)
+    {
+        return character.BiologicalSex.Equals("female", StringComparison.OrdinalIgnoreCase)
+            ? "mobile.x_bot"
+            : "mobile.y_bot";
+    }
+
+    private void PublishSelectedEntityPresentations()
+    {
+        foreach (KeyValuePair<ConnectionId, ServerSelectedCharacterSession> pair in _selectedCharactersByConnection)
+        {
+            if (!_networkEntityIdByConnection.TryGetValue(pair.Key, out uint networkEntityId))
+            {
+                continue;
+            }
+
+            ServerSelectedCharacterSession selected = pair.Value;
+            PublishEntityPresentation(
+                networkEntityId,
+                selected.CharacterName,
+                selected.PresentationDefinitionId);
+        }
+    }
+
+    private void PublishEntityPresentation(uint networkEntityId, string displayName, string definitionId)
+    {
+        if (networkEntityId == 0 || string.IsNullOrWhiteSpace(displayName))
+        {
+            return;
+        }
+
+        var packet = new EntityPresentationEventPacket(
+            networkEntityId,
+            displayName.Trim(),
+            definitionId,
+            ServerTick: 0);
+        _worldPublisher.OrderedEventStream.Publish(
+            ServerChatScopes.System,
+            PacketClass.ReliableEvent,
+            PacketCodec.Encode(packet));
     }
 
     private void ProcessUiActionInbound(ReadOnlySpan<InboundDatagram> inbound)

@@ -10,6 +10,10 @@ namespace UltraSim.Client.Godot.UI;
 [GlobalClass]
 public partial class MenuCanvasManager : CanvasLayer
 {
+    private const string ClientSettingsPath = "user://client_settings.cfg";
+    private const string WorldUiSettingsSection = "world_ui";
+    private const string ChatSettingsSection = "chat";
+
     private readonly ClientAppShellNavigation _navigation = new();
     private readonly ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser();
     private readonly Dictionary<string, Control> _serverDrivenPanels = new(StringComparer.Ordinal);
@@ -31,6 +35,8 @@ public partial class MenuCanvasManager : CanvasLayer
     private ClientChatPanel? _chatPanel;
     private WorldCanvasManager? _worldCanvas;
     private long _nextServerDrivenActionSequence;
+    private bool _showChatPanel = true;
+    private bool _suppressSettingsSave;
 
     public bool IsMenuOpen => _appShell?.Visible == true;
     public bool HasServerDrivenPanels => _serverDrivenPanels.Count > 0;
@@ -51,7 +57,9 @@ public partial class MenuCanvasManager : CanvasLayer
     public void SetWorldCanvas(WorldCanvasManager? worldCanvas)
     {
         _worldCanvas = worldCanvas;
+        LoadPresentationSettings();
         SyncAppShellWorldUiSettings();
+        ApplyChatVisibility();
     }
 
     public bool TryMountServerDrivenPanel(ClientUiPanelInstance panel, out string error)
@@ -389,25 +397,43 @@ public partial class MenuCanvasManager : CanvasLayer
         appShell.PreviewRequested += HandlePreviewRequested;
         appShell.ResumeRequested += HandleResumeRequested;
         appShell.BackRequested += HandleBackRequested;
-        appShell.OverheadChatVisibilityChanged += enabled =>
-        {
-            if (_worldCanvas is not null)
-                _worldCanvas.ShowOverheadChatBubbles = enabled;
-        };
         appShell.NameplateVisibilityChanged += enabled =>
         {
             if (_worldCanvas is not null)
+            {
                 _worldCanvas.ShowNameplates = enabled;
+                SavePresentationSettings();
+            }
+        };
+        appShell.ChatPanelVisibilityChanged += enabled =>
+        {
+            _showChatPanel = enabled;
+            SavePresentationSettings();
+            ApplyChatVisibility();
         };
         appShell.MaxVisibleWorldUiChanged += maxVisible =>
         {
             if (_worldCanvas is not null)
+            {
                 _worldCanvas.MaxVisibleWorldUi = maxVisible;
+                SavePresentationSettings();
+            }
         };
         appShell.WorldUiScaleChanged += scale =>
         {
             if (_worldCanvas is not null)
+            {
                 _worldCanvas.WorldUiScale = scale;
+                SavePresentationSettings();
+            }
+        };
+        appShell.OverheadChatVisibilityChanged += enabled =>
+        {
+            if (_worldCanvas is not null)
+            {
+                _worldCanvas.ShowOverheadChatBubbles = enabled;
+                SavePresentationSettings();
+            }
         };
     }
 
@@ -687,9 +713,10 @@ public partial class MenuCanvasManager : CanvasLayer
             return;
         }
 
-        _appShell.SetWorldUiSettings(
+        _appShell.SetPresentationSettings(
             _worldCanvas.ShowOverheadChatBubbles,
             _worldCanvas.ShowNameplates,
+            _showChatPanel,
             _worldCanvas.MaxVisibleWorldUi,
             _worldCanvas.WorldUiScale);
     }
@@ -701,11 +728,66 @@ public partial class MenuCanvasManager : CanvasLayer
             return;
         }
 
-        bool shouldShowChat = _navigation.IsInSession && _blockingServerDrivenPanels.Count == 0;
+        bool shouldShowChat = _showChatPanel && _navigation.IsInSession && _blockingServerDrivenPanels.Count == 0;
         _chatPanel.Visible = shouldShowChat;
         if (!shouldShowChat && _chatPanel.HasInputFocus)
         {
             _chatPanel.ReleaseInputFocus();
+        }
+    }
+
+    private void LoadPresentationSettings()
+    {
+        if (_worldCanvas is null)
+        {
+            return;
+        }
+
+        var config = new ConfigFile();
+        if (config.Load(ClientSettingsPath) != Error.Ok)
+        {
+            return;
+        }
+
+        _suppressSettingsSave = true;
+        _worldCanvas.ShowOverheadChatBubbles = (bool)config.GetValue(
+            WorldUiSettingsSection,
+            "show_overhead_chat",
+            _worldCanvas.ShowOverheadChatBubbles);
+        _worldCanvas.ShowNameplates = (bool)config.GetValue(
+            WorldUiSettingsSection,
+            "show_nameplates",
+            _worldCanvas.ShowNameplates);
+        _worldCanvas.MaxVisibleWorldUi = Math.Clamp(
+            (int)config.GetValue(WorldUiSettingsSection, "max_visible_world_ui", _worldCanvas.MaxVisibleWorldUi),
+            1,
+            256);
+        _worldCanvas.WorldUiScale = Mathf.Clamp(
+            (float)config.GetValue(WorldUiSettingsSection, "world_ui_scale", _worldCanvas.WorldUiScale),
+            0.5f,
+            3.0f);
+        _showChatPanel = (bool)config.GetValue(ChatSettingsSection, "show_chat_panel", _showChatPanel);
+        _suppressSettingsSave = false;
+    }
+
+    private void SavePresentationSettings()
+    {
+        if (_suppressSettingsSave || _worldCanvas is null)
+        {
+            return;
+        }
+
+        var config = new ConfigFile();
+        _ = config.Load(ClientSettingsPath);
+        config.SetValue(WorldUiSettingsSection, "show_overhead_chat", _worldCanvas.ShowOverheadChatBubbles);
+        config.SetValue(WorldUiSettingsSection, "show_nameplates", _worldCanvas.ShowNameplates);
+        config.SetValue(WorldUiSettingsSection, "max_visible_world_ui", _worldCanvas.MaxVisibleWorldUi);
+        config.SetValue(WorldUiSettingsSection, "world_ui_scale", _worldCanvas.WorldUiScale);
+        config.SetValue(ChatSettingsSection, "show_chat_panel", _showChatPanel);
+        Error saved = config.Save(ClientSettingsPath);
+        if (saved != Error.Ok)
+        {
+            GD.PushWarning($"UltraSim client: failed to save presentation settings ({saved}).");
         }
     }
 

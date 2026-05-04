@@ -22,6 +22,7 @@ internal static class TestRunner
         Run(nameof(ClientDisconnectPacket_RoundTripsReason), ClientDisconnectPacket_RoundTripsReason);
         Run(nameof(ChatSubmitPacket_RoundTripsSubmittedText), ChatSubmitPacket_RoundTripsSubmittedText);
         Run(nameof(ChatMessageEventPacket_RoundTripsMessageMetadata), ChatMessageEventPacket_RoundTripsMessageMetadata);
+        Run(nameof(EntityPresentationEventPacket_RoundTripsDisplayName), EntityPresentationEventPacket_RoundTripsDisplayName);
         Run(nameof(UiPanelOpenEventPacket_RoundTripsDocumentBytes), UiPanelOpenEventPacket_RoundTripsDocumentBytes);
         Run(nameof(UiModelUpdateEventPacket_RoundTripsDocumentBytes), UiModelUpdateEventPacket_RoundTripsDocumentBytes);
         Run(nameof(UiDocumentChunkEventPacket_RoundTripsChunkMetadataAndBytes), UiDocumentChunkEventPacket_RoundTripsChunkMetadataAndBytes);
@@ -581,6 +582,30 @@ internal static class TestRunner
         Assert.Equal("Maintenance in 10 minutes.", decoded.Text);
         Assert.Equal((ulong)77, decoded.ServerTick);
         Assert.Equal(ChatMessageFlags.System | ChatMessageFlags.Announcement, decoded.Flags);
+    }
+
+    private static void EntityPresentationEventPacket_RoundTripsDisplayName()
+    {
+        var packet = new EntityPresentationEventPacket(
+            EntityId: 1234,
+            DisplayName: "Borin",
+            DefinitionId: "mobile.x_bot",
+            ServerTick: 77);
+
+        ImmutablePayloadBuffer encoded = PacketCodec.EncodePayload(packet);
+        var reader = new BitReader(encoded.Span);
+        EntityPresentationEventPacket decoded = EntityPresentationEventPacket.Deserialize(ref reader);
+
+        Assert.Equal((ulong)1234, decoded.EntityId);
+        Assert.Equal("Borin", decoded.DisplayName);
+        Assert.Equal("mobile.x_bot", decoded.DefinitionId);
+        Assert.Equal((ulong)77, decoded.ServerTick);
+
+        PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+        Assert.True(metadata.TryGet(EntityPresentationEventPacket.PacketId, out NetworkPlane plane, out PacketClass packetClass, out ChannelType channel));
+        Assert.Equal(NetworkPlane.State, plane);
+        Assert.Equal(PacketClass.ReliableEvent, packetClass);
+        Assert.Equal(ChannelType.ReliableOrdered, channel);
     }
 
     private static void UiPanelOpenEventPacket_RoundTripsDocumentBytes()

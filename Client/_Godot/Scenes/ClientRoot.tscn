@@ -12,6 +12,7 @@
 [ext_resource type="Script" uid="uid://dwmcas7uy1rso" path="res://Scripts/UI/HudCanvasManager.cs" id="10"]
 [ext_resource type="Script" uid="uid://dsu8jpey4ljao" path="res://Scripts/UI/MenuCanvasManager.cs" id="11"]
 [ext_resource type="Script" uid="uid://d2b6vh6p2xhlq" path="res://Scripts/UI/DebugCanvasManager.cs" id="12"]
+[ext_resource type="Resource" path="res://Assets/Avatars/mobile_definition_catalog.tres" id="13_mobile_catalog"]
 
 [sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6mrp5"]
 albedo_texture = ExtResource("4_ogrqh")
@@ -38,6 +39,7 @@ CharacterWorldPath = NodePath("World/DynamicEntities")
 LocalPlayerControllerPath = NodePath("Controller")
 CameraRigPath = NodePath("World/CameraRig")
 UiManagerPath = NodePath("UILayers")
+StartPreviewOnReady = false
 
 [node name="Controller" type="Node" parent="." unique_id=831969335]
 script = ExtResource("2")
@@ -45,6 +47,7 @@ CameraRigPath = NodePath("../World/CameraRig")
 
 [node name="MobileCatalog" type="Node" parent="." unique_id=125282228]
 script = ExtResource("4")
+Catalog = ExtResource("13_mobile_catalog")
 
 [node name="World" type="Node3D" parent="." unique_id=536801843]
 
@@ -80,6 +83,7 @@ shadow_enabled = true
 
 [node name="UILayers" type="Node" parent="." unique_id=2127180535]
 script = ExtResource("8")
+WorldCanvasPath = NodePath("World")
 HudCanvasPath = NodePath("HUD")
 MenuCanvasPath = NodePath("Menus")
 DebugCanvasPath = NodePath("Debug")

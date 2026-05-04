@@ -1364,6 +1364,13 @@ Examples:
 
 These can live in `ClientAppShell` or a local schema renderer path, but they should not be confused with server authority.
 
+Current Godot shell status: the local `ClientAppShell` owns the first presentation
+settings surface. `MenuCanvasManager` applies and persists overhead chat,
+nameplate, chat panel visibility, visible world-UI budget, and world-UI scale
+settings under `user://client_settings.cfg`. `WorldCanvasManager` keeps these as
+client presentation policy only; server-authored panels and gameplay state remain
+authoritative elsewhere.
+
 ## ECS Control Panel Target
 
 The eventual ECS control panel should reproduce and improve the v1 panel:

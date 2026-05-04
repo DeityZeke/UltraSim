@@ -9,5 +9,6 @@ public sealed record ServerSelectedCharacterSession(
     ulong CharacterId,
     string CharacterName,
     string PrefabKey,
+    string PresentationDefinitionId,
     Entity Entity,
     bool UsedPrefabEntity);

@@ -17,13 +17,14 @@ public partial class ClientAppShell : Control
     public event Action? BackRequested;
     public event Action<bool>? OverheadChatVisibilityChanged;
     public event Action<bool>? NameplateVisibilityChanged;
+    public event Action<bool>? ChatPanelVisibilityChanged;
     public event Action<int>? MaxVisibleWorldUiChanged;
     public event Action<float>? WorldUiScaleChanged;
 
     private const float StartPanelWidth = 360.0f;
     private const float StartPanelHeight = 270.0f;
     private const float SettingsPanelWidth = 420.0f;
-    private const float SettingsPanelHeight = 320.0f;
+    private const float SettingsPanelHeight = 350.0f;
     private const float DirectConnectPanelWidth = 480.0f;
     private const float DirectConnectPanelHeight = 210.0f;
     private const float CompactPanelHeight = 220.0f;
@@ -51,6 +52,7 @@ public partial class ClientAppShell : Control
     private string _lastPortText = "42042";
     private bool _showOverheadChat = true;
     private bool _showNameplates = true;
+    private bool _showChatPanel = true;
     private int _maxVisibleWorldUi = 32;
     private float _worldUiScale = 1.0f;
 
@@ -148,10 +150,16 @@ public partial class ClientAppShell : Control
         _serverBrowserSnapshot = snapshot;
     }
 
-    public void SetWorldUiSettings(bool showOverheadChat, bool showNameplates, int maxVisibleWorldUi, float worldUiScale)
+    public void SetPresentationSettings(
+        bool showOverheadChat,
+        bool showNameplates,
+        bool showChatPanel,
+        int maxVisibleWorldUi,
+        float worldUiScale)
     {
         _showOverheadChat = showOverheadChat;
         _showNameplates = showNameplates;
+        _showChatPanel = showChatPanel;
         _maxVisibleWorldUi = Math.Clamp(maxVisibleWorldUi, 1, 256);
         _worldUiScale = Mathf.Clamp(worldUiScale, 0.5f, 3.0f);
     }
@@ -579,6 +587,11 @@ public partial class ClientAppShell : Control
         {
             _showNameplates = enabled;
             NameplateVisibilityChanged?.Invoke(enabled);
+        }));
+        column.AddChild(CreateCheckBox("Show chat panel", _showChatPanel, enabled =>
+        {
+            _showChatPanel = enabled;
+            ChatPanelVisibilityChanged?.Invoke(enabled);
         }));
         column.AddChild(CreateSpinRow("Max visible world UI", _maxVisibleWorldUi, min: 1.0, max: 256.0, newValue =>
         {

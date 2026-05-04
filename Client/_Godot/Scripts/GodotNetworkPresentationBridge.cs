@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using Godot;
 using UltraSim.Network;
+using UltraSim.Client.Godot.Mobiles;
 using UltraSim.Client.Godot.World;
 
 namespace UltraSim.Client.Godot;
@@ -23,7 +24,17 @@ public sealed class GodotNetworkPresentationBridge
 
         ulong actorId = result.NetworkEntityId;
         Vector3 position = ToGodotPosition(result.AuthoritativeState.PositionX, result.AuthoritativeState.PositionY);
-        float yawDegrees = ResolveYawDegrees(result.AuthoritativeState.VelocityX, result.AuthoritativeState.VelocityY);
+        float yawDegrees = ResolveYawDegrees(actorId, result.AuthoritativeState.VelocityX, result.AuthoritativeState.VelocityY);
+        if (result.HadPredictedState &&
+            result.PositionErrorMagnitude <= 0.25f &&
+            _characterWorld.TryGetCharacter(actorId, out CharacterRoot? predictedCharacter) &&
+            predictedCharacter is not null)
+        {
+            predictedCharacter.SetPresentationFacingYawDegrees(yawDegrees);
+            _characterWorld.SetLocalControlledEntityId(actorId);
+            return;
+        }
+
         _characterWorld.CorrectActorPose(actorId, position, yawDegrees);
         _characterWorld.SetLocalControlledEntityId(actorId);
     }
@@ -50,15 +61,22 @@ public sealed class GodotNetworkPresentationBridge
         }
         else if (TryDecodeMovementLikePayload(payload, out x, out y, out velocityX, out velocityY))
         {
-            actorId = itemKey;
+            actorId = TryDecodeObservedMovementItemKey(itemKey, out uint networkEntityId)
+                ? networkEntityId
+                : itemKey;
         }
         else
         {
             return;
         }
 
+        if (_characterWorld.LocalControlledEntityId == actorId)
+        {
+            return;
+        }
+
         Vector3 position = ToGodotPosition(x, y);
-        float yawDegrees = ResolveYawDegrees(velocityX, velocityY);
+        float yawDegrees = ResolveYawDegrees(actorId, velocityX, velocityY);
         _characterWorld.SetActorPose(actorId, position, yawDegrees);
     }
 
@@ -72,10 +90,16 @@ public sealed class GodotNetworkPresentationBridge
         return new Vector3(x, 0.0f, y);
     }
 
-    private static float ResolveYawDegrees(float velocityX, float velocityY)
+    private float ResolveYawDegrees(ulong actorId, float velocityX, float velocityY)
     {
         if ((velocityX * velocityX) + (velocityY * velocityY) <= 0.0001f)
         {
+            if (_characterWorld.TryGetCharacter(actorId, out CharacterRoot? character) &&
+                character is not null)
+            {
+                return character.PresentationFacingYawDegrees;
+            }
+
             return 0.0f;
         }
 
@@ -139,5 +163,18 @@ public sealed class GodotNetworkPresentationBridge
     private static bool IsFinite(float value)
     {
         return !float.IsNaN(value) && !float.IsInfinity(value);
+    }
+
+    private static bool TryDecodeObservedMovementItemKey(ulong itemKey, out uint networkEntityId)
+    {
+        const ulong observedMovementPrefix = 0x4D4F5645UL << 32;
+        if ((itemKey & 0xFFFF_FFFF_0000_0000UL) != observedMovementPrefix)
+        {
+            networkEntityId = 0;
+            return false;
+        }
+
+        networkEntityId = (uint)(itemKey & 0xFFFF_FFFFUL);
+        return networkEntityId != 0;
     }
 }

@@ -16,6 +16,7 @@ public static class DefaultPacketMetadata
         registry.Register<ClientDisconnectPacket>();
         registry.Register<ChatSubmitPacket>();
         registry.Register<ChatMessageEventPacket>();
+        registry.Register<EntityPresentationEventPacket>();
         registry.Register<UiPanelOpenEventPacket>();
         registry.Register<UiModelUpdateEventPacket>();
         registry.Register<UiDocumentChunkEventPacket>();

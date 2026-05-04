@@ -50,7 +50,7 @@ public partial class GodotClientRuntimeRoot : Node
 	[Export] public NodePath? LocalPlayerControllerPath { get; set; }
 	[Export] public NodePath? CameraRigPath { get; set; }
 	[Export] public NodePath? UiManagerPath { get; set; }
-	[Export] public bool StartPreviewOnReady { get; set; } = true;
+	[Export] public bool StartPreviewOnReady { get; set; }
 	[Export] public string ContentCacheRootOverride { get; set; } = string.Empty;
 	[Export(PropertyHint.Range, "0.0,32.0,0.1,or_greater")] public float LiveMoveSpeed { get; set; } = 4.0f;
 
@@ -153,6 +153,7 @@ public partial class GodotClientRuntimeRoot : Node
 		_sessionDriver = new GodotClientNetworkSessionDriver(
 			SetStatusText,
 			HandleChatMessage,
+			HandleEntityPresentation,
 			HandleOwnerMovementState,
 			HandleObserverState,
 			HandleObserverStateReset,
@@ -256,6 +257,7 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		CharacterWorld?.ClearAllActors();
+		UiManager?.World?.ClearAll();
 		SetStatusText("Session cleared");
 	}
 
@@ -545,8 +547,15 @@ public partial class GodotClientRuntimeRoot : Node
 			}
 		}
 
+		CharacterWorld?.SetActorDisplayName(packet.SenderEntityId, packet.SenderName);
 		UiManager?.Menus?.AppendChatLine(packet.SenderName, packet.Text);
 		UiManager?.World?.ShowOverheadChat(packet.SenderEntityId, packet.Text);
+	}
+
+	private void HandleEntityPresentation(UltraSim.Network.EntityPresentationEventPacket packet)
+	{
+		CharacterWorld?.SetActorDefinition(packet.EntityId, packet.DefinitionId);
+		CharacterWorld?.SetActorDisplayName(packet.EntityId, packet.DisplayName);
 	}
 
 	private void HandleOwnerMovementState(ClientMovementStateReceiveResult result)

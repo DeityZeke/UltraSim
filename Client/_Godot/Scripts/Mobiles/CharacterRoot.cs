@@ -16,6 +16,7 @@ public partial class CharacterRoot : Node3D
     public Node3D EffectsRoot { get; private set; } = null!;
     public float PresentationFacingYawDegrees { get; private set; }
     public bool IsMoving { get; private set; }
+    public string DisplayNameOverride { get; private set; } = string.Empty;
 
     private Node? _visualInstance;
     private float _jumpElapsedSeconds = -1.0f;
@@ -76,6 +77,13 @@ public partial class CharacterRoot : Node3D
     public void SetPresentationMoving(bool isMoving)
     {
         IsMoving = isMoving;
+    }
+
+    public void SetDisplayNameOverride(string displayName)
+    {
+        DisplayNameOverride = string.IsNullOrWhiteSpace(displayName)
+            ? string.Empty
+            : displayName.Trim();
     }
 
     public void TriggerPresentationJump()

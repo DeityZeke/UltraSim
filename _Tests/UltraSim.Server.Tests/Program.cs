@@ -3122,12 +3122,30 @@ internal static class TestRunner
         var openedPanels = new List<UiPanelOpenDocument>();
         var modelUpdates = new List<UiModelUpdateDocument>();
         var uiEvents = new ClientUiEventBridge(openedPanels.Add, modelUpdates.Add);
+        var chatMessages = new List<ChatMessageEventPacket>();
+        var chatEvents = new ClientChatEventBridge(chatMessages.Add);
+        var presentationMessages = new List<EntityPresentationEventPacket>();
+        var observerEvents = ClientObserverEventBridge.CreateSpanFastPath(
+            connectionId,
+            (_, payload) =>
+            {
+                if (!PacketCodec.TryDecodeEnvelope(payload, out PacketEnvelopeHeader header, out ReadOnlySpan<byte> innerPayload) ||
+                    header.PacketId != EntityPresentationEventPacket.PacketId)
+                {
+                    return;
+                }
+
+                var reader = new UltraSim.Network.BitReader(innerPayload);
+                presentationMessages.Add(EntityPresentationEventPacket.Deserialize(ref reader));
+            });
         var observerState = new ClientObserverStateBridge(connectionId);
         var clientHost = new ClientMovementSessionHost(
             pair.Client,
             connectionId,
             new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression),
             observerState: observerState,
+            observerEvents: observerEvents,
+            chatEvents: chatEvents,
             uiEvents: uiEvents,
             maxPollBatch: 8);
 
@@ -3299,6 +3317,18 @@ internal static class TestRunner
         Assert.Equal(0f, selectedBody.PositionX);
         Assert.Equal(0f, selectedBody.PositionY);
         Assert.Equal(3L, serverHost.ScriptBinding.Admission.CompletedSteps);
+        Assert.True(presentationMessages.Any(message =>
+            message.EntityId == 1 &&
+            message.DisplayName == "Borin" &&
+            message.DefinitionId == "mobile.x_bot"));
+
+        Assert.True(clientHost.TrySendChat("hello from character"));
+        serverHost.Pump(270, 0.016f, 26);
+        clientHost.Pump(271);
+        Assert.True(chatMessages.Any(message =>
+            message.SenderName == "Borin" &&
+            message.SenderEntityId == 1 &&
+            message.Text == "hello from character"));
 
         selectedBody = selectedBody with
         {
@@ -3309,7 +3339,7 @@ internal static class TestRunner
         };
         Assert.True(world.SetComponent(selected.Entity, selectedBody));
         Assert.True(clientHost.SendDisconnectNotice(SessionDisconnectReason.Closed, 300));
-        serverHost.Pump(301, 0.016f, 26);
+        serverHost.Pump(301, 0.016f, 27);
 
         Assert.Equal(0, serverHost.BoundConnectionCount);
         Assert.False(serverHost.TryGetSelectedCharacter(connectionId, out _));
