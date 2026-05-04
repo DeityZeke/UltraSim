@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Net;
+using System.Globalization;
 using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Server;
@@ -46,6 +47,7 @@ internal static class TestRunner
         Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
+        Run(nameof(ServerSpawnerPrimitives_MapEcsHashToAdminMetadata), ServerSpawnerPrimitives_MapEcsHashToAdminMetadata);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
@@ -731,6 +733,58 @@ internal static class TestRunner
 
         Assert.False(missing.Succeeded);
         Assert.Equal(ServerEntityInspectionStatus.EntityNotFound, missing.Status);
+    }
+
+    private static void ServerSpawnerPrimitives_MapEcsHashToAdminMetadata()
+    {
+        var registry = new ServerSpawnerRegistry();
+        var descriptor = new ServerSpawnerDescriptor(
+            "spawns/dungeons/orc_camp",
+            "Orc Camp",
+            "Starter dungeon pressure spawner.");
+
+        Assert.True(registry.TryRegister(descriptor));
+        Assert.False(registry.TryRegister(descriptor));
+        Assert.Equal(1, registry.Count);
+        Assert.True(registry.TryGetByKey("spawns/dungeons/orc_camp", out ServerSpawnerDescriptor byKey));
+        Assert.Equal(descriptor.SpawnSetKeyHash, byKey.SpawnSetKeyHash);
+        Assert.True(registry.TryGetByHash(descriptor.SpawnSetKeyHash, out ServerSpawnerDescriptor byHash));
+        Assert.Equal("Orc Camp", byHash.DisplayName);
+        Assert.Equal(1, registry.Snapshot(adminVisibleOnly: true).Count);
+
+        ServerSpawnerComponent component = ServerSpawnerComponent.Create(
+            descriptor.SpawnSetKey,
+            radius: 18.5f,
+            maxActive: 7,
+            respawnSeconds: 45);
+        Assert.Equal(descriptor.SpawnSetKeyHash, component.SpawnSetKeyHash);
+        Assert.True(component.IsEnabled);
+        Assert.True(component.IsAdminVisible);
+        Assert.True(component.UsesSmartActivation);
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId spawnerId = builder.RegisterComponent<ServerSpawnerComponent>();
+        ComponentId runtimeId = builder.RegisterComponent<ServerSpawnerRuntimeState>();
+        var world = new World(builder.Build());
+        Entity spawner = world.CreateDefault(new ArchetypeSignature([spawnerId, runtimeId]));
+        Assert.True(world.SetComponent(spawner, component));
+        Assert.True(world.SetComponent(spawner, new ServerSpawnerRuntimeState(3, 100, 145)));
+
+        ServerEntityInspectionResult inspection = new ServerEntityInspectionService(world).Inspect(
+            new ServerEntityInspectionRequest(spawner));
+        Assert.True(inspection.Succeeded);
+        Assert.NotNull(inspection.Snapshot);
+        EntityComponentInspectionSnapshot spawnerSnapshot = inspection.Snapshot!.Components.Single(
+            static value => value.DisplayName == nameof(ServerSpawnerComponent));
+        Assert.True(spawnerSnapshot.Fields.Any(field =>
+            string.Equals(field.Name, nameof(ServerSpawnerComponent.SpawnSetKeyHash), StringComparison.Ordinal) &&
+            string.Equals(field.Value, descriptor.SpawnSetKeyHash.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)));
+        Assert.True(spawnerSnapshot.Fields.Any(field =>
+            string.Equals(field.Name, nameof(ServerSpawnerComponent.Radius), StringComparison.Ordinal) &&
+            string.Equals(field.Value, "18.5", StringComparison.Ordinal)));
+
+        Assert.True(registry.Remove(descriptor.SpawnSetKey));
+        Assert.Equal(0, registry.Count);
     }
 
     private static void ServerChatService_AnnounceCommandPublishesSystemEvent()

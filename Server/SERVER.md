@@ -41,7 +41,6 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 Current foundational/server-platform task list:
 
 - access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
-- spawner component primitives: enabled state, radius, spawn-set key, and admin-visible metadata
 - runtime content group mount/unmount registry for prefab/script/spawn packages
 - command-registry integration with permission keys instead of only legacy integer access levels
 - account persistence for assigned access rules/direct grants/direct denies
@@ -72,6 +71,14 @@ Current admin inspection foundation:
 - The facade evaluates an optional `ServerAccessEvaluationRequest` before reading the ECS snapshot.
 - `ServerAdminPermissionKeys.EntityInspect` is the first named admin permission key and maps to `admin.entity.inspect`.
 - Future `[props]` commands and schema admin panels should call this facade rather than reaching directly into ECS internals.
+
+Current spawner primitive foundation:
+
+- `ServerSpawnerComponent` stores enabled/admin-visible/smart-activation flags, radius, max active count, respawn cadence, and a stable spawn-set key hash.
+- `ServerSpawnerRuntimeState` stores active count and last/next spawn ticks.
+- `ServerSpawnerRegistry` resolves stable spawn-set keys and hashes to admin-readable metadata.
+- ECS components intentionally store the stable `ulong` hash instead of strings; admin panels and commands resolve display text through the registry.
+- Actual spawn execution, live content group mount/unmount, smart player-proximity activation, and spawner persistence remain later slices.
 
 Current `Server/Network` state:
 
