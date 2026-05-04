@@ -17,7 +17,7 @@ public sealed class ClientInterpolationBuffer<TState>
 
     public int Count => _samples.Count;
 
-    public void AddSample(uint serverTick, in TState state)
+    public void AddSample(ulong serverTick, in TState state)
     {
         int index = _samples.Count;
         while (index > 0 && _samples[index - 1].ServerTick > serverTick)
@@ -38,7 +38,7 @@ public sealed class ClientInterpolationBuffer<TState>
         _samples.Insert(index, new ClientInterpolationSample<TState>(serverTick, state));
     }
 
-    public int PruneBefore(uint minServerTick)
+    public int PruneBefore(ulong minServerTick)
     {
         int removed = 0;
         while (removed < _samples.Count && _samples[removed].ServerTick < minServerTick)
@@ -50,7 +50,7 @@ public sealed class ClientInterpolationBuffer<TState>
         return removed;
     }
 
-    public bool TrySample(uint targetServerTick, InterpolationLerp<TState> lerp, out TState state)
+    public bool TrySample(ulong targetServerTick, InterpolationLerp<TState> lerp, out TState state)
     {
         ArgumentNullException.ThrowIfNull(lerp);
 

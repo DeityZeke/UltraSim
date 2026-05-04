@@ -36,7 +36,7 @@ public sealed class ServerChatService
         string rawText,
         SubscriptionKey localScope,
         long nowTicks,
-        uint serverTick)
+        ulong serverTick)
     {
         string text = Sanitize(rawText);
         if (text.Length == 0)
@@ -88,7 +88,7 @@ public sealed class ServerChatService
         ulong senderEntityId,
         string senderName,
         string text,
-        uint serverTick)
+        ulong serverTick)
     {
         if (!scope.IsValid)
         {
@@ -106,7 +106,7 @@ public sealed class ServerChatService
             ChatMessageFlags.Local | ChatMessageFlags.Overhead);
     }
 
-    public bool PublishSystemAnnouncement(string text, uint serverTick = 0)
+    public bool PublishSystemAnnouncement(string text, ulong serverTick = 0)
     {
         return Publish(
             ServerChatScopes.System,
@@ -128,7 +128,7 @@ public sealed class ServerChatService
             RejectedMessages);
     }
 
-    private bool PublishSystemTo(SubscriptionKey scope, string text, uint serverTick)
+    private bool PublishSystemTo(SubscriptionKey scope, string text, ulong serverTick)
     {
         if (!scope.IsValid)
             scope = ServerChatScopes.System;
@@ -149,7 +149,7 @@ public sealed class ServerChatService
         ulong senderEntityId,
         string senderName,
         string text,
-        uint serverTick,
+        ulong serverTick,
         ChatMessageFlags flags)
     {
         string clean = Sanitize(text);

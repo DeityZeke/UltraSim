@@ -213,7 +213,7 @@ internal static class TestRunner
         Assert.False(snapshot.Manual);
         Assert.Equal(4, snapshot.PeriodTicks);
         Assert.Equal(1, snapshot.StartOffset);
-        Assert.Equal((uint)77, snapshot.LastRunTick);
+        Assert.Equal((ulong)77, snapshot.LastRunTick);
         Assert.Equal(11L, snapshot.UpdateCount);
         Assert.Equal(0.25, snapshot.LastUpdateMilliseconds);
         Assert.Equal(0.5, snapshot.AverageUpdateMilliseconds);
@@ -1982,7 +1982,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2030,8 +2030,8 @@ internal static class TestRunner
 
         Assert.Equal(1, client.PollInbound());
         Assert.Equal((ushort)1, client.LastReceiveResult.LastProcessedInputSequence);
-        Assert.Equal((uint)42, client.LastReceiveResult.ServerTick);
-        Assert.Equal((uint)77, client.LastReceiveResult.NetworkEntityId);
+        Assert.Equal((ulong)42, client.LastReceiveResult.ServerTick);
+        Assert.Equal((ulong)77, client.LastReceiveResult.NetworkEntityId);
         Assert.Equal(1, client.LastReceiveResult.RemovedPendingInputs);
         Assert.Equal(1, client.LastReceiveResult.RemovedPredictions);
         Assert.Equal(0, client.Sequencer.PendingCount);
@@ -2112,7 +2112,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2144,7 +2144,7 @@ internal static class TestRunner
 
         Assert.Equal(1, PollUntilNonZero(static clientBridge => clientBridge.PollInbound(), client, maxAttempts: 256));
         Assert.Equal((uint)88, client.LastReceiveResult.NetworkEntityId);
-        Assert.Equal((uint)50, client.LastReceiveResult.ServerTick);
+        Assert.Equal((ulong)50, client.LastReceiveResult.ServerTick);
         Assert.Equal((ushort)1, client.LastReceiveResult.LastProcessedInputSequence);
 
         Assert.True(world.TryGetComponent(entity, out ServerEcsMovementBody authoritative));
@@ -2186,7 +2186,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2314,7 +2314,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2431,7 +2431,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2508,7 +2508,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2586,7 +2586,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2652,7 +2652,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -2742,7 +2742,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -2909,7 +2909,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3049,7 +3049,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3368,7 +3368,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3470,7 +3470,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3595,6 +3595,10 @@ internal static class TestRunner
         Assert.True(Path.GetFileName(backups[0]).StartsWith("Most Recent (", StringComparison.Ordinal));
         ServerSystemRuntimeSnapshot persistence = secondSystems.First(snapshot => snapshot.Name == "Persistence");
         Assert.Equal(2L, persistence.UpdateCount);
+        Assert.True(persistence.LastUpdateMilliseconds > 0d);
+        Assert.True(persistence.AverageUpdateMilliseconds > 0d);
+        Assert.True(persistence.PeakUpdateMilliseconds >= persistence.LastUpdateMilliseconds);
+        Assert.True(persistence.MinUpdateMilliseconds > 0d);
         Assert.Equal(0, persistence.ControlCount);
         Assert.Contains("sequence=2", persistence.Detail);
         Assert.Contains("load=current", persistence.Detail);
@@ -3638,6 +3642,7 @@ internal static class TestRunner
         Assert.Contains("Persistence: Warning: Current save-set is not loadable", logText);
         Assert.Contains("Persistence: Loaded backup save-set sequence 1.", logText);
         Assert.Equal(1L, persistence.UpdateCount);
+        Assert.True(persistence.LastUpdateMilliseconds > 0d);
         Assert.Equal(2, persistence.ControlCount);
         Assert.Contains("load=backup", persistence.Detail);
         Assert.Contains("warnings=2", persistence.Detail);
@@ -3659,7 +3664,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3734,7 +3739,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3804,7 +3809,7 @@ internal static class TestRunner
         {
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             packet = default;
             return false;
@@ -3863,7 +3868,7 @@ internal static class TestRunner
             Assert.True(movementWorld.SetComponent(movementEntity, body));
         }
 
-        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, uint serverTick, out MovementStatePacket packet)
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
             packet = new MovementStatePacket(
@@ -3927,7 +3932,7 @@ internal static class TestRunner
             Entity movementEntity,
             uint networkEntityId,
             ushort lastProcessedInputSequence,
-            uint serverTick,
+            ulong serverTick,
             out MovementStatePacket packet)
         {
             Assert.True(movementWorld.TryGetComponent(movementEntity, out ServerEcsMovementBody body));
@@ -3960,8 +3965,8 @@ internal static class TestRunner
 
         var reader = new UltraSim.Network.BitReader(updates[0].Payload.Span);
         MovementStatePacket payload = MovementStatePacket.Deserialize(ref reader);
-        Assert.Equal((uint)42, payload.NetworkEntityId);
-        Assert.Equal((uint)1234, payload.ServerTick);
+        Assert.Equal((ulong)42, payload.NetworkEntityId);
+        Assert.Equal((ulong)1234, payload.ServerTick);
         Assert.Equal(10.5f, payload.PositionX);
         Assert.Equal(-3.25f, payload.PositionY);
         Assert.Equal(1.5f, payload.VelocityX);

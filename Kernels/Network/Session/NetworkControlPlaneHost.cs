@@ -324,7 +324,7 @@ public sealed class NetworkControlPlaneHost
         Sessions.TryTouchActivity(sessionId, nowTicks);
         _pingProbesReceived++;
         _pongProbesSent++;
-        SendPacket(connectionId, new PongProbePacket(packet.Sequence, packet.ClientTick, unchecked((uint)nowTicks)), PacketHeaderFlags.HighPriorityHint);
+        SendPacket(connectionId, new PongProbePacket(packet.Sequence, packet.ClientTick, (ulong)nowTicks), PacketHeaderFlags.HighPriorityHint);
     }
 
     private void OnPongProbe(ConnectionId connectionId, long nowTicks, in PongProbePacket packet)

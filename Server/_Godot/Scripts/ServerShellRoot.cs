@@ -16,27 +16,33 @@ public partial class ServerShellRoot : Control
 	private GodotServerShellController? _controller;
 	private RichTextLabel? _outputLog;
 	private LineEdit? _commandLine;
-	private Label? _stateValue;
-	private Label? _ticksValue;
-	private Label? _sessionsValue;
-	private Label? _profileValue;
+	private readonly List<Button> _tabButtons = new();
+	private readonly List<Control> _tabPages = new();
+	private Control? _tabPageHost;
+	private Label? _bannerPrimaryValue;
+	private Label? _bannerPlayersValue;
+	private Label? _bannerAccountsValue;
+	private Label? _bannerMobilesValue;
+	private Label? _bannerItemsValue;
 	private Label? _playersSummaryValue;
 	private Label? _accountsSummaryValue;
 	private Label? _performanceSummaryValue;
-	private RichTextLabel? _performanceLog;
+	private GridContainer? _performanceGrid;
 	private Button? _startButton;
 	private Button? _saveButton;
 	private Button? _restartButton;
 	private Button? _restartWithoutSaveButton;
 	private Button? _shutdownButton;
 	private Button? _shutdownWithoutSaveButton;
-	private Button? _statusButton;
 	private bool _smokeRequireEmptySessions;
 	private double _smokeEmptySessionGraceSeconds = 2.0;
 	private double _smokeEmptySessionWaitedSeconds;
 	private bool _smokeQuitRequested;
 	private bool _smokeEmptySessionWaitLogged;
 	private bool _shellQuitScheduled;
+	private long _bannerSampleCount;
+	private double _playerOnlineSampleTotal;
+	private double _accountOnlineSampleTotal;
 
 	public override void _Ready()
 	{
@@ -290,7 +296,7 @@ public partial class ServerShellRoot : Control
 	{
 		Window window = GetWindow();
 		window.Title = "UltraSim Server";
-		window.Size = new Vector2I(720, 420);
+		window.Size = new Vector2I(900, 525);
 		window.MinSize = window.Size;
 		window.Unresizable = true;
 		window.CloseRequested += HandleWindowCloseRequested;
@@ -298,13 +304,18 @@ public partial class ServerShellRoot : Control
 
 	private void BuildInterface()
 	{
-		Color background = new(0.08f, 0.09f, 0.11f);
-		Color panel = new(0.12f, 0.13f, 0.16f);
-		Color panelSoft = new(0.15f, 0.16f, 0.20f);
+		Color background = new(0.015f, 0.016f, 0.018f);
+		Color panel = new(0.055f, 0.060f, 0.070f);
+		Color panelSoft = new(0.085f, 0.095f, 0.115f);
 		Color accent = new(0.86f, 0.55f, 0.27f);
 		Color accentSoft = new(0.31f, 0.45f, 0.57f);
 		Color text = new(0.90f, 0.92f, 0.95f);
 		Color muted = new(0.62f, 0.67f, 0.74f);
+
+		var backgroundRect = new ColorRect();
+		backgroundRect.Color = background;
+		backgroundRect.SetAnchorsPreset(LayoutPreset.FullRect);
+		AddChild(backgroundRect);
 
 		var root = new MarginContainer();
 		root.SetAnchorsPreset(LayoutPreset.FullRect);
@@ -314,35 +325,145 @@ public partial class ServerShellRoot : Control
 		root.AddThemeConstantOverride("margin_bottom", 8);
 		AddChild(root);
 
-		var tabs = new TabContainer();
-		tabs.SetAnchorsPreset(LayoutPreset.FullRect);
-		tabs.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		tabs.SizeFlagsVertical = SizeFlags.ExpandFill;
-		tabs.AddThemeColorOverride("font_selected_color", text);
-		tabs.AddThemeColorOverride("font_unselected_color", muted);
-		tabs.AddThemeStyleboxOverride("panel", CreatePanelStyle(background, 0));
-		tabs.AddThemeStyleboxOverride("tab_selected", CreatePanelStyle(panelSoft, 8, accent));
-		tabs.AddThemeStyleboxOverride("tab_unselected", CreatePanelStyle(panel, 8));
-		root.AddChild(tabs);
+		var main = new VBoxContainer();
+		main.SetAnchorsPreset(LayoutPreset.FullRect);
+		main.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		main.SizeFlagsVertical = SizeFlags.ExpandFill;
+		main.AddThemeConstantOverride("separation", 8);
+		root.AddChild(main);
 
-		Control outputTab = BuildOutputTab(panel, panelSoft, accent, text, muted);
-		outputTab.Name = "Output";
-		tabs.AddChild(outputTab);
+		var tabRow = new HBoxContainer();
+		tabRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		tabRow.AddThemeConstantOverride("separation", 4);
+		main.AddChild(tabRow);
 
-		Control playersTab = BuildPlayersTab(panel, panelSoft, accentSoft, text, muted);
-		playersTab.Name = "Players";
-		tabs.AddChild(playersTab);
+		var banner = BuildMetricBanner(panel, accent, text, muted);
+		main.AddChild(banner);
 
-		Control accountsTab = BuildAccountsTab(panel, panelSoft, accentSoft, text, muted);
-		accountsTab.Name = "Accounts";
-		tabs.AddChild(accountsTab);
+		_tabPageHost = new Control();
+		_tabPageHost.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_tabPageHost.SizeFlagsVertical = SizeFlags.ExpandFill;
+		main.AddChild(_tabPageHost);
 
-		Control performanceTab = BuildPerformanceTab(panel, panelSoft, accentSoft, text, muted);
-		performanceTab.Name = "Performance";
-		tabs.AddChild(performanceTab);
+		AddShellTab(tabRow, "Output", BuildOutputTab(panel, panelSoft, accent, text, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "Players", BuildPlayersTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "Accounts", BuildAccountsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "Performance", BuildPerformanceTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "NPCs", CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "Items", CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
+		SelectShellTab(0);
+	}
 
-		tabs.AddChild(CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted));
-		tabs.AddChild(CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted));
+	private PanelContainer BuildMetricBanner(Color panel, Color accent, Color text, Color muted)
+	{
+		var banner = new PanelContainer();
+		banner.CustomMinimumSize = new Vector2(0, 72);
+		banner.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		banner.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 8, accent));
+
+		var margin = new MarginContainer();
+		margin.AddThemeConstantOverride("margin_left", 10);
+		margin.AddThemeConstantOverride("margin_top", 7);
+		margin.AddThemeConstantOverride("margin_right", 10);
+		margin.AddThemeConstantOverride("margin_bottom", 7);
+		banner.AddChild(margin);
+
+		var column = new VBoxContainer();
+		column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.AddThemeConstantOverride("separation", 3);
+		margin.AddChild(column);
+
+		_bannerPrimaryValue = CreateBannerLine(text);
+		column.AddChild(_bannerPrimaryValue);
+
+		var secondary = new HBoxContainer();
+		secondary.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		secondary.AddThemeConstantOverride("separation", 18);
+		column.AddChild(secondary);
+
+		_bannerPlayersValue = CreateBannerMetricLabel(muted);
+		_bannerAccountsValue = CreateBannerMetricLabel(muted);
+		_bannerMobilesValue = CreateBannerMetricLabel(muted);
+		_bannerItemsValue = CreateBannerMetricLabel(muted);
+		secondary.AddChild(_bannerPlayersValue);
+		secondary.AddChild(_bannerAccountsValue);
+		secondary.AddChild(_bannerMobilesValue);
+		secondary.AddChild(_bannerItemsValue);
+		return banner;
+	}
+
+	private static Label CreateBannerLine(Color color)
+	{
+		var label = new Label();
+		label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		label.ClipText = true;
+		label.AddThemeColorOverride("font_color", color);
+		return label;
+	}
+
+	private static Label CreateBannerMetricLabel(Color color)
+	{
+		var label = CreateBannerLine(color);
+		label.ClipText = false;
+		label.CustomMinimumSize = new Vector2(118, 0);
+		label.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+		label.MouseFilter = MouseFilterEnum.Stop;
+		return label;
+	}
+
+	private void AddShellTab(
+		HBoxContainer tabRow,
+		string title,
+		Control page,
+		Color panel,
+		Color panelSoft,
+		Color accent,
+		Color text,
+		Color muted)
+	{
+		if (_tabPageHost is null)
+			return;
+
+		int index = _tabPages.Count;
+		var button = CreateTabButton(title, panel, panelSoft, accent, text, muted);
+		button.Pressed += () => SelectShellTab(index);
+		tabRow.AddChild(button);
+		_tabButtons.Add(button);
+
+		page.Name = title;
+		page.SetAnchorsPreset(LayoutPreset.FullRect);
+		page.Visible = false;
+		_tabPageHost.AddChild(page);
+		_tabPages.Add(page);
+	}
+
+	private static Button CreateTabButton(string title, Color panel, Color panelSoft, Color accent, Color text, Color muted)
+	{
+		var button = new Button();
+		button.Text = title;
+		button.ToggleMode = true;
+		button.CustomMinimumSize = new Vector2(96, 32);
+		button.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+		button.AddThemeColorOverride("font_color", muted);
+		button.AddThemeStyleboxOverride("normal", CreatePanelStyle(panel, 8));
+		button.AddThemeStyleboxOverride("hover", CreatePanelStyle(panelSoft, 8));
+		button.AddThemeStyleboxOverride("pressed", CreatePanelStyle(panelSoft, 8, accent));
+		button.AddThemeStyleboxOverride("focus", CreatePanelStyle(panelSoft, 8, accent));
+		return button;
+	}
+
+	private void SelectShellTab(int index)
+	{
+		for (int i = 0; i < _tabPages.Count; i++)
+		{
+			bool selected = i == index;
+			_tabPages[i].Visible = selected;
+			if (i < _tabButtons.Count)
+			{
+				_tabButtons[i].ButtonPressed = selected;
+				_tabButtons[i].AddThemeColorOverride("font_color", selected ? new Color(0.90f, 0.92f, 0.95f) : new Color(0.62f, 0.67f, 0.74f));
+			}
+		}
 	}
 
 	private Control BuildOutputTab(Color panel, Color panelSoft, Color accent, Color text, Color muted)
@@ -399,7 +520,7 @@ public partial class ServerShellRoot : Control
 		commandRow.AddChild(_commandLine);
 
 		var rightPanel = new PanelContainer();
-		rightPanel.CustomMinimumSize = new Vector2(180, 0);
+		rightPanel.CustomMinimumSize = new Vector2(232, 0);
 		rightPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
 		rightPanel.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
 		shellLayout.AddChild(rightPanel);
@@ -411,10 +532,18 @@ public partial class ServerShellRoot : Control
 		rightScroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
 		rightPanel.AddChild(rightScroll);
 
+		var rightMargin = new MarginContainer();
+		rightMargin.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		rightMargin.AddThemeConstantOverride("margin_left", 8);
+		rightMargin.AddThemeConstantOverride("margin_top", 8);
+		rightMargin.AddThemeConstantOverride("margin_right", 12);
+		rightMargin.AddThemeConstantOverride("margin_bottom", 8);
+		rightScroll.AddChild(rightMargin);
+
 		var rightColumn = new VBoxContainer();
 		rightColumn.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		rightColumn.AddThemeConstantOverride("separation", 6);
-		rightScroll.AddChild(rightColumn);
+		rightMargin.AddChild(rightColumn);
 
 		rightColumn.AddChild(CreateSectionLabel("Controls", text));
 
@@ -424,7 +553,6 @@ public partial class ServerShellRoot : Control
 		_restartWithoutSaveButton = CreateCommandButton("Restart No Save", ServerControlCommand.RestartWithoutSave(), panelSoft, text);
 		_shutdownButton = CreateCommandButton("Shutdown", ServerControlCommand.Shutdown(), panelSoft, text);
 		_shutdownWithoutSaveButton = CreateCommandButton("Shutdown No Save", ServerControlCommand.ShutdownWithoutSave(), panelSoft, text);
-		_statusButton = CreateStatusButton(panelSoft, text);
 
 		rightColumn.AddChild(_startButton);
 		rightColumn.AddChild(_saveButton);
@@ -432,21 +560,6 @@ public partial class ServerShellRoot : Control
 		rightColumn.AddChild(_restartWithoutSaveButton);
 		rightColumn.AddChild(_shutdownButton);
 		rightColumn.AddChild(_shutdownWithoutSaveButton);
-		rightColumn.AddChild(_statusButton);
-
-		var separator = new HSeparator();
-		rightColumn.AddChild(separator);
-
-		rightColumn.AddChild(CreateSectionLabel("Status", text));
-		_profileValue = CreateValueLabel(muted);
-		_stateValue = CreateValueLabel(muted);
-		_ticksValue = CreateValueLabel(muted);
-		_sessionsValue = CreateValueLabel(muted);
-
-		rightColumn.AddChild(CreateKeyValueRow("Profile", _profileValue, text));
-		rightColumn.AddChild(CreateKeyValueRow("State", _stateValue, text));
-		rightColumn.AddChild(CreateKeyValueRow("Ticks", _ticksValue, text));
-		rightColumn.AddChild(CreateKeyValueRow("Sessions", _sessionsValue, text));
 
 		return shellLayout;
 	}
@@ -572,18 +685,21 @@ public partial class ServerShellRoot : Control
 		logFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
 		column.AddChild(logFrame);
 
-		_performanceLog = new RichTextLabel();
-		_performanceLog.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		_performanceLog.SizeFlagsVertical = SizeFlags.ExpandFill;
-		_performanceLog.SelectionEnabled = true;
-		_performanceLog.ScrollActive = true;
-		_performanceLog.BbcodeEnabled = false;
-		_performanceLog.FitContent = false;
-		_performanceLog.ContextMenuEnabled = true;
-		_performanceLog.AddThemeColorOverride("default_color", text);
-		_performanceLog.Text =
-			"Per-system runtime metrics will appear here once the server runtime is backed by a real ECS world.";
-		logFrame.AddChild(_performanceLog);
+		var scroll = new ScrollContainer();
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Auto;
+		scroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+		logFrame.AddChild(scroll);
+
+		_performanceGrid = new GridContainer();
+		_performanceGrid.Columns = 10;
+		_performanceGrid.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_performanceGrid.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+		_performanceGrid.AddThemeConstantOverride("h_separation", 10);
+		_performanceGrid.AddThemeConstantOverride("v_separation", 4);
+		scroll.AddChild(_performanceGrid);
+		SetPerformancePlaceholder(text, muted);
 
 		return frame;
 	}
@@ -615,14 +731,7 @@ public partial class ServerShellRoot : Control
 		return button;
 	}
 
-	private Button CreateStatusButton(Color fill, Color text)
-	{
-		var button = CreateActionButton("Status", fill, text);
-		button.Pressed += PrintStatusSnapshot;
-		return button;
-	}
-
-	private static Button CreateDisabledButton(string text, Color fill, Color fontColor)
+		private static Button CreateDisabledButton(string text, Color fill, Color fontColor)
 	{
 		var button = CreateActionButton(text, fill, fontColor);
 		button.Disabled = true;
@@ -896,8 +1005,8 @@ public partial class ServerShellRoot : Control
 		if (exception.Result.ErrorCount > emitted)
 			AppendOutput("SCRIPT", $"{exception.Result.ErrorCount - emitted} additional script error(s) omitted; see cache/scripts/diagnostics.");
 
-		if (_stateValue is not null)
-			_stateValue.Text = "ScriptFault";
+		if (_bannerPrimaryValue is not null)
+			_bannerPrimaryValue.Text = "ticks 0    meanTickMs 0    maxTickMs 0";
 
 		RefreshControls(ServerApplicationState.Faulted);
 	}
@@ -906,17 +1015,7 @@ public partial class ServerShellRoot : Control
 	{
 		if (_controller is null)
 		{
-			if (_profileValue is not null)
-				_profileValue.Text = _options?.ProfileName ?? GodotServerShellOptions.Default.ProfileName;
-
-			if (_stateValue is not null)
-				_stateValue.Text = "ShellReady";
-
-			if (_ticksValue is not null)
-				_ticksValue.Text = "0";
-
-			if (_sessionsValue is not null)
-				_sessionsValue.Text = "0/0";
+			UpdateMetricBanner(null, null, Array.Empty<ServerPlayerSessionSnapshot>(), Array.Empty<ServerAccountSummarySnapshot>());
 
 			if (_playersSummaryValue is not null)
 				_playersSummaryValue.Text = "No active players.";
@@ -927,8 +1026,8 @@ public partial class ServerShellRoot : Control
 			if (_performanceSummaryValue is not null)
 				_performanceSummaryValue.Text = "Waiting for Start.";
 
-			if (_performanceLog is not null)
-				_performanceLog.Text = "Server systems will appear after Start.";
+			if (_performanceGrid is not null)
+				SetPerformancePlaceholder(new Color(0.90f, 0.92f, 0.95f), new Color(0.62f, 0.67f, 0.74f));
 
 			RefreshControls(ServerApplicationState.Created);
 			return;
@@ -940,17 +1039,7 @@ public partial class ServerShellRoot : Control
 		IReadOnlyList<ServerPlayerSessionSnapshot> players = _controller.GetPlayerSessionsSnapshot();
 		IReadOnlyList<ServerAccountSummarySnapshot> accounts = _controller.GetAccountSummariesSnapshot();
 
-		if (_profileValue is not null)
-			_profileValue.Text = status.ProfileName;
-
-		if (_stateValue is not null)
-			_stateValue.Text = status.State.ToString();
-
-		if (_ticksValue is not null)
-			_ticksValue.Text = status.TickCount.ToString();
-
-		if (_sessionsValue is not null)
-			_sessionsValue.Text = $"{status.ActiveSessions}/{status.PeakSessions}";
+		UpdateMetricBanner(status, metrics, players, accounts);
 
 		if (_playersSummaryValue is not null)
 			_playersSummaryValue.Text = players.Count == 0
@@ -966,6 +1055,75 @@ public partial class ServerShellRoot : Control
 		RefreshControls(status.State);
 	}
 
+	private void UpdateMetricBanner(
+		ServerStatusSnapshot? status,
+		ServerMetricsSnapshot? metrics,
+		IReadOnlyList<ServerPlayerSessionSnapshot> players,
+		IReadOnlyList<ServerAccountSummarySnapshot> accounts)
+	{
+		if (!status.HasValue || !metrics.HasValue)
+		{
+			_bannerSampleCount = 0;
+			_playerOnlineSampleTotal = 0.0;
+			_accountOnlineSampleTotal = 0.0;
+			if (_bannerPrimaryValue is not null)
+				_bannerPrimaryValue.Text = "ticks 0    meanTickMs 0    maxTickMs 0";
+			SetBannerMetric(_bannerPlayersValue, "players 0/0/0", "players on/avg/total: 0 / 0 / 0");
+			SetBannerMetric(_bannerAccountsValue, "accounts 0/0/0", "accounts on/avg/total: 0 / 0 / 0");
+			SetBannerMetric(_bannerMobilesValue, "mobiles 0/0", "mobiles spawned/prefabs: 0 / 0");
+			SetBannerMetric(_bannerItemsValue, "items 0/0", "items spawned/prefabs: 0 / 0");
+			return;
+		}
+
+		ServerStatusSnapshot statusValue = status.Value;
+		ServerMetricsSnapshot metricsValue = metrics.Value;
+		int onlineAccounts = CountOnlineAccounts(accounts);
+		_bannerSampleCount++;
+		_playerOnlineSampleTotal += statusValue.ActiveSessions;
+		_accountOnlineSampleTotal += onlineAccounts;
+
+		double averagePlayers = _playerOnlineSampleTotal / _bannerSampleCount;
+		double averageAccounts = _accountOnlineSampleTotal / _bannerSampleCount;
+		if (_bannerPrimaryValue is not null)
+		{
+			_bannerPrimaryValue.Text =
+				$"ticks {statusValue.TickCount}    " +
+				$"meanTickMs {metricsValue.MeanTickMilliseconds:0.###}    maxTickMs {metricsValue.MaxTickMilliseconds:0.###}";
+		}
+
+		SetBannerMetric(
+			_bannerPlayersValue,
+			$"players {statusValue.ActiveSessions}/{averagePlayers:0.#}/{players.Count}",
+			$"players on/avg/total: {statusValue.ActiveSessions} / {averagePlayers:0.#} / {players.Count}");
+		SetBannerMetric(
+			_bannerAccountsValue,
+			$"accounts {onlineAccounts}/{averageAccounts:0.#}/{accounts.Count}",
+			$"accounts on/avg/total: {onlineAccounts} / {averageAccounts:0.#} / {accounts.Count}");
+		SetBannerMetric(_bannerMobilesValue, "mobiles 0/0", "mobiles spawned/prefabs: 0 / 0");
+		SetBannerMetric(_bannerItemsValue, "items 0/0", "items spawned/prefabs: 0 / 0");
+	}
+
+	private static void SetBannerMetric(Label? label, string text, string tooltip)
+	{
+		if (label is null)
+			return;
+
+		label.Text = text;
+		label.TooltipText = tooltip;
+	}
+
+	private static int CountOnlineAccounts(IReadOnlyList<ServerAccountSummarySnapshot> accounts)
+	{
+		int count = 0;
+		for (int i = 0; i < accounts.Count; i++)
+		{
+			if (accounts[i].IsOnline)
+				count++;
+		}
+
+		return count;
+	}
+
 	private void RefreshPerformance(ServerMetricsSnapshot metrics, IReadOnlyList<ServerSystemRuntimeSnapshot> systems)
 	{
 		if (_performanceSummaryValue is not null)
@@ -975,49 +1133,116 @@ public partial class ServerShellRoot : Control
 				$"max={metrics.MaxTickMilliseconds:0.###} ms  systems={systems.Count}";
 		}
 
-		if (_performanceLog is null)
+		if (_performanceGrid is null)
 			return;
 
+		ClearPerformanceGrid();
+		AddPerformanceHeader();
 		if (systems.Count == 0)
-		{
-			_performanceLog.Text =
-				"Per-system runtime metrics will appear here once the server runtime is backed by a real ECS world.\n\n" +
-				"The shell contract is already in place, so future runtimes can expose live scheduler/system timings here.";
 			return;
-		}
-
-		var builder = new StringBuilder();
-		builder.AppendLine("Name | Stage | Mode | Period | Last | Avg | Peak | Min | Runs | Controls");
-		builder.AppendLine(new string('-', 96));
 
 		for (int i = 0; i < systems.Count; i++)
 		{
 			ServerSystemRuntimeSnapshot system = systems[i];
 			string mode = system.Manual ? "manual" : (system.Enabled ? "enabled" : "disabled");
 			string period = $"{system.PeriodTicks}/{system.StartOffset}";
-			builder.Append(system.Name);
-			builder.Append(" | ");
-			builder.Append(system.Stage);
-			builder.Append(" | ");
-			builder.Append(mode);
-			builder.Append(" | ");
-			builder.Append(period);
-			builder.Append(" | ");
-			builder.Append(system.LastUpdateMilliseconds.ToString("0.###"));
-			builder.Append(" | ");
-			builder.Append(system.AverageUpdateMilliseconds.ToString("0.###"));
-			builder.Append(" | ");
-			builder.Append(system.PeakUpdateMilliseconds.ToString("0.###"));
-			builder.Append(" | ");
-			builder.Append(system.MinUpdateMilliseconds.ToString("0.###"));
-			builder.Append(" | ");
-			builder.Append(system.UpdateCount);
-			builder.Append(" | ");
-			builder.Append(system.ControlCount);
-			builder.AppendLine();
+			AddPerformanceRow(
+				system.Name,
+				system.Stage,
+				mode,
+				period,
+				system.LastUpdateMilliseconds.ToString("0.###"),
+				system.AverageUpdateMilliseconds.ToString("0.###"),
+				system.PeakUpdateMilliseconds.ToString("0.###"),
+				system.MinUpdateMilliseconds.ToString("0.###"),
+				system.UpdateCount.ToString(),
+				system.ControlCount.ToString());
 		}
+	}
 
-		_performanceLog.Text = builder.ToString();
+	private void SetPerformancePlaceholder(Color text, Color muted)
+	{
+		if (_performanceGrid is null)
+			return;
+
+		ClearPerformanceGrid();
+		AddPerformanceHeader();
+		AddPerformanceCell("Waiting for Start", text, 180);
+		AddPerformanceCell("", muted, 100);
+		AddPerformanceCell("", muted, 76);
+		AddPerformanceCell("", muted, 70, alignRight: true);
+		AddPerformanceCell("", muted, 76, alignRight: true);
+		AddPerformanceCell("", muted, 76, alignRight: true);
+		AddPerformanceCell("", muted, 76, alignRight: true);
+		AddPerformanceCell("", muted, 76, alignRight: true);
+		AddPerformanceCell("", muted, 86, alignRight: true);
+		AddPerformanceCell("", muted, 72, alignRight: true);
+	}
+
+	private void AddPerformanceHeader()
+	{
+		Color text = new(0.90f, 0.92f, 0.95f);
+		AddPerformanceCell("Name", text, 180);
+		AddPerformanceCell("Stage", text, 100);
+		AddPerformanceCell("Mode", text, 76);
+		AddPerformanceCell("Period", text, 70, alignRight: true);
+		AddPerformanceCell("Last", text, 76, alignRight: true);
+		AddPerformanceCell("Avg", text, 76, alignRight: true);
+		AddPerformanceCell("Peak", text, 76, alignRight: true);
+		AddPerformanceCell("Min", text, 76, alignRight: true);
+		AddPerformanceCell("Runs", text, 86, alignRight: true);
+		AddPerformanceCell("Controls", text, 72, alignRight: true);
+	}
+
+	private void AddPerformanceRow(
+		string name,
+		string stage,
+		string mode,
+		string period,
+		string last,
+		string average,
+		string peak,
+		string min,
+		string runs,
+		string controls)
+	{
+		Color muted = new(0.62f, 0.67f, 0.74f);
+		AddPerformanceCell(name, muted, 180);
+		AddPerformanceCell(stage, muted, 100);
+		AddPerformanceCell(mode, muted, 76);
+		AddPerformanceCell(period, muted, 70, alignRight: true);
+		AddPerformanceCell(last, muted, 76, alignRight: true);
+		AddPerformanceCell(average, muted, 76, alignRight: true);
+		AddPerformanceCell(peak, muted, 76, alignRight: true);
+		AddPerformanceCell(min, muted, 76, alignRight: true);
+		AddPerformanceCell(runs, muted, 86, alignRight: true);
+		AddPerformanceCell(controls, muted, 72, alignRight: true);
+	}
+
+	private void AddPerformanceCell(string value, Color color, float width, bool alignRight = false)
+	{
+		if (_performanceGrid is null)
+			return;
+
+		var label = new Label();
+		label.Text = value;
+		label.ClipText = true;
+		label.CustomMinimumSize = new Vector2(width, 22);
+		label.HorizontalAlignment = alignRight ? HorizontalAlignment.Right : HorizontalAlignment.Left;
+		label.AddThemeColorOverride("font_color", color);
+		_performanceGrid.AddChild(label);
+	}
+
+	private void ClearPerformanceGrid()
+	{
+		if (_performanceGrid is null)
+			return;
+
+		foreach (Node child in _performanceGrid.GetChildren())
+		{
+			_performanceGrid.RemoveChild(child);
+			child.QueueFree();
+		}
 	}
 
 	private void RefreshControls(ServerApplicationState state)
@@ -1046,12 +1271,9 @@ public partial class ServerShellRoot : Control
 		if (_shutdownWithoutSaveButton is not null)
 			_shutdownWithoutSaveButton.Disabled = !canShutdown;
 
-		if (_statusButton is not null)
-			_statusButton.Disabled = !hasController;
-
-		if (_commandLine is not null)
-			_commandLine.Editable = true;
-	}
+			if (_commandLine is not null)
+				_commandLine.Editable = true;
+		}
 
 	private void AppendOutput(string category, string message, DateTimeOffset? timestamp = null)
 	{

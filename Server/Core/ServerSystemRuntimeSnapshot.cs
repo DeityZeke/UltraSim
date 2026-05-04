@@ -7,7 +7,7 @@ public readonly record struct ServerSystemRuntimeSnapshot(
     bool Manual,
     int PeriodTicks,
     int StartOffset,
-    uint LastRunTick,
+    ulong LastRunTick,
     long UpdateCount,
     double LastUpdateMilliseconds,
     double AverageUpdateMilliseconds,

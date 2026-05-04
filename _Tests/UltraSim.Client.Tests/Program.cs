@@ -1934,7 +1934,7 @@ internal static class TestRunner
         int pongCount = client.Control.DrainReceivedPongs(pongs);
         Assert.Equal(1, pongCount);
         Assert.Equal((ushort)77, pongs[0].Sequence);
-        Assert.Equal((uint)12345, pongs[0].ClientTick);
+        Assert.Equal((ulong)12345, pongs[0].ClientTick);
 
         ControlPlaneMetricsSnapshot serverMetrics = server.GetMetricsSnapshot();
         ControlPlaneMetricsSnapshot clientMetrics = client.Control.GetMetricsSnapshot();

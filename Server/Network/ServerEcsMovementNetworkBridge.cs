@@ -19,7 +19,7 @@ public sealed class ServerEcsMovementNetworkBridge
         ushort LastProcessedInputSequence,
         MovementStatePacket LastSentState,
         bool HasLastSentState,
-        uint LastSentServerTick);
+        ulong LastSentServerTick);
 
     private readonly World _world;
     private readonly INetworkTransport _transport;
@@ -127,7 +127,7 @@ public sealed class ServerEcsMovementNetworkBridge
         return processed;
     }
 
-    public int AdvanceAndSend(float deltaSeconds, uint serverTick, bool flushOutbound = true)
+    public int AdvanceAndSend(float deltaSeconds, ulong serverTick, bool flushOutbound = true)
     {
         if (float.IsNaN(deltaSeconds) || float.IsInfinity(deltaSeconds) || deltaSeconds < 0f)
             throw new ArgumentOutOfRangeException(nameof(deltaSeconds));
@@ -192,7 +192,7 @@ public sealed class ServerEcsMovementNetworkBridge
     public int PublishObserverMovementStates(
         ServerEcsWorldNetworkPublisher publisher,
         SubscriptionKey scopeKey,
-        uint serverTick)
+        ulong serverTick)
     {
         ArgumentNullException.ThrowIfNull(publisher);
         if (!scopeKey.IsValid)
@@ -260,12 +260,12 @@ public sealed class ServerEcsMovementNetworkBridge
         return unchecked((short)(left - right)) > 0;
     }
 
-    private bool ShouldSendOwnerCorrection(in BindingState state, in MovementStatePacket packet, uint serverTick)
+    private bool ShouldSendOwnerCorrection(in BindingState state, in MovementStatePacket packet, ulong serverTick)
     {
         if (!state.HasLastSentState)
             return true;
 
-        uint silentTicks = serverTick - state.LastSentServerTick;
+        ulong silentTicks = serverTick - state.LastSentServerTick;
         if (silentTicks >= _ownerCorrectionPolicy.MaxSilentTicks)
             return true;
 

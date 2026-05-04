@@ -6,7 +6,7 @@ public readonly record struct ChatMessageEventPacket(
     ulong SenderEntityId,
     string SenderName,
     string Text,
-    uint ServerTick,
+    ulong ServerTick,
     ChatMessageFlags Flags) : IPacket<ChatMessageEventPacket>
 {
     public static ushort PacketId => 0x0301;
@@ -21,7 +21,7 @@ public readonly record struct ChatMessageEventPacket(
         writer.WriteUInt64(SenderEntityId);
         writer.WriteString(SenderName ?? string.Empty);
         writer.WriteString(Text ?? string.Empty);
-        writer.WriteUInt32(ServerTick);
+        writer.WriteUInt64(ServerTick);
         writer.WriteUInt16((ushort)Flags);
     }
 
@@ -33,7 +33,7 @@ public readonly record struct ChatMessageEventPacket(
             reader.ReadUInt64(),
             reader.ReadString(),
             reader.ReadString(),
-            reader.ReadUInt32(),
+            reader.ReadUInt64(),
             (ChatMessageFlags)reader.ReadUInt16());
     }
 }

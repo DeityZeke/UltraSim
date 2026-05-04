@@ -5,7 +5,7 @@ namespace UltraSim.Network;
 /// </summary>
 public readonly record struct MovementStatePacket(
     uint NetworkEntityId,
-    uint ServerTick,
+    ulong ServerTick,
     ushort LastProcessedInputSequence,
     float PositionX,
     float PositionY,
@@ -20,7 +20,7 @@ public readonly record struct MovementStatePacket(
     public void Serialize(ref BitWriter writer)
     {
         writer.WriteUInt32(NetworkEntityId);
-        writer.WriteUInt32(ServerTick);
+        writer.WriteUInt64(ServerTick);
         writer.WriteUInt16(LastProcessedInputSequence);
         writer.WriteSingle(PositionX);
         writer.WriteSingle(PositionY);
@@ -32,7 +32,7 @@ public readonly record struct MovementStatePacket(
     {
         return new MovementStatePacket(
             reader.ReadUInt32(),
-            reader.ReadUInt32(),
+            reader.ReadUInt64(),
             reader.ReadUInt16(),
             reader.ReadSingle(),
             reader.ReadSingle(),

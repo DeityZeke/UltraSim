@@ -243,7 +243,7 @@ public sealed class ServerMovementSessionHost
         _control.Stop();
     }
 
-    public int Pump(long nowTicks, float deltaSeconds, uint serverTick, bool flushOutbound = true)
+    public int Pump(long nowTicks, float deltaSeconds, ulong serverTick, bool flushOutbound = true)
     {
         int totalInboundCount = 0;
         long pollElapsedTicks = 0;
@@ -546,7 +546,7 @@ public sealed class ServerMovementSessionHost
         return _selectedCharacterSnapshotWriter(connectionId, selected, position, _snapshotClock());
     }
 
-    private void ProcessChatInbound(ReadOnlySpan<InboundDatagram> inbound, long nowTicks, uint serverTick)
+    private void ProcessChatInbound(ReadOnlySpan<InboundDatagram> inbound, long nowTicks, ulong serverTick)
     {
         for (int i = 0; i < inbound.Length; i++)
         {

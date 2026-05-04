@@ -23,7 +23,7 @@ public sealed class GodotClientNetworkSessionDriver : IDisposable
     private bool _disposed;
     private uint _clientTick;
     private bool _lastReady;
-    private uint _lastOwnerServerTick;
+    private ulong _lastOwnerServerTick;
     private ushort _lastOwnerInputSequence;
     private ushort _nextPingSequence;
     private long _nextPingTicks;

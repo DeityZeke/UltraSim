@@ -8,5 +8,5 @@ public delegate bool ServerEcsMovementStateProjector(
     Entity entity,
     uint networkEntityId,
     ushort lastProcessedInputSequence,
-    uint serverTick,
+    ulong serverTick,
     out MovementStatePacket packet);

@@ -104,7 +104,7 @@ public sealed class ClientMovementNetworkBridge
         return processed;
     }
 
-    public bool TrySampleInterpolatedState(uint targetServerTick, InterpolationLerp<ClientMovementState> lerp, out ClientMovementState state)
+    public bool TrySampleInterpolatedState(ulong targetServerTick, InterpolationLerp<ClientMovementState> lerp, out ClientMovementState state)
     {
         return _interpolation.TrySample(targetServerTick, lerp, out state);
     }

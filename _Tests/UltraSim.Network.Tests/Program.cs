@@ -267,7 +267,7 @@ internal static class TestRunner
         var reader = new BitReader(rawPayload);
         PingProbePacket packet = PingProbePacket.Deserialize(ref reader);
         Assert.Equal((ushort)7, packet.Sequence);
-        Assert.Equal((uint)1234, packet.ClientTick);
+        Assert.Equal((ulong)1234, packet.ClientTick);
     }
 
     private static void UdpSocketTransport_FlushOutbound_BundlesSameConnectionPackets()
@@ -579,7 +579,7 @@ internal static class TestRunner
         Assert.Equal((ulong)1234, decoded.SenderEntityId);
         Assert.Equal("server", decoded.SenderName);
         Assert.Equal("Maintenance in 10 minutes.", decoded.Text);
-        Assert.Equal((uint)77, decoded.ServerTick);
+        Assert.Equal((ulong)77, decoded.ServerTick);
         Assert.Equal(ChatMessageFlags.System | ChatMessageFlags.Announcement, decoded.Flags);
     }
 
@@ -1089,7 +1089,7 @@ internal static class TestRunner
         Assert.Equal(1, client.ReceivedPongs.Count);
         Assert.Equal((ushort)17, client.ReceivedPongs[0].Sequence);
         Assert.Equal((uint)303, client.ReceivedPongs[0].ClientTick);
-        Assert.Equal((uint)304, client.ReceivedPongs[0].ServerTick);
+        Assert.Equal((ulong)304, client.ReceivedPongs[0].ServerTick);
 
         ControlPlaneMetricsSnapshot serverMetrics = server.GetMetricsSnapshot();
         ControlPlaneMetricsSnapshot clientMetrics = client.GetMetricsSnapshot();

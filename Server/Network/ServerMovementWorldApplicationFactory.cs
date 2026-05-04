@@ -33,6 +33,7 @@ public static class ServerMovementWorldApplicationFactory
                 GetActiveSessions = _ => runtime.ActiveSessions,
                 GetSystemRuntimeSnapshots = _ => runtime.GetSystemRuntimeSnapshots(),
                 GetPlayerSessions = _ => runtime.GetPlayerSessionsSnapshot(),
+                GetAccountSummaries = _ => runtime.GetAccountSummariesSnapshot(),
             });
     }
 
@@ -54,13 +55,19 @@ public static class ServerMovementWorldApplicationFactory
         private UdpSocketNetworkTransport? _transport;
         private ServerMovementSessionHost? _host;
         private uint _nextNetworkEntityId = 1;
-        private uint _serverTick;
+        private ulong _serverTick;
         private ulong _lastSaveSequence;
         private bool _lastLoadStartedFresh;
         private bool _lastLoadUsedBackup;
         private int _lastPersistenceWarningCount;
         private int _lastPersistenceFailureCount;
         private string _lastPersistencePath = string.Empty;
+        private ulong _lastPersistenceRunTick;
+        private long _persistenceOperationCount;
+        private long _lastPersistenceElapsedTicks;
+        private double _totalPersistenceElapsedMilliseconds;
+        private double _peakPersistenceElapsedMilliseconds;
+        private double _minPersistenceElapsedMilliseconds;
         private long _lastPumpElapsedTicks;
 
         public Runtime(ServerMovementWorldApplicationOptions options)
@@ -156,7 +163,9 @@ public static class ServerMovementWorldApplicationFactory
         public void Load(ServerApplication app)
         {
             ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
+            long persistenceStart = Stopwatch.GetTimestamp();
             ServerPersistenceLoadResult result = coordinator.Load();
+            RecordPersistenceElapsed(Stopwatch.GetTimestamp() - persistenceStart);
             if (!result.Succeeded)
             {
                 string message = result.Failures.Count == 0
@@ -190,7 +199,9 @@ public static class ServerMovementWorldApplicationFactory
         public void Save(ServerApplication app)
         {
             ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
+            long persistenceStart = Stopwatch.GetTimestamp();
             ServerPersistenceSaveResult result = coordinator.Save(DateTimeOffset.UtcNow);
+            RecordPersistenceElapsed(Stopwatch.GetTimestamp() - persistenceStart);
             if (!result.Succeeded)
             {
                 _lastPersistenceFailureCount = result.Failures.Count == 0 ? 1 : result.Failures.Count;
@@ -284,7 +295,7 @@ public static class ServerMovementWorldApplicationFactory
                     PeriodTicks: 1,
                     StartOffset: 0,
                     LastRunTick: _serverTick,
-                    UpdateCount: _serverTick,
+                    UpdateCount: _serverTick > long.MaxValue ? long.MaxValue : (long)_serverTick,
                     LastUpdateMilliseconds: lastMilliseconds,
                     AverageUpdateMilliseconds: lastMilliseconds,
                     PeakUpdateMilliseconds: lastMilliseconds,
@@ -297,13 +308,15 @@ public static class ServerMovementWorldApplicationFactory
                     Manual: true,
                     PeriodTicks: 0,
                     StartOffset: 0,
-                    LastRunTick: _serverTick,
-                    UpdateCount: _lastSaveSequence > long.MaxValue ? long.MaxValue : (long)_lastSaveSequence,
-                    LastUpdateMilliseconds: 0d,
-                    AverageUpdateMilliseconds: 0d,
-                    PeakUpdateMilliseconds: 0d,
-                    MinUpdateMilliseconds: 0d,
-                    ControlCount: _lastPersistenceWarningCount,
+                    LastRunTick: _lastPersistenceRunTick,
+                    UpdateCount: _persistenceOperationCount,
+                    LastUpdateMilliseconds: TicksToMilliseconds(_lastPersistenceElapsedTicks),
+                    AverageUpdateMilliseconds: _persistenceOperationCount == 0
+                        ? 0d
+                        : _totalPersistenceElapsedMilliseconds / _persistenceOperationCount,
+                    PeakUpdateMilliseconds: _peakPersistenceElapsedMilliseconds,
+                    MinUpdateMilliseconds: _persistenceOperationCount == 0 ? 0d : _minPersistenceElapsedMilliseconds,
+                    ControlCount: _lastPersistenceWarningCount + _lastPersistenceFailureCount,
                     Detail: BuildPersistenceDetail()),
             ];
         }
@@ -332,6 +345,46 @@ public static class ServerMovementWorldApplicationFactory
             return players;
         }
 
+        public IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot()
+        {
+            IReadOnlyList<ServerAccountRecord> accounts = _accounts.GetAccountsSnapshot();
+            if (accounts.Count == 0)
+                return Array.Empty<ServerAccountSummarySnapshot>();
+
+            HashSet<ulong> onlineAccounts = GetOnlineAccountIds();
+            var summaries = new ServerAccountSummarySnapshot[accounts.Count];
+            for (int i = 0; i < accounts.Count; i++)
+            {
+                ServerAccountRecord account = accounts[i];
+                summaries[i] = new ServerAccountSummarySnapshot(
+                    account.AccountId.ToString(),
+                    account.Username,
+                    onlineAccounts.Contains(account.AccountId),
+                    account.Status == AccountStatus.Banned,
+                    $"characters={account.CharacterCount}");
+            }
+
+            return summaries;
+        }
+
+        private HashSet<ulong> GetOnlineAccountIds()
+        {
+            var online = new HashSet<ulong>();
+            ServerMovementSessionHost? host = _host;
+            if (host is null || host.BoundConnectionCount == 0)
+                return online;
+
+            var connections = new ConnectionId[host.BoundConnectionCount];
+            int count = host.CopyBoundConnections(connections);
+            for (int i = 0; i < count; i++)
+            {
+                if (host.TryGetSelectedCharacter(connections[i], out ServerSelectedCharacterSession selected))
+                    online.Add(selected.AccountId);
+            }
+
+            return online;
+        }
+
         private void ApplyMovementInput(World world, Entity entity, in MovementInputPacket input, float deltaSeconds)
         {
             if (!world.TryGetComponent(entity, out ServerMovementBody body))
@@ -357,7 +410,7 @@ public static class ServerMovementWorldApplicationFactory
             Entity entity,
             uint networkEntityId,
             ushort lastProcessedInputSequence,
-            uint serverTick,
+            ulong serverTick,
             out MovementStatePacket packet)
         {
             if (!world.TryGetComponent(entity, out ServerMovementBody body))
@@ -460,6 +513,31 @@ public static class ServerMovementWorldApplicationFactory
                 ],
                 new ServerPersistenceSaveSetOptions(BackupsRootDirectory: backupsRoot),
                 initialSaveSequence: _lastSaveSequence);
+        }
+
+        private void RecordPersistenceElapsed(long elapsedTicks)
+        {
+            elapsedTicks = Math.Max(0, elapsedTicks);
+            double elapsedMilliseconds = TicksToMilliseconds(elapsedTicks);
+            _lastPersistenceElapsedTicks = elapsedTicks;
+            _lastPersistenceRunTick = _serverTick;
+            _persistenceOperationCount++;
+            _totalPersistenceElapsedMilliseconds += elapsedMilliseconds;
+
+            if (_persistenceOperationCount == 1)
+            {
+                _peakPersistenceElapsedMilliseconds = elapsedMilliseconds;
+                _minPersistenceElapsedMilliseconds = elapsedMilliseconds;
+                return;
+            }
+
+            _peakPersistenceElapsedMilliseconds = Math.Max(_peakPersistenceElapsedMilliseconds, elapsedMilliseconds);
+            _minPersistenceElapsedMilliseconds = Math.Min(_minPersistenceElapsedMilliseconds, elapsedMilliseconds);
+        }
+
+        private static double TicksToMilliseconds(long elapsedTicks)
+        {
+            return elapsedTicks <= 0 ? 0d : elapsedTicks * 1000d / Stopwatch.Frequency;
         }
 
         private string BuildPersistenceDetail()

@@ -1,5 +1,5 @@
 namespace UltraSim.Client;
 
 public readonly record struct ClientInterpolationSample<TState>(
-    uint ServerTick,
+    ulong ServerTick,
     TState State);

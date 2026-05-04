@@ -2,7 +2,7 @@ namespace UltraSim.Client;
 
 public readonly record struct ClientMovementStateReceiveResult(
     uint NetworkEntityId,
-    uint ServerTick,
+    ulong ServerTick,
     ushort LastProcessedInputSequence,
     ClientMovementState AuthoritativeState,
     bool HadPredictedState,

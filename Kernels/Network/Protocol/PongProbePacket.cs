@@ -9,9 +9,9 @@ public readonly struct PongProbePacket : IPacket<PongProbePacket>
 
     public readonly ushort Sequence;
     public readonly uint ClientTick;
-    public readonly uint ServerTick;
+    public readonly ulong ServerTick;
 
-    public PongProbePacket(ushort sequence, uint clientTick, uint serverTick)
+    public PongProbePacket(ushort sequence, uint clientTick, ulong serverTick)
     {
         Sequence = sequence;
         ClientTick = clientTick;
@@ -22,7 +22,7 @@ public readonly struct PongProbePacket : IPacket<PongProbePacket>
     {
         writer.WriteUInt16(Sequence);
         writer.WriteUInt32(ClientTick);
-        writer.WriteUInt32(ServerTick);
+        writer.WriteUInt64(ServerTick);
     }
 
     public static PongProbePacket Deserialize(ref BitReader reader)
@@ -30,6 +30,6 @@ public readonly struct PongProbePacket : IPacket<PongProbePacket>
         return new PongProbePacket(
             reader.ReadUInt16(),
             reader.ReadUInt32(),
-            reader.ReadUInt32());
+            reader.ReadUInt64());
     }
 }
