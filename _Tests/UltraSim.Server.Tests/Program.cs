@@ -22,6 +22,8 @@ internal static class TestRunner
     public static void Run()
     {
         Run(nameof(ServerApplicationState_PreservesExpectedLifecycleOrder), ServerApplicationState_PreservesExpectedLifecycleOrder);
+        Run(nameof(Xoroshiro256PlusPlus_IsDeterministicAndBounded), Xoroshiro256PlusPlus_IsDeterministicAndBounded);
+        Run(nameof(Xoroshiro256PlusPlusRandom_UsesRandomSurface), Xoroshiro256PlusPlusRandom_UsesRandomSurface);
         Run(nameof(ServerControlCommand_FactoryHelpers_ProduceExpectedKinds), ServerControlCommand_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerCommandResult_FactoryHelpers_ProduceExpectedKinds), ServerCommandResult_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerStatusSnapshot_PreservesSuppliedValues), ServerStatusSnapshot_PreservesSuppliedValues);
@@ -118,6 +120,48 @@ internal static class TestRunner
         Assert.Equal(10, (int)ServerApplicationState.Faulted);
     }
 
+    private static void Xoroshiro256PlusPlus_IsDeterministicAndBounded()
+    {
+        var first = new Xoroshiro256PlusPlus(42);
+        var second = new Xoroshiro256PlusPlus(42);
+        var different = new Xoroshiro256PlusPlus(43);
+
+        for (int i = 0; i < 16; i++)
+            Assert.Equal(first.NextUInt64(), second.NextUInt64());
+
+        Assert.False(first.NextUInt64() == different.NextUInt64());
+
+        for (int i = 0; i < 256; i++)
+        {
+            int value = first.NextInt32(10, 25);
+            Assert.True(value >= 10);
+            Assert.True(value < 25);
+
+            double sample = first.NextDouble();
+            Assert.True(sample >= 0d);
+            Assert.True(sample < 1d);
+        }
+
+        Assert.Throws<ArgumentException>(() => new Xoroshiro256PlusPlus(0, 0, 0, 0));
+    }
+
+    private static void Xoroshiro256PlusPlusRandom_UsesRandomSurface()
+    {
+        Random first = new Xoroshiro256PlusPlusRandom(7);
+        Random second = new Xoroshiro256PlusPlusRandom(7);
+        Span<byte> bytes = stackalloc byte[19];
+
+        for (int i = 0; i < 16; i++)
+            Assert.Equal(first.Next(1, 1000), second.Next(1, 1000));
+
+        first.NextBytes(bytes);
+        long nonZero = 0;
+        for (int i = 0; i < bytes.Length; i++)
+            nonZero |= bytes[i];
+
+        Assert.True(nonZero != 0);
+    }
+
     private static void ServerControlCommand_FactoryHelpers_ProduceExpectedKinds()
     {
         Assert.Equal(ServerControlCommandKind.Start, ServerControlCommand.Start().Kind);
@@ -128,6 +172,9 @@ internal static class TestRunner
         Assert.Equal(ServerControlCommandKind.Status, ServerControlCommand.Status().Kind);
         Assert.Equal(ServerControlCommandKind.Shutdown, ServerControlCommand.Shutdown().Kind);
         Assert.Equal("without-save", ServerControlCommand.ShutdownWithoutSave().Argument);
+        Assert.Equal(ServerControlCommandKind.ListBackups, ServerControlCommand.ListBackups().Kind);
+        Assert.Equal(ServerControlCommandKind.RestoreBackup, ServerControlCommand.RestoreBackup("Most Recent").Kind);
+        Assert.Equal("Most Recent", ServerControlCommand.RestoreBackup("Most Recent").Argument);
 
         var command = new ServerControlCommand(ServerControlCommandKind.Status, "detail");
         Assert.Equal("detail", command.Argument);
@@ -438,6 +485,9 @@ internal static class TestRunner
             new ServerApplicationHooks
             {
                 Save = _ => saves++,
+                ExecuteCommand = (_, command) => command.Kind == ServerControlCommandKind.ListBackups
+                    ? ServerCommandResult.Accepted("custom backups")
+                    : null,
             });
 
         Assert.True(app.TryExecuteCommand(ServerControlCommand.Start(), out ServerCommandResult startResult));
@@ -446,6 +496,10 @@ internal static class TestRunner
 
         Assert.True(app.TryExecuteCommand(ServerControlCommand.Status(), out ServerCommandResult statusResult));
         Assert.Equal(ServerCommandResultKind.Accepted, statusResult.Kind);
+
+        Assert.True(app.TryExecuteCommand(ServerControlCommand.ListBackups(), out ServerCommandResult listBackupsResult));
+        Assert.Equal(ServerCommandResultKind.Accepted, listBackupsResult.Kind);
+        Assert.Equal("custom backups", listBackupsResult.Message);
 
         Assert.True(app.TryExecuteCommand(ServerControlCommand.Save(), out ServerCommandResult saveResult));
         Assert.Equal(ServerCommandResultKind.Accepted, saveResult.Kind);
@@ -984,6 +1038,11 @@ internal static class TestRunner
         Assert.Equal(ConsoleShellDirectiveKind.Help, ConsoleShellCommandParser.Parse("help").Kind);
         Assert.Equal(ConsoleShellDirectiveKind.None, ConsoleShellCommandParser.Parse(" ").Kind);
         Assert.Equal(ServerControlCommandKind.Status, ConsoleShellCommandParser.Parse("status").Command.Kind);
+        Assert.Equal(ServerControlCommandKind.ListBackups, ConsoleShellCommandParser.Parse("backups").Command.Kind);
+        Assert.Equal(ServerControlCommandKind.ListBackups, ConsoleShellCommandParser.Parse("list-backups").Command.Kind);
+        ConsoleShellDirective restore = ConsoleShellCommandParser.Parse("restore Most Recent (4-5-2026 12-00-00)");
+        Assert.Equal(ServerControlCommandKind.RestoreBackup, restore.Command.Kind);
+        Assert.Equal("Most Recent (4-5-2026 12-00-00)", restore.Command.Argument);
         Assert.Equal(ServerControlCommandKind.Save, ConsoleShellCommandParser.Parse("save").Command.Kind);
         Assert.Equal(ServerControlCommandKind.Restart, ConsoleShellCommandParser.Parse("restart").Command.Kind);
         Assert.Equal("without-save", ConsoleShellCommandParser.Parse("restart-nosave").Command.Argument);

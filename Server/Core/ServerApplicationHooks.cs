@@ -13,4 +13,5 @@ public sealed class ServerApplicationHooks
     public Func<ServerApplication, IReadOnlyList<ServerSystemRuntimeSnapshot>>? GetSystemRuntimeSnapshots { get; init; }
     public Func<ServerApplication, IReadOnlyList<ServerPlayerSessionSnapshot>>? GetPlayerSessions { get; init; }
     public Func<ServerApplication, IReadOnlyList<ServerAccountSummarySnapshot>>? GetAccountSummaries { get; init; }
+    public Func<ServerApplication, ServerControlCommand, ServerCommandResult?>? ExecuteCommand { get; init; }
 }

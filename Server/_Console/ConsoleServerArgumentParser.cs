@@ -246,6 +246,8 @@ public static class ConsoleServerArgumentParser
         Console commands:
           start
           status
+          backups
+          restore <backup-folder-name>
           save
           restart
           restart-nosave

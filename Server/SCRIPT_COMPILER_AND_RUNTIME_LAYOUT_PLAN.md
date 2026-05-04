@@ -461,6 +461,17 @@ Prefab defaults may be constants or per-spawn factories. Randomized values must 
 
 Per-spawn factories should receive an explicit roll context supplied by the spawn/catalog bridge. Do not use `Random.Shared` or global static RNG directly inside prefab registration. The roll context can later carry deterministic seeds, spawn sequence, prefab key, region/world metadata, loot-quality context, or event modifiers without changing prefab authoring shape.
 
+`Xoroshiro256PlusPlus` is now the concrete default seeded generator for prefab
+rolls, NPC behavior rolls, loot rolls, and other server-authored deterministic
+chaos. `Xoroshiro256PlusPlusRandom` preserves the existing `Random`-compatible
+script authoring surface, while the direct struct path is available for hot
+simulation code. The important contract is not just "random is seeded"; it is
+that roll streams are explicit, reproducible, fast, and never hidden behind
+process-global `Random.Shared` state. The local random benchmark showed the
+expected large win for 64-bit rolls and smaller wins for ordinary/bounded
+32-bit rolls on .NET 8, so use the benchmark numbers rather than assuming a
+universal 5x improvement.
+
 This API is illustrative, not locked. The implementation can choose exact names, but it should preserve the shape:
 
 - class inheritance is for authoring readability
@@ -836,6 +847,36 @@ Most server customization should fit in `scripts/`:
 - housing/auction/guild systems
 
 If a server operator wants a VitaNex-style foundation package, it can live under `scripts/Engines/SomeFoundation/` and compile with the rest.
+
+## UO Ecosystem Content Patterns
+
+ServUO, ModernUO, TazUO, XmlSpawner, UltimaLive, and VitaNex are useful as
+community reference points, but they should map onto UltraSim's existing
+architecture instead of becoming separate compatibility layers.
+
+The practical mappings are:
+
+- XmlSpawner attachment behavior maps to ECS component add/remove, not a
+  parallel attachment subsystem.
+- XmlSpawner spawn sets map to named data prefab groups that can be loaded,
+  enabled, disabled, and inspected by region/event/admin tooling.
+- XmlSpawner smart spawning maps to activity buckets plus player-proximity
+  activation and should become the default spawner behavior.
+- Champion spawns map to a reusable escalating world-event framework: waves,
+  progress indicators, boss phase, participation tracking, and reward rules.
+- Bulk Order Deeds map to a procedural commission/order framework over crafting
+  catalogs: generate request, track fulfillment, issue reward.
+- Housing maps to region placement rules, ownership records, access lists, item
+  lockdown, and decay rules using the same permission vocabulary as inventory.
+- Factions and virtues map to behavior-driven reputation/alignment state, with
+  town control or social consequences as packages layered on top.
+- VitaNex-style foundation packages map to `scripts/Engines/*` packages that
+  provide reusable schema panels, commands, currencies, PvP frameworks, seasonal
+  events, or other shard foundation services.
+- Token/currency systems should be data-authored item/currency definitions plus
+  exchange catalogs before they become bespoke scripts.
+- LLM-backed NPC dialogue, if added later, should be a dialogue provider layer
+  over deterministic NPC intent/personality state, not the simulation itself.
 
 True custom kernels or deep runtime extensions should be a later plugin system:
 

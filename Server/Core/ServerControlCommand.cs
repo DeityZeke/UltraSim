@@ -12,4 +12,7 @@ public readonly record struct ServerControlCommand(
     public static ServerControlCommand Status() => new(ServerControlCommandKind.Status);
     public static ServerControlCommand Shutdown() => new(ServerControlCommandKind.Shutdown);
     public static ServerControlCommand ShutdownWithoutSave() => new(ServerControlCommandKind.Shutdown, "without-save");
+    public static ServerControlCommand ListBackups() => new(ServerControlCommandKind.ListBackups);
+    public static ServerControlCommand RestoreBackup(string backupDirectoryName) =>
+        new(ServerControlCommandKind.RestoreBackup, backupDirectoryName);
 }

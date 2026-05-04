@@ -1,5 +1,6 @@
 using System.Net;
 using System.Diagnostics;
+using System.Globalization;
 using UltraSim.ECS;
 using UltraSim.Network;
 using UltraSim.Server.Accounting;
@@ -34,6 +35,7 @@ public static class ServerMovementWorldApplicationFactory
                 GetSystemRuntimeSnapshots = _ => runtime.GetSystemRuntimeSnapshots(),
                 GetPlayerSessions = _ => runtime.GetPlayerSessionsSnapshot(),
                 GetAccountSummaries = _ => runtime.GetAccountSummariesSnapshot(),
+                ExecuteCommand = (app, command) => runtime.ExecuteCommand(app, command),
             });
     }
 
@@ -230,6 +232,68 @@ public static class ServerMovementWorldApplicationFactory
             _transport?.Dispose();
             _transport = null;
             _operatorLog = null;
+        }
+
+        public ServerCommandResult? ExecuteCommand(ServerApplication app, ServerControlCommand command)
+        {
+            return command.Kind switch
+            {
+                ServerControlCommandKind.ListBackups => ListBackups(),
+                ServerControlCommandKind.RestoreBackup => RestoreBackup(app, command.Argument),
+                _ => null,
+            };
+        }
+
+        private ServerCommandResult ListBackups()
+        {
+            IReadOnlyList<ServerPersistenceBackupSnapshot> backups = CreatePersistenceCoordinator().ListBackups();
+            if (backups.Count == 0)
+                return ServerCommandResult.Accepted("No backups found.");
+
+            string summary = string.Join("; ", backups.Select(static backup =>
+                $"{backup.DirectoryName} seq={backup.Manifest.SaveSequence.ToString(CultureInfo.InvariantCulture)} saved={backup.Manifest.SavedUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss zzz}"));
+            return ServerCommandResult.Accepted(summary);
+        }
+
+        private ServerCommandResult RestoreBackup(ServerApplication app, string? backupDirectoryName)
+        {
+            if (app.State == ServerApplicationState.Running)
+                return ServerCommandResult.Rejected("Stop or shutdown the runtime before restoring a backup.");
+
+            string requestedBackup = backupDirectoryName?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(requestedBackup))
+                return ServerCommandResult.Rejected("Backup folder name is required. Run 'backups' first.");
+
+            ServerPersistenceCoordinator coordinator = CreatePersistenceCoordinator();
+            long persistenceStart = Stopwatch.GetTimestamp();
+            ServerPersistenceRestoreResult restoreResult = coordinator.RestoreBackup(requestedBackup, DateTimeOffset.UtcNow);
+            if (!restoreResult.Succeeded)
+                return ServerCommandResult.Rejected(BuildPersistenceFailureMessage(restoreResult.Failures));
+
+            ServerPersistenceLoadResult loadResult = coordinator.Load();
+            RecordPersistenceElapsed(Stopwatch.GetTimestamp() - persistenceStart);
+            if (!loadResult.Succeeded)
+            {
+                _lastPersistenceFailureCount = loadResult.Failures.Count == 0 ? 1 : loadResult.Failures.Count;
+                _lastPersistencePath = coordinator.CurrentSaveSetRoot;
+                return ServerCommandResult.Rejected($"Backup restored on disk but failed to load: {BuildPersistenceFailureMessage(loadResult.Failures)}");
+            }
+
+            if (loadResult.Manifest is not null)
+                _lastSaveSequence = loadResult.Manifest.SaveSequence;
+            _lastLoadStartedFresh = loadResult.StartedFresh;
+            _lastLoadUsedBackup = false;
+            _lastPersistenceWarningCount = restoreResult.Warnings.Count + loadResult.Warnings.Count;
+            _lastPersistenceFailureCount = 0;
+            _lastPersistencePath = coordinator.CurrentSaveSetRoot;
+            RecordPersistenceArtifacts(loadResult.Timing);
+
+            ulong sequence = restoreResult.Manifest?.SaveSequence ?? 0UL;
+            string safetyBackup = string.IsNullOrWhiteSpace(restoreResult.SafetyBackupRoot)
+                ? "no safety backup"
+                : $"safety backup '{Path.GetFileName(restoreResult.SafetyBackupRoot)}'";
+            return ServerCommandResult.Accepted(
+                $"Restored '{restoreResult.BackupDirectoryName}' to current save-set sequence {sequence.ToString(CultureInfo.InvariantCulture)} ({safetyBackup}).");
         }
 
         private void LogAccountOperatorEvent(AccountOperatorEvent evt)
@@ -558,6 +622,13 @@ public static class ServerMovementWorldApplicationFactory
         private static double TicksToMilliseconds(long elapsedTicks)
         {
             return elapsedTicks <= 0 ? 0d : elapsedTicks * 1000d / Stopwatch.Frequency;
+        }
+
+        private static string BuildPersistenceFailureMessage(IReadOnlyList<ServerPersistenceSaveFailure> failures)
+        {
+            return failures.Count == 0
+                ? "Persistence operation failed."
+                : string.Join("; ", failures.Select(static failure => $"{failure.ParticipantName}: {failure.Message}"));
         }
 
         private string BuildPersistenceDetail()

@@ -21,6 +21,15 @@ public static class ConsoleShellCommandParser
         if (string.Equals(command, "status", StringComparison.OrdinalIgnoreCase))
             return new ConsoleShellDirective(ConsoleShellDirectiveKind.ServerCommand, ServerControlCommand.Status());
 
+        if (string.Equals(command, "backups", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(command, "list-backups", StringComparison.OrdinalIgnoreCase))
+        {
+            return new ConsoleShellDirective(ConsoleShellDirectiveKind.ServerCommand, ServerControlCommand.ListBackups());
+        }
+
+        if (TryParseRestoreBackupCommand(command, out string backupDirectoryName))
+            return new ConsoleShellDirective(ConsoleShellDirectiveKind.ServerCommand, ServerControlCommand.RestoreBackup(backupDirectoryName));
+
         if (string.Equals(command, "save", StringComparison.OrdinalIgnoreCase))
             return new ConsoleShellDirective(ConsoleShellDirectiveKind.ServerCommand, ServerControlCommand.Save());
 
@@ -58,5 +67,25 @@ public static class ConsoleShellCommandParser
             string.Equals(command, $"{verb} no-save", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(command, $"{verb} without-save", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(command, $"{verb} --no-save", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParseRestoreBackupCommand(string command, out string backupDirectoryName)
+    {
+        const string spacedPrefix = "restore ";
+        const string dashedPrefix = "restore-backup ";
+        if (command.StartsWith(spacedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            backupDirectoryName = command[spacedPrefix.Length..].Trim();
+            return !string.IsNullOrWhiteSpace(backupDirectoryName);
+        }
+
+        if (command.StartsWith(dashedPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            backupDirectoryName = command[dashedPrefix.Length..].Trim();
+            return !string.IsNullOrWhiteSpace(backupDirectoryName);
+        }
+
+        backupDirectoryName = string.Empty;
+        return false;
     }
 }

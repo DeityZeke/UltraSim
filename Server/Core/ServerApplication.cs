@@ -290,6 +290,13 @@ public sealed class ServerApplication : IServerApplication
                     return true;
 
                 default:
+                    ServerCommandResult? hookResult = _hooks.ExecuteCommand?.Invoke(this, command);
+                    if (hookResult.HasValue)
+                    {
+                        result = hookResult.Value;
+                        return result.Kind != ServerCommandResultKind.Unknown;
+                    }
+
                     result = ServerCommandResult.Unknown("unknown command");
                     return false;
             }

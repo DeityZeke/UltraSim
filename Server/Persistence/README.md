@@ -58,6 +58,10 @@ Current scope:
   backup recovery. Restore copies the selected backup through a pending restore
   directory first, validates the backup manifest/artifacts, and moves the
   previous current save-set into `Pre-Restore Backup (...)` before promotion.
+- Movement-world console and Godot operator shells expose those primitives as
+  `backups` / `list-backups` and `restore <backup-folder-name>` /
+  `restore-backup <backup-folder-name>`. Restore is rejected while the runtime is
+  running; stop/shutdown first so files and in-memory state cannot drift.
 - Save/load results include total elapsed milliseconds and per-participant
   timings. The movement server folds those into the existing `Persistence`
   runtime snapshot detail as sequence, load source, warnings, failures, file
@@ -87,16 +91,23 @@ The current modular path now covers the high-value coordination pieces:
 - shell/runtime status exposure through the `Persistence` system snapshot.
 - explicit backup listing and restore primitives with a pre-restore safety
   backup.
+- console and Godot operator shell commands for backup list/restore.
 
 Still worth reworking/expanding next:
 
 - add an operator recovery prompt/path on top of the non-interactive recovery
   modes;
-- expose backup listing/restore through shell/admin commands;
+- expose backup listing/restore through future admin panels;
 - make retention richer than slot count alone, such as manual keep markers,
   hourly/daily generations, or size limits;
 - add artifact checksums so load can detect content drift, not just missing files
   or changed sizes;
+- add optional backup archive compression behind a compression-agnostic archive
+  interface. ZSTD is the preferred target based on ModernUO's storage/perf
+  tradeoff, but live current saves should remain uncompressed for fast startup.
+- add optional parallel participant save/snapshot execution once there are enough
+  participants to justify the coordination cost. Manifest stamping and promotion
+  stay single-coordinator-owned; participant snapshot/write work can fan out.
 - split ECS world persistence into richer artifacts again when gameplay data
   grows beyond the single `world/entities.bin` participant;
 - eventually revive background snapshot/write behavior if autosave cost becomes

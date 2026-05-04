@@ -139,6 +139,28 @@ These helpers compile to normal schema/model/action documents. They are not
 special renderer-only panels. They exist to keep common server scripts compact
 and consistent.
 
+### UO-Style Quality-Of-Life Targets
+
+TazUO and the broader UO client ecosystem are useful validation for which UI
+surfaces players actually value. These should be implemented as schema/HUD/world
+helpers over the existing protocol, not one-off Godot widgets:
+
+- `HealthBar(entityId)` as a peelable, state-bound helper with configurable
+  color thresholds and stale-state fallback.
+- `CooldownBar(actionId)` or `CooldownBar(entityId, actionId)` using server
+  start/duration state and local interpolation.
+- `SkillProgressBar(skillId)` bound to replicated skill/mastery progress.
+- rich item comparison tooltips that bind both the hovered item and the
+  currently equipped item for the matching slot.
+- journal/chat filters by channel, message kind, source entity, and keyword or
+  regex.
+- nameplate/world-label options, including optional health percentage/health
+  line display when server visibility policy allows it.
+- `NearbyLootList` as a state-bound HUD/menu helper for lootable corpses or
+  containers in interaction range.
+- controller/gamepad focus traversal as a first-class focus mode requirement,
+  not a late renderer-only patch.
+
 ## Presentation Runtime Shape
 
 The old v2 client already used the right broad idea:

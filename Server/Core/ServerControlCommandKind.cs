@@ -8,4 +8,6 @@ public enum ServerControlCommandKind : byte
     Save = 3,
     Status = 4,
     Shutdown = 5,
+    ListBackups = 6,
+    RestoreBackup = 7,
 }

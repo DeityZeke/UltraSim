@@ -24,6 +24,17 @@ Current default host tick rate:
 - selected character sessions snapshot their current movement position on disconnect before the entity is unbound/despawned, then restore that snapshot on the next world entry
 - Godot server smokes can use `--us-smoke-require-empty-sessions` to fail if active movement sessions remain bound at smoke quit, with `--us-smoke-empty-session-grace=seconds` to wait through disconnect cleanup
 
+ModernUO/ServUO movement lessons that still apply to the UltraSim path:
+
+- movement remains server-authoritative; client prediction is presentation only
+- packet throttling should become an explicit per-connection control-plane and
+  movement-plane policy before public server exposure
+- speed-hack prevention belongs at the movement-intent validation point: reject
+  or correct any claimed movement that exceeds what the entity's current
+  movement state can physically produce for the tick window
+- movement request queuing and validation order should stay deterministic so
+  smoothness fixes do not become client trust
+
 Current `Server/Network` state:
 
 - runtime/operator snapshots and events from `Server/Core` publish into scoped network streams

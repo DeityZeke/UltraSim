@@ -793,7 +793,13 @@ public partial class ServerShellRoot : Control
 		if (string.Equals(raw, "help", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(raw, "?", StringComparison.OrdinalIgnoreCase))
 		{
-			AppendOutput("HELP", "Commands: start, status, save, restart, restart-nosave, shutdown, shutdown-nosave, quit, exit, help");
+			AppendOutput("HELP", "Commands: start, status, backups, restore <backup-folder-name>, save, restart, restart-nosave, shutdown, shutdown-nosave, quit, exit, help");
+			return;
+		}
+
+		if (TryParseRestoreBackupCommand(raw, out string backupDirectoryName))
+		{
+			ExecuteCommand(ServerControlCommand.RestoreBackup(backupDirectoryName));
 			return;
 		}
 
@@ -801,6 +807,8 @@ public partial class ServerShellRoot : Control
 		{
 			"start" => ServerControlCommand.Start(),
 			"status" => ServerControlCommand.Status(),
+			"backups" => ServerControlCommand.ListBackups(),
+			"list-backups" => ServerControlCommand.ListBackups(),
 			"save" => ServerControlCommand.Save(),
 			"restart" => ServerControlCommand.Restart(),
 			"restart-nosave" => ServerControlCommand.RestartWithoutSave(),
@@ -830,6 +838,26 @@ public partial class ServerShellRoot : Control
 		AppendOutput("ERROR", $"Unknown command '{raw}'.");
 	}
 
+	private static bool TryParseRestoreBackupCommand(string command, out string backupDirectoryName)
+	{
+		const string spacedPrefix = "restore ";
+		const string dashedPrefix = "restore-backup ";
+		if (command.StartsWith(spacedPrefix, StringComparison.OrdinalIgnoreCase))
+		{
+			backupDirectoryName = command[spacedPrefix.Length..].Trim();
+			return !string.IsNullOrWhiteSpace(backupDirectoryName);
+		}
+
+		if (command.StartsWith(dashedPrefix, StringComparison.OrdinalIgnoreCase))
+		{
+			backupDirectoryName = command[dashedPrefix.Length..].Trim();
+			return !string.IsNullOrWhiteSpace(backupDirectoryName);
+		}
+
+		backupDirectoryName = string.Empty;
+		return false;
+	}
+
 	private void ExecuteCommand(ServerControlCommand command)
 	{
 		if (_controller is null)
@@ -843,12 +871,21 @@ public partial class ServerShellRoot : Control
 
 			if (command.Kind != ServerControlCommandKind.Start)
 			{
-				AppendOutput("ERROR", "Server runtime is not started yet.");
-				RefreshStatus();
-				return;
+				if (command.Kind is not ServerControlCommandKind.ListBackups and not ServerControlCommandKind.RestoreBackup)
+				{
+					AppendOutput("ERROR", "Server runtime is not started yet.");
+					RefreshStatus();
+					return;
+				}
+
+				if (!TryEnsureController())
+				{
+					RefreshStatus();
+					return;
+				}
 			}
 
-			if (!TryEnsureController())
+			if (_controller is null && !TryEnsureController())
 			{
 				RefreshStatus();
 				return;

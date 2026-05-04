@@ -47,6 +47,14 @@ Recommended pickup point:
 - Per-file SHA-256 hashes are mandatory. They drive integrity checks, cache validation, and later delta streaming.
 - Item and equipment visuals should not assume one unique texture map per item. Prefer shared, tileable resource textures such as metal, stone, wood, cloth, leather, and gem. Meshes/material descriptors reference resource/material slots, and the runtime can live-stitch the active texture set into atlases.
 - Material variation should be data-driven. Plan for dye/hue channels rather than duplicate texture files for every color. A good first shape is three optional color channels per item/material binding, such as main, secondary, and trim, plus a RunUO-style hue table or shader palette operation.
+- TazUO-style PNG replacement is the simple case of this system: a pack provides
+  a file/definition at the same logical id and higher priority wins. The pack
+  resolver should keep that workflow easy even while supporting richer manifests.
+- Client-local sound filters should sit above server-declared sound events and
+  resource-pack sound overrides. A user pack or setting can suppress or redirect
+  a sound event without changing server gameplay semantics.
+- Seasonal/environment overlays should be modeled as content-pack layers selected
+  by server world state plus client preference, not as hard-coded texture swaps.
 
 ## Server Asset Join Flow
 

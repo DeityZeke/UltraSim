@@ -7,6 +7,33 @@ This folder contains an offline benchmark suite for comparing:
 
 The suite avoids external packages so it can run inside the repo without pulling BenchmarkDotNet.
 
+## Random
+
+Deterministic simulation RNG comparisons live in
+`_Benchmarks/UltraSim.Random.Benchmarks`.
+
+```bash
+dotnet run --project _Benchmarks/UltraSim.Random.Benchmarks/UltraSim.Random.Benchmarks.csproj -c Release -- --output _Benchmarks/results/random-benchmarks.json
+```
+
+Use `--operations <n>` to change the operations per scenario. The benchmark
+compares seeded `System.Random`, `Random.Shared`, the `Random`-compatible
+`Xoroshiro256PlusPlusRandom` adapter, and the direct `Xoroshiro256PlusPlus`
+struct path.
+
+Current local Release checkpoint at `10,000,000` operations per scenario:
+
+- unbounded `int`: direct `Xoroshiro256PlusPlus` was about `1.17x` faster than
+  seeded `System.Random`; the `Random` adapter was slower because it preserves
+  the compatibility surface.
+- bounded `int`: direct `Xoroshiro256PlusPlus` was about `1.53x` faster than
+  seeded `System.Random`.
+- `Int64`/`UInt64`: direct `Xoroshiro256PlusPlus` was about `7.66x` faster than
+  seeded `System.Random.NextInt64`.
+
+So the broad "5x faster" claim is not universal on modern .NET. It is true for
+our 64-bit path, but ordinary `Next()` is already very fast in .NET 8.
+
 ## Coverage
 
 The benchmark matrix currently covers:
