@@ -72,6 +72,12 @@ Planned modules:
   - `key=value` named argument extraction
   - access checks
   - reply callback
+- `ServerAccessRuleRegistry`
+  - named runtime rules with display text and descriptions
+  - grant/deny permission keys such as `command.spawn` or `admin.entity.inspect`
+  - wildcard permission families such as `command.*`
+  - direct subject grants/denies for account-, session-, or entity-scoped overrides
+  - legacy integer access-level fallback while current command paths are migrated
 - `ServerChatService`
   - validates submitted chat
   - rate limits

@@ -43,6 +43,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
         Run(nameof(ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs), ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs);
         Run(nameof(ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat), ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat);
+        Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
         Run(nameof(ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity), ServerApplication_StatusAndMetricsSnapshots_ReflectRuntimeActivity);
@@ -586,6 +587,66 @@ internal static class TestRunner
         Assert.True(registry.TryDispatch(in consoleRequest, out ServerCommandDispatchResult result));
         Assert.Equal(ServerCommandDispatchStatus.Executed, result.Status);
         Assert.True(invoked);
+    }
+
+    private static void ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess()
+    {
+        var registry = new ServerAccessRuleRegistry();
+
+        Assert.True(registry.TryRegister(new ServerAccessRuleDescriptor(
+            "staff",
+            "Staff",
+            "Runtime staff rule.",
+            grants: ["admin.entity.*", "command.spawn"],
+            denies: ["admin.account.delete"])));
+        Assert.False(registry.TryRegister(new ServerAccessRuleDescriptor(
+            "staff",
+            "Duplicate Staff",
+            grants: ["*"])));
+
+        registry.RegisterOrReplace(new ServerAccessRuleDescriptor(
+            "builder",
+            "Builder",
+            grants: ["world.spawn.*"]));
+
+        ServerAccessEvaluationResult entityInspect = registry.Evaluate(new ServerAccessEvaluationRequest(
+            "admin.entity.inspect",
+            ruleKeys: ["staff"]));
+        Assert.True(entityInspect.IsAllowed);
+        Assert.Equal(ServerAccessDecisionReason.RuleGrant, entityInspect.Reason);
+        Assert.Equal("staff", entityInspect.MatchedRuleKey);
+        Assert.Equal("admin.entity.*", entityInspect.MatchedPermissionKey);
+
+        ServerAccessEvaluationResult deniedByRule = registry.Evaluate(new ServerAccessEvaluationRequest(
+            "admin.account.delete",
+            ruleKeys: ["staff"],
+            directGrants: ["*"]));
+        Assert.False(deniedByRule.IsAllowed);
+        Assert.Equal(ServerAccessDecisionReason.RuleDeny, deniedByRule.Reason);
+        Assert.Equal("staff", deniedByRule.MatchedRuleKey);
+
+        ServerAccessEvaluationResult deniedByDirect = registry.Evaluate(new ServerAccessEvaluationRequest(
+            "world.spawn.mobile",
+            ruleKeys: ["builder"],
+            directDenies: ["world.spawn.*"]));
+        Assert.False(deniedByDirect.IsAllowed);
+        Assert.Equal(ServerAccessDecisionReason.DirectDeny, deniedByDirect.Reason);
+
+        ServerAccessEvaluationResult legacyAllowed = registry.Evaluate(new ServerAccessEvaluationRequest(
+            "command.announce",
+            ruleKeys: ["missing-rule"],
+            accessLevel: 100,
+            requiredAccessLevel: 100));
+        Assert.True(legacyAllowed.IsAllowed);
+        Assert.Equal(ServerAccessDecisionReason.LegacyAccessLevel, legacyAllowed.Reason);
+        Assert.SequenceEqual(["missing-rule"], legacyAllowed.MissingRuleKeys);
+
+        Assert.True(registry.TryGetRule("BUILDER", out ServerAccessRuleDescriptor builderRule));
+        Assert.Equal("builder", builderRule.Key);
+        Assert.SequenceEqual(["world.spawn.*"], builderRule.Grants);
+        Assert.Equal(2, registry.Snapshot().Count);
+        Assert.True(registry.Remove("builder"));
+        Assert.Equal(1, registry.Count);
     }
 
     private static void ServerChatService_AnnounceCommandPublishesSystemEvent()

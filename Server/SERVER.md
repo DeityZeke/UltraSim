@@ -38,6 +38,25 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 - movement request queuing and validation order should stay deterministic so
   smoothness fixes do not become client trust
 
+Current foundational/server-platform task list:
+
+- access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
+- admin facade over ECS entity inspection snapshots for `[props]`-style panels and commands
+- spawner component primitives: enabled state, radius, spawn-set key, and admin-visible metadata
+- runtime content group mount/unmount registry for prefab/script/spawn packages
+- backup compression option, likely ZSTD for backup archives while leaving live saves uncompressed
+- parallel persistence participant snapshot fan-out once save payload preparation becomes heavy
+- region/rule framework when terrain and world regions become concrete
+- health/status presentation expansion from the current overhead-bar hook into real health components and peeled-off status panels
+
+Current access/permission foundation:
+
+- `ServerAccessRuleRegistry` stores named, runtime-replaceable rules.
+- `ServerAccessRuleDescriptor` carries display name, description, grants, and denies.
+- Permission keys are normalized strings such as `admin.entity.inspect`, `command.spawn`, or wildcard families such as `admin.entity.*`.
+- Denies win over grants, direct subject denies win before rule denies, and legacy integer `AccessLevel` remains available as a bridge for current command paths.
+- Account persistence, UI editing, audit logging, and command-registry permission-key integration are intentionally later layers.
+
 Current `Server/Network` state:
 
 - runtime/operator snapshots and events from `Server/Core` publish into scoped network streams
