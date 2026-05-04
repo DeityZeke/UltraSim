@@ -449,13 +449,16 @@ public static class ServerMovementWorldApplicationFactory
         private ServerPersistenceCoordinator CreatePersistenceCoordinator()
         {
             string root = _options.PersistenceRoot ??
-                Path.Combine(AppContext.BaseDirectory, "saves", _options.ProfileName);
+                Path.Combine(AppContext.BaseDirectory, "saves");
+            string backupsRoot = _options.PersistenceBackupsRoot ??
+                Path.Combine(AppContext.BaseDirectory, "backups");
             return new ServerPersistenceCoordinator(
                 root,
                 [
                     new AccountingPersistenceParticipant(_accounts, _characters),
                     new EcsWorldPersistenceParticipant(_world)
                 ],
+                new ServerPersistenceSaveSetOptions(BackupsRootDirectory: backupsRoot),
                 initialSaveSequence: _lastSaveSequence);
         }
 

@@ -217,7 +217,7 @@ internal static class TestRunner
             var currentCoordinator = new ServerPersistenceCoordinator(root, [new SequenceFileParticipant()]);
             Assert.True(currentCoordinator.Save(now).Succeeded);
 
-            string backupRoot = Path.Combine(root, "backups", "save-newer-than-current");
+            string backupRoot = Path.Combine(root, "backups", "Most Recent (2-5-2026 12-00-01)");
             CopyDirectory(currentCoordinator.CurrentSaveSetRoot, backupRoot);
             string manifestPath = Path.Combine(backupRoot, "save_manifest.json");
             string manifest = File.ReadAllText(manifestPath).Replace("\"saveSequence\": 1", "\"saveSequence\": 9");
@@ -254,7 +254,9 @@ internal static class TestRunner
 
             string backupRoot = Path.Combine(root, "backups");
             Assert.True(Directory.Exists(backupRoot));
-            Assert.Equal(1, Directory.GetDirectories(backupRoot, "save-*").Length);
+            string[] backups = Directory.GetDirectories(backupRoot);
+            Assert.Equal(1, backups.Length);
+            Assert.True(Path.GetFileName(backups[0]).StartsWith("Most Recent (", StringComparison.Ordinal));
             Assert.Contains("3", File.ReadAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "sequence.txt")));
         }
         finally

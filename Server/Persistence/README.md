@@ -10,11 +10,15 @@ Current scope:
   directory first.
 - A successful save writes `save_manifest.json` with one save sequence and
   timestamp shared by every participant.
-- The staged directory is promoted to `current` only after every participant
-  succeeds.
-- Failed saves delete their pending directory and leave `current` untouched.
+- The staged directory is promoted into the live save root only after every
+  participant succeeds. In exported runtimes, that live save root is `saves/`
+  itself.
+- Failed saves delete their pending directory and leave the live save root
+  untouched.
 - Whole save-set backups are rotated as directories, rather than letting account
-  and world backups drift independently.
+  and world backups drift independently. The default rotation follows the RunUO
+  naming shape: `Most Recent (...)`, `Second Backup (...)`, and
+  `Third Backup (...)`. Backup timestamps use the host machine's local time.
 - `AccountingPersistenceParticipant` writes the accounting JSON snapshot into
   the staged save-set.
 - `EcsWorldPersistenceParticipant` writes the current ECS binary world snapshot
@@ -36,11 +40,10 @@ Current scope:
   be restored before world entities that may reference account or character ids.
 - Startup recovery is conservative:
   - pending save-set directories are warnings and are deleted, never promoted;
-  - valid `current` save-sets load first;
-  - corrupt or incomplete `current` save-sets fall back to the newest valid
-    backup;
-  - if a backup manifest has a higher sequence than `current`, the load result
-    reports a warning instead of silently ignoring the mismatch.
+  - the live save root loads first;
+  - corrupt or incomplete live save roots fall back to the newest valid backup;
+  - if a backup manifest has a higher sequence than the live save root, the load
+    result reports a warning instead of silently ignoring the mismatch.
 
 This is intentionally the coordination layer above the existing pieces:
 

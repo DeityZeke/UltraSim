@@ -1193,7 +1193,7 @@ If transport encryption later makes generic field submission acceptable, that sh
 
 Login, character select, and character create are server admission-flow panels built on ordinary schema nodes, not UI-kernel standard panels and not bespoke renderer screens.
 
-The UI kernel owns only the vocabulary needed to build them: exclusive surfaces, trusted credential inputs, row repeaters, select controls, and actions. The default server-authored admission package lives under `Server/RuntimeTemplate/scripts/Packages/Admission/`, so custom servers can replace or reorder the flow without changing kernel code.
+The UI kernel owns only the vocabulary needed to build them: exclusive surfaces, trusted credential inputs, row repeaters, select controls, and actions. The stock server-authored admission package source lives under `Server/RuntimeTemplate/scripts/Packages/Admission/`, but fresh runtime roots start with an empty `scripts/` folder so operators can install that package, another package, or fully custom admission scripts.
 
 Admission should be event/step based rather than a monolith. The default shape is:
 

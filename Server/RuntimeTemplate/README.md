@@ -1,7 +1,9 @@
 # UltraSim Server Runtime Template
 
-This folder is the source-controlled template for exported server runtime roots.
+This folder contains source-controlled package and data examples for server
+runtime roots.
 
-The server copies or creates this shape under the runtime root used by headless,
-console, and Godot server shells. Operator-authored server code belongs under
-`scripts/`; generated compiler output belongs under runtime `cache/scripts/`.
+Startup creates the runtime root and an empty `scripts/` folder. It does not copy
+these scripts automatically. Operator-authored server code belongs under
+runtime `scripts/`; generated compiler output belongs under runtime
+`cache/scripts/`.

@@ -22,6 +22,7 @@ public partial class UiManager : Node
         Hud = ResolveNode<HudCanvasManager>(HudCanvasPath);
         Menus = ResolveNode<MenuCanvasManager>(MenuCanvasPath);
         Debug = ResolveNode<DebugCanvasManager>(DebugCanvasPath);
+        Menus?.SetWorldCanvas(World);
         SetStatusText("Booting client shell");
     }
 

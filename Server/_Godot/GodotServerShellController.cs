@@ -7,6 +7,7 @@ namespace UltraSim.Server.Godot;
 public sealed class GodotServerShellController : IDisposable
 {
 	private readonly HostedServerRuntime _runtime;
+	private readonly UltraSimRuntimeRootLayout _runtimeRoot;
 	private readonly List<ServerApplicationEvent> _startupEvents = new();
 
 	public GodotServerShellController(
@@ -15,9 +16,11 @@ public sealed class GodotServerShellController : IDisposable
 	{
 		Options = options ?? throw new ArgumentNullException(nameof(options));
 		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+		_runtimeRoot = runtimeRoot;
 		UltraSimRuntimeTemplate.Ensure(runtimeRoot);
 		foreach (string line in ServerHostStartupBanner.Create("Godot Server Shell"))
 			AddStartupLog(line);
+		AddStartupLog($"Runtime: Root path {runtimeRoot.RootPath}");
 		UltraSimScriptStartupResult scriptStartup = new UltraSimScriptStartupService().Run(new UltraSimScriptStartupOptions(runtimeRoot));
 		ScriptContext = scriptStartup.Context;
 		_startupEvents.AddRange(UltraSimScriptStartupLog.CreateEvents(scriptStartup));
@@ -107,7 +110,9 @@ public sealed class GodotServerShellController : IDisposable
 				SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
 				SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
 				MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
-				ScriptContext: ScriptContext))
+				ScriptContext: ScriptContext,
+				PersistenceRoot: _runtimeRoot.SavesPath,
+				PersistenceBackupsRoot: _runtimeRoot.BackupsPath))
 			: new ServerApplication(new ServerApplicationOptions(
 				options.ProfileName,
 				SaveOnStop: options.SaveOnStop));

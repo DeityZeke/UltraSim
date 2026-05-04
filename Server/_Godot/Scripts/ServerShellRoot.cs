@@ -25,19 +25,18 @@ public partial class ServerShellRoot : Control
 	private Label? _performanceSummaryValue;
 	private RichTextLabel? _performanceLog;
 	private Button? _startButton;
-	private Button? _stopButton;
 	private Button? _saveButton;
 	private Button? _restartButton;
 	private Button? _restartWithoutSaveButton;
 	private Button? _shutdownButton;
 	private Button? _shutdownWithoutSaveButton;
 	private Button? _statusButton;
-	private Button? _runButton;
 	private bool _smokeRequireEmptySessions;
 	private double _smokeEmptySessionGraceSeconds = 2.0;
 	private double _smokeEmptySessionWaitedSeconds;
 	private bool _smokeQuitRequested;
 	private bool _smokeEmptySessionWaitLogged;
+	private bool _shellQuitScheduled;
 
 	public override void _Ready()
 	{
@@ -162,6 +161,8 @@ public partial class ServerShellRoot : Control
 			}
 		}
 
+		runtimeRootPath ??= ResolveExportRuntimeRootPath();
+
 		return new GodotServerShellOptions(
 			profileName,
 			TickMilliseconds: tickMilliseconds,
@@ -172,6 +173,22 @@ public partial class ServerShellRoot : Control
 			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
 			MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
 			RuntimeRootPath: runtimeRootPath);
+	}
+
+	private static string? ResolveExportRuntimeRootPath()
+	{
+		if (Engine.IsEditorHint())
+			return null;
+
+		if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("ULTRASIM_RUNTIME_ROOT")))
+			return null;
+
+		string executablePath = OS.GetExecutablePath();
+		if (string.IsNullOrWhiteSpace(executablePath))
+			return null;
+
+		string? directory = Path.GetDirectoryName(executablePath);
+		return string.IsNullOrWhiteSpace(directory) ? null : directory;
 	}
 
 	private void ScheduleSmokeQuitIfRequested()
@@ -276,6 +293,7 @@ public partial class ServerShellRoot : Control
 		window.Size = new Vector2I(720, 420);
 		window.MinSize = window.Size;
 		window.Unresizable = true;
+		window.CloseRequested += HandleWindowCloseRequested;
 	}
 
 	private void BuildInterface()
@@ -380,14 +398,6 @@ public partial class ServerShellRoot : Control
 		_commandLine.TextSubmitted += HandleCommandSubmitted;
 		commandRow.AddChild(_commandLine);
 
-		_runButton = CreateActionButton("Run", accent, text);
-		_runButton.Pressed += () =>
-		{
-			if (_commandLine is not null)
-				HandleCommandSubmitted(_commandLine.Text);
-		};
-		commandRow.AddChild(_runButton);
-
 		var rightPanel = new PanelContainer();
 		rightPanel.CustomMinimumSize = new Vector2(180, 0);
 		rightPanel.SizeFlagsVertical = SizeFlags.ExpandFill;
@@ -409,7 +419,6 @@ public partial class ServerShellRoot : Control
 		rightColumn.AddChild(CreateSectionLabel("Controls", text));
 
 		_startButton = CreateCommandButton("Start", ServerControlCommand.Start(), accent, text);
-		_stopButton = CreateCommandButton("Stop", ServerControlCommand.Stop(), panelSoft, text);
 		_saveButton = CreateCommandButton("Save", ServerControlCommand.Save(), panelSoft, text);
 		_restartButton = CreateCommandButton("Restart", ServerControlCommand.Restart(), panelSoft, text);
 		_restartWithoutSaveButton = CreateCommandButton("Restart No Save", ServerControlCommand.RestartWithoutSave(), panelSoft, text);
@@ -418,7 +427,6 @@ public partial class ServerShellRoot : Control
 		_statusButton = CreateStatusButton(panelSoft, text);
 
 		rightColumn.AddChild(_startButton);
-		rightColumn.AddChild(_stopButton);
 		rightColumn.AddChild(_saveButton);
 		rightColumn.AddChild(_restartButton);
 		rightColumn.AddChild(_restartWithoutSaveButton);
@@ -676,7 +684,7 @@ public partial class ServerShellRoot : Control
 		if (string.Equals(raw, "help", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(raw, "?", StringComparison.OrdinalIgnoreCase))
 		{
-			AppendOutput("HELP", "Commands: start, status, save, restart, restart-nosave, stop, shutdown, shutdown-nosave, quit, exit, help");
+			AppendOutput("HELP", "Commands: start, status, save, restart, restart-nosave, shutdown, shutdown-nosave, quit, exit, help");
 			return;
 		}
 
@@ -692,7 +700,6 @@ public partial class ServerShellRoot : Control
 			"restart no-save" => ServerControlCommand.RestartWithoutSave(),
 			"restart without-save" => ServerControlCommand.RestartWithoutSave(),
 			"restart --no-save" => ServerControlCommand.RestartWithoutSave(),
-			"stop" => ServerControlCommand.Stop(),
 			"shutdown" => ServerControlCommand.Shutdown(),
 			"shutdown-nosave" => ServerControlCommand.ShutdownWithoutSave(),
 			"shutdown-no-save" => ServerControlCommand.ShutdownWithoutSave(),
@@ -718,6 +725,13 @@ public partial class ServerShellRoot : Control
 	{
 		if (_controller is null)
 		{
+			if (command.Kind == ServerControlCommandKind.Shutdown)
+			{
+				AppendOutput("RESULT", "Shutdown: Accepted - shell closed");
+				ScheduleShellQuit();
+				return;
+			}
+
 			if (command.Kind != ServerControlCommandKind.Start)
 			{
 				AppendOutput("ERROR", "Server runtime is not started yet.");
@@ -738,6 +752,35 @@ public partial class ServerShellRoot : Control
 		ServerCommandResult result = _controller.Execute(command);
 		AppendOutput("RESULT", $"{command.Kind}: {result.Kind} - {result.Message}");
 		RefreshStatus();
+		if (command.Kind == ServerControlCommandKind.Shutdown &&
+			result.Kind is ServerCommandResultKind.Accepted or ServerCommandResultKind.NoOp)
+		{
+			ScheduleShellQuit();
+		}
+	}
+
+	private void ScheduleShellQuit()
+	{
+		if (_shellQuitScheduled)
+			return;
+
+		_shellQuitScheduled = true;
+		SceneTreeTimer timer = GetTree().CreateTimer(0.05);
+		timer.Timeout += () => GetTree().Quit();
+	}
+
+	private void HandleWindowCloseRequested()
+	{
+		if (_shellQuitScheduled)
+			return;
+
+		if (_controller is null)
+		{
+			ScheduleShellQuit();
+			return;
+		}
+
+		ExecuteCommand(ServerControlCommand.Shutdown());
 	}
 
 	private void PrintStatusSnapshot()
@@ -981,16 +1024,12 @@ public partial class ServerShellRoot : Control
 	{
 		bool hasController = _controller is not null;
 		bool canStart = !hasController || state is ServerApplicationState.Created or ServerApplicationState.Initialized or ServerApplicationState.Stopped;
-		bool canStop = hasController && state != ServerApplicationState.Created && state != ServerApplicationState.Stopped;
 		bool canSave = hasController && state is ServerApplicationState.Initialized or ServerApplicationState.Running or ServerApplicationState.Faulted;
 		bool canRestart = hasController && state != ServerApplicationState.Created;
 		bool canShutdown = hasController && state != ServerApplicationState.Stopped;
 
 		if (_startButton is not null)
 			_startButton.Disabled = !canStart;
-
-		if (_stopButton is not null)
-			_stopButton.Disabled = !canStop;
 
 		if (_saveButton is not null)
 			_saveButton.Disabled = !canSave;
@@ -1009,9 +1048,6 @@ public partial class ServerShellRoot : Control
 
 		if (_statusButton is not null)
 			_statusButton.Disabled = !hasController;
-
-		if (_runButton is not null)
-			_runButton.Disabled = false;
 
 		if (_commandLine is not null)
 			_commandLine.Editable = true;

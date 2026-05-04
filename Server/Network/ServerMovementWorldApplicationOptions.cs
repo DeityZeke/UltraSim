@@ -13,7 +13,8 @@ public sealed record ServerMovementWorldApplicationOptions(
     double SessionKeepAliveTimeoutSeconds = 10.0,
     int MaxAutoCreatedAccountsPerRemoteAddress = 1,
     DefaultUltraSimScriptContext? ScriptContext = null,
-    string? PersistenceRoot = null)
+    string? PersistenceRoot = null,
+    string? PersistenceBackupsRoot = null)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");
 }

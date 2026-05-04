@@ -8,32 +8,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Admission\UltraSim.Server.Admission.csproj" />
+    <ProjectReference Include="..\Core\UltraSim.Server.Core.csproj" />
     <ProjectReference Include="..\Gameplay\UltraSim.Server.Gameplay.csproj" />
     <ProjectReference Include="..\Persistence\UltraSim.Server.Persistence.csproj" />
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
-    <Reference Include="UltraSim.Server.Core">
-      <HintPath>..\Core\bin\$(Configuration)\net8.0\UltraSim.Server.Core.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="UltraSim.ECS">
-      <HintPath>..\..\Kernels\ECS\bin\$(Configuration)\net8.0\UltraSim.ECS.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="UltraSim.Network">
-      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="UltraSim.UI">
-      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
+    <ProjectReference Include="..\..\Kernels\ECS\UltraSim.ECS.csproj" />
+    <ProjectReference Include="..\..\Kernels\Network\UltraSim.Network.csproj" />
+    <ProjectReference Include="..\..\Kernels\UI\UltraSim.UI.csproj" />
   </ItemGroup>
-
-  <Target Name="BuildServerNetworkDependencies" BeforeTargets="PrepareForBuild">
-    <MSBuild
-      Projects="..\Core\UltraSim.Server.Core.csproj;..\Gameplay\UltraSim.Server.Gameplay.csproj;..\Scripting\UltraSim.Server.Scripting.csproj;..\Admission\UltraSim.Server.Admission.csproj;..\Persistence\UltraSim.Server.Persistence.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj"
-      Targets="Build"
-      Properties="Configuration=$(Configuration)" />
-  </Target>
 
 </Project>

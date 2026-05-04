@@ -33,7 +33,7 @@ public sealed class ServerPersistenceCoordinator
         _nextSaveSequence = initialSaveSequence;
     }
 
-    public string CurrentSaveSetRoot => Path.Combine(_rootDirectory, _options.CurrentDirectoryName);
+    public string CurrentSaveSetRoot => ResolveCurrentSaveSetRoot();
 
     public ServerPersistenceSaveResult Save(DateTimeOffset savedUtc)
     {
@@ -132,7 +132,7 @@ public sealed class ServerPersistenceCoordinator
 
     private string CreatePendingSaveSetRoot(ServerPersistenceMetadata metadata)
     {
-        string pendingDirectory = Path.Combine(_rootDirectory, _options.PendingDirectoryName);
+        string pendingDirectory = PendingDirectory;
         Directory.CreateDirectory(pendingDirectory);
         string name = $"save-{metadata.SaveSequence:D20}-{metadata.SavedUtc:yyyyMMddHHmmssfffffff}";
         string path = Path.Combine(pendingDirectory, name);
@@ -144,37 +144,22 @@ public sealed class ServerPersistenceCoordinator
     {
         Directory.CreateDirectory(_rootDirectory);
         string current = CurrentSaveSetRoot;
-        if (Directory.Exists(current))
+        if (CurrentSaveSetDirectoryHasEntries())
         {
             if (_options.ClampedBackupCount == 0)
             {
-                Directory.Delete(current, recursive: true);
+                DeleteCurrentSaveSet();
             }
             else
             {
-                string backupRoot = Path.Combine(_rootDirectory, _options.BackupsDirectoryName);
+                string backupRoot = BackupRootDirectory;
                 Directory.CreateDirectory(backupRoot);
-                string backupName = $"save-before-{metadata.SaveSequence:D20}-{metadata.SavedUtc:yyyyMMddHHmmssfffffff}";
-                Directory.Move(current, Path.Combine(backupRoot, backupName));
-                PruneBackups(backupRoot);
+                MoveCurrentSaveSetToBackup(CreateBackupPath(backupRoot, metadata));
             }
         }
 
-        Directory.Move(pendingRoot, current);
+        PromotePendingSaveSetToCurrent(pendingRoot);
         DeleteEmptyParentDirectory(pendingRoot);
-    }
-
-    private void PruneBackups(string backupRoot)
-    {
-        int backupCount = _options.ClampedBackupCount;
-        if (backupCount < 0)
-            return;
-
-        string[] backups = Directory.EnumerateDirectories(backupRoot, "save-*")
-            .OrderByDescending(static value => value, StringComparer.Ordinal)
-            .ToArray();
-        for (int i = backupCount; i < backups.Length; i++)
-            Directory.Delete(backups[i], recursive: true);
     }
 
     private void WriteManifest(string saveSetRoot, ServerPersistenceSaveManifest manifest)
@@ -230,16 +215,16 @@ public sealed class ServerPersistenceCoordinator
         {
             candidates.Add(new SaveSetCandidate(CurrentSaveSetRoot, currentManifest, IsBackup: false));
         }
-        else if (Directory.Exists(CurrentSaveSetRoot))
+        else if (CurrentSaveSetDirectoryHasEntries())
         {
             warnings.Add($"Current save-set is not loadable: {currentError}");
         }
 
-        string backupRoot = Path.Combine(_rootDirectory, _options.BackupsDirectoryName);
+        string backupRoot = BackupRootDirectory;
         if (!Directory.Exists(backupRoot))
             return candidates;
 
-        foreach (string backupDirectory in Directory.EnumerateDirectories(backupRoot, "save-*"))
+        foreach (string backupDirectory in Directory.EnumerateDirectories(backupRoot))
         {
             string manifestPath = Path.Combine(backupDirectory, "save_manifest.json");
             if (TryReadManifest(manifestPath, out ServerPersistenceSaveManifest backupManifest, out string backupError))
@@ -338,7 +323,7 @@ public sealed class ServerPersistenceCoordinator
 
     private void CleanupPendingSaveSets(List<string> warnings)
     {
-        string pendingDirectory = Path.Combine(_rootDirectory, _options.PendingDirectoryName);
+        string pendingDirectory = PendingDirectory;
         if (!Directory.Exists(pendingDirectory))
             return;
 
@@ -350,4 +335,211 @@ public sealed class ServerPersistenceCoordinator
         string Root,
         ServerPersistenceSaveManifest Manifest,
         bool IsBackup);
+
+    private string CreateBackupPath(string backupRoot, ServerPersistenceMetadata metadata)
+    {
+        int backupCount = _options.ClampedBackupCount < 0 ? 3 : _options.ClampedBackupCount;
+        string[] slots = GetBackupSlotNames(Math.Max(1, backupCount));
+        string timeStamp = FormatBackupTimestamp(metadata.SavedUtc);
+
+        string[] existing = Directory.GetDirectories(backupRoot);
+        for (int i = 0; i < slots.Length; i++)
+        {
+            DirectoryInfo? directory = MatchBackupSlot(existing, slots[i]);
+            if (directory is null)
+                continue;
+
+            if (i == 0)
+            {
+                try { directory.Delete(recursive: true); }
+                catch { }
+                continue;
+            }
+
+            string existingTimeStamp = FindBackupTimestamp(directory.Name) ?? timeStamp;
+            string target = FormatBackupDirectory(backupRoot, slots[i - 1], existingTimeStamp);
+            DeleteDirectoryIfExists(target);
+            try { directory.MoveTo(target); }
+            catch { }
+        }
+
+        return FormatBackupDirectory(backupRoot, slots[^1], timeStamp);
+    }
+
+    private static string[] GetBackupSlotNames(int backupCount) =>
+        backupCount <= 1
+            ? ["Most Recent"]
+            : backupCount == 2
+                ? ["Second Backup", "Most Recent"]
+                : ["Third Backup", "Second Backup", "Most Recent"];
+
+    private static DirectoryInfo? MatchBackupSlot(string[] paths, string slotName)
+    {
+        for (int i = 0; i < paths.Length; i++)
+        {
+            var info = new DirectoryInfo(paths[i]);
+            if (info.Name.StartsWith(slotName, StringComparison.Ordinal))
+                return info;
+        }
+
+        return null;
+    }
+
+    private static string FormatBackupDirectory(string root, string name, string timeStamp) =>
+        Path.Combine(root, $"{name} ({timeStamp})");
+
+    private static string? FindBackupTimestamp(string input)
+    {
+        int start = input.IndexOf('(');
+        if (start < 0)
+            return null;
+
+        int end = input.IndexOf(')', start + 1);
+        return end >= start
+            ? input.Substring(start + 1, end - start - 1)
+            : null;
+    }
+
+    private static string FormatBackupTimestamp(DateTimeOffset savedUtc)
+    {
+        DateTimeOffset local = savedUtc.ToLocalTime();
+        return $"{local.Day}-{local.Month}-{local.Year} {local.Hour}-{local.Minute:D2}-{local.Second:D2}";
+    }
+
+    private string PendingDirectory => Path.Combine(_rootDirectory, _options.PendingDirectoryName);
+
+    private string BackupRootDirectory =>
+        !string.IsNullOrWhiteSpace(_options.BackupsRootDirectory)
+            ? Path.GetFullPath(_options.BackupsRootDirectory)
+            : Path.GetFullPath(Path.Combine(_rootDirectory, _options.BackupsDirectoryName));
+
+    private bool UsesRootAsCurrentSaveSet => string.IsNullOrWhiteSpace(_options.CurrentDirectoryName);
+
+    private string ResolveCurrentSaveSetRoot() =>
+        UsesRootAsCurrentSaveSet
+            ? _rootDirectory
+            : Path.Combine(_rootDirectory, _options.CurrentDirectoryName);
+
+    private bool CurrentSaveSetDirectoryHasEntries()
+    {
+        string current = CurrentSaveSetRoot;
+        if (!Directory.Exists(current))
+            return false;
+
+        if (!UsesRootAsCurrentSaveSet)
+            return true;
+
+        foreach (string entry in Directory.EnumerateFileSystemEntries(current))
+        {
+            if (IsCurrentRootInfrastructureEntry(entry))
+                continue;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private void DeleteCurrentSaveSet()
+    {
+        string current = CurrentSaveSetRoot;
+        if (!Directory.Exists(current))
+            return;
+
+        if (!UsesRootAsCurrentSaveSet)
+        {
+            Directory.Delete(current, recursive: true);
+            return;
+        }
+
+        foreach (string entry in Directory.EnumerateFileSystemEntries(current))
+        {
+            if (IsCurrentRootInfrastructureEntry(entry))
+                continue;
+
+            DeleteFileSystemEntry(entry);
+        }
+    }
+
+    private void MoveCurrentSaveSetToBackup(string backupPath)
+    {
+        string current = CurrentSaveSetRoot;
+        if (!UsesRootAsCurrentSaveSet)
+        {
+            Directory.Move(current, backupPath);
+            return;
+        }
+
+        Directory.CreateDirectory(backupPath);
+        foreach (string entry in Directory.EnumerateFileSystemEntries(current))
+        {
+            if (IsCurrentRootInfrastructureEntry(entry))
+                continue;
+
+            MoveFileSystemEntry(entry, Path.Combine(backupPath, Path.GetFileName(entry)));
+        }
+    }
+
+    private void PromotePendingSaveSetToCurrent(string pendingRoot)
+    {
+        string current = CurrentSaveSetRoot;
+        if (!UsesRootAsCurrentSaveSet)
+        {
+            Directory.Move(pendingRoot, current);
+            return;
+        }
+
+        Directory.CreateDirectory(current);
+        foreach (string entry in Directory.EnumerateFileSystemEntries(pendingRoot))
+        {
+            string target = Path.Combine(current, Path.GetFileName(entry));
+            DeleteFileSystemEntry(target);
+            MoveFileSystemEntry(entry, target);
+        }
+        Directory.Delete(pendingRoot);
+    }
+
+    private bool IsCurrentRootInfrastructureEntry(string entry)
+    {
+        string fullEntry = Path.GetFullPath(entry);
+        return PathsEqual(fullEntry, PendingDirectory) ||
+            IsSameOrChildPath(fullEntry, BackupRootDirectory);
+    }
+
+    private static bool PathsEqual(string left, string right) =>
+        string.Equals(
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+            StringComparison.Ordinal);
+
+    private static bool IsSameOrChildPath(string path, string parent)
+    {
+        string fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        string fullParent = Path.TrimEndingDirectorySeparator(Path.GetFullPath(parent));
+        return string.Equals(fullPath, fullParent, StringComparison.Ordinal) ||
+            fullPath.StartsWith(fullParent + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    private static void DeleteFileSystemEntry(string path)
+    {
+        if (Directory.Exists(path))
+        {
+            Directory.Delete(path, recursive: true);
+            return;
+        }
+
+        if (File.Exists(path))
+            File.Delete(path);
+    }
+
+    private static void MoveFileSystemEntry(string source, string destination)
+    {
+        if (Directory.Exists(source))
+        {
+            Directory.Move(source, destination);
+            return;
+        }
+
+        File.Move(source, destination);
+    }
 }

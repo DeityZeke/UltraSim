@@ -3559,35 +3559,40 @@ internal static class TestRunner
     {
         using ServerTestRuntimeRoot root = ServerTestRuntimeRoot.Create();
         string persistenceRoot = Path.Combine(root.Path, "saves");
+        string persistenceBackupsRoot = Path.Combine(root.Path, "backups");
 
         IServerApplication first = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
             "persistence-hook-test",
             Port: 0,
             SaveOnStop: false,
             EnableAsyncFlush: false,
-            PersistenceRoot: persistenceRoot));
+            PersistenceRoot: persistenceRoot,
+            PersistenceBackupsRoot: persistenceBackupsRoot));
         first.Initialize();
         Assert.True(first.Save());
 
-        string manifestPath = Path.Combine(persistenceRoot, "current", "save_manifest.json");
+        string manifestPath = Path.Combine(persistenceRoot, "save_manifest.json");
         Assert.True(File.Exists(manifestPath));
         Assert.Contains("\"saveSequence\": 1", File.ReadAllText(manifestPath));
-        Assert.True(File.Exists(Path.Combine(persistenceRoot, "current", "accounts", "index.json")));
-        Assert.True(File.Exists(Path.Combine(persistenceRoot, "current", "world", "entities.bin")));
+        Assert.True(File.Exists(Path.Combine(persistenceRoot, "accounts", "index.json")));
+        Assert.True(File.Exists(Path.Combine(persistenceRoot, "world", "entities.bin")));
 
         IServerApplication second = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
             "persistence-hook-test",
             Port: 0,
             SaveOnStop: false,
             EnableAsyncFlush: false,
-            PersistenceRoot: persistenceRoot));
+            PersistenceRoot: persistenceRoot,
+            PersistenceBackupsRoot: persistenceBackupsRoot));
         second.Start();
         Assert.True(second.Save());
         IReadOnlyList<ServerSystemRuntimeSnapshot> secondSystems = second.GetSystemRuntimeSnapshots();
         second.Stop();
 
         Assert.Contains("\"saveSequence\": 2", File.ReadAllText(manifestPath));
-        Assert.Equal(1, Directory.GetDirectories(Path.Combine(persistenceRoot, "backups"), "save-*").Length);
+        string[] backups = Directory.GetDirectories(persistenceBackupsRoot);
+        Assert.Equal(1, backups.Length);
+        Assert.True(Path.GetFileName(backups[0]).StartsWith("Most Recent (", StringComparison.Ordinal));
         ServerSystemRuntimeSnapshot persistence = secondSystems.First(snapshot => snapshot.Name == "Persistence");
         Assert.Equal(2L, persistence.UpdateCount);
         Assert.Equal(0, persistence.ControlCount);
@@ -3599,19 +3604,21 @@ internal static class TestRunner
     {
         using ServerTestRuntimeRoot root = ServerTestRuntimeRoot.Create();
         string persistenceRoot = Path.Combine(root.Path, "saves");
+        string persistenceBackupsRoot = Path.Combine(root.Path, "backups");
 
         IServerApplication first = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
             "persistence-warning-test",
             Port: 0,
             SaveOnStop: false,
             EnableAsyncFlush: false,
-            PersistenceRoot: persistenceRoot));
+            PersistenceRoot: persistenceRoot,
+            PersistenceBackupsRoot: persistenceBackupsRoot));
         first.Initialize();
         Assert.True(first.Save());
         Assert.True(first.Save());
 
         Directory.CreateDirectory(Path.Combine(persistenceRoot, ".pending", "interrupted-save"));
-        File.WriteAllText(Path.Combine(persistenceRoot, "current", "save_manifest.json"), "{ broken json");
+        File.WriteAllText(Path.Combine(persistenceRoot, "save_manifest.json"), "{ broken json");
 
         var observed = new List<ServerApplicationEvent>();
         IServerApplication second = ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
@@ -3619,7 +3626,8 @@ internal static class TestRunner
             Port: 0,
             SaveOnStop: false,
             EnableAsyncFlush: false,
-            PersistenceRoot: persistenceRoot));
+            PersistenceRoot: persistenceRoot,
+            PersistenceBackupsRoot: persistenceBackupsRoot));
         second.EventRaised += observed.Add;
         second.Start();
         ServerSystemRuntimeSnapshot persistence = second.GetSystemRuntimeSnapshots().First(snapshot => snapshot.Name == "Persistence");

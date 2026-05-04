@@ -60,27 +60,13 @@ Server/
   RuntimeTemplate/
     README.md
     scripts/
-      Accounts/
-      Commands/
-      ContextMenus/
-      Customs/
-      Engines/
-      Items/
-      Misc/
-      Mobiles/
-      Packages/
-      Properties/
-      Regions/
-      Skills/
-      Spells/
-      Targets/
-      UI/
+      # intentionally empty on first run
     data/
     docs/
     web/
 ```
 
-`Server/RuntimeTemplate/scripts` is example/default server content and modding scaffolding. The exported server package receives a copy of this folder. After export, the server operator owns that copy.
+`Server/RuntimeTemplate/scripts` is package source and example/default server content for packaging tasks. A fresh runtime root receives only an empty `scripts/` folder. Exported server packages should include stock packages only when the package/export task explicitly installs them. After installation, the server operator owns that copy.
 
 Large cohesive systems should live as packages, not as tentacles spread across every top-level script folder. A future Knives-style chat system should prefer a package shape:
 
@@ -877,11 +863,11 @@ The first script compiler/runtime proof is implemented:
 - `IUltraSimScriptModule` discovery with `Configure` and `Initialize`
 - script command registration
 - script UI panel provider registration through `UiPanelBuilder`
-- admission package panels and replaceable admission steps under
-  `RuntimeTemplate/scripts/Packages/Admission`
+- admission package panels and replaceable admission steps from the stock
+  admission package source
 - archetype/prefab descriptor authoring through script facades
-- `BaseMobile -> BaseHumanoid -> Human` stock mobile chain and `mobiles/human`
-  prefab
+- stock mobile packages can provide a `BaseMobile -> BaseHumanoid -> Human`
+  chain and `mobiles/human` prefab
 - prefab class-name keys with source-name diagnostics
 - per-spawn random value factories evaluated at entity spawn time
 - ECS prefab catalog bridge and `/spawn <prefab-key>` proof

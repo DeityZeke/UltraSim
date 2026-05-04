@@ -42,21 +42,7 @@ internal static class TestRunner
         UltraSimRuntimeTemplate.Ensure(temp.Layout);
 
         Assert.True(Directory.Exists(temp.Layout.ScriptsPath));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Accounts")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Commands")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "ContextMenus")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Customs")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Engines")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Mobiles")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Packages")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Items")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Misc")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Properties")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Regions")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Skills")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Spells")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "Targets")));
-        Assert.True(Directory.Exists(Path.Combine(temp.Layout.ScriptsPath, "UI")));
+        Assert.False(Directory.EnumerateFileSystemEntries(temp.Layout.ScriptsPath).Any());
         Assert.True(Directory.Exists(temp.Layout.DataPrefabsPath));
         Assert.True(Directory.Exists(Path.Combine(temp.Layout.DataPrefabsPath, "items")));
         Assert.True(Directory.Exists(temp.Layout.ScriptAssemblyCachePath));

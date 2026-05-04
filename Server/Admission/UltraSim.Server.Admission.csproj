@@ -8,21 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
-    <Reference Include="UltraSim.Network">
-      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
-    <Reference Include="UltraSim.UI">
-      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
+    <ProjectReference Include="..\..\Kernels\Network\UltraSim.Network.csproj" />
+    <ProjectReference Include="..\..\Kernels\UI\UltraSim.UI.csproj" />
   </ItemGroup>
-
-  <Target Name="BuildServerAdmissionDependencies" BeforeTargets="PrepareForBuild">
-    <MSBuild
-      Projects="..\Scripting\UltraSim.Server.Scripting.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj"
-      Targets="Build"
-      Properties="Configuration=$(Configuration)" />
-  </Target>
 
 </Project>

@@ -111,7 +111,9 @@ public sealed class HeadlessServerShell
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
                 SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
                 MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
-                ScriptContext: ScriptContext))
+                ScriptContext: ScriptContext,
+                PersistenceRoot: ScriptContext!.RuntimeRoot.SavesPath,
+                PersistenceBackupsRoot: ScriptContext.RuntimeRoot.BackupsPath))
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,
                 SaveOnStop: options.SaveOnStop));

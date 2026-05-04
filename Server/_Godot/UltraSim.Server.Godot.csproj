@@ -12,26 +12,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Hosting\UltraSim.Server.Hosting.csproj" />
+    <ProjectReference Include="..\Network\UltraSim.Server.Network.csproj" />
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
-    <Reference Include="UltraSim.Server.Network">
-      <HintPath>..\Network\bin\$(Configuration)\net8.0\UltraSim.Server.Network.dll</HintPath>
-      <Private>true</Private>
-    </Reference>
   </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="..\RuntimeTemplate\**\*">
-      <Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-  </ItemGroup>
-
-  <Target Name="BuildServerGodotNetworkDependencies" BeforeTargets="PrepareForBuild">
-    <MSBuild
-      Projects="..\Network\UltraSim.Server.Network.csproj;..\Scripting\UltraSim.Server.Scripting.csproj"
-      Targets="Build"
-      Properties="Configuration=$(Configuration)" />
-  </Target>
 
   <ItemGroup>
     <Compile Remove="obj\**\*.cs" />

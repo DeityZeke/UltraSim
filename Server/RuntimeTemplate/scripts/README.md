@@ -11,14 +11,13 @@ Use top-level folders for loose scripts and small content groups. Use
 unit. For example, a future Knives-style chat system should live under
 `Packages/Chat/` with its own channels, commands, UI panels, rules, and data.
 
-Default platform packages that are still server-authored also live under
-`Packages/`. `Packages/Admission/` contains the default login and character-flow
-panel builders plus stable admission event names. Servers register or replace
-those steps through the script admission registry instead of modifying kernel
-code.
+Default platform packages that are still server-authored can ship separately as
+installable packages. `Packages/Admission/` is the stock login and character-flow
+package source used by tests and package builds; it is not copied into a fresh
+runtime root automatically.
 
-`Mobiles/` contains entity-backed mobile archetypes and prefabs. The stock
-template registers a wide `BaseMobile -> BaseHumanoid -> Human` archetype chain
-and the `mobiles/human` prefab. Sex and reproduction state live on the
+`Mobiles/` can contain entity-backed mobile archetypes and prefabs. The stock
+mobile package registers a wide `BaseMobile -> BaseHumanoid -> Human` archetype
+chain and the `mobiles/human` prefab. Sex and reproduction state live on the
 `BaseMobile` component set, so human, animal, and creature systems can filter
 that data without requiring separate male/female archetypes by default.

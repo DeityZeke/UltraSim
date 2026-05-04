@@ -29,6 +29,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
+    private WorldCanvasManager? _worldCanvas;
     private long _nextServerDrivenActionSequence;
 
     public bool IsMenuOpen => _appShell?.Visible == true;
@@ -45,6 +46,12 @@ public partial class MenuCanvasManager : CanvasLayer
 
         WireAppShell(_appShell);
         ApplyNavigation();
+    }
+
+    public void SetWorldCanvas(WorldCanvasManager? worldCanvas)
+    {
+        _worldCanvas = worldCanvas;
+        SyncAppShellWorldUiSettings();
     }
 
     public bool TryMountServerDrivenPanel(ClientUiPanelInstance panel, out string error)
@@ -285,7 +292,15 @@ public partial class MenuCanvasManager : CanvasLayer
                 return;
             }
 
-            ToggleInSessionMenu();
+            if (_navigation.IsInSession)
+            {
+                ToggleInSessionMenu();
+            }
+            else
+            {
+                HandleBackRequested();
+            }
+
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -370,9 +385,30 @@ public partial class MenuCanvasManager : CanvasLayer
         appShell.ScreenRequested += HandleScreenRequested;
         appShell.DirectConnectRequested += HandleDirectConnectRequested;
         appShell.ServerBrowserRefreshRequested += HandleServerBrowserRefreshRequested;
+        appShell.ServerBrowserProviderRequested += HandleServerBrowserProviderRequested;
         appShell.PreviewRequested += HandlePreviewRequested;
         appShell.ResumeRequested += HandleResumeRequested;
         appShell.BackRequested += HandleBackRequested;
+        appShell.OverheadChatVisibilityChanged += enabled =>
+        {
+            if (_worldCanvas is not null)
+                _worldCanvas.ShowOverheadChatBubbles = enabled;
+        };
+        appShell.NameplateVisibilityChanged += enabled =>
+        {
+            if (_worldCanvas is not null)
+                _worldCanvas.ShowNameplates = enabled;
+        };
+        appShell.MaxVisibleWorldUiChanged += maxVisible =>
+        {
+            if (_worldCanvas is not null)
+                _worldCanvas.MaxVisibleWorldUi = maxVisible;
+        };
+        appShell.WorldUiScaleChanged += scale =>
+        {
+            if (_worldCanvas is not null)
+                _worldCanvas.WorldUiScale = scale;
+        };
     }
 
     public void ShowSessionStatus()
@@ -448,6 +484,15 @@ public partial class MenuCanvasManager : CanvasLayer
     private void HandleServerBrowserRefreshRequested()
     {
         _ = RefreshServerBrowserAsync();
+    }
+
+    private void HandleServerBrowserProviderRequested(string providerId)
+    {
+        if (_serverBrowser.SelectProvider(providerId))
+        {
+            ApplyNavigation();
+            _ = RefreshServerBrowserAsync();
+        }
     }
 
     private void HandlePreviewRequested()
@@ -624,6 +669,7 @@ public partial class MenuCanvasManager : CanvasLayer
         if (_appShell is not null)
         {
             _appShell.Visible = _navigation.IsMenuVisible;
+            SyncAppShellWorldUiSettings();
             _appShell.SetServerBrowserSnapshot(_serverBrowser.GetSnapshot());
             _appShell.ShowScreen(_navigation.CurrentScreen);
         }
@@ -632,6 +678,20 @@ public partial class MenuCanvasManager : CanvasLayer
         {
             ApplyChatVisibility();
         }
+    }
+
+    private void SyncAppShellWorldUiSettings()
+    {
+        if (_appShell is null || _worldCanvas is null)
+        {
+            return;
+        }
+
+        _appShell.SetWorldUiSettings(
+            _worldCanvas.ShowOverheadChatBubbles,
+            _worldCanvas.ShowNameplates,
+            _worldCanvas.MaxVisibleWorldUi,
+            _worldCanvas.WorldUiScale);
     }
 
     private void ApplyChatVisibility()
@@ -1062,8 +1122,17 @@ public partial class MenuCanvasManager : CanvasLayer
     private async Task RefreshServerBrowserAsync()
     {
         _appShell?.SetServerBrowserSnapshot(_serverBrowser.GetSnapshot());
+        if (_navigation.IsMenuVisible && _navigation.CurrentScreen == ClientAppScreen.ServerBrowser)
+        {
+            ApplyNavigation();
+        }
+
         ServerBrowserSnapshot snapshot = await _serverBrowser.RefreshAsync();
         _appShell?.SetServerBrowserSnapshot(snapshot);
+        if (_navigation.IsMenuVisible && _navigation.CurrentScreen == ClientAppScreen.ServerBrowser)
+        {
+            ApplyNavigation();
+        }
     }
 
     private static ClientServerBrowserService CreateDefaultServerBrowser()
@@ -1083,10 +1152,31 @@ public partial class MenuCanvasManager : CanvasLayer
         return new ClientServerBrowserService(
         [
             new ServerBrowserProviderDefinition(
+                "official",
+                "Official",
+                ServerDiscoveryProviderKind.Official,
+                new InMemoryServerDiscoveryQuery([])),
+            new ServerBrowserProviderDefinition(
+                "favorites",
+                "Favorites",
+                ServerDiscoveryProviderKind.Favorites,
+                new InMemoryServerDiscoveryQuery([])),
+            new ServerBrowserProviderDefinition(
+                "history",
+                "History",
+                ServerDiscoveryProviderKind.History,
+                new InMemoryServerDiscoveryQuery([])),
+            new ServerBrowserProviderDefinition(
+                "lan",
+                "LAN",
+                ServerDiscoveryProviderKind.Lan,
+                new InMemoryServerDiscoveryQuery([])),
+            new ServerBrowserProviderDefinition(
                 "manual",
                 "Manual",
                 ServerDiscoveryProviderKind.Manual,
                 new InMemoryServerDiscoveryQuery([localRow]))
-        ]);
+        ],
+        initialProviderId: "manual");
     }
 }
