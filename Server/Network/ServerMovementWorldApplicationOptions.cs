@@ -11,6 +11,7 @@ public sealed record ServerMovementWorldApplicationOptions(
     float MovementSpeed = 4.0f,
     double SessionAuthTimeoutSeconds = 5.0,
     double SessionKeepAliveTimeoutSeconds = 10.0,
+    string CommandPrefix = "/",
     int MaxAutoCreatedAccountsPerRemoteAddress = 1,
     DefaultUltraSimScriptContext? ScriptContext = null,
     string? PersistenceRoot = null,

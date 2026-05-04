@@ -14,6 +14,7 @@ public sealed class ServerScriptRuntimeBinding
     private readonly ServerUiService _ui;
     private readonly ServerScriptPrefabSpawner? _spawnPrefab;
     private readonly ServerAdmissionFlowRuntime _admission;
+    private readonly string _commandPrefix;
     private long _nextScriptPanelSequence;
 
     public ServerScriptRuntimeBinding(
@@ -22,12 +23,16 @@ public sealed class ServerScriptRuntimeBinding
         ServerUiService ui,
         ServerScriptPrefabSpawner? spawnPrefab = null,
         IAdmissionCredentialValidator? credentialValidator = null,
-        IAdmissionRuntimePolicy? admissionRuntimePolicy = null)
+        IAdmissionRuntimePolicy? admissionRuntimePolicy = null,
+        string commandPrefix = "/")
     {
         _scriptContext = scriptContext ?? throw new ArgumentNullException(nameof(scriptContext));
         ArgumentNullException.ThrowIfNull(commands);
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
         _spawnPrefab = spawnPrefab;
+        if (string.IsNullOrWhiteSpace(commandPrefix))
+            throw new ArgumentException("Command prefix cannot be empty.", nameof(commandPrefix));
+        _commandPrefix = commandPrefix.Trim();
         _admission = new ServerAdmissionFlowRuntime(
             _scriptContext,
             new ServerUiAdmissionPanelGateway(_ui),
@@ -38,7 +43,7 @@ public sealed class ServerScriptRuntimeBinding
         RegisterPanelOpenCommand(commands);
         if (_spawnPrefab is not null)
             RegisterSpawnCommand(commands);
-        _scriptContext.RegisterCommandsInto(commands);
+        _scriptContext.RegisterCommandsInto(commands, _commandPrefix);
     }
 
     public DefaultUltraSimScriptContext ScriptContext => _scriptContext;
@@ -52,7 +57,7 @@ public sealed class ServerScriptRuntimeBinding
             {
                 if (invocation.Arguments.Count == 0)
                 {
-                    request.Reply?.Invoke("Usage: /panel <script-panel-key>");
+                    request.Reply?.Invoke($"Usage: {_commandPrefix}panel <script-panel-key>");
                     return;
                 }
 
@@ -91,7 +96,7 @@ public sealed class ServerScriptRuntimeBinding
 
                 request.Reply?.Invoke($"Opened script panel '{panelKey}'.");
             },
-            prefix: "/",
+            prefix: _commandPrefix,
             helpText: "Open a script-registered UI panel.");
     }
 
@@ -103,14 +108,14 @@ public sealed class ServerScriptRuntimeBinding
             {
                 if (invocation.Arguments.Count == 0)
                 {
-                    request.Reply?.Invoke("Usage: /spawn <prefab-key>");
+                    request.Reply?.Invoke($"Usage: {_commandPrefix}spawn <prefab-key>");
                     return;
                 }
 
                 string prefabKey = invocation.Arguments[0].Trim();
                 if (prefabKey.Length == 0)
                 {
-                    request.Reply?.Invoke("Usage: /spawn <prefab-key>");
+                    request.Reply?.Invoke($"Usage: {_commandPrefix}spawn <prefab-key>");
                     return;
                 }
 
@@ -129,7 +134,7 @@ public sealed class ServerScriptRuntimeBinding
                     request.Reply?.Invoke($"Spawn failed for prefab '{prefabKey}': {ex.Message}");
                 }
             },
-            prefix: "/",
+            prefix: _commandPrefix,
             helpText: "Spawn a registered script prefab.");
     }
 

@@ -16,9 +16,9 @@ public sealed class ServerCommandRegistry
     private readonly Dictionary<string, CommandEntry> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _prefixes = new();
 
-    public ServerCommandRegistry()
+    public ServerCommandRegistry(string commandPrefix = "/")
     {
-        AddPrefix("/");
+        AddPrefix(commandPrefix);
     }
 
     public IReadOnlyList<string> Prefixes => _prefixes;

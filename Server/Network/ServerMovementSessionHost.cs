@@ -67,12 +67,15 @@ public sealed class ServerMovementSessionHost
         IAdmissionCredentialValidator? admissionCredentialValidator = null,
         IAdmissionRuntimePolicy? admissionRuntimePolicy = null,
         Action<ConnectionId, string>? operatorLog = null,
+        string commandPrefix = "/",
         bool enableGlobalMovementObserverState = false,
         SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
     {
         if (maxPollBatch <= 0)
             throw new ArgumentOutOfRangeException(nameof(maxPollBatch));
+        if (string.IsNullOrWhiteSpace(commandPrefix))
+            throw new ArgumentException("Command prefix cannot be empty.", nameof(commandPrefix));
 
         _world = world ?? throw new ArgumentNullException(nameof(world));
         _transport = transport ?? throw new ArgumentNullException(nameof(transport));
@@ -95,9 +98,10 @@ public sealed class ServerMovementSessionHost
             _subscriptions,
             new ReliableEventReplayBuffer(capacityPerConnection: runtimeOptions.ReplayBufferCapacityPerConnection),
             runtimeOptions);
-        _chat = new ServerChatService(orderedEvents);
+        string normalizedCommandPrefix = commandPrefix.Trim();
+        _chat = new ServerChatService(orderedEvents, new ServerCommandRegistry(normalizedCommandPrefix));
         _ui = new ServerUiService(orderedEvents);
-        ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat);
+        ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat, normalizedCommandPrefix);
         if (scriptContext is not null)
         {
             _scriptBinding = new ServerScriptRuntimeBinding(
@@ -106,7 +110,8 @@ public sealed class ServerMovementSessionHost
                 _ui,
                 world.TryCreatePrefab,
                 admissionCredentialValidator,
-                admissionRuntimePolicy);
+                admissionRuntimePolicy,
+                normalizedCommandPrefix);
         }
         _requiresAdmission = scriptContext?.RegisteredAdmissionSteps.Count > 0;
         _allocateNetworkEntityId = allocateNetworkEntityId;

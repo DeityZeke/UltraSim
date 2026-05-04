@@ -43,6 +43,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_CommandDispatch_UsesSharedLifecycleSurface), ServerApplication_CommandDispatch_UsesSharedLifecycleSurface);
         Run(nameof(ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs), ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs);
         Run(nameof(ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat), ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat);
+        Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
         Run(nameof(ServerApplication_Faults_WhenHookThrows), ServerApplication_Faults_WhenHookThrows);
@@ -587,6 +588,31 @@ internal static class TestRunner
         Assert.True(registry.TryDispatch(in consoleRequest, out ServerCommandDispatchResult result));
         Assert.Equal(ServerCommandDispatchStatus.Executed, result.Status);
         Assert.True(invoked);
+    }
+
+    private static void ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix()
+    {
+        var orderedEvents = new OrderedEventStream(capacity: 8);
+        var registry = new ServerCommandRegistry("[");
+        var chat = new ServerChatService(orderedEvents, registry);
+        ServerChatCommandBootstrap.RegisterDefaults(registry, chat, "[");
+
+        string? reply = null;
+        var bracketRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "[help",
+            Reply: message => reply = message);
+        Assert.True(registry.TryDispatch(in bracketRequest, out ServerCommandDispatchResult bracketResult));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, bracketResult.Status);
+        Assert.Contains("[help", reply!);
+        Assert.Contains("[ping", reply!);
+        Assert.False(reply!.Contains("/help", StringComparison.Ordinal));
+
+        var slashRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "/help",
+            Reply: message => reply = message);
+        Assert.False(registry.TryDispatch(in slashRequest, out _));
     }
 
     private static void ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess()

@@ -2,12 +2,18 @@ namespace UltraSim.Server.Network;
 
 public static class ServerChatCommandBootstrap
 {
-    public static void RegisterDefaults(ServerCommandRegistry registry, ServerChatService chat)
+    public static void RegisterDefaults(
+        ServerCommandRegistry registry,
+        ServerChatService chat,
+        string commandPrefix = "/")
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(chat);
+        if (string.IsNullOrWhiteSpace(commandPrefix))
+            throw new ArgumentException("Command prefix cannot be empty.", nameof(commandPrefix));
 
-        registry.AddPrefix("[");
+        string prefix = commandPrefix.Trim();
+        registry.AddPrefix(prefix);
 
         registry.Register(
             "help",
@@ -16,7 +22,7 @@ public static class ServerChatCommandBootstrap
                 string help = registry.BuildHelp(invocation.Prefix);
                 request.Reply?.Invoke(string.IsNullOrWhiteSpace(help) ? "No commands registered." : help);
             },
-            prefix: "/",
+            prefix: prefix,
             helpText: "List available commands.");
 
         registry.Register(
@@ -25,7 +31,7 @@ public static class ServerChatCommandBootstrap
             {
                 request.Reply?.Invoke("pong");
             },
-            prefix: "/",
+            prefix: prefix,
             helpText: "Check the command path.");
 
         registry.Register(

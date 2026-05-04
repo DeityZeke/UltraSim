@@ -49,6 +49,13 @@ Current foundational/server-platform task list:
 - region/rule framework when terrain and world regions become concrete
 - health/status presentation expansion from the current overhead-bar hook into real health components and peeled-off status panels
 
+Current chat command prefix policy:
+
+- `ServerMovementWorldApplicationOptions.CommandPrefix` owns the live gameplay/chat command declaration string.
+- The default is `/`, but server owners can set one alternate prefix such as `[`, `.`, `#`, or `command:`.
+- The live movement host registers built-in and script commands under that one configured prefix.
+- The command registry can still support extra prefixes internally, especially unprefixed operator-console commands, but normal chat should not advertise multiple command declaration symbols.
+
 Current access/permission foundation:
 
 - `ServerAccessRuleRegistry` stores named, runtime-replaceable rules.

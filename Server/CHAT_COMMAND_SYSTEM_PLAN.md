@@ -10,7 +10,7 @@ The target feel is RunUO-like:
 - submit plain text to speak locally
 - local speech appears in the chat feed and as an overhead bubble
 - command-prefixed input runs server commands
-- the command prefix is configurable and can be more than one character, such as `[`, `/`, `.`, or `command:`
+- the command prefix is a single server-owner configured string, such as `[`, `/`, `.`, `#`, or `command:`
 
 The target UI grows toward a Knives Chat-style panel:
 
@@ -50,7 +50,7 @@ Server-side interpretation order:
 2. Else if input starts with a configured channel alias, route to that channel.
 3. Else route as default local speech.
 
-Command prefixes are strings and use longest-prefix matching. This allows `command:` to coexist with shorter prefixes.
+The live server should advertise and use one gameplay/chat command prefix. The registry still supports multiple prefixes internally for console/specialized tooling, but normal chat command dispatch should not expose multiple competing declaration symbols. Script command registrations are normalized onto the server's configured chat prefix at runtime.
 
 Channel aliases should usually be command handlers:
 
@@ -67,7 +67,7 @@ Planned modules:
 
 - `ServerCommandRegistry`
   - source-neutral command registration and dispatch
-  - string prefixes
+  - string command prefixes for low-level dispatch
   - quoted argument parsing
   - `key=value` named argument extraction
   - access checks
@@ -117,6 +117,13 @@ The default `help`, `ping`, and `announce` bootstrap commands can remain core
 until script command facades can express every required behavior cleanly. In
 particular, `announce` needs a first-class chat/system announcement facade
 before it should move into runtime scripts.
+
+Current command-prefix policy:
+
+- `ServerMovementWorldApplicationOptions.CommandPrefix` is the server-owned chat command declaration string.
+- `ServerChatCommandBootstrap` registers `help` and `ping` under that one prefix.
+- script commands and built-in script helper commands such as `panel`/`spawn` are normalized onto that same prefix when bound into the live movement host.
+- unprefixed console-only commands can still exist for operator shell flows, but they are not chat command declaration symbols.
 
 The visible chat panel should also remain a local client surface for now, not a
 server-authored schema panel. Chat needs persistent local history, append-only

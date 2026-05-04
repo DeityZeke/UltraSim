@@ -198,12 +198,16 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
         return true;
     }
 
-    public void RegisterCommandsInto(ServerCommandRegistry registry)
+    public void RegisterCommandsInto(ServerCommandRegistry registry, string? commandPrefixOverride = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
+        string? normalizedOverride = string.IsNullOrWhiteSpace(commandPrefixOverride)
+            ? null
+            : commandPrefixOverride.Trim();
 
         foreach (UltraSimScriptCommandDescriptor descriptor in _commands.Values)
         {
+            string prefix = normalizedOverride ?? descriptor.Prefix;
             registry.Register(
                 descriptor.Name,
                 (in ServerCommandRequest request, ServerTextCommandInvocation invocation) =>
@@ -219,7 +223,7 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
                         request.Reply);
                     descriptor.Handler(context);
                 },
-                descriptor.Prefix,
+                prefix,
                 descriptor.MinAccessLevel,
                 descriptor.HelpText,
                 descriptor.Aliases);

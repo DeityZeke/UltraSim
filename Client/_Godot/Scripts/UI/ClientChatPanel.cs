@@ -9,8 +9,19 @@ public partial class ClientChatPanel : PanelContainer
 
     private RichTextLabel? _history;
     private LineEdit? _input;
+    private string _commandPrefix = "/";
 
     public bool HasInputFocus => _input?.HasFocus() == true;
+
+    public string CommandPrefix
+    {
+        get => _commandPrefix;
+        set
+        {
+            _commandPrefix = string.IsNullOrWhiteSpace(value) ? "/" : value.Trim();
+            ApplyCommandPlaceholder();
+        }
+    }
 
     public override void _Ready()
     {
@@ -77,10 +88,21 @@ public partial class ClientChatPanel : PanelContainer
 
         _input = new LineEdit
         {
-            PlaceholderText = "say, /command, [command..."
+            PlaceholderText = BuildCommandPlaceholder()
         };
         _input.TextSubmitted += HandleTextSubmitted;
         column.AddChild(_input);
+    }
+
+    private void ApplyCommandPlaceholder()
+    {
+        if (_input is not null)
+            _input.PlaceholderText = BuildCommandPlaceholder();
+    }
+
+    private string BuildCommandPlaceholder()
+    {
+        return $"say, {_commandPrefix}command...";
     }
 
     private void ApplyViewportLayout()

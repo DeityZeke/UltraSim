@@ -17,6 +17,8 @@ public static class ServerMovementWorldApplicationFactory
         ArgumentNullException.ThrowIfNull(options);
         if (string.IsNullOrWhiteSpace(options.ProfileName))
             throw new ArgumentException("Profile name cannot be empty.", nameof(options));
+        if (string.IsNullOrWhiteSpace(options.CommandPrefix))
+            throw new ArgumentException("Command prefix cannot be empty.", nameof(options));
         if ((uint)options.Port > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(options));
 
@@ -160,6 +162,7 @@ public static class ServerMovementWorldApplicationFactory
                     bindCharacter: TryBindSelectedCharacter),
                 operatorLog: (connectionId, message) =>
                     _operatorLog?.Invoke($"Client: {ResolveRemoteAddress(connectionId)}: {message}"),
+                commandPrefix: _options.CommandPrefix,
                 enableGlobalMovementObserverState: _options.EnableGlobalMovementObserverState);
             _host.Start();
         }
