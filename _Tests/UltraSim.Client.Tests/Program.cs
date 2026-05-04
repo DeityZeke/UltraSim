@@ -26,6 +26,8 @@ internal static class TestRunner
         Run(nameof(UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity), UiSchemaCacheKey_RequiresExactServerPanelRevisionAndHashIdentity);
         Run(nameof(ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths), ServerPatchManifestValidator_RejectsExecutableContentAndUnsafePaths);
         Run(nameof(ContentPathValidation_ValidatesSizeAndSha256), ContentPathValidation_ValidatesSizeAndSha256);
+        Run(nameof(ContentPackManifestValidator_ValidatesSemanticDefinitionsAndFiles), ContentPackManifestValidator_ValidatesSemanticDefinitionsAndFiles);
+        Run(nameof(ContentPackLoader_ReadsAndValidatesDirectoryAndZipSources), ContentPackLoader_ReadsAndValidatesDirectoryAndZipSources);
         Run(nameof(LayeredContentResolver_ResolvesHighestPriorityMapping), LayeredContentResolver_ResolvesHighestPriorityMapping);
         Run(nameof(ResourcePackManifestValidator_CreatesUserOverrideLayer), ResourcePackManifestValidator_CreatesUserOverrideLayer);
         Run(nameof(ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions), ContentCacheQuotaPlanner_PlansOldestUnpinnedEvictions);
@@ -415,6 +417,238 @@ internal static class TestRunner
         Assert.True(error.Contains("size mismatch", StringComparison.OrdinalIgnoreCase), error);
         Assert.False(ContentPathValidation.ValidateSizeAndSha256(bytes, bytes.Length, new string('0', 64), out error));
         Assert.Equal("Asset SHA-256 hash mismatch.", error);
+    }
+
+    private static void ContentPackManifestValidator_ValidatesSemanticDefinitionsAndFiles()
+    {
+        byte[] modelBytes = [9, 8, 7, 6];
+        string modelHash = Convert.ToHexString(SHA256.HashData(modelBytes)).ToLowerInvariant();
+        var manifest = new ContentPackManifest(
+            ContentPackManifest.CurrentSchema,
+            new ContentPackInfo(
+                "ultrasim.core.bots",
+                "UltraSim Core Bots",
+                "1.0.0",
+                MinPipelineFormat: 1,
+                MaxPipelineFormat: 1,
+                ContentHash: null),
+            [
+                new ContentPackFileEntry("models/bot_x.glb", "model", modelBytes.Length, modelHash)
+            ],
+            [
+                new ContentPackDefinitionEntry(
+                    "ultrasim:mobile/x_bot",
+                    ContentPackDefinitionKind.Mobile,
+                    ContentPackDefinitionMode.Replace,
+                    DisplayName: "Human Female",
+                    Model: "models/bot_x.glb",
+                    Texture: null,
+                    Material: null,
+                    VisualOffset: new ContentPackVector3(0f, 0f, 0f),
+                    VisualRotationDegrees: null,
+                    VisualScale: new ContentPackVector3(1f, 1f, 1f),
+                    CameraPivotOffset: new ContentPackVector3(0f, 1.6f, 0f),
+                    NameplateOffset: new ContentPackVector3(0f, 2f, 0f),
+                    EffectsOffset: new ContentPackVector3(0f, 0.9f, 0f),
+                    MaterialSlots: null),
+                new ContentPackDefinitionEntry(
+                    "ultrasim:item/flower",
+                    ContentPackDefinitionKind.ItemVisual,
+                    ContentPackDefinitionMode.Append,
+                    DisplayName: "Flower",
+                    Model: "models/bot_x.glb",
+                    Texture: null,
+                    Material: null,
+                    VisualOffset: null,
+                    VisualRotationDegrees: null,
+                    VisualScale: null,
+                    CameraPivotOffset: null,
+                    NameplateOffset: null,
+                    EffectsOffset: null,
+                    MaterialSlots:
+                    [
+                        new ContentPackMaterialSlotEntry(
+                            "petals",
+                            "ultrasim:material/petal_soft",
+                            Texture: null,
+                            Material: null,
+                            HueChannel: ContentPackHueChannel.Main,
+                            DefaultHue: 32),
+                        new ContentPackMaterialSlotEntry(
+                            "stem",
+                            "ultrasim:material/plant_green",
+                            Texture: null,
+                            Material: null,
+                            HueChannel: ContentPackHueChannel.Secondary,
+                            DefaultHue: 0),
+                        new ContentPackMaterialSlotEntry(
+                            "center",
+                            "ultrasim:material/pollen",
+                            Texture: null,
+                            Material: null,
+                            HueChannel: ContentPackHueChannel.Trim,
+                            DefaultHue: 12)
+                    ])
+            ],
+            [],
+            []);
+
+        Assert.True(ContentPackManifestValidator.TryValidate(manifest, out string error), error);
+
+        ContentPackManifest duplicateFile = manifest with
+        {
+            Files =
+            [
+                manifest.Files[0],
+                manifest.Files[0] with { Path = "models\\bot_x.glb" }
+            ]
+        };
+        Assert.False(ContentPackManifestValidator.TryValidate(duplicateFile, out error));
+        Assert.True(error.Contains("duplicate file", StringComparison.OrdinalIgnoreCase), error);
+
+        ContentPackManifest missingModel = manifest with
+        {
+            Definitions =
+            [
+                manifest.Definitions[0] with { Model = "models/missing.glb" }
+            ]
+        };
+        Assert.False(ContentPackManifestValidator.TryValidate(missingModel, out error));
+        Assert.True(error.Contains("undeclared model", StringComparison.OrdinalIgnoreCase), error);
+
+        ContentPackManifest duplicateMaterialSlot = manifest with
+        {
+            Definitions =
+            [
+                manifest.Definitions[1] with
+                {
+                    MaterialSlots =
+                    [
+                        new ContentPackMaterialSlotEntry(
+                            "petals",
+                            "ultrasim:material/petal_soft",
+                            Texture: null,
+                            Material: null,
+                            HueChannel: ContentPackHueChannel.Main,
+                            DefaultHue: 32),
+                        new ContentPackMaterialSlotEntry(
+                            "petals",
+                            "ultrasim:material/petal_soft",
+                            Texture: null,
+                            Material: null,
+                            HueChannel: ContentPackHueChannel.Secondary,
+                            DefaultHue: 77)
+                    ]
+                }
+            ]
+        };
+        Assert.False(ContentPackManifestValidator.TryValidate(duplicateMaterialSlot, out error));
+        Assert.True(error.Contains("duplicate material slot", StringComparison.OrdinalIgnoreCase), error);
+
+        ContentPackManifest invalidHueChannel = manifest with
+        {
+            Definitions =
+            [
+                manifest.Definitions[1] with
+                {
+                    MaterialSlots =
+                    [
+                        new ContentPackMaterialSlotEntry(
+                            "petals",
+                            "ultrasim:material/petal_soft",
+                            Texture: null,
+                            Material: null,
+                            HueChannel: "glitter",
+                            DefaultHue: 32)
+                    ]
+                }
+            ]
+        };
+        Assert.False(ContentPackManifestValidator.TryValidate(invalidHueChannel, out error));
+        Assert.True(error.Contains("unsupported hue channel", StringComparison.OrdinalIgnoreCase), error);
+
+        ContentPackManifest incompatible = manifest with
+        {
+            Pack = manifest.Pack with
+            {
+                MinPipelineFormat = 99,
+                MaxPipelineFormat = 99
+            }
+        };
+        Assert.False(ContentPackManifestValidator.TryValidate(incompatible, out error));
+        Assert.True(error.Contains("pipeline format", StringComparison.OrdinalIgnoreCase), error);
+    }
+
+    private static void ContentPackLoader_ReadsAndValidatesDirectoryAndZipSources()
+    {
+        byte[] modelBytes = [1, 3, 3, 7, 9];
+        string modelHash = Convert.ToHexString(SHA256.HashData(modelBytes)).ToLowerInvariant();
+        string manifestJson = $$"""
+        {
+          "schema": "ultrasim.content-pack.v1",
+          "pack": {
+            "id": "server.sample_pack",
+            "name": "Sample Pack",
+            "version": "1.0.0",
+            "minPipelineFormat": 1,
+            "maxPipelineFormat": 1
+          },
+          "files": [
+            {
+              "path": "models/bot_y.glb",
+              "kind": "model",
+              "sizeBytes": {{modelBytes.Length}},
+              "sha256": "{{modelHash}}"
+            }
+          ],
+          "definitions": [
+            {
+              "id": "server:mobile/bot_y",
+              "kind": "mobile",
+              "mode": "append",
+              "displayName": "Server Male",
+              "model": "models/bot_y.glb",
+              "visualScale": { "x": 1, "y": 1, "z": 1 }
+            }
+          ],
+          "dependencies": [],
+          "filters": []
+        }
+        """;
+
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-content-pack-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "models"));
+        File.WriteAllText(Path.Combine(root, ContentPackManifest.ManifestPath), manifestJson);
+        File.WriteAllBytes(Path.Combine(root, "models", "bot_y.glb"), modelBytes);
+
+        using (var directorySource = new DirectoryContentPackSource(root))
+        {
+            Assert.True(ContentPackLoader.TryReadAndValidate(directorySource, out ContentPackManifest manifest, out string error), error);
+            Assert.Equal("server.sample_pack", manifest.Pack.Id);
+            Assert.Equal("server:mobile/bot_y", manifest.Definitions[0].Id);
+        }
+
+        string zipPath = Path.Combine(Path.GetTempPath(), "ultrasim-content-pack-tests", Guid.NewGuid().ToString("N") + ".uspkg");
+        var zipWriter = new ZipContentPackArchiveWriter();
+        Assert.Equal("zip", zipWriter.ArchiveKind);
+        Assert.True(zipWriter.TryWritePackage(root, zipPath, overwrite: false, out string packageError), packageError);
+
+        using (var zipSource = new ZipContentPackSource(zipPath))
+        {
+            Assert.True(ContentPackLoader.TryReadAndValidate(zipSource, out ContentPackManifest manifest, out string error), error);
+            Assert.Equal("Sample Pack", manifest.Pack.Name);
+            Assert.Equal("models/bot_y.glb", manifest.Files[0].Path);
+        }
+
+        string badRoot = Path.Combine(Path.GetTempPath(), "ultrasim-content-pack-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(badRoot, "models"));
+        File.WriteAllText(Path.Combine(badRoot, ContentPackManifest.ManifestPath), manifestJson);
+        File.WriteAllBytes(Path.Combine(badRoot, "models", "bot_y.glb"), [0, 0, 0]);
+        using (var badSource = new DirectoryContentPackSource(badRoot))
+        {
+            Assert.False(ContentPackLoader.TryReadAndValidate(badSource, out _, out string error));
+            Assert.True(error.Contains("failed validation", StringComparison.OrdinalIgnoreCase), error);
+        }
     }
 
     private static void LayeredContentResolver_ResolvesHighestPriorityMapping()
