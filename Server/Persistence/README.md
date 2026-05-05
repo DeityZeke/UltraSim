@@ -20,10 +20,14 @@ Current scope:
   untouched.
 - Participant artifact paths are validated as safe save-set-relative paths before
   promotion/load. A bad participant cannot point outside `saves/`.
-- Whole save-set backups are rotated as directories, rather than letting account
-  and world backups drift independently. The default rotation follows the RunUO
-  naming shape: `Most Recent (...)`, `Second Backup (...)`, and
-  `Third Backup (...)`. Backup timestamps use the host machine's local time.
+- Whole save-set backups are rotated together, rather than letting account and
+  world backups drift independently. The default backup storage is still a
+  directory. Operators can opt into archive compression with
+  `ServerPersistenceSaveSetOptions.BackupCompressor`; the first built-in
+  compressor is ZIP, and the interface is intentionally small so ZSTD can replace
+  it later without changing the coordinator contract. The default rotation
+  follows the RunUO naming shape: `Most Recent (...)`, `Second Backup (...)`,
+  and `Third Backup (...)`. Backup timestamps use the host machine's local time.
 - `AccountingPersistenceParticipant` writes the accounting JSON snapshot into
   the staged save-set.
 - `EcsWorldPersistenceParticipant` writes the current ECS binary world snapshot
@@ -102,9 +106,9 @@ Still worth reworking/expanding next:
   hourly/daily generations, or size limits;
 - add artifact checksums so load can detect content drift, not just missing files
   or changed sizes;
-- add optional backup archive compression behind a compression-agnostic archive
-  interface. ZSTD is the preferred target based on ModernUO's storage/perf
-  tradeoff, but live current saves should remain uncompressed for fast startup.
+- add a ZSTD implementation of `IServerPersistenceBackupCompressor`. The
+  coordinator already supports archive-backed backups through that compression
+  interface, and live current saves remain uncompressed for fast startup.
 - add optional parallel participant save/snapshot execution once there are enough
   participants to justify the coordination cost. Manifest stamping and promotion
   stay single-coordinator-owned; participant snapshot/write work can fan out.

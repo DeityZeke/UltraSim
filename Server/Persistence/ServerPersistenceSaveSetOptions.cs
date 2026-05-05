@@ -6,7 +6,8 @@ public sealed record ServerPersistenceSaveSetOptions(
     string BackupsDirectoryName = "backups",
     int BackupCount = 3,
     string? BackupsRootDirectory = null,
-    ServerPersistenceRecoveryMode RecoveryMode = ServerPersistenceRecoveryMode.CurrentThenBackups)
+    ServerPersistenceRecoveryMode RecoveryMode = ServerPersistenceRecoveryMode.CurrentThenBackups,
+    IServerPersistenceBackupCompressor? BackupCompressor = null)
 {
     public int ClampedBackupCount => BackupCount < 0 ? -1 : BackupCount;
 }

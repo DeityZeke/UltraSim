@@ -125,15 +125,14 @@ public sealed class ServerPersistenceCoordinator
             return [];
 
         var backups = new List<ServerPersistenceBackupSnapshot>();
-        foreach (string backupDirectory in Directory.EnumerateDirectories(backupRoot))
+        foreach (string backupPath in EnumerateBackupEntries(backupRoot))
         {
-            string manifestPath = Path.Combine(backupDirectory, "save_manifest.json");
-            if (!TryReadManifest(manifestPath, out ServerPersistenceSaveManifest manifest, out _))
+            if (!TryReadBackupManifest(backupPath, out ServerPersistenceSaveManifest manifest, out _))
                 continue;
 
             backups.Add(new ServerPersistenceBackupSnapshot(
-                Path.GetFileName(backupDirectory),
-                backupDirectory,
+                Path.GetFileName(backupPath),
+                backupPath,
                 manifest));
         }
 
@@ -151,8 +150,7 @@ public sealed class ServerPersistenceCoordinator
         try
         {
             string backupPath = ResolveBackupDirectoryPath(backupDirectoryName);
-            string manifestPath = Path.Combine(backupPath, "save_manifest.json");
-            if (!TryReadManifest(manifestPath, out ServerPersistenceSaveManifest manifest, out string manifestError))
+            if (!TryReadBackupManifest(backupPath, out ServerPersistenceSaveManifest manifest, out string manifestError))
             {
                 return ServerPersistenceRestoreResult.Failure(
                     backupDirectoryName,
@@ -160,10 +158,13 @@ public sealed class ServerPersistenceCoordinator
                     warnings);
             }
 
-            ValidateBackupArtifacts(backupPath, manifest);
-
             pendingRoot = CreateRestorePendingRoot();
-            CopyDirectory(backupPath, pendingRoot);
+            if (IsBackupArchivePath(backupPath))
+                _options.BackupCompressor!.ExtractToDirectory(backupPath, pendingRoot);
+            else
+                CopyDirectory(backupPath, pendingRoot);
+
+            ValidateBackupArtifacts(pendingRoot, manifest);
 
             string? safetyBackupRoot = null;
             if (CurrentSaveSetDirectoryHasEntries())
@@ -320,7 +321,7 @@ public sealed class ServerPersistenceCoordinator
         string backupPath = Path.GetFullPath(Path.Combine(backupRoot, backupDirectoryName));
         if (!IsSameOrChildPath(backupPath, backupRoot) || PathsEqual(backupPath, backupRoot))
             throw new InvalidOperationException($"Backup directory name '{backupDirectoryName}' is not safe.");
-        if (!Directory.Exists(backupPath))
+        if (!Directory.Exists(backupPath) && !File.Exists(backupPath))
             throw new DirectoryNotFoundException($"Backup save-set '{backupDirectoryName}' was not found.");
 
         return backupPath;
@@ -427,6 +428,43 @@ public sealed class ServerPersistenceCoordinator
         }
     }
 
+    private bool TryReadBackupManifest(
+        string backupPath,
+        out ServerPersistenceSaveManifest manifest,
+        out string error)
+    {
+        if (IsBackupArchivePath(backupPath))
+            return TryReadArchiveManifest(backupPath, out manifest, out error);
+
+        return TryReadManifest(Path.Combine(backupPath, "save_manifest.json"), out manifest, out error);
+    }
+
+    private bool TryReadArchiveManifest(
+        string archivePath,
+        out ServerPersistenceSaveManifest manifest,
+        out string error)
+    {
+        manifest = default!;
+        error = string.Empty;
+        string extractionRoot = string.Empty;
+        try
+        {
+            extractionRoot = CreateRestorePendingRoot();
+            _options.BackupCompressor!.ExtractToDirectory(archivePath, extractionRoot);
+            return TryReadManifest(Path.Combine(extractionRoot, "save_manifest.json"), out manifest, out error);
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            return false;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(extractionRoot))
+                DeletePendingSaveSet(extractionRoot);
+        }
+    }
+
     private List<SaveSetCandidate> CollectLoadCandidates(List<string> warnings)
     {
         var candidates = new List<SaveSetCandidate>();
@@ -444,16 +482,15 @@ public sealed class ServerPersistenceCoordinator
         if (!Directory.Exists(backupRoot))
             return candidates;
 
-        foreach (string backupDirectory in Directory.EnumerateDirectories(backupRoot))
+        foreach (string backupPath in EnumerateBackupEntries(backupRoot))
         {
-            string manifestPath = Path.Combine(backupDirectory, "save_manifest.json");
-            if (TryReadManifest(manifestPath, out ServerPersistenceSaveManifest backupManifest, out string backupError))
+            if (TryReadBackupManifest(backupPath, out ServerPersistenceSaveManifest backupManifest, out string backupError))
             {
-                candidates.Add(new SaveSetCandidate(backupDirectory, backupManifest, IsBackup: true));
+                candidates.Add(new SaveSetCandidate(backupPath, backupManifest, IsBackup: true));
             }
             else
             {
-                warnings.Add($"Backup save-set '{backupDirectory}' is not loadable: {backupError}");
+                warnings.Add($"Backup save-set '{backupPath}' is not loadable: {backupError}");
             }
         }
 
@@ -471,15 +508,26 @@ public sealed class ServerPersistenceCoordinator
     {
         var timings = new List<ServerPersistenceParticipantTiming>(_participants.Length);
         Dictionary<string, ServerPersistenceArtifact> artifactsByName;
+        string loadRoot = candidate.Root;
+        string extractionRoot = string.Empty;
         try
         {
+            if (candidate.IsBackup && IsBackupArchivePath(candidate.Root))
+            {
+                extractionRoot = CreateRestorePendingRoot();
+                _options.BackupCompressor!.ExtractToDirectory(candidate.Root, extractionRoot);
+                loadRoot = extractionRoot;
+            }
+
             artifactsByName = candidate.Manifest.Artifacts.ToDictionary(
                 static artifact => artifact.Name,
                 StringComparer.Ordinal);
         }
-        catch (ArgumentException ex)
+        catch (Exception ex)
         {
-            warnings.Add($"Save-set '{candidate.Root}' has duplicate participant artifacts: {ex.Message}");
+            if (!string.IsNullOrWhiteSpace(extractionRoot))
+                DeletePendingSaveSet(extractionRoot);
+            warnings.Add($"Save-set '{candidate.Root}' could not be prepared for load: {ex.Message}");
             result = default!;
             return false;
         }
@@ -502,9 +550,9 @@ public sealed class ServerPersistenceCoordinator
 
             try
             {
-                ServerPersistenceArtifact measuredArtifact = MeasureArtifact(candidate.Root, artifact);
+                ServerPersistenceArtifact measuredArtifact = MeasureArtifact(loadRoot, artifact);
                 var participantStopwatch = Stopwatch.StartNew();
-                participant.Load(candidate.Root, candidate.Manifest.Metadata, measuredArtifact);
+                participant.Load(loadRoot, candidate.Manifest.Metadata, measuredArtifact);
                 participantStopwatch.Stop();
                 timings.Add(new ServerPersistenceParticipantTiming(
                     participant.Name,
@@ -516,6 +564,8 @@ public sealed class ServerPersistenceCoordinator
             {
                 warnings.Add($"Save-set '{candidate.Root}' failed to load participant '{participant.Name}': {ex.Message}");
                 result = default!;
+                if (!string.IsNullOrWhiteSpace(extractionRoot))
+                    DeletePendingSaveSet(extractionRoot);
                 return false;
             }
         }
@@ -527,6 +577,8 @@ public sealed class ServerPersistenceCoordinator
             candidate.IsBackup,
             warnings,
             new ServerPersistenceTiming(TicksToMilliseconds(totalStopwatch.ElapsedTicks), timings));
+        if (!string.IsNullOrWhiteSpace(extractionRoot))
+            DeletePendingSaveSet(extractionRoot);
         return true;
     }
 
@@ -667,40 +719,45 @@ public sealed class ServerPersistenceCoordinator
         string[] slots = GetBackupSlotNames(Math.Max(1, backupCount));
         string timeStamp = FormatBackupTimestamp(metadata.SavedUtc);
 
-        string[] existing = Directory.GetDirectories(backupRoot);
+        string[] existing = EnumerateBackupEntries(backupRoot).ToArray();
         for (int i = 0; i < slots.Length; i++)
         {
-            DirectoryInfo? directory = MatchBackupSlot(existing, slots[i]);
-            if (directory is null)
+            string? existingPath = MatchBackupSlot(existing, slots[i]);
+            if (existingPath is null)
                 continue;
 
             if (i == 0)
             {
-                try { directory.Delete(recursive: true); }
+                try { DeleteFileSystemEntry(existingPath); }
                 catch { }
                 continue;
             }
 
-            string existingTimeStamp = FindBackupTimestamp(directory.Name) ?? timeStamp;
-            string target = FormatBackupDirectory(backupRoot, slots[i - 1], existingTimeStamp);
-            DeleteDirectoryIfExists(target);
-            try { directory.MoveTo(target); }
+            string existingTimeStamp = FindBackupTimestamp(Path.GetFileName(existingPath)) ?? timeStamp;
+            string target = FormatBackupPath(backupRoot, slots[i - 1], existingTimeStamp);
+            DeleteFileSystemEntry(target);
+            try { MoveFileSystemEntry(existingPath, target); }
             catch { }
         }
 
-        return FormatBackupDirectory(backupRoot, slots[^1], timeStamp);
+        return FormatBackupPath(backupRoot, slots[^1], timeStamp);
     }
 
-    private static string CreatePreRestoreBackupPath(string backupRoot, DateTimeOffset restoredUtc)
+    private string CreatePreRestoreBackupPath(string backupRoot, DateTimeOffset restoredUtc)
     {
-        string path = FormatBackupDirectory(backupRoot, "Pre-Restore Backup", FormatBackupTimestamp(restoredUtc));
-        if (!Directory.Exists(path))
+        string path = FormatBackupPath(backupRoot, "Pre-Restore Backup", FormatBackupTimestamp(restoredUtc));
+        if (!Directory.Exists(path) && !File.Exists(path))
             return path;
 
         for (int i = 2; ; i++)
         {
-            string candidate = $"{path} #{i.ToString(CultureInfo.InvariantCulture)}";
-            if (!Directory.Exists(candidate))
+            string suffix = $" #{i.ToString(CultureInfo.InvariantCulture)}";
+            string candidate = _options.BackupCompressor is null
+                ? path + suffix
+                : Path.Combine(
+                    Path.GetDirectoryName(path) ?? string.Empty,
+                    Path.GetFileNameWithoutExtension(path) + suffix + Path.GetExtension(path));
+            if (!Directory.Exists(candidate) && !File.Exists(candidate))
                 return candidate;
         }
     }
@@ -712,20 +769,35 @@ public sealed class ServerPersistenceCoordinator
                 ? ["Second Backup", "Most Recent"]
                 : ["Third Backup", "Second Backup", "Most Recent"];
 
-    private static DirectoryInfo? MatchBackupSlot(string[] paths, string slotName)
+    private static string? MatchBackupSlot(string[] paths, string slotName)
     {
         for (int i = 0; i < paths.Length; i++)
         {
-            var info = new DirectoryInfo(paths[i]);
-            if (info.Name.StartsWith(slotName, StringComparison.Ordinal))
-                return info;
+            if (Path.GetFileName(paths[i]).StartsWith(slotName, StringComparison.Ordinal))
+                return paths[i];
         }
 
         return null;
     }
 
-    private static string FormatBackupDirectory(string root, string name, string timeStamp) =>
-        Path.Combine(root, $"{name} ({timeStamp})");
+    private string FormatBackupPath(string root, string name, string timeStamp)
+    {
+        string path = Path.Combine(root, $"{name} ({timeStamp})");
+        return _options.BackupCompressor is null ? path : path + NormalizeBackupExtension(_options.BackupCompressor.FileExtension);
+    }
+
+    private IEnumerable<string> EnumerateBackupEntries(string backupRoot)
+    {
+        foreach (string directory in Directory.EnumerateDirectories(backupRoot))
+            yield return directory;
+
+        if (_options.BackupCompressor is null)
+            yield break;
+
+        string extension = NormalizeBackupExtension(_options.BackupCompressor.FileExtension);
+        foreach (string file in Directory.EnumerateFiles(backupRoot, "*" + extension))
+            yield return file;
+    }
 
     private static string? FindBackupTimestamp(string input)
     {
@@ -751,6 +823,29 @@ public sealed class ServerPersistenceCoordinator
         !string.IsNullOrWhiteSpace(_options.BackupsRootDirectory)
             ? Path.GetFullPath(_options.BackupsRootDirectory)
             : Path.GetFullPath(Path.Combine(_rootDirectory, _options.BackupsDirectoryName));
+
+    private bool IsBackupArchivePath(string path)
+    {
+        if (_options.BackupCompressor is null || string.IsNullOrWhiteSpace(path))
+            return false;
+
+        return File.Exists(path) &&
+            string.Equals(
+                Path.GetExtension(path),
+                NormalizeBackupExtension(_options.BackupCompressor.FileExtension),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeBackupExtension(string extension)
+    {
+        if (string.IsNullOrWhiteSpace(extension))
+            throw new InvalidOperationException("Backup compressor file extension is required.");
+
+        string normalized = extension.Trim();
+        return normalized.StartsWith(".", StringComparison.Ordinal)
+            ? normalized
+            : "." + normalized;
+    }
 
     private bool UsesRootAsCurrentSaveSet => string.IsNullOrWhiteSpace(_options.CurrentDirectoryName);
 
@@ -803,6 +898,30 @@ public sealed class ServerPersistenceCoordinator
     private void MoveCurrentSaveSetToBackup(string backupPath)
     {
         string current = CurrentSaveSetRoot;
+        if (_options.BackupCompressor is not null)
+        {
+            string source = current;
+            bool deleteSource = true;
+            if (UsesRootAsCurrentSaveSet)
+            {
+                source = Path.Combine(PendingDirectory, $"backup-source-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(source);
+                foreach (string entry in Directory.EnumerateFileSystemEntries(current))
+                {
+                    if (IsCurrentRootInfrastructureEntry(entry))
+                        continue;
+
+                    MoveFileSystemEntry(entry, Path.Combine(source, Path.GetFileName(entry)));
+                }
+            }
+
+            _options.BackupCompressor.CompressDirectory(source, backupPath);
+            if (deleteSource)
+                DeleteDirectoryIfExists(source);
+            DeleteEmptyParentDirectory(source);
+            return;
+        }
+
         if (!UsesRootAsCurrentSaveSet)
         {
             Directory.Move(current, backupPath);

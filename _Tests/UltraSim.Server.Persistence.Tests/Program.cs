@@ -18,6 +18,7 @@ internal static class TestRunner
         Run(nameof(ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly), ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly);
         Run(nameof(ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent), ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent);
         Run(nameof(ServerPersistenceCoordinator_RotatesWholeSaveSetBackups), ServerPersistenceCoordinator_RotatesWholeSaveSetBackups);
+        Run(nameof(ServerPersistenceCoordinator_CompressedBackups_ListLoadAndRestore), ServerPersistenceCoordinator_CompressedBackups_ListLoadAndRestore);
         Run(nameof(ServerPersistenceCoordinator_RestoreBackup_PromotesBackupAndCreatesSafetyBackup), ServerPersistenceCoordinator_RestoreBackup_PromotesBackupAndCreatesSafetyBackup);
         Run(nameof(ServerPersistenceCoordinator_RestoreBackup_RejectsUnsafeBackupName), ServerPersistenceCoordinator_RestoreBackup_RejectsUnsafeBackupName);
         Run(nameof(ServerPersistenceCoordinator_RestoreBackup_FailureLeavesCurrentUntouched), ServerPersistenceCoordinator_RestoreBackup_FailureLeavesCurrentUntouched);
@@ -380,6 +381,54 @@ internal static class TestRunner
             Assert.Equal(1, backups.Length);
             Assert.True(Path.GetFileName(backups[0]).StartsWith("Most Recent (", StringComparison.Ordinal));
             Assert.Contains("3", File.ReadAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "sequence.txt")));
+        }
+        finally
+        {
+            DeleteTempRoot(root);
+        }
+    }
+
+    private static void ServerPersistenceCoordinator_CompressedBackups_ListLoadAndRestore()
+    {
+        string root = CreateTempRoot("server_persistence_compressed_backups");
+        try
+        {
+            DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+            var options = new ServerPersistenceSaveSetOptions(
+                BackupCount: 1,
+                BackupCompressor: new ZipServerPersistenceBackupCompressor());
+            var coordinator = new ServerPersistenceCoordinator(
+                root,
+                [new SequenceFileParticipant()],
+                options);
+
+            Assert.True(coordinator.Save(now).Succeeded);
+            Assert.True(coordinator.Save(now.AddSeconds(1)).Succeeded);
+
+            string backupRoot = Path.Combine(root, "backups");
+            Assert.Equal(0, Directory.GetDirectories(backupRoot).Length);
+            string[] backupArchives = Directory.GetFiles(backupRoot, "*.zip");
+            Assert.Equal(1, backupArchives.Length);
+
+            IReadOnlyList<ServerPersistenceBackupSnapshot> backups = coordinator.ListBackups();
+            Assert.Equal(1, backups.Count);
+            Assert.Equal(1UL, backups[0].Manifest.SaveSequence);
+            Assert.True(backups[0].DirectoryName.EndsWith(".zip", StringComparison.Ordinal));
+
+            File.WriteAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "save_manifest.json"), "{ broken json");
+            var participant = new SequenceFileParticipant();
+            var loader = new ServerPersistenceCoordinator(root, [participant], options, initialSaveSequence: 2);
+            ServerPersistenceLoadResult loaded = loader.Load();
+            Assert.True(loaded.Succeeded);
+            Assert.True(loaded.LoadedBackup);
+            Assert.Equal("1", participant.LoadedSequence);
+
+            ServerPersistenceRestoreResult restored = coordinator.RestoreBackup(backups[0].DirectoryName, now.AddMinutes(1));
+            Assert.True(restored.Succeeded);
+            Assert.Equal(1UL, restored.Manifest!.SaveSequence);
+            Assert.True(restored.SafetyBackupRoot is not null);
+            Assert.True(File.Exists(restored.SafetyBackupRoot!));
+            Assert.Equal("1", File.ReadAllText(Path.Combine(coordinator.CurrentSaveSetRoot, "sequence.txt")));
         }
         finally
         {
