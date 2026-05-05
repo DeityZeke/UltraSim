@@ -47,6 +47,17 @@ public partial class ServerShellRoot : Control
 	private double _playerOnlineSampleTotal;
 	private double _accountOnlineSampleTotal;
 
+	private enum ShellSettingApplyMode
+	{
+		ApplyWithoutRestart,
+		RestartRequired
+	}
+
+	private sealed record ShellSettingDescriptor(
+		string Name,
+		string Value,
+		ShellSettingApplyMode ApplyMode);
+
 	public override void _Ready()
 	{
 		_smokeRequireEmptySessions = HasUserArg("--us-smoke-require-empty-sessions");
@@ -372,10 +383,18 @@ public partial class ServerShellRoot : Control
 		AddShellTab(tabRow, "Players", BuildPlayersTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Accounts", BuildAccountsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Performance", BuildPerformanceTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
-		AddShellTab(tabRow, "Settings", BuildSettingsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "NPCs", CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Items", CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
+		AddTabSpacer(tabRow);
+		AddShellTab(tabRow, "Settings", BuildSettingsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		SelectShellTab(0);
+	}
+
+	private static void AddTabSpacer(HBoxContainer tabRow)
+	{
+		var spacer = new Control();
+		spacer.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		tabRow.AddChild(spacer);
 	}
 
 	private PanelContainer BuildMetricBanner(Color panel, Color accent, Color text, Color muted)
@@ -1159,44 +1178,89 @@ public partial class ServerShellRoot : Control
 
 		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
 		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+		IReadOnlyList<ShellSettingDescriptor> settings = BuildSettingsInventory(options, runtimeRoot);
 		var builder = new StringBuilder();
-		builder.AppendLine("[color=#E6EBF2][b]Runtime Changeable[/b][/color]");
-		builder.AppendLine("Manual save: available from Output controls and command line");
-		builder.AppendLine("Backup list/restore: available from Output controls and command line");
-		builder.AppendLine("Account access rules: planned admin surface");
+		AppendSettingsSection(builder, "Changeable While Running", settings, ShellSettingApplyMode.ApplyWithoutRestart);
 		builder.AppendLine();
-		builder.AppendLine("[color=#E6EBF2][b]Restart Required[/b][/color]");
-		AppendSetting(builder, "Server name**", options.ProfileName);
-		AppendSetting(builder, "Network port**", options.NetworkPort.ToString(CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Movement world enabled**", FormatBool(options.EnableMovementWorld));
-		AppendSetting(builder, "Tick milliseconds**", options.TickMilliseconds.ToString(CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Max catch-up ticks**", options.MaxCatchUpTicksPerPump.ToString(CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Save on stop**", FormatBool(options.SaveOnStop));
-		AppendSetting(builder, "Session auth timeout seconds**", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Session keepalive timeout seconds**", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Max auto-created accounts per IP**", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Runtime root**", runtimeRoot.RootPath);
-		AppendSetting(builder, "Save folder**", runtimeRoot.SavesPath);
-		AppendSetting(builder, "Backups folder**", runtimeRoot.BackupsPath);
-		AppendSetting(builder, "Backup compression**", FormatBackupStorageMode(options.BackupStorageMode));
-		AppendSetting(builder, "Backup ZSTD level**", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture));
-		AppendSetting(builder, "Number of backups**", "3");
-		AppendSetting(builder, "Autosave interval**", "not wired");
-		AppendSetting(builder, "Discovery enabled**", "not wired");
-		AppendSetting(builder, "Command prefix**", "/");
-		AppendSetting(builder, "Compile VB.NET scripts**", "not wired");
+		AppendSettingsSection(builder, "Restart Required", settings, ShellSettingApplyMode.RestartRequired);
 		builder.AppendLine();
 		builder.AppendLine("[color=#F4C36A]** This setting requires a restart to apply.[/color]");
-		builder.AppendLine("[color=#9EAABD]This tab is read-only for now; editing and apply/restart routing will land on top of this settings inventory.[/color]");
+		builder.AppendLine("[color=#9EAABD]This tab is read-only for now; editing, apply/restart routing, and package-fed settings can land on top of this settings inventory.[/color]");
 		_settingsText.Text = builder.ToString();
 	}
 
-	private static void AppendSetting(StringBuilder builder, string name, string value)
+	private static IReadOnlyList<ShellSettingDescriptor> BuildSettingsInventory(
+		GodotServerShellOptions options,
+		UltraSimRuntimeRootLayout runtimeRoot)
 	{
+		var settings = new List<ShellSettingDescriptor>();
+		AddRuntimeSetting(settings, "Manual save", "available from Output controls and command line");
+		AddRuntimeSetting(settings, "Backup list/restore", "available from Output controls and command line");
+		AddRestartSetting(settings, "Server name", options.ProfileName);
+		AddRestartSetting(settings, "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture));
+		AddRestartSetting(settings, "Save on stop", FormatBool(options.SaveOnStop));
+		AddRestartSetting(settings, "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
+		AddRestartSetting(settings, "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
+		AddRestartSetting(settings, "Max auto-created accounts per IP", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture));
+		AddRestartSetting(settings, "Runtime root", runtimeRoot.RootPath);
+		AddRestartSetting(settings, "Save folder", runtimeRoot.SavesPath);
+		AddRestartSetting(settings, "Backups folder", runtimeRoot.BackupsPath);
+		AddRestartSetting(settings, "Backup compression", FormatBackupStorageMode(options.BackupStorageMode));
+		AddRestartSetting(settings, "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture));
+		AddRestartSetting(settings, "Number of backups", "3");
+		AddRestartSetting(settings, "Autosave interval", "not wired");
+		AddRestartSetting(settings, "Discovery enabled", "not wired");
+		AddRestartSetting(settings, "Command prefix", "/");
+		return settings;
+	}
+
+	private static void AddRuntimeSetting(List<ShellSettingDescriptor> settings, string name, string value)
+	{
+		settings.Add(new ShellSettingDescriptor(name, value, ShellSettingApplyMode.ApplyWithoutRestart));
+	}
+
+	private static void AddRestartSetting(List<ShellSettingDescriptor> settings, string name, string value)
+	{
+		settings.Add(new ShellSettingDescriptor(name, value, ShellSettingApplyMode.RestartRequired));
+	}
+
+	private static void AppendSettingsSection(
+		StringBuilder builder,
+		string title,
+		IReadOnlyList<ShellSettingDescriptor> settings,
+		ShellSettingApplyMode applyMode)
+	{
+		builder.Append("[color=#E6EBF2][b]");
+		builder.Append(EscapeBbcode(title));
+		builder.AppendLine("[/b][/color]");
+		bool hasSettings = false;
+		for (int i = 0; i < settings.Count; i++)
+		{
+			ShellSettingDescriptor setting = settings[i];
+			if (setting.ApplyMode != applyMode)
+			{
+				continue;
+			}
+
+			AppendSetting(builder, setting);
+			hasSettings = true;
+		}
+
+		if (!hasSettings)
+		{
+			builder.AppendLine("[color=#9EAABD]No settings registered.[/color]");
+		}
+	}
+
+	private static void AppendSetting(StringBuilder builder, ShellSettingDescriptor setting)
+	{
+		string name = setting.ApplyMode == ShellSettingApplyMode.RestartRequired
+			? setting.Name + "**"
+			: setting.Name;
 		builder.Append("[color=#9EAABD]");
 		builder.Append(EscapeBbcode(name));
 		builder.Append("[/color]  [color=#E6EBF2]");
-		builder.Append(EscapeBbcode(value));
+		builder.Append(EscapeBbcode(setting.Value));
 		builder.AppendLine("[/color]");
 	}
 

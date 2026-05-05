@@ -41,7 +41,8 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 Current foundational/server-platform task list:
 
 - access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
-- editable Godot/server settings panel with runtime-changeable vs restart-required sections
+- package-facing server settings registry/facade for bootstrap/auth/storage/discovery/operator settings, editor widgets, and apply/restart routing
+- separate live ECS control panel for systems, system tuning, entity discovery/modding, accounting views, items, and in-world admin tooling
 - parallel persistence participant snapshot fan-out once save payload preparation becomes heavy
 - region/rule framework when terrain and world regions become concrete
 - health/status presentation expansion from the current overhead-bar hook into real health components and peeled-off status panels
