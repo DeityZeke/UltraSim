@@ -71,6 +71,7 @@ public sealed class ServerMovementSessionHost
         Action<ConnectionId, string>? operatorLog = null,
         string commandPrefix = "/",
         ServerAccessRuleRegistry? accessRules = null,
+        IServerCommandAuditSink? commandAudit = null,
         bool enableGlobalMovementObserverState = false,
         SubscriptionKey globalMovementObserverScope = default,
         int maxPollBatch = 64)
@@ -102,7 +103,10 @@ public sealed class ServerMovementSessionHost
             new ReliableEventReplayBuffer(capacityPerConnection: runtimeOptions.ReplayBufferCapacityPerConnection),
             runtimeOptions);
         string normalizedCommandPrefix = commandPrefix.Trim();
-        _chat = new ServerChatService(orderedEvents, new ServerCommandRegistry(normalizedCommandPrefix, accessRules));
+        _chat = new ServerChatService(orderedEvents, new ServerCommandRegistry(
+            normalizedCommandPrefix,
+            accessRules,
+            commandAudit));
         _ui = new ServerUiService(orderedEvents);
         ServerChatCommandBootstrap.RegisterDefaults(_chat.Commands, _chat, normalizedCommandPrefix);
         if (scriptContext is not null)

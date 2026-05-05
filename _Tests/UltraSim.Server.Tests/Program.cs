@@ -45,6 +45,7 @@ internal static class TestRunner
         Run(nameof(ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs), ServerCommandRegistry_DispatchesStringPrefixCommandsAndNamedArgs);
         Run(nameof(ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat), ServerCommandRegistry_AllowsUnprefixedConsoleCommandsButNotPlainChat);
         Run(nameof(ServerCommandRegistry_EvaluatesPermissionKeysAndLegacyBridge), ServerCommandRegistry_EvaluatesPermissionKeysAndLegacyBridge);
+        Run(nameof(ServerCommandRegistry_AuditsHandledCommandOutcomes), ServerCommandRegistry_AuditsHandledCommandOutcomes);
         Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
@@ -634,6 +635,55 @@ internal static class TestRunner
         Assert.True(registry.TryDispatch(in deniedRequest, out ServerCommandDispatchResult deniedResult));
         Assert.Equal(ServerCommandDispatchStatus.PermissionDenied, deniedResult.Status);
         Assert.Equal(2, invocations);
+    }
+
+    private static void ServerCommandRegistry_AuditsHandledCommandOutcomes()
+    {
+        DateTimeOffset now = new(2026, 5, 4, 12, 30, 0, TimeSpan.Zero);
+        var audit = new InMemoryServerCommandAuditSink();
+        var access = new ServerAccessRuleRegistry();
+        var registry = new ServerCommandRegistry("/", access, audit, () => now);
+        int invocations = 0;
+        registry.Register(
+            "spawn",
+            (in ServerCommandRequest _, ServerTextCommandInvocation _) => invocations++,
+            minAccessLevel: 100);
+
+        var deniedRequest = new ServerCommandRequest(
+            ServerCommandSource.ChatInput,
+            "/spawn mobile",
+            SessionId: 11,
+            ConnectionId: 7,
+            EntityId: 42,
+            SenderName: "Asha");
+        Assert.True(registry.TryDispatch(in deniedRequest, out ServerCommandDispatchResult denied));
+        Assert.Equal(ServerCommandDispatchStatus.PermissionDenied, denied.Status);
+
+        now = now.AddSeconds(1);
+        var allowedRequest = deniedRequest with { AccessLevel = 100 };
+        Assert.True(registry.TryDispatch(in allowedRequest, out ServerCommandDispatchResult allowed));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, allowed.Status);
+
+        now = now.AddSeconds(1);
+        var unknownRequest = deniedRequest with { RawText = "/missing arg" };
+        Assert.True(registry.TryDispatch(in unknownRequest, out ServerCommandDispatchResult unknown));
+        Assert.Equal(ServerCommandDispatchStatus.UnknownCommand, unknown.Status);
+
+        Assert.Equal(1, invocations);
+        Assert.Equal(3, audit.Entries.Count);
+        Assert.Equal(ServerCommandDispatchStatus.PermissionDenied, audit.Entries[0].Status);
+        Assert.Equal("spawn", audit.Entries[0].CommandName);
+        Assert.Equal("command.spawn", audit.Entries[0].PermissionKey);
+        Assert.Equal(11L, audit.Entries[0].SessionId);
+        Assert.Equal(7, audit.Entries[0].ConnectionId);
+        Assert.Equal(42UL, audit.Entries[0].EntityId);
+        Assert.Equal("Asha", audit.Entries[0].SenderName);
+        Assert.Equal("Permission denied.", audit.Entries[0].Error);
+        Assert.Equal(ServerCommandDispatchStatus.Executed, audit.Entries[1].Status);
+        Assert.Equal(new DateTimeOffset(2026, 5, 4, 12, 30, 1, TimeSpan.Zero), audit.Entries[1].TimestampUtc);
+        Assert.Equal(ServerCommandDispatchStatus.UnknownCommand, audit.Entries[2].Status);
+        Assert.Equal("missing", audit.Entries[2].CommandName);
+        Assert.Equal("command.missing", audit.Entries[2].PermissionKey);
     }
 
     private static void ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix()

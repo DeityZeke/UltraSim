@@ -15,6 +15,7 @@ public sealed record ServerMovementWorldApplicationOptions(
     int MaxAutoCreatedAccountsPerRemoteAddress = 1,
     DefaultUltraSimScriptContext? ScriptContext = null,
     ServerAccessRuleRegistry? AccessRules = null,
+    IServerCommandAuditSink? CommandAudit = null,
     string? PersistenceRoot = null,
     string? PersistenceBackupsRoot = null)
 {

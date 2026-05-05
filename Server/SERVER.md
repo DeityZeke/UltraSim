@@ -63,7 +63,8 @@ Current access/permission foundation:
 - Commands default to `command.<name>` permission keys, can still declare a legacy minimum access level, and can be overridden with direct grants/denies on the command request.
 - Accounts now persist access rule keys plus direct permission grants and denies.
 - The movement host attaches selected-account access metadata to chat command requests when accounting is available.
-- UI editing and audit logging are intentionally later layers.
+- Command dispatch audit entries now capture handled command outcomes, sender/session context, permission key, status, and error text.
+- UI editing and permission-change audit logging are intentionally later layers.
 
 Current admin inspection foundation:
 

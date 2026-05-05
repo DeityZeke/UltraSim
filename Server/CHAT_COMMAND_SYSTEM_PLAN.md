@@ -132,6 +132,7 @@ Current command permission policy:
 - commands can still declare a legacy `minAccessLevel`; the access registry uses that as a compatibility fallback after direct denies, rule denies, direct grants, and rule grants.
 - `ServerCommandRequest` carries optional runtime rule keys, direct permission grants, and direct permission denies.
 - this lets account/session metadata grant commands without hard-coded integer levels, while still keeping old access-level paths working during migration.
+- `IServerCommandAuditSink` can receive handled command outcomes, including unknown commands, permission denials, handler errors, and successful executions.
 
 The visible chat panel should also remain a local client surface for now, not a
 server-authored schema panel. Chat needs persistent local history, append-only

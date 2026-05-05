@@ -17,10 +17,18 @@ public sealed class ServerCommandRegistry
     private readonly Dictionary<string, CommandEntry> _commands = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<string> _prefixes = new();
     private readonly ServerAccessRuleRegistry? _accessRules;
+    private readonly IServerCommandAuditSink? _audit;
+    private readonly Func<DateTimeOffset> _clock;
 
-    public ServerCommandRegistry(string commandPrefix = "/", ServerAccessRuleRegistry? accessRules = null)
+    public ServerCommandRegistry(
+        string commandPrefix = "/",
+        ServerAccessRuleRegistry? accessRules = null,
+        IServerCommandAuditSink? audit = null,
+        Func<DateTimeOffset>? clock = null)
     {
         _accessRules = accessRules;
+        _audit = audit;
+        _clock = clock ?? (static () => DateTimeOffset.UtcNow);
         AddPrefix(commandPrefix);
     }
 
@@ -98,18 +106,21 @@ public sealed class ServerCommandRegistry
         if (commandSpan.Length == 0)
         {
             result = ServerCommandDispatchResult.InvalidSyntax("Missing command name.");
+            RecordAudit(in request, entry: null, commandName: string.Empty, permissionKey: string.Empty, in result);
             return true;
         }
 
         if (!TryTokenize(commandSpan, out List<string> tokens, out string rawArguments, out string? error))
         {
             result = ServerCommandDispatchResult.InvalidSyntax(error ?? "Invalid command syntax.");
+            RecordAudit(in request, entry: null, commandName: string.Empty, permissionKey: string.Empty, in result);
             return true;
         }
 
         if (tokens.Count == 0)
         {
             result = ServerCommandDispatchResult.InvalidSyntax("Missing command name.");
+            RecordAudit(in request, entry: null, commandName: string.Empty, permissionKey: string.Empty, in result);
             return true;
         }
 
@@ -119,12 +130,19 @@ public sealed class ServerCommandRegistry
             result = ServerCommandDispatchResult.UnknownCommand(
                 commandName,
                 $"Unknown command '{prefix}{commandName}'.");
+            RecordAudit(
+                in request,
+                entry: null,
+                commandName,
+                ServerCommandPermissionKeys.ForCommandName(commandName),
+                in result);
             return true;
         }
 
         if (!CanExecute(in request, entry))
         {
             result = ServerCommandDispatchResult.PermissionDenied(entry.Name);
+            RecordAudit(in request, entry, entry.Name, entry.PermissionKey, in result);
             return true;
         }
 
@@ -161,6 +179,7 @@ public sealed class ServerCommandRegistry
             result = ServerCommandDispatchResult.HandlerError(entry.Name, ex.Message);
         }
 
+        RecordAudit(in request, entry, entry.Name, entry.PermissionKey, in result);
         return true;
     }
 
@@ -204,6 +223,32 @@ public sealed class ServerCommandRegistry
             request.AccessLevel,
             entry.MinAccessLevel);
         return _accessRules.Evaluate(accessRequest).IsAllowed;
+    }
+
+    private void RecordAudit(
+        in ServerCommandRequest request,
+        CommandEntry? entry,
+        string commandName,
+        string permissionKey,
+        in ServerCommandDispatchResult result)
+    {
+        if (_audit is null)
+            return;
+
+        _audit.Record(new ServerCommandAuditEntry(
+            _clock(),
+            request.Source,
+            result.Status,
+            entry?.Name ?? commandName,
+            permissionKey,
+            request.AccessLevel,
+            request.SessionId,
+            request.ConnectionId,
+            request.EntityId,
+            request.SenderName ?? string.Empty,
+            request.TargetContext ?? string.Empty,
+            request.RawText ?? string.Empty,
+            result.Error ?? string.Empty));
     }
 
     private bool TryMatchPrefix(string raw, ServerCommandSource source, out string prefix)
