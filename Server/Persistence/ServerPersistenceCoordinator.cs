@@ -756,7 +756,9 @@ public sealed class ServerPersistenceCoordinator
                 ? path + suffix
                 : Path.Combine(
                     Path.GetDirectoryName(path) ?? string.Empty,
-                    Path.GetFileNameWithoutExtension(path) + suffix + Path.GetExtension(path));
+                    StripBackupExtension(Path.GetFileName(path), _options.BackupCompressor.FileExtension) +
+                    suffix +
+                    NormalizeBackupExtension(_options.BackupCompressor.FileExtension));
             if (!Directory.Exists(candidate) && !File.Exists(candidate))
                 return candidate;
         }
@@ -829,11 +831,17 @@ public sealed class ServerPersistenceCoordinator
         if (_options.BackupCompressor is null || string.IsNullOrWhiteSpace(path))
             return false;
 
+        string extension = NormalizeBackupExtension(_options.BackupCompressor.FileExtension);
         return File.Exists(path) &&
-            string.Equals(
-                Path.GetExtension(path),
-                NormalizeBackupExtension(_options.BackupCompressor.FileExtension),
-                StringComparison.OrdinalIgnoreCase);
+            path.EndsWith(extension, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string StripBackupExtension(string fileName, string extension)
+    {
+        string normalizedExtension = NormalizeBackupExtension(extension);
+        return fileName.EndsWith(normalizedExtension, StringComparison.OrdinalIgnoreCase)
+            ? fileName[..^normalizedExtension.Length]
+            : Path.GetFileNameWithoutExtension(fileName);
     }
 
     private static string NormalizeBackupExtension(string extension)
