@@ -22,6 +22,8 @@ internal static class TestRunner
         Run(nameof(RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages), RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages);
         Run(nameof(RuntimeContentGroupRegistry_RunsUnmountActionsInReverseOrder), RuntimeContentGroupRegistry_RunsUnmountActionsInReverseOrder);
         Run(nameof(RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails), RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails);
+        Run(nameof(ScriptCommands_CanBeScopedToContentGroupUnmount), ScriptCommands_CanBeScopedToContentGroupUnmount);
+        Run(nameof(ScriptCommands_ScopedRegistrationRequiresMountedContentGroup), ScriptCommands_ScopedRegistrationRequiresMountedContentGroup);
         Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
         Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
@@ -460,6 +462,69 @@ internal static class TestRunner
 
         Assert.True(retried.Accepted);
         Assert.True(events.SequenceEqual(["second", "second", "first"]));
+    }
+
+    private static void ScriptCommands_CanBeScopedToContentGroupUnmount()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/tools",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Tools")).Accepted);
+
+        Assert.True(context.Commands.RegisterForContentGroup(
+            "packages/tools",
+            "ping",
+            command => command.Reply("pong"),
+            helpText: "Replies with pong."));
+        Assert.Equal(1, context.RegisteredCommands.Count);
+
+        var serverCommands = new ServerCommandRegistry();
+        context.RegisterCommandsInto(serverCommands);
+        string reply = string.Empty;
+        Assert.True(serverCommands.TryDispatch(
+            new ServerCommandRequest(ServerCommandSource.ServerConsole, "/ping", Reply: message => reply = message),
+            out ServerCommandDispatchResult dispatch));
+        Assert.Equal(ServerCommandDispatchStatus.Executed, dispatch.Status);
+        Assert.Equal("pong", reply);
+
+        Assert.True(context.ContentGroups.Unmount("packages/tools").Accepted);
+        Assert.Equal(0, context.RegisteredCommands.Count);
+
+        Assert.True(context.ContentGroups.Mount("packages/tools").Accepted);
+        Assert.True(context.Commands.RegisterForContentGroup(
+            "packages/tools",
+            "ping",
+            command => command.Reply("pong again")));
+        Assert.True(context.Commands.Unregister("ping"));
+        Assert.Equal(0, context.RegisteredCommands.Count);
+    }
+
+    private static void ScriptCommands_ScopedRegistrationRequiresMountedContentGroup()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/tools",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Tools"),
+            mounted: false).Accepted);
+
+        Assert.False(context.Commands.RegisterForContentGroup(
+            "packages/tools",
+            "ping",
+            command => command.Reply("pong")));
+        Assert.Equal(0, context.RegisteredCommands.Count);
+
+        Assert.True(context.ContentGroups.Mount("packages/tools").Accepted);
+        Assert.True(context.Commands.RegisterForContentGroup(
+            "packages/tools",
+            "ping",
+            command => command.Reply("pong")));
+        Assert.Equal(1, context.RegisteredCommands.Count);
     }
 
     private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()

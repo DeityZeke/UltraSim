@@ -66,34 +66,39 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
         string prefix = "/",
         IEnumerable<string>? aliases = null,
         string? permissionKey = null)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-            throw new ArgumentException("Command name cannot be empty.", nameof(name));
-        ArgumentNullException.ThrowIfNull(handler);
-        if (minAccessLevel < 0)
-            throw new ArgumentOutOfRangeException(nameof(minAccessLevel));
+        => TryAddCommand(name, handler, helpText, minAccessLevel, prefix, aliases, permissionKey, out _);
 
-        string trimmedPrefix = string.IsNullOrWhiteSpace(prefix) ? "/" : prefix.Trim();
-        string trimmedName = name.Trim();
-        string key = MakeCommandKey(trimmedPrefix, trimmedName);
-        if (_commands.ContainsKey(key))
+    public bool RegisterForContentGroup(
+        string contentGroupKey,
+        string name,
+        Action<UltraSimScriptCommandContext> handler,
+        string helpText = "",
+        int minAccessLevel = 0,
+        string prefix = "/",
+        IEnumerable<string>? aliases = null,
+        string? permissionKey = null)
+    {
+        ScriptDefinitionValidation.ValidateStableKey(contentGroupKey, nameof(contentGroupKey));
+        if (!TryAddCommand(name, handler, helpText, minAccessLevel, prefix, aliases, permissionKey, out string commandKey))
             return false;
 
-        string[] aliasArray = aliases?.Where(static alias => !string.IsNullOrWhiteSpace(alias)).Select(static alias => alias.Trim()).ToArray()
-            ?? Array.Empty<string>();
+        UltraSimRuntimeContentGroupOperationResult cleanup = _contentGroups.RegisterUnmountAction(
+            contentGroupKey,
+            () => _commands.Remove(commandKey));
+        if (cleanup.Accepted)
+            return true;
 
-        var descriptor = new UltraSimScriptCommandDescriptor(
-            trimmedName,
-            trimmedPrefix,
-            minAccessLevel,
-            helpText ?? string.Empty,
-            handler,
-            aliasArray,
-            string.IsNullOrWhiteSpace(permissionKey)
-                ? ServerCommandPermissionKeys.ForCommandName(trimmedName)
-                : ServerAccessKey.NormalizePermissionKey(permissionKey));
-        _commands.Add(key, descriptor);
-        return true;
+        _commands.Remove(commandKey);
+        return false;
+    }
+
+    public bool Unregister(string name, string prefix = "/")
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return false;
+
+        string key = MakeCommandKey(NormalizeCommandPrefix(prefix), name.Trim());
+        return _commands.Remove(key);
     }
 
     public bool RegisterPanelProvider(string key, Func<UiBuiltPanel> provider)
@@ -242,6 +247,48 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     {
         _logEntries.Add(new UltraSimScriptLogEntry(level, message ?? string.Empty, DateTimeOffset.UtcNow));
     }
+
+    private bool TryAddCommand(
+        string name,
+        Action<UltraSimScriptCommandContext> handler,
+        string helpText,
+        int minAccessLevel,
+        string prefix,
+        IEnumerable<string>? aliases,
+        string? permissionKey,
+        out string key)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Command name cannot be empty.", nameof(name));
+        ArgumentNullException.ThrowIfNull(handler);
+        if (minAccessLevel < 0)
+            throw new ArgumentOutOfRangeException(nameof(minAccessLevel));
+
+        string trimmedPrefix = NormalizeCommandPrefix(prefix);
+        string trimmedName = name.Trim();
+        key = MakeCommandKey(trimmedPrefix, trimmedName);
+        if (_commands.ContainsKey(key))
+            return false;
+
+        string[] aliasArray = aliases?.Where(static alias => !string.IsNullOrWhiteSpace(alias)).Select(static alias => alias.Trim()).ToArray()
+            ?? Array.Empty<string>();
+
+        var descriptor = new UltraSimScriptCommandDescriptor(
+            trimmedName,
+            trimmedPrefix,
+            minAccessLevel,
+            helpText ?? string.Empty,
+            handler,
+            aliasArray,
+            string.IsNullOrWhiteSpace(permissionKey)
+                ? ServerCommandPermissionKeys.ForCommandName(trimmedName)
+                : ServerAccessKey.NormalizePermissionKey(permissionKey));
+        _commands.Add(key, descriptor);
+        return true;
+    }
+
+    private static string NormalizeCommandPrefix(string prefix)
+        => string.IsNullOrWhiteSpace(prefix) ? "/" : prefix.Trim();
 
     private static string MakeCommandKey(string prefix, string name) => $"{prefix}\u001F{name}";
 }

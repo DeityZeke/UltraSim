@@ -89,8 +89,9 @@ Current runtime content group foundation:
 - content group descriptors carry kind, display name, description, origin path, and version.
 - `IUltraSimScriptContext.ContentGroups` exposes registration/mount/unmount to script packages.
 - mounted groups can register unmount actions, which run in reverse order and must succeed before the group is marked unmounted.
+- script commands can opt into content-group ownership through `Commands.RegisterForContentGroup`, which removes those commands from the script context when the group unmounts.
 - the stock Admission package registers `packages/admission` as a mounted script package.
-- command, panel, prefab definition, and spawn-set registries still need to attach their own unregister actions to this lifecycle layer.
+- panel, prefab definition, and spawn-set registries still need to attach their own unregister actions to this lifecycle layer.
 
 Current `Server/Network` state:
 
