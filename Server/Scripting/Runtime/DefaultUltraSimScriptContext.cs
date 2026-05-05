@@ -102,17 +102,33 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     }
 
     public bool RegisterPanelProvider(string key, Func<UiBuiltPanel> provider)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new ArgumentException("Panel provider key cannot be empty.", nameof(key));
-        ArgumentNullException.ThrowIfNull(provider);
+        => TryAddPanelProvider(key, provider, out _);
 
-        string trimmed = key.Trim();
-        if (_panelProviders.ContainsKey(trimmed))
+    public bool RegisterPanelProviderForContentGroup(
+        string contentGroupKey,
+        string key,
+        Func<UiBuiltPanel> provider)
+    {
+        ScriptDefinitionValidation.ValidateStableKey(contentGroupKey, nameof(contentGroupKey));
+        if (!TryAddPanelProvider(key, provider, out string panelKey))
             return false;
 
-        _panelProviders.Add(trimmed, new UltraSimScriptUiPanelProviderDescriptor(trimmed, provider));
-        return true;
+        UltraSimRuntimeContentGroupOperationResult cleanup = _contentGroups.RegisterUnmountAction(
+            contentGroupKey,
+            () => _panelProviders.Remove(panelKey));
+        if (cleanup.Accepted)
+            return true;
+
+        _panelProviders.Remove(panelKey);
+        return false;
+    }
+
+    public bool UnregisterPanelProvider(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        return _panelProviders.Remove(key.Trim());
     }
 
     public bool TryGetPanelProvider(string key, out UltraSimScriptUiPanelProviderDescriptor provider)
@@ -141,6 +157,20 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
         }
 
         _admissionStepEventKeys.Add(normalized.StartsOnEvent);
+        return true;
+    }
+
+    private bool TryAddPanelProvider(string key, Func<UiBuiltPanel> provider, out string trimmed)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            throw new ArgumentException("Panel provider key cannot be empty.", nameof(key));
+        ArgumentNullException.ThrowIfNull(provider);
+
+        trimmed = key.Trim();
+        if (_panelProviders.ContainsKey(trimmed))
+            return false;
+
+        _panelProviders.Add(trimmed, new UltraSimScriptUiPanelProviderDescriptor(trimmed, provider));
         return true;
     }
 

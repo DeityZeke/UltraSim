@@ -24,6 +24,8 @@ internal static class TestRunner
         Run(nameof(RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails), RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails);
         Run(nameof(ScriptCommands_CanBeScopedToContentGroupUnmount), ScriptCommands_CanBeScopedToContentGroupUnmount);
         Run(nameof(ScriptCommands_ScopedRegistrationRequiresMountedContentGroup), ScriptCommands_ScopedRegistrationRequiresMountedContentGroup);
+        Run(nameof(ScriptPanelProviders_CanBeScopedToContentGroupUnmount), ScriptPanelProviders_CanBeScopedToContentGroupUnmount);
+        Run(nameof(ScriptPanelProviders_ScopedRegistrationRequiresMountedContentGroup), ScriptPanelProviders_ScopedRegistrationRequiresMountedContentGroup);
         Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
         Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
@@ -525,6 +527,62 @@ internal static class TestRunner
             "ping",
             command => command.Reply("pong")));
         Assert.Equal(1, context.RegisteredCommands.Count);
+    }
+
+    private static void ScriptPanelProviders_CanBeScopedToContentGroupUnmount()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/admission",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Admission")).Accepted);
+
+        Assert.True(context.UiPanels.RegisterPanelProviderForContentGroup(
+            "packages/admission",
+            "admission.panel.test",
+            () => UiStandardPanels.MessageBox("test", "Title", "Body")));
+        Assert.Equal(1, context.RegisteredPanelProviders.Count);
+        Assert.True(context.TryGetPanelProvider("admission.panel.test", out UltraSimScriptUiPanelProviderDescriptor provider));
+        Assert.Equal(UiStandardPanels.MessageBoxPanelType, provider.Provider().Schema.Metadata.PanelType);
+
+        Assert.True(context.ContentGroups.Unmount("packages/admission").Accepted);
+        Assert.Equal(0, context.RegisteredPanelProviders.Count);
+        Assert.False(context.TryGetPanelProvider("admission.panel.test", out _));
+
+        Assert.True(context.ContentGroups.Mount("packages/admission").Accepted);
+        Assert.True(context.UiPanels.RegisterPanelProviderForContentGroup(
+            "packages/admission",
+            "admission.panel.test",
+            () => UiStandardPanels.MessageBox("test", "Title", "Body")));
+        Assert.True(context.UiPanels.UnregisterPanelProvider("admission.panel.test"));
+        Assert.Equal(0, context.RegisteredPanelProviders.Count);
+    }
+
+    private static void ScriptPanelProviders_ScopedRegistrationRequiresMountedContentGroup()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/admission",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Admission"),
+            mounted: false).Accepted);
+
+        Assert.False(context.UiPanels.RegisterPanelProviderForContentGroup(
+            "packages/admission",
+            "admission.panel.test",
+            () => UiStandardPanels.MessageBox("test", "Title", "Body")));
+        Assert.Equal(0, context.RegisteredPanelProviders.Count);
+
+        Assert.True(context.ContentGroups.Mount("packages/admission").Accepted);
+        Assert.True(context.UiPanels.RegisterPanelProviderForContentGroup(
+            "packages/admission",
+            "admission.panel.test",
+            () => UiStandardPanels.MessageBox("test", "Title", "Body")));
+        Assert.Equal(1, context.RegisteredPanelProviders.Count);
     }
 
     private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()
