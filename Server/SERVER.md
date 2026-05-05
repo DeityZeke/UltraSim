@@ -64,7 +64,8 @@ Current access/permission foundation:
 - Accounts now persist access rule keys plus direct permission grants and denies.
 - The movement host attaches selected-account access metadata to chat command requests when accounting is available.
 - Command dispatch audit entries now capture handled command outcomes, sender/session context, permission key, status, and error text.
-- UI editing and permission-change audit logging are intentionally later layers.
+- `AccountAccessAdministrationService` is the trusted mutation path for replacing account access metadata and emits account access audit entries.
+- UI editing for access rules, grants, and denies is intentionally a later layer.
 
 Current admin inspection foundation:
 

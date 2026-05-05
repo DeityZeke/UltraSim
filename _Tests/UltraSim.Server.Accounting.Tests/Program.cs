@@ -20,6 +20,7 @@ internal static class TestRunner
         Run(nameof(DefaultCredentialService_EmitsOperatorEventsForCreateSuccessAndFailure), DefaultCredentialService_EmitsOperatorEventsForCreateSuccessAndFailure);
         Run(nameof(DefaultCredentialService_RejectsPortalTokenMaterial), DefaultCredentialService_RejectsPortalTokenMaterial);
         Run(nameof(PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword), PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword);
+        Run(nameof(AccountAccessAdministrationService_ReplacesMetadataAndAudits), AccountAccessAdministrationService_ReplacesMetadataAndAudits);
         Run(nameof(AccountCharacterService_CreatesListsAndDeletesCharactersBySlot), AccountCharacterService_CreatesListsAndDeletesCharactersBySlot);
         Run(nameof(AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy), AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy);
         Run(nameof(AccountCharacterService_AutoJoinRequiresSingleCharacterMode), AccountCharacterService_AutoJoinRequiresSingleCharacterMode);
@@ -304,6 +305,47 @@ internal static class TestRunner
         Assert.Equal("platform-account-7", result.Account!.Username);
         Assert.Equal(AccountAuthenticationMode.UltraSimPortalAccounts, provider.Mode);
         Assert.Equal("server-instance-1", portal.LastServerInstanceId);
+    }
+
+    private static void AccountAccessAdministrationService_ReplacesMetadataAndAudits()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var accounts = new InMemoryAccountRegistry();
+        ServerAccountRecord admin = accounts.CreateAccount("Admin", "hash", now);
+        ServerAccountRecord player = accounts.CreateAccount("Alice", "hash", now);
+        var audit = new InMemoryAccountAccessAuditSink();
+        var service = new AccountAccessAdministrationService(accounts, audit, () => now.AddMinutes(1));
+
+        AccountAccessUpdateResult result = service.ReplaceAccessMetadata(
+            player.AccountId,
+            accessRuleKeys: ["Staff", "builder", "staff"],
+            directPermissionGrants: ["Command.Spawn", "admin.entity.inspect"],
+            directPermissionDenies: ["ADMIN.Account.Delete"],
+            actorAccountId: admin.AccountId,
+            reason: " promotion ");
+
+        Assert.True(result.Succeeded);
+        Assert.True(accounts.TryGetById(player.AccountId, out ServerAccountRecord updated));
+        Assert.True(updated.AccessRuleKeys.SequenceEqual(["builder", "staff"]));
+        Assert.True(updated.DirectPermissionGrants.SequenceEqual(["admin.entity.inspect", "command.spawn"]));
+        Assert.True(updated.DirectPermissionDenies.SequenceEqual(["admin.account.delete"]));
+        Assert.Equal(1, audit.Entries.Count);
+        AccountAccessAuditEntry entry = audit.Entries[0];
+        Assert.Equal(now.AddMinutes(1), entry.TimestampUtc);
+        Assert.Equal(admin.AccountId, entry.ActorAccountId);
+        Assert.Equal(player.AccountId, entry.TargetAccountId);
+        Assert.Equal("Alice", entry.TargetUsername);
+        Assert.Equal(AccountAccessAuditAction.MetadataReplaced, entry.Action);
+        Assert.True(entry.AccessRuleKeys.SequenceEqual(["builder", "staff"]));
+        Assert.True(entry.DirectPermissionGrants.SequenceEqual(["admin.entity.inspect", "command.spawn"]));
+        Assert.True(entry.DirectPermissionDenies.SequenceEqual(["admin.account.delete"]));
+        Assert.Equal("promotion", entry.Reason);
+
+        AccountAccessUpdateResult missing = service.ReplaceAccessMetadata(999, accessRuleKeys: ["staff"]);
+
+        Assert.False(missing.Succeeded);
+        Assert.Contains("not found", missing.Error);
+        Assert.Equal(1, audit.Entries.Count);
     }
 
     private static void AccountCharacterService_CreatesListsAndDeletesCharactersBySlot()

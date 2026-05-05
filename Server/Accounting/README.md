@@ -18,6 +18,10 @@ Current first-pass scope:
   - direct permission denies such as `admin.account.delete`.
   - metadata is normalized, persisted with the account record, and available to
     the movement host for chat command dispatch.
+- `AccountAccessAdministrationService` as the trusted mutation path for
+  replacing an account's access rule keys, direct grants, and direct denies.
+  Changes emit `AccountAccessAuditEntry` records so admin panels and operator
+  commands can share the same audit shape.
 - `DefaultCredentialService` that combines lookup, status, password verification,
   session conflict policy, rate limiting, and audit recording.
 - `AccountingAdmissionCredentialValidator` adapter that maps trusted admission
