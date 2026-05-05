@@ -49,6 +49,7 @@ internal static class TestRunner
         Run(nameof(ServerCommandRegistry_AuditsHandledCommandOutcomes), ServerCommandRegistry_AuditsHandledCommandOutcomes);
         Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
+        Run(nameof(ServerSettingsRegistry_PreservesOrderAndSupportsReplace), ServerSettingsRegistry_PreservesOrderAndSupportsReplace);
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
         Run(nameof(ServerSpawnerPrimitives_MapEcsHashToAdminMetadata), ServerSpawnerPrimitives_MapEcsHashToAdminMetadata);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
@@ -769,6 +770,37 @@ internal static class TestRunner
         Assert.SequenceEqual(["world.spawn.*"], builderRule.Grants);
         Assert.Equal(2, registry.Snapshot().Count);
         Assert.True(registry.Remove("builder"));
+        Assert.Equal(1, registry.Count);
+    }
+
+    private static void ServerSettingsRegistry_PreservesOrderAndSupportsReplace()
+    {
+        var registry = new ServerSettingsRegistry();
+
+        registry.RegisterApplyWithoutRestart("server.save.manual", "Manual save", "available");
+        registry.RegisterRestartRequired("Server.Network.Port", "Network port", "42042");
+        Assert.False(registry.TryRegister(new ServerSettingDescriptor(
+            "server.network.port",
+            "Duplicate port",
+            "1",
+            ServerSettingApplyMode.RestartRequired)));
+
+        registry.RegisterOrReplace(new ServerSettingDescriptor(
+            "server.network.port",
+            "Network port",
+            "42043",
+            ServerSettingApplyMode.RestartRequired));
+
+        IReadOnlyList<ServerSettingDescriptor> snapshot = registry.Snapshot();
+        Assert.Equal(2, snapshot.Count);
+        Assert.Equal("server.save.manual", snapshot[0].Key);
+        Assert.Equal(ServerSettingApplyMode.ApplyWithoutRestart, snapshot[0].ApplyMode);
+        Assert.Equal("server.network.port", snapshot[1].Key);
+        Assert.Equal("42043", snapshot[1].Value);
+
+        Assert.True(registry.TryGetSetting("SERVER.NETWORK.PORT", out ServerSettingDescriptor port));
+        Assert.Equal("Network port", port.DisplayName);
+        Assert.True(registry.Remove("server.save.manual"));
         Assert.Equal(1, registry.Count);
     }
 

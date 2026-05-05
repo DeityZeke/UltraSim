@@ -41,11 +41,18 @@ ModernUO/ServUO movement lessons that still apply to the UltraSim path:
 Current foundational/server-platform task list:
 
 - access/permission rule registry for runtime-added roles, grants, denies, and later account attachments
-- package-facing server settings registry/facade for bootstrap/auth/storage/discovery/operator settings, editor widgets, and apply/restart routing
+- package-facing server settings editor widgets and apply/restart routing over the shared settings registry/facade
 - separate live ECS control panel for systems, system tuning, entity discovery/modding, accounting views, items, and in-world admin tooling
 - parallel persistence participant snapshot fan-out once save payload preparation becomes heavy
 - region/rule framework when terrain and world regions become concrete
 - health/status presentation expansion from the current overhead-bar hook into real health components and peeled-off status panels
+
+Current server settings foundation:
+
+- `ServerSettingsRegistry` stores ordered, key-addressable setting descriptors for bootstrap/auth/storage/discovery/operator settings
+- descriptors carry a stable key, display name, value text, and apply mode (`ApplyWithoutRestart` or `RestartRequired`)
+- the Godot server Settings tab renders from the shared descriptor inventory and is intentionally separate from the future live ECS control panel
+- editing, validation, persistence to config files, restart/apply routing, and package-fed setting registration are planned layers on top of this shared registry
 
 Current chat command prefix policy:
 

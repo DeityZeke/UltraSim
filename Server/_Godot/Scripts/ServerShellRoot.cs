@@ -47,17 +47,6 @@ public partial class ServerShellRoot : Control
 	private double _playerOnlineSampleTotal;
 	private double _accountOnlineSampleTotal;
 
-	private enum ShellSettingApplyMode
-	{
-		ApplyWithoutRestart,
-		RestartRequired
-	}
-
-	private sealed record ShellSettingDescriptor(
-		string Name,
-		string Value,
-		ShellSettingApplyMode ApplyMode);
-
 	public override void _Ready()
 	{
 		_smokeRequireEmptySessions = HasUserArg("--us-smoke-require-empty-sessions");
@@ -1178,57 +1167,47 @@ public partial class ServerShellRoot : Control
 
 		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
 		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
-		IReadOnlyList<ShellSettingDescriptor> settings = BuildSettingsInventory(options, runtimeRoot);
+		IReadOnlyList<ServerSettingDescriptor> settings = BuildSettingsInventory(options, runtimeRoot);
 		var builder = new StringBuilder();
-		AppendSettingsSection(builder, "Changeable While Running", settings, ShellSettingApplyMode.ApplyWithoutRestart);
+		AppendSettingsSection(builder, "Changeable While Running", settings, ServerSettingApplyMode.ApplyWithoutRestart);
 		builder.AppendLine();
-		AppendSettingsSection(builder, "Restart Required", settings, ShellSettingApplyMode.RestartRequired);
+		AppendSettingsSection(builder, "Restart Required", settings, ServerSettingApplyMode.RestartRequired);
 		builder.AppendLine();
 		builder.AppendLine("[color=#F4C36A]** This setting requires a restart to apply.[/color]");
 		builder.AppendLine("[color=#9EAABD]This tab is read-only for now; editing, apply/restart routing, and package-fed settings can land on top of this settings inventory.[/color]");
 		_settingsText.Text = builder.ToString();
 	}
 
-	private static IReadOnlyList<ShellSettingDescriptor> BuildSettingsInventory(
+	private static IReadOnlyList<ServerSettingDescriptor> BuildSettingsInventory(
 		GodotServerShellOptions options,
 		UltraSimRuntimeRootLayout runtimeRoot)
 	{
-		var settings = new List<ShellSettingDescriptor>();
-		AddRuntimeSetting(settings, "Manual save", "available from Output controls and command line");
-		AddRuntimeSetting(settings, "Backup list/restore", "available from Output controls and command line");
-		AddRestartSetting(settings, "Server name", options.ProfileName);
-		AddRestartSetting(settings, "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture));
-		AddRestartSetting(settings, "Save on stop", FormatBool(options.SaveOnStop));
-		AddRestartSetting(settings, "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
-		AddRestartSetting(settings, "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
-		AddRestartSetting(settings, "Max auto-created accounts per IP", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture));
-		AddRestartSetting(settings, "Runtime root", runtimeRoot.RootPath);
-		AddRestartSetting(settings, "Save folder", runtimeRoot.SavesPath);
-		AddRestartSetting(settings, "Backups folder", runtimeRoot.BackupsPath);
-		AddRestartSetting(settings, "Backup compression", FormatBackupStorageMode(options.BackupStorageMode));
-		AddRestartSetting(settings, "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture));
-		AddRestartSetting(settings, "Number of backups", "3");
-		AddRestartSetting(settings, "Autosave interval", "not wired");
-		AddRestartSetting(settings, "Discovery enabled", "not wired");
-		AddRestartSetting(settings, "Command prefix", "/");
-		return settings;
-	}
-
-	private static void AddRuntimeSetting(List<ShellSettingDescriptor> settings, string name, string value)
-	{
-		settings.Add(new ShellSettingDescriptor(name, value, ShellSettingApplyMode.ApplyWithoutRestart));
-	}
-
-	private static void AddRestartSetting(List<ShellSettingDescriptor> settings, string name, string value)
-	{
-		settings.Add(new ShellSettingDescriptor(name, value, ShellSettingApplyMode.RestartRequired));
+		var registry = new ServerSettingsRegistry();
+		registry.RegisterApplyWithoutRestart("server.save.manual", "Manual save", "available from Output controls and command line");
+		registry.RegisterApplyWithoutRestart("server.backups.restore", "Backup list/restore", "available from Output controls and command line");
+		registry.RegisterRestartRequired("server.name", "Server name", options.ProfileName);
+		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture));
+		registry.RegisterRestartRequired("server.save.on_stop", "Save on stop", FormatBool(options.SaveOnStop));
+		registry.RegisterRestartRequired("server.session.auth_timeout_seconds", "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
+		registry.RegisterRestartRequired("server.session.keepalive_timeout_seconds", "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
+		registry.RegisterRestartRequired("server.accounts.max_auto_created_per_ip", "Max auto-created accounts per IP", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture));
+		registry.RegisterRestartRequired("server.runtime.root", "Runtime root", runtimeRoot.RootPath);
+		registry.RegisterRestartRequired("server.persistence.saves_path", "Save folder", runtimeRoot.SavesPath);
+		registry.RegisterRestartRequired("server.persistence.backups_path", "Backups folder", runtimeRoot.BackupsPath);
+		registry.RegisterRestartRequired("server.persistence.backup_storage", "Backup compression", FormatBackupStorageMode(options.BackupStorageMode));
+		registry.RegisterRestartRequired("server.persistence.backup_zstd_level", "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture));
+		registry.RegisterRestartRequired("server.persistence.backup_count", "Number of backups", "3");
+		registry.RegisterRestartRequired("server.persistence.autosave_interval", "Autosave interval", "not wired");
+		registry.RegisterRestartRequired("server.discovery.enabled", "Discovery enabled", "not wired");
+		registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", "/");
+		return registry.Snapshot();
 	}
 
 	private static void AppendSettingsSection(
 		StringBuilder builder,
 		string title,
-		IReadOnlyList<ShellSettingDescriptor> settings,
-		ShellSettingApplyMode applyMode)
+		IReadOnlyList<ServerSettingDescriptor> settings,
+		ServerSettingApplyMode applyMode)
 	{
 		builder.Append("[color=#E6EBF2][b]");
 		builder.Append(EscapeBbcode(title));
@@ -1236,7 +1215,7 @@ public partial class ServerShellRoot : Control
 		bool hasSettings = false;
 		for (int i = 0; i < settings.Count; i++)
 		{
-			ShellSettingDescriptor setting = settings[i];
+			ServerSettingDescriptor setting = settings[i];
 			if (setting.ApplyMode != applyMode)
 			{
 				continue;
@@ -1252,11 +1231,11 @@ public partial class ServerShellRoot : Control
 		}
 	}
 
-	private static void AppendSetting(StringBuilder builder, ShellSettingDescriptor setting)
+	private static void AppendSetting(StringBuilder builder, ServerSettingDescriptor setting)
 	{
-		string name = setting.ApplyMode == ShellSettingApplyMode.RestartRequired
-			? setting.Name + "**"
-			: setting.Name;
+		string name = setting.ApplyMode == ServerSettingApplyMode.RestartRequired
+			? setting.DisplayName + "**"
+			: setting.DisplayName;
 		builder.Append("[color=#9EAABD]");
 		builder.Append(EscapeBbcode(name));
 		builder.Append("[/color]  [color=#E6EBF2]");
