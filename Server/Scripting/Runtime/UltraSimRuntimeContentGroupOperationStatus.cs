@@ -7,4 +7,5 @@ public enum UltraSimRuntimeContentGroupOperationStatus : byte
     UnknownKey = 2,
     AlreadyMounted = 3,
     AlreadyUnmounted = 4,
+    UnmountFailed = 5,
 }

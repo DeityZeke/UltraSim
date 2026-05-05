@@ -3,6 +3,7 @@ namespace UltraSim.Server.Scripting;
 public sealed class UltraSimRuntimeContentGroupRegistry : IUltraSimScriptContentGroupRegistry
 {
     private readonly Dictionary<string, UltraSimRuntimeContentGroupSnapshot> _groups = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, List<Action>> _unmountActions = new(StringComparer.Ordinal);
     private readonly Func<DateTimeOffset> _clock;
 
     public UltraSimRuntimeContentGroupRegistry(Func<DateTimeOffset>? clock = null)
@@ -48,6 +49,36 @@ public sealed class UltraSimRuntimeContentGroupRegistry : IUltraSimScriptContent
     public UltraSimRuntimeContentGroupOperationResult Unmount(string key)
         => SetMountState(key, UltraSimRuntimeContentGroupMountState.Unmounted);
 
+    public UltraSimRuntimeContentGroupOperationResult RegisterUnmountAction(string key, Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ScriptDefinitionValidation.ValidateStableKey(key, nameof(key));
+        string normalized = ScriptDefinitionValidation.NormalizeKey(key);
+        if (!_groups.TryGetValue(normalized, out UltraSimRuntimeContentGroupSnapshot? current))
+        {
+            return UltraSimRuntimeContentGroupOperationResult.Rejected(
+                UltraSimRuntimeContentGroupOperationStatus.UnknownKey,
+                $"Runtime content group '{normalized}' is not registered.");
+        }
+
+        if (!current.IsMounted)
+        {
+            return UltraSimRuntimeContentGroupOperationResult.Rejected(
+                UltraSimRuntimeContentGroupOperationStatus.AlreadyUnmounted,
+                $"Runtime content group '{normalized}' is not mounted.",
+                current);
+        }
+
+        if (!_unmountActions.TryGetValue(normalized, out List<Action>? actions))
+        {
+            actions = new List<Action>();
+            _unmountActions.Add(normalized, actions);
+        }
+
+        actions.Add(action);
+        return UltraSimRuntimeContentGroupOperationResult.AcceptedResult(current);
+    }
+
     public bool TryGet(string key, out UltraSimRuntimeContentGroupSnapshot snapshot)
     {
         ScriptDefinitionValidation.ValidateStableKey(key, nameof(key));
@@ -89,6 +120,12 @@ public sealed class UltraSimRuntimeContentGroupRegistry : IUltraSimScriptContent
                 current);
         }
 
+        if (state == UltraSimRuntimeContentGroupMountState.Unmounted &&
+            !TryRunUnmountActions(normalized, current, out UltraSimRuntimeContentGroupOperationResult failure))
+        {
+            return failure;
+        }
+
         UltraSimRuntimeContentGroupSnapshot updated = current with
         {
             MountState = state,
@@ -103,5 +140,37 @@ public sealed class UltraSimRuntimeContentGroupRegistry : IUltraSimScriptContent
         UltraSimRuntimeContentGroupMountState state)
     {
         return new UltraSimRuntimeContentGroupSnapshot(descriptor, state, _clock());
+    }
+
+    private bool TryRunUnmountActions(
+        string normalized,
+        UltraSimRuntimeContentGroupSnapshot current,
+        out UltraSimRuntimeContentGroupOperationResult failure)
+    {
+        failure = default!;
+        if (!_unmountActions.TryGetValue(normalized, out List<Action>? actions) || actions.Count == 0)
+            return true;
+
+        while (actions.Count > 0)
+        {
+            int index = actions.Count - 1;
+            Action action = actions[index];
+            try
+            {
+                action();
+                actions.RemoveAt(index);
+            }
+            catch (Exception ex)
+            {
+                failure = UltraSimRuntimeContentGroupOperationResult.Rejected(
+                    UltraSimRuntimeContentGroupOperationStatus.UnmountFailed,
+                    $"Runtime content group '{normalized}' failed to unmount: {ex.Message}",
+                    current);
+                return false;
+            }
+        }
+
+        _unmountActions.Remove(normalized);
+        return true;
     }
 }

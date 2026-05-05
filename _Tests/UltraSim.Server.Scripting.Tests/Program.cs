@@ -20,6 +20,8 @@ internal static class TestRunner
         Run(nameof(ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab), ScriptDefinitions_RegistryRequiresArchetypeBeforePrefab);
         Run(nameof(ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically), ReplaceableProviderRegistry_ReplacesDisablesAndFallsBackDeterministically);
         Run(nameof(RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages), RuntimeContentGroupRegistry_MountsUnmountsAndSnapshotsPackages);
+        Run(nameof(RuntimeContentGroupRegistry_RunsUnmountActionsInReverseOrder), RuntimeContentGroupRegistry_RunsUnmountActionsInReverseOrder);
+        Run(nameof(RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails), RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails);
         Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
         Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
@@ -397,6 +399,67 @@ internal static class TestRunner
                 "Custom Package"));
         Assert.True(contextGroup.Accepted);
         Assert.Equal(1, context.RuntimeContentGroups.Count);
+    }
+
+    private static void RuntimeContentGroupRegistry_RunsUnmountActionsInReverseOrder()
+    {
+        var registry = new UltraSimRuntimeContentGroupRegistry();
+        var descriptor = new UltraSimRuntimeContentGroupDescriptor(
+            "packages/spawning",
+            UltraSimRuntimeContentGroupKind.SpawnPackage,
+            "Default Spawning");
+        var events = new List<string>();
+
+        Assert.True(registry.Register(descriptor).Accepted);
+        Assert.True(registry.RegisterUnmountAction("packages/spawning", () => events.Add("command")).Accepted);
+        Assert.True(registry.RegisterUnmountAction("packages/spawning", () => events.Add("panel")).Accepted);
+        Assert.True(registry.RegisterUnmountAction("packages/spawning", () => events.Add("spawn-set")).Accepted);
+
+        UltraSimRuntimeContentGroupOperationResult unmounted = registry.Unmount("packages/spawning");
+
+        Assert.True(unmounted.Accepted);
+        Assert.False(unmounted.Snapshot!.IsMounted);
+        Assert.True(events.SequenceEqual(["spawn-set", "panel", "command"]));
+
+        Assert.True(registry.Mount("packages/spawning").Accepted);
+        Assert.True(registry.RegisterUnmountAction("packages/spawning", () => events.Add("second-mount")).Accepted);
+        Assert.True(registry.Unmount("packages/spawning").Accepted);
+        Assert.True(events.SequenceEqual(["spawn-set", "panel", "command", "second-mount"]));
+    }
+
+    private static void RuntimeContentGroupRegistry_KeepsMountedStateWhenUnmountActionFails()
+    {
+        var registry = new UltraSimRuntimeContentGroupRegistry();
+        var descriptor = new UltraSimRuntimeContentGroupDescriptor(
+            "packages/spawning",
+            UltraSimRuntimeContentGroupKind.SpawnPackage,
+            "Default Spawning");
+        var events = new List<string>();
+        bool shouldFail = true;
+
+        Assert.True(registry.Register(descriptor).Accepted);
+        Assert.True(registry.RegisterUnmountAction("packages/spawning", () => events.Add("first")).Accepted);
+        Assert.True(registry.RegisterUnmountAction("packages/spawning", () =>
+        {
+            events.Add("second");
+            if (shouldFail)
+                throw new InvalidOperationException("cleanup blocked");
+        }).Accepted);
+
+        UltraSimRuntimeContentGroupOperationResult failed = registry.Unmount("packages/spawning");
+
+        Assert.False(failed.Accepted);
+        Assert.Equal(UltraSimRuntimeContentGroupOperationStatus.UnmountFailed, failed.Status);
+        Assert.True(failed.Snapshot!.IsMounted);
+        Assert.True(registry.TryGet("packages/spawning", out UltraSimRuntimeContentGroupSnapshot snapshot));
+        Assert.True(snapshot.IsMounted);
+        Assert.True(events.SequenceEqual(["second"]));
+
+        shouldFail = false;
+        UltraSimRuntimeContentGroupOperationResult retried = registry.Unmount("packages/spawning");
+
+        Assert.True(retried.Accepted);
+        Assert.True(events.SequenceEqual(["second", "second", "first"]));
     }
 
     private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()

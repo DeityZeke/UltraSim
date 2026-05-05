@@ -87,7 +87,8 @@ Current runtime content group state:
 - packages can register themselves through `IUltraSimScriptContext.ContentGroups`.
 - `UltraSimRuntimeContentGroupRegistry` records descriptor metadata and mounted/unmounted state.
 - descriptors carry key, kind, display name, description, origin path, and version.
-- this registry is intentionally a lifecycle/metadata layer first; command, panel, prefab, and spawn-set unregister/reload behavior will be layered on top later.
+- mounted groups can register unmount actions; actions run in reverse registration order and must complete before the group is marked unmounted.
+- command, panel, prefab, and spawn-set unregister/reload behavior should attach cleanup actions to this lifecycle layer as those registries become content-group-aware.
 - the stock Admission package now registers itself as `packages/admission`.
 
 Default server-authored platform flows can also be packages. The default

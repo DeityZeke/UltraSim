@@ -9,4 +9,6 @@ public interface IUltraSimScriptContentGroupRegistry
     UltraSimRuntimeContentGroupOperationResult Mount(string key);
 
     UltraSimRuntimeContentGroupOperationResult Unmount(string key);
+
+    UltraSimRuntimeContentGroupOperationResult RegisterUnmountAction(string key, Action action);
 }
