@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using Godot;
 using UltraSim.Server.Hosting;
@@ -28,6 +29,7 @@ public partial class ServerShellRoot : Control
 	private Label? _playersSummaryValue;
 	private Label? _accountsSummaryValue;
 	private Label? _performanceSummaryValue;
+	private RichTextLabel? _settingsText;
 	private GridContainer? _performanceGrid;
 	private Button? _startButton;
 	private Button? _saveButton;
@@ -61,6 +63,7 @@ public partial class ServerShellRoot : Control
 			ExecuteCommand(ServerControlCommand.Start());
 		}
 
+		RefreshSettingsTab();
 		RefreshStatus();
 		ScheduleSmokeQuitIfRequested();
 	}
@@ -369,6 +372,7 @@ public partial class ServerShellRoot : Control
 		AddShellTab(tabRow, "Players", BuildPlayersTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Accounts", BuildAccountsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Performance", BuildPerformanceTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "Settings", BuildSettingsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "NPCs", CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Items", CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
 		SelectShellTab(0);
@@ -720,6 +724,42 @@ public partial class ServerShellRoot : Control
 		_performanceGrid.AddThemeConstantOverride("v_separation", 4);
 		scroll.AddChild(_performanceGrid);
 		SetPerformancePlaceholder(text, muted);
+
+		return frame;
+	}
+
+	private Control BuildSettingsTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+	{
+		var frame = new PanelContainer();
+		frame.SetAnchorsPreset(LayoutPreset.FullRect);
+		frame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		frame.SizeFlagsVertical = SizeFlags.ExpandFill;
+		frame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
+
+		var column = new VBoxContainer();
+		column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.SizeFlagsVertical = SizeFlags.ExpandFill;
+		column.AddThemeConstantOverride("separation", 10);
+		frame.AddChild(column);
+
+		column.AddChild(CreateSectionLabel("Settings", text));
+
+		var settingsFrame = new PanelContainer();
+		settingsFrame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		settingsFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
+		settingsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
+		column.AddChild(settingsFrame);
+
+		_settingsText = new RichTextLabel();
+		_settingsText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_settingsText.SizeFlagsVertical = SizeFlags.ExpandFill;
+		_settingsText.SelectionEnabled = true;
+		_settingsText.ScrollActive = true;
+		_settingsText.BbcodeEnabled = true;
+		_settingsText.AddThemeColorOverride("default_color", text);
+		_settingsText.AddThemeConstantOverride("line_separation", 3);
+		settingsFrame.AddChild(_settingsText);
+		RefreshSettingsTab();
 
 		return frame;
 	}
@@ -1110,6 +1150,74 @@ public partial class ServerShellRoot : Control
 
 		RefreshPerformance(metrics, systems);
 		RefreshControls(status.State);
+	}
+
+	private void RefreshSettingsTab()
+	{
+		if (_settingsText is null)
+			return;
+
+		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
+		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+		var builder = new StringBuilder();
+		builder.AppendLine("[color=#E6EBF2][b]Runtime Changeable[/b][/color]");
+		builder.AppendLine("Manual save: available from Output controls and command line");
+		builder.AppendLine("Backup list/restore: available from Output controls and command line");
+		builder.AppendLine("Account access rules: planned admin surface");
+		builder.AppendLine();
+		builder.AppendLine("[color=#E6EBF2][b]Restart Required[/b][/color]");
+		AppendSetting(builder, "Server name**", options.ProfileName);
+		AppendSetting(builder, "Network port**", options.NetworkPort.ToString(CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Movement world enabled**", FormatBool(options.EnableMovementWorld));
+		AppendSetting(builder, "Tick milliseconds**", options.TickMilliseconds.ToString(CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Max catch-up ticks**", options.MaxCatchUpTicksPerPump.ToString(CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Save on stop**", FormatBool(options.SaveOnStop));
+		AppendSetting(builder, "Session auth timeout seconds**", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Session keepalive timeout seconds**", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Max auto-created accounts per IP**", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Runtime root**", runtimeRoot.RootPath);
+		AppendSetting(builder, "Save folder**", runtimeRoot.SavesPath);
+		AppendSetting(builder, "Backups folder**", runtimeRoot.BackupsPath);
+		AppendSetting(builder, "Backup compression**", FormatBackupStorageMode(options.BackupStorageMode));
+		AppendSetting(builder, "Backup ZSTD level**", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture));
+		AppendSetting(builder, "Number of backups**", "3");
+		AppendSetting(builder, "Autosave interval**", "not wired");
+		AppendSetting(builder, "Discovery enabled**", "not wired");
+		AppendSetting(builder, "Command prefix**", "/");
+		AppendSetting(builder, "Compile VB.NET scripts**", "not wired");
+		builder.AppendLine();
+		builder.AppendLine("[color=#F4C36A]** This setting requires a restart to apply.[/color]");
+		builder.AppendLine("[color=#9EAABD]This tab is read-only for now; editing and apply/restart routing will land on top of this settings inventory.[/color]");
+		_settingsText.Text = builder.ToString();
+	}
+
+	private static void AppendSetting(StringBuilder builder, string name, string value)
+	{
+		builder.Append("[color=#9EAABD]");
+		builder.Append(EscapeBbcode(name));
+		builder.Append("[/color]  [color=#E6EBF2]");
+		builder.Append(EscapeBbcode(value));
+		builder.AppendLine("[/color]");
+	}
+
+	private static string FormatBool(bool value) => value ? "on" : "off";
+
+	private static string FormatBackupStorageMode(ServerPersistenceBackupStorageMode mode)
+	{
+		return mode switch
+		{
+			ServerPersistenceBackupStorageMode.Directory => "off",
+			ServerPersistenceBackupStorageMode.Zip => "zip",
+			ServerPersistenceBackupStorageMode.Zstd => "zstd",
+			_ => mode.ToString()
+		};
+	}
+
+	private static string EscapeBbcode(string value)
+	{
+		return value
+			.Replace("[", "[lb]", StringComparison.Ordinal)
+			.Replace("]", "[rb]", StringComparison.Ordinal);
 	}
 
 	private void UpdateMetricBanner(
