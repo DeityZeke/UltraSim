@@ -11,6 +11,7 @@ namespace UltraSim.Server.Godot;
 public partial class ServerShellRoot : Control
 {
 	private const int MaxOutputLines = 400;
+	private const string SettingsConfigRelativePath = "config/server_settings.json";
 
 	private readonly Queue<string> _outputLines = new();
 
@@ -29,7 +30,11 @@ public partial class ServerShellRoot : Control
 	private Label? _playersSummaryValue;
 	private Label? _accountsSummaryValue;
 	private Label? _performanceSummaryValue;
-	private RichTextLabel? _settingsText;
+	private VBoxContainer? _settingsList;
+	private Label? _settingsNote;
+	private Button? _validateSettingsButton;
+	private Button? _resetSettingsButton;
+	private Button? _applySettingsButton;
 	private GridContainer? _performanceGrid;
 	private Button? _startButton;
 	private Button? _saveButton;
@@ -46,6 +51,12 @@ public partial class ServerShellRoot : Control
 	private long _bannerSampleCount;
 	private double _playerOnlineSampleTotal;
 	private double _accountOnlineSampleTotal;
+	private IReadOnlyList<ServerSettingDescriptor> _settingsDescriptors = Array.Empty<ServerSettingDescriptor>();
+	private readonly Dictionary<string, Control> _settingsEditors = new(StringComparer.Ordinal);
+	private Color _settingsPanelSoftColor;
+	private Color _settingsAccentSoftColor;
+	private Color _settingsTextColor;
+	private Color _settingsMutedColor;
 
 	public override void _Ready()
 	{
@@ -90,17 +101,48 @@ public partial class ServerShellRoot : Control
 
 	private static GodotServerShellOptions ReadShellOptions(out bool startOnReady)
 	{
-		string profileName = GodotServerShellOptions.Default.ProfileName;
-		int tickMilliseconds = GodotServerShellOptions.Default.TickMilliseconds;
-		int maxCatchUpTicks = GodotServerShellOptions.Default.MaxCatchUpTicksPerPump;
-		int networkPort = GodotServerShellOptions.Default.NetworkPort;
-		double sessionAuthTimeoutSeconds = GodotServerShellOptions.Default.SessionAuthTimeoutSeconds;
-		double sessionKeepAliveTimeoutSeconds = GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
-		int maxAutoCreatedAccountsPerRemoteAddress = GodotServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
-		bool enableMovementWorld = GodotServerShellOptions.Default.EnableMovementWorld;
-		string? runtimeRootPath = GodotServerShellOptions.Default.RuntimeRootPath;
-		ServerPersistenceBackupStorageMode backupStorageMode = GodotServerShellOptions.Default.BackupStorageMode;
-		int backupZstdCompressionLevel = GodotServerShellOptions.Default.BackupZstdCompressionLevel;
+		string? runtimeRootPath = ReadRuntimeRootPathFromArgs() ?? ResolveExportRuntimeRootPath();
+		GodotServerShellOptions options = GodotServerShellOptions.Default with
+		{
+			RuntimeRootPath = runtimeRootPath
+		};
+
+		options = LoadConfiguredShellOptions(options);
+		options = ApplyCommandLineOptions(options, out startOnReady);
+		return options;
+	}
+
+	private static string? ReadRuntimeRootPathFromArgs()
+	{
+		foreach (string arg in OS.GetCmdlineUserArgs())
+		{
+			if (!arg.StartsWith("--us-server-runtime-root=", StringComparison.OrdinalIgnoreCase))
+			{
+				continue;
+			}
+
+			string value = arg["--us-server-runtime-root=".Length..].Trim();
+			return string.IsNullOrWhiteSpace(value) ? null : value;
+		}
+
+		return null;
+	}
+
+	private static GodotServerShellOptions ApplyCommandLineOptions(GodotServerShellOptions options, out bool startOnReady)
+	{
+		string profileName = options.ProfileName;
+		int tickMilliseconds = options.TickMilliseconds;
+		int maxCatchUpTicks = options.MaxCatchUpTicksPerPump;
+		int networkPort = options.NetworkPort;
+		double sessionAuthTimeoutSeconds = options.SessionAuthTimeoutSeconds;
+		double sessionKeepAliveTimeoutSeconds = options.SessionKeepAliveTimeoutSeconds;
+		string commandPrefix = options.CommandPrefix;
+		int maxAutoCreatedAccountsPerRemoteAddress = options.MaxAutoCreatedAccountsPerRemoteAddress;
+		bool saveOnStop = options.SaveOnStop;
+		bool enableMovementWorld = options.EnableMovementWorld;
+		string? runtimeRootPath = options.RuntimeRootPath;
+		ServerPersistenceBackupStorageMode backupStorageMode = options.BackupStorageMode;
+		int backupZstdCompressionLevel = options.BackupZstdCompressionLevel;
 		startOnReady = false;
 
 		foreach (string arg in OS.GetCmdlineUserArgs())
@@ -142,6 +184,14 @@ public partial class ServerShellRoot : Control
 				if (int.TryParse(arg["--us-server-backup-zstd-level=".Length..], out int parsedBackupZstdCompressionLevel))
 				{
 					backupZstdCompressionLevel = parsedBackupZstdCompressionLevel;
+				}
+			}
+			else if (arg.StartsWith("--us-server-command-prefix=", StringComparison.OrdinalIgnoreCase))
+			{
+				string value = arg["--us-server-command-prefix=".Length..].Trim();
+				if (!string.IsNullOrWhiteSpace(value))
+				{
+					commandPrefix = value;
 				}
 			}
 			else if (arg.StartsWith("--us-server-port=", StringComparison.OrdinalIgnoreCase))
@@ -186,22 +236,59 @@ public partial class ServerShellRoot : Control
 					maxAutoCreatedAccountsPerRemoteAddress = parsedAccountLimit;
 				}
 			}
+			else if (string.Equals(arg, "--us-server-save-on-stop", StringComparison.OrdinalIgnoreCase))
+			{
+				saveOnStop = true;
+			}
 		}
-
-		runtimeRootPath ??= ResolveExportRuntimeRootPath();
 
 		return new GodotServerShellOptions(
 			profileName,
 			TickMilliseconds: tickMilliseconds,
 			MaxCatchUpTicksPerPump: maxCatchUpTicks,
+			SaveOnStop: saveOnStop,
 			EnableMovementWorld: enableMovementWorld,
 			NetworkPort: networkPort,
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+			CommandPrefix: commandPrefix,
 			MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
 			RuntimeRootPath: runtimeRootPath,
 			BackupStorageMode: backupStorageMode,
 			BackupZstdCompressionLevel: backupZstdCompressionLevel);
+	}
+
+	private static GodotServerShellOptions LoadConfiguredShellOptions(GodotServerShellOptions options)
+	{
+		try
+		{
+			UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+			string path = GetSettingsConfigPath(runtimeRoot);
+			ServerSettingsConfigDocument document = new ServerSettingsConfigStore().LoadOrEmpty(path);
+			ServerSettingsRegistry registry = BuildSettingsRegistry(options, runtimeRoot);
+			var proposed = new List<ServerSettingProposedValue>();
+			foreach (ServerSettingProposedValue value in document.ToProposedValues())
+			{
+				if (registry.TryGetSetting(value.Key, out _))
+				{
+					proposed.Add(value);
+				}
+			}
+
+			ServerSettingsChangeSetValidationResult validation = registry.ValidateChanges(proposed);
+			if (!validation.IsValid)
+			{
+				foreach (ServerSettingChangeError error in validation.Errors)
+					GD.PushWarning($"UltraSim server setting '{error.Key}' was ignored: {error.Error}");
+			}
+
+			return ApplyValidatedSettingsToOptions(options, validation.Changes);
+		}
+		catch (Exception ex)
+		{
+			GD.PushWarning($"UltraSim server settings config could not be loaded: {ex.Message}");
+			return options;
+		}
 	}
 
 	private static string? ResolveExportRuntimeRootPath()
@@ -758,15 +845,52 @@ public partial class ServerShellRoot : Control
 		settingsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
 		column.AddChild(settingsFrame);
 
-		_settingsText = new RichTextLabel();
-		_settingsText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		_settingsText.SizeFlagsVertical = SizeFlags.ExpandFill;
-		_settingsText.SelectionEnabled = true;
-		_settingsText.ScrollActive = true;
-		_settingsText.BbcodeEnabled = true;
-		_settingsText.AddThemeColorOverride("default_color", text);
-		_settingsText.AddThemeConstantOverride("line_separation", 3);
-		settingsFrame.AddChild(_settingsText);
+		_settingsPanelSoftColor = panelSoft;
+		_settingsAccentSoftColor = accentSoft;
+		_settingsTextColor = text;
+		_settingsMutedColor = muted;
+
+		var settingsColumn = new VBoxContainer();
+		settingsColumn.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		settingsColumn.SizeFlagsVertical = SizeFlags.ExpandFill;
+		settingsColumn.AddThemeConstantOverride("separation", 8);
+		settingsFrame.AddChild(settingsColumn);
+
+		var scroll = new ScrollContainer();
+		scroll.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		scroll.SizeFlagsVertical = SizeFlags.ExpandFill;
+		scroll.HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled;
+		scroll.VerticalScrollMode = ScrollContainer.ScrollMode.Auto;
+		settingsColumn.AddChild(scroll);
+
+		_settingsList = new VBoxContainer();
+		_settingsList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_settingsList.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+		_settingsList.AddThemeConstantOverride("separation", 8);
+		scroll.AddChild(_settingsList);
+
+		var actionRow = new HBoxContainer();
+		actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		actionRow.AddThemeConstantOverride("separation", 8);
+		settingsColumn.AddChild(actionRow);
+
+		_validateSettingsButton = CreateActionButton("Validate Changes", accentSoft, text);
+		_validateSettingsButton.Pressed += HandleValidateSettingsPressed;
+		actionRow.AddChild(_validateSettingsButton);
+
+		_resetSettingsButton = CreateActionButton("Reset", panelSoft, text);
+		_resetSettingsButton.Pressed += RefreshSettingsTab;
+		actionRow.AddChild(_resetSettingsButton);
+
+		_applySettingsButton = CreateActionButton("Apply", panelSoft.Darkened(0.08f), muted);
+		_applySettingsButton.Pressed += HandleApplySettingsPressed;
+		_applySettingsButton.Disabled = true;
+		actionRow.AddChild(_applySettingsButton);
+
+		_settingsNote = new Label();
+		_settingsNote.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		_settingsNote.AddThemeColorOverride("font_color", muted);
+		settingsColumn.AddChild(_settingsNote);
 		RefreshSettingsTab();
 
 		return frame;
@@ -1162,38 +1286,43 @@ public partial class ServerShellRoot : Control
 
 	private void RefreshSettingsTab()
 	{
-		if (_settingsText is null)
+		if (_settingsList is null)
 			return;
 
 		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
 		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
 		IReadOnlyList<ServerSettingDescriptor> settings = BuildSettingsInventory(options, runtimeRoot);
-		var builder = new StringBuilder();
-		AppendSettingsSection(builder, "Changeable While Running", settings, ServerSettingApplyMode.ApplyWithoutRestart);
-		builder.AppendLine();
-		AppendSettingsSection(builder, "Restart Required", settings, ServerSettingApplyMode.RestartRequired);
-		builder.AppendLine();
-		builder.AppendLine("[color=#F4C36A]** This setting requires a restart to apply.[/color]");
-		builder.AppendLine("[color=#9EAABD]This tab is read-only for now; editing, apply/restart routing, and package-fed settings can land on top of this settings inventory.[/color]");
-		_settingsText.Text = builder.ToString();
+		_settingsDescriptors = settings;
+		_settingsEditors.Clear();
+		ClearSettingsList();
+		AppendSettingsSection("Changeable While Running", settings, ServerSettingApplyMode.ApplyWithoutRestart);
+		AppendSettingsSection("Restart Required", settings, ServerSettingApplyMode.RestartRequired);
+		if (_settingsNote is not null)
+		{
+			_settingsNote.Text = "** This setting requires a restart to apply.\nEdit values and validate them here; Apply remains locked until config persistence and routing land.";
+		}
+
+		UpdateSettingsActionState();
 	}
 
 	private static IReadOnlyList<ServerSettingDescriptor> BuildSettingsInventory(
 		GodotServerShellOptions options,
 		UltraSimRuntimeRootLayout runtimeRoot)
 	{
+		return BuildSettingsRegistry(options, runtimeRoot).Snapshot();
+	}
+
+	private static ServerSettingsRegistry BuildSettingsRegistry(
+		GodotServerShellOptions options,
+		UltraSimRuntimeRootLayout runtimeRoot)
+	{
 		var registry = new ServerSettingsRegistry();
-		registry.RegisterApplyWithoutRestart("server.save.manual", "Manual save", "available from Output controls and command line");
-		registry.RegisterApplyWithoutRestart("server.backups.restore", "Backup list/restore", "available from Output controls and command line");
 		registry.RegisterRestartRequired("server.name", "Server name", options.ProfileName);
 		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired("server.save.on_stop", "Save on stop", FormatBool(options.SaveOnStop), editorKind: ServerSettingEditorKind.Boolean);
 		registry.RegisterRestartRequired("server.session.auth_timeout_seconds", "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
 		registry.RegisterRestartRequired("server.session.keepalive_timeout_seconds", "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
 		registry.RegisterRestartRequired("server.accounts.max_auto_created_per_ip", "Max auto-created accounts per IP", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
-		registry.RegisterRestartRequired("server.runtime.root", "Runtime root", runtimeRoot.RootPath, editorKind: ServerSettingEditorKind.Path);
-		registry.RegisterRestartRequired("server.persistence.saves_path", "Save folder", runtimeRoot.SavesPath, editorKind: ServerSettingEditorKind.Path);
-		registry.RegisterRestartRequired("server.persistence.backups_path", "Backups folder", runtimeRoot.BackupsPath, editorKind: ServerSettingEditorKind.Path);
 		registry.RegisterRestartRequired(
 			"server.persistence.backup_storage",
 			"Backup compression",
@@ -1206,22 +1335,19 @@ public partial class ServerShellRoot : Control
 				new ServerSettingChoice("zstd", "zstd")
 			]);
 		registry.RegisterRestartRequired("server.persistence.backup_zstd_level", "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
-		registry.RegisterRestartRequired("server.persistence.backup_count", "Number of backups", "3", editorKind: ServerSettingEditorKind.Integer);
-		registry.RegisterRestartRequired("server.persistence.autosave_interval", "Autosave interval", "not wired");
-		registry.RegisterRestartRequired("server.discovery.enabled", "Discovery enabled", "not wired");
-		registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", "/");
-		return registry.Snapshot();
+		registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", options.CommandPrefix);
+		return registry;
 	}
 
-	private static void AppendSettingsSection(
-		StringBuilder builder,
+	private void AppendSettingsSection(
 		string title,
 		IReadOnlyList<ServerSettingDescriptor> settings,
 		ServerSettingApplyMode applyMode)
 	{
-		builder.Append("[color=#E6EBF2][b]");
-		builder.Append(EscapeBbcode(title));
-		builder.AppendLine("[/b][/color]");
+		if (_settingsList is null)
+			return;
+
+		_settingsList.AddChild(CreateSettingsSectionLabel(title));
 		bool hasSettings = false;
 		for (int i = 0; i < settings.Count; i++)
 		{
@@ -1231,26 +1357,403 @@ public partial class ServerShellRoot : Control
 				continue;
 			}
 
-			AppendSetting(builder, setting);
+			_settingsList.AddChild(CreateSettingRow(setting));
 			hasSettings = true;
 		}
 
 		if (!hasSettings)
 		{
-			builder.AppendLine("[color=#9EAABD]No settings registered.[/color]");
+			var empty = new Label();
+			empty.Text = "No settings registered.";
+			empty.AddThemeColorOverride("font_color", _settingsMutedColor);
+			_settingsList.AddChild(empty);
 		}
 	}
 
-	private static void AppendSetting(StringBuilder builder, ServerSettingDescriptor setting)
+	private void ClearSettingsList()
 	{
-		string name = setting.ApplyMode == ServerSettingApplyMode.RestartRequired
+		if (_settingsList is null)
+			return;
+
+		foreach (Node child in _settingsList.GetChildren())
+		{
+			_settingsList.RemoveChild(child);
+			child.QueueFree();
+		}
+	}
+
+	private Label CreateSettingsSectionLabel(string title)
+	{
+		var label = CreateSectionLabel(title, _settingsTextColor);
+		label.CustomMinimumSize = new Vector2(0, 24);
+		return label;
+	}
+
+	private Control CreateSettingRow(ServerSettingDescriptor setting)
+	{
+		var row = new GridContainer();
+		row.Columns = 3;
+		row.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		row.AddThemeConstantOverride("h_separation", 10);
+		row.AddThemeConstantOverride("v_separation", 4);
+		row.TooltipText = BuildSettingTooltip(setting);
+
+		var name = new Label();
+		name.Text = setting.ApplyMode == ServerSettingApplyMode.RestartRequired
 			? setting.DisplayName + "**"
 			: setting.DisplayName;
-		builder.Append("[color=#9EAABD]");
-		builder.Append(EscapeBbcode(name));
-		builder.Append("[/color]  [color=#E6EBF2]");
-		builder.Append(EscapeBbcode(setting.Value));
-		builder.AppendLine("[/color]");
+		name.CustomMinimumSize = new Vector2(220, 0);
+		name.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
+		name.ClipText = true;
+		name.TooltipText = row.TooltipText;
+		name.AddThemeColorOverride("font_color", _settingsMutedColor);
+		row.AddChild(name);
+
+		Control editor = CreateSettingEditor(setting);
+		editor.CustomMinimumSize = new Vector2(260, 30);
+		editor.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		editor.TooltipText = row.TooltipText;
+		row.AddChild(editor);
+		_settingsEditors[setting.Key] = editor;
+
+		var kind = new Label();
+		kind.Text = FormatSettingEditorKind(setting.EditorKind);
+		kind.CustomMinimumSize = new Vector2(86, 0);
+		kind.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+		kind.HorizontalAlignment = HorizontalAlignment.Right;
+		kind.TooltipText = row.TooltipText;
+		kind.AddThemeColorOverride("font_color", _settingsMutedColor);
+		row.AddChild(kind);
+		return row;
+	}
+
+	private Control CreateSettingEditor(ServerSettingDescriptor setting)
+	{
+		return setting.EditorKind switch
+		{
+			ServerSettingEditorKind.Boolean => CreateBooleanSettingEditor(setting),
+			ServerSettingEditorKind.Choice => CreateChoiceSettingEditor(setting),
+			_ => CreateTextSettingEditor(setting)
+		};
+	}
+
+	private LineEdit CreateTextSettingEditor(ServerSettingDescriptor setting)
+	{
+		var editor = new LineEdit();
+		editor.Text = setting.Value;
+		editor.Editable = true;
+		editor.TextChanged += _ => UpdateSettingsActionState();
+		editor.AddThemeColorOverride("font_color", _settingsTextColor);
+		editor.AddThemeStyleboxOverride("normal", CreatePanelStyle(_settingsPanelSoftColor, 6));
+		editor.AddThemeStyleboxOverride("read_only", CreatePanelStyle(_settingsPanelSoftColor, 6, _settingsAccentSoftColor));
+		return editor;
+	}
+
+	private CheckBox CreateBooleanSettingEditor(ServerSettingDescriptor setting)
+	{
+		var editor = new CheckBox();
+		editor.Text = setting.Value;
+		editor.ButtonPressed = string.Equals(setting.Value, "on", StringComparison.OrdinalIgnoreCase);
+		editor.Disabled = false;
+		editor.Toggled += enabled =>
+		{
+			editor.Text = enabled ? "on" : "off";
+			UpdateSettingsActionState();
+		};
+		editor.AddThemeColorOverride("font_color", _settingsTextColor);
+		return editor;
+	}
+
+	private OptionButton CreateChoiceSettingEditor(ServerSettingDescriptor setting)
+	{
+		var editor = new OptionButton();
+		int selectedIndex = 0;
+		for (int i = 0; i < setting.Choices.Count; i++)
+		{
+			ServerSettingChoice choice = setting.Choices[i];
+			editor.AddItem(choice.DisplayName);
+			if (string.Equals(choice.Value, setting.Value, StringComparison.Ordinal))
+				selectedIndex = i;
+		}
+
+		editor.Select(selectedIndex);
+		editor.Disabled = false;
+		editor.ItemSelected += _ => UpdateSettingsActionState();
+		return editor;
+	}
+
+	private void HandleValidateSettingsPressed()
+	{
+		ServerSettingsChangeSetValidationResult result = ValidatePendingSettingsChanges();
+		if (result.Changes.Count == 0 && result.Errors.Count == 0)
+		{
+			SetSettingsNote("No pending setting changes.");
+			UpdateSettingsActionState();
+			return;
+		}
+
+		if (!result.IsValid)
+		{
+			ReportSettingsValidationErrors(result);
+			return;
+		}
+
+		int restartRequired = CountSettingsChanges(result.Changes, ServerSettingApplyMode.RestartRequired);
+		int applyWithoutRestart = CountSettingsChanges(result.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
+		SetSettingsNote(
+			$"Validated {result.Changes.Count} pending change(s): {applyWithoutRestart} changeable while running, {restartRequired} restart required. Apply will save config; restart-required values take effect on next start.");
+		UpdateSettingsActionState();
+	}
+
+	private void HandleApplySettingsPressed()
+	{
+		ServerSettingsChangeSetValidationResult result = ValidatePendingSettingsChanges();
+		if (!result.IsValid)
+		{
+			ReportSettingsValidationErrors(result);
+			return;
+		}
+
+		if (result.Changes.Count == 0)
+		{
+			SetSettingsNote("No pending setting changes.");
+			UpdateSettingsActionState();
+			return;
+		}
+
+		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
+		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+		string path = GetSettingsConfigPath(runtimeRoot);
+		var store = new ServerSettingsConfigStore();
+		ServerSettingsConfigDocument document = store.LoadOrEmpty(path);
+		document.ApplyChanges(result.Changes);
+		store.Save(path, document);
+
+		_options = ApplyValidatedSettingsToOptions(options, result.Changes);
+		RefreshSettingsTab();
+		int restartRequired = CountSettingsChanges(result.Changes, ServerSettingApplyMode.RestartRequired);
+		int applyWithoutRestart = CountSettingsChanges(result.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
+		SetSettingsNote(
+			$"Saved {result.Changes.Count} setting change(s) to {path}. {applyWithoutRestart} changeable while running, {restartRequired} restart required.");
+		AppendOutput("SETTINGS", $"Saved {result.Changes.Count} setting change(s) to {path}.");
+	}
+
+	private ServerSettingsChangeSetValidationResult ValidatePendingSettingsChanges()
+	{
+		IReadOnlyList<ServerSettingProposedValue> proposed = CollectSettingsProposedValues(onlyChanged: true);
+		ServerSettingsRegistry registry = BuildSettingsRegistryFromCurrentDescriptors();
+		return registry.ValidateChanges(proposed);
+	}
+
+	private void ReportSettingsValidationErrors(ServerSettingsChangeSetValidationResult result)
+	{
+		var builder = new StringBuilder();
+		builder.AppendLine("Settings validation failed:");
+		for (int i = 0; i < result.Errors.Count; i++)
+		{
+			ServerSettingChangeError error = result.Errors[i];
+			builder.Append("- ");
+			builder.Append(error.Key);
+			builder.Append(": ");
+			builder.AppendLine(error.Error);
+		}
+
+		SetSettingsNote(builder.ToString().TrimEnd());
+	}
+
+	private IReadOnlyList<ServerSettingProposedValue> CollectSettingsProposedValues(bool onlyChanged)
+	{
+		var proposed = new List<ServerSettingProposedValue>();
+		for (int i = 0; i < _settingsDescriptors.Count; i++)
+		{
+			ServerSettingDescriptor descriptor = _settingsDescriptors[i];
+			if (!_settingsEditors.TryGetValue(descriptor.Key, out Control? editor))
+				continue;
+
+			string value = GetSettingEditorValue(descriptor, editor);
+			if (onlyChanged && string.Equals(value, descriptor.Value, StringComparison.Ordinal))
+				continue;
+
+			proposed.Add(new ServerSettingProposedValue(descriptor.Key, value));
+		}
+
+		return proposed;
+	}
+
+	private static string GetSettingEditorValue(ServerSettingDescriptor descriptor, Control editor)
+	{
+		return editor switch
+		{
+			CheckBox checkBox => checkBox.ButtonPressed ? "on" : "off",
+			OptionButton optionButton => descriptor.Choices.Count == 0
+				? string.Empty
+				: descriptor.Choices[Math.Clamp(optionButton.Selected, 0, descriptor.Choices.Count - 1)].Value,
+			LineEdit lineEdit => lineEdit.Text,
+			_ => string.Empty
+		};
+	}
+
+	private ServerSettingsRegistry BuildSettingsRegistryFromCurrentDescriptors()
+	{
+		var registry = new ServerSettingsRegistry();
+		for (int i = 0; i < _settingsDescriptors.Count; i++)
+		{
+			registry.RegisterOrReplace(_settingsDescriptors[i]);
+		}
+
+		return registry;
+	}
+
+	private void UpdateSettingsActionState()
+	{
+		bool hasChanges = CollectSettingsProposedValues(onlyChanged: true).Count > 0;
+		if (_validateSettingsButton is not null)
+			_validateSettingsButton.Disabled = !hasChanges;
+		if (_resetSettingsButton is not null)
+			_resetSettingsButton.Disabled = !hasChanges;
+		if (_applySettingsButton is not null)
+			_applySettingsButton.Disabled = !hasChanges;
+	}
+
+	private void SetSettingsNote(string text)
+	{
+		if (_settingsNote is not null)
+			_settingsNote.Text = text;
+	}
+
+	private static string BuildSettingTooltip(ServerSettingDescriptor setting)
+	{
+		return string.IsNullOrWhiteSpace(setting.Description)
+			? setting.Key
+			: $"{setting.Key}\n{setting.Description}";
+	}
+
+	private static int CountSettingsChanges(
+		IReadOnlyList<ServerSettingValidatedChange> changes,
+		ServerSettingApplyMode applyMode)
+	{
+		int count = 0;
+		for (int i = 0; i < changes.Count; i++)
+		{
+			if (changes[i].ApplyMode == applyMode)
+				count++;
+		}
+
+		return count;
+	}
+
+	private static GodotServerShellOptions ApplyValidatedSettingsToOptions(
+		GodotServerShellOptions options,
+		IReadOnlyList<ServerSettingValidatedChange> changes)
+	{
+		string profileName = options.ProfileName;
+		int networkPort = options.NetworkPort;
+		bool saveOnStop = options.SaveOnStop;
+		double sessionAuthTimeoutSeconds = options.SessionAuthTimeoutSeconds;
+		double sessionKeepAliveTimeoutSeconds = options.SessionKeepAliveTimeoutSeconds;
+		string commandPrefix = options.CommandPrefix;
+		int maxAutoCreatedAccountsPerRemoteAddress = options.MaxAutoCreatedAccountsPerRemoteAddress;
+		ServerPersistenceBackupStorageMode backupStorageMode = options.BackupStorageMode;
+		int backupZstdCompressionLevel = options.BackupZstdCompressionLevel;
+
+		for (int i = 0; i < changes.Count; i++)
+		{
+			ServerSettingValidatedChange change = changes[i];
+			switch (change.Key)
+			{
+				case "server.name":
+					if (!string.IsNullOrWhiteSpace(change.NormalizedValue))
+						profileName = change.NormalizedValue;
+					break;
+				case "server.network.port":
+					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPort) && parsedPort > 0)
+						networkPort = parsedPort;
+					break;
+				case "server.save.on_stop":
+					if (TryParseSettingBool(change.NormalizedValue, out bool parsedSaveOnStop))
+						saveOnStop = parsedSaveOnStop;
+					break;
+				case "server.session.auth_timeout_seconds":
+					if (double.TryParse(change.NormalizedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedAuthTimeout) && parsedAuthTimeout >= 0.0)
+						sessionAuthTimeoutSeconds = parsedAuthTimeout;
+					break;
+				case "server.session.keepalive_timeout_seconds":
+					if (double.TryParse(change.NormalizedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedKeepAliveTimeout) && parsedKeepAliveTimeout >= 0.0)
+						sessionKeepAliveTimeoutSeconds = parsedKeepAliveTimeout;
+					break;
+				case "server.chat.command_prefix":
+					if (!string.IsNullOrWhiteSpace(change.NormalizedValue))
+						commandPrefix = change.NormalizedValue;
+					break;
+				case "server.accounts.max_auto_created_per_ip":
+					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedAccountLimit) && parsedAccountLimit >= 0)
+						maxAutoCreatedAccountsPerRemoteAddress = parsedAccountLimit;
+					break;
+				case "server.persistence.backup_storage":
+					if (ServerPersistenceBackupCompressorFactory.TryParseMode(change.NormalizedValue, out ServerPersistenceBackupStorageMode parsedBackupStorageMode))
+						backupStorageMode = parsedBackupStorageMode;
+					break;
+				case "server.persistence.backup_zstd_level":
+					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupZstdLevel))
+						backupZstdCompressionLevel = parsedBackupZstdLevel;
+					break;
+			}
+		}
+
+		return options with
+		{
+			ProfileName = profileName,
+			NetworkPort = networkPort,
+			SaveOnStop = saveOnStop,
+			SessionAuthTimeoutSeconds = sessionAuthTimeoutSeconds,
+			SessionKeepAliveTimeoutSeconds = sessionKeepAliveTimeoutSeconds,
+			CommandPrefix = commandPrefix,
+			MaxAutoCreatedAccountsPerRemoteAddress = maxAutoCreatedAccountsPerRemoteAddress,
+			BackupStorageMode = backupStorageMode,
+			BackupZstdCompressionLevel = backupZstdCompressionLevel
+		};
+	}
+
+	private static bool TryParseSettingBool(string value, out bool result)
+	{
+		if (string.Equals(value, "on", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(value, "1", StringComparison.Ordinal))
+		{
+			result = true;
+			return true;
+		}
+
+		if (string.Equals(value, "off", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(value, "false", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(value, "no", StringComparison.OrdinalIgnoreCase)
+			|| string.Equals(value, "0", StringComparison.Ordinal))
+		{
+			result = false;
+			return true;
+		}
+
+		result = false;
+		return false;
+	}
+
+	private static string GetSettingsConfigPath(UltraSimRuntimeRootLayout runtimeRoot)
+	{
+		return Path.Combine(runtimeRoot.RootPath, SettingsConfigRelativePath);
+	}
+
+	private static string FormatSettingEditorKind(ServerSettingEditorKind kind)
+	{
+		return kind switch
+		{
+			ServerSettingEditorKind.Integer => "integer",
+			ServerSettingEditorKind.Decimal => "decimal",
+			ServerSettingEditorKind.Boolean => "boolean",
+			ServerSettingEditorKind.Choice => "choice",
+			ServerSettingEditorKind.Path => "path",
+			_ => "text"
+		};
 	}
 
 	private static string FormatBool(bool value) => value ? "on" : "off";
@@ -1264,13 +1767,6 @@ public partial class ServerShellRoot : Control
 			ServerPersistenceBackupStorageMode.Zstd => "zstd",
 			_ => mode.ToString()
 		};
-	}
-
-	private static string EscapeBbcode(string value)
-	{
-		return value
-			.Replace("[", "[lb]", StringComparison.Ordinal)
-			.Replace("]", "[rb]", StringComparison.Ordinal);
 	}
 
 	private void UpdateMetricBanner(

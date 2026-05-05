@@ -52,6 +52,7 @@ internal static class TestRunner
         Run(nameof(ServerSettingsRegistry_PreservesOrderAndSupportsReplace), ServerSettingsRegistry_PreservesOrderAndSupportsReplace);
         Run(nameof(ServerSettingValueValidator_NormalizesAndRejectsInvalidValues), ServerSettingValueValidator_NormalizesAndRejectsInvalidValues);
         Run(nameof(ServerSettingsChangeSetValidator_ValidatesBatchEdits), ServerSettingsChangeSetValidator_ValidatesBatchEdits);
+        Run(nameof(ServerSettingsConfigStore_PersistsNormalizedValues), ServerSettingsConfigStore_PersistsNormalizedValues);
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
         Run(nameof(ServerSpawnerPrimitives_MapEcsHashToAdminMetadata), ServerSpawnerPrimitives_MapEcsHashToAdminMetadata);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
@@ -949,6 +950,50 @@ internal static class TestRunner
         Assert.Equal("server.unknown", invalid.Errors[2].Key);
         Assert.Equal("server.save_on_stop", invalid.Errors[3].Key);
         Assert.Equal("server.save_on_stop", invalid.Errors[4].Key);
+    }
+
+    private static void ServerSettingsConfigStore_PersistsNormalizedValues()
+    {
+        using ServerTestRuntimeRoot temp = ServerTestRuntimeRoot.Create();
+        string path = Path.Combine(temp.Path, "config", "server_settings.json");
+        var store = new ServerSettingsConfigStore();
+        ServerSettingsConfigDocument empty = store.LoadOrEmpty(path);
+        Assert.Equal(0, empty.Values.Count);
+
+        var registry = new ServerSettingsRegistry();
+        registry.RegisterRestartRequired(
+            "server.network.port",
+            "Network port",
+            "42042",
+            editorKind: ServerSettingEditorKind.Integer);
+        registry.RegisterRestartRequired(
+            "server.save.on_stop",
+            "Save on stop",
+            "off",
+            editorKind: ServerSettingEditorKind.Boolean);
+
+        ServerSettingsChangeSetValidationResult validation = registry.ValidateChanges(
+        [
+            new ServerSettingProposedValue("SERVER.NETWORK.PORT", " 042043 "),
+            new ServerSettingProposedValue("server.save.on_stop", "yes")
+        ]);
+        Assert.True(validation.IsValid);
+
+        var document = ServerSettingsConfigDocument.Empty();
+        document.ApplyChanges(validation.Changes);
+        store.Save(path, document);
+
+        string json = File.ReadAllText(path);
+        Assert.Contains("\"schemaVersion\": 1", json);
+        Assert.Contains("\"server.network.port\": \"42043\"", json);
+        Assert.Contains("\"server.save.on_stop\": \"on\"", json);
+
+        ServerSettingsConfigDocument loaded = store.LoadOrEmpty(path);
+        Assert.True(loaded.TryGetValue("SERVER.NETWORK.PORT", out string port));
+        Assert.Equal("42043", port);
+        Assert.SequenceEqual(
+            ["server.network.port", "server.save.on_stop"],
+            loaded.ToProposedValues().Select(static proposed => proposed.Key).OrderBy(static key => key, StringComparer.Ordinal).ToArray());
     }
 
     private static void ServerEntityInspectionService_GatesAndReturnsEcsSnapshot()

@@ -109,6 +109,7 @@ public sealed class GodotServerShellController : IDisposable
 				SaveOnStop: options.SaveOnStop,
 				SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
 				SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
+				CommandPrefix: options.CommandPrefix,
 				MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
 				ScriptContext: ScriptContext,
 				PersistenceRoot: _runtimeRoot.SavesPath,
