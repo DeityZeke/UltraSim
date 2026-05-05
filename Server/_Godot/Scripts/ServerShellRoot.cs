@@ -11,7 +11,6 @@ namespace UltraSim.Server.Godot;
 public partial class ServerShellRoot : Control
 {
 	private const int MaxOutputLines = 400;
-	private const string SettingsConfigRelativePath = "config/server_settings.json";
 
 	private readonly Queue<string> _outputLines = new();
 
@@ -53,6 +52,7 @@ public partial class ServerShellRoot : Control
 	private double _accountOnlineSampleTotal;
 	private IReadOnlyList<ServerSettingDescriptor> _settingsDescriptors = Array.Empty<ServerSettingDescriptor>();
 	private readonly Dictionary<string, Control> _settingsEditors = new(StringComparer.Ordinal);
+	private readonly Dictionary<string, Label> _settingsDirtyMarkers = new(StringComparer.Ordinal);
 	private Color _settingsPanelSoftColor;
 	private Color _settingsAccentSoftColor;
 	private Color _settingsTextColor;
@@ -889,7 +889,7 @@ public partial class ServerShellRoot : Control
 
 		_settingsNote = new Label();
 		_settingsNote.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-		_settingsNote.AddThemeColorOverride("font_color", muted);
+		_settingsNote.AddThemeColorOverride("font_color", accentSoft.Lightened(0.15f));
 		settingsColumn.AddChild(_settingsNote);
 		RefreshSettingsTab();
 
@@ -1294,13 +1294,11 @@ public partial class ServerShellRoot : Control
 		IReadOnlyList<ServerSettingDescriptor> settings = BuildSettingsInventory(options, runtimeRoot);
 		_settingsDescriptors = settings;
 		_settingsEditors.Clear();
+		_settingsDirtyMarkers.Clear();
 		ClearSettingsList();
 		AppendSettingsSection("Changeable While Running", settings, ServerSettingApplyMode.ApplyWithoutRestart);
 		AppendSettingsSection("Restart Required", settings, ServerSettingApplyMode.RestartRequired);
-		if (_settingsNote is not null)
-		{
-			_settingsNote.Text = "** This setting requires a restart to apply.\nEdit values and validate them here; Apply remains locked until config persistence and routing land.";
-		}
+		SetSettingsDefaultNote(settings, runtimeRoot);
 
 		UpdateSettingsActionState();
 	}
@@ -1392,7 +1390,7 @@ public partial class ServerShellRoot : Control
 	private Control CreateSettingRow(ServerSettingDescriptor setting)
 	{
 		var row = new GridContainer();
-		row.Columns = 3;
+		row.Columns = 4;
 		row.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		row.AddThemeConstantOverride("h_separation", 10);
 		row.AddThemeConstantOverride("v_separation", 4);
@@ -1402,7 +1400,7 @@ public partial class ServerShellRoot : Control
 		name.Text = setting.ApplyMode == ServerSettingApplyMode.RestartRequired
 			? setting.DisplayName + "**"
 			: setting.DisplayName;
-		name.CustomMinimumSize = new Vector2(220, 0);
+		name.CustomMinimumSize = new Vector2(340, 0);
 		name.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
 		name.ClipText = true;
 		name.TooltipText = row.TooltipText;
@@ -1410,8 +1408,10 @@ public partial class ServerShellRoot : Control
 		row.AddChild(name);
 
 		Control editor = CreateSettingEditor(setting);
-		editor.CustomMinimumSize = new Vector2(260, 30);
-		editor.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		editor.CustomMinimumSize = new Vector2(GetSettingEditorMinimumWidth(setting.EditorKind), 30);
+		editor.SizeFlagsHorizontal = setting.EditorKind == ServerSettingEditorKind.Path
+			? SizeFlags.ExpandFill
+			: SizeFlags.ShrinkBegin;
 		editor.TooltipText = row.TooltipText;
 		row.AddChild(editor);
 		_settingsEditors[setting.Key] = editor;
@@ -1424,6 +1424,16 @@ public partial class ServerShellRoot : Control
 		kind.TooltipText = row.TooltipText;
 		kind.AddThemeColorOverride("font_color", _settingsMutedColor);
 		row.AddChild(kind);
+
+		var marker = new Label();
+		marker.Text = string.Empty;
+		marker.CustomMinimumSize = new Vector2(68, 0);
+		marker.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+		marker.HorizontalAlignment = HorizontalAlignment.Right;
+		marker.TooltipText = row.TooltipText;
+		marker.AddThemeColorOverride("font_color", _settingsAccentSoftColor.Lightened(0.25f));
+		row.AddChild(marker);
+		_settingsDirtyMarkers[setting.Key] = marker;
 		return row;
 	}
 
@@ -1488,7 +1498,7 @@ public partial class ServerShellRoot : Control
 		if (result.Changes.Count == 0 && result.Errors.Count == 0)
 		{
 			SetSettingsNote("No pending setting changes.");
-			UpdateSettingsActionState();
+			UpdateSettingsActionState(updateNote: false);
 			return;
 		}
 
@@ -1502,7 +1512,7 @@ public partial class ServerShellRoot : Control
 		int applyWithoutRestart = CountSettingsChanges(result.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
 		SetSettingsNote(
 			$"Validated {result.Changes.Count} pending change(s): {applyWithoutRestart} changeable while running, {restartRequired} restart required. Apply will save config; restart-required values take effect on next start.");
-		UpdateSettingsActionState();
+		UpdateSettingsActionState(updateNote: false);
 	}
 
 	private void HandleApplySettingsPressed()
@@ -1517,7 +1527,7 @@ public partial class ServerShellRoot : Control
 		if (result.Changes.Count == 0)
 		{
 			SetSettingsNote("No pending setting changes.");
-			UpdateSettingsActionState();
+			UpdateSettingsActionState(updateNote: false);
 			return;
 		}
 
@@ -1604,15 +1614,31 @@ public partial class ServerShellRoot : Control
 		return registry;
 	}
 
-	private void UpdateSettingsActionState()
+	private void UpdateSettingsActionState(bool updateNote = true)
 	{
-		bool hasChanges = CollectSettingsProposedValues(onlyChanged: true).Count > 0;
+		IReadOnlyList<ServerSettingProposedValue> pendingChanges = CollectSettingsProposedValues(onlyChanged: true);
+		bool hasChanges = pendingChanges.Count > 0;
 		if (_validateSettingsButton is not null)
 			_validateSettingsButton.Disabled = !hasChanges;
 		if (_resetSettingsButton is not null)
 			_resetSettingsButton.Disabled = !hasChanges;
 		if (_applySettingsButton is not null)
 			_applySettingsButton.Disabled = !hasChanges;
+
+		UpdateSettingsDirtyMarkers(pendingChanges);
+
+		if (updateNote)
+			SetSettingsPendingNote(pendingChanges);
+	}
+
+	private void UpdateSettingsDirtyMarkers(IReadOnlyList<ServerSettingProposedValue> pendingChanges)
+	{
+		var changedKeys = new HashSet<string>(StringComparer.Ordinal);
+		for (int i = 0; i < pendingChanges.Count; i++)
+			changedKeys.Add(pendingChanges[i].Key);
+
+		foreach (KeyValuePair<string, Label> pair in _settingsDirtyMarkers)
+			pair.Value.Text = changedKeys.Contains(pair.Key) ? "modified" : string.Empty;
 	}
 
 	private void SetSettingsNote(string text)
@@ -1621,11 +1647,61 @@ public partial class ServerShellRoot : Control
 			_settingsNote.Text = text;
 	}
 
+	private void SetSettingsDefaultNote(
+		IReadOnlyList<ServerSettingDescriptor> settings,
+		UltraSimRuntimeRootLayout runtimeRoot)
+	{
+		int applyWithoutRestart = CountSettingsDescriptors(settings, ServerSettingApplyMode.ApplyWithoutRestart);
+		int restartRequired = CountSettingsDescriptors(settings, ServerSettingApplyMode.RestartRequired);
+		string configPath = FormatRuntimeRelativePath(runtimeRoot, GetSettingsConfigPath(runtimeRoot));
+		SetSettingsNote(
+			$"Config file: {configPath} under runtime root {runtimeRoot.RootPath}\n" +
+			$"Registered settings: {applyWithoutRestart} changeable while running, {restartRequired} restart required. Relative paths resolve from the runtime root; absolute paths leave it. ** This setting requires a restart to apply.");
+	}
+
+	private void SetSettingsPendingNote(IReadOnlyList<ServerSettingProposedValue> pendingChanges)
+	{
+		if (pendingChanges.Count == 0)
+		{
+			GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
+			UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
+			SetSettingsDefaultNote(_settingsDescriptors, runtimeRoot);
+			return;
+		}
+
+		ServerSettingsRegistry registry = BuildSettingsRegistryFromCurrentDescriptors();
+		ServerSettingsChangeSetValidationResult validation = registry.ValidateChanges(pendingChanges);
+		if (!validation.IsValid)
+		{
+			SetSettingsNote($"{pendingChanges.Count} pending setting change(s). Validate Changes will show details before saving.");
+			return;
+		}
+
+		int applyWithoutRestart = CountSettingsChanges(validation.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
+		int restartRequired = CountSettingsChanges(validation.Changes, ServerSettingApplyMode.RestartRequired);
+		SetSettingsNote(
+			$"{pendingChanges.Count} pending setting change(s): {applyWithoutRestart} changeable while running, {restartRequired} restart required. Apply saves config; restart-required values take effect on next start.");
+	}
+
 	private static string BuildSettingTooltip(ServerSettingDescriptor setting)
 	{
 		return string.IsNullOrWhiteSpace(setting.Description)
 			? setting.Key
 			: $"{setting.Key}\n{setting.Description}";
+	}
+
+	private static float GetSettingEditorMinimumWidth(ServerSettingEditorKind kind)
+	{
+		return kind switch
+		{
+			ServerSettingEditorKind.Path => 360f,
+			ServerSettingEditorKind.Text => 150f,
+			ServerSettingEditorKind.Choice => 140f,
+			ServerSettingEditorKind.Decimal => 120f,
+			ServerSettingEditorKind.Integer => 110f,
+			ServerSettingEditorKind.Boolean => 96f,
+			_ => 150f
+		};
 	}
 
 	private static int CountSettingsChanges(
@@ -1636,6 +1712,20 @@ public partial class ServerShellRoot : Control
 		for (int i = 0; i < changes.Count; i++)
 		{
 			if (changes[i].ApplyMode == applyMode)
+				count++;
+		}
+
+		return count;
+	}
+
+	private static int CountSettingsDescriptors(
+		IReadOnlyList<ServerSettingDescriptor> settings,
+		ServerSettingApplyMode applyMode)
+	{
+		int count = 0;
+		for (int i = 0; i < settings.Count; i++)
+		{
+			if (settings[i].ApplyMode == applyMode)
 				count++;
 		}
 
@@ -1740,7 +1830,22 @@ public partial class ServerShellRoot : Control
 
 	private static string GetSettingsConfigPath(UltraSimRuntimeRootLayout runtimeRoot)
 	{
-		return Path.Combine(runtimeRoot.RootPath, SettingsConfigRelativePath);
+		return ServerSettingsConfigPaths.GetPath(runtimeRoot.RootPath);
+	}
+
+	private static string FormatRuntimeRelativePath(UltraSimRuntimeRootLayout runtimeRoot, string path)
+	{
+		string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runtimeRoot.RootPath));
+		string fullPath = Path.GetFullPath(path);
+		if (string.Equals(fullPath, root, StringComparison.Ordinal))
+			return "/";
+
+		string rootWithSeparator = root + Path.DirectorySeparatorChar;
+		if (!fullPath.StartsWith(rootWithSeparator, StringComparison.Ordinal))
+			return fullPath;
+
+		string relative = Path.GetRelativePath(root, fullPath).Replace('\\', '/').TrimStart('/');
+		return "/" + relative;
 	}
 
 	private static string FormatSettingEditorKind(ServerSettingEditorKind kind)

@@ -1,4 +1,5 @@
 using UltraSim.Server.Persistence;
+using UltraSim.Server.Wrappers;
 
 namespace UltraSim.Server.Console;
 
@@ -22,10 +23,33 @@ public static class ConsoleServerArgumentParser
         int networkPort = ConsoleServerShellOptions.Default.NetworkPort;
         double sessionAuthTimeoutSeconds = ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+        string commandPrefix = ConsoleServerShellOptions.Default.CommandPrefix;
         int maxAutoCreatedAccountsPerRemoteAddress = ConsoleServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
-        string? runtimeRootPath = ConsoleServerShellOptions.Default.RuntimeRootPath;
+        string? runtimeRootPath = ServerWrapperSettingsConfigLoader.ReadRuntimeRootPath(args) ?? ConsoleServerShellOptions.Default.RuntimeRootPath;
         ServerPersistenceBackupStorageMode backupStorageMode = ConsoleServerShellOptions.Default.BackupStorageMode;
         int backupZstdCompressionLevel = ConsoleServerShellOptions.Default.BackupZstdCompressionLevel;
+
+        ServerWrapperSettingsConfigValues configValues = ServerWrapperSettingsConfigLoader.Load(
+            runtimeRootPath,
+            new ServerWrapperSettingsConfigValues(
+                profileName,
+                saveOnStop,
+                networkPort,
+                sessionAuthTimeoutSeconds,
+                sessionKeepAliveTimeoutSeconds,
+                commandPrefix,
+                maxAutoCreatedAccountsPerRemoteAddress,
+                backupStorageMode,
+                backupZstdCompressionLevel));
+        profileName = configValues.ProfileName;
+        saveOnStop = configValues.SaveOnStop;
+        networkPort = configValues.NetworkPort;
+        sessionAuthTimeoutSeconds = configValues.SessionAuthTimeoutSeconds;
+        sessionKeepAliveTimeoutSeconds = configValues.SessionKeepAliveTimeoutSeconds;
+        commandPrefix = configValues.CommandPrefix;
+        maxAutoCreatedAccountsPerRemoteAddress = configValues.MaxAutoCreatedAccountsPerRemoteAddress;
+        backupStorageMode = configValues.BackupStorageMode;
+        backupZstdCompressionLevel = configValues.BackupZstdCompressionLevel;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -111,6 +135,12 @@ public static class ConsoleServerArgumentParser
                     return false;
                 }
 
+                continue;
+            }
+
+            if (string.Equals(key, "--command-prefix", StringComparison.OrdinalIgnoreCase))
+            {
+                commandPrefix = value.Trim();
                 continue;
             }
 
@@ -247,6 +277,7 @@ public static class ConsoleServerArgumentParser
             NetworkPort: networkPort,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+            CommandPrefix: commandPrefix,
             MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
             RuntimeRootPath: runtimeRootPath,
             BackupStorageMode: backupStorageMode,
@@ -268,6 +299,7 @@ public static class ConsoleServerArgumentParser
           --port=<0-65535>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
+          --command-prefix=<prefix>
           --max-auto-created-accounts-per-ip=<n>
           --run-for-seconds=<seconds>
           --idle-delay-ms=<n>
@@ -290,4 +322,5 @@ public static class ConsoleServerArgumentParser
           shutdown-nosave
           help
         """;
+
 }

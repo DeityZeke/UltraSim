@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\Wrappers\ServerWrapperSettingsConfigLoader.cs" Link="Wrappers\ServerWrapperSettingsConfigLoader.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Hosting\UltraSim.Server.Hosting.csproj" />
     <ProjectReference Include="..\Network\UltraSim.Server.Network.csproj" />
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />

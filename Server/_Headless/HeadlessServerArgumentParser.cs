@@ -1,4 +1,5 @@
 using UltraSim.Server.Persistence;
+using UltraSim.Server.Wrappers;
 
 namespace UltraSim.Server.Headless;
 
@@ -22,10 +23,33 @@ public static class HeadlessServerArgumentParser
         int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
         double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
+        string commandPrefix = HeadlessServerShellOptions.Default.CommandPrefix;
         int maxAutoCreatedAccountsPerRemoteAddress = HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
-        string? runtimeRootPath = HeadlessServerShellOptions.Default.RuntimeRootPath;
+        string? runtimeRootPath = ServerWrapperSettingsConfigLoader.ReadRuntimeRootPath(args) ?? HeadlessServerShellOptions.Default.RuntimeRootPath;
         ServerPersistenceBackupStorageMode backupStorageMode = HeadlessServerShellOptions.Default.BackupStorageMode;
         int backupZstdCompressionLevel = HeadlessServerShellOptions.Default.BackupZstdCompressionLevel;
+
+        ServerWrapperSettingsConfigValues configValues = ServerWrapperSettingsConfigLoader.Load(
+            runtimeRootPath,
+            new ServerWrapperSettingsConfigValues(
+                profileName,
+                saveOnStop,
+                networkPort,
+                sessionAuthTimeoutSeconds,
+                sessionKeepAliveTimeoutSeconds,
+                commandPrefix,
+                maxAutoCreatedAccountsPerRemoteAddress,
+                backupStorageMode,
+                backupZstdCompressionLevel));
+        profileName = configValues.ProfileName;
+        saveOnStop = configValues.SaveOnStop;
+        networkPort = configValues.NetworkPort;
+        sessionAuthTimeoutSeconds = configValues.SessionAuthTimeoutSeconds;
+        sessionKeepAliveTimeoutSeconds = configValues.SessionKeepAliveTimeoutSeconds;
+        commandPrefix = configValues.CommandPrefix;
+        maxAutoCreatedAccountsPerRemoteAddress = configValues.MaxAutoCreatedAccountsPerRemoteAddress;
+        backupStorageMode = configValues.BackupStorageMode;
+        backupZstdCompressionLevel = configValues.BackupZstdCompressionLevel;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -111,6 +135,12 @@ public static class HeadlessServerArgumentParser
                     return false;
                 }
 
+                continue;
+            }
+
+            if (string.Equals(key, "--command-prefix", StringComparison.OrdinalIgnoreCase))
+            {
+                commandPrefix = value.Trim();
                 continue;
             }
 
@@ -247,6 +277,7 @@ public static class HeadlessServerArgumentParser
             NetworkPort: networkPort,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
+            CommandPrefix: commandPrefix,
             MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
             RuntimeRootPath: runtimeRootPath,
             BackupStorageMode: backupStorageMode,
@@ -268,6 +299,7 @@ public static class HeadlessServerArgumentParser
           --port=<0-65535>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
+          --command-prefix=<prefix>
           --max-auto-created-accounts-per-ip=<n>
           --run-for-seconds=<seconds>
           --idle-delay-ms=<n>
@@ -277,4 +309,5 @@ public static class HeadlessServerArgumentParser
           --quiet
           --help
         """;
+
 }

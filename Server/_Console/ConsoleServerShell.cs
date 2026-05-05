@@ -160,6 +160,7 @@ public sealed class ConsoleServerShell
                 SaveOnStop: options.SaveOnStop,
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
                 SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
+                CommandPrefix: options.CommandPrefix,
                 MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
                 ScriptContext: ScriptContext,
                 PersistenceRoot: ScriptContext!.RuntimeRoot.SavesPath,

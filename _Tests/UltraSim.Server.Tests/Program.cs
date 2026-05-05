@@ -70,9 +70,11 @@ internal static class TestRunner
         Run(nameof(ServerHostLoop_ForwardsApplicationEventsToSinks), ServerHostLoop_ForwardsApplicationEventsToSinks);
         Run(nameof(HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface), HostedServerRuntime_StartImmediately_AndStopSafely_UsesSharedHostingSurface);
         Run(nameof(HeadlessServerArgumentParser_ParsesExpectedOptions), HeadlessServerArgumentParser_ParsesExpectedOptions);
+        Run(nameof(HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides), HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides);
         Run(nameof(HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly), HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly);
         Run(nameof(HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults), HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults);
         Run(nameof(ConsoleServerArgumentParser_ParsesExpectedOptions), ConsoleServerArgumentParser_ParsesExpectedOptions);
+        Run(nameof(ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides), ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides);
         Run(nameof(ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases), ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases);
         Run(nameof(ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly), ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly);
         Run(nameof(GodotServerShellController_ExposesSharedControlSurface), GodotServerShellController_ExposesSharedControlSurface);
@@ -996,6 +998,19 @@ internal static class TestRunner
             loaded.ToProposedValues().Select(static proposed => proposed.Key).OrderBy(static key => key, StringComparer.Ordinal).ToArray());
     }
 
+    private static void WriteServerSettingsConfig(string runtimeRootPath, Dictionary<string, string> values)
+    {
+        var document = ServerSettingsConfigDocument.Empty();
+        foreach (KeyValuePair<string, string> pair in values)
+        {
+            document.SetValue(pair.Key, pair.Value);
+        }
+
+        new ServerSettingsConfigStore().Save(
+            ServerSettingsConfigPaths.GetPath(runtimeRootPath),
+            document);
+    }
+
     private static void ServerEntityInspectionService_GatesAndReturnsEcsSnapshot()
     {
         var builder = new EcsSchemaBuilder();
@@ -1473,6 +1488,7 @@ internal static class TestRunner
             "--port=0",
             "--session-auth-timeout-seconds=6.5",
             "--session-keepalive-timeout-seconds=13.25",
+            "--command-prefix=[",
             "--max-auto-created-accounts-per-ip=2",
             "--backup-storage=zstd",
             "--backup-zstd-level=7",
@@ -1500,11 +1516,54 @@ internal static class TestRunner
         Assert.Equal(0, options.NetworkPort);
         Assert.Equal(6.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(13.25, options.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal("[", options.CommandPrefix);
         Assert.Equal(2, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
         Assert.Equal(7, options.BackupZstdCompressionLevel);
         Assert.Equal(TimeSpan.FromSeconds(0.25), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(2), options.IdleDelay);
+    }
+
+    private static void HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides()
+    {
+        using ServerTestRuntimeRoot temp = ServerTestRuntimeRoot.Create();
+        WriteServerSettingsConfig(
+            temp.Path,
+            new Dictionary<string, string>
+            {
+                ["server.name"] = "configured-headless",
+                ["server.network.port"] = "43001",
+                ["server.save.on_stop"] = "on",
+                ["server.session.auth_timeout_seconds"] = "8.5",
+                ["server.session.keepalive_timeout_seconds"] = "18.25",
+                ["server.chat.command_prefix"] = ".",
+                ["server.accounts.max_auto_created_per_ip"] = "4",
+                ["server.persistence.backup_storage"] = "zstd",
+                ["server.persistence.backup_zstd_level"] = "9"
+            });
+
+        bool parsed = HeadlessServerArgumentParser.TryParse(
+            [
+                $"--runtime-root={temp.Path}",
+                "--port=0",
+                "--command-prefix=#"
+            ],
+            out HeadlessServerShellOptions options,
+            out string? error,
+            out bool showHelp);
+
+        Assert.True(parsed);
+        Assert.Equal<string?>(null, error);
+        Assert.False(showHelp);
+        Assert.Equal("configured-headless", options.ProfileName);
+        Assert.Equal(0, options.NetworkPort);
+        Assert.True(options.SaveOnStop);
+        Assert.Equal(8.5, options.SessionAuthTimeoutSeconds);
+        Assert.Equal(18.25, options.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal("#", options.CommandPrefix);
+        Assert.Equal(4, options.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
+        Assert.Equal(9, options.BackupZstdCompressionLevel);
     }
 
     private static void HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly()
@@ -1576,6 +1635,7 @@ internal static class TestRunner
             "--port=0",
             "--session-auth-timeout-seconds=7.5",
             "--session-keepalive-timeout-seconds=14.25",
+            "--command-prefix=.",
             "--max-auto-created-accounts-per-ip=3",
             "--backup-storage=zip",
             "--backup-zstd-level=6",
@@ -1603,11 +1663,54 @@ internal static class TestRunner
         Assert.Equal(0, options.NetworkPort);
         Assert.Equal(7.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(14.25, options.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal(".", options.CommandPrefix);
         Assert.Equal(3, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(ServerPersistenceBackupStorageMode.Zip, options.BackupStorageMode);
         Assert.Equal(6, options.BackupZstdCompressionLevel);
         Assert.Equal(TimeSpan.FromSeconds(0.5), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(3), options.IdleDelay);
+    }
+
+    private static void ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides()
+    {
+        using ServerTestRuntimeRoot temp = ServerTestRuntimeRoot.Create();
+        WriteServerSettingsConfig(
+            temp.Path,
+            new Dictionary<string, string>
+            {
+                ["server.name"] = "configured-console",
+                ["server.network.port"] = "43002",
+                ["server.save.on_stop"] = "on",
+                ["server.session.auth_timeout_seconds"] = "9.5",
+                ["server.session.keepalive_timeout_seconds"] = "19.25",
+                ["server.chat.command_prefix"] = "[",
+                ["server.accounts.max_auto_created_per_ip"] = "5",
+                ["server.persistence.backup_storage"] = "zip",
+                ["server.persistence.backup_zstd_level"] = "8"
+            });
+
+        bool parsed = ConsoleServerArgumentParser.TryParse(
+            [
+                $"--runtime-root={temp.Path}",
+                "--profile=cli-console",
+                "--backup-storage=zstd"
+            ],
+            out ConsoleServerShellOptions options,
+            out string? error,
+            out bool showHelp);
+
+        Assert.True(parsed);
+        Assert.Equal<string?>(null, error);
+        Assert.False(showHelp);
+        Assert.Equal("cli-console", options.ProfileName);
+        Assert.Equal(43002, options.NetworkPort);
+        Assert.True(options.SaveOnStop);
+        Assert.Equal(9.5, options.SessionAuthTimeoutSeconds);
+        Assert.Equal(19.25, options.SessionKeepAliveTimeoutSeconds);
+        Assert.Equal("[", options.CommandPrefix);
+        Assert.Equal(5, options.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
+        Assert.Equal(8, options.BackupZstdCompressionLevel);
     }
 
     private static void ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases()

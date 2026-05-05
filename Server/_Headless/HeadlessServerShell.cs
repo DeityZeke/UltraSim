@@ -110,6 +110,7 @@ public sealed class HeadlessServerShell
                 SaveOnStop: options.SaveOnStop,
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
                 SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
+                CommandPrefix: options.CommandPrefix,
                 MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
                 ScriptContext: ScriptContext,
                 PersistenceRoot: ScriptContext!.RuntimeRoot.SavesPath,

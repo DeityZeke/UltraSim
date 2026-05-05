@@ -55,9 +55,9 @@ Current server settings foundation:
 - `ServerSettingValueValidator` validates and normalizes edited values by editor kind before any config persistence or apply/restart routing sees them
 - `ServerSettingsChangeSetValidator` validates batches of proposed edits, rejects duplicate/unknown keys, and returns normalized changes with their apply mode
 - `ServerSettingsConfigDocument` and `ServerSettingsConfigStore` persist normalized `key -> value` settings as a small JSON document
-- the Godot server shell reads and writes `config/server_settings.json` under the resolved runtime root; command-line options still override config values on startup
+- Godot, console, and headless server shells read `config/server_settings.json` under the resolved runtime root; Godot writes it from the Settings tab, and command-line options still override config values on startup
 - the Godot server Settings tab renders from the shared descriptor inventory and is intentionally separate from the future live ECS control panel
-- restart/apply routing, headless/console config loading, and package-fed setting registration are planned layers on top of this shared registry
+- restart/apply routing and package-fed setting registration are planned layers on top of this shared registry
 
 Current chat command prefix policy:
 
