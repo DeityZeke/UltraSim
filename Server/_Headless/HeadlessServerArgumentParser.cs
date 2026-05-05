@@ -1,3 +1,5 @@
+using UltraSim.Server.Persistence;
+
 namespace UltraSim.Server.Headless;
 
 public static class HeadlessServerArgumentParser
@@ -22,6 +24,8 @@ public static class HeadlessServerArgumentParser
         double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
         int maxAutoCreatedAccountsPerRemoteAddress = HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
         string? runtimeRootPath = HeadlessServerShellOptions.Default.RuntimeRootPath;
+        ServerPersistenceBackupStorageMode backupStorageMode = HeadlessServerShellOptions.Default.BackupStorageMode;
+        int backupZstdCompressionLevel = HeadlessServerShellOptions.Default.BackupZstdCompressionLevel;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -81,6 +85,32 @@ public static class HeadlessServerArgumentParser
             if (string.Equals(key, "--runtime-root", StringComparison.OrdinalIgnoreCase))
             {
                 runtimeRootPath = value.Trim();
+                continue;
+            }
+
+            if (string.Equals(key, "--backup-storage", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!ServerPersistenceBackupCompressorFactory.TryParseMode(value, out backupStorageMode))
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid backup storage mode '{value}'. Expected directory, zip, or zstd.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(key, "--backup-zstd-level", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out backupZstdCompressionLevel))
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid ZSTD compression level '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
                 continue;
             }
 
@@ -218,7 +248,9 @@ public static class HeadlessServerArgumentParser
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
             MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
-            RuntimeRootPath: runtimeRootPath);
+            RuntimeRootPath: runtimeRootPath,
+            BackupStorageMode: backupStorageMode,
+            BackupZstdCompressionLevel: backupZstdCompressionLevel);
         error = null;
         showHelp = false;
         return true;
@@ -229,6 +261,8 @@ public static class HeadlessServerArgumentParser
         UltraSim.Server.Headless options:
           --profile=<name>
           --runtime-root=<path>
+          --backup-storage=<directory|zip|zstd>
+          --backup-zstd-level=<n>
           --tick-ms=<n>
           --max-catchup=<n>
           --port=<0-65535>

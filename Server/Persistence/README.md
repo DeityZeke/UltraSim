@@ -23,10 +23,11 @@ Current scope:
 - Whole save-set backups are rotated together, rather than letting account and
   world backups drift independently. The default backup storage is still a
   directory. Operators can opt into archive compression with
-  `ServerPersistenceSaveSetOptions.BackupCompressor`; the built-in compressors
-  are ZIP and ZSTD-backed `.tar.zst`, and the interface is intentionally small so
-  other archive formats can replace them without changing the coordinator
-  contract. The default rotation
+  `ServerPersistenceSaveSetOptions.BackupCompressor`; `ServerPersistenceBackupCompressorFactory`
+  maps the operator-facing storage modes to directory, ZIP, or ZSTD-backed
+  `.tar.zst` backups, and the interface is intentionally small so other archive
+  formats can replace them without changing the coordinator contract. The
+  default rotation
   follows the RunUO naming shape: `Most Recent (...)`, `Second Backup (...)`,
   and `Third Backup (...)`. Backup timestamps use the host machine's local time.
 - `AccountingPersistenceParticipant` writes the accounting JSON snapshot into
@@ -107,10 +108,9 @@ Still worth reworking/expanding next:
   hourly/daily generations, or size limits;
 - add artifact checksums so load can detect content drift, not just missing files
   or changed sizes;
-- add operator/server settings for choosing the backup compressor. The
-  coordinator already supports directory, ZIP, and ZSTD-backed archive backups
-  through the compression interface, and live current saves remain uncompressed
-  for fast startup.
+- expose the backup storage mode in future admin settings panels. Console,
+  headless, Godot, and movement-world options already carry the setting, and
+  live current saves remain uncompressed for fast startup.
 - add optional parallel participant save/snapshot execution once there are enough
   participants to justify the coordination cost. Manifest stamping and promotion
   stay single-coordinator-owned; participant snapshot/write work can fan out.

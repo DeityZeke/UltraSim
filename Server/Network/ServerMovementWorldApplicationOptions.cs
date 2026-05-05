@@ -1,4 +1,5 @@
 using UltraSim.Server.Scripting;
+using UltraSim.Server.Persistence;
 
 namespace UltraSim.Server.Network;
 
@@ -17,7 +18,9 @@ public sealed record ServerMovementWorldApplicationOptions(
     ServerAccessRuleRegistry? AccessRules = null,
     IServerCommandAuditSink? CommandAudit = null,
     string? PersistenceRoot = null,
-    string? PersistenceBackupsRoot = null)
+    string? PersistenceBackupsRoot = null,
+    ServerPersistenceBackupStorageMode PersistenceBackupStorageMode = ServerPersistenceBackupStorageMode.Directory,
+    int PersistenceBackupZstdCompressionLevel = 3)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");
 }

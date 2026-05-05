@@ -17,6 +17,7 @@ internal static class TestRunner
         Run(nameof(ServerPersistenceCoordinator_Load_CurrentOnlyDoesNotFallbackToBackup), ServerPersistenceCoordinator_Load_CurrentOnlyDoesNotFallbackToBackup);
         Run(nameof(ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly), ServerPersistenceCoordinator_Load_RequireCurrentRefusesBackupOnly);
         Run(nameof(ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent), ServerPersistenceCoordinator_Load_WarnsWhenBackupSequenceIsNewerThanCurrent);
+        Run(nameof(ServerPersistenceBackupCompressorFactory_CreatesConfiguredCompressors), ServerPersistenceBackupCompressorFactory_CreatesConfiguredCompressors);
         Run(nameof(ServerPersistenceCoordinator_RotatesWholeSaveSetBackups), ServerPersistenceCoordinator_RotatesWholeSaveSetBackups);
         Run(nameof(ServerPersistenceCoordinator_CompressedBackups_ListLoadAndRestore), ServerPersistenceCoordinator_CompressedBackups_ListLoadAndRestore);
         Run(nameof(ServerPersistenceCoordinator_ZstdBackups_ListLoadAndRestore), ServerPersistenceCoordinator_ZstdBackups_ListLoadAndRestore);
@@ -387,6 +388,22 @@ internal static class TestRunner
         {
             DeleteTempRoot(root);
         }
+    }
+
+    private static void ServerPersistenceBackupCompressorFactory_CreatesConfiguredCompressors()
+    {
+        Assert.Equal<IServerPersistenceBackupCompressor?>(null, ServerPersistenceBackupCompressorFactory.Create(ServerPersistenceBackupStorageMode.Directory));
+        Assert.True(ServerPersistenceBackupCompressorFactory.Create(ServerPersistenceBackupStorageMode.Zip) is ZipServerPersistenceBackupCompressor);
+        IServerPersistenceBackupCompressor? zstd = ServerPersistenceBackupCompressorFactory.Create(
+            ServerPersistenceBackupStorageMode.Zstd,
+            zstdCompressionLevel: 9);
+        Assert.True(zstd is ZstdServerPersistenceBackupCompressor);
+        Assert.Equal(9, ((ZstdServerPersistenceBackupCompressor)zstd!).CompressionLevel);
+        Assert.True(ServerPersistenceBackupCompressorFactory.TryParseMode("folder", out ServerPersistenceBackupStorageMode directory));
+        Assert.Equal(ServerPersistenceBackupStorageMode.Directory, directory);
+        Assert.True(ServerPersistenceBackupCompressorFactory.TryParseMode("tar.zst", out ServerPersistenceBackupStorageMode parsedZstd));
+        Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, parsedZstd);
+        Assert.False(ServerPersistenceBackupCompressorFactory.TryParseMode("rar", out _));
     }
 
     private static void ServerPersistenceCoordinator_CompressedBackups_ListLoadAndRestore()

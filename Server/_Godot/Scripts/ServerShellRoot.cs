@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using Godot;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Persistence;
 using UltraSim.Server.Scripting;
 
 namespace UltraSim.Server.Godot;
@@ -95,6 +96,8 @@ public partial class ServerShellRoot : Control
 		int maxAutoCreatedAccountsPerRemoteAddress = GodotServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
 		bool enableMovementWorld = GodotServerShellOptions.Default.EnableMovementWorld;
 		string? runtimeRootPath = GodotServerShellOptions.Default.RuntimeRootPath;
+		ServerPersistenceBackupStorageMode backupStorageMode = GodotServerShellOptions.Default.BackupStorageMode;
+		int backupZstdCompressionLevel = GodotServerShellOptions.Default.BackupZstdCompressionLevel;
 		startOnReady = false;
 
 		foreach (string arg in OS.GetCmdlineUserArgs())
@@ -121,6 +124,21 @@ public partial class ServerShellRoot : Control
 				if (!string.IsNullOrWhiteSpace(value))
 				{
 					runtimeRootPath = value;
+				}
+			}
+			else if (arg.StartsWith("--us-server-backup-storage=", StringComparison.OrdinalIgnoreCase))
+			{
+				string value = arg["--us-server-backup-storage=".Length..].Trim();
+				if (ServerPersistenceBackupCompressorFactory.TryParseMode(value, out ServerPersistenceBackupStorageMode parsedBackupStorageMode))
+				{
+					backupStorageMode = parsedBackupStorageMode;
+				}
+			}
+			else if (arg.StartsWith("--us-server-backup-zstd-level=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-backup-zstd-level=".Length..], out int parsedBackupZstdCompressionLevel))
+				{
+					backupZstdCompressionLevel = parsedBackupZstdCompressionLevel;
 				}
 			}
 			else if (arg.StartsWith("--us-server-port=", StringComparison.OrdinalIgnoreCase))
@@ -178,7 +196,9 @@ public partial class ServerShellRoot : Control
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
 			MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
-			RuntimeRootPath: runtimeRootPath);
+			RuntimeRootPath: runtimeRootPath,
+			BackupStorageMode: backupStorageMode,
+			BackupZstdCompressionLevel: backupZstdCompressionLevel);
 	}
 
 	private static string? ResolveExportRuntimeRootPath()

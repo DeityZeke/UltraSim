@@ -112,7 +112,9 @@ public sealed class GodotServerShellController : IDisposable
 				MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
 				ScriptContext: ScriptContext,
 				PersistenceRoot: _runtimeRoot.SavesPath,
-				PersistenceBackupsRoot: _runtimeRoot.BackupsPath))
+				PersistenceBackupsRoot: _runtimeRoot.BackupsPath,
+				PersistenceBackupStorageMode: options.BackupStorageMode,
+				PersistenceBackupZstdCompressionLevel: options.BackupZstdCompressionLevel))
 			: new ServerApplication(new ServerApplicationOptions(
 				options.ProfileName,
 				SaveOnStop: options.SaveOnStop));

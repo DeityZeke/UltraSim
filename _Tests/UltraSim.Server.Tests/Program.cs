@@ -12,6 +12,7 @@ using UltraSim.Server.Gameplay;
 using UltraSim.Server.Hosting;
 using UltraSim.Server.Headless;
 using UltraSim.Server.Network;
+using UltraSim.Server.Persistence;
 using UltraSim.Server.Scripting;
 using UltraSim.Network;
 using UltraSim.UI;
@@ -1056,18 +1057,24 @@ internal static class TestRunner
         Assert.Equal(5.0, HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(1, HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Directory, HeadlessServerShellOptions.Default.BackupStorageMode);
+        Assert.Equal(3, HeadlessServerShellOptions.Default.BackupZstdCompressionLevel);
         Assert.Equal(16, ConsoleServerShellOptions.Default.TickMilliseconds);
         Assert.True(ConsoleServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, ConsoleServerShellOptions.Default.NetworkPort);
         Assert.Equal(5.0, ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(1, ConsoleServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Directory, ConsoleServerShellOptions.Default.BackupStorageMode);
+        Assert.Equal(3, ConsoleServerShellOptions.Default.BackupZstdCompressionLevel);
         Assert.Equal(16, GodotServerShellOptions.Default.TickMilliseconds);
         Assert.True(GodotServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, GodotServerShellOptions.Default.NetworkPort);
         Assert.Equal(5.0, GodotServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(1, GodotServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Directory, GodotServerShellOptions.Default.BackupStorageMode);
+        Assert.Equal(3, GodotServerShellOptions.Default.BackupZstdCompressionLevel);
     }
 
     private static void ServerApplication_SystemRuntimeSnapshots_ReflectHookData()
@@ -1243,6 +1250,8 @@ internal static class TestRunner
             "--session-auth-timeout-seconds=6.5",
             "--session-keepalive-timeout-seconds=13.25",
             "--max-auto-created-accounts-per-ip=2",
+            "--backup-storage=zstd",
+            "--backup-zstd-level=7",
             "--run-for-seconds=0.25",
             "--idle-delay-ms=2",
             "--no-auto-start",
@@ -1268,6 +1277,8 @@ internal static class TestRunner
         Assert.Equal(6.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(13.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(2, options.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
+        Assert.Equal(7, options.BackupZstdCompressionLevel);
         Assert.Equal(TimeSpan.FromSeconds(0.25), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(2), options.IdleDelay);
     }
@@ -1342,6 +1353,8 @@ internal static class TestRunner
             "--session-auth-timeout-seconds=7.5",
             "--session-keepalive-timeout-seconds=14.25",
             "--max-auto-created-accounts-per-ip=3",
+            "--backup-storage=zip",
+            "--backup-zstd-level=6",
             "--run-for-seconds=0.5",
             "--idle-delay-ms=3",
             "--no-auto-start",
@@ -1367,6 +1380,8 @@ internal static class TestRunner
         Assert.Equal(7.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(14.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(3, options.MaxAutoCreatedAccountsPerRemoteAddress);
+        Assert.Equal(ServerPersistenceBackupStorageMode.Zip, options.BackupStorageMode);
+        Assert.Equal(6, options.BackupZstdCompressionLevel);
         Assert.Equal(TimeSpan.FromSeconds(0.5), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(3), options.IdleDelay);
     }

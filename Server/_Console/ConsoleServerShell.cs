@@ -163,7 +163,9 @@ public sealed class ConsoleServerShell
                 MaxAutoCreatedAccountsPerRemoteAddress: options.MaxAutoCreatedAccountsPerRemoteAddress,
                 ScriptContext: ScriptContext,
                 PersistenceRoot: ScriptContext!.RuntimeRoot.SavesPath,
-                PersistenceBackupsRoot: ScriptContext.RuntimeRoot.BackupsPath))
+                PersistenceBackupsRoot: ScriptContext.RuntimeRoot.BackupsPath,
+                PersistenceBackupStorageMode: options.BackupStorageMode,
+                PersistenceBackupZstdCompressionLevel: options.BackupZstdCompressionLevel))
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,
                 SaveOnStop: options.SaveOnStop));

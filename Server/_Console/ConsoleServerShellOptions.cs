@@ -1,3 +1,5 @@
+using UltraSim.Server.Persistence;
+
 namespace UltraSim.Server.Console;
 
 public sealed record ConsoleServerShellOptions(
@@ -14,7 +16,9 @@ public sealed record ConsoleServerShellOptions(
     double SessionAuthTimeoutSeconds = 5.0,
     double SessionKeepAliveTimeoutSeconds = 10.0,
     int MaxAutoCreatedAccountsPerRemoteAddress = 1,
-    string? RuntimeRootPath = null)
+    string? RuntimeRootPath = null,
+    ServerPersistenceBackupStorageMode BackupStorageMode = ServerPersistenceBackupStorageMode.Directory,
+    int BackupZstdCompressionLevel = 3)
 {
     public static ConsoleServerShellOptions Default { get; } =
         new("console", IdleDelay: TimeSpan.FromMilliseconds(1));

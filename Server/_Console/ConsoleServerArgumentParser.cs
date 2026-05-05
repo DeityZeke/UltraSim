@@ -1,3 +1,5 @@
+using UltraSim.Server.Persistence;
+
 namespace UltraSim.Server.Console;
 
 public static class ConsoleServerArgumentParser
@@ -22,6 +24,8 @@ public static class ConsoleServerArgumentParser
         double sessionKeepAliveTimeoutSeconds = ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
         int maxAutoCreatedAccountsPerRemoteAddress = ConsoleServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
         string? runtimeRootPath = ConsoleServerShellOptions.Default.RuntimeRootPath;
+        ServerPersistenceBackupStorageMode backupStorageMode = ConsoleServerShellOptions.Default.BackupStorageMode;
+        int backupZstdCompressionLevel = ConsoleServerShellOptions.Default.BackupZstdCompressionLevel;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -81,6 +85,32 @@ public static class ConsoleServerArgumentParser
             if (string.Equals(key, "--runtime-root", StringComparison.OrdinalIgnoreCase))
             {
                 runtimeRootPath = value.Trim();
+                continue;
+            }
+
+            if (string.Equals(key, "--backup-storage", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!ServerPersistenceBackupCompressorFactory.TryParseMode(value, out backupStorageMode))
+                {
+                    options = ConsoleServerShellOptions.Default;
+                    error = $"Invalid backup storage mode '{value}'. Expected directory, zip, or zstd.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(key, "--backup-zstd-level", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out backupZstdCompressionLevel))
+                {
+                    options = ConsoleServerShellOptions.Default;
+                    error = $"Invalid ZSTD compression level '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
                 continue;
             }
 
@@ -218,7 +248,9 @@ public static class ConsoleServerArgumentParser
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
             MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
-            RuntimeRootPath: runtimeRootPath);
+            RuntimeRootPath: runtimeRootPath,
+            BackupStorageMode: backupStorageMode,
+            BackupZstdCompressionLevel: backupZstdCompressionLevel);
         error = null;
         showHelp = false;
         return true;
@@ -229,6 +261,8 @@ public static class ConsoleServerArgumentParser
         UltraSim.Server.Console options:
           --profile=<name>
           --runtime-root=<path>
+          --backup-storage=<directory|zip|zstd>
+          --backup-zstd-level=<n>
           --tick-ms=<n>
           --max-catchup=<n>
           --port=<0-65535>

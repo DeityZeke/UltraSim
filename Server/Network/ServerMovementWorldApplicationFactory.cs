@@ -596,7 +596,11 @@ public static class ServerMovementWorldApplicationFactory
                     new AccountingPersistenceParticipant(_accounts, _characters),
                     new EcsWorldPersistenceParticipant(_world)
                 ],
-                new ServerPersistenceSaveSetOptions(BackupsRootDirectory: backupsRoot),
+                new ServerPersistenceSaveSetOptions(
+                    BackupsRootDirectory: backupsRoot,
+                    BackupCompressor: ServerPersistenceBackupCompressorFactory.Create(
+                        _options.PersistenceBackupStorageMode,
+                        _options.PersistenceBackupZstdCompressionLevel)),
                 initialSaveSequence: _lastSaveSequence);
         }
 
