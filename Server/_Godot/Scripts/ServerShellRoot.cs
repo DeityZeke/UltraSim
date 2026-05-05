@@ -1186,17 +1186,27 @@ public partial class ServerShellRoot : Control
 		registry.RegisterApplyWithoutRestart("server.save.manual", "Manual save", "available from Output controls and command line");
 		registry.RegisterApplyWithoutRestart("server.backups.restore", "Backup list/restore", "available from Output controls and command line");
 		registry.RegisterRestartRequired("server.name", "Server name", options.ProfileName);
-		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture));
-		registry.RegisterRestartRequired("server.save.on_stop", "Save on stop", FormatBool(options.SaveOnStop));
-		registry.RegisterRestartRequired("server.session.auth_timeout_seconds", "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
-		registry.RegisterRestartRequired("server.session.keepalive_timeout_seconds", "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture));
-		registry.RegisterRestartRequired("server.accounts.max_auto_created_per_ip", "Max auto-created accounts per IP", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture));
-		registry.RegisterRestartRequired("server.runtime.root", "Runtime root", runtimeRoot.RootPath);
-		registry.RegisterRestartRequired("server.persistence.saves_path", "Save folder", runtimeRoot.SavesPath);
-		registry.RegisterRestartRequired("server.persistence.backups_path", "Backups folder", runtimeRoot.BackupsPath);
-		registry.RegisterRestartRequired("server.persistence.backup_storage", "Backup compression", FormatBackupStorageMode(options.BackupStorageMode));
-		registry.RegisterRestartRequired("server.persistence.backup_zstd_level", "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture));
-		registry.RegisterRestartRequired("server.persistence.backup_count", "Number of backups", "3");
+		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired("server.save.on_stop", "Save on stop", FormatBool(options.SaveOnStop), editorKind: ServerSettingEditorKind.Boolean);
+		registry.RegisterRestartRequired("server.session.auth_timeout_seconds", "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
+		registry.RegisterRestartRequired("server.session.keepalive_timeout_seconds", "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
+		registry.RegisterRestartRequired("server.accounts.max_auto_created_per_ip", "Max auto-created accounts per IP", options.MaxAutoCreatedAccountsPerRemoteAddress.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired("server.runtime.root", "Runtime root", runtimeRoot.RootPath, editorKind: ServerSettingEditorKind.Path);
+		registry.RegisterRestartRequired("server.persistence.saves_path", "Save folder", runtimeRoot.SavesPath, editorKind: ServerSettingEditorKind.Path);
+		registry.RegisterRestartRequired("server.persistence.backups_path", "Backups folder", runtimeRoot.BackupsPath, editorKind: ServerSettingEditorKind.Path);
+		registry.RegisterRestartRequired(
+			"server.persistence.backup_storage",
+			"Backup compression",
+			FormatBackupStorageMode(options.BackupStorageMode),
+			editorKind: ServerSettingEditorKind.Choice,
+			choices:
+			[
+				new ServerSettingChoice("off", "off"),
+				new ServerSettingChoice("zip", "zip"),
+				new ServerSettingChoice("zstd", "zstd")
+			]);
+		registry.RegisterRestartRequired("server.persistence.backup_zstd_level", "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired("server.persistence.backup_count", "Number of backups", "3", editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired("server.persistence.autosave_interval", "Autosave interval", "not wired");
 		registry.RegisterRestartRequired("server.discovery.enabled", "Discovery enabled", "not wired");
 		registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", "/");

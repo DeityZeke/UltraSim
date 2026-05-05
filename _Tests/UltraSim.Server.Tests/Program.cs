@@ -778,7 +778,22 @@ internal static class TestRunner
         var registry = new ServerSettingsRegistry();
 
         registry.RegisterApplyWithoutRestart("server.save.manual", "Manual save", "available");
-        registry.RegisterRestartRequired("Server.Network.Port", "Network port", "42042");
+        registry.RegisterRestartRequired(
+            "Server.Network.Port",
+            "Network port",
+            "42042",
+            editorKind: ServerSettingEditorKind.Integer);
+        registry.RegisterRestartRequired(
+            "server.persistence.backup_storage",
+            "Backup compression",
+            "zstd",
+            editorKind: ServerSettingEditorKind.Choice,
+            choices:
+            [
+                new ServerSettingChoice("off", "off"),
+                new ServerSettingChoice("zip", "zip"),
+                new ServerSettingChoice("zstd", "zstd")
+            ]);
         Assert.False(registry.TryRegister(new ServerSettingDescriptor(
             "server.network.port",
             "Duplicate port",
@@ -789,19 +804,31 @@ internal static class TestRunner
             "server.network.port",
             "Network port",
             "42043",
-            ServerSettingApplyMode.RestartRequired));
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Integer));
 
         IReadOnlyList<ServerSettingDescriptor> snapshot = registry.Snapshot();
-        Assert.Equal(2, snapshot.Count);
+        Assert.Equal(3, snapshot.Count);
         Assert.Equal("server.save.manual", snapshot[0].Key);
         Assert.Equal(ServerSettingApplyMode.ApplyWithoutRestart, snapshot[0].ApplyMode);
         Assert.Equal("server.network.port", snapshot[1].Key);
+        Assert.Equal(ServerSettingEditorKind.Integer, snapshot[1].EditorKind);
         Assert.Equal("42043", snapshot[1].Value);
+        Assert.Equal("server.persistence.backup_storage", snapshot[2].Key);
+        Assert.Equal(ServerSettingEditorKind.Choice, snapshot[2].EditorKind);
+        Assert.Equal(3, snapshot[2].Choices.Count);
 
         Assert.True(registry.TryGetSetting("SERVER.NETWORK.PORT", out ServerSettingDescriptor port));
         Assert.Equal("Network port", port.DisplayName);
         Assert.True(registry.Remove("server.save.manual"));
-        Assert.Equal(1, registry.Count);
+        Assert.Equal(2, registry.Count);
+        Assert.Throws<ArgumentException>(() => new ServerSettingDescriptor(
+            "bad.choice",
+            "Bad choice",
+            "rar",
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Choice,
+            choices: [new ServerSettingChoice("zip", "zip")]));
     }
 
     private static void ServerEntityInspectionService_GatesAndReturnsEcsSnapshot()

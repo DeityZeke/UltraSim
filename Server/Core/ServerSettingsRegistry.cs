@@ -33,28 +33,36 @@ public sealed class ServerSettingsRegistry
         string key,
         string displayName,
         string value,
-        string description = "")
+        string description = "",
+        ServerSettingEditorKind editorKind = ServerSettingEditorKind.Text,
+        IEnumerable<ServerSettingChoice>? choices = null)
     {
         RegisterOrReplace(new ServerSettingDescriptor(
             key,
             displayName,
             value,
             ServerSettingApplyMode.ApplyWithoutRestart,
-            description));
+            description,
+            editorKind,
+            choices));
     }
 
     public void RegisterRestartRequired(
         string key,
         string displayName,
         string value,
-        string description = "")
+        string description = "",
+        ServerSettingEditorKind editorKind = ServerSettingEditorKind.Text,
+        IEnumerable<ServerSettingChoice>? choices = null)
     {
         RegisterOrReplace(new ServerSettingDescriptor(
             key,
             displayName,
             value,
             ServerSettingApplyMode.RestartRequired,
-            description));
+            description,
+            editorKind,
+            choices));
     }
 
     public bool Remove(string key)
