@@ -52,8 +52,10 @@ Current server settings foundation:
 - `ServerSettingsRegistry` stores ordered, key-addressable setting descriptors for bootstrap/auth/storage/discovery/operator settings
 - descriptors carry a stable key, display name, value text, apply mode (`ApplyWithoutRestart` or `RestartRequired`), and editor metadata
 - editor metadata identifies text, integer, decimal, boolean, path, and choice/dropdown settings; choice settings declare their allowed values up front
+- `ServerSettingValueValidator` validates and normalizes edited values by editor kind before any config persistence or apply/restart routing sees them
+- `ServerSettingsChangeSetValidator` validates batches of proposed edits, rejects duplicate/unknown keys, and returns normalized changes with their apply mode
 - the Godot server Settings tab renders from the shared descriptor inventory and is intentionally separate from the future live ECS control panel
-- editing, validation, persistence to config files, restart/apply routing, and package-fed setting registration are planned layers on top of this shared registry
+- editing widgets, persistence to config files, restart/apply routing, and package-fed setting registration are planned layers on top of this shared registry
 
 Current chat command prefix policy:
 

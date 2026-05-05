@@ -50,6 +50,8 @@ internal static class TestRunner
         Run(nameof(ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix), ServerChatCommandBootstrap_UsesOneConfiguredChatPrefix);
         Run(nameof(ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess), ServerAccessRuleRegistry_EvaluatesRuntimeRulesAndLegacyAccess);
         Run(nameof(ServerSettingsRegistry_PreservesOrderAndSupportsReplace), ServerSettingsRegistry_PreservesOrderAndSupportsReplace);
+        Run(nameof(ServerSettingValueValidator_NormalizesAndRejectsInvalidValues), ServerSettingValueValidator_NormalizesAndRejectsInvalidValues);
+        Run(nameof(ServerSettingsChangeSetValidator_ValidatesBatchEdits), ServerSettingsChangeSetValidator_ValidatesBatchEdits);
         Run(nameof(ServerEntityInspectionService_GatesAndReturnsEcsSnapshot), ServerEntityInspectionService_GatesAndReturnsEcsSnapshot);
         Run(nameof(ServerSpawnerPrimitives_MapEcsHashToAdminMetadata), ServerSpawnerPrimitives_MapEcsHashToAdminMetadata);
         Run(nameof(ServerChatService_AnnounceCommandPublishesSystemEvent), ServerChatService_AnnounceCommandPublishesSystemEvent);
@@ -829,6 +831,124 @@ internal static class TestRunner
             ServerSettingApplyMode.RestartRequired,
             editorKind: ServerSettingEditorKind.Choice,
             choices: [new ServerSettingChoice("zip", "zip")]));
+    }
+
+    private static void ServerSettingValueValidator_NormalizesAndRejectsInvalidValues()
+    {
+        var integer = new ServerSettingDescriptor(
+            "server.port",
+            "Port",
+            "42042",
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Integer);
+        AssertValid("99", ServerSettingValueValidator.Validate(integer, " 099 "));
+        AssertInvalid(ServerSettingValueValidator.Validate(integer, "99.5"));
+
+        var decimalSetting = new ServerSettingDescriptor(
+            "server.timeout",
+            "Timeout",
+            "5.5",
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Decimal);
+        AssertValid("6.25", ServerSettingValueValidator.Validate(decimalSetting, "6.25"));
+        AssertInvalid(ServerSettingValueValidator.Validate(decimalSetting, "six"));
+
+        var boolean = new ServerSettingDescriptor(
+            "server.save_on_stop",
+            "Save on stop",
+            "off",
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Boolean);
+        AssertValid("on", ServerSettingValueValidator.Validate(boolean, "yes"));
+        AssertValid("off", ServerSettingValueValidator.Validate(boolean, "0"));
+        AssertInvalid(ServerSettingValueValidator.Validate(boolean, "maybe"));
+
+        var choice = new ServerSettingDescriptor(
+            "server.backup_storage",
+            "Backup storage",
+            "zstd",
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Choice,
+            choices:
+            [
+                new ServerSettingChoice("off", "off"),
+                new ServerSettingChoice("zip", "zip"),
+                new ServerSettingChoice("zstd", "zstd")
+            ]);
+        AssertValid("zstd", ServerSettingValueValidator.Validate(choice, "ZSTD"));
+        AssertInvalid(ServerSettingValueValidator.Validate(choice, "rar"));
+
+        var path = new ServerSettingDescriptor(
+            "server.root",
+            "Runtime root",
+            "/tmp/server",
+            ServerSettingApplyMode.RestartRequired,
+            editorKind: ServerSettingEditorKind.Path);
+        AssertValid("/tmp/server", ServerSettingValueValidator.Validate(path, " /tmp/server "));
+        AssertInvalid(ServerSettingValueValidator.Validate(path, "   "));
+    }
+
+    private static void AssertValid(string expectedNormalizedValue, ServerSettingValidationResult result)
+    {
+        Assert.True(result.IsValid);
+        Assert.Equal(expectedNormalizedValue, result.NormalizedValue);
+        Assert.Equal(string.Empty, result.Error);
+    }
+
+    private static void AssertInvalid(ServerSettingValidationResult result)
+    {
+        Assert.False(result.IsValid);
+        Assert.Equal(string.Empty, result.NormalizedValue);
+        Assert.True(!string.IsNullOrWhiteSpace(result.Error));
+    }
+
+    private static void ServerSettingsChangeSetValidator_ValidatesBatchEdits()
+    {
+        var registry = new ServerSettingsRegistry();
+        registry.RegisterRestartRequired(
+            "server.network.port",
+            "Network port",
+            "42042",
+            editorKind: ServerSettingEditorKind.Integer);
+        registry.RegisterApplyWithoutRestart(
+            "server.save.on_stop",
+            "Save on stop",
+            "off",
+            editorKind: ServerSettingEditorKind.Boolean);
+
+        ServerSettingsChangeSetValidationResult valid = registry.ValidateChanges(
+        [
+            new ServerSettingProposedValue("SERVER.NETWORK.PORT", " 42043 "),
+            new ServerSettingProposedValue("server.save.on_stop", "yes")
+        ]);
+
+        Assert.True(valid.IsValid);
+        Assert.Equal(2, valid.Changes.Count);
+        Assert.Equal("server.network.port", valid.Changes[0].Key);
+        Assert.Equal("42042", valid.Changes[0].PreviousValue);
+        Assert.Equal("42043", valid.Changes[0].NormalizedValue);
+        Assert.Equal(ServerSettingApplyMode.RestartRequired, valid.Changes[0].ApplyMode);
+        Assert.Equal("on", valid.Changes[1].NormalizedValue);
+        Assert.Equal(ServerSettingApplyMode.ApplyWithoutRestart, valid.Changes[1].ApplyMode);
+        Assert.Equal(0, valid.Errors.Count);
+
+        ServerSettingsChangeSetValidationResult invalid = registry.ValidateChanges(
+        [
+            new ServerSettingProposedValue("server.network.port", "forty-two"),
+            new ServerSettingProposedValue("server.save.on_stop", "maybe"),
+            new ServerSettingProposedValue("server.unknown", "value"),
+            new ServerSettingProposedValue("server.save_on_stop", "off"),
+            new ServerSettingProposedValue("server.save_on_stop", "on")
+        ]);
+
+        Assert.False(invalid.IsValid);
+        Assert.Equal(0, invalid.Changes.Count);
+        Assert.Equal(5, invalid.Errors.Count);
+        Assert.Equal("server.network.port", invalid.Errors[0].Key);
+        Assert.Equal("server.save.on_stop", invalid.Errors[1].Key);
+        Assert.Equal("server.unknown", invalid.Errors[2].Key);
+        Assert.Equal("server.save_on_stop", invalid.Errors[3].Key);
+        Assert.Equal("server.save_on_stop", invalid.Errors[4].Key);
     }
 
     private static void ServerEntityInspectionService_GatesAndReturnsEcsSnapshot()

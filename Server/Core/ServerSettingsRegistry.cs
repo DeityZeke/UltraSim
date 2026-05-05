@@ -95,6 +95,12 @@ public sealed class ServerSettingsRegistry
         return _settings.ToArray();
     }
 
+    public ServerSettingsChangeSetValidationResult ValidateChanges(
+        IEnumerable<ServerSettingProposedValue> proposedValues)
+    {
+        return ServerSettingsChangeSetValidator.Validate(this, proposedValues);
+    }
+
     private int IndexOf(string normalizedKey)
     {
         for (int i = 0; i < _settings.Count; i++)
