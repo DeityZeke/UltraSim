@@ -90,7 +90,8 @@ Current runtime content group state:
 - mounted groups can register unmount actions; actions run in reverse registration order and must complete before the group is marked unmounted.
 - `Commands.RegisterForContentGroup` is the first content-group-aware registry hook and removes owned script commands when the group unmounts.
 - `UiPanels.RegisterPanelProviderForContentGroup` removes owned panel providers when the group unmounts.
-- prefab and spawn-set unregister/reload behavior should attach cleanup actions to this lifecycle layer as those registries become content-group-aware.
+- `Definitions.RegisterPrefabForContentGroup` and `Definitions.RegisterArchetypeForContentGroup` remove owned definitions when the group unmounts; archetype removal is blocked while any remaining prefab references it.
+- spawn-set unregister/reload behavior should attach cleanup actions to this lifecycle layer once spawn execution exists.
 - the stock Admission package now registers itself as `packages/admission`.
 
 Default server-authored platform flows can also be packages. The default

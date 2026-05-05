@@ -198,15 +198,51 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     }
 
     public bool RegisterArchetype(ArchetypeDescriptor descriptor)
+        => TryAddArchetype(descriptor, out _);
+
+    public bool RegisterArchetypeForContentGroup<TShape>(string contentGroupKey)
+        where TShape : ArchetypeShape, new()
     {
-        ArgumentNullException.ThrowIfNull(descriptor);
-        ScriptDefinitionValidation.ValidateStableKey(descriptor.Key, nameof(descriptor.Key));
-        string key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
-        if (_archetypes.ContainsKey(key))
+        return RegisterArchetypeForContentGroup(contentGroupKey, new TShape().BuildDescriptor());
+    }
+
+    public bool RegisterArchetypeForContentGroup(string contentGroupKey, ArchetypeDescriptor descriptor)
+    {
+        ScriptDefinitionValidation.ValidateStableKey(contentGroupKey, nameof(contentGroupKey));
+        if (!TryAddArchetype(descriptor, out string key))
             return false;
 
-        _archetypes.Add(key, descriptor with { Key = key });
-        return true;
+        UltraSimRuntimeContentGroupOperationResult cleanup = _contentGroups.RegisterUnmountAction(
+            contentGroupKey,
+            () =>
+            {
+                if (!UnregisterArchetype(key))
+                    throw new InvalidOperationException($"Archetype '{key}' is still referenced or already removed.");
+            });
+        if (cleanup.Accepted)
+            return true;
+
+        _archetypes.Remove(key);
+        return false;
+    }
+
+    public bool UnregisterArchetype(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        ScriptDefinitionValidation.ValidateStableKey(key, nameof(key));
+        string normalized = ScriptDefinitionValidation.NormalizeKey(key);
+        if (!_archetypes.ContainsKey(normalized))
+            return false;
+
+        foreach (PrefabDescriptor prefab in _prefabs.Values)
+        {
+            if (string.Equals(prefab.ArchetypeKey, normalized, StringComparison.Ordinal))
+                return false;
+        }
+
+        return _archetypes.Remove(normalized);
     }
 
     public bool RegisterPrefab<TPrefab>()
@@ -216,13 +252,59 @@ public sealed class DefaultUltraSimScriptContext : IUltraSimScriptContext, IUltr
     }
 
     public bool RegisterPrefab(PrefabDescriptor descriptor)
+        => TryAddPrefab(descriptor, out _);
+
+    public bool RegisterPrefabForContentGroup<TPrefab>(string contentGroupKey)
+        where TPrefab : IUltraSimScriptPrefabDefinition, new()
+    {
+        return RegisterPrefabForContentGroup(contentGroupKey, new TPrefab().BuildDescriptor());
+    }
+
+    public bool RegisterPrefabForContentGroup(string contentGroupKey, PrefabDescriptor descriptor)
+    {
+        ScriptDefinitionValidation.ValidateStableKey(contentGroupKey, nameof(contentGroupKey));
+        if (!TryAddPrefab(descriptor, out string key))
+            return false;
+
+        UltraSimRuntimeContentGroupOperationResult cleanup = _contentGroups.RegisterUnmountAction(
+            contentGroupKey,
+            () => _prefabs.Remove(key));
+        if (cleanup.Accepted)
+            return true;
+
+        _prefabs.Remove(key);
+        return false;
+    }
+
+    public bool UnregisterPrefab(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return false;
+
+        ScriptDefinitionValidation.ValidateStableKey(key, nameof(key));
+        return _prefabs.Remove(ScriptDefinitionValidation.NormalizeKey(key));
+    }
+
+    private bool TryAddArchetype(ArchetypeDescriptor descriptor, out string key)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        ScriptDefinitionValidation.ValidateStableKey(descriptor.Key, nameof(descriptor.Key));
+        key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
+        if (_archetypes.ContainsKey(key))
+            return false;
+
+        _archetypes.Add(key, descriptor with { Key = key });
+        return true;
+    }
+
+    private bool TryAddPrefab(PrefabDescriptor descriptor, out string key)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         ScriptDefinitionValidation.ValidateStableKey(descriptor.Key, nameof(descriptor.Key));
         ScriptDefinitionValidation.ValidateStableKey(descriptor.ArchetypeKey, nameof(descriptor.ArchetypeKey));
         if (string.IsNullOrWhiteSpace(descriptor.SourceName))
             throw new ArgumentException("Prefab source name cannot be empty.", nameof(descriptor));
-        string key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
+        key = ScriptDefinitionValidation.NormalizeKey(descriptor.Key);
         string archetypeKey = ScriptDefinitionValidation.NormalizeKey(descriptor.ArchetypeKey);
         if (!_archetypes.ContainsKey(archetypeKey))
         {

@@ -26,6 +26,9 @@ internal static class TestRunner
         Run(nameof(ScriptCommands_ScopedRegistrationRequiresMountedContentGroup), ScriptCommands_ScopedRegistrationRequiresMountedContentGroup);
         Run(nameof(ScriptPanelProviders_CanBeScopedToContentGroupUnmount), ScriptPanelProviders_CanBeScopedToContentGroupUnmount);
         Run(nameof(ScriptPanelProviders_ScopedRegistrationRequiresMountedContentGroup), ScriptPanelProviders_ScopedRegistrationRequiresMountedContentGroup);
+        Run(nameof(ScriptDefinitions_CanBeScopedToContentGroupUnmount), ScriptDefinitions_CanBeScopedToContentGroupUnmount);
+        Run(nameof(ScriptDefinitions_BlockArchetypeUnmountWhilePrefabReferencesIt), ScriptDefinitions_BlockArchetypeUnmountWhilePrefabReferencesIt);
+        Run(nameof(ScriptDefinitions_ScopedRegistrationRequiresMountedContentGroup), ScriptDefinitions_ScopedRegistrationRequiresMountedContentGroup);
         Run(nameof(ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog), ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog);
         Run(nameof(ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues), ScriptPrefabCatalogBuilder_WorldCreatePrefabAppliesConstantsAndPerSpawnValues);
         Run(nameof(ScriptCompiler_CompilesLoadsCommandAndPanelModule), ScriptCompiler_CompilesLoadsCommandAndPanelModule);
@@ -583,6 +586,82 @@ internal static class TestRunner
             "admission.panel.test",
             () => UiStandardPanels.MessageBox("test", "Title", "Body")));
         Assert.Equal(1, context.RegisteredPanelProviders.Count);
+    }
+
+    private static void ScriptDefinitions_CanBeScopedToContentGroupUnmount()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/items",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Items")).Accepted);
+
+        Assert.True(context.Definitions.RegisterArchetypeForContentGroup<TestBaseBladedWeapon>("packages/items"));
+        Assert.True(context.Definitions.RegisterPrefabForContentGroup<TestIronDagger>("packages/items"));
+        Assert.Equal(1, context.RegisteredArchetypes.Count);
+        Assert.Equal(1, context.RegisteredPrefabs.Count);
+
+        Assert.True(context.ContentGroups.Unmount("packages/items").Accepted);
+        Assert.Equal(0, context.RegisteredArchetypes.Count);
+        Assert.Equal(0, context.RegisteredPrefabs.Count);
+
+        Assert.True(context.ContentGroups.Mount("packages/items").Accepted);
+        Assert.True(context.Definitions.RegisterArchetypeForContentGroup<TestBaseBladedWeapon>("packages/items"));
+        Assert.True(context.Definitions.RegisterPrefabForContentGroup<TestIronDagger>("packages/items"));
+        Assert.True(context.Definitions.UnregisterPrefab("items/weapons/bladed/iron_dagger"));
+        Assert.True(context.Definitions.UnregisterArchetype("items/weapons/bladed/base"));
+        Assert.Equal(0, context.RegisteredArchetypes.Count);
+        Assert.Equal(0, context.RegisteredPrefabs.Count);
+    }
+
+    private static void ScriptDefinitions_BlockArchetypeUnmountWhilePrefabReferencesIt()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/base_items",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Base Items")).Accepted);
+
+        Assert.True(context.Definitions.RegisterArchetypeForContentGroup<TestBaseBladedWeapon>("packages/base_items"));
+        Assert.True(context.Definitions.RegisterPrefab<TestIronDagger>());
+
+        UltraSimRuntimeContentGroupOperationResult failed = context.ContentGroups.Unmount("packages/base_items");
+
+        Assert.False(failed.Accepted);
+        Assert.Equal(UltraSimRuntimeContentGroupOperationStatus.UnmountFailed, failed.Status);
+        Assert.True(failed.Snapshot!.IsMounted);
+        Assert.Equal(1, context.RegisteredArchetypes.Count);
+        Assert.Equal(1, context.RegisteredPrefabs.Count);
+
+        Assert.True(context.Definitions.UnregisterPrefab("items/weapons/bladed/iron_dagger"));
+        Assert.True(context.ContentGroups.Unmount("packages/base_items").Accepted);
+        Assert.Equal(0, context.RegisteredArchetypes.Count);
+        Assert.Equal(0, context.RegisteredPrefabs.Count);
+    }
+
+    private static void ScriptDefinitions_ScopedRegistrationRequiresMountedContentGroup()
+    {
+        using TempRuntimeRoot temp = TempRuntimeRoot.Create();
+        var context = new DefaultUltraSimScriptContext(temp.Layout);
+        Assert.True(context.ContentGroups.Register(
+            new UltraSimRuntimeContentGroupDescriptor(
+                "packages/items",
+                UltraSimRuntimeContentGroupKind.ScriptPackage,
+                "Items"),
+            mounted: false).Accepted);
+
+        Assert.False(context.Definitions.RegisterArchetypeForContentGroup<TestBaseBladedWeapon>("packages/items"));
+        Assert.Equal(0, context.RegisteredArchetypes.Count);
+
+        Assert.True(context.ContentGroups.Mount("packages/items").Accepted);
+        Assert.True(context.Definitions.RegisterArchetypeForContentGroup<TestBaseBladedWeapon>("packages/items"));
+        Assert.True(context.Definitions.RegisterPrefabForContentGroup<TestIronDagger>("packages/items"));
+        Assert.Equal(1, context.RegisteredArchetypes.Count);
+        Assert.Equal(1, context.RegisteredPrefabs.Count);
     }
 
     private static void ScriptPrefabCatalogBuilder_TranslatesDescriptorsToEcsCatalog()

@@ -91,8 +91,9 @@ Current runtime content group foundation:
 - mounted groups can register unmount actions, which run in reverse order and must succeed before the group is marked unmounted.
 - script commands can opt into content-group ownership through `Commands.RegisterForContentGroup`, which removes those commands from the script context when the group unmounts.
 - script UI panel providers can opt into content-group ownership through `UiPanels.RegisterPanelProviderForContentGroup`, which removes those providers from the script context when the group unmounts.
+- script prefab/archetype definitions can opt into content-group ownership through `Definitions.RegisterPrefabForContentGroup` and `Definitions.RegisterArchetypeForContentGroup`; archetype removal is blocked while any remaining prefab references it.
 - the stock Admission package registers `packages/admission` as a mounted script package.
-- prefab definition and spawn-set registries still need to attach their own unregister actions to this lifecycle layer.
+- spawn-set registries still need to attach their own unregister actions to this lifecycle layer once spawn execution exists.
 
 Current `Server/Network` state:
 
