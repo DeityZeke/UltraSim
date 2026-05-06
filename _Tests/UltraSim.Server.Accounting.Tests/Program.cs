@@ -22,6 +22,7 @@ internal static class TestRunner
         Run(nameof(PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword), PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword);
         Run(nameof(AccountAccessAdministrationService_ReplacesMetadataAndAudits), AccountAccessAdministrationService_ReplacesMetadataAndAudits);
         Run(nameof(AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin), AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin);
+        Run(nameof(AccountStatusAdministrationService_ReplacesStatusAndReason), AccountStatusAdministrationService_ReplacesStatusAndReason);
         Run(nameof(AccountCharacterService_CreatesListsAndDeletesCharactersBySlot), AccountCharacterService_CreatesListsAndDeletesCharactersBySlot);
         Run(nameof(AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy), AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy);
         Run(nameof(AccountCharacterService_AutoJoinRequiresSingleCharacterMode), AccountCharacterService_AutoJoinRequiresSingleCharacterMode);
@@ -373,6 +374,28 @@ internal static class TestRunner
         Assert.True(updated.AccessRuleKeys.SequenceEqual(["staff"]));
         Assert.True(updated.DirectPermissionGrants.SequenceEqual(["command.kick"]));
         Assert.True(updated.DirectPermissionDenies.SequenceEqual(["command.shutdown"]));
+    }
+
+    private static void AccountStatusAdministrationService_ReplacesStatusAndReason()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var accounts = new InMemoryAccountRegistry();
+        ServerAccountRecord account = accounts.CreateAccount("Alice", "hash", now);
+        var service = new AccountStatusAdministrationService(accounts);
+
+        AccountStatusUpdateResult result = service.ReplaceStatus(
+            account.AccountId,
+            AccountStatus.Banned,
+            " shell ban ");
+
+        Assert.True(result.Succeeded);
+        Assert.True(accounts.TryGetById(account.AccountId, out ServerAccountRecord updated));
+        Assert.Equal(AccountStatus.Banned, updated.Status);
+        Assert.Equal("shell ban", updated.StatusReason);
+
+        AccountStatusUpdateResult missing = service.ReplaceStatus(999, AccountStatus.Banned);
+        Assert.False(missing.Succeeded);
+        Assert.Contains("not found", missing.Error);
     }
 
     private static void AccountCharacterService_CreatesListsAndDeletesCharactersBySlot()

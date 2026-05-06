@@ -90,6 +90,16 @@ public sealed class GodotServerShellController : IDisposable
 		return _runtime.Application.GetAccountSummariesSnapshot();
 	}
 
+	public ServerPlayerSessionActionResult KickPlayerSession(string sessionId)
+	{
+		return _runtime.Application.KickPlayerSession(sessionId);
+	}
+
+	public ServerAccountActionResult BanAccount(string accountId)
+	{
+		return _runtime.Application.BanAccount(accountId);
+	}
+
 	public ServerAccountAccessUpdateResult ReplaceAccountAccess(
 		string accountId,
 		int accessLevel,

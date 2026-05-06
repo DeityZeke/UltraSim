@@ -45,6 +45,8 @@ public static class ServerMovementWorldApplicationFactory
                 GetSystemRuntimeSnapshots = _ => runtime.GetSystemRuntimeSnapshots(),
                 GetPlayerSessions = _ => runtime.GetPlayerSessionsSnapshot(),
                 GetAccountSummaries = _ => runtime.GetAccountSummariesSnapshot(),
+                KickPlayerSession = (_, sessionId) => runtime.KickPlayerSession(sessionId),
+                BanAccount = (_, accountId) => runtime.BanAccount(accountId),
                 ReplaceAccountAccess = (_, accountId, accessLevel, directGrants, directDenies) =>
                     runtime.ReplaceAccountAccess(accountId, accessLevel, directGrants, directDenies),
                 ExecuteCommand = (app, command) => runtime.ExecuteCommand(app, command),
@@ -86,6 +88,7 @@ public static class ServerMovementWorldApplicationFactory
         private readonly InMemoryAccountSessionTracker _accountSessions = new();
         private readonly InMemoryAccountAuditSink _accountAudit = new();
         private readonly AccountAccessAdministrationService _accountAccess;
+        private readonly AccountStatusAdministrationService _accountStatus;
         private readonly DefaultCredentialService _credentialService;
         private Action<string>? _operatorLog;
         private const float SprintMovementMultiplier = 1.75f;
@@ -114,6 +117,7 @@ public static class ServerMovementWorldApplicationFactory
             _options = options;
             _characterService = new AccountCharacterService(_accounts, _characters);
             _accountAccess = new AccountAccessAdministrationService(_accounts);
+            _accountStatus = new AccountStatusAdministrationService(_accounts);
             _credentialService = new DefaultCredentialService(
                 _accounts,
                 _passwords,
@@ -515,6 +519,76 @@ public static class ServerMovementWorldApplicationFactory
 
             _operatorLog?.Invoke($"Accounts: Updated permissions for '{result.Account.Username}' access={result.Account.AccessLevel}.");
             return ServerAccountAccessUpdateResult.Success(accountId, $"Updated permissions for '{result.Account.Username}'.");
+        }
+
+        public ServerPlayerSessionActionResult KickPlayerSession(string sessionId)
+        {
+            if (!int.TryParse(sessionId, NumberStyles.Integer, CultureInfo.InvariantCulture, out int connectionValue))
+                return ServerPlayerSessionActionResult.Reject(sessionId, "Player session id is not valid.");
+
+            var connectionId = new ConnectionId(connectionValue);
+            if (!connectionId.IsValid)
+                return ServerPlayerSessionActionResult.Reject(sessionId, "Player session id is not valid.");
+
+            ServerMovementSessionHost? host = _host;
+            if (host is null)
+                return ServerPlayerSessionActionResult.Reject(sessionId, "Server is not accepting player sessions.");
+
+            string playerName = $"session {sessionId}";
+            if (host.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected))
+                playerName = selected.CharacterName;
+
+            if (!host.TryKick(connectionId, Stopwatch.GetTimestamp()))
+                return ServerPlayerSessionActionResult.Reject(sessionId, $"Player session '{sessionId}' is not online.");
+
+            _operatorLog?.Invoke($"Players: Kicked '{playerName}' session={sessionId}.");
+            return ServerPlayerSessionActionResult.Success(sessionId, $"Kicked '{playerName}'.");
+        }
+
+        public ServerAccountActionResult BanAccount(string accountId)
+        {
+            if (!ulong.TryParse(accountId, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong parsedAccountId))
+                return ServerAccountActionResult.Reject(accountId, "Account id is not valid.");
+
+            AccountStatusUpdateResult result = _accountStatus.ReplaceStatus(
+                parsedAccountId,
+                AccountStatus.Banned,
+                "Banned from Godot server shell.");
+            if (!result.Succeeded || result.Account is null)
+                return ServerAccountActionResult.Reject(accountId, result.Error);
+
+            int kicked = KickAccountSessions(parsedAccountId);
+            _operatorLog?.Invoke($"Accounts: Banned '{result.Account.Username}' and kicked {kicked} active session(s).");
+            string message = kicked == 0
+                ? $"Banned '{result.Account.Username}'."
+                : $"Banned '{result.Account.Username}' and kicked {kicked} active session(s).";
+            return ServerAccountActionResult.Success(accountId, message);
+        }
+
+        private int KickAccountSessions(ulong accountId)
+        {
+            ServerMovementSessionHost? host = _host;
+            if (host is null || host.BoundConnectionCount == 0)
+                return 0;
+
+            var connections = new ConnectionId[host.BoundConnectionCount];
+            int count = host.CopyBoundConnections(connections);
+            int kicked = 0;
+            long nowTicks = Stopwatch.GetTimestamp();
+            for (int i = 0; i < count; i++)
+            {
+                ConnectionId connectionId = connections[i];
+                if (!host.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected) ||
+                    selected.AccountId != accountId)
+                {
+                    continue;
+                }
+
+                if (host.TryKick(connectionId, nowTicks))
+                    kicked++;
+            }
+
+            return kicked;
         }
 
         private HashSet<ulong> GetOnlineAccountIds()

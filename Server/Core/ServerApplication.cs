@@ -229,6 +229,22 @@ public sealed class ServerApplication : IServerApplication
         return _hooks.GetAccountSummaries?.Invoke(this) ?? Array.Empty<ServerAccountSummarySnapshot>();
     }
 
+    public ServerPlayerSessionActionResult KickPlayerSession(string sessionId)
+    {
+        if (_hooks.KickPlayerSession is null)
+            return ServerPlayerSessionActionResult.Reject(sessionId, "Player session actions are not available.");
+
+        return _hooks.KickPlayerSession(this, sessionId);
+    }
+
+    public ServerAccountActionResult BanAccount(string accountId)
+    {
+        if (_hooks.BanAccount is null)
+            return ServerAccountActionResult.Reject(accountId, "Account actions are not available.");
+
+        return _hooks.BanAccount(this, accountId);
+    }
+
     public ServerAccountAccessUpdateResult ReplaceAccountAccess(
         string accountId,
         int accessLevel,

@@ -23,6 +23,18 @@ public partial class ServerShellRoot : Control
 		AccessLevel
 	}
 
+	private enum AccountSortColumn
+	{
+		DisplayName,
+		AccountId,
+		OnlineState,
+		BanState,
+		AccessLevel,
+		LastLogin,
+		TotalPlayTime,
+		RemoteAddress
+	}
+
 	private readonly Queue<string> _outputLines = new();
 
 	private GodotServerShellOptions? _options;
@@ -42,9 +54,13 @@ public partial class ServerShellRoot : Control
 	private Label? _performanceSummaryValue;
 	private ItemList? _playersList;
 	private Label? _playersSelectedValue;
+	private Button? _playerKickButton;
+	private Button? _playerBanButton;
 	private Button? _playerPermissionsButton;
 	private ItemList? _accountsList;
 	private Label? _accountsSelectedValue;
+	private Button? _accountBanButton;
+	private Button? _accountPermissionsButton;
 	private PanelContainer? _permissionsOverlay;
 	private Label? _permissionsTitleLabel;
 	private OptionButton? _permissionsAccessLevel;
@@ -91,6 +107,8 @@ public partial class ServerShellRoot : Control
 	private string _accountsListSignature = string.Empty;
 	private PlayerSortColumn _playerSortColumn = PlayerSortColumn.PlayerName;
 	private bool _playerSortAscending = true;
+	private AccountSortColumn _accountSortColumn = AccountSortColumn.DisplayName;
+	private bool _accountSortAscending = true;
 	private IReadOnlyList<ServerSettingDescriptor> _settingsDescriptors = Array.Empty<ServerSettingDescriptor>();
 	private readonly Dictionary<string, Control> _settingsRows = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, Control> _settingsEditors = new(StringComparer.Ordinal);
@@ -868,8 +886,14 @@ public partial class ServerShellRoot : Control
 		actionRow.AddThemeConstantOverride("separation", 8);
 		column.AddChild(actionRow);
 
-		actionRow.AddChild(CreateDisabledButton("Kick", panelSoft, text));
-		actionRow.AddChild(CreateDisabledButton("Ban", panelSoft, text));
+		_playerKickButton = CreateActionButton("Kick", panelSoft, text);
+		_playerKickButton.Disabled = true;
+		_playerKickButton.Pressed += KickSelectedPlayer;
+		actionRow.AddChild(_playerKickButton);
+		_playerBanButton = CreateActionButton("Ban", panelSoft, text);
+		_playerBanButton.Disabled = true;
+		_playerBanButton.Pressed += BanSelectedPlayerAccount;
+		actionRow.AddChild(_playerBanButton);
 		actionRow.AddChild(CreateDisabledButton("Promote", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
@@ -903,6 +927,19 @@ public partial class ServerShellRoot : Control
 		_accountsSummaryValue.AddThemeColorOverride("font_color", muted);
 		column.AddChild(_accountsSummaryValue);
 
+		var headerRow = new HBoxContainer();
+		headerRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		headerRow.AddThemeConstantOverride("separation", 4);
+		column.AddChild(headerRow);
+		headerRow.AddChild(CreateAccountSortButton("Name", AccountSortColumn.DisplayName, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("Account", AccountSortColumn.AccountId, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("State", AccountSortColumn.OnlineState, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("Ban", AccountSortColumn.BanState, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("Access", AccountSortColumn.AccessLevel, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("Last", AccountSortColumn.LastLogin, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("Total", AccountSortColumn.TotalPlayTime, panelSoft, text));
+		headerRow.AddChild(CreateAccountSortButton("IP", AccountSortColumn.RemoteAddress, panelSoft, text));
+
 		var detailsFrame = new PanelContainer();
 		detailsFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
 		detailsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
@@ -933,11 +970,18 @@ public partial class ServerShellRoot : Control
 
 		actionRow.AddChild(CreateDisabledButton("Add", accentSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Remove", panelSoft, text));
-		actionRow.AddChild(CreateDisabledButton("Ban", panelSoft, text));
+		_accountBanButton = CreateActionButton("Ban", panelSoft, text);
+		_accountBanButton.Disabled = true;
+		_accountBanButton.Pressed += BanSelectedAccount;
+		actionRow.AddChild(_accountBanButton);
 		actionRow.AddChild(CreateDisabledButton("Promote", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Blacklist", panelSoft, text));
+		_accountPermissionsButton = CreateActionButton("Permissions", accentSoft, text);
+		_accountPermissionsButton.Disabled = true;
+		_accountPermissionsButton.Pressed += OpenSelectedAccountPermissions;
+		actionRow.AddChild(_accountPermissionsButton);
 		actionRow.AddChild(CreateDisabledButton("Inspect", panelSoft, text));
 
 		return frame;
@@ -1159,6 +1203,101 @@ public partial class ServerShellRoot : Control
 			_permissionsRevokedText.Text = FormatPermissionLines(player.DirectDenies);
 		if (_permissionsSpecialText is not null)
 			_permissionsSpecialText.Text = FormatPermissionLines(player.DirectGrants);
+
+		RefreshPermissionsCatalogLabel();
+		if (_permissionsOverlay is not null)
+			_permissionsOverlay.Visible = true;
+	}
+
+	private void KickSelectedPlayer()
+	{
+		if (_controller is null)
+		{
+			AppendOutput("PLAYER", "Server controller is not available.");
+			return;
+		}
+
+		if (!TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
+		{
+			AppendOutput("PLAYER", "Select a player before kicking.");
+			return;
+		}
+
+		ServerPlayerSessionActionResult result = _controller.KickPlayerSession(player.SessionId);
+		AppendOutput(result.Succeeded ? "PLAYER" : "WARN", result.Message);
+		_playersListSignature = string.Empty;
+		_accountsListSignature = string.Empty;
+		RefreshStatus();
+	}
+
+	private void BanSelectedPlayerAccount()
+	{
+		if (!TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
+		{
+			AppendOutput("ACCT", "Select a player before banning their account.");
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(player.AccountId) ||
+			string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase))
+		{
+			AppendOutput("ACCT", "Selected player is not bound to a persisted account.");
+			return;
+		}
+
+		BanAccount(player.AccountId);
+	}
+
+	private void BanSelectedAccount()
+	{
+		if (!TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		{
+			AppendOutput("ACCT", "Select an account before banning.");
+			return;
+		}
+
+		BanAccount(account.AccountId);
+	}
+
+	private void BanAccount(string accountId)
+	{
+		if (_controller is null)
+		{
+			AppendOutput("ACCT", "Server controller is not available.");
+			return;
+		}
+
+		ServerAccountActionResult result = _controller.BanAccount(accountId);
+		AppendOutput(result.Succeeded ? "ACCT" : "WARN", result.Message);
+		_playersListSignature = string.Empty;
+		_accountsListSignature = string.Empty;
+		RefreshStatus();
+	}
+
+	private void OpenSelectedAccountPermissions()
+	{
+		if (!TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		{
+			AppendOutput("ACCT", "Select an account before opening permissions.");
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(account.AccountId))
+		{
+			AppendOutput("ACCT", "Selected account row is missing an account id.");
+			return;
+		}
+
+		_permissionsAccountId = account.AccountId;
+		_permissionsPlayerName = account.DisplayName;
+		if (_permissionsTitleLabel is not null)
+			_permissionsTitleLabel.Text = $"Permissions: {account.DisplayName} (account {account.AccountId})";
+		if (_permissionsAccessLevel is not null)
+			SelectPermissionAccessLevel(account.AccessLevel);
+		if (_permissionsRevokedText is not null)
+			_permissionsRevokedText.Text = FormatPermissionLines(account.DirectDenies);
+		if (_permissionsSpecialText is not null)
+			_permissionsSpecialText.Text = FormatPermissionLines(account.DirectGrants);
 
 		RefreshPermissionsCatalogLabel();
 		if (_permissionsOverlay is not null)
@@ -1579,6 +1718,27 @@ public partial class ServerShellRoot : Control
 		return button;
 	}
 
+	private Button CreateAccountSortButton(string label, AccountSortColumn column, Color fill, Color text)
+	{
+		var button = CreateActionButton(label, fill, text);
+		button.CustomMinimumSize = new Vector2(0, 26);
+		button.TooltipText = $"Sort accounts by {label}.";
+		button.Pressed += () =>
+		{
+			if (_accountSortColumn == column)
+				_accountSortAscending = !_accountSortAscending;
+			else
+			{
+				_accountSortColumn = column;
+				_accountSortAscending = true;
+			}
+
+			_accountsListSignature = string.Empty;
+			RefreshAccountsList(_currentAccounts);
+		};
+		return button;
+	}
+
 	private static Button CreateDisabledButton(string text, Color fill, Color fontColor)
 	{
 		var button = CreateActionButton(text, fill, fontColor);
@@ -1982,24 +2142,25 @@ public partial class ServerShellRoot : Control
 
 	private void RefreshAccountsList(IReadOnlyList<ServerAccountSummarySnapshot> accounts)
 	{
-		_currentAccounts = accounts;
+		_currentAccounts = SortAccounts(accounts);
 		if (_accountsList is null)
 			return;
 
-		string signature = BuildAccountsListSignature(accounts);
+		IReadOnlyList<ServerAccountSummarySnapshot> sortedAccounts = _currentAccounts;
+		string signature = BuildAccountsListSignature(sortedAccounts);
 		bool listChanged = !string.Equals(signature, _accountsListSignature, StringComparison.Ordinal);
 		if (listChanged)
 		{
 			_accountsList.Clear();
-			for (int i = 0; i < accounts.Count; i++)
-				_accountsList.AddItem(FormatAccountRow(accounts[i]));
+			for (int i = 0; i < sortedAccounts.Count; i++)
+				_accountsList.AddItem(FormatAccountRow(sortedAccounts[i]));
 			_accountsListSignature = signature;
 		}
 
 		int selectedIndex = -1;
-		for (int i = 0; i < accounts.Count; i++)
+		for (int i = 0; i < sortedAccounts.Count; i++)
 		{
-			ServerAccountSummarySnapshot account = accounts[i];
+			ServerAccountSummarySnapshot account = sortedAccounts[i];
 			if (!string.IsNullOrWhiteSpace(_selectedAccountId) &&
 				string.Equals(account.AccountId, _selectedAccountId, StringComparison.Ordinal))
 			{
@@ -2013,6 +2174,36 @@ public partial class ServerShellRoot : Control
 			_selectedAccountId = null;
 
 		RefreshAccountSelection();
+	}
+
+	private IReadOnlyList<ServerAccountSummarySnapshot> SortAccounts(IReadOnlyList<ServerAccountSummarySnapshot> accounts)
+	{
+		if (accounts.Count <= 1)
+			return accounts;
+
+		var sorted = new ServerAccountSummarySnapshot[accounts.Count];
+		for (int i = 0; i < accounts.Count; i++)
+			sorted[i] = accounts[i];
+
+		Array.Sort(sorted, CompareAccountRows);
+		return sorted;
+	}
+
+	private int CompareAccountRows(ServerAccountSummarySnapshot left, ServerAccountSummarySnapshot right)
+	{
+		int result = _accountSortColumn switch
+		{
+			AccountSortColumn.AccountId => CompareText(left.AccountId, right.AccountId),
+			AccountSortColumn.OnlineState => left.IsOnline.CompareTo(right.IsOnline),
+			AccountSortColumn.BanState => left.IsBanned.CompareTo(right.IsBanned),
+			AccountSortColumn.AccessLevel => left.AccessLevel.CompareTo(right.AccessLevel),
+			AccountSortColumn.LastLogin => Nullable.Compare(left.LastLoginUtc, right.LastLoginUtc),
+			AccountSortColumn.TotalPlayTime => left.TotalPlayTime.CompareTo(right.TotalPlayTime),
+			AccountSortColumn.RemoteAddress => CompareText(FirstKnownRemote(left), FirstKnownRemote(right)),
+			_ => CompareText(left.DisplayName, right.DisplayName)
+		};
+
+		return _accountSortAscending ? result : -result;
 	}
 
 	private IReadOnlyList<ServerPlayerSessionSnapshot> SortPlayers(IReadOnlyList<ServerPlayerSessionSnapshot> players)
@@ -2052,6 +2243,10 @@ public partial class ServerShellRoot : Control
 
 		if (TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
 		{
+			if (_playerKickButton is not null)
+				_playerKickButton.Disabled = !player.IsOnline || string.IsNullOrWhiteSpace(player.SessionId);
+			if (_playerBanButton is not null)
+				_playerBanButton.Disabled = string.IsNullOrWhiteSpace(player.AccountId) || string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase);
 			if (_playerPermissionsButton is not null)
 				_playerPermissionsButton.Disabled = string.IsNullOrWhiteSpace(player.AccountId) || string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase);
 			_playersSelectedValue.Text = string.IsNullOrWhiteSpace(player.Detail)
@@ -2060,6 +2255,10 @@ public partial class ServerShellRoot : Control
 			return;
 		}
 
+		if (_playerKickButton is not null)
+			_playerKickButton.Disabled = true;
+		if (_playerBanButton is not null)
+			_playerBanButton.Disabled = true;
 		if (_playerPermissionsButton is not null)
 			_playerPermissionsButton.Disabled = true;
 		_playersSelectedValue.Text = "Select a player row to enable player actions.";
@@ -2073,12 +2272,20 @@ public partial class ServerShellRoot : Control
 		if (TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
 		{
 			string flags = $"{(account.IsOnline ? "online" : "offline")}, {(account.IsBanned ? "banned" : "clear")}";
+			if (_accountBanButton is not null)
+				_accountBanButton.Disabled = string.IsNullOrWhiteSpace(account.AccountId) || account.IsBanned;
+			if (_accountPermissionsButton is not null)
+				_accountPermissionsButton.Disabled = string.IsNullOrWhiteSpace(account.AccountId);
 			_accountsSelectedValue.Text = string.IsNullOrWhiteSpace(account.Detail)
-				? $"Selected: {account.DisplayName}  account={account.AccountId}  {flags}"
-				: $"Selected: {account.DisplayName}  account={account.AccountId}  {flags}  {account.Detail}";
+				? $"Selected: {account.DisplayName}  account={account.AccountId}  access={account.AccessLevel}  {flags}"
+				: $"Selected: {account.DisplayName}  account={account.AccountId}  access={account.AccessLevel}  {flags}  {account.Detail}";
 			return;
 		}
 
+		if (_accountBanButton is not null)
+			_accountBanButton.Disabled = true;
+		if (_accountPermissionsButton is not null)
+			_accountPermissionsButton.Disabled = true;
 		_accountsSelectedValue.Text = "Select an account row to enable account actions.";
 	}
 
@@ -2126,9 +2333,14 @@ public partial class ServerShellRoot : Control
 
 	private static string FormatAccountRow(ServerAccountSummarySnapshot account)
 	{
-		string online = account.IsOnline ? "online" : "offline";
-		string banned = account.IsBanned ? "banned" : "clear";
-		return $"{TrimForRow(account.DisplayName, 24),-24}  {TrimForRow(account.AccountId, 18),-18}  {online,-8}  {banned,-8}";
+		return $"{TrimForRow(account.DisplayName, 18),-18}  " +
+			$"{TrimForRow(account.AccountId, 10),-10}  " +
+			$"{TrimForRow(account.IsOnline ? "Online" : "Offline", 9),-9}  " +
+			$"{TrimForRow(account.IsBanned ? "Banned" : "Clear", 8),-8}  " +
+			$"{account.AccessLevel,4}  " +
+			$"{TrimForRow(FormatDate(account.LastLoginUtc), 12),-12}  " +
+			$"{FormatDuration(account.TotalPlayTime),9}  " +
+			$"{TrimForRow(FirstKnownRemote(account), 18),-18}";
 	}
 
 	private static string BuildPlayersListSignature(IReadOnlyList<ServerPlayerSessionSnapshot> players)
@@ -2185,6 +2397,18 @@ public partial class ServerShellRoot : Control
 				.Append('\u001f')
 				.Append(account.IsBanned ? '1' : '0')
 				.Append('\u001f')
+				.Append(account.AccessLevel)
+				.Append('\u001f')
+				.Append(account.LastLoginUtc?.ToUnixTimeSeconds() ?? 0L)
+				.Append('\u001f')
+				.Append(account.TotalPlayTime.Ticks)
+				.Append('\u001f')
+				.Append(JoinKeys(account.DirectGrants))
+				.Append('\u001f')
+				.Append(JoinKeys(account.DirectDenies))
+				.Append('\u001f')
+				.Append(JoinKeys(account.KnownRemotes))
+				.Append('\u001f')
 				.Append(account.Detail);
 		}
 
@@ -2226,6 +2450,18 @@ public partial class ServerShellRoot : Control
 		}
 
 		return builder.ToString();
+	}
+
+	private static string FirstKnownRemote(ServerAccountSummarySnapshot account)
+	{
+		return account.KnownRemotes.Count == 0 ? string.Empty : account.KnownRemotes[0];
+	}
+
+	private static string FormatDate(DateTimeOffset? value)
+	{
+		return value.HasValue
+			? value.Value.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+			: "-";
 	}
 
 	private static string AccountNameOrId(ServerPlayerSessionSnapshot player)

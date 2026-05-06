@@ -63,7 +63,8 @@ public sealed record ServerAccountRecord(
             DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(DirectPermissionGrants),
             DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(DirectPermissionDenies),
             AccessLevel = normalizedAccessLevel,
-            IsAdmin = normalizedAccessLevel >= 100
+            IsAdmin = normalizedAccessLevel >= 100,
+            StatusReason = string.IsNullOrWhiteSpace(StatusReason) ? null : StatusReason.Trim()
         };
     }
 
@@ -81,6 +82,16 @@ public sealed record ServerAccountRecord(
             AccessRuleKeys = ServerAccessKey.NormalizeRuleSet(ruleKeys),
             DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(directGrants),
             DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(directDenies)
+        };
+    }
+
+    public ServerAccountRecord WithStatus(AccountStatus status, string? reason = null)
+    {
+        string? normalizedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+        return this with
+        {
+            Status = status,
+            StatusReason = normalizedReason
         };
     }
 

@@ -116,6 +116,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings), ServerMovementWorldApplication_LoadRecovery_EmitsOperatorPersistenceWarnings);
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
+        Run(nameof(ServerMovementSessionHost_Kick_UnbindsAndRemovesClient), ServerMovementSessionHost_Kick_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
         Run(nameof(ServerMovementWorldApplicationFactory_RejectsInvalidBindAddress), ServerMovementWorldApplicationFactory_RejectsInvalidBindAddress);
         Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
@@ -353,6 +354,8 @@ internal static class TestRunner
         AssertMethod(contract, nameof(IServerApplication.GetSystemRuntimeSnapshots), typeof(IReadOnlyList<ServerSystemRuntimeSnapshot>));
         AssertMethod(contract, nameof(IServerApplication.GetPlayerSessionsSnapshot), typeof(IReadOnlyList<ServerPlayerSessionSnapshot>));
         AssertMethod(contract, nameof(IServerApplication.GetAccountSummariesSnapshot), typeof(IReadOnlyList<ServerAccountSummarySnapshot>));
+        AssertMethod(contract, nameof(IServerApplication.KickPlayerSession), typeof(ServerPlayerSessionActionResult), typeof(string));
+        AssertMethod(contract, nameof(IServerApplication.BanAccount), typeof(ServerAccountActionResult), typeof(string));
 
         MethodInfo? tryExecute = contract.GetMethod(nameof(IServerApplication.TryExecuteCommand));
         Assert.NotNull(tryExecute);
@@ -4731,6 +4734,77 @@ internal static class TestRunner
         Assert.Equal(0, serverHost.Control.Sessions.GetMetricsSnapshot().TotalSessions);
         Assert.Equal(0, serverHost.Control.Sessions.GetMetricsSnapshot().TimeoutDisconnects);
         Assert.Contains("1:Disconnected (Closed)", string.Join('\n', operatorLog));
+    }
+
+    private static void ServerMovementSessionHost_Kick_UnbindsAndRemovesClient()
+    {
+        using var pair = new LoopbackTransportPair();
+        pair.Server.Start();
+        pair.Client.Start();
+
+        var builder = new EcsSchemaBuilder();
+        ComponentId movementId = builder.RegisterComponent<ServerEcsMovementBody>();
+        World world = new(builder.Build());
+        ArchetypeSignature signature = new([movementId]);
+        Entity spawnedEntity = Entity.Null;
+
+        void ApplyMovementInput(World movementWorld, Entity movementEntity, in MovementInputPacket input, float deltaSeconds)
+        {
+        }
+
+        bool ProjectMovementState(World movementWorld, Entity movementEntity, uint networkEntityId, ushort lastProcessedInputSequence, ulong serverTick, out MovementStatePacket packet)
+        {
+            packet = default;
+            return false;
+        }
+
+        ServerMovementSessionSpawn SpawnSession(World movementWorld, ConnectionId _)
+        {
+            spawnedEntity = movementWorld.CreateDefault(signature);
+            Assert.True(movementWorld.SetComponent(spawnedEntity, new ServerEcsMovementBody(0f, 0f, 0f, 0f)));
+            return new ServerMovementSessionSpawn(spawnedEntity, 1);
+        }
+
+        var handshakePolicy = new HandshakePolicy(
+            ProtocolVersion: 3,
+            SchemaHash: 4,
+            ContentHash: 5,
+            RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+        var operatorLog = new List<string>();
+        var serverHost = new ServerMovementSessionHost(
+            world,
+            pair.Server,
+            ApplyMovementInput,
+            ProjectMovementState,
+            SpawnSession,
+            handshakePolicy: handshakePolicy,
+            operatorLog: (connection, message) =>
+                operatorLog.Add($"{connection.Value}:{message}"));
+        serverHost.Start();
+
+        var clientHost = new ClientMovementSessionHost(
+            pair.Client,
+            new ConnectionId(1),
+            new HandshakeHelloPacket(3, 4, 5, FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression));
+        clientHost.Start();
+        clientHost.BeginHandshake(100);
+
+        for (int step = 0; step < 8; step++)
+        {
+            serverHost.Pump(101 + step * 2, 0.016f, (uint)(step + 1));
+            clientHost.Pump(102 + step * 2);
+        }
+
+        Assert.True(clientHost.IsReady);
+        Assert.Equal(1, serverHost.BoundConnectionCount);
+        Assert.True(world.Entities.IsAlive(spawnedEntity));
+
+        Assert.True(serverHost.TryKick(new ConnectionId(1), 200));
+
+        Assert.Equal(0, serverHost.BoundConnectionCount);
+        Assert.False(world.Entities.IsAlive(spawnedEntity));
+        Assert.Equal(0, serverHost.Control.Sessions.GetMetricsSnapshot().TotalSessions);
+        Assert.Contains("1:Disconnected (Kicked)", string.Join('\n', operatorLog));
     }
 
     private static void ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities()

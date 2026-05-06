@@ -20,6 +20,8 @@ public interface IServerApplication
     IReadOnlyList<ServerSystemRuntimeSnapshot> GetSystemRuntimeSnapshots();
     IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot();
     IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot();
+    ServerPlayerSessionActionResult KickPlayerSession(string sessionId);
+    ServerAccountActionResult BanAccount(string accountId);
     ServerAccountAccessUpdateResult ReplaceAccountAccess(
         string accountId,
         int accessLevel,

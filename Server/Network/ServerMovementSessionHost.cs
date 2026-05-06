@@ -259,6 +259,19 @@ public sealed class ServerMovementSessionHost
         _control.Stop();
     }
 
+    public bool TryKick(ConnectionId connectionId, long nowTicks)
+    {
+        if (!_boundConnections.Contains(connectionId))
+            return false;
+
+        if (!_control.SendDisconnectNotice(connectionId, SessionDisconnectReason.Kicked, nowTicks))
+            return false;
+
+        _control.FlushOutbound();
+        HandleSessionLifecycleEvents(nowTicks);
+        return true;
+    }
+
     public int Pump(long nowTicks, float deltaSeconds, ulong serverTick, bool flushOutbound = true)
     {
         int totalInboundCount = 0;
@@ -597,7 +610,7 @@ public sealed class ServerMovementSessionHost
             if (hasSelectedCharacter &&
                 _getAccountAccessMetadata?.Invoke(selectedCharacter!.AccountId, out ServerAccountRecord account) == true)
             {
-                accessLevel = account.IsAdmin ? 100 : 0;
+                accessLevel = account.AccessLevel;
                 accessRuleKeys = account.AccessRuleKeys;
                 directPermissionGrants = account.DirectPermissionGrants;
                 directPermissionDenies = account.DirectPermissionDenies;
