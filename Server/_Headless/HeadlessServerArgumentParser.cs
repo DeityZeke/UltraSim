@@ -22,6 +22,7 @@ public static class HeadlessServerArgumentParser
         bool enableMovementWorld = HeadlessServerShellOptions.Default.EnableMovementWorld;
         int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
         int maxClients = HeadlessServerShellOptions.Default.MaxClients;
+        double autoSaveIntervalSeconds = HeadlessServerShellOptions.Default.AutoSaveIntervalSeconds;
         double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
         string commandPrefix = HeadlessServerShellOptions.Default.CommandPrefix;
@@ -38,6 +39,7 @@ public static class HeadlessServerArgumentParser
                 saveOnStop,
                 networkPort,
                 maxClients,
+                autoSaveIntervalSeconds,
                 sessionAuthTimeoutSeconds,
                 sessionKeepAliveTimeoutSeconds,
                 commandPrefix,
@@ -49,6 +51,7 @@ public static class HeadlessServerArgumentParser
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
         maxClients = configValues.MaxClients;
+        autoSaveIntervalSeconds = configValues.AutoSaveIntervalSeconds;
         sessionAuthTimeoutSeconds = configValues.SessionAuthTimeoutSeconds;
         sessionKeepAliveTimeoutSeconds = configValues.SessionKeepAliveTimeoutSeconds;
         commandPrefix = configValues.CommandPrefix;
@@ -215,6 +218,19 @@ public static class HeadlessServerArgumentParser
                 continue;
             }
 
+            if (string.Equals(key, "--autosave-interval-seconds", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!double.TryParse(value, out autoSaveIntervalSeconds) || autoSaveIntervalSeconds < 0d)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid autosave interval '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
             if (string.Equals(key, "--session-auth-timeout-seconds", StringComparison.OrdinalIgnoreCase))
             {
                 if (!double.TryParse(value, out sessionAuthTimeoutSeconds) || sessionAuthTimeoutSeconds < 0d)
@@ -308,6 +324,7 @@ public static class HeadlessServerArgumentParser
             EnableMovementWorld: enableMovementWorld,
             NetworkPort: networkPort,
             MaxClients: maxClients,
+            AutoSaveIntervalSeconds: autoSaveIntervalSeconds,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
             CommandPrefix: commandPrefix,
@@ -333,6 +350,7 @@ public static class HeadlessServerArgumentParser
           --max-catchup=<n>
           --port=<0-65535>
           --max-clients=<n>
+          --autosave-interval-seconds=<seconds>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
           --command-prefix=<prefix>

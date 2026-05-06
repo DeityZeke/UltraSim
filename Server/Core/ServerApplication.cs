@@ -15,6 +15,7 @@ public sealed class ServerApplication : IServerApplication
     private long _totalFaults;
     private double _tickMillisecondsTotal;
     private double _maxTickMilliseconds;
+    private double _autoSaveElapsedSeconds;
     private int _peakSessions;
 
     public ServerApplication(
@@ -78,6 +79,7 @@ public sealed class ServerApplication : IServerApplication
             long start = Stopwatch.GetTimestamp();
             _hooks.Tick?.Invoke(this, deltaSeconds);
             _tickCount++;
+            RequestAutoSaveIfDue(deltaSeconds);
 
             double elapsedMs = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
             _tickMillisecondsTotal += elapsedMs;
@@ -314,9 +316,22 @@ public sealed class ServerApplication : IServerApplication
         long saveStart = Stopwatch.GetTimestamp();
         _hooks.Save?.Invoke(this);
         TimeSpan saveDuration = Stopwatch.GetElapsedTime(saveStart);
+        _autoSaveElapsedSeconds = 0.0;
         _totalCompletedSaves++;
         RaiseEvent(ServerApplicationEventKind.SaveCompleted, "save completed", ServerApplicationState.Saving, saveDuration);
         State = previousState == ServerApplicationState.Saving ? ServerApplicationState.Initialized : previousState;
+    }
+
+    private void RequestAutoSaveIfDue(float deltaSeconds)
+    {
+        if (Options.AutoSaveIntervalSeconds <= 0.0 || _hooks.Save is null)
+            return;
+
+        _autoSaveElapsedSeconds += Math.Max(0.0f, deltaSeconds);
+        if (_autoSaveElapsedSeconds < Options.AutoSaveIntervalSeconds)
+            return;
+
+        RequestSave();
     }
 
     private static bool IsWithoutSave(ServerControlCommand command)

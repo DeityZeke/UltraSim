@@ -159,6 +159,7 @@ public sealed class ConsoleServerShell
                 Port: options.NetworkPort,
                 SaveOnStop: options.SaveOnStop,
                 MaxClients: options.MaxClients,
+                AutoSaveIntervalSeconds: options.AutoSaveIntervalSeconds,
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
                 SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
                 CommandPrefix: options.CommandPrefix,

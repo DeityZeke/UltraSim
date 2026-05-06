@@ -38,6 +38,7 @@ internal static class TestRunner
         Run(nameof(ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder), ServerApplication_Initialize_Start_Tick_Stop_FollowsExpectedHookOrder);
         Run(nameof(ServerApplication_Start_AutoInitializesFromCreated), ServerApplication_Start_AutoInitializesFromCreated);
         Run(nameof(ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick), ServerApplication_RequestSave_DefersSaveUntilEndOfNextTick);
+        Run(nameof(ServerApplication_AutoSaveInterval_RequestsSaveOnTick), ServerApplication_AutoSaveInterval_RequestsSaveOnTick);
         Run(nameof(ServerApplication_Save_ExecutesImmediately), ServerApplication_Save_ExecutesImmediately);
         Run(nameof(ServerApplication_Log_RaisesOperatorLogEvent), ServerApplication_Log_RaisesOperatorLogEvent);
         Run(nameof(ServerApplication_Stop_FromCreated_MovesDirectlyToStopped), ServerApplication_Stop_FromCreated_MovesDirectlyToStopped);
@@ -432,6 +433,36 @@ internal static class TestRunner
 
         app.Tick(0.016f);
         Assert.SequenceEqual(new[] { "Tick", "Save", "Tick" }, log);
+    }
+
+    private static void ServerApplication_AutoSaveInterval_RequestsSaveOnTick()
+    {
+        var log = new List<string>();
+        int saveRequests = 0;
+        var app = new ServerApplication(
+            new ServerApplicationOptions("test", AutoSaveIntervalSeconds: 0.05),
+            new ServerApplicationHooks
+            {
+                Tick = (_, deltaSeconds) => log.Add($"Tick:{deltaSeconds:0.000}"),
+                Save = _ => log.Add("Save"),
+            });
+        app.EventRaised += evt =>
+        {
+            if (evt.Kind == ServerApplicationEventKind.SaveRequested)
+                saveRequests++;
+        };
+
+        app.Start();
+        app.Tick(0.02f);
+        app.Tick(0.02f);
+        app.Tick(0.02f);
+        app.Tick(0.01f);
+
+        Assert.Equal(1, saveRequests);
+        Assert.SequenceEqual(
+            new[] { "Tick:0.020", "Tick:0.020", "Tick:0.020", "Save", "Tick:0.010" },
+            log);
+        Assert.Equal(1, app.GetMetricsSnapshot().TotalCompletedSaves);
     }
 
     private static void ServerApplication_Save_ExecutesImmediately()
@@ -1486,11 +1517,14 @@ internal static class TestRunner
             "--tick-ms=16",
             "--max-catchup=4",
             "--port=0",
+            "--max-clients=64",
+            "--autosave-interval-seconds=300",
             "--session-auth-timeout-seconds=6.5",
             "--session-keepalive-timeout-seconds=13.25",
             "--command-prefix=[",
             "--max-auto-created-accounts-per-ip=2",
             "--backup-storage=zstd",
+            "--backup-count=2",
             "--backup-zstd-level=7",
             "--run-for-seconds=0.25",
             "--idle-delay-ms=2",
@@ -1514,11 +1548,14 @@ internal static class TestRunner
         Assert.True(options.Quiet);
         Assert.False(options.EnableMovementWorld);
         Assert.Equal(0, options.NetworkPort);
+        Assert.Equal(64, options.MaxClients);
+        Assert.Equal(300d, options.AutoSaveIntervalSeconds);
         Assert.Equal(6.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(13.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal("[", options.CommandPrefix);
         Assert.Equal(2, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
+        Assert.Equal(2, options.BackupCount);
         Assert.Equal(7, options.BackupZstdCompressionLevel);
         Assert.Equal(TimeSpan.FromSeconds(0.25), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(2), options.IdleDelay);
@@ -1533,12 +1570,15 @@ internal static class TestRunner
             {
                 ["server.name"] = "configured-headless",
                 ["server.network.port"] = "43001",
+                ["server.network.max_clients"] = "100",
                 ["server.save.on_stop"] = "on",
+                ["server.save.autosave_interval_seconds"] = "900",
                 ["server.session.auth_timeout_seconds"] = "8.5",
                 ["server.session.keepalive_timeout_seconds"] = "18.25",
                 ["server.chat.command_prefix"] = ".",
                 ["server.accounts.max_auto_created_per_ip"] = "4",
                 ["server.persistence.backup_storage"] = "zstd",
+                ["server.persistence.backup_count"] = "1",
                 ["server.persistence.backup_zstd_level"] = "9"
             });
 
@@ -1557,12 +1597,15 @@ internal static class TestRunner
         Assert.False(showHelp);
         Assert.Equal("configured-headless", options.ProfileName);
         Assert.Equal(0, options.NetworkPort);
+        Assert.Equal(100, options.MaxClients);
+        Assert.Equal(900d, options.AutoSaveIntervalSeconds);
         Assert.True(options.SaveOnStop);
         Assert.Equal(8.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(18.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal("#", options.CommandPrefix);
         Assert.Equal(4, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
+        Assert.Equal(1, options.BackupCount);
         Assert.Equal(9, options.BackupZstdCompressionLevel);
     }
 
@@ -1633,11 +1676,14 @@ internal static class TestRunner
             "--tick-ms=20",
             "--max-catchup=5",
             "--port=0",
+            "--max-clients=32",
+            "--autosave-interval-seconds=60",
             "--session-auth-timeout-seconds=7.5",
             "--session-keepalive-timeout-seconds=14.25",
             "--command-prefix=.",
             "--max-auto-created-accounts-per-ip=3",
             "--backup-storage=zip",
+            "--backup-count=3",
             "--backup-zstd-level=6",
             "--run-for-seconds=0.5",
             "--idle-delay-ms=3",
@@ -1661,11 +1707,14 @@ internal static class TestRunner
         Assert.False(options.EnableInput);
         Assert.False(options.EnableMovementWorld);
         Assert.Equal(0, options.NetworkPort);
+        Assert.Equal(32, options.MaxClients);
+        Assert.Equal(60d, options.AutoSaveIntervalSeconds);
         Assert.Equal(7.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(14.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(".", options.CommandPrefix);
         Assert.Equal(3, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(ServerPersistenceBackupStorageMode.Zip, options.BackupStorageMode);
+        Assert.Equal(3, options.BackupCount);
         Assert.Equal(6, options.BackupZstdCompressionLevel);
         Assert.Equal(TimeSpan.FromSeconds(0.5), options.RunFor);
         Assert.Equal(TimeSpan.FromMilliseconds(3), options.IdleDelay);
@@ -1680,12 +1729,15 @@ internal static class TestRunner
             {
                 ["server.name"] = "configured-console",
                 ["server.network.port"] = "43002",
+                ["server.network.max_clients"] = "48",
                 ["server.save.on_stop"] = "on",
+                ["server.save.autosave_interval_seconds"] = "1800",
                 ["server.session.auth_timeout_seconds"] = "9.5",
                 ["server.session.keepalive_timeout_seconds"] = "19.25",
                 ["server.chat.command_prefix"] = "[",
                 ["server.accounts.max_auto_created_per_ip"] = "5",
                 ["server.persistence.backup_storage"] = "zip",
+                ["server.persistence.backup_count"] = "2",
                 ["server.persistence.backup_zstd_level"] = "8"
             });
 
@@ -1704,12 +1756,15 @@ internal static class TestRunner
         Assert.False(showHelp);
         Assert.Equal("cli-console", options.ProfileName);
         Assert.Equal(43002, options.NetworkPort);
+        Assert.Equal(48, options.MaxClients);
+        Assert.Equal(1800d, options.AutoSaveIntervalSeconds);
         Assert.True(options.SaveOnStop);
         Assert.Equal(9.5, options.SessionAuthTimeoutSeconds);
         Assert.Equal(19.25, options.SessionKeepAliveTimeoutSeconds);
         Assert.Equal("[", options.CommandPrefix);
         Assert.Equal(5, options.MaxAutoCreatedAccountsPerRemoteAddress);
         Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
+        Assert.Equal(2, options.BackupCount);
         Assert.Equal(8, options.BackupZstdCompressionLevel);
     }
 

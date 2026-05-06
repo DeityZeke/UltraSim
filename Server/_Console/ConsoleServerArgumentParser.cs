@@ -22,6 +22,7 @@ public static class ConsoleServerArgumentParser
         bool enableMovementWorld = ConsoleServerShellOptions.Default.EnableMovementWorld;
         int networkPort = ConsoleServerShellOptions.Default.NetworkPort;
         int maxClients = ConsoleServerShellOptions.Default.MaxClients;
+        double autoSaveIntervalSeconds = ConsoleServerShellOptions.Default.AutoSaveIntervalSeconds;
         double sessionAuthTimeoutSeconds = ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
         string commandPrefix = ConsoleServerShellOptions.Default.CommandPrefix;
@@ -38,6 +39,7 @@ public static class ConsoleServerArgumentParser
                 saveOnStop,
                 networkPort,
                 maxClients,
+                autoSaveIntervalSeconds,
                 sessionAuthTimeoutSeconds,
                 sessionKeepAliveTimeoutSeconds,
                 commandPrefix,
@@ -49,6 +51,7 @@ public static class ConsoleServerArgumentParser
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
         maxClients = configValues.MaxClients;
+        autoSaveIntervalSeconds = configValues.AutoSaveIntervalSeconds;
         sessionAuthTimeoutSeconds = configValues.SessionAuthTimeoutSeconds;
         sessionKeepAliveTimeoutSeconds = configValues.SessionKeepAliveTimeoutSeconds;
         commandPrefix = configValues.CommandPrefix;
@@ -215,6 +218,19 @@ public static class ConsoleServerArgumentParser
                 continue;
             }
 
+            if (string.Equals(key, "--autosave-interval-seconds", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!double.TryParse(value, out autoSaveIntervalSeconds) || autoSaveIntervalSeconds < 0d)
+                {
+                    options = ConsoleServerShellOptions.Default;
+                    error = $"Invalid autosave interval '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
             if (string.Equals(key, "--session-auth-timeout-seconds", StringComparison.OrdinalIgnoreCase))
             {
                 if (!double.TryParse(value, out sessionAuthTimeoutSeconds) || sessionAuthTimeoutSeconds < 0d)
@@ -308,6 +324,7 @@ public static class ConsoleServerArgumentParser
             EnableMovementWorld: enableMovementWorld,
             NetworkPort: networkPort,
             MaxClients: maxClients,
+            AutoSaveIntervalSeconds: autoSaveIntervalSeconds,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
             CommandPrefix: commandPrefix,
@@ -333,6 +350,7 @@ public static class ConsoleServerArgumentParser
           --max-catchup=<n>
           --port=<0-65535>
           --max-clients=<n>
+          --autosave-interval-seconds=<seconds>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
           --command-prefix=<prefix>

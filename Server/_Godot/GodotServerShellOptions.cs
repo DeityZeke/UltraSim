@@ -10,6 +10,7 @@ public sealed record GodotServerShellOptions(
     bool EnableMovementWorld = true,
     int NetworkPort = 42042,
     int MaxClients = 0,
+    double AutoSaveIntervalSeconds = 0.0,
     double SessionAuthTimeoutSeconds = 5.0,
     double SessionKeepAliveTimeoutSeconds = 10.0,
     string CommandPrefix = "/",

@@ -11,6 +11,7 @@ public sealed record ServerMovementWorldApplicationOptions(
     bool EnableAsyncFlush = true,
     float MovementSpeed = 4.0f,
     int MaxClients = 0,
+    double AutoSaveIntervalSeconds = 0.0,
     double SessionAuthTimeoutSeconds = 5.0,
     double SessionKeepAliveTimeoutSeconds = 10.0,
     string CommandPrefix = "/",

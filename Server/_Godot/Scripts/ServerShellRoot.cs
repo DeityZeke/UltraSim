@@ -157,6 +157,7 @@ public partial class ServerShellRoot : Control
 		bool enableMovementWorld = options.EnableMovementWorld;
 		string? runtimeRootPath = options.RuntimeRootPath;
 		int maxClients = options.MaxClients;
+		double autoSaveIntervalSeconds = options.AutoSaveIntervalSeconds;
 		ServerPersistenceBackupStorageMode backupStorageMode = options.BackupStorageMode;
 		int backupCount = options.BackupCount;
 		int backupZstdCompressionLevel = options.BackupZstdCompressionLevel;
@@ -233,6 +234,14 @@ public partial class ServerShellRoot : Control
 					maxClients = parsedMaxClients;
 				}
 			}
+			else if (arg.StartsWith("--us-server-autosave-interval-seconds=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (double.TryParse(arg["--us-server-autosave-interval-seconds=".Length..], out double parsedAutoSaveIntervalSeconds) &&
+					parsedAutoSaveIntervalSeconds >= 0.0)
+				{
+					autoSaveIntervalSeconds = parsedAutoSaveIntervalSeconds;
+				}
+			}
 			else if (arg.StartsWith("--us-server-tick-ms=", StringComparison.OrdinalIgnoreCase))
 			{
 				if (int.TryParse(arg["--us-server-tick-ms=".Length..], out int parsedTickMilliseconds) && parsedTickMilliseconds > 0)
@@ -282,6 +291,7 @@ public partial class ServerShellRoot : Control
 			EnableMovementWorld: enableMovementWorld,
 			NetworkPort: networkPort,
 			MaxClients: maxClients,
+			AutoSaveIntervalSeconds: autoSaveIntervalSeconds,
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
 			CommandPrefix: commandPrefix,
@@ -1614,6 +1624,12 @@ public partial class ServerShellRoot : Control
 		registry.RegisterRestartRequired("server.name", "Server name", options.ProfileName);
 		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired("server.network.max_clients", "Max clients", options.MaxClients.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired(
+			"server.save.autosave_interval_seconds",
+			"Autosave interval",
+			options.AutoSaveIntervalSeconds.ToString("0.###", CultureInfo.InvariantCulture),
+			editorKind: ServerSettingEditorKind.Choice,
+			choices: CreateAutoSaveIntervalChoices(options.AutoSaveIntervalSeconds));
 		registry.RegisterRestartRequired("server.save.on_stop", "Save on stop", FormatBool(options.SaveOnStop), editorKind: ServerSettingEditorKind.Boolean);
 		registry.RegisterRestartRequired("server.session.auth_timeout_seconds", "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
 		registry.RegisterRestartRequired("server.session.keepalive_timeout_seconds", "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
@@ -2151,6 +2167,7 @@ public partial class ServerShellRoot : Control
 		string profileName = options.ProfileName;
 		int networkPort = options.NetworkPort;
 		int maxClients = options.MaxClients;
+		double autoSaveIntervalSeconds = options.AutoSaveIntervalSeconds;
 		bool saveOnStop = options.SaveOnStop;
 		double sessionAuthTimeoutSeconds = options.SessionAuthTimeoutSeconds;
 		double sessionKeepAliveTimeoutSeconds = options.SessionKeepAliveTimeoutSeconds;
@@ -2176,6 +2193,10 @@ public partial class ServerShellRoot : Control
 				case "server.network.max_clients":
 					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedMaxClients))
 						maxClients = Math.Max(0, parsedMaxClients);
+					break;
+				case "server.save.autosave_interval_seconds":
+					if (double.TryParse(change.NormalizedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedAutoSaveIntervalSeconds))
+						autoSaveIntervalSeconds = Math.Max(0.0, parsedAutoSaveIntervalSeconds);
 					break;
 				case "server.save.on_stop":
 					if (TryParseSettingBool(change.NormalizedValue, out bool parsedSaveOnStop))
@@ -2217,6 +2238,7 @@ public partial class ServerShellRoot : Control
 			ProfileName = profileName,
 			NetworkPort = networkPort,
 			MaxClients = maxClients,
+			AutoSaveIntervalSeconds = autoSaveIntervalSeconds,
 			SaveOnStop = saveOnStop,
 			SessionAuthTimeoutSeconds = sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds = sessionKeepAliveTimeoutSeconds,
@@ -2296,6 +2318,27 @@ public partial class ServerShellRoot : Control
 			ServerPersistenceBackupStorageMode.Zstd => "zstd",
 			_ => mode.ToString()
 		};
+	}
+
+	private static ServerSettingChoice[] CreateAutoSaveIntervalChoices(double currentValue)
+	{
+		string current = currentValue.ToString("0.###", CultureInfo.InvariantCulture);
+		ServerSettingChoice[] presets =
+		[
+			new ServerSettingChoice("0", "off"),
+			new ServerSettingChoice("60", "1m"),
+			new ServerSettingChoice("300", "5m"),
+			new ServerSettingChoice("900", "15m"),
+			new ServerSettingChoice("1800", "30m"),
+			new ServerSettingChoice("3600", "60m")
+		];
+		for (int i = 0; i < presets.Length; i++)
+		{
+			if (string.Equals(presets[i].Value, current, StringComparison.Ordinal))
+				return presets;
+		}
+
+		return [.. presets, new ServerSettingChoice(current, $"{current}s")];
 	}
 
 	private void UpdateMetricBanner(

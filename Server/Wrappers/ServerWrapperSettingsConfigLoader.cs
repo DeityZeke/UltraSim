@@ -9,6 +9,7 @@ internal sealed record ServerWrapperSettingsConfigValues(
     bool SaveOnStop,
     int NetworkPort,
     int MaxClients,
+    double AutoSaveIntervalSeconds,
     double SessionAuthTimeoutSeconds,
     double SessionKeepAliveTimeoutSeconds,
     string CommandPrefix,
@@ -81,6 +82,12 @@ internal static class ServerWrapperSettingsConfigLoader
             values.MaxClients.ToString(CultureInfo.InvariantCulture),
             editorKind: ServerSettingEditorKind.Integer);
         registry.RegisterRestartRequired(
+            "server.save.autosave_interval_seconds",
+            "Autosave interval",
+            values.AutoSaveIntervalSeconds.ToString("0.###", CultureInfo.InvariantCulture),
+            editorKind: ServerSettingEditorKind.Choice,
+            choices: CreateAutoSaveIntervalChoices());
+        registry.RegisterRestartRequired(
             "server.save.on_stop",
             "Save on stop",
             values.SaveOnStop ? "on" : "off",
@@ -140,6 +147,7 @@ internal static class ServerWrapperSettingsConfigLoader
         bool saveOnStop = values.SaveOnStop;
         int networkPort = values.NetworkPort;
         int maxClients = values.MaxClients;
+        double autoSaveIntervalSeconds = values.AutoSaveIntervalSeconds;
         double sessionAuthTimeoutSeconds = values.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = values.SessionKeepAliveTimeoutSeconds;
         string commandPrefix = values.CommandPrefix;
@@ -168,6 +176,10 @@ internal static class ServerWrapperSettingsConfigLoader
                 case "server.network.max_clients":
                     if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedMaxClients))
                         maxClients = Math.Max(0, parsedMaxClients);
+                    break;
+                case "server.save.autosave_interval_seconds":
+                    if (double.TryParse(change.NormalizedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedAutoSaveIntervalSeconds))
+                        autoSaveIntervalSeconds = Math.Max(0.0, parsedAutoSaveIntervalSeconds);
                     break;
                 case "server.save.on_stop":
                     saveOnStop = string.Equals(change.NormalizedValue, "on", StringComparison.OrdinalIgnoreCase);
@@ -217,6 +229,7 @@ internal static class ServerWrapperSettingsConfigLoader
             saveOnStop,
             networkPort,
             maxClients,
+            autoSaveIntervalSeconds,
             sessionAuthTimeoutSeconds,
             sessionKeepAliveTimeoutSeconds,
             commandPrefix,
@@ -236,4 +249,14 @@ internal static class ServerWrapperSettingsConfigLoader
             _ => mode.ToString()
         };
     }
+
+    private static ServerSettingChoice[] CreateAutoSaveIntervalChoices() =>
+    [
+        new ServerSettingChoice("0", "off"),
+        new ServerSettingChoice("60", "1m"),
+        new ServerSettingChoice("300", "5m"),
+        new ServerSettingChoice("900", "15m"),
+        new ServerSettingChoice("1800", "30m"),
+        new ServerSettingChoice("3600", "60m")
+    ];
 }

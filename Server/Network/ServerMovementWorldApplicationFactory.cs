@@ -23,10 +23,15 @@ public static class ServerMovementWorldApplicationFactory
             throw new ArgumentOutOfRangeException(nameof(options));
         if (options.MaxClients < 0)
             throw new ArgumentOutOfRangeException(nameof(options), "Max clients cannot be negative.");
+        if (options.AutoSaveIntervalSeconds < 0.0)
+            throw new ArgumentOutOfRangeException(nameof(options), "Autosave interval cannot be negative.");
 
         var runtime = new Runtime(options);
         return new ServerApplication(
-            new ServerApplicationOptions(options.ProfileName, SaveOnStop: options.SaveOnStop),
+            new ServerApplicationOptions(
+                options.ProfileName,
+                SaveOnStop: options.SaveOnStop,
+                AutoSaveIntervalSeconds: options.AutoSaveIntervalSeconds),
             new ServerApplicationHooks
             {
                 Start = app => runtime.Start(app),
