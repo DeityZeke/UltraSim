@@ -21,6 +21,8 @@ public sealed record ServerAccountRecord(
 
     public string[] DirectPermissionDenies { get; init; } = [];
 
+    public int AccessLevel { get; init; } = IsAdmin ? 100 : 0;
+
     public int CharacterCount
     {
         get
@@ -50,6 +52,7 @@ public sealed record ServerAccountRecord(
             .Distinct(StringComparer.Ordinal)
             .Take(8)
             .ToArray();
+        int normalizedAccessLevel = Math.Max(0, AccessLevel);
         return this with
         {
             Username = username,
@@ -58,17 +61,23 @@ public sealed record ServerAccountRecord(
             CharacterSlots = CharacterSlots.ToArray(),
             AccessRuleKeys = ServerAccessKey.NormalizeRuleSet(AccessRuleKeys),
             DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(DirectPermissionGrants),
-            DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(DirectPermissionDenies)
+            DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(DirectPermissionDenies),
+            AccessLevel = normalizedAccessLevel,
+            IsAdmin = normalizedAccessLevel >= 100
         };
     }
 
     public ServerAccountRecord WithAccessMetadata(
+        int? accessLevel = null,
         IEnumerable<string>? ruleKeys = null,
         IEnumerable<string>? directGrants = null,
         IEnumerable<string>? directDenies = null)
     {
+        int normalizedAccessLevel = Math.Max(0, accessLevel ?? AccessLevel);
         return this with
         {
+            AccessLevel = normalizedAccessLevel,
+            IsAdmin = normalizedAccessLevel >= 100,
             AccessRuleKeys = ServerAccessKey.NormalizeRuleSet(ruleKeys),
             DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(directGrants),
             DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(directDenies)

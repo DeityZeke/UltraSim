@@ -117,6 +117,7 @@ internal static class TestRunner
         Run(nameof(ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient), ServerMovementSessionHost_KeepAliveTimeout_UnbindsAndRemovesSilentClient);
         Run(nameof(ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient), ServerMovementSessionHost_ClientDisconnectNotice_UnbindsAndRemovesClient);
         Run(nameof(ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities), ServerMovementSessionHost_UsesConfiguredOrderedEventAndReplayCapacities);
+        Run(nameof(ServerMovementWorldApplicationFactory_RejectsInvalidBindAddress), ServerMovementWorldApplicationFactory_RejectsInvalidBindAddress);
         Run(nameof(ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement), ServerMovementSessionHosts_Udp_MultiClientHandshakeAndMovement);
         Run(nameof(ServerMovementSessionHosts_Udp_GlobalObserverMovement_ReachesOtherClients), ServerMovementSessionHosts_Udp_GlobalObserverMovement_ReachesOtherClients);
 
@@ -1517,6 +1518,7 @@ internal static class TestRunner
             "--tick-ms=16",
             "--max-catchup=4",
             "--port=0",
+            "--bind-address=localhost",
             "--max-clients=64",
             "--autosave-interval-seconds=300",
             "--session-auth-timeout-seconds=6.5",
@@ -1548,6 +1550,7 @@ internal static class TestRunner
         Assert.True(options.Quiet);
         Assert.False(options.EnableMovementWorld);
         Assert.Equal(0, options.NetworkPort);
+        Assert.Equal("localhost", options.BindAddress);
         Assert.Equal(64, options.MaxClients);
         Assert.Equal(300d, options.AutoSaveIntervalSeconds);
         Assert.Equal(6.5, options.SessionAuthTimeoutSeconds);
@@ -1570,6 +1573,7 @@ internal static class TestRunner
             {
                 ["server.name"] = "configured-headless",
                 ["server.network.port"] = "43001",
+                ["server.network.bind_address"] = "127.0.0.1",
                 ["server.network.max_clients"] = "100",
                 ["server.save.on_stop"] = "on",
                 ["server.save.autosave_interval_seconds"] = "900",
@@ -1597,6 +1601,7 @@ internal static class TestRunner
         Assert.False(showHelp);
         Assert.Equal("configured-headless", options.ProfileName);
         Assert.Equal(0, options.NetworkPort);
+        Assert.Equal("127.0.0.1", options.BindAddress);
         Assert.Equal(100, options.MaxClients);
         Assert.Equal(900d, options.AutoSaveIntervalSeconds);
         Assert.True(options.SaveOnStop);
@@ -1676,6 +1681,7 @@ internal static class TestRunner
             "--tick-ms=20",
             "--max-catchup=5",
             "--port=0",
+            "--bind-address=any",
             "--max-clients=32",
             "--autosave-interval-seconds=60",
             "--session-auth-timeout-seconds=7.5",
@@ -1707,6 +1713,7 @@ internal static class TestRunner
         Assert.False(options.EnableInput);
         Assert.False(options.EnableMovementWorld);
         Assert.Equal(0, options.NetworkPort);
+        Assert.Equal("any", options.BindAddress);
         Assert.Equal(32, options.MaxClients);
         Assert.Equal(60d, options.AutoSaveIntervalSeconds);
         Assert.Equal(7.5, options.SessionAuthTimeoutSeconds);
@@ -1729,6 +1736,7 @@ internal static class TestRunner
             {
                 ["server.name"] = "configured-console",
                 ["server.network.port"] = "43002",
+                ["server.network.bind_address"] = "127.0.0.1",
                 ["server.network.max_clients"] = "48",
                 ["server.save.on_stop"] = "on",
                 ["server.save.autosave_interval_seconds"] = "1800",
@@ -1756,6 +1764,7 @@ internal static class TestRunner
         Assert.False(showHelp);
         Assert.Equal("cli-console", options.ProfileName);
         Assert.Equal(43002, options.NetworkPort);
+        Assert.Equal("127.0.0.1", options.BindAddress);
         Assert.Equal(48, options.MaxClients);
         Assert.Equal(1800d, options.AutoSaveIntervalSeconds);
         Assert.True(options.SaveOnStop);
@@ -4766,6 +4775,14 @@ internal static class TestRunner
 
         Assert.Equal(1536, host.WorldPublisher.OrderedEventStream.Capacity);
         Assert.Equal(192, host.SessionRuntime.ReplayBufferCapacityPerConnection);
+    }
+
+    private static void ServerMovementWorldApplicationFactory_RejectsInvalidBindAddress()
+    {
+        Assert.Throws<ArgumentException>(() =>
+            ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
+                "bad-bind",
+                BindAddress: "not an address")));
     }
 
     private static void ServerEcsMovementNetworkBridge_OwnerCorrectionPolicy_SuppressesSmallIntermediateStates()

@@ -107,6 +107,7 @@ public sealed class HeadlessServerShell
             ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
                 options.ProfileName,
                 Port: options.NetworkPort,
+                BindAddress: options.BindAddress,
                 SaveOnStop: options.SaveOnStop,
                 MaxClients: options.MaxClients,
                 AutoSaveIntervalSeconds: options.AutoSaveIntervalSeconds,

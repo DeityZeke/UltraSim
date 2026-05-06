@@ -157,6 +157,7 @@ public sealed class ConsoleServerShell
             ? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
                 options.ProfileName,
                 Port: options.NetworkPort,
+                BindAddress: options.BindAddress,
                 SaveOnStop: options.SaveOnStop,
                 MaxClients: options.MaxClients,
                 AutoSaveIntervalSeconds: options.AutoSaveIntervalSeconds,

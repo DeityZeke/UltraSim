@@ -21,6 +21,7 @@ internal static class TestRunner
         Run(nameof(DefaultCredentialService_RejectsPortalTokenMaterial), DefaultCredentialService_RejectsPortalTokenMaterial);
         Run(nameof(PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword), PortalCredentialAuthenticationProvider_AcceptsTokenWithoutLocalPassword);
         Run(nameof(AccountAccessAdministrationService_ReplacesMetadataAndAudits), AccountAccessAdministrationService_ReplacesMetadataAndAudits);
+        Run(nameof(AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin), AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin);
         Run(nameof(AccountCharacterService_CreatesListsAndDeletesCharactersBySlot), AccountCharacterService_CreatesListsAndDeletesCharactersBySlot);
         Run(nameof(AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy), AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy);
         Run(nameof(AccountCharacterService_AutoJoinRequiresSingleCharacterMode), AccountCharacterService_AutoJoinRequiresSingleCharacterMode);
@@ -346,6 +347,32 @@ internal static class TestRunner
         Assert.False(missing.Succeeded);
         Assert.Contains("not found", missing.Error);
         Assert.Equal(1, audit.Entries.Count);
+    }
+
+    private static void AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin()
+    {
+        DateTimeOffset now = new(2026, 5, 2, 12, 0, 0, TimeSpan.Zero);
+        var accounts = new InMemoryAccountRegistry();
+        ServerAccountRecord account = accounts.CreateAccount("Alice", "hash", now);
+        accounts.Update(account.WithAccessMetadata(
+            accessLevel: 100,
+            ruleKeys: ["staff"],
+            directGrants: ["command.spawn"],
+            directDenies: ["command.shutdown"]));
+
+        var service = new AccountAccessAdministrationService(accounts);
+        AccountAccessUpdateResult result = service.ReplaceAccessMetadata(
+            account.AccountId,
+            accessLevel: 40,
+            directPermissionGrants: ["command.kick"]);
+
+        Assert.True(result.Succeeded);
+        Assert.True(accounts.TryGetById(account.AccountId, out ServerAccountRecord updated));
+        Assert.Equal(40, updated.AccessLevel);
+        Assert.False(updated.IsAdmin);
+        Assert.True(updated.AccessRuleKeys.SequenceEqual(["staff"]));
+        Assert.True(updated.DirectPermissionGrants.SequenceEqual(["command.kick"]));
+        Assert.True(updated.DirectPermissionDenies.SequenceEqual(["command.shutdown"]));
     }
 
     private static void AccountCharacterService_CreatesListsAndDeletesCharactersBySlot()

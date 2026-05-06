@@ -229,6 +229,23 @@ public sealed class ServerApplication : IServerApplication
         return _hooks.GetAccountSummaries?.Invoke(this) ?? Array.Empty<ServerAccountSummarySnapshot>();
     }
 
+    public ServerAccountAccessUpdateResult ReplaceAccountAccess(
+        string accountId,
+        int accessLevel,
+        IReadOnlyList<string> directPermissionGrants,
+        IReadOnlyList<string> directPermissionDenies)
+    {
+        if (_hooks.ReplaceAccountAccess is null)
+            return ServerAccountAccessUpdateResult.Reject(accountId, "Account access editing is not available.");
+
+        return _hooks.ReplaceAccountAccess(
+            this,
+            accountId,
+            accessLevel,
+            directPermissionGrants ?? Array.Empty<string>(),
+            directPermissionDenies ?? Array.Empty<string>());
+    }
+
     public bool TryExecuteCommand(ServerControlCommand command, out ServerCommandResult result)
     {
         _totalCommands++;

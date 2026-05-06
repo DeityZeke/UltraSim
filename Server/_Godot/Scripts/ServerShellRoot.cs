@@ -11,6 +11,17 @@ namespace UltraSim.Server.Godot;
 public partial class ServerShellRoot : Control
 {
 	private const int MaxOutputLines = 400;
+	private enum PlayerSortColumn
+	{
+		PlayerName,
+		RemoteAddress,
+		SessionId,
+		AccountName,
+		State,
+		CurrentUptime,
+		TotalPlayTime,
+		AccessLevel
+	}
 
 	private readonly Queue<string> _outputLines = new();
 
@@ -31,8 +42,22 @@ public partial class ServerShellRoot : Control
 	private Label? _performanceSummaryValue;
 	private ItemList? _playersList;
 	private Label? _playersSelectedValue;
+	private Button? _playerPermissionsButton;
 	private ItemList? _accountsList;
 	private Label? _accountsSelectedValue;
+	private PanelContainer? _permissionsOverlay;
+	private Label? _permissionsTitleLabel;
+	private OptionButton? _permissionsAccessLevel;
+	private TextEdit? _permissionsRevokedText;
+	private TextEdit? _permissionsSpecialText;
+	private Label? _permissionsCatalogLabel;
+	private PanelContainer? _permissionPickerOverlay;
+	private Label? _permissionPickerTitleLabel;
+	private ItemList? _permissionPickerList;
+	private TextEdit? _permissionPickerTarget;
+	private bool _permissionPickerAddMode;
+	private string _permissionsAccountId = string.Empty;
+	private string _permissionsPlayerName = string.Empty;
 	private VBoxContainer? _settingsList;
 	private PanelContainer? _restartRequiredBannerPanel;
 	private Label? _restartRequiredBannerText;
@@ -64,6 +89,8 @@ public partial class ServerShellRoot : Control
 	private IReadOnlyList<ServerAccountSummarySnapshot> _currentAccounts = Array.Empty<ServerAccountSummarySnapshot>();
 	private string _playersListSignature = string.Empty;
 	private string _accountsListSignature = string.Empty;
+	private PlayerSortColumn _playerSortColumn = PlayerSortColumn.PlayerName;
+	private bool _playerSortAscending = true;
 	private IReadOnlyList<ServerSettingDescriptor> _settingsDescriptors = Array.Empty<ServerSettingDescriptor>();
 	private readonly Dictionary<string, Control> _settingsRows = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, Control> _settingsEditors = new(StringComparer.Ordinal);
@@ -72,6 +99,23 @@ public partial class ServerShellRoot : Control
 	private Color _settingsAccentSoftColor;
 	private Color _settingsTextColor;
 	private Color _settingsMutedColor;
+	private static readonly PermissionCatalogEntry[] PermissionCatalog =
+	[
+		new("command.help", "Show available chat commands.", 0),
+		new("command.ping", "Check the command path.", 0),
+		new("command.panel", "Open script-registered UI panels.", 0),
+		new("command.spawn", "Spawn a registered script prefab.", 60),
+		new("command.announce", "Publish a server announcement.", 100),
+		new("admin.entity.inspect", "Inspect ECS entity/component state.", 80),
+		new("admin.account.access", "Edit account access metadata.", 80),
+		new("admin.account.kick", "Kick a connected account/player session.", 80),
+		new("admin.account.ban", "Ban an account/player.", 80),
+		new("admin.server.shutdown", "Stop or shut down server runtime.", 100),
+		new("command.*", "Wildcard grant/deny for all command permissions.", 100),
+		new("admin.*", "Wildcard grant/deny for all admin permissions.", 100)
+	];
+
+	private readonly record struct PermissionCatalogEntry(string Key, string Description, int AccessLevel);
 
 	public override void _Ready()
 	{
@@ -149,6 +193,7 @@ public partial class ServerShellRoot : Control
 		int tickMilliseconds = options.TickMilliseconds;
 		int maxCatchUpTicks = options.MaxCatchUpTicksPerPump;
 		int networkPort = options.NetworkPort;
+		string bindAddress = options.BindAddress;
 		double sessionAuthTimeoutSeconds = options.SessionAuthTimeoutSeconds;
 		double sessionKeepAliveTimeoutSeconds = options.SessionKeepAliveTimeoutSeconds;
 		string commandPrefix = options.CommandPrefix;
@@ -227,6 +272,14 @@ public partial class ServerShellRoot : Control
 					networkPort = parsedPort;
 				}
 			}
+			else if (arg.StartsWith("--us-server-bind-address=", StringComparison.OrdinalIgnoreCase))
+			{
+				string value = arg["--us-server-bind-address=".Length..].Trim();
+				if (!string.IsNullOrWhiteSpace(value))
+				{
+					bindAddress = value;
+				}
+			}
 			else if (arg.StartsWith("--us-server-max-clients=", StringComparison.OrdinalIgnoreCase))
 			{
 				if (int.TryParse(arg["--us-server-max-clients=".Length..], out int parsedMaxClients) && parsedMaxClients >= 0)
@@ -290,6 +343,7 @@ public partial class ServerShellRoot : Control
 			SaveOnStop: saveOnStop,
 			EnableMovementWorld: enableMovementWorld,
 			NetworkPort: networkPort,
+			BindAddress: bindAddress,
 			MaxClients: maxClients,
 			AutoSaveIntervalSeconds: autoSaveIntervalSeconds,
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
@@ -509,6 +563,8 @@ public partial class ServerShellRoot : Control
 		AddShellTab(tabRow, "Items", CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
 		AddTabSpacer(tabRow);
 		AddShellTab(tabRow, "Settings", BuildSettingsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
+		AddChild(BuildPermissionsOverlay(panel, panelSoft, accentSoft, text, muted));
+		AddChild(BuildPermissionPickerOverlay(panel, panelSoft, accentSoft, text, muted));
 		SelectShellTab(0);
 	}
 
@@ -772,6 +828,18 @@ public partial class ServerShellRoot : Control
 		_playersSummaryValue.AddThemeColorOverride("font_color", muted);
 		column.AddChild(_playersSummaryValue);
 
+		var headerRow = new HBoxContainer();
+		headerRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		headerRow.AddThemeConstantOverride("separation", 4);
+		column.AddChild(headerRow);
+		headerRow.AddChild(CreatePlayerSortButton("Name", PlayerSortColumn.PlayerName, panelSoft, text));
+		headerRow.AddChild(CreatePlayerSortButton("IP", PlayerSortColumn.RemoteAddress, panelSoft, text));
+		headerRow.AddChild(CreatePlayerSortButton("Session", PlayerSortColumn.SessionId, panelSoft, text));
+		headerRow.AddChild(CreatePlayerSortButton("Account", PlayerSortColumn.AccountName, panelSoft, text));
+		headerRow.AddChild(CreatePlayerSortButton("State", PlayerSortColumn.State, panelSoft, text));
+		headerRow.AddChild(CreatePlayerSortButton("Up", PlayerSortColumn.CurrentUptime, panelSoft, text));
+		headerRow.AddChild(CreatePlayerSortButton("Total", PlayerSortColumn.TotalPlayTime, panelSoft, text));
+
 		var listFrame = new PanelContainer();
 		listFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
 		listFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
@@ -806,7 +874,11 @@ public partial class ServerShellRoot : Control
 		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Blacklist", panelSoft, text));
-		actionRow.AddChild(CreateDisabledButton("Inspect", accentSoft, text));
+		_playerPermissionsButton = CreateActionButton("Permissions", accentSoft, text);
+		_playerPermissionsButton.Disabled = true;
+		_playerPermissionsButton.Pressed += OpenSelectedPlayerPermissions;
+		actionRow.AddChild(_playerPermissionsButton);
+		actionRow.AddChild(CreateDisabledButton("Inspect", panelSoft, text));
 
 		return frame;
 	}
@@ -869,6 +941,466 @@ public partial class ServerShellRoot : Control
 		actionRow.AddChild(CreateDisabledButton("Inspect", panelSoft, text));
 
 		return frame;
+	}
+
+	private Control BuildPermissionsOverlay(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+	{
+		_permissionsOverlay = new PanelContainer();
+		_permissionsOverlay.SetAnchorsPreset(LayoutPreset.FullRect);
+		_permissionsOverlay.Visible = false;
+		_permissionsOverlay.MouseFilter = MouseFilterEnum.Stop;
+		_permissionsOverlay.AddThemeStyleboxOverride("panel", CreatePanelStyle(new Color(0f, 0f, 0f, 0.45f), 0));
+
+		var center = new CenterContainer();
+		center.SetAnchorsPreset(LayoutPreset.FullRect);
+		_permissionsOverlay.AddChild(center);
+
+		var dialog = new PanelContainer();
+		dialog.CustomMinimumSize = new Vector2(640, 430);
+		dialog.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10, accentSoft));
+		center.AddChild(dialog);
+
+		var column = new VBoxContainer();
+		column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.SizeFlagsVertical = SizeFlags.ExpandFill;
+		column.AddThemeConstantOverride("separation", 8);
+		dialog.AddChild(column);
+
+		var titleRow = new HBoxContainer();
+		titleRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.AddChild(titleRow);
+
+		_permissionsTitleLabel = CreateSectionLabel("Permissions", text);
+		_permissionsTitleLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		titleRow.AddChild(_permissionsTitleLabel);
+
+		var close = CreateActionButton("X", panelSoft, text);
+		close.CustomMinimumSize = new Vector2(36, 28);
+		close.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+		close.TooltipText = "Close permissions editor.";
+		close.Pressed += ClosePermissionsOverlay;
+		titleRow.AddChild(close);
+
+		var accessRow = new HBoxContainer();
+		accessRow.AddThemeConstantOverride("separation", 8);
+		column.AddChild(accessRow);
+		accessRow.AddChild(CreateSectionLabel("Access level", muted));
+		_permissionsAccessLevel = new OptionButton();
+		_permissionsAccessLevel.CustomMinimumSize = new Vector2(220, 30);
+		_permissionsAccessLevel.AddItem("Player (0)", 0);
+		_permissionsAccessLevel.AddItem("Councilor (40)", 40);
+		_permissionsAccessLevel.AddItem("Seer (60)", 60);
+		_permissionsAccessLevel.AddItem("Game Master (GM) (80)", 80);
+		_permissionsAccessLevel.AddItem("Developer / Owner (100)", 100);
+		_permissionsAccessLevel.AddThemeColorOverride("font_color", text);
+		_permissionsAccessLevel.ItemSelected += _ => RefreshPermissionsCatalogLabel();
+		accessRow.AddChild(_permissionsAccessLevel);
+
+		var editorRow = new HBoxContainer();
+		editorRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		editorRow.SizeFlagsVertical = SizeFlags.ExpandFill;
+		editorRow.AddThemeConstantOverride("separation", 8);
+		column.AddChild(editorRow);
+
+		_permissionsRevokedText = CreatePermissionTextBox("Revoked permissions/commands", panelSoft, text, muted);
+		editorRow.AddChild(WrapPermissionTextBox("Revoked permissions/commands", _permissionsRevokedText, panelSoft, text));
+		_permissionsSpecialText = CreatePermissionTextBox("Special permissions/commands", panelSoft, text, muted);
+		editorRow.AddChild(WrapPermissionTextBox("Special permissions/commands", _permissionsSpecialText, panelSoft, text));
+
+		_permissionsCatalogLabel = new Label();
+		_permissionsCatalogLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		_permissionsCatalogLabel.AddThemeColorOverride("font_color", muted);
+		column.AddChild(_permissionsCatalogLabel);
+
+		var actionRow = new HBoxContainer();
+		actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		actionRow.AddThemeConstantOverride("separation", 8);
+		column.AddChild(actionRow);
+
+		var cancel = CreateActionButton("Cancel", panelSoft, text);
+		cancel.Pressed += ClosePermissionsOverlay;
+		actionRow.AddChild(cancel);
+		var apply = CreateActionButton("Apply", accentSoft, text);
+		apply.Pressed += ApplyPermissionsOverlay;
+		actionRow.AddChild(apply);
+		return _permissionsOverlay;
+	}
+
+	private TextEdit CreatePermissionTextBox(string placeholder, Color panelSoft, Color text, Color muted)
+	{
+		var edit = new TextEdit();
+		edit.PlaceholderText = "One permission per line";
+		edit.TooltipText = placeholder + "\nUse normalized keys, for example command.spawn or admin.entity.inspect.";
+		edit.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		edit.SizeFlagsVertical = SizeFlags.ExpandFill;
+		edit.CustomMinimumSize = new Vector2(0, 150);
+		edit.AddThemeColorOverride("font_color", text);
+		edit.AddThemeColorOverride("font_placeholder_color", muted);
+		edit.AddThemeStyleboxOverride("normal", CreatePanelStyle(panelSoft, 6));
+		edit.AddThemeStyleboxOverride("focus", CreatePanelStyle(panelSoft, 6, _settingsAccentSoftColor));
+		return edit;
+	}
+
+	private Control WrapPermissionTextBox(string title, TextEdit edit, Color panelSoft, Color text)
+	{
+		var column = new VBoxContainer();
+		column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.SizeFlagsVertical = SizeFlags.ExpandFill;
+		column.AddThemeConstantOverride("separation", 4);
+		var titleRow = new HBoxContainer();
+		titleRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		titleRow.AddThemeConstantOverride("separation", 4);
+		column.AddChild(titleRow);
+
+		Label label = CreateSectionLabel(title, text);
+		label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		titleRow.AddChild(label);
+
+		Button add = CreateActionButton("+", panelSoft, text);
+		add.CustomMinimumSize = new Vector2(28, 24);
+		add.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+		add.TooltipText = "Add permission.";
+		add.Pressed += () => OpenPermissionPicker(edit, true, title);
+		titleRow.AddChild(add);
+
+		Button remove = CreateActionButton("-", panelSoft, text);
+		remove.CustomMinimumSize = new Vector2(28, 24);
+		remove.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+		remove.TooltipText = "Remove permission.";
+		remove.Pressed += () => OpenPermissionPicker(edit, false, title);
+		titleRow.AddChild(remove);
+
+		column.AddChild(edit);
+		return column;
+	}
+
+	private Control BuildPermissionPickerOverlay(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+	{
+		_permissionPickerOverlay = new PanelContainer();
+		_permissionPickerOverlay.SetAnchorsPreset(LayoutPreset.FullRect);
+		_permissionPickerOverlay.Visible = false;
+		_permissionPickerOverlay.MouseFilter = MouseFilterEnum.Stop;
+		_permissionPickerOverlay.AddThemeStyleboxOverride("panel", CreatePanelStyle(new Color(0f, 0f, 0f, 0.55f), 0));
+
+		var center = new CenterContainer();
+		center.SetAnchorsPreset(LayoutPreset.FullRect);
+		_permissionPickerOverlay.AddChild(center);
+
+		var dialog = new PanelContainer();
+		dialog.CustomMinimumSize = new Vector2(520, 420);
+		dialog.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10, accentSoft));
+		center.AddChild(dialog);
+
+		var column = new VBoxContainer();
+		column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.SizeFlagsVertical = SizeFlags.ExpandFill;
+		column.AddThemeConstantOverride("separation", 8);
+		dialog.AddChild(column);
+
+		var titleRow = new HBoxContainer();
+		titleRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.AddChild(titleRow);
+
+		_permissionPickerTitleLabel = CreateSectionLabel("Add commands or permissions", text);
+		_permissionPickerTitleLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		titleRow.AddChild(_permissionPickerTitleLabel);
+
+		Button close = CreateActionButton("X", panelSoft, text);
+		close.CustomMinimumSize = new Vector2(36, 28);
+		close.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+		close.TooltipText = "Close permission picker.";
+		close.Pressed += ClosePermissionPickerOverlay;
+		titleRow.AddChild(close);
+
+		_permissionPickerList = new ItemList();
+		_permissionPickerList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_permissionPickerList.SizeFlagsVertical = SizeFlags.ExpandFill;
+		_permissionPickerList.SelectMode = ItemList.SelectModeEnum.Multi;
+		_permissionPickerList.AddThemeColorOverride("font_color", text);
+		column.AddChild(_permissionPickerList);
+
+		var actionRow = new HBoxContainer();
+		actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		actionRow.AddThemeConstantOverride("separation", 8);
+		column.AddChild(actionRow);
+
+		Button cancel = CreateActionButton("Cancel", panelSoft, text);
+		cancel.Pressed += ClosePermissionPickerOverlay;
+		actionRow.AddChild(cancel);
+
+		Button apply = CreateActionButton("Apply", accentSoft, text);
+		apply.Pressed += ApplyPermissionPickerOverlay;
+		actionRow.AddChild(apply);
+		return _permissionPickerOverlay;
+	}
+
+	private void OpenSelectedPlayerPermissions()
+	{
+		if (!TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
+		{
+			AppendOutput("ACCT", "Select a player before opening permissions.");
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(player.AccountId) ||
+			string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase))
+		{
+			AppendOutput("ACCT", "Selected row is not bound to a persisted account.");
+			return;
+		}
+
+		_permissionsAccountId = player.AccountId;
+		_permissionsPlayerName = player.PlayerName;
+		if (_permissionsTitleLabel is not null)
+			_permissionsTitleLabel.Text = $"Permissions: {player.PlayerName} ({AccountNameOrId(player)})";
+		if (_permissionsAccessLevel is not null)
+			SelectPermissionAccessLevel(player.AccessLevel);
+		if (_permissionsRevokedText is not null)
+			_permissionsRevokedText.Text = FormatPermissionLines(player.DirectDenies);
+		if (_permissionsSpecialText is not null)
+			_permissionsSpecialText.Text = FormatPermissionLines(player.DirectGrants);
+
+		RefreshPermissionsCatalogLabel();
+		if (_permissionsOverlay is not null)
+			_permissionsOverlay.Visible = true;
+	}
+
+	private void ClosePermissionsOverlay()
+	{
+		ClosePermissionPickerOverlay();
+		if (_permissionsOverlay is not null)
+			_permissionsOverlay.Visible = false;
+		_permissionsAccountId = string.Empty;
+		_permissionsPlayerName = string.Empty;
+	}
+
+	private void OpenPermissionPicker(TextEdit target, bool addMode, string categoryTitle)
+	{
+		_permissionPickerTarget = target;
+		_permissionPickerAddMode = addMode;
+		if (_permissionPickerTitleLabel is not null)
+			_permissionPickerTitleLabel.Text = addMode
+				? $"Add commands or permissions: {categoryTitle}"
+				: $"Remove commands or permissions: {categoryTitle}";
+		PopulatePermissionPickerList(target, addMode);
+		if (_permissionPickerOverlay is not null)
+			_permissionPickerOverlay.Visible = true;
+	}
+
+	private void ClosePermissionPickerOverlay()
+	{
+		if (_permissionPickerOverlay is not null)
+			_permissionPickerOverlay.Visible = false;
+		_permissionPickerTarget = null;
+		_permissionPickerAddMode = false;
+	}
+
+	private void PopulatePermissionPickerList(TextEdit target, bool addMode)
+	{
+		if (_permissionPickerList is null)
+			return;
+
+		_permissionPickerList.Clear();
+		if (addMode)
+		{
+			for (int i = 0; i < PermissionCatalog.Length; i++)
+			{
+				PermissionCatalogEntry entry = PermissionCatalog[i];
+				int item = _permissionPickerList.AddItem(entry.Key);
+				_permissionPickerList.SetItemTooltip(item, $"{entry.Description}\nAccess level: {AccessLevelName(entry.AccessLevel)}");
+			}
+			return;
+		}
+
+		IReadOnlyList<string> values = ParsePermissionLines(target.Text);
+		for (int i = 0; i < values.Count; i++)
+		{
+			int item = _permissionPickerList.AddItem(values[i]);
+			_permissionPickerList.SetItemTooltip(item, "Remove this direct permission override from the selected category.");
+		}
+	}
+
+	private void ApplyPermissionPickerOverlay()
+	{
+		if (_permissionPickerTarget is null || _permissionPickerList is null)
+		{
+			ClosePermissionPickerOverlay();
+			return;
+		}
+
+		int[] selected = _permissionPickerList.GetSelectedItems();
+		if (selected.Length == 0)
+		{
+			ClosePermissionPickerOverlay();
+			return;
+		}
+
+		var values = new SortedSet<string>(ParsePermissionLines(_permissionPickerTarget.Text), StringComparer.Ordinal);
+		for (int i = 0; i < selected.Length; i++)
+		{
+			string key = ServerAccessKey.NormalizePermissionKey(_permissionPickerList.GetItemText(selected[i]));
+			if (_permissionPickerAddMode)
+				values.Add(key);
+			else
+				values.Remove(key);
+		}
+
+		_permissionPickerTarget.Text = FormatPermissionLines(values);
+		ClosePermissionPickerOverlay();
+	}
+
+	private void ApplyPermissionsOverlay()
+	{
+		if (_controller is null)
+		{
+			AppendOutput("ACCT", "Server controller is not available.");
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(_permissionsAccountId))
+		{
+			AppendOutput("ACCT", "No account is selected for permission update.");
+			return;
+		}
+
+		try
+		{
+			int accessLevel = ReadSelectedPermissionAccessLevel();
+			IReadOnlyList<string> directDenies = ParsePermissionLines(_permissionsRevokedText?.Text);
+			IReadOnlyList<string> directGrants = ParsePermissionLines(_permissionsSpecialText?.Text);
+			ServerAccountAccessUpdateResult result = _controller.ReplaceAccountAccess(
+				_permissionsAccountId,
+				accessLevel,
+				directGrants,
+				directDenies);
+
+			AppendOutput(result.Succeeded ? "ACCT" : "WARN", result.Message);
+			if (!result.Succeeded)
+				return;
+
+			_playersListSignature = string.Empty;
+			_accountsListSignature = string.Empty;
+			ClosePermissionsOverlay();
+			RefreshStatus();
+		}
+		catch (ArgumentException ex)
+		{
+			AppendOutput("WARN", $"Permission update rejected: {ex.Message}");
+		}
+	}
+
+	private void SelectPermissionAccessLevel(int accessLevel)
+	{
+		if (_permissionsAccessLevel is null)
+			return;
+
+		int bestIndex = 0;
+		int bestDelta = int.MaxValue;
+		for (int i = 0; i < _permissionsAccessLevel.ItemCount; i++)
+		{
+			int itemLevel = (int)_permissionsAccessLevel.GetItemId(i);
+			int delta = Math.Abs(itemLevel - accessLevel);
+			if (delta < bestDelta)
+			{
+				bestDelta = delta;
+				bestIndex = i;
+			}
+		}
+
+		_permissionsAccessLevel.Select(bestIndex);
+	}
+
+	private int ReadSelectedPermissionAccessLevel()
+	{
+		if (_permissionsAccessLevel is null || _permissionsAccessLevel.Selected < 0)
+			return 0;
+
+		return Math.Max(0, (int)_permissionsAccessLevel.GetSelectedId());
+	}
+
+	private void RefreshPermissionsCatalogLabel()
+	{
+		if (_permissionsCatalogLabel is null)
+			return;
+
+		int accessLevel = ReadSelectedPermissionAccessLevel();
+		_permissionsCatalogLabel.Text = BuildPermissionsCatalogText(accessLevel);
+	}
+
+	private static string BuildPermissionsCatalogText(int accessLevel)
+	{
+		var builder = new StringBuilder();
+		builder.Append("Visible permission groups for this access level: player permissions/commands");
+		if (accessLevel >= 40)
+			builder.Append(", councilor permissions/commands");
+		if (accessLevel >= 60)
+			builder.Append(", seer permissions/commands");
+		if (accessLevel >= 80)
+			builder.Append(", game master (GM) permissions/commands");
+		if (accessLevel >= 100)
+			builder.Append(", developer/owner permissions/commands");
+		builder.Append(". Direct revoked/special entries override the access-level defaults for this account.");
+		return builder.ToString();
+	}
+
+	private static string AccessLevelName(int accessLevel)
+	{
+		return accessLevel switch
+		{
+			>= 100 => "Developer / Owner",
+			>= 80 => "Game Master (GM)",
+			>= 60 => "Seer",
+			>= 40 => "Councilor",
+			_ => "Player"
+		};
+	}
+
+	private static IReadOnlyList<string> ParsePermissionLines(string? text)
+	{
+		if (string.IsNullOrWhiteSpace(text))
+			return Array.Empty<string>();
+
+		var values = new List<string>();
+		string normalizedNewlines = text.Replace('\r', '\n');
+		string[] lines = normalizedNewlines.Split('\n');
+		for (int i = 0; i < lines.Length; i++)
+		{
+			string line = lines[i].Trim();
+			if (line.Length == 0)
+				continue;
+
+			string key = ServerAccessKey.NormalizePermissionKey(line);
+			bool exists = false;
+			for (int j = 0; j < values.Count; j++)
+			{
+				if (string.Equals(values[j], key, StringComparison.Ordinal))
+				{
+					exists = true;
+					break;
+				}
+			}
+
+			if (!exists)
+				values.Add(key);
+		}
+
+		values.Sort(StringComparer.Ordinal);
+		return values;
+	}
+
+	private static string FormatPermissionLines(IEnumerable<string> values)
+	{
+		var builder = new StringBuilder();
+		bool hasValue = false;
+		foreach (string value in values)
+		{
+			if (hasValue)
+				builder.Append('\n');
+			builder.Append(value);
+			hasValue = true;
+		}
+
+		return builder.ToString();
 	}
 
 	private Control BuildPerformanceTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
@@ -1023,6 +1555,27 @@ public partial class ServerShellRoot : Control
 	{
 		var button = CreateActionButton(label, fill, text);
 		button.Pressed += () => ExecuteCommand(command);
+		return button;
+	}
+
+	private Button CreatePlayerSortButton(string label, PlayerSortColumn column, Color fill, Color text)
+	{
+		var button = CreateActionButton(label, fill, text);
+		button.CustomMinimumSize = new Vector2(0, 26);
+		button.TooltipText = $"Sort players by {label}.";
+		button.Pressed += () =>
+		{
+			if (_playerSortColumn == column)
+				_playerSortAscending = !_playerSortAscending;
+			else
+			{
+				_playerSortColumn = column;
+				_playerSortAscending = true;
+			}
+
+			_playersListSignature = string.Empty;
+			RefreshPlayersList(_currentPlayers);
+		};
 		return button;
 	}
 
@@ -1393,24 +1946,25 @@ public partial class ServerShellRoot : Control
 
 	private void RefreshPlayersList(IReadOnlyList<ServerPlayerSessionSnapshot> players)
 	{
-		_currentPlayers = players;
+		_currentPlayers = SortPlayers(players);
 		if (_playersList is null)
 			return;
 
-		string signature = BuildPlayersListSignature(players);
+		IReadOnlyList<ServerPlayerSessionSnapshot> sortedPlayers = _currentPlayers;
+		string signature = BuildPlayersListSignature(sortedPlayers);
 		bool listChanged = !string.Equals(signature, _playersListSignature, StringComparison.Ordinal);
 		if (listChanged)
 		{
 			_playersList.Clear();
-			for (int i = 0; i < players.Count; i++)
-				_playersList.AddItem(FormatPlayerRow(players[i]));
+			for (int i = 0; i < sortedPlayers.Count; i++)
+				_playersList.AddItem(FormatPlayerRow(sortedPlayers[i]));
 			_playersListSignature = signature;
 		}
 
 		int selectedIndex = -1;
-		for (int i = 0; i < players.Count; i++)
+		for (int i = 0; i < sortedPlayers.Count; i++)
 		{
-			ServerPlayerSessionSnapshot player = players[i];
+			ServerPlayerSessionSnapshot player = sortedPlayers[i];
 			if (!string.IsNullOrWhiteSpace(_selectedPlayerSessionId) &&
 				string.Equals(player.SessionId, _selectedPlayerSessionId, StringComparison.Ordinal))
 			{
@@ -1461,6 +2015,36 @@ public partial class ServerShellRoot : Control
 		RefreshAccountSelection();
 	}
 
+	private IReadOnlyList<ServerPlayerSessionSnapshot> SortPlayers(IReadOnlyList<ServerPlayerSessionSnapshot> players)
+	{
+		if (players.Count <= 1)
+			return players;
+
+		var sorted = new ServerPlayerSessionSnapshot[players.Count];
+		for (int i = 0; i < players.Count; i++)
+			sorted[i] = players[i];
+
+		Array.Sort(sorted, ComparePlayerRows);
+		return sorted;
+	}
+
+	private int ComparePlayerRows(ServerPlayerSessionSnapshot left, ServerPlayerSessionSnapshot right)
+	{
+		int result = _playerSortColumn switch
+		{
+			PlayerSortColumn.RemoteAddress => CompareText(left.RemoteAddress, right.RemoteAddress),
+			PlayerSortColumn.SessionId => CompareText(left.SessionId, right.SessionId),
+			PlayerSortColumn.AccountName => CompareText(AccountNameOrId(left), AccountNameOrId(right)),
+			PlayerSortColumn.State => CompareText(OnlineStateText(left), OnlineStateText(right)),
+			PlayerSortColumn.CurrentUptime => left.CurrentUptime.CompareTo(right.CurrentUptime),
+			PlayerSortColumn.TotalPlayTime => left.TotalPlayTime.CompareTo(right.TotalPlayTime),
+			PlayerSortColumn.AccessLevel => left.AccessLevel.CompareTo(right.AccessLevel),
+			_ => CompareText(left.PlayerName, right.PlayerName)
+		};
+
+		return _playerSortAscending ? result : -result;
+	}
+
 	private void RefreshPlayerSelection()
 	{
 		if (_playersSelectedValue is null)
@@ -1468,12 +2052,16 @@ public partial class ServerShellRoot : Control
 
 		if (TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
 		{
+			if (_playerPermissionsButton is not null)
+				_playerPermissionsButton.Disabled = string.IsNullOrWhiteSpace(player.AccountId) || string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase);
 			_playersSelectedValue.Text = string.IsNullOrWhiteSpace(player.Detail)
-				? $"Selected: {player.PlayerName}  session={player.SessionId}  account={player.AccountId}"
-				: $"Selected: {player.PlayerName}  session={player.SessionId}  account={player.AccountId}  {player.Detail}";
+				? $"Selected: {player.PlayerName}  session={player.SessionId}  account={AccountNameOrId(player)}  access={player.AccessLevel}"
+				: $"Selected: {player.PlayerName}  session={player.SessionId}  account={AccountNameOrId(player)}  access={player.AccessLevel}  {player.Detail}";
 			return;
 		}
 
+		if (_playerPermissionsButton is not null)
+			_playerPermissionsButton.Disabled = true;
 		_playersSelectedValue.Text = "Select a player row to enable player actions.";
 	}
 
@@ -1526,7 +2114,14 @@ public partial class ServerShellRoot : Control
 
 	private static string FormatPlayerRow(ServerPlayerSessionSnapshot player)
 	{
-		return $"{TrimForRow(player.PlayerName, 24),-24}  {TrimForRow(player.AccountId, 18),-18}  {TrimForRow(player.SessionState, 16),-16}  {TrimForRow(player.SessionId, 20),-20}";
+		return $"{TrimForRow(player.PlayerName, 18),-18}  " +
+			$"{TrimForRow(player.RemoteAddress, 18),-18}  " +
+			$"{TrimForRow(player.SessionId, 10),-10}  " +
+			$"{TrimForRow(AccountNameOrId(player), 16),-16}  " +
+			$"{TrimForRow(OnlineStateText(player), 9),-9}  " +
+			$"{FormatDuration(player.CurrentUptime),9}  " +
+			$"{FormatDuration(player.TotalPlayTime),9}  " +
+			$"{player.AccessLevel,4}";
 	}
 
 	private static string FormatAccountRow(ServerAccountSummarySnapshot account)
@@ -1550,7 +2145,23 @@ public partial class ServerShellRoot : Control
 				.Append('\u001f')
 				.Append(player.AccountId)
 				.Append('\u001f')
+				.Append(player.AccountName)
+				.Append('\u001f')
+				.Append(player.RemoteAddress)
+				.Append('\u001f')
+				.Append(player.IsOnline ? '1' : '0')
+				.Append('\u001f')
 				.Append(player.SessionState)
+				.Append('\u001f')
+				.Append(player.CurrentUptime.Ticks)
+				.Append('\u001f')
+				.Append(player.TotalPlayTime.Ticks)
+				.Append('\u001f')
+				.Append(player.AccessLevel)
+				.Append('\u001f')
+				.Append(JoinKeys(player.DirectGrants))
+				.Append('\u001f')
+				.Append(JoinKeys(player.DirectDenies))
 				.Append('\u001f')
 				.Append(player.Detail);
 		}
@@ -1584,6 +2195,47 @@ public partial class ServerShellRoot : Control
 	{
 		string text = string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
 		return text.Length <= maxLength ? text : text[..Math.Max(0, maxLength - 3)] + "...";
+	}
+
+	private static int CompareText(string? left, string? right)
+	{
+		return StringComparer.OrdinalIgnoreCase.Compare(left ?? string.Empty, right ?? string.Empty);
+	}
+
+	private static string FormatDuration(TimeSpan value)
+	{
+		if (value <= TimeSpan.Zero)
+			return "00:00:00";
+
+		return value.TotalDays >= 1d
+			? string.Create(CultureInfo.InvariantCulture, $"{(int)value.TotalDays}d {value:hh\\:mm}")
+			: value.ToString("hh\\:mm\\:ss", CultureInfo.InvariantCulture);
+	}
+
+	private static string JoinKeys(IReadOnlyList<string> values)
+	{
+		if (values.Count == 0)
+			return string.Empty;
+
+		var builder = new StringBuilder(values.Count * 16);
+		for (int i = 0; i < values.Count; i++)
+		{
+			if (i > 0)
+				builder.Append(',');
+			builder.Append(values[i]);
+		}
+
+		return builder.ToString();
+	}
+
+	private static string AccountNameOrId(ServerPlayerSessionSnapshot player)
+	{
+		return string.IsNullOrWhiteSpace(player.AccountName) ? player.AccountId : player.AccountName;
+	}
+
+	private static string OnlineStateText(ServerPlayerSessionSnapshot player)
+	{
+		return player.IsOnline ? "Online" : "Offline";
 	}
 
 	private void RefreshSettingsTab()
@@ -1623,6 +2275,7 @@ public partial class ServerShellRoot : Control
 		var registry = new ServerSettingsRegistry();
 		registry.RegisterRestartRequired("server.name", "Server name", options.ProfileName);
 		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired("server.network.bind_address", "Bind address", options.BindAddress);
 		registry.RegisterRestartRequired("server.network.max_clients", "Max clients", options.MaxClients.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired(
 			"server.save.autosave_interval_seconds",
@@ -2166,6 +2819,7 @@ public partial class ServerShellRoot : Control
 	{
 		string profileName = options.ProfileName;
 		int networkPort = options.NetworkPort;
+		string bindAddress = options.BindAddress;
 		int maxClients = options.MaxClients;
 		double autoSaveIntervalSeconds = options.AutoSaveIntervalSeconds;
 		bool saveOnStop = options.SaveOnStop;
@@ -2189,6 +2843,10 @@ public partial class ServerShellRoot : Control
 				case "server.network.port":
 					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPort) && parsedPort > 0)
 						networkPort = parsedPort;
+					break;
+				case "server.network.bind_address":
+					if (!string.IsNullOrWhiteSpace(change.NormalizedValue))
+						bindAddress = change.NormalizedValue;
 					break;
 				case "server.network.max_clients":
 					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedMaxClients))
@@ -2237,6 +2895,7 @@ public partial class ServerShellRoot : Control
 		{
 			ProfileName = profileName,
 			NetworkPort = networkPort,
+			BindAddress = bindAddress,
 			MaxClients = maxClients,
 			AutoSaveIntervalSeconds = autoSaveIntervalSeconds,
 			SaveOnStop = saveOnStop,

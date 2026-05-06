@@ -18,6 +18,7 @@ public sealed class AccountAccessAdministrationService
 
     public AccountAccessUpdateResult ReplaceAccessMetadata(
         ulong targetAccountId,
+        int? accessLevel = null,
         IEnumerable<string>? accessRuleKeys = null,
         IEnumerable<string>? directPermissionGrants = null,
         IEnumerable<string>? directPermissionDenies = null,
@@ -30,9 +31,10 @@ public sealed class AccountAccessAdministrationService
             return AccountAccessUpdateResult.Reject($"Account '{targetAccountId}' was not found.");
 
         ServerAccountRecord updated = account.WithAccessMetadata(
-            accessRuleKeys,
-            directPermissionGrants,
-            directPermissionDenies).Normalize();
+            accessLevel,
+            accessRuleKeys ?? account.AccessRuleKeys,
+            directPermissionGrants ?? account.DirectPermissionGrants,
+            directPermissionDenies ?? account.DirectPermissionDenies).Normalize();
         _accounts.Update(updated);
         _audit?.Record(new AccountAccessAuditEntry(
             _clock(),

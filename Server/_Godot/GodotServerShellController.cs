@@ -90,6 +90,19 @@ public sealed class GodotServerShellController : IDisposable
 		return _runtime.Application.GetAccountSummariesSnapshot();
 	}
 
+	public ServerAccountAccessUpdateResult ReplaceAccountAccess(
+		string accountId,
+		int accessLevel,
+		IReadOnlyList<string> directPermissionGrants,
+		IReadOnlyList<string> directPermissionDenies)
+	{
+		return _runtime.Application.ReplaceAccountAccess(
+			accountId,
+			accessLevel,
+			directPermissionGrants,
+			directPermissionDenies);
+	}
+
 	public void Shutdown()
 	{
 		_runtime.StopSafely();
@@ -106,6 +119,7 @@ public sealed class GodotServerShellController : IDisposable
 			? ServerMovementWorldApplicationFactory.Create(new ServerMovementWorldApplicationOptions(
 				options.ProfileName,
 				Port: options.NetworkPort,
+				BindAddress: options.BindAddress,
 				SaveOnStop: options.SaveOnStop,
 				MaxClients: options.MaxClients,
 				AutoSaveIntervalSeconds: options.AutoSaveIntervalSeconds,

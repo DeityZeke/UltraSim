@@ -21,6 +21,7 @@ public static class HeadlessServerArgumentParser
         TimeSpan idleDelay = HeadlessServerShellOptions.Default.IdleDelay;
         bool enableMovementWorld = HeadlessServerShellOptions.Default.EnableMovementWorld;
         int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
+        string bindAddress = HeadlessServerShellOptions.Default.BindAddress;
         int maxClients = HeadlessServerShellOptions.Default.MaxClients;
         double autoSaveIntervalSeconds = HeadlessServerShellOptions.Default.AutoSaveIntervalSeconds;
         double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
@@ -38,6 +39,7 @@ public static class HeadlessServerArgumentParser
                 profileName,
                 saveOnStop,
                 networkPort,
+                bindAddress,
                 maxClients,
                 autoSaveIntervalSeconds,
                 sessionAuthTimeoutSeconds,
@@ -50,6 +52,7 @@ public static class HeadlessServerArgumentParser
         profileName = configValues.ProfileName;
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
+        bindAddress = configValues.BindAddress;
         maxClients = configValues.MaxClients;
         autoSaveIntervalSeconds = configValues.AutoSaveIntervalSeconds;
         sessionAuthTimeoutSeconds = configValues.SessionAuthTimeoutSeconds;
@@ -205,6 +208,12 @@ public static class HeadlessServerArgumentParser
                 continue;
             }
 
+            if (string.Equals(key, "--bind-address", StringComparison.OrdinalIgnoreCase))
+            {
+                bindAddress = value.Trim();
+                continue;
+            }
+
             if (string.Equals(key, "--max-clients", StringComparison.OrdinalIgnoreCase))
             {
                 if (!int.TryParse(value, out maxClients) || maxClients < 0)
@@ -323,6 +332,7 @@ public static class HeadlessServerArgumentParser
             IdleDelay: idleDelay,
             EnableMovementWorld: enableMovementWorld,
             NetworkPort: networkPort,
+            BindAddress: bindAddress,
             MaxClients: maxClients,
             AutoSaveIntervalSeconds: autoSaveIntervalSeconds,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
@@ -349,6 +359,7 @@ public static class HeadlessServerArgumentParser
           --tick-ms=<n>
           --max-catchup=<n>
           --port=<0-65535>
+          --bind-address=<ip|any|localhost>
           --max-clients=<n>
           --autosave-interval-seconds=<seconds>
           --session-auth-timeout-seconds=<seconds>

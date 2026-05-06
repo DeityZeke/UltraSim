@@ -19,6 +19,7 @@ public static class ServerMovementWorldApplicationFactory
             throw new ArgumentException("Profile name cannot be empty.", nameof(options));
         if (string.IsNullOrWhiteSpace(options.CommandPrefix))
             throw new ArgumentException("Command prefix cannot be empty.", nameof(options));
+        _ = ParseBindAddress(options.BindAddress);
         if ((uint)options.Port > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(options));
         if (options.MaxClients < 0)
@@ -44,8 +45,32 @@ public static class ServerMovementWorldApplicationFactory
                 GetSystemRuntimeSnapshots = _ => runtime.GetSystemRuntimeSnapshots(),
                 GetPlayerSessions = _ => runtime.GetPlayerSessionsSnapshot(),
                 GetAccountSummaries = _ => runtime.GetAccountSummariesSnapshot(),
+                ReplaceAccountAccess = (_, accountId, accessLevel, directGrants, directDenies) =>
+                    runtime.ReplaceAccountAccess(accountId, accessLevel, directGrants, directDenies),
                 ExecuteCommand = (app, command) => runtime.ExecuteCommand(app, command),
             });
+    }
+
+    private static IPAddress ParseBindAddress(string bindAddress)
+    {
+        string value = bindAddress?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(value) ||
+            string.Equals(value, "any", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            return IPAddress.Any;
+        }
+
+        if (string.Equals(value, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "loopback", StringComparison.OrdinalIgnoreCase))
+        {
+            return IPAddress.Loopback;
+        }
+
+        if (IPAddress.TryParse(value, out IPAddress? parsed))
+            return parsed;
+
+        throw new ArgumentException($"Bind address '{bindAddress}' is not a valid IP address.", nameof(bindAddress));
     }
 
     private sealed class Runtime : IDisposable
@@ -60,6 +85,7 @@ public static class ServerMovementWorldApplicationFactory
         private readonly InMemoryLoginRateLimiter _loginRateLimiter = new();
         private readonly InMemoryAccountSessionTracker _accountSessions = new();
         private readonly InMemoryAccountAuditSink _accountAudit = new();
+        private readonly AccountAccessAdministrationService _accountAccess;
         private readonly DefaultCredentialService _credentialService;
         private Action<string>? _operatorLog;
         private const float SprintMovementMultiplier = 1.75f;
@@ -87,6 +113,7 @@ public static class ServerMovementWorldApplicationFactory
         {
             _options = options;
             _characterService = new AccountCharacterService(_accounts, _characters);
+            _accountAccess = new AccountAccessAdministrationService(_accounts);
             _credentialService = new DefaultCredentialService(
                 _accounts,
                 _passwords,
@@ -128,7 +155,7 @@ public static class ServerMovementWorldApplicationFactory
 
             var metadata = DefaultPacketMetadata.Create();
             _transport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
-                new IPEndPoint(IPAddress.Any, _options.Port),
+                new IPEndPoint(ParseBindAddress(_options.BindAddress), _options.Port),
                 metadata,
                 EnableAsyncFlush: _options.EnableAsyncFlush));
             _transport.Start();
@@ -416,12 +443,24 @@ public static class ServerMovementWorldApplicationFactory
             {
                 ConnectionId connectionId = connections[i];
                 bool hasSelected = host.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected);
+                ServerAccountRecord account = null!;
+                bool hasAccount = hasSelected && _accounts.TryGetById(selected.AccountId, out account);
+                string remoteAddress = ResolveRemoteAddress(connectionId);
                 players[i] = new ServerPlayerSessionSnapshot(
                     connectionId.Value.ToString(),
                     hasSelected ? selected.CharacterName : $"Player {connectionId.Value}",
                     hasSelected ? selected.AccountId.ToString() : "local",
                     hasSelected ? "InWorld" : "Ready",
-                    hasSelected ? $"character={selected.CharacterId} prefab={selected.PrefabKey}" : string.Empty);
+                    hasSelected ? $"character={selected.CharacterId} prefab={selected.PrefabKey}" : string.Empty,
+                    AccountName: hasAccount ? account.Username : string.Empty,
+                    RemoteAddress: remoteAddress,
+                    IsOnline: true,
+                    CurrentUptime: TimeSpan.Zero,
+                    TotalPlayTime: TimeSpan.Zero,
+                    AccessLevel: hasAccount ? account.AccessLevel : 0,
+                    AccessRuleKeys: hasAccount ? account.AccessRuleKeys : [],
+                    DirectPermissionGrants: hasAccount ? account.DirectPermissionGrants : [],
+                    DirectPermissionDenies: hasAccount ? account.DirectPermissionDenies : []);
             }
 
             return players;
@@ -443,10 +482,39 @@ public static class ServerMovementWorldApplicationFactory
                     account.Username,
                     onlineAccounts.Contains(account.AccountId),
                     account.Status == AccountStatus.Banned,
-                    $"characters={account.CharacterCount}");
+                    $"characters={account.CharacterCount}",
+                    AccessLevel: account.AccessLevel,
+                    AccessRuleKeys: account.AccessRuleKeys,
+                    DirectPermissionGrants: account.DirectPermissionGrants,
+                    DirectPermissionDenies: account.DirectPermissionDenies,
+                    CreatedUtc: account.CreatedUtc,
+                    LastLoginUtc: account.LastLoginUtc == DateTimeOffset.MinValue ? null : account.LastLoginUtc,
+                    KnownRemoteAddresses: account.KnownRemoteAddresses);
             }
 
             return summaries;
+        }
+
+        public ServerAccountAccessUpdateResult ReplaceAccountAccess(
+            string accountId,
+            int accessLevel,
+            IReadOnlyList<string> directGrants,
+            IReadOnlyList<string> directDenies)
+        {
+            if (!ulong.TryParse(accountId, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong parsedAccountId))
+                return ServerAccountAccessUpdateResult.Reject(accountId, "Account id is not valid.");
+
+            AccountAccessUpdateResult result = _accountAccess.ReplaceAccessMetadata(
+                parsedAccountId,
+                accessLevel: Math.Max(0, accessLevel),
+                directPermissionGrants: directGrants,
+                directPermissionDenies: directDenies,
+                reason: "Godot server shell permissions edit.");
+            if (!result.Succeeded || result.Account is null)
+                return ServerAccountAccessUpdateResult.Reject(accountId, result.Error);
+
+            _operatorLog?.Invoke($"Accounts: Updated permissions for '{result.Account.Username}' access={result.Account.AccessLevel}.");
+            return ServerAccountAccessUpdateResult.Success(accountId, $"Updated permissions for '{result.Account.Username}'.");
         }
 
         private HashSet<ulong> GetOnlineAccountIds()

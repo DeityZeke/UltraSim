@@ -20,6 +20,11 @@ public interface IServerApplication
     IReadOnlyList<ServerSystemRuntimeSnapshot> GetSystemRuntimeSnapshots();
     IReadOnlyList<ServerPlayerSessionSnapshot> GetPlayerSessionsSnapshot();
     IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot();
+    ServerAccountAccessUpdateResult ReplaceAccountAccess(
+        string accountId,
+        int accessLevel,
+        IReadOnlyList<string> directPermissionGrants,
+        IReadOnlyList<string> directPermissionDenies);
     bool TryExecuteCommand(ServerControlCommand command, out ServerCommandResult result);
 
     event Action<ServerApplicationEvent>? EventRaised;

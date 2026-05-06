@@ -8,6 +8,7 @@ internal sealed record ServerWrapperSettingsConfigValues(
     string ProfileName,
     bool SaveOnStop,
     int NetworkPort,
+    string BindAddress,
     int MaxClients,
     double AutoSaveIntervalSeconds,
     double SessionAuthTimeoutSeconds,
@@ -76,6 +77,7 @@ internal static class ServerWrapperSettingsConfigLoader
             "Network port",
             values.NetworkPort.ToString(CultureInfo.InvariantCulture),
             editorKind: ServerSettingEditorKind.Integer);
+        registry.RegisterRestartRequired("server.network.bind_address", "Bind address", values.BindAddress);
         registry.RegisterRestartRequired(
             "server.network.max_clients",
             "Max clients",
@@ -146,6 +148,7 @@ internal static class ServerWrapperSettingsConfigLoader
         string profileName = values.ProfileName;
         bool saveOnStop = values.SaveOnStop;
         int networkPort = values.NetworkPort;
+        string bindAddress = values.BindAddress;
         int maxClients = values.MaxClients;
         double autoSaveIntervalSeconds = values.AutoSaveIntervalSeconds;
         double sessionAuthTimeoutSeconds = values.SessionAuthTimeoutSeconds;
@@ -172,6 +175,10 @@ internal static class ServerWrapperSettingsConfigLoader
                     {
                         networkPort = parsedPort;
                     }
+                    break;
+                case "server.network.bind_address":
+                    if (!string.IsNullOrWhiteSpace(change.NormalizedValue))
+                        bindAddress = change.NormalizedValue;
                     break;
                 case "server.network.max_clients":
                     if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedMaxClients))
@@ -228,6 +235,7 @@ internal static class ServerWrapperSettingsConfigLoader
             profileName,
             saveOnStop,
             networkPort,
+            bindAddress,
             maxClients,
             autoSaveIntervalSeconds,
             sessionAuthTimeoutSeconds,

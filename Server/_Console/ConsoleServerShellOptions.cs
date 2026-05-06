@@ -13,6 +13,7 @@ public sealed record ConsoleServerShellOptions(
     TimeSpan IdleDelay = default,
     bool EnableMovementWorld = true,
     int NetworkPort = 42042,
+    string BindAddress = "0.0.0.0",
     int MaxClients = 0,
     double AutoSaveIntervalSeconds = 0.0,
     double SessionAuthTimeoutSeconds = 5.0,
