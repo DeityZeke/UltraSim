@@ -10,6 +10,7 @@ public sealed record ServerMovementWorldApplicationOptions(
     bool EnableGlobalMovementObserverState = true,
     bool EnableAsyncFlush = true,
     float MovementSpeed = 4.0f,
+    int MaxClients = 0,
     double SessionAuthTimeoutSeconds = 5.0,
     double SessionKeepAliveTimeoutSeconds = 10.0,
     string CommandPrefix = "/",
@@ -20,6 +21,7 @@ public sealed record ServerMovementWorldApplicationOptions(
     string? PersistenceRoot = null,
     string? PersistenceBackupsRoot = null,
     ServerPersistenceBackupStorageMode PersistenceBackupStorageMode = ServerPersistenceBackupStorageMode.Directory,
+    int PersistenceBackupCount = 3,
     int PersistenceBackupZstdCompressionLevel = 3)
 {
     public static ServerMovementWorldApplicationOptions Default { get; } = new("movement-world");

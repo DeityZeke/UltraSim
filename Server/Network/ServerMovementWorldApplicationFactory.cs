@@ -21,6 +21,8 @@ public static class ServerMovementWorldApplicationFactory
             throw new ArgumentException("Command prefix cannot be empty.", nameof(options));
         if ((uint)options.Port > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(options));
+        if (options.MaxClients < 0)
+            throw new ArgumentOutOfRangeException(nameof(options), "Max clients cannot be negative.");
 
         var runtime = new Runtime(options);
         return new ServerApplication(
@@ -134,7 +136,7 @@ public static class ServerMovementWorldApplicationFactory
 
             var sessionPolicy = new SessionAdmissionPolicy(
                 DuplicateSessionPolicy.RejectNew,
-                MaxActiveSessions: 0,
+                MaxActiveSessions: _options.MaxClients,
                 AuthTimeoutTicks: SecondsToTicks(_options.SessionAuthTimeoutSeconds),
                 KeepAliveTimeoutTicks: SecondsToTicks(_options.SessionKeepAliveTimeoutSeconds));
 
@@ -598,6 +600,7 @@ public static class ServerMovementWorldApplicationFactory
                 ],
                 new ServerPersistenceSaveSetOptions(
                     BackupsRootDirectory: backupsRoot,
+                    BackupCount: _options.PersistenceBackupCount,
                     BackupCompressor: ServerPersistenceBackupCompressorFactory.Create(
                         _options.PersistenceBackupStorageMode,
                         _options.PersistenceBackupZstdCompressionLevel)),

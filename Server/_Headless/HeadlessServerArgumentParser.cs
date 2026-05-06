@@ -21,12 +21,14 @@ public static class HeadlessServerArgumentParser
         TimeSpan idleDelay = HeadlessServerShellOptions.Default.IdleDelay;
         bool enableMovementWorld = HeadlessServerShellOptions.Default.EnableMovementWorld;
         int networkPort = HeadlessServerShellOptions.Default.NetworkPort;
+        int maxClients = HeadlessServerShellOptions.Default.MaxClients;
         double sessionAuthTimeoutSeconds = HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds;
         string commandPrefix = HeadlessServerShellOptions.Default.CommandPrefix;
         int maxAutoCreatedAccountsPerRemoteAddress = HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress;
         string? runtimeRootPath = ServerWrapperSettingsConfigLoader.ReadRuntimeRootPath(args) ?? HeadlessServerShellOptions.Default.RuntimeRootPath;
         ServerPersistenceBackupStorageMode backupStorageMode = HeadlessServerShellOptions.Default.BackupStorageMode;
+        int backupCount = HeadlessServerShellOptions.Default.BackupCount;
         int backupZstdCompressionLevel = HeadlessServerShellOptions.Default.BackupZstdCompressionLevel;
 
         ServerWrapperSettingsConfigValues configValues = ServerWrapperSettingsConfigLoader.Load(
@@ -35,20 +37,24 @@ public static class HeadlessServerArgumentParser
                 profileName,
                 saveOnStop,
                 networkPort,
+                maxClients,
                 sessionAuthTimeoutSeconds,
                 sessionKeepAliveTimeoutSeconds,
                 commandPrefix,
                 maxAutoCreatedAccountsPerRemoteAddress,
                 backupStorageMode,
+                backupCount,
                 backupZstdCompressionLevel));
         profileName = configValues.ProfileName;
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
+        maxClients = configValues.MaxClients;
         sessionAuthTimeoutSeconds = configValues.SessionAuthTimeoutSeconds;
         sessionKeepAliveTimeoutSeconds = configValues.SessionKeepAliveTimeoutSeconds;
         commandPrefix = configValues.CommandPrefix;
         maxAutoCreatedAccountsPerRemoteAddress = configValues.MaxAutoCreatedAccountsPerRemoteAddress;
         backupStorageMode = configValues.BackupStorageMode;
+        backupCount = configValues.BackupCount;
         backupZstdCompressionLevel = configValues.BackupZstdCompressionLevel;
 
         for (int i = 0; i < args.Length; i++)
@@ -138,6 +144,19 @@ public static class HeadlessServerArgumentParser
                 continue;
             }
 
+            if (string.Equals(key, "--backup-count", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out backupCount) || backupCount is < 0 or > 3)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid backup count '{value}'. Expected 0, 1, 2, or 3.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
             if (string.Equals(key, "--command-prefix", StringComparison.OrdinalIgnoreCase))
             {
                 commandPrefix = value.Trim();
@@ -176,6 +195,19 @@ public static class HeadlessServerArgumentParser
                 {
                     options = HeadlessServerShellOptions.Default;
                     error = $"Invalid network port '{value}'.";
+                    showHelp = false;
+                    return false;
+                }
+
+                continue;
+            }
+
+            if (string.Equals(key, "--max-clients", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(value, out maxClients) || maxClients < 0)
+                {
+                    options = HeadlessServerShellOptions.Default;
+                    error = $"Invalid max clients '{value}'.";
                     showHelp = false;
                     return false;
                 }
@@ -275,12 +307,14 @@ public static class HeadlessServerArgumentParser
             IdleDelay: idleDelay,
             EnableMovementWorld: enableMovementWorld,
             NetworkPort: networkPort,
+            MaxClients: maxClients,
             SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
             SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
             CommandPrefix: commandPrefix,
             MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
             RuntimeRootPath: runtimeRootPath,
             BackupStorageMode: backupStorageMode,
+            BackupCount: backupCount,
             BackupZstdCompressionLevel: backupZstdCompressionLevel);
         error = null;
         showHelp = false;
@@ -293,10 +327,12 @@ public static class HeadlessServerArgumentParser
           --profile=<name>
           --runtime-root=<path>
           --backup-storage=<directory|zip|zstd>
+          --backup-count=<0-3>
           --backup-zstd-level=<n>
           --tick-ms=<n>
           --max-catchup=<n>
           --port=<0-65535>
+          --max-clients=<n>
           --session-auth-timeout-seconds=<seconds>
           --session-keepalive-timeout-seconds=<seconds>
           --command-prefix=<prefix>

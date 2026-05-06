@@ -108,6 +108,7 @@ public sealed class HeadlessServerShell
                 options.ProfileName,
                 Port: options.NetworkPort,
                 SaveOnStop: options.SaveOnStop,
+                MaxClients: options.MaxClients,
                 SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
                 SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
                 CommandPrefix: options.CommandPrefix,
@@ -116,6 +117,7 @@ public sealed class HeadlessServerShell
                 PersistenceRoot: ScriptContext!.RuntimeRoot.SavesPath,
                 PersistenceBackupsRoot: ScriptContext.RuntimeRoot.BackupsPath,
                 PersistenceBackupStorageMode: options.BackupStorageMode,
+                PersistenceBackupCount: options.BackupCount,
                 PersistenceBackupZstdCompressionLevel: options.BackupZstdCompressionLevel))
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,

@@ -107,6 +107,7 @@ public sealed class GodotServerShellController : IDisposable
 				options.ProfileName,
 				Port: options.NetworkPort,
 				SaveOnStop: options.SaveOnStop,
+				MaxClients: options.MaxClients,
 				SessionAuthTimeoutSeconds: options.SessionAuthTimeoutSeconds,
 				SessionKeepAliveTimeoutSeconds: options.SessionKeepAliveTimeoutSeconds,
 				CommandPrefix: options.CommandPrefix,
@@ -115,6 +116,7 @@ public sealed class GodotServerShellController : IDisposable
 				PersistenceRoot: _runtimeRoot.SavesPath,
 				PersistenceBackupsRoot: _runtimeRoot.BackupsPath,
 				PersistenceBackupStorageMode: options.BackupStorageMode,
+				PersistenceBackupCount: options.BackupCount,
 				PersistenceBackupZstdCompressionLevel: options.BackupZstdCompressionLevel))
 			: new ServerApplication(new ServerApplicationOptions(
 				options.ProfileName,

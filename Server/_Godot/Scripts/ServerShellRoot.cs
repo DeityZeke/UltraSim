@@ -29,10 +29,16 @@ public partial class ServerShellRoot : Control
 	private Label? _playersSummaryValue;
 	private Label? _accountsSummaryValue;
 	private Label? _performanceSummaryValue;
+	private ItemList? _playersList;
+	private Label? _playersSelectedValue;
+	private ItemList? _accountsList;
+	private Label? _accountsSelectedValue;
 	private VBoxContainer? _settingsList;
+	private PanelContainer? _restartRequiredBannerPanel;
+	private Label? _restartRequiredBannerText;
+	private Label? _settingsTitlePathLabel;
 	private Label? _settingsNote;
-	private Button? _validateSettingsButton;
-	private Button? _resetSettingsButton;
+	private Button? _cancelSettingsButton;
 	private Button? _applySettingsButton;
 	private GridContainer? _performanceGrid;
 	private Button? _startButton;
@@ -50,7 +56,16 @@ public partial class ServerShellRoot : Control
 	private long _bannerSampleCount;
 	private double _playerOnlineSampleTotal;
 	private double _accountOnlineSampleTotal;
+	private bool _settingsRestartRequiredPending;
+	private ServerApplicationState _lastServerState = ServerApplicationState.Created;
+	private string? _selectedPlayerSessionId;
+	private string? _selectedAccountId;
+	private IReadOnlyList<ServerPlayerSessionSnapshot> _currentPlayers = Array.Empty<ServerPlayerSessionSnapshot>();
+	private IReadOnlyList<ServerAccountSummarySnapshot> _currentAccounts = Array.Empty<ServerAccountSummarySnapshot>();
+	private string _playersListSignature = string.Empty;
+	private string _accountsListSignature = string.Empty;
 	private IReadOnlyList<ServerSettingDescriptor> _settingsDescriptors = Array.Empty<ServerSettingDescriptor>();
+	private readonly Dictionary<string, Control> _settingsRows = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, Control> _settingsEditors = new(StringComparer.Ordinal);
 	private readonly Dictionary<string, Label> _settingsDirtyMarkers = new(StringComparer.Ordinal);
 	private Color _settingsPanelSoftColor;
@@ -141,7 +156,9 @@ public partial class ServerShellRoot : Control
 		bool saveOnStop = options.SaveOnStop;
 		bool enableMovementWorld = options.EnableMovementWorld;
 		string? runtimeRootPath = options.RuntimeRootPath;
+		int maxClients = options.MaxClients;
 		ServerPersistenceBackupStorageMode backupStorageMode = options.BackupStorageMode;
+		int backupCount = options.BackupCount;
 		int backupZstdCompressionLevel = options.BackupZstdCompressionLevel;
 		startOnReady = false;
 
@@ -186,6 +203,14 @@ public partial class ServerShellRoot : Control
 					backupZstdCompressionLevel = parsedBackupZstdCompressionLevel;
 				}
 			}
+			else if (arg.StartsWith("--us-server-backup-count=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-backup-count=".Length..], out int parsedBackupCount) &&
+					parsedBackupCount is >= 0 and <= 3)
+				{
+					backupCount = parsedBackupCount;
+				}
+			}
 			else if (arg.StartsWith("--us-server-command-prefix=", StringComparison.OrdinalIgnoreCase))
 			{
 				string value = arg["--us-server-command-prefix=".Length..].Trim();
@@ -199,6 +224,13 @@ public partial class ServerShellRoot : Control
 				if (int.TryParse(arg["--us-server-port=".Length..], out int parsedPort) && parsedPort > 0)
 				{
 					networkPort = parsedPort;
+				}
+			}
+			else if (arg.StartsWith("--us-server-max-clients=", StringComparison.OrdinalIgnoreCase))
+			{
+				if (int.TryParse(arg["--us-server-max-clients=".Length..], out int parsedMaxClients) && parsedMaxClients >= 0)
+				{
+					maxClients = parsedMaxClients;
 				}
 			}
 			else if (arg.StartsWith("--us-server-tick-ms=", StringComparison.OrdinalIgnoreCase))
@@ -249,12 +281,14 @@ public partial class ServerShellRoot : Control
 			SaveOnStop: saveOnStop,
 			EnableMovementWorld: enableMovementWorld,
 			NetworkPort: networkPort,
+			MaxClients: maxClients,
 			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
 			CommandPrefix: commandPrefix,
 			MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
 			RuntimeRootPath: runtimeRootPath,
 			BackupStorageMode: backupStorageMode,
+			BackupCount: backupCount,
 			BackupZstdCompressionLevel: backupZstdCompressionLevel);
 	}
 
@@ -447,6 +481,8 @@ public partial class ServerShellRoot : Control
 		tabRow.AddThemeConstantOverride("separation", 4);
 		main.AddChild(tabRow);
 
+		main.AddChild(BuildRestartRequiredBanner(text));
+
 		var banner = BuildMetricBanner(panel, accent, text, muted);
 		main.AddChild(banner);
 
@@ -464,6 +500,29 @@ public partial class ServerShellRoot : Control
 		AddTabSpacer(tabRow);
 		AddShellTab(tabRow, "Settings", BuildSettingsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		SelectShellTab(0);
+	}
+
+	private PanelContainer BuildRestartRequiredBanner(Color text)
+	{
+		_restartRequiredBannerPanel = new PanelContainer();
+		_restartRequiredBannerPanel.CustomMinimumSize = new Vector2(0, 34);
+		_restartRequiredBannerPanel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_restartRequiredBannerPanel.Visible = false;
+		_restartRequiredBannerPanel.AddThemeStyleboxOverride("panel", CreatePanelStyle(new Color(0.58f, 0.04f, 0.04f), 6, new Color(0.96f, 0.20f, 0.16f)));
+
+		var margin = new MarginContainer();
+		margin.AddThemeConstantOverride("margin_left", 10);
+		margin.AddThemeConstantOverride("margin_top", 6);
+		margin.AddThemeConstantOverride("margin_right", 10);
+		margin.AddThemeConstantOverride("margin_bottom", 6);
+		_restartRequiredBannerPanel.AddChild(margin);
+
+		_restartRequiredBannerText = new Label();
+		_restartRequiredBannerText.Text = "Server restart required to apply new settings.";
+		_restartRequiredBannerText.HorizontalAlignment = HorizontalAlignment.Center;
+		_restartRequiredBannerText.AddThemeColorOverride("font_color", text);
+		margin.AddChild(_restartRequiredBannerText);
+		return _restartRequiredBannerPanel;
 	}
 
 	private static void AddTabSpacer(HBoxContainer tabRow)
@@ -708,20 +767,36 @@ public partial class ServerShellRoot : Control
 		listFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
 		column.AddChild(listFrame);
 
-		var listText = new RichTextLabel();
-		listText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		listText.SizeFlagsVertical = SizeFlags.ExpandFill;
-		listText.SelectionEnabled = true;
-		listText.ScrollActive = true;
-		listText.AddThemeColorOverride("default_color", text);
-		listText.Text =
-			"Active player rows will appear here once session roster plumbing is wired.\n\n" +
-			"Planned first fields:\n" +
-			"- player name\n" +
-			"- account id\n" +
-			"- session state\n" +
-			"- kick / inspect actions";
-		listFrame.AddChild(listText);
+		_playersList = new ItemList();
+		_playersList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_playersList.SizeFlagsVertical = SizeFlags.ExpandFill;
+		_playersList.SelectMode = ItemList.SelectModeEnum.Single;
+		_playersList.ItemSelected += index =>
+		{
+			int selected = (int)index;
+			if ((uint)selected < (uint)_currentPlayers.Count)
+				_selectedPlayerSessionId = _currentPlayers[selected].SessionId;
+			RefreshPlayerSelection();
+		};
+		listFrame.AddChild(_playersList);
+
+		_playersSelectedValue = new Label();
+		_playersSelectedValue.AddThemeColorOverride("font_color", muted);
+		_playersSelectedValue.ClipText = true;
+		column.AddChild(_playersSelectedValue);
+
+		var actionRow = new HBoxContainer();
+		actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		actionRow.AddThemeConstantOverride("separation", 8);
+		column.AddChild(actionRow);
+
+		actionRow.AddChild(CreateDisabledButton("Kick", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Ban", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Promote", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Blacklist", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Inspect", accentSoft, text));
 
 		return frame;
 	}
@@ -746,6 +821,29 @@ public partial class ServerShellRoot : Control
 		_accountsSummaryValue.AddThemeColorOverride("font_color", muted);
 		column.AddChild(_accountsSummaryValue);
 
+		var detailsFrame = new PanelContainer();
+		detailsFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
+		detailsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
+		column.AddChild(detailsFrame);
+
+		_accountsList = new ItemList();
+		_accountsList.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		_accountsList.SizeFlagsVertical = SizeFlags.ExpandFill;
+		_accountsList.SelectMode = ItemList.SelectModeEnum.Single;
+		_accountsList.ItemSelected += index =>
+		{
+			int selected = (int)index;
+			if ((uint)selected < (uint)_currentAccounts.Count)
+				_selectedAccountId = _currentAccounts[selected].AccountId;
+			RefreshAccountSelection();
+		};
+		detailsFrame.AddChild(_accountsList);
+
+		_accountsSelectedValue = new Label();
+		_accountsSelectedValue.AddThemeColorOverride("font_color", muted);
+		_accountsSelectedValue.ClipText = true;
+		column.AddChild(_accountsSelectedValue);
+
 		var actionRow = new HBoxContainer();
 		actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		actionRow.AddThemeConstantOverride("separation", 8);
@@ -754,25 +852,11 @@ public partial class ServerShellRoot : Control
 		actionRow.AddChild(CreateDisabledButton("Add", accentSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Remove", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Ban", panelSoft, text));
-
-		var detailsFrame = new PanelContainer();
-		detailsFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
-		detailsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
-		column.AddChild(detailsFrame);
-
-		var detailsText = new RichTextLabel();
-		detailsText.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-		detailsText.SizeFlagsVertical = SizeFlags.ExpandFill;
-		detailsText.SelectionEnabled = true;
-		detailsText.ScrollActive = true;
-		detailsText.AddThemeColorOverride("default_color", text);
-		detailsText.Text =
-			"Account directory and moderation tools are intentionally not wired yet.\n\n" +
-			"This tab will become the thin operator view for:\n" +
-			"- account lookup\n" +
-			"- add / remove / ban actions\n" +
-			"- audit notes and current flags";
-		detailsFrame.AddChild(detailsText);
+		actionRow.AddChild(CreateDisabledButton("Promote", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Blacklist", panelSoft, text));
+		actionRow.AddChild(CreateDisabledButton("Inspect", panelSoft, text));
 
 		return frame;
 	}
@@ -837,7 +921,16 @@ public partial class ServerShellRoot : Control
 		column.AddThemeConstantOverride("separation", 10);
 		frame.AddChild(column);
 
-		column.AddChild(CreateSectionLabel("Settings", text));
+		var titleRow = new HBoxContainer();
+		titleRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		titleRow.AddThemeConstantOverride("separation", 4);
+		column.AddChild(titleRow);
+
+		titleRow.AddChild(CreateSectionLabel("Settings:", text));
+		_settingsTitlePathLabel = CreateSectionLabel(string.Empty, accentSoft.Lightened(0.15f));
+		_settingsTitlePathLabel.ClipText = true;
+		_settingsTitlePathLabel.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		titleRow.AddChild(_settingsTitlePathLabel);
 
 		var settingsFrame = new PanelContainer();
 		settingsFrame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
@@ -869,18 +962,18 @@ public partial class ServerShellRoot : Control
 		_settingsList.AddThemeConstantOverride("separation", 8);
 		scroll.AddChild(_settingsList);
 
+		var actionSpacer = new Control();
+		actionSpacer.CustomMinimumSize = new Vector2(0, 6);
+		settingsColumn.AddChild(actionSpacer);
+
 		var actionRow = new HBoxContainer();
 		actionRow.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		actionRow.AddThemeConstantOverride("separation", 8);
 		settingsColumn.AddChild(actionRow);
 
-		_validateSettingsButton = CreateActionButton("Validate Changes", accentSoft, text);
-		_validateSettingsButton.Pressed += HandleValidateSettingsPressed;
-		actionRow.AddChild(_validateSettingsButton);
-
-		_resetSettingsButton = CreateActionButton("Reset", panelSoft, text);
-		_resetSettingsButton.Pressed += RefreshSettingsTab;
-		actionRow.AddChild(_resetSettingsButton);
+		_cancelSettingsButton = CreateActionButton("Cancel", panelSoft, text);
+		_cancelSettingsButton.Pressed += RefreshSettingsTab;
+		actionRow.AddChild(_cancelSettingsButton);
 
 		_applySettingsButton = CreateActionButton("Apply", panelSoft.Darkened(0.08f), muted);
 		_applySettingsButton.Pressed += HandleApplySettingsPressed;
@@ -923,7 +1016,7 @@ public partial class ServerShellRoot : Control
 		return button;
 	}
 
-		private static Button CreateDisabledButton(string text, Color fill, Color fontColor)
+	private static Button CreateDisabledButton(string text, Color fill, Color fontColor)
 	{
 		var button = CreateActionButton(text, fill, fontColor);
 		button.Disabled = true;
@@ -1258,6 +1351,8 @@ public partial class ServerShellRoot : Control
 			if (_performanceGrid is not null)
 				SetPerformancePlaceholder(new Color(0.90f, 0.92f, 0.95f), new Color(0.62f, 0.67f, 0.74f));
 
+			RefreshPlayersList(Array.Empty<ServerPlayerSessionSnapshot>());
+			RefreshAccountsList(Array.Empty<ServerAccountSummarySnapshot>());
 			RefreshControls(ServerApplicationState.Created);
 			return;
 		}
@@ -1280,8 +1375,205 @@ public partial class ServerShellRoot : Control
 				? "Account directory actions are placeholders until account storage is wired."
 				: $"{accounts.Count} account rows available for operator view.";
 
+		RefreshPlayersList(players);
+		RefreshAccountsList(accounts);
 		RefreshPerformance(metrics, systems);
 		RefreshControls(status.State);
+	}
+
+	private void RefreshPlayersList(IReadOnlyList<ServerPlayerSessionSnapshot> players)
+	{
+		_currentPlayers = players;
+		if (_playersList is null)
+			return;
+
+		string signature = BuildPlayersListSignature(players);
+		bool listChanged = !string.Equals(signature, _playersListSignature, StringComparison.Ordinal);
+		if (listChanged)
+		{
+			_playersList.Clear();
+			for (int i = 0; i < players.Count; i++)
+				_playersList.AddItem(FormatPlayerRow(players[i]));
+			_playersListSignature = signature;
+		}
+
+		int selectedIndex = -1;
+		for (int i = 0; i < players.Count; i++)
+		{
+			ServerPlayerSessionSnapshot player = players[i];
+			if (!string.IsNullOrWhiteSpace(_selectedPlayerSessionId) &&
+				string.Equals(player.SessionId, _selectedPlayerSessionId, StringComparison.Ordinal))
+			{
+				selectedIndex = i;
+			}
+		}
+
+		if (selectedIndex >= 0)
+			_playersList.Select(selectedIndex);
+		else
+			_selectedPlayerSessionId = null;
+
+		RefreshPlayerSelection();
+	}
+
+	private void RefreshAccountsList(IReadOnlyList<ServerAccountSummarySnapshot> accounts)
+	{
+		_currentAccounts = accounts;
+		if (_accountsList is null)
+			return;
+
+		string signature = BuildAccountsListSignature(accounts);
+		bool listChanged = !string.Equals(signature, _accountsListSignature, StringComparison.Ordinal);
+		if (listChanged)
+		{
+			_accountsList.Clear();
+			for (int i = 0; i < accounts.Count; i++)
+				_accountsList.AddItem(FormatAccountRow(accounts[i]));
+			_accountsListSignature = signature;
+		}
+
+		int selectedIndex = -1;
+		for (int i = 0; i < accounts.Count; i++)
+		{
+			ServerAccountSummarySnapshot account = accounts[i];
+			if (!string.IsNullOrWhiteSpace(_selectedAccountId) &&
+				string.Equals(account.AccountId, _selectedAccountId, StringComparison.Ordinal))
+			{
+				selectedIndex = i;
+			}
+		}
+
+		if (selectedIndex >= 0)
+			_accountsList.Select(selectedIndex);
+		else
+			_selectedAccountId = null;
+
+		RefreshAccountSelection();
+	}
+
+	private void RefreshPlayerSelection()
+	{
+		if (_playersSelectedValue is null)
+			return;
+
+		if (TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
+		{
+			_playersSelectedValue.Text = string.IsNullOrWhiteSpace(player.Detail)
+				? $"Selected: {player.PlayerName}  session={player.SessionId}  account={player.AccountId}"
+				: $"Selected: {player.PlayerName}  session={player.SessionId}  account={player.AccountId}  {player.Detail}";
+			return;
+		}
+
+		_playersSelectedValue.Text = "Select a player row to enable player actions.";
+	}
+
+	private void RefreshAccountSelection()
+	{
+		if (_accountsSelectedValue is null)
+			return;
+
+		if (TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		{
+			string flags = $"{(account.IsOnline ? "online" : "offline")}, {(account.IsBanned ? "banned" : "clear")}";
+			_accountsSelectedValue.Text = string.IsNullOrWhiteSpace(account.Detail)
+				? $"Selected: {account.DisplayName}  account={account.AccountId}  {flags}"
+				: $"Selected: {account.DisplayName}  account={account.AccountId}  {flags}  {account.Detail}";
+			return;
+		}
+
+		_accountsSelectedValue.Text = "Select an account row to enable account actions.";
+	}
+
+	private bool TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player)
+	{
+		for (int i = 0; i < _currentPlayers.Count; i++)
+		{
+			if (string.Equals(_currentPlayers[i].SessionId, _selectedPlayerSessionId, StringComparison.Ordinal))
+			{
+				player = _currentPlayers[i];
+				return true;
+			}
+		}
+
+		player = default;
+		return false;
+	}
+
+	private bool TryFindSelectedAccount(out ServerAccountSummarySnapshot account)
+	{
+		for (int i = 0; i < _currentAccounts.Count; i++)
+		{
+			if (string.Equals(_currentAccounts[i].AccountId, _selectedAccountId, StringComparison.Ordinal))
+			{
+				account = _currentAccounts[i];
+				return true;
+			}
+		}
+
+		account = default;
+		return false;
+	}
+
+	private static string FormatPlayerRow(ServerPlayerSessionSnapshot player)
+	{
+		return $"{TrimForRow(player.PlayerName, 24),-24}  {TrimForRow(player.AccountId, 18),-18}  {TrimForRow(player.SessionState, 16),-16}  {TrimForRow(player.SessionId, 20),-20}";
+	}
+
+	private static string FormatAccountRow(ServerAccountSummarySnapshot account)
+	{
+		string online = account.IsOnline ? "online" : "offline";
+		string banned = account.IsBanned ? "banned" : "clear";
+		return $"{TrimForRow(account.DisplayName, 24),-24}  {TrimForRow(account.AccountId, 18),-18}  {online,-8}  {banned,-8}";
+	}
+
+	private static string BuildPlayersListSignature(IReadOnlyList<ServerPlayerSessionSnapshot> players)
+	{
+		var builder = new StringBuilder(players.Count * 96);
+		builder.Append(players.Count);
+		for (int i = 0; i < players.Count; i++)
+		{
+			ServerPlayerSessionSnapshot player = players[i];
+			builder.Append('|')
+				.Append(player.SessionId)
+				.Append('\u001f')
+				.Append(player.PlayerName)
+				.Append('\u001f')
+				.Append(player.AccountId)
+				.Append('\u001f')
+				.Append(player.SessionState)
+				.Append('\u001f')
+				.Append(player.Detail);
+		}
+
+		return builder.ToString();
+	}
+
+	private static string BuildAccountsListSignature(IReadOnlyList<ServerAccountSummarySnapshot> accounts)
+	{
+		var builder = new StringBuilder(accounts.Count * 80);
+		builder.Append(accounts.Count);
+		for (int i = 0; i < accounts.Count; i++)
+		{
+			ServerAccountSummarySnapshot account = accounts[i];
+			builder.Append('|')
+				.Append(account.AccountId)
+				.Append('\u001f')
+				.Append(account.DisplayName)
+				.Append('\u001f')
+				.Append(account.IsOnline ? '1' : '0')
+				.Append('\u001f')
+				.Append(account.IsBanned ? '1' : '0')
+				.Append('\u001f')
+				.Append(account.Detail);
+		}
+
+		return builder.ToString();
+	}
+
+	private static string TrimForRow(string? value, int maxLength)
+	{
+		string text = string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
+		return text.Length <= maxLength ? text : text[..Math.Max(0, maxLength - 3)] + "...";
 	}
 
 	private void RefreshSettingsTab()
@@ -1292,12 +1584,16 @@ public partial class ServerShellRoot : Control
 		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
 		UltraSimRuntimeRootLayout runtimeRoot = UltraSimRuntimeRootResolver.Resolve(options.RuntimeRootPath);
 		IReadOnlyList<ServerSettingDescriptor> settings = BuildSettingsInventory(options, runtimeRoot);
+		if (_settingsTitlePathLabel is not null)
+			_settingsTitlePathLabel.Text = FormatRuntimeRelativePath(runtimeRoot, GetSettingsConfigPath(runtimeRoot));
 		_settingsDescriptors = settings;
+		_settingsRows.Clear();
 		_settingsEditors.Clear();
 		_settingsDirtyMarkers.Clear();
 		ClearSettingsList();
 		AppendSettingsSection("Changeable While Running", settings, ServerSettingApplyMode.ApplyWithoutRestart);
 		AppendSettingsSection("Restart Required", settings, ServerSettingApplyMode.RestartRequired);
+		UpdateSettingsRestartBanner();
 		SetSettingsDefaultNote(settings, runtimeRoot);
 
 		UpdateSettingsActionState();
@@ -1317,6 +1613,7 @@ public partial class ServerShellRoot : Control
 		var registry = new ServerSettingsRegistry();
 		registry.RegisterRestartRequired("server.name", "Server name", options.ProfileName);
 		registry.RegisterRestartRequired("server.network.port", "Network port", options.NetworkPort.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired("server.network.max_clients", "Max clients", options.MaxClients.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired("server.save.on_stop", "Save on stop", FormatBool(options.SaveOnStop), editorKind: ServerSettingEditorKind.Boolean);
 		registry.RegisterRestartRequired("server.session.auth_timeout_seconds", "Session auth timeout seconds", options.SessionAuthTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
 		registry.RegisterRestartRequired("server.session.keepalive_timeout_seconds", "Session keepalive timeout seconds", options.SessionKeepAliveTimeoutSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
@@ -1331,6 +1628,18 @@ public partial class ServerShellRoot : Control
 				new ServerSettingChoice("off", "off"),
 				new ServerSettingChoice("zip", "zip"),
 				new ServerSettingChoice("zstd", "zstd")
+			]);
+		registry.RegisterRestartRequired(
+			"server.persistence.backup_count",
+			"Backup count",
+			options.BackupCount.ToString(CultureInfo.InvariantCulture),
+			editorKind: ServerSettingEditorKind.Choice,
+			choices:
+			[
+				new ServerSettingChoice("0", "0"),
+				new ServerSettingChoice("1", "1"),
+				new ServerSettingChoice("2", "2"),
+				new ServerSettingChoice("3", "3")
 			]);
 		registry.RegisterRestartRequired("server.persistence.backup_zstd_level", "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", options.CommandPrefix);
@@ -1409,9 +1718,7 @@ public partial class ServerShellRoot : Control
 
 		Control editor = CreateSettingEditor(setting);
 		editor.CustomMinimumSize = new Vector2(GetSettingEditorMinimumWidth(setting.EditorKind), 30);
-		editor.SizeFlagsHorizontal = setting.EditorKind == ServerSettingEditorKind.Path
-			? SizeFlags.ExpandFill
-			: SizeFlags.ShrinkBegin;
+		editor.SizeFlagsHorizontal = SizeFlags.ShrinkBegin;
 		editor.TooltipText = row.TooltipText;
 		row.AddChild(editor);
 		_settingsEditors[setting.Key] = editor;
@@ -1433,6 +1740,7 @@ public partial class ServerShellRoot : Control
 		marker.TooltipText = row.TooltipText;
 		marker.AddThemeColorOverride("font_color", _settingsAccentSoftColor.Lightened(0.25f));
 		row.AddChild(marker);
+		_settingsRows[setting.Key] = row;
 		_settingsDirtyMarkers[setting.Key] = marker;
 		return row;
 	}
@@ -1452,7 +1760,26 @@ public partial class ServerShellRoot : Control
 		var editor = new LineEdit();
 		editor.Text = setting.Value;
 		editor.Editable = true;
-		editor.TextChanged += _ => UpdateSettingsActionState();
+		bool updatingText = false;
+		editor.TextChanged += value =>
+		{
+			if (!updatingText)
+			{
+				string filtered = FilterSettingInput(setting.EditorKind, value);
+				if (!string.Equals(filtered, value, StringComparison.Ordinal))
+				{
+					int caretColumn = editor.CaretColumn;
+					updatingText = true;
+					editor.Text = filtered;
+					editor.CaretColumn = Math.Clamp(caretColumn - (value.Length - filtered.Length), 0, filtered.Length);
+					updatingText = false;
+				}
+			}
+
+			UpdateSettingsActionState();
+		};
+		editor.TextSubmitted += _ => CommitSettingEditorValue(setting, editor);
+		editor.FocusExited += () => CommitSettingEditorValue(setting, editor);
 		editor.AddThemeColorOverride("font_color", _settingsTextColor);
 		editor.AddThemeStyleboxOverride("normal", CreatePanelStyle(_settingsPanelSoftColor, 6));
 		editor.AddThemeStyleboxOverride("read_only", CreatePanelStyle(_settingsPanelSoftColor, 6, _settingsAccentSoftColor));
@@ -1468,6 +1795,7 @@ public partial class ServerShellRoot : Control
 		editor.Toggled += enabled =>
 		{
 			editor.Text = enabled ? "on" : "off";
+			CommitSettingEditorValue(setting, editor);
 			UpdateSettingsActionState();
 		};
 		editor.AddThemeColorOverride("font_color", _settingsTextColor);
@@ -1488,31 +1816,12 @@ public partial class ServerShellRoot : Control
 
 		editor.Select(selectedIndex);
 		editor.Disabled = false;
-		editor.ItemSelected += _ => UpdateSettingsActionState();
+		editor.ItemSelected += _ =>
+		{
+			CommitSettingEditorValue(setting, editor);
+			UpdateSettingsActionState();
+		};
 		return editor;
-	}
-
-	private void HandleValidateSettingsPressed()
-	{
-		ServerSettingsChangeSetValidationResult result = ValidatePendingSettingsChanges();
-		if (result.Changes.Count == 0 && result.Errors.Count == 0)
-		{
-			SetSettingsNote("No pending setting changes.");
-			UpdateSettingsActionState(updateNote: false);
-			return;
-		}
-
-		if (!result.IsValid)
-		{
-			ReportSettingsValidationErrors(result);
-			return;
-		}
-
-		int restartRequired = CountSettingsChanges(result.Changes, ServerSettingApplyMode.RestartRequired);
-		int applyWithoutRestart = CountSettingsChanges(result.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
-		SetSettingsNote(
-			$"Validated {result.Changes.Count} pending change(s): {applyWithoutRestart} changeable while running, {restartRequired} restart required. Apply will save config; restart-required values take effect on next start.");
-		UpdateSettingsActionState(updateNote: false);
 	}
 
 	private void HandleApplySettingsPressed()
@@ -1539,12 +1848,13 @@ public partial class ServerShellRoot : Control
 		document.ApplyChanges(result.Changes);
 		store.Save(path, document);
 
+		int restartRequired = CountSettingsChanges(result.Changes, ServerSettingApplyMode.RestartRequired);
+		if (restartRequired > 0 && IsServerActivelyRunning(_lastServerState))
+			_settingsRestartRequiredPending = true;
+
 		_options = ApplyValidatedSettingsToOptions(options, result.Changes);
 		RefreshSettingsTab();
-		int restartRequired = CountSettingsChanges(result.Changes, ServerSettingApplyMode.RestartRequired);
-		int applyWithoutRestart = CountSettingsChanges(result.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
-		SetSettingsNote(
-			$"Saved {result.Changes.Count} setting change(s) to {path}. {applyWithoutRestart} changeable while running, {restartRequired} restart required.");
+		SetSettingsNote($"{result.Changes.Count} Setting{(result.Changes.Count == 1 ? string.Empty : "s")} Applied.");
 		AppendOutput("SETTINGS", $"Saved {result.Changes.Count} setting change(s) to {path}.");
 	}
 
@@ -1577,6 +1887,9 @@ public partial class ServerShellRoot : Control
 		for (int i = 0; i < _settingsDescriptors.Count; i++)
 		{
 			ServerSettingDescriptor descriptor = _settingsDescriptors[i];
+			if (_settingsRows.TryGetValue(descriptor.Key, out Control? row) && !row.Visible)
+				continue;
+
 			if (!_settingsEditors.TryGetValue(descriptor.Key, out Control? editor))
 				continue;
 
@@ -1603,6 +1916,105 @@ public partial class ServerShellRoot : Control
 		};
 	}
 
+	private string GetChoiceEditorValue(string settingKey, OptionButton optionButton)
+	{
+		for (int i = 0; i < _settingsDescriptors.Count; i++)
+		{
+			ServerSettingDescriptor descriptor = _settingsDescriptors[i];
+			if (!string.Equals(descriptor.Key, settingKey, StringComparison.Ordinal) || descriptor.Choices.Count == 0)
+				continue;
+
+			int selected = Math.Clamp(optionButton.Selected, 0, descriptor.Choices.Count - 1);
+			return descriptor.Choices[selected].Value;
+		}
+
+		return string.Empty;
+	}
+
+	private void CommitSettingEditorValue(ServerSettingDescriptor descriptor, Control editor)
+	{
+		string value = GetSettingEditorValue(descriptor, editor);
+		ServerSettingValidationResult validation = ServerSettingValueValidator.Validate(descriptor, value);
+		if (!validation.IsValid)
+		{
+			SetSettingEditorValue(descriptor, editor, descriptor.Value);
+			SetSettingsNote($"{descriptor.DisplayName} reverted: {validation.Error}");
+			UpdateSettingsActionState(updateNote: false);
+			return;
+		}
+
+		SetSettingEditorValue(descriptor, editor, validation.NormalizedValue);
+		UpdateSettingsActionState();
+	}
+
+	private static void SetSettingEditorValue(ServerSettingDescriptor descriptor, Control editor, string value)
+	{
+		switch (editor)
+		{
+			case CheckBox checkBox:
+				bool enabled = string.Equals(value, "on", StringComparison.OrdinalIgnoreCase);
+				checkBox.ButtonPressed = enabled;
+				checkBox.Text = enabled ? "on" : "off";
+				break;
+			case OptionButton optionButton:
+				for (int i = 0; i < descriptor.Choices.Count; i++)
+				{
+					if (string.Equals(descriptor.Choices[i].Value, value, StringComparison.Ordinal))
+					{
+						optionButton.Select(i);
+						break;
+					}
+				}
+				break;
+			case LineEdit lineEdit:
+				if (!string.Equals(lineEdit.Text, value, StringComparison.Ordinal))
+				{
+					lineEdit.Text = value;
+					lineEdit.CaretColumn = value.Length;
+				}
+				break;
+		}
+	}
+
+	private static string FilterSettingInput(ServerSettingEditorKind kind, string value)
+	{
+		return kind switch
+		{
+			ServerSettingEditorKind.Integer => FilterNumberInput(value, allowDecimalPoint: false),
+			ServerSettingEditorKind.Decimal => FilterNumberInput(value, allowDecimalPoint: true),
+			_ => value
+		};
+	}
+
+	private static string FilterNumberInput(string value, bool allowDecimalPoint)
+	{
+		var builder = new StringBuilder(value.Length);
+		bool hasDecimalPoint = false;
+		for (int i = 0; i < value.Length; i++)
+		{
+			char c = value[i];
+			if (char.IsDigit(c))
+			{
+				builder.Append(c);
+				continue;
+			}
+
+			if (c == '-' && builder.Length == 0)
+			{
+				builder.Append(c);
+				continue;
+			}
+
+			if (allowDecimalPoint && c == '.' && !hasDecimalPoint)
+			{
+				builder.Append(c);
+				hasDecimalPoint = true;
+			}
+		}
+
+		return builder.ToString();
+	}
+
 	private ServerSettingsRegistry BuildSettingsRegistryFromCurrentDescriptors()
 	{
 		var registry = new ServerSettingsRegistry();
@@ -1616,12 +2028,11 @@ public partial class ServerShellRoot : Control
 
 	private void UpdateSettingsActionState(bool updateNote = true)
 	{
+		UpdateSettingsConditionalVisibility();
 		IReadOnlyList<ServerSettingProposedValue> pendingChanges = CollectSettingsProposedValues(onlyChanged: true);
 		bool hasChanges = pendingChanges.Count > 0;
-		if (_validateSettingsButton is not null)
-			_validateSettingsButton.Disabled = !hasChanges;
-		if (_resetSettingsButton is not null)
-			_resetSettingsButton.Disabled = !hasChanges;
+		if (_cancelSettingsButton is not null)
+			_cancelSettingsButton.Disabled = !hasChanges;
 		if (_applySettingsButton is not null)
 			_applySettingsButton.Disabled = !hasChanges;
 
@@ -1629,6 +2040,25 @@ public partial class ServerShellRoot : Control
 
 		if (updateNote)
 			SetSettingsPendingNote(pendingChanges);
+	}
+
+	private void UpdateSettingsConditionalVisibility()
+	{
+		if (!_settingsRows.TryGetValue("server.persistence.backup_zstd_level", out Control? zstdLevelRow))
+			return;
+
+		if (!_settingsEditors.TryGetValue("server.persistence.backup_storage", out Control? backupStorageEditor))
+			return;
+
+		string backupStorage = backupStorageEditor switch
+		{
+			OptionButton optionButton => GetChoiceEditorValue("server.persistence.backup_storage", optionButton),
+			_ => string.Empty
+		};
+		bool showZstdLevel = string.Equals(backupStorage, "zstd", StringComparison.OrdinalIgnoreCase);
+		zstdLevelRow.Visible = showZstdLevel;
+		if (!showZstdLevel && _settingsDirtyMarkers.TryGetValue("server.persistence.backup_zstd_level", out Label? marker))
+			marker.Text = string.Empty;
 	}
 
 	private void UpdateSettingsDirtyMarkers(IReadOnlyList<ServerSettingProposedValue> pendingChanges)
@@ -1647,16 +2077,23 @@ public partial class ServerShellRoot : Control
 			_settingsNote.Text = text;
 	}
 
+	private void UpdateSettingsRestartBanner()
+	{
+		if (_restartRequiredBannerPanel is null || _restartRequiredBannerText is null)
+			return;
+
+		bool visible = _settingsRestartRequiredPending && IsServerActivelyRunning(_lastServerState);
+		_restartRequiredBannerPanel.Visible = visible;
+		_restartRequiredBannerText.Text = visible
+			? "Server restart required to apply new settings."
+			: string.Empty;
+	}
+
 	private void SetSettingsDefaultNote(
 		IReadOnlyList<ServerSettingDescriptor> settings,
 		UltraSimRuntimeRootLayout runtimeRoot)
 	{
-		int applyWithoutRestart = CountSettingsDescriptors(settings, ServerSettingApplyMode.ApplyWithoutRestart);
-		int restartRequired = CountSettingsDescriptors(settings, ServerSettingApplyMode.RestartRequired);
-		string configPath = FormatRuntimeRelativePath(runtimeRoot, GetSettingsConfigPath(runtimeRoot));
-		SetSettingsNote(
-			$"Config file: {configPath} under runtime root {runtimeRoot.RootPath}\n" +
-			$"Registered settings: {applyWithoutRestart} changeable while running, {restartRequired} restart required. Relative paths resolve from the runtime root; absolute paths leave it. ** This setting requires a restart to apply.");
+		SetSettingsNote($"{settings.Count} Settings Applied.");
 	}
 
 	private void SetSettingsPendingNote(IReadOnlyList<ServerSettingProposedValue> pendingChanges)
@@ -1673,14 +2110,12 @@ public partial class ServerShellRoot : Control
 		ServerSettingsChangeSetValidationResult validation = registry.ValidateChanges(pendingChanges);
 		if (!validation.IsValid)
 		{
-			SetSettingsNote($"{pendingChanges.Count} pending setting change(s). Validate Changes will show details before saving.");
+			SetSettingsNote($"{pendingChanges.Count} setting change(s) pending - press Apply to save changes. Note: '**' changes take effect on next start.");
 			return;
 		}
 
-		int applyWithoutRestart = CountSettingsChanges(validation.Changes, ServerSettingApplyMode.ApplyWithoutRestart);
-		int restartRequired = CountSettingsChanges(validation.Changes, ServerSettingApplyMode.RestartRequired);
 		SetSettingsNote(
-			$"{pendingChanges.Count} pending setting change(s): {applyWithoutRestart} changeable while running, {restartRequired} restart required. Apply saves config; restart-required values take effect on next start.");
+			$"{pendingChanges.Count} setting change(s) pending - press Apply to save changes. Note: '**' changes take effect on next start.");
 	}
 
 	private static string BuildSettingTooltip(ServerSettingDescriptor setting)
@@ -1692,16 +2127,7 @@ public partial class ServerShellRoot : Control
 
 	private static float GetSettingEditorMinimumWidth(ServerSettingEditorKind kind)
 	{
-		return kind switch
-		{
-			ServerSettingEditorKind.Path => 360f,
-			ServerSettingEditorKind.Text => 150f,
-			ServerSettingEditorKind.Choice => 140f,
-			ServerSettingEditorKind.Decimal => 120f,
-			ServerSettingEditorKind.Integer => 110f,
-			ServerSettingEditorKind.Boolean => 96f,
-			_ => 150f
-		};
+		return 170f;
 	}
 
 	private static int CountSettingsChanges(
@@ -1718,32 +2144,20 @@ public partial class ServerShellRoot : Control
 		return count;
 	}
 
-	private static int CountSettingsDescriptors(
-		IReadOnlyList<ServerSettingDescriptor> settings,
-		ServerSettingApplyMode applyMode)
-	{
-		int count = 0;
-		for (int i = 0; i < settings.Count; i++)
-		{
-			if (settings[i].ApplyMode == applyMode)
-				count++;
-		}
-
-		return count;
-	}
-
 	private static GodotServerShellOptions ApplyValidatedSettingsToOptions(
 		GodotServerShellOptions options,
 		IReadOnlyList<ServerSettingValidatedChange> changes)
 	{
 		string profileName = options.ProfileName;
 		int networkPort = options.NetworkPort;
+		int maxClients = options.MaxClients;
 		bool saveOnStop = options.SaveOnStop;
 		double sessionAuthTimeoutSeconds = options.SessionAuthTimeoutSeconds;
 		double sessionKeepAliveTimeoutSeconds = options.SessionKeepAliveTimeoutSeconds;
 		string commandPrefix = options.CommandPrefix;
 		int maxAutoCreatedAccountsPerRemoteAddress = options.MaxAutoCreatedAccountsPerRemoteAddress;
 		ServerPersistenceBackupStorageMode backupStorageMode = options.BackupStorageMode;
+		int backupCount = options.BackupCount;
 		int backupZstdCompressionLevel = options.BackupZstdCompressionLevel;
 
 		for (int i = 0; i < changes.Count; i++)
@@ -1758,6 +2172,10 @@ public partial class ServerShellRoot : Control
 				case "server.network.port":
 					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedPort) && parsedPort > 0)
 						networkPort = parsedPort;
+					break;
+				case "server.network.max_clients":
+					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedMaxClients))
+						maxClients = Math.Max(0, parsedMaxClients);
 					break;
 				case "server.save.on_stop":
 					if (TryParseSettingBool(change.NormalizedValue, out bool parsedSaveOnStop))
@@ -1783,6 +2201,10 @@ public partial class ServerShellRoot : Control
 					if (ServerPersistenceBackupCompressorFactory.TryParseMode(change.NormalizedValue, out ServerPersistenceBackupStorageMode parsedBackupStorageMode))
 						backupStorageMode = parsedBackupStorageMode;
 					break;
+				case "server.persistence.backup_count":
+					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupCount))
+						backupCount = Math.Clamp(parsedBackupCount, 0, 3);
+					break;
 				case "server.persistence.backup_zstd_level":
 					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupZstdLevel))
 						backupZstdCompressionLevel = parsedBackupZstdLevel;
@@ -1794,12 +2216,14 @@ public partial class ServerShellRoot : Control
 		{
 			ProfileName = profileName,
 			NetworkPort = networkPort,
+			MaxClients = maxClients,
 			SaveOnStop = saveOnStop,
 			SessionAuthTimeoutSeconds = sessionAuthTimeoutSeconds,
 			SessionKeepAliveTimeoutSeconds = sessionKeepAliveTimeoutSeconds,
 			CommandPrefix = commandPrefix,
 			MaxAutoCreatedAccountsPerRemoteAddress = maxAutoCreatedAccountsPerRemoteAddress,
 			BackupStorageMode = backupStorageMode,
+			BackupCount = backupCount,
 			BackupZstdCompressionLevel = backupZstdCompressionLevel
 		};
 	}
@@ -2066,6 +2490,9 @@ public partial class ServerShellRoot : Control
 
 	private void RefreshControls(ServerApplicationState state)
 	{
+		_lastServerState = state;
+		UpdateSettingsRestartBanner();
+
 		bool hasController = _controller is not null;
 		bool canStart = !hasController || state is ServerApplicationState.Created or ServerApplicationState.Initialized or ServerApplicationState.Stopped;
 		bool canSave = hasController && state is ServerApplicationState.Initialized or ServerApplicationState.Running or ServerApplicationState.Faulted;
@@ -2090,9 +2517,20 @@ public partial class ServerShellRoot : Control
 		if (_shutdownWithoutSaveButton is not null)
 			_shutdownWithoutSaveButton.Disabled = !canShutdown;
 
-			if (_commandLine is not null)
-				_commandLine.Editable = true;
-		}
+		if (_commandLine is not null)
+			_commandLine.Editable = true;
+	}
+
+	private static bool IsServerActivelyRunning(ServerApplicationState state)
+	{
+		return state is
+			ServerApplicationState.Initializing or
+			ServerApplicationState.Starting or
+			ServerApplicationState.Loading or
+			ServerApplicationState.Running or
+			ServerApplicationState.Saving or
+			ServerApplicationState.Restarting;
+	}
 
 	private void AppendOutput(string category, string message, DateTimeOffset? timestamp = null)
 	{

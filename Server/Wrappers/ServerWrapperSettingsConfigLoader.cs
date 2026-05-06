@@ -8,11 +8,13 @@ internal sealed record ServerWrapperSettingsConfigValues(
     string ProfileName,
     bool SaveOnStop,
     int NetworkPort,
+    int MaxClients,
     double SessionAuthTimeoutSeconds,
     double SessionKeepAliveTimeoutSeconds,
     string CommandPrefix,
     int MaxAutoCreatedAccountsPerRemoteAddress,
     ServerPersistenceBackupStorageMode BackupStorageMode,
+    int BackupCount,
     int BackupZstdCompressionLevel);
 
 internal static class ServerWrapperSettingsConfigLoader
@@ -74,6 +76,11 @@ internal static class ServerWrapperSettingsConfigLoader
             values.NetworkPort.ToString(CultureInfo.InvariantCulture),
             editorKind: ServerSettingEditorKind.Integer);
         registry.RegisterRestartRequired(
+            "server.network.max_clients",
+            "Max clients",
+            values.MaxClients.ToString(CultureInfo.InvariantCulture),
+            editorKind: ServerSettingEditorKind.Integer);
+        registry.RegisterRestartRequired(
             "server.save.on_stop",
             "Save on stop",
             values.SaveOnStop ? "on" : "off",
@@ -105,6 +112,18 @@ internal static class ServerWrapperSettingsConfigLoader
                 new ServerSettingChoice("zstd", "zstd")
             ]);
         registry.RegisterRestartRequired(
+            "server.persistence.backup_count",
+            "Backup count",
+            values.BackupCount.ToString(CultureInfo.InvariantCulture),
+            editorKind: ServerSettingEditorKind.Choice,
+            choices:
+            [
+                new ServerSettingChoice("0", "0"),
+                new ServerSettingChoice("1", "1"),
+                new ServerSettingChoice("2", "2"),
+                new ServerSettingChoice("3", "3")
+            ]);
+        registry.RegisterRestartRequired(
             "server.persistence.backup_zstd_level",
             "Backup ZSTD level",
             values.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture),
@@ -120,11 +139,13 @@ internal static class ServerWrapperSettingsConfigLoader
         string profileName = values.ProfileName;
         bool saveOnStop = values.SaveOnStop;
         int networkPort = values.NetworkPort;
+        int maxClients = values.MaxClients;
         double sessionAuthTimeoutSeconds = values.SessionAuthTimeoutSeconds;
         double sessionKeepAliveTimeoutSeconds = values.SessionKeepAliveTimeoutSeconds;
         string commandPrefix = values.CommandPrefix;
         int maxAutoCreatedAccountsPerRemoteAddress = values.MaxAutoCreatedAccountsPerRemoteAddress;
         ServerPersistenceBackupStorageMode backupStorageMode = values.BackupStorageMode;
+        int backupCount = values.BackupCount;
         int backupZstdCompressionLevel = values.BackupZstdCompressionLevel;
 
         for (int i = 0; i < changes.Count; i++)
@@ -143,6 +164,10 @@ internal static class ServerWrapperSettingsConfigLoader
                     {
                         networkPort = parsedPort;
                     }
+                    break;
+                case "server.network.max_clients":
+                    if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedMaxClients))
+                        maxClients = Math.Max(0, parsedMaxClients);
                     break;
                 case "server.save.on_stop":
                     saveOnStop = string.Equals(change.NormalizedValue, "on", StringComparison.OrdinalIgnoreCase);
@@ -176,6 +201,10 @@ internal static class ServerWrapperSettingsConfigLoader
                     if (ServerPersistenceBackupCompressorFactory.TryParseMode(change.NormalizedValue, out ServerPersistenceBackupStorageMode parsedBackupStorageMode))
                         backupStorageMode = parsedBackupStorageMode;
                     break;
+                case "server.persistence.backup_count":
+                    if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupCount))
+                        backupCount = Math.Clamp(parsedBackupCount, 0, 3);
+                    break;
                 case "server.persistence.backup_zstd_level":
                     if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupZstdLevel))
                         backupZstdCompressionLevel = parsedBackupZstdLevel;
@@ -187,11 +216,13 @@ internal static class ServerWrapperSettingsConfigLoader
             profileName,
             saveOnStop,
             networkPort,
+            maxClients,
             sessionAuthTimeoutSeconds,
             sessionKeepAliveTimeoutSeconds,
             commandPrefix,
             maxAutoCreatedAccountsPerRemoteAddress,
             backupStorageMode,
+            backupCount,
             backupZstdCompressionLevel);
     }
 
