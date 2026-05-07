@@ -11,5 +11,7 @@
     <ProjectReference Include="..\..\Server\Core\UltraSim.Server.Core.csproj" />
     <ProjectReference Include="..\..\Server\Discovery\UltraSim.Server.Discovery.csproj" />
     <ProjectReference Include="..\..\Client\Core\UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="..\..\Client\Network\UltraSim.Client.Network.csproj" />
+    <ProjectReference Include="..\..\Kernels\Network\UltraSim.Network.csproj" />
   </ItemGroup>
 </Project>

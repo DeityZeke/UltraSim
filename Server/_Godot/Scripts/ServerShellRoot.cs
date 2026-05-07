@@ -52,6 +52,16 @@ public partial class ServerShellRoot : Control
 	private Label? _playersSummaryValue;
 	private Label? _accountsSummaryValue;
 	private Label? _performanceSummaryValue;
+	private Label? _discoverySummaryValue;
+	private Label? _discoveryEnabledValue;
+	private Label? _discoveryRegistryValue;
+	private Label? _discoveryPublishModeValue;
+	private Label? _discoveryServerIdValue;
+	private Label? _discoveryAdvertisedValue;
+	private Label? _discoveryStatusEndpointValue;
+	private Label? _discoveryPublisherValue;
+	private Label? _discoveryLastPublishValue;
+	private Label? _discoveryLastMessageValue;
 	private ItemList? _playersList;
 	private Label? _playersSelectedValue;
 	private Button? _playerKickButton;
@@ -581,6 +591,7 @@ public partial class ServerShellRoot : Control
 		AddShellTab(tabRow, "Players", BuildPlayersTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Accounts", BuildAccountsTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Performance", BuildPerformanceTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
+		AddShellTab(tabRow, "Discovery", BuildDiscoveryTab(panel, panelSoft, accentSoft, text, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "NPCs", CreatePlaceholderTab("NPCs", "NPC and mob operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
 		AddShellTab(tabRow, "Items", CreatePlaceholderTab("Items", "Item and inventory operator tools will land here.", panel, muted), panel, panelSoft, accent, text, muted);
 		AddTabSpacer(tabRow);
@@ -1717,6 +1728,70 @@ public partial class ServerShellRoot : Control
 		return frame;
 	}
 
+	private Control BuildDiscoveryTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
+	{
+		var frame = new PanelContainer();
+		frame.SetAnchorsPreset(LayoutPreset.FullRect);
+		frame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		frame.SizeFlagsVertical = SizeFlags.ExpandFill;
+		frame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panel, 10));
+
+		var column = new VBoxContainer();
+		column.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		column.SizeFlagsVertical = SizeFlags.ExpandFill;
+		column.AddThemeConstantOverride("separation", 10);
+		frame.AddChild(column);
+
+		column.AddChild(CreateSectionLabel("Discovery", text));
+
+		_discoverySummaryValue = new Label();
+		_discoverySummaryValue.AddThemeColorOverride("font_color", muted);
+		_discoverySummaryValue.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+		column.AddChild(_discoverySummaryValue);
+
+		var detailsFrame = new PanelContainer();
+		detailsFrame.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		detailsFrame.SizeFlagsVertical = SizeFlags.ExpandFill;
+		detailsFrame.AddThemeStyleboxOverride("panel", CreatePanelStyle(panelSoft, 10, accentSoft));
+		column.AddChild(detailsFrame);
+
+		var margin = new MarginContainer();
+		margin.AddThemeConstantOverride("margin_left", 12);
+		margin.AddThemeConstantOverride("margin_top", 12);
+		margin.AddThemeConstantOverride("margin_right", 12);
+		margin.AddThemeConstantOverride("margin_bottom", 12);
+		detailsFrame.AddChild(margin);
+
+		var rows = new VBoxContainer();
+		rows.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+		rows.SizeFlagsVertical = SizeFlags.ShrinkBegin;
+		rows.AddThemeConstantOverride("separation", 8);
+		margin.AddChild(rows);
+
+		_discoveryEnabledValue = CreateDiscoveryValueLabel(muted);
+		_discoveryRegistryValue = CreateDiscoveryValueLabel(muted);
+		_discoveryPublishModeValue = CreateDiscoveryValueLabel(muted);
+		_discoveryServerIdValue = CreateDiscoveryValueLabel(muted);
+		_discoveryAdvertisedValue = CreateDiscoveryValueLabel(muted);
+		_discoveryStatusEndpointValue = CreateDiscoveryValueLabel(muted);
+		_discoveryPublisherValue = CreateDiscoveryValueLabel(muted);
+		_discoveryLastPublishValue = CreateDiscoveryValueLabel(muted);
+		_discoveryLastMessageValue = CreateDiscoveryValueLabel(muted);
+
+		rows.AddChild(CreateKeyValueRow("Enabled", _discoveryEnabledValue, text));
+		rows.AddChild(CreateKeyValueRow("Registry URL", _discoveryRegistryValue, text));
+		rows.AddChild(CreateKeyValueRow("Publish mode", _discoveryPublishModeValue, text));
+		rows.AddChild(CreateKeyValueRow("Server ID", _discoveryServerIdValue, text));
+		rows.AddChild(CreateKeyValueRow("Advertised", _discoveryAdvertisedValue, text));
+		rows.AddChild(CreateKeyValueRow("Status endpoint", _discoveryStatusEndpointValue, text));
+		rows.AddChild(CreateKeyValueRow("Publisher", _discoveryPublisherValue, text));
+		rows.AddChild(CreateKeyValueRow("Last publish", _discoveryLastPublishValue, text));
+		rows.AddChild(CreateKeyValueRow("Last message", _discoveryLastMessageValue, text));
+
+		RefreshDiscoveryStatus(null);
+		return frame;
+	}
+
 	private Control BuildSettingsTab(Color panel, Color panelSoft, Color accentSoft, Color text, Color muted)
 	{
 		var frame = new PanelContainer();
@@ -1901,6 +1976,14 @@ public partial class ServerShellRoot : Control
 		var label = new Label();
 		label.AddThemeColorOverride("font_color", color);
 		label.HorizontalAlignment = HorizontalAlignment.Right;
+		return label;
+	}
+
+	private static Label CreateDiscoveryValueLabel(Color color)
+	{
+		var label = CreateValueLabel(color);
+		label.ClipText = true;
+		label.SizeFlagsHorizontal = SizeFlags.ExpandFill;
 		return label;
 	}
 
@@ -2190,6 +2273,7 @@ public partial class ServerShellRoot : Control
 		if (_controller is null)
 		{
 			UpdateMetricBanner(null, null, Array.Empty<ServerPlayerSessionSnapshot>(), Array.Empty<ServerAccountSummarySnapshot>());
+			RefreshDiscoveryStatus(null);
 
 			if (_playersSummaryValue is not null)
 				_playersSummaryValue.Text = "No active players.";
@@ -2216,6 +2300,7 @@ public partial class ServerShellRoot : Control
 		IReadOnlyList<ServerAccountSummarySnapshot> accounts = _controller.GetAccountSummariesSnapshot();
 
 		UpdateMetricBanner(status, metrics, players, accounts);
+		RefreshDiscoveryStatus(_controller.GetDiscoverySnapshot());
 
 		if (_playersSummaryValue is not null)
 			_playersSummaryValue.Text = players.Count == 0
@@ -2231,6 +2316,67 @@ public partial class ServerShellRoot : Control
 		RefreshAccountsList(accounts);
 		RefreshPerformance(metrics, systems);
 		RefreshControls(status.State);
+	}
+
+	private void RefreshDiscoveryStatus(GodotServerDiscoverySnapshot? snapshot)
+	{
+		GodotServerShellOptions options = _options ?? GodotServerShellOptions.Default;
+		if (snapshot is null)
+		{
+			if (_discoverySummaryValue is not null)
+				_discoverySummaryValue.Text = options.DiscoveryEnabled
+					? "Discovery is configured but the server runtime has not been created."
+					: "Discovery is disabled.";
+
+			SetDiscoveryLabel(_discoveryEnabledValue, FormatBool(options.DiscoveryEnabled));
+			SetDiscoveryLabel(_discoveryRegistryValue, options.DiscoveryRegistryUrl);
+			SetDiscoveryLabel(_discoveryPublishModeValue, options.DiscoveryPublishMode);
+			SetDiscoveryLabel(_discoveryServerIdValue, string.IsNullOrWhiteSpace(options.DiscoveryServerId) ? options.ProfileName : options.DiscoveryServerId);
+			SetDiscoveryLabel(_discoveryAdvertisedValue, $"{options.DiscoveryAdvertisedHost}:{options.NetworkPort}");
+			SetDiscoveryLabel(_discoveryStatusEndpointValue, string.IsNullOrWhiteSpace(options.DiscoveryStatusEndpointUrl) ? "off" : options.DiscoveryStatusEndpointUrl);
+			SetDiscoveryLabel(_discoveryPublisherValue, "not created");
+			SetDiscoveryLabel(_discoveryLastPublishValue, "never");
+			SetDiscoveryLabel(_discoveryLastMessageValue, "Runtime not created.");
+			return;
+		}
+
+		if (_discoverySummaryValue is not null)
+		{
+			_discoverySummaryValue.Text = snapshot.Enabled
+				? $"{(snapshot.HasPublished ? "Published" : "Not published")} to {snapshot.RegistryUrl}."
+				: "Discovery is disabled.";
+		}
+
+		SetDiscoveryLabel(_discoveryEnabledValue, FormatBool(snapshot.Enabled));
+		SetDiscoveryLabel(_discoveryRegistryValue, snapshot.RegistryUrl);
+		SetDiscoveryLabel(_discoveryPublishModeValue, snapshot.PublishMode);
+		SetDiscoveryLabel(_discoveryServerIdValue, snapshot.ServerId);
+		SetDiscoveryLabel(_discoveryAdvertisedValue, $"{snapshot.AdvertisedHost}:{snapshot.AdvertisedPort}");
+		SetDiscoveryLabel(
+			_discoveryStatusEndpointValue,
+			string.IsNullOrWhiteSpace(snapshot.StatusEndpointUrl)
+				? "off"
+				: $"{snapshot.StatusEndpointUrl} ({(snapshot.StatusEndpointRunning ? "listening" : "not listening")})");
+		SetDiscoveryLabel(
+			_discoveryPublisherValue,
+			snapshot.PublisherCreated
+				? snapshot.HasPublished ? "published" : "waiting"
+				: snapshot.Enabled ? "not created" : "disabled");
+		SetDiscoveryLabel(
+			_discoveryLastPublishValue,
+			snapshot.LastPublishUtc.HasValue
+				? snapshot.LastPublishUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+				: "never");
+		SetDiscoveryLabel(_discoveryLastMessageValue, snapshot.LastMessage);
+	}
+
+	private static void SetDiscoveryLabel(Label? label, string value)
+	{
+		if (label is null)
+			return;
+
+		label.Text = string.IsNullOrWhiteSpace(value) ? "-" : value;
+		label.TooltipText = label.Text;
 	}
 
 	private void RefreshPlayersList(IReadOnlyList<ServerPlayerSessionSnapshot> players)

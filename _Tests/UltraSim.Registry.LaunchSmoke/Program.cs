@@ -5,6 +5,7 @@ using System.Net.Sockets;
 using UltraSim.Client;
 using UltraSim.Discovery;
 using UltraSim.Discovery.Official;
+using UltraSim.Network;
 using UltraSim.Server;
 using UltraSim.Server.Discovery;
 
@@ -16,6 +17,7 @@ static async Task RegistryLaunchSmoke_RunRealRegistryPublisherAndClientQuery()
     string repoRoot = FindRepoRoot();
     string registryProject = Path.Combine(repoRoot, "Services", "Registry", "UltraSim.Registry.csproj");
     int port = GetAvailableTcpPort();
+    int advertisedGamePort = GetAvailableUdpPort();
     string registryUrl = $"http://127.0.0.1:{port}";
     string dotnet = ResolveDotnetExecutable();
 
@@ -37,7 +39,7 @@ static async Task RegistryLaunchSmoke_RunRealRegistryPublisherAndClientQuery()
             ServerId: "launch-smoke-shard",
             DisplayName: "Launch Smoke Shard",
             AdvertisedHost: "127.0.0.1",
-            Port: 42042,
+            Port: advertisedGamePort,
             MaxUsers: 64,
             Description: "Registry launched-service smoke",
             Region: "local",
@@ -81,10 +83,18 @@ static async Task RegistryLaunchSmoke_RunRealRegistryPublisherAndClientQuery()
     Assert.Equal(ServerDiscoveryProviderKind.Official, row.ProviderKind);
     Assert.Equal(ServerListingHealthState.Online, row.HealthState);
     Assert.Equal("127.0.0.1", row.Host);
-    Assert.Equal(42042, row.Port);
+    Assert.Equal(advertisedGamePort, row.Port);
     Assert.Equal(2, row.CurrentUsers);
     Assert.Equal(64, row.MaxUsers);
     Assert.Contains("smoke", row.TagsOrEmpty);
+
+    Assert.True(
+        ClientDirectConnectRequest.TryCreate(row, out ClientDirectConnectRequest joinRequest, out string joinRequestError),
+        joinRequestError);
+    Assert.Equal(advertisedGamePort, joinRequest.Port);
+    Assert.True(joinRequest.TryResolve(out IPEndPoint joinEndPoint, out string resolveError), resolveError);
+    Assert.Equal(advertisedGamePort, joinEndPoint.Port);
+    await VerifyDiscoveredEndpointHandshakeAsync(joinEndPoint);
 
     await coordinator.PublishShutdownAsync();
 
@@ -93,6 +103,63 @@ static async Task RegistryLaunchSmoke_RunRealRegistryPublisherAndClientQuery()
         row => row.ServerId == "launch-smoke-shard",
         expectedToExist: false);
     Assert.False(afterShutdown.Any(row => row.ServerId == "launch-smoke-shard"));
+}
+
+static async Task VerifyDiscoveredEndpointHandshakeAsync(IPEndPoint discoveredEndPoint)
+{
+    PacketMetadataRegistry metadata = DefaultPacketMetadata.Create();
+    using var serverTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+        discoveredEndPoint,
+        metadata));
+    using var clientTransport = new UdpSocketNetworkTransport(new UdpSocketNetworkTransportOptions(
+        new IPEndPoint(IPAddress.Loopback, 0),
+        metadata,
+        discoveredEndPoint,
+        new ConnectionId(1),
+        AllowDynamicConnections: false));
+
+    serverTransport.Start();
+    clientTransport.Start();
+
+    var handshakePolicy = new HandshakePolicy(
+        ProtocolVersion: 3,
+        SchemaHash: 4,
+        ContentHash: 5,
+        RequiredFeatures: FeatureFlags.SharedPayloadFanout);
+    var handshakeHello = new HandshakeHelloPacket(
+        protocolVersion: 3,
+        schemaHash: 4,
+        contentHash: 5,
+        features: FeatureFlags.SharedPayloadFanout | FeatureFlags.Compression);
+    var server = new NetworkControlPlaneHost(
+        NetworkControlPlaneRole.Server,
+        serverTransport,
+        handshakePolicy: handshakePolicy);
+    var client = new ClientMovementSessionHost(
+        clientTransport,
+        new ConnectionId(1),
+        handshakeHello,
+        maxPollBatch: 8);
+
+    server.Start();
+    client.Start();
+    SessionId sessionId = client.BeginHandshake(1000);
+    Assert.True(sessionId.IsValid);
+
+    Stopwatch stopwatch = Stopwatch.StartNew();
+    int pump = 0;
+    while (stopwatch.Elapsed < TimeSpan.FromSeconds(5))
+    {
+        server.Pump(1001 + pump * 2);
+        client.Pump(1002 + pump * 2);
+        if (client.IsReady)
+            return;
+
+        pump++;
+        await Task.Delay(10);
+    }
+
+    throw new InvalidOperationException($"Timed out handshaking against discovered endpoint {discoveredEndPoint}.");
 }
 
 static async Task<IReadOnlyList<ServerDiscoveryRow>> WaitForRowsAsync(
@@ -163,6 +230,13 @@ static int GetAvailableTcpPort()
     int port = ((IPEndPoint)listener.LocalEndpoint).Port;
     listener.Stop();
     return port;
+}
+
+static int GetAvailableUdpPort()
+{
+    using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+    socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+    return ((IPEndPoint)socket.LocalEndPoint!).Port;
 }
 
 internal sealed class LaunchedRegistry : IDisposable
@@ -302,6 +376,12 @@ internal static class Assert
     {
         if (condition)
             throw new InvalidOperationException("Assert.False failed.");
+    }
+
+    public static void True(bool condition, string? message = null)
+    {
+        if (!condition)
+            throw new InvalidOperationException(message ?? "Assert.True failed.");
     }
 
     public static void Contains<T>(T expected, IEnumerable<T> values)

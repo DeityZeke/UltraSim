@@ -37,11 +37,16 @@ contracts without moving registry, HTTP, or portal details into `Server/Core`.
   `UltraSim.Server.Tests`.
 - The embedded status endpoint host is covered by `UltraSim.Server.Tests` and
   is wired into console, headless, and Godot server wrappers.
+- The Godot server shell has a read-only Discovery tab for publisher state,
+  registry URL, advertised target, status endpoint state, last publish time, and
+  latest discovery message.
 - `_Tests/UltraSim.Registry.Tests` covers the shared contract loop from server
   publisher through official client query.
 - `_Tests/UltraSim.Registry.LaunchSmoke` starts the real registry service over
   HTTP, publishes a server row, queries it through the official client provider,
-  and verifies unpublish-on-shutdown.
+  resolves the discovered row into a direct-connect request, verifies a live UDP
+  handshake against the advertised non-default port, and verifies
+  unpublish-on-shutdown.
 
 ## Smoke Commands
 
@@ -53,4 +58,3 @@ PATH="$HOME/.dotnet:$PATH" dotnet run --project _Tests/UltraSim.Registry.LaunchS
 
 - LAN/mDNS provider and favorites/history providers.
 - Owner-claim UI/tooling for official registry moderation.
-- Discovery diagnostics in the Godot server shell.

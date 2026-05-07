@@ -14,6 +14,7 @@ public sealed class GodotServerShellController : IDisposable
 	private readonly ServerDiscoveryPublisherCoordinator? _discovery;
 	private readonly ServerDiscoveryStatusEndpointHost? _discoveryStatusEndpoint;
 	private readonly SemaphoreSlim _discoveryGate = new(1, 1);
+	private string _lastDiscoveryMessage = "Not started.";
 	private bool _disposed;
 
 	public GodotServerShellController(
@@ -106,6 +107,30 @@ public sealed class GodotServerShellController : IDisposable
 	public IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot()
 	{
 		return _runtime.Application.GetAccountSummariesSnapshot();
+	}
+
+	public GodotServerDiscoverySnapshot GetDiscoverySnapshot()
+	{
+		return new GodotServerDiscoverySnapshot(
+			Enabled: Options.DiscoveryEnabled,
+			RegistryUrl: Options.DiscoveryRegistryUrl,
+			PublishMode: Options.DiscoveryPublishMode,
+			AdvertisedHost: Options.DiscoveryAdvertisedHost,
+			AdvertisedPort: Options.NetworkPort,
+			ServerId: string.IsNullOrWhiteSpace(Options.DiscoveryServerId)
+				? Options.ProfileName
+				: Options.DiscoveryServerId,
+			Description: Options.DiscoveryDescription,
+			Region: Options.DiscoveryRegion,
+			Language: Options.DiscoveryLanguage,
+			Tags: Options.DiscoveryTags,
+			StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl,
+			PublisherCreated: _discovery is not null,
+			HasPublished: _discovery?.HasPublished ?? false,
+			LastPublishUtc: _discovery?.LastPublishUtc,
+			StatusEndpointCreated: _discoveryStatusEndpoint is not null,
+			StatusEndpointRunning: _discoveryStatusEndpoint?.IsRunning ?? false,
+			LastMessage: _lastDiscoveryMessage);
 	}
 
 	public ServerPlayerSessionActionResult KickPlayerSession(string sessionId)
@@ -218,6 +243,7 @@ public sealed class GodotServerShellController : IDisposable
 		}
 		catch (Exception ex)
 		{
+			_lastDiscoveryMessage = $"Disabled: {ex.Message}";
 			EmitLog($"Discovery disabled: {ex.Message}");
 			return null;
 		}
@@ -238,12 +264,12 @@ public sealed class GodotServerShellController : IDisposable
 				_runtime.GetStatusSnapshot,
 				serverId);
 			host.Start();
-			EmitLog($"Discovery status endpoint listening at {host.EndpointUri}");
+			SetDiscoveryMessage($"Status endpoint listening at {host.EndpointUri}");
 			return host;
 		}
 		catch (Exception ex)
 		{
-			EmitLog($"Discovery status endpoint disabled: {ex.Message}");
+			SetDiscoveryMessage($"Status endpoint disabled: {ex.Message}");
 			return null;
 		}
 	}
@@ -270,10 +296,14 @@ public sealed class GodotServerShellController : IDisposable
 				await _discovery.PublishHeartbeatIfDueAsync().ConfigureAwait(false);
 			else
 				await _discovery.PublishStartupAsync().ConfigureAwait(false);
+
+			SetDiscoveryMessage(_discovery.HasPublished
+				? $"Published at {_discovery.LastPublishUtc?.ToLocalTime():yyyy-MM-dd HH:mm:ss}"
+				: "Waiting to publish.");
 		}
 		catch (Exception ex)
 		{
-			EmitLog($"Discovery publish failed: {ex.Message}");
+			SetDiscoveryMessage($"Publish failed: {ex.Message}");
 		}
 		finally
 		{
@@ -292,6 +322,7 @@ public sealed class GodotServerShellController : IDisposable
 			try
 			{
 				_discovery.PublishShutdownAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+				SetDiscoveryMessage("Shutdown/unpublish sent.");
 			}
 			finally
 			{
@@ -300,8 +331,14 @@ public sealed class GodotServerShellController : IDisposable
 		}
 		catch (Exception ex)
 		{
-			EmitLog($"Discovery shutdown publish failed: {ex.Message}");
+			SetDiscoveryMessage($"Shutdown publish failed: {ex.Message}");
 		}
+	}
+
+	private void SetDiscoveryMessage(string message)
+	{
+		_lastDiscoveryMessage = message;
+		EmitLog($"Discovery: {message}");
 	}
 
 	private void HandleEvent(ServerApplicationEvent evt)

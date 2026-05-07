@@ -90,7 +90,9 @@ The current game project should pair with this service in small layers:
      server publisher through official client query.
    - `_Tests/UltraSim.Registry.LaunchSmoke` starts `Services/Registry`, starts
      a server publisher, verifies the client browser can query the row over
-     real HTTP, and verifies unpublish-on-shutdown.
+     real HTTP, resolves the discovered row into a join endpoint, handshakes
+     against the advertised non-default UDP port, and verifies
+     unpublish-on-shutdown.
 
 Run the launched-service smoke with:
 

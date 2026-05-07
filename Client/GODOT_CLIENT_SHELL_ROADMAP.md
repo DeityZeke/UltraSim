@@ -613,12 +613,15 @@ Current status:
   unpublish-on-shutdown
 - `_Tests/UltraSim.Registry.LaunchSmoke` starts the real registry service over
   HTTP, publishes a server row, queries it through the official client provider,
-  and verifies unpublish-on-shutdown
+  resolves the row into a direct-connect endpoint, handshakes against the
+  advertised non-default UDP port, and verifies unpublish-on-shutdown
+- Godot server shell has a read-only Discovery tab for current discovery
+  configuration, publisher state, last publish time, status endpoint state, and
+  latest discovery message
 
 Remaining deferred G4 work:
 
 - favorites/history/LAN providers are explicitly deferred
-- discovery diagnostics/status in the Godot server shell
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 
 ### Phase G5 - Content Resolver And Cache Spine
