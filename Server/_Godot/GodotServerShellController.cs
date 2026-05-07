@@ -12,6 +12,7 @@ public sealed class GodotServerShellController : IDisposable
 	private readonly List<ServerApplicationEvent> _startupEvents = new();
 	private readonly HttpClient? _discoveryHttpClient;
 	private readonly ServerDiscoveryPublisherCoordinator? _discovery;
+	private readonly ServerDiscoveryStatusEndpointHost? _discoveryStatusEndpoint;
 	private readonly SemaphoreSlim _discoveryGate = new(1, 1);
 	private bool _disposed;
 
@@ -45,6 +46,7 @@ public sealed class GodotServerShellController : IDisposable
 			? new HttpClient { Timeout = TimeSpan.FromSeconds(5) }
 			: null;
 		_discovery = CreateDiscoveryCoordinator(_discoveryHttpClient);
+		_discoveryStatusEndpoint = CreateDiscoveryStatusEndpoint();
 	}
 
 	public GodotServerShellOptions Options { get; }
@@ -153,6 +155,7 @@ public sealed class GodotServerShellController : IDisposable
 		_disposed = true;
 		_runtime.StopSafely();
 		PublishDiscoveryShutdown();
+		_discoveryStatusEndpoint?.Dispose();
 		_runtime.Dispose();
 		_discoveryHttpClient?.Dispose();
 		_discoveryGate.Dispose();
@@ -216,6 +219,31 @@ public sealed class GodotServerShellController : IDisposable
 		catch (Exception ex)
 		{
 			EmitLog($"Discovery disabled: {ex.Message}");
+			return null;
+		}
+	}
+
+	private ServerDiscoveryStatusEndpointHost? CreateDiscoveryStatusEndpoint()
+	{
+		if (!Options.DiscoveryEnabled || string.IsNullOrWhiteSpace(Options.DiscoveryStatusEndpointUrl))
+			return null;
+
+		try
+		{
+			string serverId = string.IsNullOrWhiteSpace(Options.DiscoveryServerId)
+				? Options.ProfileName
+				: Options.DiscoveryServerId;
+			var host = new ServerDiscoveryStatusEndpointHost(
+				Options.DiscoveryStatusEndpointUrl,
+				_runtime.GetStatusSnapshot,
+				serverId);
+			host.Start();
+			EmitLog($"Discovery status endpoint listening at {host.EndpointUri}");
+			return host;
+		}
+		catch (Exception ex)
+		{
+			EmitLog($"Discovery status endpoint disabled: {ex.Message}");
 			return null;
 		}
 	}

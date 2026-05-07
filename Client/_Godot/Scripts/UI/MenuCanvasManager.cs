@@ -1245,13 +1245,24 @@ public partial class MenuCanvasManager : CanvasLayer
             MaxUsers: 64,
             CompatibilityId: "current");
 
-        return new ClientServerBrowserService(
-        [
-            new ServerBrowserProviderDefinition(
+        ServerBrowserProviderDefinition officialProvider;
+        try
+        {
+            officialProvider = ClientOfficialRegistryDiscoveryFactory.CreateProvider(
+                new ClientOfficialRegistryDiscoveryOptions(ReadOfficialRegistryUrl()));
+        }
+        catch
+        {
+            officialProvider = new ServerBrowserProviderDefinition(
                 "official",
                 "Official",
                 ServerDiscoveryProviderKind.Official,
-                new InMemoryServerDiscoveryQuery([])),
+                new InMemoryServerDiscoveryQuery([]));
+        }
+
+        return new ClientServerBrowserService(
+        [
+            officialProvider,
             new ServerBrowserProviderDefinition(
                 "favorites",
                 "Favorites",
@@ -1274,5 +1285,23 @@ public partial class MenuCanvasManager : CanvasLayer
                 new InMemoryServerDiscoveryQuery([localRow]))
         ],
         initialProviderId: "manual");
+    }
+
+    private static string ReadOfficialRegistryUrl()
+    {
+        foreach (string arg in OS.GetCmdlineUserArgs())
+        {
+            if (!arg.StartsWith("--us-registry-url=", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            string value = arg["--us-registry-url=".Length..].Trim();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        string? environmentValue = System.Environment.GetEnvironmentVariable("ULTRASIM_REGISTRY_URL");
+        return string.IsNullOrWhiteSpace(environmentValue)
+            ? new ClientOfficialRegistryDiscoveryOptions().RegistryUrl
+            : environmentValue.Trim();
     }
 }

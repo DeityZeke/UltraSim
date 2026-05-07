@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Text;
 using UltraSim.Client;
 using UltraSim.Client.Content;
 using UltraSim.Client.UI;
@@ -22,6 +23,7 @@ internal static class TestRunner
         Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
         Run(nameof(ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary), ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary);
         Run(nameof(ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure), ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure);
+        Run(nameof(ClientOfficialRegistryDiscoveryFactory_CreatesOfficialProvider), ClientOfficialRegistryDiscoveryFactory_CreatesOfficialProvider);
         Run(nameof(ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields), ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields);
         Run(nameof(ServerContentIdentity_ProducesPathSafeStableNamespace), ServerContentIdentity_ProducesPathSafeStableNamespace);
         Run(nameof(ClientContentCachePathPolicy_ResolvesServerScopedPathsAndRejectsTraversal), ClientContentCachePathPolicy_ResolvesServerScopedPathsAndRejectsTraversal);
@@ -292,6 +294,50 @@ internal static class TestRunner
 
         Assert.False(service.SelectProvider("missing"));
         Assert.Equal("broken", service.ActiveProviderId);
+    }
+
+    private static void ClientOfficialRegistryDiscoveryFactory_CreatesOfficialProvider()
+    {
+        var handler = new CapturingJsonHandler(
+            """
+            [
+              {
+                "providerId": "official",
+                "providerKind": 1,
+                "serverId": "registry-shard",
+                "displayName": "Registry Shard",
+                "host": "play.example.test",
+                "port": 42042,
+                "region": "us-central",
+                "currentUsers": 3,
+                "maxUsers": 64
+              }
+            ]
+            """);
+        using var httpClient = new HttpClient(handler);
+        ServerBrowserProviderDefinition provider = ClientOfficialRegistryDiscoveryFactory.CreateProvider(
+            new ClientOfficialRegistryDiscoveryOptions(
+                RegistryUrl: " http://registry.example.test ",
+                Limit: 25,
+                SortBy: "players",
+                Descending: true),
+            httpClient);
+        var service = new ClientServerBrowserService([provider]);
+
+        ServerBrowserSnapshot snapshot = service.RefreshAsync().AsTask().GetAwaiter().GetResult();
+
+        Assert.Equal("official", provider.ProviderId);
+        Assert.Equal(ServerDiscoveryProviderKind.Official, provider.ProviderKind);
+        Assert.Equal(new Uri("http://registry.example.test/"), httpClient.BaseAddress!);
+        Assert.Equal(1, snapshot.Rows.Count);
+        Assert.Equal("Registry Shard", snapshot.Rows[0].DisplayName);
+        Assert.Equal("play.example.test", snapshot.Rows[0].Host);
+        Assert.Equal(42042, snapshot.Rows[0].Port);
+        Assert.True(handler.LastRequestUri is not null);
+        Assert.True(handler.LastRequestUri!.PathAndQuery.Contains("/api/v1/servers", StringComparison.Ordinal));
+        Assert.True(handler.LastRequestUri.PathAndQuery.Contains("limit=25", StringComparison.Ordinal));
+        Assert.True(handler.LastRequestUri.PathAndQuery.Contains("sortBy=players", StringComparison.Ordinal));
+        Assert.True(handler.LastRequestUri.PathAndQuery.Contains("descending=true", StringComparison.Ordinal));
     }
 
     private static void ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields()
@@ -2503,5 +2549,28 @@ internal sealed class ThrowingDiscoveryQuery : IServerDiscoveryQuery
     public ValueTask<IReadOnlyList<ServerDiscoveryRow>> QueryAsync(CancellationToken cancellationToken = default)
     {
         throw new InvalidOperationException(_message);
+    }
+}
+
+internal sealed class CapturingJsonHandler : HttpMessageHandler
+{
+    private readonly string _json;
+
+    public CapturingJsonHandler(string json)
+    {
+        _json = json;
+    }
+
+    public Uri? LastRequestUri { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        LastRequestUri = request.RequestUri;
+        return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+        {
+            Content = new StringContent(_json, Encoding.UTF8, "application/json")
+        });
     }
 }

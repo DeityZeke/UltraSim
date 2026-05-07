@@ -61,6 +61,7 @@ public sealed class HeadlessServerShell
             sinks);
         using HttpClient? discoveryHttpClient = Options.DiscoveryEnabled ? new HttpClient() : null;
         ServerDiscoveryPublisherCoordinator? discovery = CreateDiscoveryCoordinator(runtime, discoveryHttpClient);
+        using ServerDiscoveryStatusEndpointHost? discoveryStatusEndpoint = CreateDiscoveryStatusEndpoint(runtime);
 
         if (Options.AutoStart)
             runtime.StartImmediately();
@@ -168,6 +169,37 @@ public sealed class HeadlessServerShell
         catch (Exception ex)
         {
             _stderr.WriteLine($"Discovery disabled: {ex.Message}");
+            _stderr.Flush();
+            return null;
+        }
+    }
+
+    private ServerDiscoveryStatusEndpointHost? CreateDiscoveryStatusEndpoint(HostedServerRuntime runtime)
+    {
+        if (!Options.DiscoveryEnabled || string.IsNullOrWhiteSpace(Options.DiscoveryStatusEndpointUrl))
+            return null;
+
+        try
+        {
+            string serverId = string.IsNullOrWhiteSpace(Options.DiscoveryServerId)
+                ? Options.ProfileName
+                : Options.DiscoveryServerId;
+            var host = new ServerDiscoveryStatusEndpointHost(
+                Options.DiscoveryStatusEndpointUrl,
+                runtime.GetStatusSnapshot,
+                serverId);
+            host.Start();
+            if (!Options.Quiet)
+            {
+                _stdout.WriteLine($"Discovery status endpoint listening at {host.EndpointUri}");
+                _stdout.Flush();
+            }
+
+            return host;
+        }
+        catch (Exception ex)
+        {
+            _stderr.WriteLine($"Discovery status endpoint disabled: {ex.Message}");
             _stderr.Flush();
             return null;
         }

@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Net;
+using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Globalization;
 using UltraSim.Client;
 using UltraSim.ECS;
@@ -37,6 +39,7 @@ internal static class TestRunner
         Run(nameof(ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown), ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown);
         Run(nameof(ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions), ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions);
         Run(nameof(ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings), ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings);
+        Run(nameof(ServerDiscoveryStatusEndpointHost_ReturnsPollStatusResponse), ServerDiscoveryStatusEndpointHost_ReturnsPollStatusResponse);
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerSystemRuntimeSnapshot_PreservesSuppliedValues), ServerSystemRuntimeSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerPlayerSessionSnapshot_PreservesSuppliedValues), ServerPlayerSessionSnapshot_PreservesSuppliedValues);
@@ -486,6 +489,55 @@ internal static class TestRunner
             invalidRegistryClient));
     }
 
+    private static void ServerDiscoveryStatusEndpointHost_ReturnsPollStatusResponse()
+    {
+        int port = GetAvailableTcpPort();
+        DateTimeOffset now = new(2026, 5, 7, 15, 30, 0, TimeSpan.Zero);
+        var snapshot = new ServerStatusSnapshot(
+            "status-test",
+            ServerApplicationState.Running,
+            IsInitialized: true,
+            IsRunning: true,
+            IsAcceptingConnections: true,
+            TickCount: 512,
+            ActiveSessions: 3,
+            PeakSessions: 5,
+            StartedAtUtc: now.AddMinutes(-10),
+            Uptime: TimeSpan.FromMinutes(10));
+
+        using var host = new ServerDiscoveryStatusEndpointHost(
+            $"http://127.0.0.1:{port}/discovery/status",
+            () => snapshot,
+            serverId: "status-shard",
+            ownershipTokenHash: "owner-hash",
+            clock: () => now);
+        host.Start();
+
+        using var client = new HttpClient();
+        ServerDiscoveryPollStatusResponse? response = client
+            .GetFromJsonAsync<ServerDiscoveryPollStatusResponse>($"http://127.0.0.1:{port}/discovery/status")
+            .GetAwaiter()
+            .GetResult();
+
+        Assert.NotNull(response);
+        Assert.Equal("status-shard", response!.ServerId);
+        Assert.Equal("owner-hash", response.OwnershipTokenHash);
+        Assert.True(response.StatusInfo.IsAcceptingConnections);
+        Assert.Equal(3, response.StatusInfo.CurrentUsers);
+        Assert.Equal(5, response.StatusInfo.PeakUsers);
+        Assert.Equal(TimeSpan.FromMinutes(10), response.StatusInfo.Uptime);
+        Assert.Equal(now, response.StatusInfo.LastHeartbeatUtc);
+
+        using HttpResponseMessage missing = client
+            .GetAsync($"http://127.0.0.1:{port}/discovery/missing")
+            .GetAwaiter()
+            .GetResult();
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+
+        host.StopAsync().AsTask().GetAwaiter().GetResult();
+        Assert.False(host.IsRunning);
+    }
+
     private static ServerDiscoveryAdvertisedSettings CreateDiscoveryAdvertisedSettings()
     {
         return new ServerDiscoveryAdvertisedSettings(
@@ -509,6 +561,15 @@ internal static class TestRunner
             PeakSessions: peakSessions,
             StartedAtUtc: new DateTimeOffset(2026, 5, 6, 12, 0, 0, TimeSpan.Zero),
             Uptime: TimeSpan.FromHours(1));
+    }
+
+    private static int GetAvailableTcpPort()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        listener.Stop();
+        return port;
     }
 
     private static void ServerMetricsSnapshot_PreservesSuppliedValues()

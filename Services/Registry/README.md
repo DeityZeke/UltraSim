@@ -63,14 +63,19 @@ The current game project should pair with this service in small layers:
 
 3. Status endpoint policy
    - The registry can work from pushed heartbeats alone.
-   - If registry polling is enabled, the game server also needs a small
-     HTTP status endpoint that returns `ServerDiscoveryPollStatusResponse`.
-   - Keep this endpoint under `Server/Discovery` or a thin host adapter; do not
-     embed HTTP concerns into `Server/Core`.
+   - If registry polling is enabled, the game server can expose the embedded
+     `ServerDiscoveryStatusEndpointHost` from `Server/Discovery`.
+   - The embedded host returns `ServerDiscoveryPollStatusResponse` and is wired
+     into the console, headless, and Godot wrappers when
+     `server.discovery.status_endpoint_url` is configured.
+   - HTTP concerns stay in `Server/Discovery`; `Server/Core` only supplies the
+     status snapshot.
 
 4. Client official provider
-   - Wire `OfficialRegistryDiscoveryQuery` into `ClientServerBrowserService`
-     with the configured registry base URL.
+   - Current status: `OfficialRegistryDiscoveryQuery` is wired into the Godot
+     client shell through `ClientServerBrowserService`.
+   - The official provider defaults to `http://127.0.0.1:5000`; use
+     `--us-registry-url=...` or `ULTRASIM_REGISTRY_URL` to override it.
    - Keep manual/direct connect always available when the official registry is
      down.
    - Surface provider failures as friendly browser status text.
@@ -81,5 +86,14 @@ The current game project should pair with this service in small layers:
      `IServerDiscoveryPublisher`.
    - Unit-test official query URL construction and registry-unavailable
      behavior.
-   - Keep an optional integration smoke that starts `Services/Registry`, starts
-     a server publisher, and verifies the client browser can query the row.
+   - `_Tests/UltraSim.Registry.Tests` covers the shared discovery contracts from
+     server publisher through official client query.
+   - `_Tests/UltraSim.Registry.LaunchSmoke` starts `Services/Registry`, starts
+     a server publisher, verifies the client browser can query the row over
+     real HTTP, and verifies unpublish-on-shutdown.
+
+Run the launched-service smoke with:
+
+```bash
+PATH="$HOME/.dotnet:$PATH" dotnet run --project _Tests/UltraSim.Registry.LaunchSmoke/UltraSim.Registry.LaunchSmoke.csproj -c Release
+```

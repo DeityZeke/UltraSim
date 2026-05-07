@@ -595,17 +595,30 @@ Current status:
 - engine-agnostic discovery contracts exist in `Discovery`
 - `ClientServerBrowserService` supports provider-backed snapshots, refresh, provider selection, and friendly provider failure state
 - Godot app shell has a provider-backed server browser surface
+- official registry provider is wired in the Godot client shell, defaults to
+  `http://127.0.0.1:5000`, and can be overridden with `--us-registry-url=...`
+  or `ULTRASIM_REGISTRY_URL`
 - manual/local-dev provider is wired and direct-connect remains available
-- direct-connect row resolution and provider failure behavior are covered by `UltraSim.Client.Tests`
+- direct-connect row resolution, official provider query construction, and
+  provider failure behavior are covered by `UltraSim.Client.Tests`
 - the v2 official registry service has been moved into `Services/Registry`
 - the v2 official discovery DTOs/query/publisher contracts have been restored under `Discovery`
+- server-side discovery publisher/status adapters under `Server/Discovery` are
+  wired into console, headless, and Godot server wrappers
+- optional embedded discovery status endpoint host is available for
+  `server.discovery.status_endpoint_url` and is wired into console, headless,
+  and Godot server wrappers
+- `_Tests/UltraSim.Registry.Tests` covers the publisher -> registry-contract
+  handler -> official client query loop, including startup visibility and
+  unpublish-on-shutdown
+- `_Tests/UltraSim.Registry.LaunchSmoke` starts the real registry service over
+  HTTP, publishes a server row, queries it through the official client provider,
+  and verifies unpublish-on-shutdown
 
-Remaining G4 work before a real registry launch:
+Remaining deferred G4 work:
 
-- official registry provider wiring in the Godot client shell
-- server-side discovery publisher/status adapters under `Server/Discovery`
-- server-operation settings for registry URL, discovery enablement, publish mode, server metadata, and advertised endpoint
 - favorites/history/LAN providers are explicitly deferred
+- discovery diagnostics/status in the Godot server shell
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 
 ### Phase G5 - Content Resolver And Cache Spine
