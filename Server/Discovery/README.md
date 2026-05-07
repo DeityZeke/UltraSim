@@ -17,12 +17,17 @@ contracts without moving registry, HTTP, or portal details into `Server/Core`.
 - `ServerDiscoveryPublisherCoordinator` owns register/startup presence,
   heartbeat cadence, shutdown presence, optional unpublish, and disabled-mode
   behavior over an injected `IServerDiscoveryPublisher`.
+- Headless, console, and Godot shell options now carry discovery
+  server-operation settings loaded through the shared settings config path.
+- The Godot server shell settings tab exposes discovery enabled, registry URL,
+  publish mode, advertised host, metadata, heartbeat cadence, unpublish-on-stop,
+  and optional status endpoint URL.
 - Mapping and publisher cadence are covered by `UltraSim.Server.Tests`.
+- Console/headless config loading for discovery settings is covered by
+  `UltraSim.Server.Tests`.
 
 ## First Integration Slice
 
-- Add server-operation settings for discovery enabled, registry URL, publish
-  mode, advertised host, metadata, heartbeat cadence, and unpublish-on-stop.
 - Create `OfficialRegistryDiscoveryPublisher` from those settings.
 - Wire the coordinator into headless, console, and Godot wrapper lifecycle.
 - Keep direct connect independent of discovery.

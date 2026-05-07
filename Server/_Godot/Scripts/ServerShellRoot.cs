@@ -2699,6 +2699,28 @@ public partial class ServerShellRoot : Control
 			]);
 		registry.RegisterRestartRequired("server.persistence.backup_zstd_level", "Backup ZSTD level", options.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
 		registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", options.CommandPrefix);
+		registry.RegisterRestartRequired("server.discovery.enabled", "Discovery enabled", FormatBool(options.DiscoveryEnabled), editorKind: ServerSettingEditorKind.Boolean);
+		registry.RegisterRestartRequired("server.discovery.registry_url", "Discovery registry URL", options.DiscoveryRegistryUrl);
+		registry.RegisterRestartRequired(
+			"server.discovery.publish_mode",
+			"Discovery publish mode",
+			options.DiscoveryPublishMode,
+			editorKind: ServerSettingEditorKind.Choice,
+			choices:
+			[
+				new ServerSettingChoice("unverified", "unverified"),
+				new ServerSettingChoice("verified", "verified"),
+				new ServerSettingChoice("official", "official")
+			]);
+		registry.RegisterRestartRequired("server.discovery.advertised_host", "Discovery advertised host", options.DiscoveryAdvertisedHost);
+		registry.RegisterRestartRequired("server.discovery.server_id", "Discovery server ID", options.DiscoveryServerId);
+		registry.RegisterRestartRequired("server.discovery.description", "Discovery description", options.DiscoveryDescription);
+		registry.RegisterRestartRequired("server.discovery.region", "Discovery region", options.DiscoveryRegion);
+		registry.RegisterRestartRequired("server.discovery.language", "Discovery language", options.DiscoveryLanguage);
+		registry.RegisterRestartRequired("server.discovery.tags", "Discovery tags", options.DiscoveryTags);
+		registry.RegisterRestartRequired("server.discovery.heartbeat_interval_seconds", "Discovery heartbeat interval", options.DiscoveryHeartbeatIntervalSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
+		registry.RegisterRestartRequired("server.discovery.unpublish_on_stop", "Discovery unpublish on stop", FormatBool(options.DiscoveryUnpublishOnStop), editorKind: ServerSettingEditorKind.Boolean);
+		registry.RegisterRestartRequired("server.discovery.status_endpoint_url", "Discovery status endpoint URL", options.DiscoveryStatusEndpointUrl);
 		return registry;
 	}
 
@@ -3217,6 +3239,18 @@ public partial class ServerShellRoot : Control
 		ServerPersistenceBackupStorageMode backupStorageMode = options.BackupStorageMode;
 		int backupCount = options.BackupCount;
 		int backupZstdCompressionLevel = options.BackupZstdCompressionLevel;
+		bool discoveryEnabled = options.DiscoveryEnabled;
+		string discoveryRegistryUrl = options.DiscoveryRegistryUrl;
+		string discoveryPublishMode = options.DiscoveryPublishMode;
+		string discoveryAdvertisedHost = options.DiscoveryAdvertisedHost;
+		string discoveryServerId = options.DiscoveryServerId;
+		string discoveryDescription = options.DiscoveryDescription;
+		string discoveryRegion = options.DiscoveryRegion;
+		string discoveryLanguage = options.DiscoveryLanguage;
+		string discoveryTags = options.DiscoveryTags;
+		double discoveryHeartbeatIntervalSeconds = options.DiscoveryHeartbeatIntervalSeconds;
+		bool discoveryUnpublishOnStop = options.DiscoveryUnpublishOnStop;
+		string discoveryStatusEndpointUrl = options.DiscoveryStatusEndpointUrl;
 
 		for (int i = 0; i < changes.Count; i++)
 		{
@@ -3275,6 +3309,45 @@ public partial class ServerShellRoot : Control
 					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupZstdLevel))
 						backupZstdCompressionLevel = parsedBackupZstdLevel;
 					break;
+				case "server.discovery.enabled":
+					if (TryParseSettingBool(change.NormalizedValue, out bool parsedDiscoveryEnabled))
+						discoveryEnabled = parsedDiscoveryEnabled;
+					break;
+				case "server.discovery.registry_url":
+					discoveryRegistryUrl = change.NormalizedValue;
+					break;
+				case "server.discovery.publish_mode":
+					discoveryPublishMode = change.NormalizedValue;
+					break;
+				case "server.discovery.advertised_host":
+					discoveryAdvertisedHost = change.NormalizedValue;
+					break;
+				case "server.discovery.server_id":
+					discoveryServerId = change.NormalizedValue;
+					break;
+				case "server.discovery.description":
+					discoveryDescription = change.NormalizedValue;
+					break;
+				case "server.discovery.region":
+					discoveryRegion = change.NormalizedValue;
+					break;
+				case "server.discovery.language":
+					discoveryLanguage = change.NormalizedValue;
+					break;
+				case "server.discovery.tags":
+					discoveryTags = change.NormalizedValue;
+					break;
+				case "server.discovery.heartbeat_interval_seconds":
+					if (double.TryParse(change.NormalizedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDiscoveryHeartbeat) && parsedDiscoveryHeartbeat >= 1.0)
+						discoveryHeartbeatIntervalSeconds = parsedDiscoveryHeartbeat;
+					break;
+				case "server.discovery.unpublish_on_stop":
+					if (TryParseSettingBool(change.NormalizedValue, out bool parsedDiscoveryUnpublishOnStop))
+						discoveryUnpublishOnStop = parsedDiscoveryUnpublishOnStop;
+					break;
+				case "server.discovery.status_endpoint_url":
+					discoveryStatusEndpointUrl = change.NormalizedValue;
+					break;
 			}
 		}
 
@@ -3292,7 +3365,19 @@ public partial class ServerShellRoot : Control
 			MaxAutoCreatedAccountsPerRemoteAddress = maxAutoCreatedAccountsPerRemoteAddress,
 			BackupStorageMode = backupStorageMode,
 			BackupCount = backupCount,
-			BackupZstdCompressionLevel = backupZstdCompressionLevel
+			BackupZstdCompressionLevel = backupZstdCompressionLevel,
+			DiscoveryEnabled = discoveryEnabled,
+			DiscoveryRegistryUrl = discoveryRegistryUrl,
+			DiscoveryPublishMode = discoveryPublishMode,
+			DiscoveryAdvertisedHost = discoveryAdvertisedHost,
+			DiscoveryServerId = discoveryServerId,
+			DiscoveryDescription = discoveryDescription,
+			DiscoveryRegion = discoveryRegion,
+			DiscoveryLanguage = discoveryLanguage,
+			DiscoveryTags = discoveryTags,
+			DiscoveryHeartbeatIntervalSeconds = discoveryHeartbeatIntervalSeconds,
+			DiscoveryUnpublishOnStop = discoveryUnpublishOnStop,
+			DiscoveryStatusEndpointUrl = discoveryStatusEndpointUrl
 		};
 	}
 

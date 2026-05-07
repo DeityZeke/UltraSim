@@ -32,6 +32,18 @@ public static class ConsoleServerArgumentParser
         ServerPersistenceBackupStorageMode backupStorageMode = ConsoleServerShellOptions.Default.BackupStorageMode;
         int backupCount = ConsoleServerShellOptions.Default.BackupCount;
         int backupZstdCompressionLevel = ConsoleServerShellOptions.Default.BackupZstdCompressionLevel;
+        bool discoveryEnabled = ConsoleServerShellOptions.Default.DiscoveryEnabled;
+        string discoveryRegistryUrl = ConsoleServerShellOptions.Default.DiscoveryRegistryUrl;
+        string discoveryPublishMode = ConsoleServerShellOptions.Default.DiscoveryPublishMode;
+        string discoveryAdvertisedHost = ConsoleServerShellOptions.Default.DiscoveryAdvertisedHost;
+        string discoveryServerId = ConsoleServerShellOptions.Default.DiscoveryServerId;
+        string discoveryDescription = ConsoleServerShellOptions.Default.DiscoveryDescription;
+        string discoveryRegion = ConsoleServerShellOptions.Default.DiscoveryRegion;
+        string discoveryLanguage = ConsoleServerShellOptions.Default.DiscoveryLanguage;
+        string discoveryTags = ConsoleServerShellOptions.Default.DiscoveryTags;
+        double discoveryHeartbeatIntervalSeconds = ConsoleServerShellOptions.Default.DiscoveryHeartbeatIntervalSeconds;
+        bool discoveryUnpublishOnStop = ConsoleServerShellOptions.Default.DiscoveryUnpublishOnStop;
+        string discoveryStatusEndpointUrl = ConsoleServerShellOptions.Default.DiscoveryStatusEndpointUrl;
 
         ServerWrapperSettingsConfigValues configValues = ServerWrapperSettingsConfigLoader.Load(
             runtimeRootPath,
@@ -48,7 +60,19 @@ public static class ConsoleServerArgumentParser
                 maxAutoCreatedAccountsPerRemoteAddress,
                 backupStorageMode,
                 backupCount,
-                backupZstdCompressionLevel));
+                backupZstdCompressionLevel,
+                discoveryEnabled,
+                discoveryRegistryUrl,
+                discoveryPublishMode,
+                discoveryAdvertisedHost,
+                discoveryServerId,
+                discoveryDescription,
+                discoveryRegion,
+                discoveryLanguage,
+                discoveryTags,
+                discoveryHeartbeatIntervalSeconds,
+                discoveryUnpublishOnStop,
+                discoveryStatusEndpointUrl));
         profileName = configValues.ProfileName;
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
@@ -62,6 +86,18 @@ public static class ConsoleServerArgumentParser
         backupStorageMode = configValues.BackupStorageMode;
         backupCount = configValues.BackupCount;
         backupZstdCompressionLevel = configValues.BackupZstdCompressionLevel;
+        discoveryEnabled = configValues.DiscoveryEnabled;
+        discoveryRegistryUrl = configValues.DiscoveryRegistryUrl;
+        discoveryPublishMode = configValues.DiscoveryPublishMode;
+        discoveryAdvertisedHost = configValues.DiscoveryAdvertisedHost;
+        discoveryServerId = configValues.DiscoveryServerId;
+        discoveryDescription = configValues.DiscoveryDescription;
+        discoveryRegion = configValues.DiscoveryRegion;
+        discoveryLanguage = configValues.DiscoveryLanguage;
+        discoveryTags = configValues.DiscoveryTags;
+        discoveryHeartbeatIntervalSeconds = configValues.DiscoveryHeartbeatIntervalSeconds;
+        discoveryUnpublishOnStop = configValues.DiscoveryUnpublishOnStop;
+        discoveryStatusEndpointUrl = configValues.DiscoveryStatusEndpointUrl;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -342,7 +378,19 @@ public static class ConsoleServerArgumentParser
             RuntimeRootPath: runtimeRootPath,
             BackupStorageMode: backupStorageMode,
             BackupCount: backupCount,
-            BackupZstdCompressionLevel: backupZstdCompressionLevel);
+            BackupZstdCompressionLevel: backupZstdCompressionLevel,
+            DiscoveryEnabled: discoveryEnabled,
+            DiscoveryRegistryUrl: discoveryRegistryUrl,
+            DiscoveryPublishMode: discoveryPublishMode,
+            DiscoveryAdvertisedHost: discoveryAdvertisedHost,
+            DiscoveryServerId: discoveryServerId,
+            DiscoveryDescription: discoveryDescription,
+            DiscoveryRegion: discoveryRegion,
+            DiscoveryLanguage: discoveryLanguage,
+            DiscoveryTags: discoveryTags,
+            DiscoveryHeartbeatIntervalSeconds: discoveryHeartbeatIntervalSeconds,
+            DiscoveryUnpublishOnStop: discoveryUnpublishOnStop,
+            DiscoveryStatusEndpointUrl: discoveryStatusEndpointUrl);
         error = null;
         showHelp = false;
         return true;

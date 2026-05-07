@@ -23,7 +23,19 @@ public sealed record HeadlessServerShellOptions(
     string? RuntimeRootPath = null,
     ServerPersistenceBackupStorageMode BackupStorageMode = ServerPersistenceBackupStorageMode.Directory,
     int BackupCount = 3,
-    int BackupZstdCompressionLevel = 3)
+    int BackupZstdCompressionLevel = 3,
+    bool DiscoveryEnabled = false,
+    string DiscoveryRegistryUrl = "http://127.0.0.1:5000",
+    string DiscoveryPublishMode = "unverified",
+    string DiscoveryAdvertisedHost = "127.0.0.1",
+    string DiscoveryServerId = "",
+    string DiscoveryDescription = "",
+    string DiscoveryRegion = "",
+    string DiscoveryLanguage = "en-US",
+    string DiscoveryTags = "",
+    double DiscoveryHeartbeatIntervalSeconds = 15.0,
+    bool DiscoveryUnpublishOnStop = true,
+    string DiscoveryStatusEndpointUrl = "")
 {
     public static HeadlessServerShellOptions Default { get; } =
         new("headless", IdleDelay: TimeSpan.FromMilliseconds(1));

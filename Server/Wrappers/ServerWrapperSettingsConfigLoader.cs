@@ -17,7 +17,19 @@ internal sealed record ServerWrapperSettingsConfigValues(
     int MaxAutoCreatedAccountsPerRemoteAddress,
     ServerPersistenceBackupStorageMode BackupStorageMode,
     int BackupCount,
-    int BackupZstdCompressionLevel);
+    int BackupZstdCompressionLevel,
+    bool DiscoveryEnabled,
+    string DiscoveryRegistryUrl,
+    string DiscoveryPublishMode,
+    string DiscoveryAdvertisedHost,
+    string DiscoveryServerId,
+    string DiscoveryDescription,
+    string DiscoveryRegion,
+    string DiscoveryLanguage,
+    string DiscoveryTags,
+    double DiscoveryHeartbeatIntervalSeconds,
+    bool DiscoveryUnpublishOnStop,
+    string DiscoveryStatusEndpointUrl);
 
 internal static class ServerWrapperSettingsConfigLoader
 {
@@ -138,6 +150,64 @@ internal static class ServerWrapperSettingsConfigLoader
             values.BackupZstdCompressionLevel.ToString(CultureInfo.InvariantCulture),
             editorKind: ServerSettingEditorKind.Integer);
         registry.RegisterRestartRequired("server.chat.command_prefix", "Command prefix", values.CommandPrefix);
+        registry.RegisterRestartRequired(
+            "server.discovery.enabled",
+            "Discovery enabled",
+            values.DiscoveryEnabled ? "on" : "off",
+            editorKind: ServerSettingEditorKind.Boolean);
+        registry.RegisterRestartRequired(
+            "server.discovery.registry_url",
+            "Discovery registry URL",
+            values.DiscoveryRegistryUrl);
+        registry.RegisterRestartRequired(
+            "server.discovery.publish_mode",
+            "Discovery publish mode",
+            values.DiscoveryPublishMode,
+            editorKind: ServerSettingEditorKind.Choice,
+            choices:
+            [
+                new ServerSettingChoice("unverified", "unverified"),
+                new ServerSettingChoice("verified", "verified"),
+                new ServerSettingChoice("official", "official")
+            ]);
+        registry.RegisterRestartRequired(
+            "server.discovery.advertised_host",
+            "Discovery advertised host",
+            values.DiscoveryAdvertisedHost);
+        registry.RegisterRestartRequired(
+            "server.discovery.server_id",
+            "Discovery server ID",
+            values.DiscoveryServerId);
+        registry.RegisterRestartRequired(
+            "server.discovery.description",
+            "Discovery description",
+            values.DiscoveryDescription);
+        registry.RegisterRestartRequired(
+            "server.discovery.region",
+            "Discovery region",
+            values.DiscoveryRegion);
+        registry.RegisterRestartRequired(
+            "server.discovery.language",
+            "Discovery language",
+            values.DiscoveryLanguage);
+        registry.RegisterRestartRequired(
+            "server.discovery.tags",
+            "Discovery tags",
+            values.DiscoveryTags);
+        registry.RegisterRestartRequired(
+            "server.discovery.heartbeat_interval_seconds",
+            "Discovery heartbeat interval",
+            values.DiscoveryHeartbeatIntervalSeconds.ToString("0.###", CultureInfo.InvariantCulture),
+            editorKind: ServerSettingEditorKind.Decimal);
+        registry.RegisterRestartRequired(
+            "server.discovery.unpublish_on_stop",
+            "Discovery unpublish on stop",
+            values.DiscoveryUnpublishOnStop ? "on" : "off",
+            editorKind: ServerSettingEditorKind.Boolean);
+        registry.RegisterRestartRequired(
+            "server.discovery.status_endpoint_url",
+            "Discovery status endpoint URL",
+            values.DiscoveryStatusEndpointUrl);
         return registry;
     }
 
@@ -158,6 +228,18 @@ internal static class ServerWrapperSettingsConfigLoader
         ServerPersistenceBackupStorageMode backupStorageMode = values.BackupStorageMode;
         int backupCount = values.BackupCount;
         int backupZstdCompressionLevel = values.BackupZstdCompressionLevel;
+        bool discoveryEnabled = values.DiscoveryEnabled;
+        string discoveryRegistryUrl = values.DiscoveryRegistryUrl;
+        string discoveryPublishMode = values.DiscoveryPublishMode;
+        string discoveryAdvertisedHost = values.DiscoveryAdvertisedHost;
+        string discoveryServerId = values.DiscoveryServerId;
+        string discoveryDescription = values.DiscoveryDescription;
+        string discoveryRegion = values.DiscoveryRegion;
+        string discoveryLanguage = values.DiscoveryLanguage;
+        string discoveryTags = values.DiscoveryTags;
+        double discoveryHeartbeatIntervalSeconds = values.DiscoveryHeartbeatIntervalSeconds;
+        bool discoveryUnpublishOnStop = values.DiscoveryUnpublishOnStop;
+        string discoveryStatusEndpointUrl = values.DiscoveryStatusEndpointUrl;
 
         for (int i = 0; i < changes.Count; i++)
         {
@@ -228,6 +310,46 @@ internal static class ServerWrapperSettingsConfigLoader
                     if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedBackupZstdLevel))
                         backupZstdCompressionLevel = parsedBackupZstdLevel;
                     break;
+                case "server.discovery.enabled":
+                    discoveryEnabled = string.Equals(change.NormalizedValue, "on", StringComparison.OrdinalIgnoreCase);
+                    break;
+                case "server.discovery.registry_url":
+                    discoveryRegistryUrl = change.NormalizedValue;
+                    break;
+                case "server.discovery.publish_mode":
+                    discoveryPublishMode = change.NormalizedValue;
+                    break;
+                case "server.discovery.advertised_host":
+                    discoveryAdvertisedHost = change.NormalizedValue;
+                    break;
+                case "server.discovery.server_id":
+                    discoveryServerId = change.NormalizedValue;
+                    break;
+                case "server.discovery.description":
+                    discoveryDescription = change.NormalizedValue;
+                    break;
+                case "server.discovery.region":
+                    discoveryRegion = change.NormalizedValue;
+                    break;
+                case "server.discovery.language":
+                    discoveryLanguage = change.NormalizedValue;
+                    break;
+                case "server.discovery.tags":
+                    discoveryTags = change.NormalizedValue;
+                    break;
+                case "server.discovery.heartbeat_interval_seconds":
+                    if (double.TryParse(change.NormalizedValue, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsedDiscoveryHeartbeat)
+                        && parsedDiscoveryHeartbeat >= 1d)
+                    {
+                        discoveryHeartbeatIntervalSeconds = parsedDiscoveryHeartbeat;
+                    }
+                    break;
+                case "server.discovery.unpublish_on_stop":
+                    discoveryUnpublishOnStop = string.Equals(change.NormalizedValue, "on", StringComparison.OrdinalIgnoreCase);
+                    break;
+                case "server.discovery.status_endpoint_url":
+                    discoveryStatusEndpointUrl = change.NormalizedValue;
+                    break;
             }
         }
 
@@ -244,7 +366,19 @@ internal static class ServerWrapperSettingsConfigLoader
             maxAutoCreatedAccountsPerRemoteAddress,
             backupStorageMode,
             backupCount,
-            backupZstdCompressionLevel);
+            backupZstdCompressionLevel,
+            discoveryEnabled,
+            discoveryRegistryUrl,
+            discoveryPublishMode,
+            discoveryAdvertisedHost,
+            discoveryServerId,
+            discoveryDescription,
+            discoveryRegion,
+            discoveryLanguage,
+            discoveryTags,
+            discoveryHeartbeatIntervalSeconds,
+            discoveryUnpublishOnStop,
+            discoveryStatusEndpointUrl);
     }
 
     private static string FormatBackupStorageMode(ServerPersistenceBackupStorageMode mode)

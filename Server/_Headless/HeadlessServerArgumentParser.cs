@@ -32,6 +32,18 @@ public static class HeadlessServerArgumentParser
         ServerPersistenceBackupStorageMode backupStorageMode = HeadlessServerShellOptions.Default.BackupStorageMode;
         int backupCount = HeadlessServerShellOptions.Default.BackupCount;
         int backupZstdCompressionLevel = HeadlessServerShellOptions.Default.BackupZstdCompressionLevel;
+        bool discoveryEnabled = HeadlessServerShellOptions.Default.DiscoveryEnabled;
+        string discoveryRegistryUrl = HeadlessServerShellOptions.Default.DiscoveryRegistryUrl;
+        string discoveryPublishMode = HeadlessServerShellOptions.Default.DiscoveryPublishMode;
+        string discoveryAdvertisedHost = HeadlessServerShellOptions.Default.DiscoveryAdvertisedHost;
+        string discoveryServerId = HeadlessServerShellOptions.Default.DiscoveryServerId;
+        string discoveryDescription = HeadlessServerShellOptions.Default.DiscoveryDescription;
+        string discoveryRegion = HeadlessServerShellOptions.Default.DiscoveryRegion;
+        string discoveryLanguage = HeadlessServerShellOptions.Default.DiscoveryLanguage;
+        string discoveryTags = HeadlessServerShellOptions.Default.DiscoveryTags;
+        double discoveryHeartbeatIntervalSeconds = HeadlessServerShellOptions.Default.DiscoveryHeartbeatIntervalSeconds;
+        bool discoveryUnpublishOnStop = HeadlessServerShellOptions.Default.DiscoveryUnpublishOnStop;
+        string discoveryStatusEndpointUrl = HeadlessServerShellOptions.Default.DiscoveryStatusEndpointUrl;
 
         ServerWrapperSettingsConfigValues configValues = ServerWrapperSettingsConfigLoader.Load(
             runtimeRootPath,
@@ -48,7 +60,19 @@ public static class HeadlessServerArgumentParser
                 maxAutoCreatedAccountsPerRemoteAddress,
                 backupStorageMode,
                 backupCount,
-                backupZstdCompressionLevel));
+                backupZstdCompressionLevel,
+                discoveryEnabled,
+                discoveryRegistryUrl,
+                discoveryPublishMode,
+                discoveryAdvertisedHost,
+                discoveryServerId,
+                discoveryDescription,
+                discoveryRegion,
+                discoveryLanguage,
+                discoveryTags,
+                discoveryHeartbeatIntervalSeconds,
+                discoveryUnpublishOnStop,
+                discoveryStatusEndpointUrl));
         profileName = configValues.ProfileName;
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
@@ -62,6 +86,18 @@ public static class HeadlessServerArgumentParser
         backupStorageMode = configValues.BackupStorageMode;
         backupCount = configValues.BackupCount;
         backupZstdCompressionLevel = configValues.BackupZstdCompressionLevel;
+        discoveryEnabled = configValues.DiscoveryEnabled;
+        discoveryRegistryUrl = configValues.DiscoveryRegistryUrl;
+        discoveryPublishMode = configValues.DiscoveryPublishMode;
+        discoveryAdvertisedHost = configValues.DiscoveryAdvertisedHost;
+        discoveryServerId = configValues.DiscoveryServerId;
+        discoveryDescription = configValues.DiscoveryDescription;
+        discoveryRegion = configValues.DiscoveryRegion;
+        discoveryLanguage = configValues.DiscoveryLanguage;
+        discoveryTags = configValues.DiscoveryTags;
+        discoveryHeartbeatIntervalSeconds = configValues.DiscoveryHeartbeatIntervalSeconds;
+        discoveryUnpublishOnStop = configValues.DiscoveryUnpublishOnStop;
+        discoveryStatusEndpointUrl = configValues.DiscoveryStatusEndpointUrl;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -342,7 +378,19 @@ public static class HeadlessServerArgumentParser
             RuntimeRootPath: runtimeRootPath,
             BackupStorageMode: backupStorageMode,
             BackupCount: backupCount,
-            BackupZstdCompressionLevel: backupZstdCompressionLevel);
+            BackupZstdCompressionLevel: backupZstdCompressionLevel,
+            DiscoveryEnabled: discoveryEnabled,
+            DiscoveryRegistryUrl: discoveryRegistryUrl,
+            DiscoveryPublishMode: discoveryPublishMode,
+            DiscoveryAdvertisedHost: discoveryAdvertisedHost,
+            DiscoveryServerId: discoveryServerId,
+            DiscoveryDescription: discoveryDescription,
+            DiscoveryRegion: discoveryRegion,
+            DiscoveryLanguage: discoveryLanguage,
+            DiscoveryTags: discoveryTags,
+            DiscoveryHeartbeatIntervalSeconds: discoveryHeartbeatIntervalSeconds,
+            DiscoveryUnpublishOnStop: discoveryUnpublishOnStop,
+            DiscoveryStatusEndpointUrl: discoveryStatusEndpointUrl);
         error = null;
         showHelp = false;
         return true;

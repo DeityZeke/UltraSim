@@ -51,8 +51,8 @@ The current game project should pair with this service in small layers:
    - On stop/shutdown, send an offline/shutdown presence or unpublish.
 
 2. Server settings
-   - Expose discovery server-operation settings in the Godot server shell
-     settings tab.
+   - Discovery server-operation settings are now exposed in the Godot server
+     shell settings tab and loaded by the console/headless config path.
    - Keep bind address and port as next-start settings.
    - Keep discovery endpoint/name/description/region/language/tags as next-start
      settings for the default path; optional restart-discovery hooks can be
@@ -80,4 +80,3 @@ The current game project should pair with this service in small layers:
      behavior.
    - Keep an optional integration smoke that starts `Services/Registry`, starts
      a server publisher, and verifies the client browser can query the row.
-

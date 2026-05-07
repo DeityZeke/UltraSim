@@ -1790,7 +1790,19 @@ internal static class TestRunner
                 ["server.accounts.max_auto_created_per_ip"] = "4",
                 ["server.persistence.backup_storage"] = "zstd",
                 ["server.persistence.backup_count"] = "1",
-                ["server.persistence.backup_zstd_level"] = "9"
+                ["server.persistence.backup_zstd_level"] = "9",
+                ["server.discovery.enabled"] = "on",
+                ["server.discovery.registry_url"] = "http://127.0.0.1:5050",
+                ["server.discovery.publish_mode"] = "verified",
+                ["server.discovery.advertised_host"] = "shard.example.test",
+                ["server.discovery.server_id"] = "headless-shard",
+                ["server.discovery.description"] = "Headless test shard",
+                ["server.discovery.region"] = "local",
+                ["server.discovery.language"] = "en-US",
+                ["server.discovery.tags"] = "test,pvp",
+                ["server.discovery.heartbeat_interval_seconds"] = "22.5",
+                ["server.discovery.unpublish_on_stop"] = "off",
+                ["server.discovery.status_endpoint_url"] = "http://shard.example.test/status"
             });
 
         bool parsed = HeadlessServerArgumentParser.TryParse(
@@ -1819,6 +1831,18 @@ internal static class TestRunner
         Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
         Assert.Equal(1, options.BackupCount);
         Assert.Equal(9, options.BackupZstdCompressionLevel);
+        Assert.True(options.DiscoveryEnabled);
+        Assert.Equal("http://127.0.0.1:5050", options.DiscoveryRegistryUrl);
+        Assert.Equal("verified", options.DiscoveryPublishMode);
+        Assert.Equal("shard.example.test", options.DiscoveryAdvertisedHost);
+        Assert.Equal("headless-shard", options.DiscoveryServerId);
+        Assert.Equal("Headless test shard", options.DiscoveryDescription);
+        Assert.Equal("local", options.DiscoveryRegion);
+        Assert.Equal("en-US", options.DiscoveryLanguage);
+        Assert.Equal("test,pvp", options.DiscoveryTags);
+        Assert.Equal(22.5, options.DiscoveryHeartbeatIntervalSeconds);
+        Assert.False(options.DiscoveryUnpublishOnStop);
+        Assert.Equal("http://shard.example.test/status", options.DiscoveryStatusEndpointUrl);
     }
 
     private static void HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly()
@@ -1953,7 +1977,19 @@ internal static class TestRunner
                 ["server.accounts.max_auto_created_per_ip"] = "5",
                 ["server.persistence.backup_storage"] = "zip",
                 ["server.persistence.backup_count"] = "2",
-                ["server.persistence.backup_zstd_level"] = "8"
+                ["server.persistence.backup_zstd_level"] = "8",
+                ["server.discovery.enabled"] = "on",
+                ["server.discovery.registry_url"] = "http://127.0.0.1:5051",
+                ["server.discovery.publish_mode"] = "official",
+                ["server.discovery.advertised_host"] = "console.example.test",
+                ["server.discovery.server_id"] = "console-shard",
+                ["server.discovery.description"] = "Console test shard",
+                ["server.discovery.region"] = "lab",
+                ["server.discovery.language"] = "en-GB",
+                ["server.discovery.tags"] = "test,roleplay",
+                ["server.discovery.heartbeat_interval_seconds"] = "30",
+                ["server.discovery.unpublish_on_stop"] = "on",
+                ["server.discovery.status_endpoint_url"] = "http://console.example.test/status"
             });
 
         bool parsed = ConsoleServerArgumentParser.TryParse(
@@ -1982,6 +2018,18 @@ internal static class TestRunner
         Assert.Equal(ServerPersistenceBackupStorageMode.Zstd, options.BackupStorageMode);
         Assert.Equal(2, options.BackupCount);
         Assert.Equal(8, options.BackupZstdCompressionLevel);
+        Assert.True(options.DiscoveryEnabled);
+        Assert.Equal("http://127.0.0.1:5051", options.DiscoveryRegistryUrl);
+        Assert.Equal("official", options.DiscoveryPublishMode);
+        Assert.Equal("console.example.test", options.DiscoveryAdvertisedHost);
+        Assert.Equal("console-shard", options.DiscoveryServerId);
+        Assert.Equal("Console test shard", options.DiscoveryDescription);
+        Assert.Equal("lab", options.DiscoveryRegion);
+        Assert.Equal("en-GB", options.DiscoveryLanguage);
+        Assert.Equal("test,roleplay", options.DiscoveryTags);
+        Assert.Equal(30d, options.DiscoveryHeartbeatIntervalSeconds);
+        Assert.True(options.DiscoveryUnpublishOnStop);
+        Assert.Equal("http://console.example.test/status", options.DiscoveryStatusEndpointUrl);
     }
 
     private static void ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases()
