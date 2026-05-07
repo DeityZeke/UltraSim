@@ -11,11 +11,11 @@ namespace UltraSim.Client.Godot.UI;
 public partial class MenuCanvasManager : CanvasLayer
 {
     private const string ClientSettingsPath = "user://client_settings.cfg";
+    private const string SavedServersPath = "user://saved_servers.json";
     private const string WorldUiSettingsSection = "world_ui";
     private const string ChatSettingsSection = "chat";
 
     private readonly ClientAppShellNavigation _navigation = new();
-    private readonly ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser();
     private readonly Dictionary<string, Control> _serverDrivenPanels = new(StringComparer.Ordinal);
     private readonly Dictionary<string, UiPanelMetadata> _serverDrivenPanelMetadata = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Control> _actionMenus = new(StringComparer.Ordinal);
@@ -34,6 +34,10 @@ public partial class MenuCanvasManager : CanvasLayer
     private ClientAppShell? _appShell;
     private ClientChatPanel? _chatPanel;
     private WorldCanvasManager? _worldCanvas;
+    private ClientSavedServerList _savedServers = new();
+    private ClientSavedServerListStore? _savedServerStore;
+    private ClientServerBrowserService _serverBrowser = CreateDefaultServerBrowser(new ClientSavedServerList());
+    private ClientSavedServerEntry? _pendingDirectConnectHistoryEntry;
     private long _nextServerDrivenActionSequence;
     private bool _showChatPanel = true;
     private bool _suppressSettingsSave;
@@ -45,6 +49,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
     public override void _Ready()
     {
+        LoadSavedServers();
         _appShell = GetNodeOrNull<ClientAppShell>("AppShell") ?? CreateAppShell();
         EnsureServerDrivenSurfaceHosts();
         _chatPanel = GetNodeOrNull<ClientChatPanel>("ChatPanel") ?? CreateChatPanel();
@@ -392,6 +397,8 @@ public partial class MenuCanvasManager : CanvasLayer
     {
         appShell.ScreenRequested += HandleScreenRequested;
         appShell.DirectConnectRequested += HandleDirectConnectRequested;
+        appShell.ServerBrowserRowSubmitted += HandleServerBrowserRowSubmitted;
+        appShell.ManualDirectConnectSubmitted += HandleManualDirectConnectSubmitted;
         appShell.ServerBrowserRefreshRequested += HandleServerBrowserRefreshRequested;
         appShell.ServerBrowserProviderRequested += HandleServerBrowserProviderRequested;
         appShell.PreviewRequested += HandlePreviewRequested;
@@ -512,7 +519,24 @@ public partial class MenuCanvasManager : CanvasLayer
 
     private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
     {
+        RecordPendingHistory(request);
         DirectConnectRequested?.Invoke(request);
+    }
+
+    private void HandleServerBrowserRowSubmitted(ServerDiscoveryRow row)
+    {
+        _pendingDirectConnectHistoryEntry = ClientSavedServerEntry.FromRow(row);
+    }
+
+    private void HandleManualDirectConnectSubmitted(ClientDirectConnectRequest request)
+    {
+        string endpoint = $"{request.Host}:{request.Port}";
+        _pendingDirectConnectHistoryEntry = new ClientSavedServerEntry(
+            ServerId: endpoint,
+            DisplayName: endpoint,
+            Host: request.Host,
+            Port: request.Port,
+            LastSeenUtc: DateTimeOffset.UtcNow);
     }
 
     private void HandleServerBrowserRefreshRequested()
@@ -1231,7 +1255,54 @@ public partial class MenuCanvasManager : CanvasLayer
         }
     }
 
-    private static ClientServerBrowserService CreateDefaultServerBrowser()
+    private void LoadSavedServers()
+    {
+        _savedServerStore = new ClientSavedServerListStore(ProjectSettings.GlobalizePath(SavedServersPath));
+        try
+        {
+            _savedServers = _savedServerStore.LoadAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            GD.PushWarning($"Failed to load saved server browser entries: {ex.Message}");
+            _savedServers = new ClientSavedServerList();
+        }
+
+        _serverBrowser = CreateDefaultServerBrowser(_savedServers);
+    }
+
+    private void RecordPendingHistory(ClientDirectConnectRequest request)
+    {
+        ClientSavedServerEntry entry = _pendingDirectConnectHistoryEntry ?? new ClientSavedServerEntry(
+            ServerId: $"{request.Host}:{request.Port}",
+            DisplayName: $"{request.Host}:{request.Port}",
+            Host: request.Host,
+            Port: request.Port,
+            LastSeenUtc: DateTimeOffset.UtcNow);
+        _pendingDirectConnectHistoryEntry = null;
+
+        if (!_savedServers.RecordHistory(entry with { LastSeenUtc = DateTimeOffset.UtcNow }))
+            return;
+
+        SaveSavedServers();
+    }
+
+    private void SaveSavedServers()
+    {
+        if (_savedServerStore is null)
+            return;
+
+        try
+        {
+            _savedServerStore.SaveAsync(_savedServers).AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            GD.PushWarning($"Failed to save server browser history: {ex.Message}");
+        }
+    }
+
+    private static ClientServerBrowserService CreateDefaultServerBrowser(ClientSavedServerList savedServers)
     {
         var localRow = new ServerDiscoveryRow(
             ProviderId: "manual",
@@ -1263,16 +1334,8 @@ public partial class MenuCanvasManager : CanvasLayer
         return new ClientServerBrowserService(
         [
             officialProvider,
-            new ServerBrowserProviderDefinition(
-                "favorites",
-                "Favorites",
-                ServerDiscoveryProviderKind.Favorites,
-                new InMemoryServerDiscoveryQuery([])),
-            new ServerBrowserProviderDefinition(
-                "history",
-                "History",
-                ServerDiscoveryProviderKind.History,
-                new InMemoryServerDiscoveryQuery([])),
+            savedServers.CreateFavoritesProvider(),
+            savedServers.CreateHistoryProvider(),
             new ServerBrowserProviderDefinition(
                 "lan",
                 "LAN",

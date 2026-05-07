@@ -10,6 +10,8 @@ public partial class ClientAppShell : Control
 {
     public event Action<ClientAppScreen>? ScreenRequested;
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
+    public event Action<ServerDiscoveryRow>? ServerBrowserRowSubmitted;
+    public event Action<ClientDirectConnectRequest>? ManualDirectConnectSubmitted;
     public event Action? ServerBrowserRefreshRequested;
     public event Action<string>? ServerBrowserProviderRequested;
     public event Action? PreviewRequested;
@@ -625,6 +627,7 @@ public partial class ClientAppShell : Control
 
         _lastHostText = request.Host;
         _lastPortText = request.Port.ToString(CultureInfo.InvariantCulture);
+        ServerBrowserRowSubmitted?.Invoke(row);
         DirectConnectRequested?.Invoke(request);
     }
 
@@ -644,6 +647,7 @@ public partial class ClientAppShell : Control
 
         _lastHostText = request.Host;
         _lastPortText = request.Port.ToString(CultureInfo.InvariantCulture);
+        ManualDirectConnectSubmitted?.Invoke(request);
         DirectConnectRequested?.Invoke(request);
     }
 

@@ -23,6 +23,8 @@ internal static class TestRunner
         Run(nameof(ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu), ClientAppShellNavigation_NavigatesBackAndTogglesSessionMenu);
         Run(nameof(ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary), ClientNetworkSummaryFormatter_FormatsOfflineAndReadySummary);
         Run(nameof(ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure), ClientServerBrowserService_RefreshesRowsAndHandlesProviderFailure);
+        Run(nameof(ClientSavedServerList_ProvidesFavoritesAndHistoryRows), ClientSavedServerList_ProvidesFavoritesAndHistoryRows);
+        Run(nameof(ClientSavedServerListStore_RoundTripsFavoritesAndHistory), ClientSavedServerListStore_RoundTripsFavoritesAndHistory);
         Run(nameof(ClientOfficialRegistryDiscoveryFactory_CreatesOfficialProvider), ClientOfficialRegistryDiscoveryFactory_CreatesOfficialProvider);
         Run(nameof(ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields), ClientDirectConnectRequest_ValidatesAndTrimsEndpointFields);
         Run(nameof(ServerContentIdentity_ProducesPathSafeStableNamespace), ServerContentIdentity_ProducesPathSafeStableNamespace);
@@ -294,6 +296,86 @@ internal static class TestRunner
 
         Assert.False(service.SelectProvider("missing"));
         Assert.Equal("broken", service.ActiveProviderId);
+    }
+
+    private static void ClientSavedServerList_ProvidesFavoritesAndHistoryRows()
+    {
+        DateTimeOffset older = new(2026, 5, 6, 1, 0, 0, TimeSpan.Zero);
+        DateTimeOffset newer = older.AddHours(2);
+        var list = new ClientSavedServerList();
+
+        Assert.True(list.UpsertFavorite(new ClientSavedServerEntry(
+            ServerId: "",
+            DisplayName: "  Favorite Shard  ",
+            Host: " 127.0.0.1 ",
+            Port: 42042,
+            Region: "local",
+            PrimaryLanguage: "en-US",
+            CompatibilityId: "current",
+            Tags: ["uo", "test"],
+            LastSeenUtc: older)));
+        Assert.True(list.RecordHistory(new ClientSavedServerEntry(
+            ServerId: "old",
+            DisplayName: "Old Shard",
+            Host: "127.0.0.1",
+            Port: 42042,
+            LastSeenUtc: older)));
+        Assert.True(list.RecordHistory(new ClientSavedServerEntry(
+            ServerId: "new",
+            DisplayName: "New Shard",
+            Host: "localhost",
+            Port: 42043,
+            LastSeenUtc: newer)));
+        Assert.False(list.UpsertFavorite(new ClientSavedServerEntry("", "Bad", "", 42042)));
+
+        ServerBrowserProviderDefinition favoritesProvider = list.CreateFavoritesProvider();
+        IReadOnlyList<ServerDiscoveryRow> favoriteRows = favoritesProvider.Query.QueryAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal(1, favoriteRows.Count);
+        Assert.Equal(ServerDiscoveryProviderKind.Favorites, favoriteRows[0].ProviderKind);
+        Assert.Equal("Favorite Shard", favoriteRows[0].DisplayName);
+        Assert.Equal("127.0.0.1", favoriteRows[0].Host);
+        Assert.Equal(42042, favoriteRows[0].Port);
+        Assert.True(favoriteRows[0].IsFavorite);
+        Assert.Equal(ServerListingHealthState.Stale, favoriteRows[0].HealthState);
+        Assert.Equal("current", favoriteRows[0].CompatibilityId ?? string.Empty);
+        Assert.Equal("uo", favoriteRows[0].TagsOrEmpty[0]);
+
+        ServerBrowserProviderDefinition historyProvider = list.CreateHistoryProvider();
+        IReadOnlyList<ServerDiscoveryRow> historyRows = historyProvider.Query.QueryAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal(2, historyRows.Count);
+        Assert.Equal("New Shard", historyRows[0].DisplayName);
+        Assert.Equal("Old Shard", historyRows[1].DisplayName);
+        Assert.False(historyRows[0].IsFavorite);
+    }
+
+    private static void ClientSavedServerListStore_RoundTripsFavoritesAndHistory()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "ultrasim-saved-server-tests", Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(root, "servers.json");
+        var store = new ClientSavedServerListStore(path);
+        var list = new ClientSavedServerList();
+        Assert.True(list.UpsertFavorite(new ClientSavedServerEntry(
+            "fav",
+            "Favorite",
+            "127.0.0.1",
+            42042,
+            LastSeenUtc: new DateTimeOffset(2026, 5, 6, 1, 0, 0, TimeSpan.Zero))));
+        Assert.True(list.RecordHistory(new ClientSavedServerEntry(
+            "hist",
+            "History",
+            "localhost",
+            42043,
+            LastSeenUtc: new DateTimeOffset(2026, 5, 6, 2, 0, 0, TimeSpan.Zero))));
+
+        store.SaveAsync(list).AsTask().GetAwaiter().GetResult();
+        ClientSavedServerList loaded = store.LoadAsync().AsTask().GetAwaiter().GetResult();
+
+        Assert.Equal(1, loaded.Favorites.Count);
+        Assert.Equal("Favorite", loaded.Favorites[0].DisplayName);
+        Assert.Equal(42042, loaded.Favorites[0].Port);
+        Assert.Equal(1, loaded.History.Count);
+        Assert.Equal("History", loaded.History[0].DisplayName);
+        Assert.Equal(42043, loaded.History[0].Port);
     }
 
     private static void ClientOfficialRegistryDiscoveryFactory_CreatesOfficialProvider()

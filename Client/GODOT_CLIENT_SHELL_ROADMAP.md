@@ -599,6 +599,10 @@ Current status:
   `http://127.0.0.1:5000`, and can be overridden with `--us-registry-url=...`
   or `ULTRASIM_REGISTRY_URL`
 - manual/local-dev provider is wired and direct-connect remains available
+- saved-server favorites/history provider adapters and JSON storage exist in
+  `Client/Core`; Godot wires the provider shape, loads/saves
+  `user://saved_servers.json`, and records browser/manual connect submissions
+  into History
 - direct-connect row resolution, official provider query construction, and
   provider failure behavior are covered by `UltraSim.Client.Tests`
 - the v2 official registry service has been moved into `Services/Registry`
@@ -621,7 +625,8 @@ Current status:
 
 Remaining deferred G4 work:
 
-- favorites/history/LAN providers are explicitly deferred
+- LAN/mDNS provider is explicitly deferred
+- favorite/unfavorite UI actions are deferred
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 
 ### Phase G5 - Content Resolver And Cache Spine
