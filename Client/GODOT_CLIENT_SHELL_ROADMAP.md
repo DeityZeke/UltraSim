@@ -603,6 +603,8 @@ Current status:
   `Client/Core`; Godot wires the provider shape, loads/saves
   `user://saved_servers.json`, and records browser/manual connect submissions
   into History
+- selected server rows can be added/removed as Favorites, favorite state is
+  overlaid onto official/manual/history rows, and the History tab can be cleared
 - direct-connect row resolution, official provider query construction, and
   provider failure behavior are covered by `UltraSim.Client.Tests`
 - the v2 official registry service has been moved into `Services/Registry`
@@ -626,7 +628,6 @@ Current status:
 Remaining deferred G4 work:
 
 - LAN/mDNS provider is explicitly deferred
-- favorite/unfavorite UI actions are deferred
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 
 ### Phase G5 - Content Resolver And Cache Spine

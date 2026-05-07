@@ -346,6 +346,31 @@ internal static class TestRunner
         Assert.Equal("New Shard", historyRows[0].DisplayName);
         Assert.Equal("Old Shard", historyRows[1].DisplayName);
         Assert.False(historyRows[0].IsFavorite);
+
+        Assert.True(list.IsFavorite("127.0.0.1", 42042));
+        ServerBrowserProviderDefinition officialProvider = new(
+            "official",
+            "Official",
+            ServerDiscoveryProviderKind.Official,
+            new InMemoryServerDiscoveryQuery([
+                new ServerDiscoveryRow(
+                    ProviderId: "official",
+                    ProviderKind: ServerDiscoveryProviderKind.Official,
+                    ServerId: "official-fav",
+                    DisplayName: "Official Favorite",
+                    Host: "127.0.0.1",
+                    Port: 42042)
+            ]));
+        IReadOnlyList<ServerDiscoveryRow> overlaidRows = list
+            .CreateFavoriteOverlayProvider(officialProvider)
+            .Query
+            .QueryAsync()
+            .AsTask()
+            .GetAwaiter()
+            .GetResult();
+        Assert.True(overlaidRows[0].IsFavorite);
+        Assert.True(list.RemoveFavorite("127.0.0.1", 42042));
+        Assert.False(list.IsFavorite("127.0.0.1", 42042));
     }
 
     private static void ClientSavedServerListStore_RoundTripsFavoritesAndHistory()

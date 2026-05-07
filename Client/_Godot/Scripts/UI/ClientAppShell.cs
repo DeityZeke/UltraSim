@@ -12,6 +12,9 @@ public partial class ClientAppShell : Control
     public event Action<ClientDirectConnectRequest>? DirectConnectRequested;
     public event Action<ServerDiscoveryRow>? ServerBrowserRowSubmitted;
     public event Action<ClientDirectConnectRequest>? ManualDirectConnectSubmitted;
+    public event Action<ServerDiscoveryRow>? ServerBrowserFavoriteRequested;
+    public event Action<ServerDiscoveryRow>? ServerBrowserUnfavoriteRequested;
+    public event Action? ServerBrowserClearHistoryRequested;
     public event Action? ServerBrowserRefreshRequested;
     public event Action<string>? ServerBrowserProviderRequested;
     public event Action? PreviewRequested;
@@ -47,6 +50,8 @@ public partial class ClientAppShell : Control
     private LineEdit? _portField;
     private ItemList? _serverList;
     private Label? _serverDetailLabel;
+    private Button? _favoriteButton;
+    private Button? _clearHistoryButton;
     private Button? _joinButton;
     private ClientAppScreen _currentScreen = ClientAppScreen.Start;
     private ServerBrowserSnapshot? _serverBrowserSnapshot;
@@ -326,6 +331,8 @@ public partial class ClientAppShell : Control
         _portField = null;
         _serverList = null;
         _serverDetailLabel = null;
+        _favoriteButton = null;
+        _clearHistoryButton = null;
         _joinButton = null;
     }
 
@@ -433,6 +440,10 @@ public partial class ClientAppShell : Control
         _serverDetailLabel.VerticalAlignment = VerticalAlignment.Top;
         _serverDetailLabel.SizeFlagsVertical = SizeFlags.ExpandFill;
         rightColumn.AddChild(_serverDetailLabel);
+        _favoriteButton = AddPrimaryButton(rightColumn, "Add Favorite", SubmitFavoriteToggle, minWidth: 180.0f);
+        _favoriteButton.Disabled = true;
+        _clearHistoryButton = AddPrimaryButton(rightColumn, "Clear History", () => ServerBrowserClearHistoryRequested?.Invoke(), minWidth: 180.0f);
+        _clearHistoryButton.Visible = snapshot?.ActiveProviderId == "history";
 
         var footerStatus = new Label
         {
@@ -535,6 +546,8 @@ public partial class ClientAppShell : Control
             _selectedServerIndex = -1;
             if (_joinButton is not null)
                 _joinButton.Disabled = true;
+            if (_favoriteButton is not null)
+                _favoriteButton.Disabled = true;
             return;
         }
 
@@ -542,8 +555,30 @@ public partial class ClientAppShell : Control
         ServerDiscoveryRow row = snapshot.Rows[index];
         if (_joinButton is not null)
             _joinButton.Disabled = false;
+        if (_favoriteButton is not null)
+        {
+            _favoriteButton.Disabled = false;
+            _favoriteButton.Text = row.IsFavorite ? "Remove Favorite" : "Add Favorite";
+        }
         if (_serverDetailLabel is not null)
             _serverDetailLabel.Text = FormatServerDetails(row);
+    }
+
+    private void SubmitFavoriteToggle()
+    {
+        ServerBrowserSnapshot? snapshot = _serverBrowserSnapshot;
+        if (snapshot is null || _selectedServerIndex < 0 || _selectedServerIndex >= snapshot.Rows.Count)
+            return;
+
+        ServerDiscoveryRow row = snapshot.Rows[_selectedServerIndex];
+        if (row.IsFavorite)
+        {
+            ServerBrowserUnfavoriteRequested?.Invoke(row);
+        }
+        else
+        {
+            ServerBrowserFavoriteRequested?.Invoke(row);
+        }
     }
 
     private void SubmitSelectedServer()

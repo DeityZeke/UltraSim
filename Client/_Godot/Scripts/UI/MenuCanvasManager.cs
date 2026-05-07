@@ -399,6 +399,9 @@ public partial class MenuCanvasManager : CanvasLayer
         appShell.DirectConnectRequested += HandleDirectConnectRequested;
         appShell.ServerBrowserRowSubmitted += HandleServerBrowserRowSubmitted;
         appShell.ManualDirectConnectSubmitted += HandleManualDirectConnectSubmitted;
+        appShell.ServerBrowserFavoriteRequested += HandleServerBrowserFavoriteRequested;
+        appShell.ServerBrowserUnfavoriteRequested += HandleServerBrowserUnfavoriteRequested;
+        appShell.ServerBrowserClearHistoryRequested += HandleServerBrowserClearHistoryRequested;
         appShell.ServerBrowserRefreshRequested += HandleServerBrowserRefreshRequested;
         appShell.ServerBrowserProviderRequested += HandleServerBrowserProviderRequested;
         appShell.PreviewRequested += HandlePreviewRequested;
@@ -537,6 +540,31 @@ public partial class MenuCanvasManager : CanvasLayer
             Host: request.Host,
             Port: request.Port,
             LastSeenUtc: DateTimeOffset.UtcNow);
+    }
+
+    private void HandleServerBrowserFavoriteRequested(ServerDiscoveryRow row)
+    {
+        if (!_savedServers.UpsertFavorite(ClientSavedServerEntry.FromRow(row)))
+            return;
+
+        SaveSavedServers();
+        _ = RefreshServerBrowserAsync();
+    }
+
+    private void HandleServerBrowserUnfavoriteRequested(ServerDiscoveryRow row)
+    {
+        if (!_savedServers.RemoveFavorite(row.Host, row.Port))
+            return;
+
+        SaveSavedServers();
+        _ = RefreshServerBrowserAsync();
+    }
+
+    private void HandleServerBrowserClearHistoryRequested()
+    {
+        _savedServers.ClearHistory();
+        SaveSavedServers();
+        _ = RefreshServerBrowserAsync();
     }
 
     private void HandleServerBrowserRefreshRequested()
@@ -1333,7 +1361,7 @@ public partial class MenuCanvasManager : CanvasLayer
 
         return new ClientServerBrowserService(
         [
-            officialProvider,
+            savedServers.CreateFavoriteOverlayProvider(officialProvider),
             savedServers.CreateFavoritesProvider(),
             savedServers.CreateHistoryProvider(),
             new ServerBrowserProviderDefinition(
@@ -1345,7 +1373,9 @@ public partial class MenuCanvasManager : CanvasLayer
                 "manual",
                 "Manual",
                 ServerDiscoveryProviderKind.Manual,
-                new InMemoryServerDiscoveryQuery([localRow]))
+                new ClientSavedServerOverlayDiscoveryQuery(
+                    savedServers,
+                    new InMemoryServerDiscoveryQuery([localRow])))
         ],
         initialProviderId: "manual");
     }

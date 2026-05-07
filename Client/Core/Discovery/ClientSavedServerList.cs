@@ -44,6 +44,24 @@ public sealed class ClientSavedServerList
         return _favorites.Remove(key);
     }
 
+    public bool IsFavorite(string host, int port)
+    {
+        if (!TryCreateKey(host, port, out string key))
+            return false;
+
+        return _favorites.ContainsKey(key);
+    }
+
+    public ServerBrowserProviderDefinition CreateFavoriteOverlayProvider(ServerBrowserProviderDefinition inner)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        return new ServerBrowserProviderDefinition(
+            inner.ProviderId,
+            inner.DisplayName,
+            inner.ProviderKind,
+            new ClientSavedServerOverlayDiscoveryQuery(this, inner.Query));
+    }
+
     public bool RecordHistory(ClientSavedServerEntry entry)
     {
         if (!TryNormalize(entry, out ClientSavedServerEntry normalized))
