@@ -40,6 +40,7 @@ internal static class TestRunner
         Run(nameof(ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions), ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions);
         Run(nameof(ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings), ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings);
         Run(nameof(ServerDiscoveryStatusEndpointHost_ReturnsPollStatusResponse), ServerDiscoveryStatusEndpointHost_ReturnsPollStatusResponse);
+        Run(nameof(ServerLanDiscoveryResponderHost_AnswersClientLanQuery), ServerLanDiscoveryResponderHost_AnswersClientLanQuery);
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerSystemRuntimeSnapshot_PreservesSuppliedValues), ServerSystemRuntimeSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerPlayerSessionSnapshot_PreservesSuppliedValues), ServerPlayerSessionSnapshot_PreservesSuppliedValues);
@@ -536,6 +537,47 @@ internal static class TestRunner
 
         host.StopAsync().AsTask().GetAwaiter().GetResult();
         Assert.False(host.IsRunning);
+    }
+
+    private static void ServerLanDiscoveryResponderHost_AnswersClientLanQuery()
+    {
+        using var responder = new ServerLanDiscoveryResponderHost(
+            () => new ServerDiscoveryRow(
+                ProviderId: "server",
+                ProviderKind: ServerDiscoveryProviderKind.Custom,
+                ServerId: "lan-shard",
+                DisplayName: "LAN Shard",
+                Host: "127.0.0.1",
+                Port: 42042,
+                Region: "local",
+                PrimaryLanguage: "en-US",
+                CurrentUsers: 2,
+                MaxUsers: 64,
+                CompatibilityId: "current",
+                Tags: ["lan", "smoke"]),
+            new IPEndPoint(IPAddress.Loopback, 0));
+        responder.Start();
+        IPEndPoint endpoint = Assert.NotNull(responder.LocalEndPoint);
+
+        var query = new ClientLanDiscoveryQuery(new ClientLanDiscoveryOptions(
+            queryEndpoints: [endpoint],
+            timeout: TimeSpan.FromSeconds(2),
+            listenEndPoint: new IPEndPoint(IPAddress.Loopback, 0)));
+        IReadOnlyList<ServerDiscoveryRow> rows = query.QueryAsync().AsTask().GetAwaiter().GetResult();
+
+        Assert.Equal(1, rows.Count);
+        Assert.Equal("lan", rows[0].ProviderId);
+        Assert.Equal(ServerDiscoveryProviderKind.Lan, rows[0].ProviderKind);
+        Assert.Equal("lan-shard", rows[0].ServerId);
+        Assert.Equal("LAN Shard", rows[0].DisplayName);
+        Assert.Equal("127.0.0.1", rows[0].Host);
+        Assert.Equal(42042, rows[0].Port);
+        Assert.Equal("local", rows[0].Region);
+        Assert.Equal("en-US", rows[0].PrimaryLanguage);
+        Assert.Equal(2, rows[0].CurrentUsers);
+        Assert.Equal(64, rows[0].MaxUsers);
+        Assert.True(rows[0].PingMs.HasValue);
+        Assert.True(rows[0].LastSeenUtc.HasValue);
     }
 
     private static ServerDiscoveryAdvertisedSettings CreateDiscoveryAdvertisedSettings()

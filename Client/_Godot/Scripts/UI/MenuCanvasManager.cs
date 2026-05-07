@@ -522,8 +522,12 @@ public partial class MenuCanvasManager : CanvasLayer
 
     private void HandleDirectConnectRequested(ClientDirectConnectRequest request)
     {
-        RecordPendingHistory(request);
         DirectConnectRequested?.Invoke(request);
+    }
+
+    public void RecordReadySessionHistory(ClientDirectConnectRequest request)
+    {
+        RecordPendingHistory(request);
     }
 
     private void HandleServerBrowserRowSubmitted(ServerDiscoveryRow row)
@@ -1364,11 +1368,7 @@ public partial class MenuCanvasManager : CanvasLayer
             savedServers.CreateFavoriteOverlayProvider(officialProvider),
             savedServers.CreateFavoritesProvider(),
             savedServers.CreateHistoryProvider(),
-            new ServerBrowserProviderDefinition(
-                "lan",
-                "LAN",
-                ServerDiscoveryProviderKind.Lan,
-                new InMemoryServerDiscoveryQuery([])),
+            savedServers.CreateFavoriteOverlayProvider(ClientLanDiscoveryFactory.CreateProvider()),
             new ServerBrowserProviderDefinition(
                 "manual",
                 "Manual",

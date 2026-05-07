@@ -40,6 +40,10 @@ contracts without moving registry, HTTP, or portal details into `Server/Core`.
 - The Godot server shell has a read-only Discovery tab for publisher state,
   registry URL, advertised target, status endpoint state, last publish time, and
   latest discovery message.
+- `ServerLanDiscoveryResponderHost` answers shared UDP LAN discovery queries
+  with a server discovery row. The protocol and loopback client/server exchange
+  are covered by `UltraSim.Server.Tests`; console/headless/Godot lifecycle
+  wiring is still pending.
 - `_Tests/UltraSim.Registry.Tests` covers the shared contract loop from server
   publisher through official client query.
 - `_Tests/UltraSim.Registry.LaunchSmoke` starts the real registry service over
@@ -56,5 +60,7 @@ PATH="$HOME/.dotnet:$PATH" dotnet run --project _Tests/UltraSim.Registry.LaunchS
 
 ## Later Slices
 
-- LAN/mDNS provider and favorites/history providers.
+- Wire `ServerLanDiscoveryResponderHost` into console, headless, and Godot
+  server lifecycles.
+- mDNS/zeroconf provider.
 - Owner-claim UI/tooling for official registry moderation.

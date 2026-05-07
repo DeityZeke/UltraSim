@@ -71,9 +71,14 @@ What now exists:
   - preview actor, local controller, orbit camera, v2-style nameplate/overhead-chat projection
   - world UI presentation settings for nameplates, overhead chat, overhead health bars, chat panel visibility, visible label budget, and UI scale persisted in `user://client_settings.cfg`
   - local app shell, official/manual provider-backed server browser rows, direct connect, in-session menu, chat panel
-  - saved server browser history/favorites persisted to `user://saved_servers.json`; browser
-    and manual connect submissions record history entries, selected rows can be
+  - saved server browser history/favorites persisted to `user://saved_servers.json`; ready
+    direct-connect sessions record history entries, selected rows can be
     added/removed as favorites, and History can be cleared from the browser
+  - server browser filters are active for search, region, language, trust,
+    password, and whitelist state; rows can be sorted by name, users, ping,
+    region, and last seen time
+  - LAN browser provider uses the shared UDP LAN discovery query; server shell
+    lifecycle wiring for LAN responses is the next server-side slice
   - initial UDP session driver wiring for movement, observer state, chat, ping/status, and disconnect
   - first server-driven UI renderer bridge:
     - `MenuCanvasManager` hosts server-driven menu, modal, and exclusive surface lanes separately

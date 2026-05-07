@@ -601,10 +601,15 @@ Current status:
 - manual/local-dev provider is wired and direct-connect remains available
 - saved-server favorites/history provider adapters and JSON storage exist in
   `Client/Core`; Godot wires the provider shape, loads/saves
-  `user://saved_servers.json`, and records browser/manual connect submissions
-  into History
+  `user://saved_servers.json`, and records ready direct-connect sessions into
+  History
 - selected server rows can be added/removed as Favorites, favorite state is
   overlaid onto official/manual/history rows, and the History tab can be cleared
+- server browser filters are active for search, region, language, trust,
+  password, and whitelist state
+- server browser sort modes are active for name, users, ping, region, and last
+  seen time
+- LAN browser provider uses the shared UDP LAN discovery query
 - direct-connect row resolution, official provider query construction, and
   provider failure behavior are covered by `UltraSim.Client.Tests`
 - the v2 official registry service has been moved into `Services/Registry`
@@ -627,7 +632,8 @@ Current status:
 
 Remaining deferred G4 work:
 
-- LAN/mDNS provider is explicitly deferred
+- LAN server-shell responder lifecycle wiring is deferred
+- mDNS/zeroconf provider is explicitly deferred
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 
 ### Phase G5 - Content Resolver And Cache Spine

@@ -701,6 +701,10 @@ public partial class GodotClientRuntimeRoot : Node
 		}
 
 		UiManager?.Menus?.EnterConnectedSession();
+		if (_lastDirectConnectRequest.HasValue)
+		{
+			UiManager?.Menus?.RecordReadySessionHistory(_lastDirectConnectRequest.Value);
+		}
 		UiManager?.Menus?.AppendSystemChatLine("Connected.");
 	}
 

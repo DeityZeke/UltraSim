@@ -50,14 +50,30 @@ public partial class ClientAppShell : Control
     private LineEdit? _portField;
     private ItemList? _serverList;
     private Label? _serverDetailLabel;
+    private Label? _serverBrowserFooterStatus;
+    private LineEdit? _serverSearchField;
+    private LineEdit? _serverRegionField;
+    private LineEdit? _serverLanguageField;
+    private OptionButton? _serverTrustFilter;
+    private OptionButton? _serverPasswordFilter;
+    private OptionButton? _serverWhitelistFilter;
+    private OptionButton? _serverSortMode;
     private Button? _favoriteButton;
     private Button? _clearHistoryButton;
     private Button? _joinButton;
+    private readonly List<int> _visibleServerRowIndexes = [];
     private ClientAppScreen _currentScreen = ClientAppScreen.Start;
     private ServerBrowserSnapshot? _serverBrowserSnapshot;
     private int _selectedServerIndex = -1;
     private string _lastHostText = "127.0.0.1";
     private string _lastPortText = "42042";
+    private string _serverSearchFilter = string.Empty;
+    private string _serverRegionFilter = string.Empty;
+    private string _serverLanguageFilter = string.Empty;
+    private int _serverTrustFilterIndex;
+    private int _serverPasswordFilterIndex;
+    private int _serverWhitelistFilterIndex;
+    private int _serverSortModeIndex;
     private bool _showOverheadChat = true;
     private bool _showNameplates = true;
     private bool _showOverheadHealthBars = true;
@@ -331,9 +347,18 @@ public partial class ClientAppShell : Control
         _portField = null;
         _serverList = null;
         _serverDetailLabel = null;
+        _serverBrowserFooterStatus = null;
+        _serverSearchField = null;
+        _serverRegionField = null;
+        _serverLanguageField = null;
+        _serverTrustFilter = null;
+        _serverPasswordFilter = null;
+        _serverWhitelistFilter = null;
+        _serverSortMode = null;
         _favoriteButton = null;
         _clearHistoryButton = null;
         _joinButton = null;
+        _visibleServerRowIndexes.Clear();
     }
 
     private void BuildStartMenu()
@@ -451,6 +476,7 @@ public partial class ClientAppShell : Control
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             SizeFlagsStretchRatio = 3.0f
         };
+        _serverBrowserFooterStatus = footerStatus;
         layout.AddChild(footerStatus);
         layout.AddChild(CreateDivider());
 
@@ -500,13 +526,68 @@ public partial class ClientAppShell : Control
     {
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 8);
-        row.AddChild(CreateFilterField("Search", 180.0f, expand: true));
-        row.AddChild(CreateFilterField("Region", 110.0f));
-        row.AddChild(CreateFilterField("Language", 110.0f));
-        row.AddChild(CreateOption(["Trust: Any", "Trust: Unverified", "Trust: Verified", "Trust: Official"], 132.0f));
-        row.AddChild(CreateOption(["Password: Any", "Password: Open", "Password: Required"], 148.0f));
-        row.AddChild(CreateOption(["Whitelist: Any", "Whitelist: Off", "Whitelist: On"], 138.0f));
+        _serverSearchField = CreateFilterField("Search", 180.0f, _serverSearchFilter, expand: true);
+        _serverSearchField.TextChanged += text =>
+        {
+            _serverSearchFilter = text;
+            RefilterServerList();
+        };
+        row.AddChild(_serverSearchField);
+
+        _serverRegionField = CreateFilterField("Region", 110.0f, _serverRegionFilter);
+        _serverRegionField.TextChanged += text =>
+        {
+            _serverRegionFilter = text;
+            RefilterServerList();
+        };
+        row.AddChild(_serverRegionField);
+
+        _serverLanguageField = CreateFilterField("Language", 110.0f, _serverLanguageFilter);
+        _serverLanguageField.TextChanged += text =>
+        {
+            _serverLanguageFilter = text;
+            RefilterServerList();
+        };
+        row.AddChild(_serverLanguageField);
+
+        _serverTrustFilter = CreateOption(["Trust: Any", "Trust: Unverified", "Trust: Verified", "Trust: Official"], 132.0f, _serverTrustFilterIndex);
+        _serverTrustFilter.ItemSelected += index =>
+        {
+            _serverTrustFilterIndex = (int)index;
+            RefilterServerList();
+        };
+        row.AddChild(_serverTrustFilter);
+
+        _serverPasswordFilter = CreateOption(["Password: Any", "Password: Open", "Password: Required"], 148.0f, _serverPasswordFilterIndex);
+        _serverPasswordFilter.ItemSelected += index =>
+        {
+            _serverPasswordFilterIndex = (int)index;
+            RefilterServerList();
+        };
+        row.AddChild(_serverPasswordFilter);
+
+        _serverWhitelistFilter = CreateOption(["Whitelist: Any", "Whitelist: Off", "Whitelist: On"], 138.0f, _serverWhitelistFilterIndex);
+        _serverWhitelistFilter.ItemSelected += index =>
+        {
+            _serverWhitelistFilterIndex = (int)index;
+            RefilterServerList();
+        };
+        row.AddChild(_serverWhitelistFilter);
+
+        _serverSortMode = CreateOption(["Sort: Name", "Sort: Users", "Sort: Ping", "Sort: Region", "Sort: Last Seen"], 132.0f, _serverSortModeIndex);
+        _serverSortMode.ItemSelected += index =>
+        {
+            _serverSortModeIndex = (int)index;
+            RefilterServerList();
+        };
+        row.AddChild(_serverSortMode);
         return row;
+    }
+
+    private void RefilterServerList()
+    {
+        if (_serverBrowserFooterStatus is not null)
+            PopulateServerList(_serverBrowserSnapshot, _serverBrowserFooterStatus);
     }
 
     private void PopulateServerList(ServerBrowserSnapshot? snapshot, Label footerStatus)
@@ -515,6 +596,8 @@ public partial class ClientAppShell : Control
             return;
 
         _serverList.Clear();
+        _visibleServerRowIndexes.Clear();
+        ClearSelectedServerRow();
         if (snapshot is null)
         {
             footerStatus.Text = "Manual: no discovery providers are configured. manual connect available.";
@@ -522,11 +605,21 @@ public partial class ClientAppShell : Control
         }
 
         for (int i = 0; i < snapshot.Rows.Count; i++)
-            _serverList.AddItem(FormatServerRow(snapshot.Rows[i]));
-
-        if (snapshot.Rows.Count == 0)
         {
-            _serverList.AddItem("No servers found");
+            ServerDiscoveryRow row = snapshot.Rows[i];
+            if (!MatchesServerFilters(row))
+                continue;
+
+            _visibleServerRowIndexes.Add(i);
+        }
+        SortVisibleServerRows(snapshot);
+
+        for (int i = 0; i < _visibleServerRowIndexes.Count; i++)
+            _serverList.AddItem(FormatServerRow(snapshot.Rows[_visibleServerRowIndexes[i]]));
+
+        if (_visibleServerRowIndexes.Count == 0)
+        {
+            _serverList.AddItem(snapshot.Rows.Count == 0 ? "No servers found" : "No servers match filters");
             _serverList.SetItemDisabled(0, true);
         }
 
@@ -534,25 +627,39 @@ public partial class ClientAppShell : Control
             ? "refreshing..."
             : snapshot.LastError is not null
                 ? $"error: {snapshot.LastError}"
-                : $"{snapshot.Rows.Count} server(s)";
+                : ResolveServerCountStatus(snapshot.Rows.Count, _visibleServerRowIndexes.Count);
         footerStatus.Text = $"{ResolveActiveProviderName(snapshot)}: {status}. manual connect available.";
     }
 
-    private void SelectServerRow(int index)
+    private void ClearSelectedServerRow()
+    {
+        _selectedServerIndex = -1;
+        if (_joinButton is not null)
+            _joinButton.Disabled = true;
+        if (_favoriteButton is not null)
+            _favoriteButton.Disabled = true;
+        if (_serverDetailLabel is not null)
+            _serverDetailLabel.Text = "Select a server to view detailed information.";
+    }
+
+    private void SelectServerRow(int visibleIndex)
     {
         ServerBrowserSnapshot? snapshot = _serverBrowserSnapshot;
-        if (snapshot is null || index < 0 || index >= snapshot.Rows.Count)
+        if (snapshot is null || visibleIndex < 0 || visibleIndex >= _visibleServerRowIndexes.Count)
         {
-            _selectedServerIndex = -1;
-            if (_joinButton is not null)
-                _joinButton.Disabled = true;
-            if (_favoriteButton is not null)
-                _favoriteButton.Disabled = true;
+            ClearSelectedServerRow();
             return;
         }
 
-        _selectedServerIndex = index;
-        ServerDiscoveryRow row = snapshot.Rows[index];
+        int rowIndex = _visibleServerRowIndexes[visibleIndex];
+        if (rowIndex < 0 || rowIndex >= snapshot.Rows.Count)
+        {
+            ClearSelectedServerRow();
+            return;
+        }
+
+        _selectedServerIndex = rowIndex;
+        ServerDiscoveryRow row = snapshot.Rows[rowIndex];
         if (_joinButton is not null)
             _joinButton.Disabled = false;
         if (_favoriteButton is not null)
@@ -704,7 +811,142 @@ public partial class ClientAppShell : Control
             : string.Empty;
         string ping = row.PingMs.HasValue ? $" {row.PingMs}ms" : string.Empty;
         string region = string.IsNullOrWhiteSpace(row.Region) ? string.Empty : $" [{row.Region}]";
-        return $"{row.DisplayName}{region} - {row.Host}:{row.Port}{users}{ping}";
+        string favorite = row.IsFavorite ? "[Fav] " : string.Empty;
+        return $"{favorite}{row.DisplayName}{region} - {row.Host}:{row.Port}{users}{ping}";
+    }
+
+    private bool MatchesServerFilters(ServerDiscoveryRow row)
+    {
+        if (!MatchesSearchFilter(row, _serverSearchFilter))
+            return false;
+
+        if (!MatchesTextFilter(row.Region, _serverRegionFilter))
+            return false;
+
+        if (!MatchesTextFilter(row.PrimaryLanguage, _serverLanguageFilter))
+            return false;
+
+        if (_serverTrustFilterIndex > 0 &&
+            row.TrustLevel != (ServerListingTrustLevel)(_serverTrustFilterIndex - 1))
+        {
+            return false;
+        }
+
+        if (_serverPasswordFilterIndex == 1 && row.PasswordRequired)
+            return false;
+        if (_serverPasswordFilterIndex == 2 && !row.PasswordRequired)
+            return false;
+
+        if (_serverWhitelistFilterIndex == 1 && row.WhitelistOnly)
+            return false;
+        if (_serverWhitelistFilterIndex == 2 && !row.WhitelistOnly)
+            return false;
+
+        return true;
+    }
+
+    private static bool MatchesSearchFilter(ServerDiscoveryRow row, string filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter))
+            return true;
+
+        string value = filter.Trim();
+        return ContainsOrdinalIgnoreCase(row.DisplayName, value) ||
+               ContainsOrdinalIgnoreCase(row.Host, value) ||
+               ContainsOrdinalIgnoreCase(row.Region, value) ||
+               ContainsOrdinalIgnoreCase(row.PrimaryLanguage, value) ||
+               ContainsOrdinalIgnoreCase(row.CompatibilityId, value) ||
+               ContainsOrdinalIgnoreCase(row.VersionLabel, value) ||
+               row.TagsOrEmpty.Any(tag => ContainsOrdinalIgnoreCase(tag, value));
+    }
+
+    private static bool MatchesTextFilter(string? text, string filter)
+    {
+        return string.IsNullOrWhiteSpace(filter) || ContainsOrdinalIgnoreCase(text, filter.Trim());
+    }
+
+    private static bool ContainsOrdinalIgnoreCase(string? text, string value)
+    {
+        return !string.IsNullOrWhiteSpace(text) &&
+               text.Contains(value, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ResolveServerCountStatus(int totalCount, int visibleCount)
+    {
+        return visibleCount == totalCount
+            ? $"{totalCount} server(s)"
+            : $"{visibleCount}/{totalCount} server(s)";
+    }
+
+    private void SortVisibleServerRows(ServerBrowserSnapshot snapshot)
+    {
+        _visibleServerRowIndexes.Sort((left, right) =>
+        {
+            ServerDiscoveryRow a = snapshot.Rows[left];
+            ServerDiscoveryRow b = snapshot.Rows[right];
+            int comparison = _serverSortModeIndex switch
+            {
+                1 => CompareNullableIntDescending(a.CurrentUsers, b.CurrentUsers),
+                2 => CompareNullableIntAscending(a.PingMs, b.PingMs),
+                3 => CompareOrdinalIgnoreCase(a.Region, b.Region),
+                4 => CompareNullableDateDescending(a.LastSeenUtc, b.LastSeenUtc),
+                _ => CompareOrdinalIgnoreCase(a.DisplayName, b.DisplayName),
+            };
+
+            if (comparison != 0)
+                return comparison;
+
+            comparison = b.IsFavorite.CompareTo(a.IsFavorite);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = CompareOrdinalIgnoreCase(a.DisplayName, b.DisplayName);
+            if (comparison != 0)
+                return comparison;
+
+            comparison = CompareOrdinalIgnoreCase(a.Host, b.Host);
+            return comparison != 0 ? comparison : a.Port.CompareTo(b.Port);
+        });
+    }
+
+    private static int CompareNullableIntAscending(int? left, int? right)
+    {
+        if (!left.HasValue && !right.HasValue)
+            return 0;
+        if (!left.HasValue)
+            return 1;
+        if (!right.HasValue)
+            return -1;
+        return left.Value.CompareTo(right.Value);
+    }
+
+    private static int CompareNullableIntDescending(int? left, int? right)
+    {
+        return CompareNullableIntAscending(right, left);
+    }
+
+    private static int CompareNullableDateDescending(DateTimeOffset? left, DateTimeOffset? right)
+    {
+        if (!left.HasValue && !right.HasValue)
+            return 0;
+        if (!left.HasValue)
+            return 1;
+        if (!right.HasValue)
+            return -1;
+        return right.Value.CompareTo(left.Value);
+    }
+
+    private static int CompareOrdinalIgnoreCase(string? left, string? right)
+    {
+        bool leftEmpty = string.IsNullOrWhiteSpace(left);
+        bool rightEmpty = string.IsNullOrWhiteSpace(right);
+        if (leftEmpty && rightEmpty)
+            return 0;
+        if (leftEmpty)
+            return 1;
+        if (rightEmpty)
+            return -1;
+        return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FormatServerDetails(ServerDiscoveryRow row)
@@ -807,11 +1049,12 @@ public partial class ClientAppShell : Control
         return style;
     }
 
-    private static LineEdit CreateFilterField(string placeholder, float width, bool expand = false)
+    private static LineEdit CreateFilterField(string placeholder, float width, string text, bool expand = false)
     {
         var field = new LineEdit
         {
             PlaceholderText = placeholder,
+            Text = text,
             CustomMinimumSize = new Vector2(width, 0.0f)
         };
         if (expand)
@@ -819,7 +1062,7 @@ public partial class ClientAppShell : Control
         return field;
     }
 
-    private static OptionButton CreateOption(string[] values, float width)
+    private static OptionButton CreateOption(string[] values, float width, int selectedIndex = 0)
     {
         var option = new OptionButton
         {
@@ -827,6 +1070,7 @@ public partial class ClientAppShell : Control
         };
         for (int i = 0; i < values.Length; i++)
             option.AddItem(values[i]);
+        option.Select(Math.Clamp(selectedIndex, 0, Math.Max(0, values.Length - 1)));
         return option;
     }
 
