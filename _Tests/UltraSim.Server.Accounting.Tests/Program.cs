@@ -23,6 +23,7 @@ internal static class TestRunner
         Run(nameof(AccountAccessAdministrationService_ReplacesMetadataAndAudits), AccountAccessAdministrationService_ReplacesMetadataAndAudits);
         Run(nameof(AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin), AccountAccessAdministrationService_PreservesOmittedMetadataAndDemotesAdmin);
         Run(nameof(AccountStatusAdministrationService_ReplacesStatusAndReason), AccountStatusAdministrationService_ReplacesStatusAndReason);
+        Run(nameof(ServerAccountRecord_AccumulatesAndNormalizesPlayTime), ServerAccountRecord_AccumulatesAndNormalizesPlayTime);
         Run(nameof(AccountCharacterService_CreatesListsAndDeletesCharactersBySlot), AccountCharacterService_CreatesListsAndDeletesCharactersBySlot);
         Run(nameof(AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy), AccountCharacterService_EnforcesCharacterLimitAndDeletePolicy);
         Run(nameof(AccountCharacterService_AutoJoinRequiresSingleCharacterMode), AccountCharacterService_AutoJoinRequiresSingleCharacterMode);
@@ -142,6 +143,27 @@ internal static class TestRunner
         CredentialValidationResult limited = service.ValidateLogin(bad with { NowUtc = now.AddSeconds(2) });
         Assert.Equal(CredentialValidationResultKind.RateLimited, limited.Kind);
         Assert.True(limited.RetryAfter.HasValue);
+    }
+
+    private static void ServerAccountRecord_AccumulatesAndNormalizesPlayTime()
+    {
+        DateTimeOffset now = new(2026, 5, 6, 12, 0, 0, TimeSpan.Zero);
+        var account = new ServerAccountRecord(
+            7,
+            "Alice",
+            "hash",
+            AccountStatus.Active,
+            now,
+            DateTimeOffset.MinValue,
+            []);
+
+        ServerAccountRecord updated = account
+            .WithAdditionalPlayTime(TimeSpan.FromMinutes(5))
+            .WithAdditionalPlayTime(TimeSpan.FromSeconds(30))
+            .WithAdditionalPlayTime(TimeSpan.Zero);
+
+        Assert.Equal(TimeSpan.FromMinutes(5) + TimeSpan.FromSeconds(30), updated.TotalPlayTime);
+        Assert.Equal(TimeSpan.Zero, (updated with { TotalPlayTime = TimeSpan.FromSeconds(-1) }).Normalize().TotalPlayTime);
     }
 
     private static void DefaultCredentialService_DeniesSecondSessionByDefault()
@@ -392,6 +414,16 @@ internal static class TestRunner
         Assert.True(accounts.TryGetById(account.AccountId, out ServerAccountRecord updated));
         Assert.Equal(AccountStatus.Banned, updated.Status);
         Assert.Equal("shell ban", updated.StatusReason);
+
+        AccountStatusUpdateResult active = service.ReplaceStatus(
+            account.AccountId,
+            AccountStatus.Active,
+            " unban ");
+
+        Assert.True(active.Succeeded);
+        Assert.True(accounts.TryGetById(account.AccountId, out ServerAccountRecord unbanned));
+        Assert.Equal(AccountStatus.Active, unbanned.Status);
+        Assert.Equal("unban", unbanned.StatusReason);
 
         AccountStatusUpdateResult missing = service.ReplaceStatus(999, AccountStatus.Banned);
         Assert.False(missing.Succeeded);

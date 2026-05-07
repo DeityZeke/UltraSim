@@ -47,6 +47,9 @@ public static class ServerMovementWorldApplicationFactory
                 GetAccountSummaries = _ => runtime.GetAccountSummariesSnapshot(),
                 KickPlayerSession = (_, sessionId) => runtime.KickPlayerSession(sessionId),
                 BanAccount = (_, accountId) => runtime.BanAccount(accountId),
+                UnbanAccount = (_, accountId) => runtime.UnbanAccount(accountId),
+                SetAccountAccessLevel = (_, accountId, accessLevel) =>
+                    runtime.SetAccountAccessLevel(accountId, accessLevel),
                 ReplaceAccountAccess = (_, accountId, accessLevel, directGrants, directDenies) =>
                     runtime.ReplaceAccountAccess(accountId, accessLevel, directGrants, directDenies),
                 ExecuteCommand = (app, command) => runtime.ExecuteCommand(app, command),
@@ -184,6 +187,7 @@ public static class ServerMovementWorldApplicationFactory
                 SpawnSession,
                 despawnSession: DespawnSession,
                 endAccountSession: EndAccountSession,
+                recordAccountPlayTime: RecordAccountPlayTime,
                 getAccountAccessMetadata: _accounts.TryGetById,
                 characterPositionProjector: ProjectCharacterPosition,
                 characterPositionApplier: ApplyCharacterPosition,
@@ -388,6 +392,15 @@ public static class ServerMovementWorldApplicationFactory
             _accountSessions.EndSession(accountId, ResolveAccountSessionKey(connectionId));
         }
 
+        private void RecordAccountPlayTime(ulong accountId, TimeSpan elapsed)
+        {
+            if (accountId == 0 || elapsed <= TimeSpan.Zero)
+                return;
+
+            if (_accounts.TryGetById(accountId, out ServerAccountRecord account))
+                _accounts.Update(account.WithAdditionalPlayTime(elapsed));
+        }
+
         public void Dispose()
         {
             Stop();
@@ -443,6 +456,7 @@ public static class ServerMovementWorldApplicationFactory
             var connections = new ConnectionId[host.BoundConnectionCount];
             int count = host.CopyBoundConnections(connections);
             var players = new ServerPlayerSessionSnapshot[count];
+            DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
             for (int i = 0; i < count; i++)
             {
                 ConnectionId connectionId = connections[i];
@@ -450,6 +464,12 @@ public static class ServerMovementWorldApplicationFactory
                 ServerAccountRecord account = null!;
                 bool hasAccount = hasSelected && _accounts.TryGetById(selected.AccountId, out account);
                 string remoteAddress = ResolveRemoteAddress(connectionId);
+                TimeSpan currentUptime = host.TryGetConnectedAtUtc(connectionId, out DateTimeOffset connectedAtUtc)
+                    ? ClampDuration(nowUtc - connectedAtUtc)
+                    : TimeSpan.Zero;
+                TimeSpan totalPlayTime = hasAccount
+                    ? account.TotalPlayTime + currentUptime
+                    : currentUptime;
                 players[i] = new ServerPlayerSessionSnapshot(
                     connectionId.Value.ToString(),
                     hasSelected ? selected.CharacterName : $"Player {connectionId.Value}",
@@ -459,8 +479,8 @@ public static class ServerMovementWorldApplicationFactory
                     AccountName: hasAccount ? account.Username : string.Empty,
                     RemoteAddress: remoteAddress,
                     IsOnline: true,
-                    CurrentUptime: TimeSpan.Zero,
-                    TotalPlayTime: TimeSpan.Zero,
+                    CurrentUptime: currentUptime,
+                    TotalPlayTime: totalPlayTime,
                     AccessLevel: hasAccount ? account.AccessLevel : 0,
                     AccessRuleKeys: hasAccount ? account.AccessRuleKeys : [],
                     DirectPermissionGrants: hasAccount ? account.DirectPermissionGrants : [],
@@ -477,10 +497,12 @@ public static class ServerMovementWorldApplicationFactory
                 return Array.Empty<ServerAccountSummarySnapshot>();
 
             HashSet<ulong> onlineAccounts = GetOnlineAccountIds();
+            Dictionary<ulong, TimeSpan> livePlayTimeByAccount = GetLivePlayTimeByAccount();
             var summaries = new ServerAccountSummarySnapshot[accounts.Count];
             for (int i = 0; i < accounts.Count; i++)
             {
                 ServerAccountRecord account = accounts[i];
+                livePlayTimeByAccount.TryGetValue(account.AccountId, out TimeSpan livePlayTime);
                 summaries[i] = new ServerAccountSummarySnapshot(
                     account.AccountId.ToString(),
                     account.Username,
@@ -493,7 +515,8 @@ public static class ServerMovementWorldApplicationFactory
                     DirectPermissionDenies: account.DirectPermissionDenies,
                     CreatedUtc: account.CreatedUtc,
                     LastLoginUtc: account.LastLoginUtc == DateTimeOffset.MinValue ? null : account.LastLoginUtc,
-                    KnownRemoteAddresses: account.KnownRemoteAddresses);
+                    KnownRemoteAddresses: account.KnownRemoteAddresses,
+                    TotalPlayTime: account.TotalPlayTime + livePlayTime);
             }
 
             return summaries;
@@ -519,6 +542,34 @@ public static class ServerMovementWorldApplicationFactory
 
             _operatorLog?.Invoke($"Accounts: Updated permissions for '{result.Account.Username}' access={result.Account.AccessLevel}.");
             return ServerAccountAccessUpdateResult.Success(accountId, $"Updated permissions for '{result.Account.Username}'.");
+        }
+
+        public ServerAccountAccessUpdateResult SetAccountAccessLevel(string accountId, int accessLevel)
+        {
+            if (!ulong.TryParse(accountId, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong parsedAccountId))
+                return ServerAccountAccessUpdateResult.Reject(accountId, "Account id is not valid.");
+
+            AccountAccessUpdateResult result = _accountAccess.ReplaceAccessMetadata(
+                parsedAccountId,
+                accessLevel: Math.Max(0, accessLevel),
+                reason: "Godot server shell access level shortcut.");
+            if (!result.Succeeded || result.Account is null)
+                return ServerAccountAccessUpdateResult.Reject(accountId, result.Error);
+
+            _operatorLog?.Invoke($"Accounts: Set access level for '{result.Account.Username}' to {result.Account.AccessLevel}.");
+            return ServerAccountAccessUpdateResult.Success(accountId, $"Set '{result.Account.Username}' access to {AccessLevelName(result.Account.AccessLevel)}.");
+        }
+
+        private static string AccessLevelName(int accessLevel)
+        {
+            return accessLevel switch
+            {
+                >= 100 => "Developer / Owner",
+                >= 80 => "Game Master (GM)",
+                >= 60 => "Seer",
+                >= 40 => "Councilor",
+                _ => "Player"
+            };
         }
 
         public ServerPlayerSessionActionResult KickPlayerSession(string sessionId)
@@ -565,6 +616,22 @@ public static class ServerMovementWorldApplicationFactory
             return ServerAccountActionResult.Success(accountId, message);
         }
 
+        public ServerAccountActionResult UnbanAccount(string accountId)
+        {
+            if (!ulong.TryParse(accountId, NumberStyles.Integer, CultureInfo.InvariantCulture, out ulong parsedAccountId))
+                return ServerAccountActionResult.Reject(accountId, "Account id is not valid.");
+
+            AccountStatusUpdateResult result = _accountStatus.ReplaceStatus(
+                parsedAccountId,
+                AccountStatus.Active,
+                "Unbanned from Godot server shell.");
+            if (!result.Succeeded || result.Account is null)
+                return ServerAccountActionResult.Reject(accountId, result.Error);
+
+            _operatorLog?.Invoke($"Accounts: Unbanned '{result.Account.Username}'.");
+            return ServerAccountActionResult.Success(accountId, $"Unbanned '{result.Account.Username}'.");
+        }
+
         private int KickAccountSessions(ulong accountId)
         {
             ServerMovementSessionHost? host = _host;
@@ -607,6 +674,38 @@ public static class ServerMovementWorldApplicationFactory
             }
 
             return online;
+        }
+
+        private Dictionary<ulong, TimeSpan> GetLivePlayTimeByAccount()
+        {
+            var livePlayTime = new Dictionary<ulong, TimeSpan>();
+            ServerMovementSessionHost? host = _host;
+            if (host is null || host.BoundConnectionCount == 0)
+                return livePlayTime;
+
+            var connections = new ConnectionId[host.BoundConnectionCount];
+            int count = host.CopyBoundConnections(connections);
+            DateTimeOffset nowUtc = DateTimeOffset.UtcNow;
+            for (int i = 0; i < count; i++)
+            {
+                ConnectionId connectionId = connections[i];
+                if (!host.TryGetSelectedCharacter(connectionId, out ServerSelectedCharacterSession selected) ||
+                    !host.TryGetConnectedAtUtc(connectionId, out DateTimeOffset connectedAtUtc))
+                {
+                    continue;
+                }
+
+                TimeSpan elapsed = ClampDuration(nowUtc - connectedAtUtc);
+                livePlayTime.TryGetValue(selected.AccountId, out TimeSpan current);
+                livePlayTime[selected.AccountId] = current + elapsed;
+            }
+
+            return livePlayTime;
+        }
+
+        private static TimeSpan ClampDuration(TimeSpan value)
+        {
+            return value < TimeSpan.Zero ? TimeSpan.Zero : value;
         }
 
         private void ApplyMovementInput(World world, Entity entity, in MovementInputPacket input, float deltaSeconds)

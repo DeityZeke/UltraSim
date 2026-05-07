@@ -21,6 +21,10 @@ public delegate void ServerAccountSessionEnder(
     ConnectionId connectionId,
     ulong accountId);
 
+public delegate void ServerAccountPlayTimeRecorder(
+    ulong accountId,
+    TimeSpan elapsed);
+
 public delegate bool ServerAccountAccessMetadataProvider(
     ulong accountId,
     out ServerAccountRecord account);

@@ -22,6 +22,8 @@ public interface IServerApplication
     IReadOnlyList<ServerAccountSummarySnapshot> GetAccountSummariesSnapshot();
     ServerPlayerSessionActionResult KickPlayerSession(string sessionId);
     ServerAccountActionResult BanAccount(string accountId);
+    ServerAccountActionResult UnbanAccount(string accountId);
+    ServerAccountAccessUpdateResult SetAccountAccessLevel(string accountId, int accessLevel);
     ServerAccountAccessUpdateResult ReplaceAccountAccess(
         string accountId,
         int accessLevel,

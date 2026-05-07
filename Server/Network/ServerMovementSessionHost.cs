@@ -28,6 +28,7 @@ public sealed class ServerMovementSessionHost
     private readonly ServerMovementSessionSpawner _spawnSession;
     private readonly ServerMovementSessionDespawner? _despawnSession;
     private readonly ServerAccountSessionEnder? _endAccountSession;
+    private readonly ServerAccountPlayTimeRecorder? _recordAccountPlayTime;
     private readonly ServerAccountAccessMetadataProvider? _getAccountAccessMetadata;
     private readonly ServerCharacterPositionProjector? _characterPositionProjector;
     private readonly ServerCharacterPositionApplier? _characterPositionApplier;
@@ -44,6 +45,7 @@ public sealed class ServerMovementSessionHost
     private readonly Dictionary<ConnectionId, Entity> _entityByConnection = new();
     private readonly Dictionary<ConnectionId, uint> _networkEntityIdByConnection = new();
     private readonly Dictionary<ConnectionId, ServerSelectedCharacterSession> _selectedCharactersByConnection = new();
+    private readonly Dictionary<ConnectionId, DateTimeOffset> _connectedAtUtcByConnection = new();
     private readonly HashSet<ConnectionId> _pendingAdmissionStarts = new();
     private uint _nextAdmissionNetworkEntityId = 1;
 
@@ -55,6 +57,7 @@ public sealed class ServerMovementSessionHost
         ServerMovementSessionSpawner spawnSession,
         ServerMovementSessionDespawner? despawnSession = null,
         ServerAccountSessionEnder? endAccountSession = null,
+        ServerAccountPlayTimeRecorder? recordAccountPlayTime = null,
         ServerAccountAccessMetadataProvider? getAccountAccessMetadata = null,
         ServerCharacterPositionProjector? characterPositionProjector = null,
         ServerCharacterPositionApplier? characterPositionApplier = null,
@@ -125,6 +128,7 @@ public sealed class ServerMovementSessionHost
         _spawnSession = spawnSession ?? throw new ArgumentNullException(nameof(spawnSession));
         _despawnSession = despawnSession;
         _endAccountSession = endAccountSession;
+        _recordAccountPlayTime = recordAccountPlayTime;
         _getAccountAccessMetadata = getAccountAccessMetadata;
         _characterPositionProjector = characterPositionProjector;
         _characterPositionApplier = characterPositionApplier;
@@ -176,6 +180,11 @@ public sealed class ServerMovementSessionHost
         out ServerSelectedCharacterSession selectedCharacter)
     {
         return _selectedCharactersByConnection.TryGetValue(connectionId, out selectedCharacter!);
+    }
+
+    public bool TryGetConnectedAtUtc(ConnectionId connectionId, out DateTimeOffset connectedAtUtc)
+    {
+        return _connectedAtUtcByConnection.TryGetValue(connectionId, out connectedAtUtc);
     }
 
     public bool TryEnterWorld(ConnectionId connectionId, ServerCharacterRecord character)
@@ -254,8 +263,10 @@ public sealed class ServerMovementSessionHost
 
     public void Stop()
     {
-        SendDisconnectNotices(SessionDisconnectReason.ServerShutdown, Stopwatch.GetTimestamp());
+        long nowTicks = Stopwatch.GetTimestamp();
+        SendDisconnectNotices(SessionDisconnectReason.ServerShutdown, nowTicks);
         _control.FlushOutbound();
+        HandleSessionLifecycleEvents(nowTicks);
         _control.Stop();
     }
 
@@ -456,6 +467,7 @@ public sealed class ServerMovementSessionHost
                     continue;
 
                 _boundConnections.Add(evt.ConnectionId);
+                _connectedAtUtcByConnection[evt.ConnectionId] = _snapshotClock();
                 _operatorLog?.Invoke(evt.ConnectionId, "Connected");
                 _sessionRuntime.BindConnection(evt.ConnectionId);
                 _subscriptions.Subscribe(evt.ConnectionId, ServerChatScopes.System);
@@ -524,6 +536,7 @@ public sealed class ServerMovementSessionHost
                     _selectedCharactersByConnection.Remove(evt.ConnectionId);
                     _pendingAdmissionStarts.Remove(evt.ConnectionId);
                     EndAdmissionAndAccountSession(evt.ConnectionId, selectedCharacter);
+                    _connectedAtUtcByConnection.Remove(evt.ConnectionId);
                     _operatorLog?.Invoke(evt.ConnectionId, FormatDisconnectMessage(evt.DisconnectReason));
                 }
                 else
@@ -549,7 +562,16 @@ public sealed class ServerMovementSessionHost
         }
 
         if (accountId != 0)
+        {
+            if (_connectedAtUtcByConnection.TryGetValue(connectionId, out DateTimeOffset connectedAtUtc))
+            {
+                TimeSpan elapsed = _snapshotClock() - connectedAtUtc;
+                if (elapsed > TimeSpan.Zero)
+                    _recordAccountPlayTime?.Invoke(accountId, elapsed);
+            }
+
             _endAccountSession?.Invoke(connectionId, accountId);
+        }
     }
 
     private static string FormatDisconnectMessage(SessionDisconnectReason reason)

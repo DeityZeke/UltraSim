@@ -245,6 +245,22 @@ public sealed class ServerApplication : IServerApplication
         return _hooks.BanAccount(this, accountId);
     }
 
+    public ServerAccountActionResult UnbanAccount(string accountId)
+    {
+        if (_hooks.UnbanAccount is null)
+            return ServerAccountActionResult.Reject(accountId, "Account actions are not available.");
+
+        return _hooks.UnbanAccount(this, accountId);
+    }
+
+    public ServerAccountAccessUpdateResult SetAccountAccessLevel(string accountId, int accessLevel)
+    {
+        if (_hooks.SetAccountAccessLevel is null)
+            return ServerAccountAccessUpdateResult.Reject(accountId, "Account access editing is not available.");
+
+        return _hooks.SetAccountAccessLevel(this, accountId, accessLevel);
+    }
+
     public ServerAccountAccessUpdateResult ReplaceAccountAccess(
         string accountId,
         int accessLevel,

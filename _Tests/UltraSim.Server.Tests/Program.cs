@@ -356,6 +356,8 @@ internal static class TestRunner
         AssertMethod(contract, nameof(IServerApplication.GetAccountSummariesSnapshot), typeof(IReadOnlyList<ServerAccountSummarySnapshot>));
         AssertMethod(contract, nameof(IServerApplication.KickPlayerSession), typeof(ServerPlayerSessionActionResult), typeof(string));
         AssertMethod(contract, nameof(IServerApplication.BanAccount), typeof(ServerAccountActionResult), typeof(string));
+        AssertMethod(contract, nameof(IServerApplication.UnbanAccount), typeof(ServerAccountActionResult), typeof(string));
+        AssertMethod(contract, nameof(IServerApplication.SetAccountAccessLevel), typeof(ServerAccountAccessUpdateResult), typeof(string), typeof(int));
 
         MethodInfo? tryExecute = contract.GetMethod(nameof(IServerApplication.TryExecuteCommand));
         Assert.NotNull(tryExecute);
@@ -4771,6 +4773,9 @@ internal static class TestRunner
             ContentHash: 5,
             RequiredFeatures: FeatureFlags.SharedPayloadFanout);
         var operatorLog = new List<string>();
+        DateTimeOffset nowUtc = new(2026, 5, 6, 12, 0, 0, TimeSpan.Zero);
+        ulong recordedAccountId = 0;
+        TimeSpan recordedPlayTime = TimeSpan.Zero;
         var serverHost = new ServerMovementSessionHost(
             world,
             pair.Server,
@@ -4778,6 +4783,12 @@ internal static class TestRunner
             ProjectMovementState,
             SpawnSession,
             handshakePolicy: handshakePolicy,
+            recordAccountPlayTime: (accountId, elapsed) =>
+            {
+                recordedAccountId = accountId;
+                recordedPlayTime += elapsed;
+            },
+            snapshotClock: () => nowUtc,
             operatorLog: (connection, message) =>
                 operatorLog.Add($"{connection.Value}:{message}"));
         serverHost.Start();
@@ -4798,12 +4809,29 @@ internal static class TestRunner
         Assert.True(clientHost.IsReady);
         Assert.Equal(1, serverHost.BoundConnectionCount);
         Assert.True(world.Entities.IsAlive(spawnedEntity));
+        Assert.True(serverHost.TryGetConnectedAtUtc(new ConnectionId(1), out DateTimeOffset connectedAtUtc));
+        Assert.Equal(nowUtc, connectedAtUtc);
 
+        Assert.True(serverHost.TryEnterWorld(
+            new ConnectionId(1),
+            new ServerCharacterRecord(
+                9,
+                7,
+                0,
+                "Zeke",
+                "missing.prefab",
+                nowUtc,
+                nowUtc,
+                CharacterPositionSnapshot.Origin).Normalize()));
+
+        nowUtc = nowUtc.AddMinutes(2);
         Assert.True(serverHost.TryKick(new ConnectionId(1), 200));
 
         Assert.Equal(0, serverHost.BoundConnectionCount);
         Assert.False(world.Entities.IsAlive(spawnedEntity));
         Assert.Equal(0, serverHost.Control.Sessions.GetMetricsSnapshot().TotalSessions);
+        Assert.Equal(7UL, recordedAccountId);
+        Assert.Equal(TimeSpan.FromMinutes(2), recordedPlayTime);
         Assert.Contains("1:Disconnected (Kicked)", string.Join('\n', operatorLog));
     }
 

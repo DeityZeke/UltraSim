@@ -56,10 +56,14 @@ public partial class ServerShellRoot : Control
 	private Label? _playersSelectedValue;
 	private Button? _playerKickButton;
 	private Button? _playerBanButton;
+	private Button? _playerPromoteButton;
+	private Button? _playerDemoteButton;
 	private Button? _playerPermissionsButton;
 	private ItemList? _accountsList;
 	private Label? _accountsSelectedValue;
 	private Button? _accountBanButton;
+	private Button? _accountPromoteButton;
+	private Button? _accountDemoteButton;
 	private Button? _accountPermissionsButton;
 	private PanelContainer? _permissionsOverlay;
 	private Label? _permissionsTitleLabel;
@@ -894,8 +898,14 @@ public partial class ServerShellRoot : Control
 		_playerBanButton.Disabled = true;
 		_playerBanButton.Pressed += BanSelectedPlayerAccount;
 		actionRow.AddChild(_playerBanButton);
-		actionRow.AddChild(CreateDisabledButton("Promote", panelSoft, text));
-		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
+		_playerPromoteButton = CreateActionButton("Promote", panelSoft, text);
+		_playerPromoteButton.Disabled = true;
+		_playerPromoteButton.Pressed += PromoteSelectedPlayerAccount;
+		actionRow.AddChild(_playerPromoteButton);
+		_playerDemoteButton = CreateActionButton("Demote", panelSoft, text);
+		_playerDemoteButton.Disabled = true;
+		_playerDemoteButton.Pressed += DemoteSelectedPlayerAccount;
+		actionRow.AddChild(_playerDemoteButton);
 		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Blacklist", panelSoft, text));
 		_playerPermissionsButton = CreateActionButton("Permissions", accentSoft, text);
@@ -972,10 +982,16 @@ public partial class ServerShellRoot : Control
 		actionRow.AddChild(CreateDisabledButton("Remove", panelSoft, text));
 		_accountBanButton = CreateActionButton("Ban", panelSoft, text);
 		_accountBanButton.Disabled = true;
-		_accountBanButton.Pressed += BanSelectedAccount;
+		_accountBanButton.Pressed += ToggleSelectedAccountBan;
 		actionRow.AddChild(_accountBanButton);
-		actionRow.AddChild(CreateDisabledButton("Promote", panelSoft, text));
-		actionRow.AddChild(CreateDisabledButton("Demote", panelSoft, text));
+		_accountPromoteButton = CreateActionButton("Promote", panelSoft, text);
+		_accountPromoteButton.Disabled = true;
+		_accountPromoteButton.Pressed += PromoteSelectedAccount;
+		actionRow.AddChild(_accountPromoteButton);
+		_accountDemoteButton = CreateActionButton("Demote", panelSoft, text);
+		_accountDemoteButton.Disabled = true;
+		_accountDemoteButton.Pressed += DemoteSelectedAccount;
+		actionRow.AddChild(_accountDemoteButton);
 		actionRow.AddChild(CreateDisabledButton("Whitelist", panelSoft, text));
 		actionRow.AddChild(CreateDisabledButton("Blacklist", panelSoft, text));
 		_accountPermissionsButton = CreateActionButton("Permissions", accentSoft, text);
@@ -1248,15 +1264,62 @@ public partial class ServerShellRoot : Control
 		BanAccount(player.AccountId);
 	}
 
-	private void BanSelectedAccount()
+	private void PromoteSelectedPlayerAccount()
 	{
-		if (!TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		if (!TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
 		{
-			AppendOutput("ACCT", "Select an account before banning.");
+			AppendOutput("ACCT", "Select a player before promoting their account.");
 			return;
 		}
 
-		BanAccount(account.AccountId);
+		SetAccountAccessLevel(player.AccountId, NextAccessLevel(player.AccessLevel));
+	}
+
+	private void DemoteSelectedPlayerAccount()
+	{
+		if (!TryFindSelectedPlayer(out ServerPlayerSessionSnapshot player))
+		{
+			AppendOutput("ACCT", "Select a player before demoting their account.");
+			return;
+		}
+
+		SetAccountAccessLevel(player.AccountId, PreviousAccessLevel(player.AccessLevel));
+	}
+
+	private void ToggleSelectedAccountBan()
+	{
+		if (!TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		{
+			AppendOutput("ACCT", "Select an account before changing ban status.");
+			return;
+		}
+
+		if (account.IsBanned)
+			UnbanAccount(account.AccountId);
+		else
+			BanAccount(account.AccountId);
+	}
+
+	private void PromoteSelectedAccount()
+	{
+		if (!TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		{
+			AppendOutput("ACCT", "Select an account before promoting.");
+			return;
+		}
+
+		SetAccountAccessLevel(account.AccountId, NextAccessLevel(account.AccessLevel));
+	}
+
+	private void DemoteSelectedAccount()
+	{
+		if (!TryFindSelectedAccount(out ServerAccountSummarySnapshot account))
+		{
+			AppendOutput("ACCT", "Select an account before demoting.");
+			return;
+		}
+
+		SetAccountAccessLevel(account.AccountId, PreviousAccessLevel(account.AccessLevel));
 	}
 
 	private void BanAccount(string accountId)
@@ -1268,6 +1331,43 @@ public partial class ServerShellRoot : Control
 		}
 
 		ServerAccountActionResult result = _controller.BanAccount(accountId);
+		AppendOutput(result.Succeeded ? "ACCT" : "WARN", result.Message);
+		_playersListSignature = string.Empty;
+		_accountsListSignature = string.Empty;
+		RefreshStatus();
+	}
+
+	private void UnbanAccount(string accountId)
+	{
+		if (_controller is null)
+		{
+			AppendOutput("ACCT", "Server controller is not available.");
+			return;
+		}
+
+		ServerAccountActionResult result = _controller.UnbanAccount(accountId);
+		AppendOutput(result.Succeeded ? "ACCT" : "WARN", result.Message);
+		_playersListSignature = string.Empty;
+		_accountsListSignature = string.Empty;
+		RefreshStatus();
+	}
+
+	private void SetAccountAccessLevel(string accountId, int accessLevel)
+	{
+		if (_controller is null)
+		{
+			AppendOutput("ACCT", "Server controller is not available.");
+			return;
+		}
+
+		if (string.IsNullOrWhiteSpace(accountId) ||
+			string.Equals(accountId, "local", StringComparison.OrdinalIgnoreCase))
+		{
+			AppendOutput("ACCT", "Selected row is not bound to a persisted account.");
+			return;
+		}
+
+		ServerAccountAccessUpdateResult result = _controller.SetAccountAccessLevel(accountId, accessLevel);
 		AppendOutput(result.Succeeded ? "ACCT" : "WARN", result.Message);
 		_playersListSignature = string.Empty;
 		_accountsListSignature = string.Empty;
@@ -1492,6 +1592,35 @@ public partial class ServerShellRoot : Control
 			>= 40 => "Councilor",
 			_ => "Player"
 		};
+	}
+
+	private static int NextAccessLevel(int accessLevel)
+	{
+		return accessLevel switch
+		{
+			< 40 => 40,
+			< 60 => 60,
+			< 80 => 80,
+			< 100 => 100,
+			_ => 100
+		};
+	}
+
+	private static int PreviousAccessLevel(int accessLevel)
+	{
+		return accessLevel switch
+		{
+			> 80 => 80,
+			> 60 => 60,
+			> 40 => 40,
+			_ => 0
+		};
+	}
+
+	private static bool CanEditAccountAccess(string? accountId)
+	{
+		return !string.IsNullOrWhiteSpace(accountId) &&
+			!string.Equals(accountId, "local", StringComparison.OrdinalIgnoreCase);
 	}
 
 	private static IReadOnlyList<string> ParsePermissionLines(string? text)
@@ -2247,6 +2376,10 @@ public partial class ServerShellRoot : Control
 				_playerKickButton.Disabled = !player.IsOnline || string.IsNullOrWhiteSpace(player.SessionId);
 			if (_playerBanButton is not null)
 				_playerBanButton.Disabled = string.IsNullOrWhiteSpace(player.AccountId) || string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase);
+			if (_playerPromoteButton is not null)
+				_playerPromoteButton.Disabled = !CanEditAccountAccess(player.AccountId) || player.AccessLevel >= 100;
+			if (_playerDemoteButton is not null)
+				_playerDemoteButton.Disabled = !CanEditAccountAccess(player.AccountId) || player.AccessLevel <= 0;
 			if (_playerPermissionsButton is not null)
 				_playerPermissionsButton.Disabled = string.IsNullOrWhiteSpace(player.AccountId) || string.Equals(player.AccountId, "local", StringComparison.OrdinalIgnoreCase);
 			_playersSelectedValue.Text = string.IsNullOrWhiteSpace(player.Detail)
@@ -2259,6 +2392,10 @@ public partial class ServerShellRoot : Control
 			_playerKickButton.Disabled = true;
 		if (_playerBanButton is not null)
 			_playerBanButton.Disabled = true;
+		if (_playerPromoteButton is not null)
+			_playerPromoteButton.Disabled = true;
+		if (_playerDemoteButton is not null)
+			_playerDemoteButton.Disabled = true;
 		if (_playerPermissionsButton is not null)
 			_playerPermissionsButton.Disabled = true;
 		_playersSelectedValue.Text = "Select a player row to enable player actions.";
@@ -2273,7 +2410,14 @@ public partial class ServerShellRoot : Control
 		{
 			string flags = $"{(account.IsOnline ? "online" : "offline")}, {(account.IsBanned ? "banned" : "clear")}";
 			if (_accountBanButton is not null)
-				_accountBanButton.Disabled = string.IsNullOrWhiteSpace(account.AccountId) || account.IsBanned;
+			{
+				_accountBanButton.Text = account.IsBanned ? "Unban" : "Ban";
+				_accountBanButton.Disabled = string.IsNullOrWhiteSpace(account.AccountId);
+			}
+			if (_accountPromoteButton is not null)
+				_accountPromoteButton.Disabled = !CanEditAccountAccess(account.AccountId) || account.AccessLevel >= 100;
+			if (_accountDemoteButton is not null)
+				_accountDemoteButton.Disabled = !CanEditAccountAccess(account.AccountId) || account.AccessLevel <= 0;
 			if (_accountPermissionsButton is not null)
 				_accountPermissionsButton.Disabled = string.IsNullOrWhiteSpace(account.AccountId);
 			_accountsSelectedValue.Text = string.IsNullOrWhiteSpace(account.Detail)
@@ -2283,7 +2427,14 @@ public partial class ServerShellRoot : Control
 		}
 
 		if (_accountBanButton is not null)
+		{
+			_accountBanButton.Text = "Ban";
 			_accountBanButton.Disabled = true;
+		}
+		if (_accountPromoteButton is not null)
+			_accountPromoteButton.Disabled = true;
+		if (_accountDemoteButton is not null)
+			_accountDemoteButton.Disabled = true;
 		if (_accountPermissionsButton is not null)
 			_accountPermissionsButton.Disabled = true;
 		_accountsSelectedValue.Text = "Select an account row to enable account actions.";

@@ -23,6 +23,8 @@ public sealed record ServerAccountRecord(
 
     public int AccessLevel { get; init; } = IsAdmin ? 100 : 0;
 
+    public TimeSpan TotalPlayTime { get; init; } = TimeSpan.Zero;
+
     public int CharacterCount
     {
         get
@@ -53,6 +55,9 @@ public sealed record ServerAccountRecord(
             .Take(8)
             .ToArray();
         int normalizedAccessLevel = Math.Max(0, AccessLevel);
+        TimeSpan normalizedTotalPlayTime = TotalPlayTime < TimeSpan.Zero
+            ? TimeSpan.Zero
+            : TotalPlayTime;
         return this with
         {
             Username = username,
@@ -64,6 +69,7 @@ public sealed record ServerAccountRecord(
             DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(DirectPermissionDenies),
             AccessLevel = normalizedAccessLevel,
             IsAdmin = normalizedAccessLevel >= 100,
+            TotalPlayTime = normalizedTotalPlayTime,
             StatusReason = string.IsNullOrWhiteSpace(StatusReason) ? null : StatusReason.Trim()
         };
     }
@@ -83,6 +89,14 @@ public sealed record ServerAccountRecord(
             DirectPermissionGrants = ServerAccessKey.NormalizePermissionSet(directGrants),
             DirectPermissionDenies = ServerAccessKey.NormalizePermissionSet(directDenies)
         };
+    }
+
+    public ServerAccountRecord WithAdditionalPlayTime(TimeSpan elapsed)
+    {
+        if (elapsed <= TimeSpan.Zero)
+            return this;
+
+        return this with { TotalPlayTime = TotalPlayTime + elapsed };
     }
 
     public ServerAccountRecord WithStatus(AccountStatus status, string? reason = null)

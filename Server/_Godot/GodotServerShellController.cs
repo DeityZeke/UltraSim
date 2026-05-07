@@ -100,6 +100,16 @@ public sealed class GodotServerShellController : IDisposable
 		return _runtime.Application.BanAccount(accountId);
 	}
 
+	public ServerAccountActionResult UnbanAccount(string accountId)
+	{
+		return _runtime.Application.UnbanAccount(accountId);
+	}
+
+	public ServerAccountAccessUpdateResult SetAccountAccessLevel(string accountId, int accessLevel)
+	{
+		return _runtime.Application.SetAccountAccessLevel(accountId, accessLevel);
+	}
+
 	public ServerAccountAccessUpdateResult ReplaceAccountAccess(
 		string accountId,
 		int accessLevel,
