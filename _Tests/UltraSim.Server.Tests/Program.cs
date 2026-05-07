@@ -3,10 +3,12 @@ using System.Net;
 using System.Globalization;
 using UltraSim.Client;
 using UltraSim.ECS;
+using UltraSim.Discovery;
 using UltraSim.Server;
 using UltraSim.Server.Accounting;
 using UltraSim.Server.Admission;
 using UltraSim.Server.Console;
+using UltraSim.Server.Discovery;
 using UltraSim.Server.Godot;
 using UltraSim.Server.Gameplay;
 using UltraSim.Server.Hosting;
@@ -29,6 +31,10 @@ internal static class TestRunner
         Run(nameof(ServerControlCommand_FactoryHelpers_ProduceExpectedKinds), ServerControlCommand_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerCommandResult_FactoryHelpers_ProduceExpectedKinds), ServerCommandResult_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerStatusSnapshot_PreservesSuppliedValues), ServerStatusSnapshot_PreservesSuppliedValues);
+        Run(nameof(ServerDiscoveryContractBuilder_BuildsAdvertisedInfoFromSettings), ServerDiscoveryContractBuilder_BuildsAdvertisedInfoFromSettings);
+        Run(nameof(ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot), ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot);
+        Run(nameof(ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown), ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown);
+        Run(nameof(ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions), ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions);
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerSystemRuntimeSnapshot_PreservesSuppliedValues), ServerSystemRuntimeSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerPlayerSessionSnapshot_PreservesSuppliedValues), ServerPlayerSessionSnapshot_PreservesSuppliedValues);
@@ -234,6 +240,202 @@ internal static class TestRunner
         Assert.Equal(9, snapshot.PeakSessions);
         Assert.Equal(startedAt, snapshot.StartedAtUtc);
         Assert.Equal(uptime, snapshot.Uptime);
+    }
+
+    private static void ServerDiscoveryContractBuilder_BuildsAdvertisedInfoFromSettings()
+    {
+        var settings = new ServerDiscoveryAdvertisedSettings(
+            ServerId: " shard-one ",
+            DisplayName: " UltraSim Test ",
+            AdvertisedHost: " play.example.com ",
+            Port: 42042,
+            ProtocolVersion: " net-v1 ",
+            ContentVersion: " content-v3 ",
+            PasswordRequired: true,
+            WhitelistOnly: true,
+            Region: " us-central ",
+            Description: " test shard ",
+            Tags: [" pvp ", "", "custom"],
+            PrimaryLanguage: " en-US ",
+            Languages: [" en-US ", " es-MX "],
+            MaxUsers: 512,
+            Modded: true,
+            Visibility: ServerListingVisibility.Unlisted,
+            CompatibilityId: " compat-1 ",
+            CapabilityFlags: ServerCapabilityFlags.ServerDrivenUi | ServerCapabilityFlags.ContentPatching,
+            StatusEndpointUrl: " https://status.example.com/ultrasim ");
+
+        ServerAdvertisedInfo advertised = ServerDiscoveryContractBuilder.BuildAdvertisedInfo(settings);
+
+        Assert.Equal("shard-one", advertised.ServerId);
+        Assert.Equal("UltraSim Test", advertised.DisplayName);
+        Assert.Equal("play.example.com:42042", advertised.ConnectHint);
+        Assert.Equal("net-v1", advertised.ProtocolVersion);
+        Assert.Equal("content-v3", advertised.ContentVersion);
+        Assert.True(advertised.PasswordRequired);
+        Assert.True(advertised.WhitelistOnly);
+        Assert.Equal("us-central", advertised.Region);
+        Assert.Equal("test shard", advertised.Description);
+        Assert.Equal(ServerListingVisibility.Unlisted, advertised.Visibility);
+        Assert.Equal("compat-1", advertised.CompatibilityId);
+        Assert.Equal("https://status.example.com/ultrasim", advertised.StatusEndpointUrl);
+        Assert.SequenceEqual(["pvp", "custom"], advertised.TagsOrEmpty.ToArray());
+        Assert.SequenceEqual(["en-US", "es-MX"], advertised.LanguagesOrEmpty.ToArray());
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.DirectConnect) != 0);
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.PasswordRequired) != 0);
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.WhitelistOnly) != 0);
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.Mods) != 0);
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.ServerDrivenUi) != 0);
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.ContentPatching) != 0);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ServerDiscoveryContractBuilder.BuildAdvertisedInfo(settings with { Port = 0 }));
+    }
+
+    private static void ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot()
+    {
+        DateTimeOffset heartbeat = new(2026, 5, 6, 12, 30, 0, TimeSpan.Zero);
+        var snapshot = new ServerStatusSnapshot(
+            "test",
+            ServerApplicationState.Running,
+            IsInitialized: true,
+            IsRunning: true,
+            IsAcceptingConnections: true,
+            TickCount: 100,
+            ActiveSessions: 12,
+            PeakSessions: 22,
+            StartedAtUtc: heartbeat.AddHours(-2),
+            Uptime: TimeSpan.FromHours(2));
+
+        ServerDiscoveryStatusInfo status = ServerDiscoveryContractBuilder.BuildStatusInfo(
+            snapshot,
+            queueLength: 3,
+            rolling24HourUsers: 44,
+            heartbeatUtc: heartbeat);
+
+        Assert.True(status.IsAcceptingConnections);
+        Assert.Equal(12, status.CurrentUsers);
+        Assert.Equal(22, status.PeakUsers);
+        Assert.Equal(TimeSpan.FromHours(2), status.Uptime);
+        Assert.Equal("Running", status.Status);
+        Assert.Equal(44, status.Rolling24HourUsers);
+        Assert.Equal(3, status.QueueLength);
+        Assert.Equal(heartbeat, status.LastHeartbeatUtc);
+
+        ServerDiscoveryPollStatusResponse response = ServerDiscoveryContractBuilder.BuildPollStatusResponse(
+            snapshot,
+            serverId: "shard-one",
+            ownershipTokenHash: "hash",
+            heartbeatUtc: heartbeat);
+
+        Assert.Equal("shard-one", response.ServerId);
+        Assert.Equal("hash", response.OwnershipTokenHash);
+        Assert.Equal(status.CurrentUsers, response.StatusInfo.CurrentUsers);
+
+        ServerDiscoveryStatusInfo stopped = ServerDiscoveryContractBuilder.BuildStatusInfo(snapshot with
+        {
+            IsRunning = false,
+            IsAcceptingConnections = true,
+        });
+        Assert.False(stopped.IsAcceptingConnections);
+    }
+
+    private static void ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown()
+    {
+        DateTimeOffset now = new(2026, 5, 6, 13, 0, 0, TimeSpan.Zero);
+        var publisher = new FakeServerDiscoveryPublisher();
+        var coordinator = new ServerDiscoveryPublisherCoordinator(
+            publisher,
+            CreateDiscoveryAdvertisedSettings(),
+            () => CreateDiscoveryStatusSnapshot(activeSessions: 4, peakSessions: 9),
+            new ServerDiscoveryPublisherOptions(HeartbeatInterval: TimeSpan.FromSeconds(10)),
+            () => now);
+
+        coordinator.PublishStartupAsync().AsTask().GetAwaiter().GetResult();
+
+        Assert.True(coordinator.HasPublished);
+        Assert.Equal(now, coordinator.LastPublishUtc);
+        Assert.Equal(1, publisher.Published.Count);
+        Assert.Equal("test-shard", publisher.Published[0].AdvertisedInfo.ServerId);
+        Assert.Equal("127.0.0.1:42042", publisher.Published[0].AdvertisedInfo.ConnectHint);
+        Assert.Equal(4, publisher.Published[0].StatusInfo.CurrentUsers);
+        Assert.Equal(now, publisher.Published[0].StatusInfo.LastHeartbeatUtc);
+        Assert.Equal(1, publisher.Presences.Count);
+        Assert.Equal(ServerDiscoveryPresenceSignal.Startup, publisher.Presences[0].Signal);
+
+        now = now.AddSeconds(5);
+        coordinator.PublishHeartbeatIfDueAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal(1, publisher.Published.Count);
+
+        now = now.AddSeconds(5);
+        coordinator.PublishHeartbeatIfDueAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal(2, publisher.Published.Count);
+        Assert.Equal(now, coordinator.LastPublishUtc);
+        Assert.Equal(now, publisher.Published[1].StatusInfo.LastHeartbeatUtc);
+
+        coordinator.PublishShutdownAsync().AsTask().GetAwaiter().GetResult();
+        Assert.False(coordinator.HasPublished);
+        Assert.Equal(2, publisher.Presences.Count);
+        Assert.Equal(ServerDiscoveryPresenceSignal.Shutdown, publisher.Presences[1].Signal);
+        Assert.Equal(0, publisher.Unpublished.Count);
+    }
+
+    private static void ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions()
+    {
+        DateTimeOffset now = new(2026, 5, 6, 13, 0, 0, TimeSpan.Zero);
+        var disabledPublisher = new FakeServerDiscoveryPublisher();
+        var disabled = new ServerDiscoveryPublisherCoordinator(
+            disabledPublisher,
+            CreateDiscoveryAdvertisedSettings(),
+            () => CreateDiscoveryStatusSnapshot(activeSessions: 0, peakSessions: 0),
+            new ServerDiscoveryPublisherOptions(Enabled: false),
+            () => now);
+
+        disabled.PublishStartupAsync().AsTask().GetAwaiter().GetResult();
+        disabled.PublishHeartbeatIfDueAsync().AsTask().GetAwaiter().GetResult();
+        disabled.PublishShutdownAsync().AsTask().GetAwaiter().GetResult();
+        Assert.Equal(0, disabledPublisher.Published.Count);
+        Assert.Equal(0, disabledPublisher.Presences.Count);
+        Assert.Equal(0, disabledPublisher.Unpublished.Count);
+
+        var publisher = new FakeServerDiscoveryPublisher();
+        var coordinator = new ServerDiscoveryPublisherCoordinator(
+            publisher,
+            CreateDiscoveryAdvertisedSettings(),
+            () => CreateDiscoveryStatusSnapshot(activeSessions: 1, peakSessions: 1),
+            new ServerDiscoveryPublisherOptions(UnpublishOnStop: true),
+            () => now);
+
+        coordinator.PublishStartupAsync().AsTask().GetAwaiter().GetResult();
+        coordinator.PublishShutdownAsync().AsTask().GetAwaiter().GetResult();
+
+        Assert.Equal(1, publisher.Published.Count);
+        Assert.Equal(1, publisher.Unpublished.Count);
+        Assert.Equal("test-shard", publisher.Unpublished[0]);
+    }
+
+    private static ServerDiscoveryAdvertisedSettings CreateDiscoveryAdvertisedSettings()
+    {
+        return new ServerDiscoveryAdvertisedSettings(
+            ServerId: "test-shard",
+            DisplayName: "Test Shard",
+            AdvertisedHost: "127.0.0.1",
+            Port: 42042,
+            MaxUsers: 64);
+    }
+
+    private static ServerStatusSnapshot CreateDiscoveryStatusSnapshot(int activeSessions, int peakSessions)
+    {
+        return new ServerStatusSnapshot(
+            "test",
+            ServerApplicationState.Running,
+            IsInitialized: true,
+            IsRunning: true,
+            IsAcceptingConnections: true,
+            TickCount: 100,
+            ActiveSessions: activeSessions,
+            PeakSessions: peakSessions,
+            StartedAtUtc: new DateTimeOffset(2026, 5, 6, 12, 0, 0, TimeSpan.Zero),
+            Uptime: TimeSpan.FromHours(1));
     }
 
     private static void ServerMetricsSnapshot_PreservesSuppliedValues()
@@ -5318,6 +5520,39 @@ internal sealed class RecordingHostSink : IServerHostEventSink
     public void OnEvent(ServerApplicationEvent evt)
     {
         Events.Add(evt);
+    }
+}
+
+internal sealed class FakeServerDiscoveryPublisher : IServerDiscoveryPublisher
+{
+    public List<(ServerAdvertisedInfo AdvertisedInfo, ServerDiscoveryStatusInfo StatusInfo)> Published { get; } = [];
+
+    public List<string> Unpublished { get; } = [];
+
+    public List<(ServerDiscoveryPresenceSignal Signal, ServerDiscoveryStatusInfo? StatusInfo)> Presences { get; } = [];
+
+    public ValueTask PublishAsync(
+        ServerAdvertisedInfo advertisedInfo,
+        ServerDiscoveryStatusInfo statusInfo,
+        CancellationToken cancellationToken = default)
+    {
+        Published.Add((advertisedInfo, statusInfo));
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask UnpublishAsync(string serverId, CancellationToken cancellationToken = default)
+    {
+        Unpublished.Add(serverId);
+        return ValueTask.CompletedTask;
+    }
+
+    public ValueTask SendPresenceAsync(
+        ServerDiscoveryPresenceSignal signal,
+        ServerDiscoveryStatusInfo? statusInfo = null,
+        CancellationToken cancellationToken = default)
+    {
+        Presences.Add((signal, statusInfo));
+        return ValueTask.CompletedTask;
     }
 }
 

@@ -597,10 +597,14 @@ Current status:
 - Godot app shell has a provider-backed server browser surface
 - manual/local-dev provider is wired and direct-connect remains available
 - direct-connect row resolution and provider failure behavior are covered by `UltraSim.Client.Tests`
+- the v2 official registry service has been moved into `Services/Registry`
+- the v2 official discovery DTOs/query/publisher contracts have been restored under `Discovery`
 
 Remaining G4 work before a real registry launch:
 
-- official registry HTTP/query adapter once the portal/registry endpoint is available
+- official registry provider wiring in the Godot client shell
+- server-side discovery publisher/status adapters under `Server/Discovery`
+- server-operation settings for registry URL, discovery enablement, publish mode, server metadata, and advertised endpoint
 - favorites/history/LAN providers are explicitly deferred
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 

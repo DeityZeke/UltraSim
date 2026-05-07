@@ -6,6 +6,7 @@ public enum ServerDiscoveryProviderKind : byte
     Favorites = 1,
     History = 2,
     Lan = 3,
+    Steam = 4,
     Manual = 5,
     Custom = 255,
 }

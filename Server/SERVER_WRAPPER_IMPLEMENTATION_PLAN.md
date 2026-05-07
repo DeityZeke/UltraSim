@@ -451,6 +451,27 @@ Current note:
   - that same slice now also has a real UDP socket-backed validation path after control-plane handshake
   - that same slice now also has shared live session hosts (`ServerMovementSessionHost` / `ClientMovementSessionHost`) plus a first small multi-client UDP ramp benchmark
 
+## Parked Server Shell Tasks
+
+These are intentionally paused while discovery work resumes. They are server
+operator shell/runtime tasks, not gameplay content or future in-game ECS control
+panel work.
+
+- Add a full account status editor for `Active`, `Banned`, `Suspended`,
+  `Locked`, and `Pending`; keep the current ban/unban quick actions as the
+  common shortcut.
+- Add whitelist/blacklist policy and shell actions after the account policy
+  model is explicit.
+- Replace the current static permission picker catalog with a live
+  command/permission registry so packages can register shell/runtime
+  permissions without pretending they are content settings.
+- Gate shell actions by the operator's own access level and direct
+  grant/deny metadata.
+- Add account creation/removal flows once the policy decisions around local
+  accounts, portal accounts, and audit trails are pinned down.
+- Add inspect panels for player sessions and account records.
+- Polish the permission modal once the live permission registry exists.
+
 ## Risks To Watch
 
 - letting wrapper needs bloat the core API
