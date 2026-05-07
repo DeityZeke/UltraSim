@@ -49,6 +49,9 @@ The current game project should pair with this service in small layers:
    - On server start, register or publish a heartbeat.
    - During normal runtime, heartbeat at a coarse cadence.
    - On stop/shutdown, send an offline/shutdown presence or unpublish.
+   - Current status: settings-to-official-publication-plan construction exists
+     in `ServerDiscoveryPublicationFactory`; console, headless, and Godot
+     lifecycle wiring exists.
 
 2. Server settings
    - Discovery server-operation settings are now exposed in the Godot server

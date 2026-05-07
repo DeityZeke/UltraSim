@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Hosting\UltraSim.Server.Hosting.csproj" />
     <ProjectReference Include="..\Network\UltraSim.Server.Network.csproj" />
+    <ProjectReference Include="..\Discovery\UltraSim.Server.Discovery.csproj" />
     <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
   </ItemGroup>
 

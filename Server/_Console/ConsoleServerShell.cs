@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Discovery;
 using UltraSim.Server.Network;
 using UltraSim.Server.Scripting;
 
@@ -49,6 +50,8 @@ public sealed class ConsoleServerShell
                 TimeSpan.FromMilliseconds(Options.TickMilliseconds),
                 Options.MaxCatchUpTicksPerPump),
             new IServerHostEventSink[] { new ConsoleServerEventSink(_stdout, _stderr) });
+        using HttpClient? discoveryHttpClient = Options.DiscoveryEnabled ? new HttpClient() : null;
+        ServerDiscoveryPublisherCoordinator? discovery = CreateDiscoveryCoordinator(runtime, discoveryHttpClient);
 
         if (Options.AutoStart)
             runtime.StartImmediately();
@@ -71,6 +74,7 @@ public sealed class ConsoleServerShell
 
                 DrainPendingDirectives(runtime);
                 runtime.Pump(delta);
+                await PublishDiscoveryIfDueAsync(discovery, runtime, cancellationToken).ConfigureAwait(false);
 
                 if (runtime.State == ServerApplicationState.Running)
                     observedRunning = true;
@@ -101,10 +105,12 @@ public sealed class ConsoleServerShell
             _stderr.WriteLine(ex);
             _stderr.Flush();
             runtime.StopSafely();
+            await PublishDiscoveryShutdownAsync(discovery, CancellationToken.None).ConfigureAwait(false);
             return 1;
         }
 
         runtime.StopSafely();
+        await PublishDiscoveryShutdownAsync(discovery, CancellationToken.None).ConfigureAwait(false);
 
         if (inputTask is not null && inputTask.IsCompleted)
             await inputTask.ConfigureAwait(false);
@@ -174,6 +180,88 @@ public sealed class ConsoleServerShell
             : new ServerApplication(new ServerApplicationOptions(
                 options.ProfileName,
                 SaveOnStop: options.SaveOnStop));
+
+    private ServerDiscoveryPublisherCoordinator? CreateDiscoveryCoordinator(
+        HostedServerRuntime runtime,
+        HttpClient? httpClient)
+    {
+        if (!Options.DiscoveryEnabled || httpClient is null)
+            return null;
+
+        try
+        {
+            ServerDiscoveryPublicationPlan plan = ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(
+                new ServerDiscoveryPublicationSettings(
+                    Enabled: Options.DiscoveryEnabled,
+                    RegistryUrl: Options.DiscoveryRegistryUrl,
+                    PublishMode: Options.DiscoveryPublishMode,
+                    ServerId: Options.DiscoveryServerId,
+                    DisplayName: Options.ProfileName,
+                    AdvertisedHost: Options.DiscoveryAdvertisedHost,
+                    Port: Options.NetworkPort,
+                    MaxUsers: Options.MaxClients,
+                    Description: Options.DiscoveryDescription,
+                    Region: Options.DiscoveryRegion,
+                    PrimaryLanguage: Options.DiscoveryLanguage,
+                    Tags: Options.DiscoveryTags,
+                    HeartbeatIntervalSeconds: Options.DiscoveryHeartbeatIntervalSeconds,
+                    UnpublishOnStop: Options.DiscoveryUnpublishOnStop,
+                    StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl),
+                httpClient);
+
+            return new ServerDiscoveryPublisherCoordinator(
+                plan.Publisher,
+                plan.AdvertisedSettings,
+                runtime.GetStatusSnapshot,
+                plan.PublisherOptions);
+        }
+        catch (Exception ex)
+        {
+            _stderr.WriteLine($"Discovery disabled: {ex.Message}");
+            _stderr.Flush();
+            return null;
+        }
+    }
+
+    private async ValueTask PublishDiscoveryIfDueAsync(
+        ServerDiscoveryPublisherCoordinator? discovery,
+        HostedServerRuntime runtime,
+        CancellationToken cancellationToken)
+    {
+        if (discovery is null || runtime.State != ServerApplicationState.Running)
+            return;
+
+        try
+        {
+            if (discovery.HasPublished)
+                await discovery.PublishHeartbeatIfDueAsync(cancellationToken).ConfigureAwait(false);
+            else
+                await discovery.PublishStartupAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _stderr.WriteLine($"Discovery publish failed: {ex.Message}");
+            _stderr.Flush();
+        }
+    }
+
+    private async ValueTask PublishDiscoveryShutdownAsync(
+        ServerDiscoveryPublisherCoordinator? discovery,
+        CancellationToken cancellationToken)
+    {
+        if (discovery is null || !discovery.HasPublished)
+            return;
+
+        try
+        {
+            await discovery.PublishShutdownAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _stderr.WriteLine($"Discovery shutdown publish failed: {ex.Message}");
+            _stderr.Flush();
+        }
+    }
 
     private static void WriteStartupPreamble(TextWriter writer)
     {

@@ -167,8 +167,7 @@ internal static class ServerWrapperSettingsConfigLoader
             choices:
             [
                 new ServerSettingChoice("unverified", "unverified"),
-                new ServerSettingChoice("verified", "verified"),
-                new ServerSettingChoice("official", "official")
+                new ServerSettingChoice("verified", "verified")
             ]);
         registry.RegisterRestartRequired(
             "server.discovery.advertised_host",

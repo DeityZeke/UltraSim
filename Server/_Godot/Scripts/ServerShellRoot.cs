@@ -2709,8 +2709,7 @@ public partial class ServerShellRoot : Control
 			choices:
 			[
 				new ServerSettingChoice("unverified", "unverified"),
-				new ServerSettingChoice("verified", "verified"),
-				new ServerSettingChoice("official", "official")
+				new ServerSettingChoice("verified", "verified")
 			]);
 		registry.RegisterRestartRequired("server.discovery.advertised_host", "Discovery advertised host", options.DiscoveryAdvertisedHost);
 		registry.RegisterRestartRequired("server.discovery.server_id", "Discovery server ID", options.DiscoveryServerId);

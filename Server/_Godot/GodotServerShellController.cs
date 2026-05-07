@@ -1,4 +1,5 @@
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Discovery;
 using UltraSim.Server.Network;
 using UltraSim.Server.Scripting;
 
@@ -9,6 +10,10 @@ public sealed class GodotServerShellController : IDisposable
 	private readonly HostedServerRuntime _runtime;
 	private readonly UltraSimRuntimeRootLayout _runtimeRoot;
 	private readonly List<ServerApplicationEvent> _startupEvents = new();
+	private readonly HttpClient? _discoveryHttpClient;
+	private readonly ServerDiscoveryPublisherCoordinator? _discovery;
+	private readonly SemaphoreSlim _discoveryGate = new(1, 1);
+	private bool _disposed;
 
 	public GodotServerShellController(
 		GodotServerShellOptions options,
@@ -36,6 +41,10 @@ public sealed class GodotServerShellController : IDisposable
 				TimeSpan.FromMilliseconds(options.TickMilliseconds),
 				options.MaxCatchUpTicksPerPump),
 			new IServerHostEventSink[] { new ForwardingSink(HandleEvent) });
+		_discoveryHttpClient = options.DiscoveryEnabled
+			? new HttpClient { Timeout = TimeSpan.FromSeconds(5) }
+			: null;
+		_discovery = CreateDiscoveryCoordinator(_discoveryHttpClient);
 	}
 
 	public GodotServerShellOptions Options { get; }
@@ -49,6 +58,7 @@ public sealed class GodotServerShellController : IDisposable
 	public void Start()
 	{
 		_runtime.StartImmediately();
+		QueueDiscoveryPublishIfDue();
 	}
 
 	public void TickFrame(double deltaSeconds)
@@ -57,11 +67,17 @@ public sealed class GodotServerShellController : IDisposable
 			throw new ArgumentOutOfRangeException(nameof(deltaSeconds), "Frame delta must be non-negative.");
 
 		_runtime.Pump(TimeSpan.FromSeconds(deltaSeconds));
+		QueueDiscoveryPublishIfDue();
 	}
 
 	public ServerCommandResult Execute(ServerControlCommand command)
 	{
 		_runtime.TryExecuteCommand(command, out ServerCommandResult result);
+		if (_runtime.State == ServerApplicationState.Running)
+			QueueDiscoveryPublishIfDue();
+		else if (_runtime.State == ServerApplicationState.Stopped)
+			PublishDiscoveryShutdown();
+
 		return result;
 	}
 
@@ -126,12 +142,20 @@ public sealed class GodotServerShellController : IDisposable
 	public void Shutdown()
 	{
 		_runtime.StopSafely();
+		PublishDiscoveryShutdown();
 	}
 
 	public void Dispose()
 	{
+		if (_disposed)
+			return;
+
+		_disposed = true;
 		_runtime.StopSafely();
+		PublishDiscoveryShutdown();
 		_runtime.Dispose();
+		_discoveryHttpClient?.Dispose();
+		_discoveryGate.Dispose();
 	}
 
 	private IServerApplication CreateDefaultApplication(GodotServerShellOptions options) =>
@@ -157,6 +181,101 @@ public sealed class GodotServerShellController : IDisposable
 				options.ProfileName,
 				SaveOnStop: options.SaveOnStop));
 
+	private ServerDiscoveryPublisherCoordinator? CreateDiscoveryCoordinator(HttpClient? httpClient)
+	{
+		if (!Options.DiscoveryEnabled || httpClient is null)
+			return null;
+
+		try
+		{
+			ServerDiscoveryPublicationPlan plan = ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(
+				new ServerDiscoveryPublicationSettings(
+					Enabled: Options.DiscoveryEnabled,
+					RegistryUrl: Options.DiscoveryRegistryUrl,
+					PublishMode: Options.DiscoveryPublishMode,
+					ServerId: Options.DiscoveryServerId,
+					DisplayName: Options.ProfileName,
+					AdvertisedHost: Options.DiscoveryAdvertisedHost,
+					Port: Options.NetworkPort,
+					MaxUsers: Options.MaxClients,
+					Description: Options.DiscoveryDescription,
+					Region: Options.DiscoveryRegion,
+					PrimaryLanguage: Options.DiscoveryLanguage,
+					Tags: Options.DiscoveryTags,
+					HeartbeatIntervalSeconds: Options.DiscoveryHeartbeatIntervalSeconds,
+					UnpublishOnStop: Options.DiscoveryUnpublishOnStop,
+					StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl),
+				httpClient);
+
+			return new ServerDiscoveryPublisherCoordinator(
+				plan.Publisher,
+				plan.AdvertisedSettings,
+				_runtime.GetStatusSnapshot,
+				plan.PublisherOptions);
+		}
+		catch (Exception ex)
+		{
+			EmitLog($"Discovery disabled: {ex.Message}");
+			return null;
+		}
+	}
+
+	private void QueueDiscoveryPublishIfDue()
+	{
+		if (_discovery is null || _runtime.State != ServerApplicationState.Running)
+			return;
+
+		if (!_discoveryGate.Wait(0))
+			return;
+
+		_ = PublishDiscoveryIfDueAsync();
+	}
+
+	private async Task PublishDiscoveryIfDueAsync()
+	{
+		try
+		{
+			if (_discovery is null)
+				return;
+
+			if (_discovery.HasPublished)
+				await _discovery.PublishHeartbeatIfDueAsync().ConfigureAwait(false);
+			else
+				await _discovery.PublishStartupAsync().ConfigureAwait(false);
+		}
+		catch (Exception ex)
+		{
+			EmitLog($"Discovery publish failed: {ex.Message}");
+		}
+		finally
+		{
+			_discoveryGate.Release();
+		}
+	}
+
+	private void PublishDiscoveryShutdown()
+	{
+		if (_discovery is null || !_discovery.HasPublished)
+			return;
+
+		try
+		{
+			_discoveryGate.Wait();
+			try
+			{
+				_discovery.PublishShutdownAsync(CancellationToken.None).AsTask().GetAwaiter().GetResult();
+			}
+			finally
+			{
+				_discoveryGate.Release();
+			}
+		}
+		catch (Exception ex)
+		{
+			EmitLog($"Discovery shutdown publish failed: {ex.Message}");
+		}
+	}
+
 	private void HandleEvent(ServerApplicationEvent evt)
 	{
 		EventRaised?.Invoke(evt);
@@ -168,6 +287,18 @@ public sealed class GodotServerShellController : IDisposable
 			ServerApplicationEventKind.Log,
 			DateTimeOffset.UtcNow,
 			message));
+	}
+
+	private void EmitLog(string message)
+	{
+		var evt = new ServerApplicationEvent(
+			ServerApplicationEventKind.Log,
+			DateTimeOffset.UtcNow,
+			message);
+		if (EventRaised is null)
+			_startupEvents.Add(evt);
+		else
+			EventRaised.Invoke(evt);
 	}
 
 	private sealed class ForwardingSink : IServerHostEventSink

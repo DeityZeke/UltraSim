@@ -4,6 +4,7 @@ using System.Globalization;
 using UltraSim.Client;
 using UltraSim.ECS;
 using UltraSim.Discovery;
+using UltraSim.Discovery.Official;
 using UltraSim.Server;
 using UltraSim.Server.Accounting;
 using UltraSim.Server.Admission;
@@ -35,6 +36,7 @@ internal static class TestRunner
         Run(nameof(ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot), ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot);
         Run(nameof(ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown), ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown);
         Run(nameof(ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions), ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions);
+        Run(nameof(ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings), ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings);
         Run(nameof(ServerMetricsSnapshot_PreservesSuppliedValues), ServerMetricsSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerSystemRuntimeSnapshot_PreservesSuppliedValues), ServerSystemRuntimeSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerPlayerSessionSnapshot_PreservesSuppliedValues), ServerPlayerSessionSnapshot_PreservesSuppliedValues);
@@ -79,12 +81,14 @@ internal static class TestRunner
         Run(nameof(HeadlessServerArgumentParser_ParsesExpectedOptions), HeadlessServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides), HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides);
         Run(nameof(HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly), HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly);
+        Run(nameof(HeadlessServerShell_RunAsync_ContinuesWhenDiscoveryConfigurationIsInvalid), HeadlessServerShell_RunAsync_ContinuesWhenDiscoveryConfigurationIsInvalid);
         Run(nameof(HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults), HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults);
         Run(nameof(ConsoleServerArgumentParser_ParsesExpectedOptions), ConsoleServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides), ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides);
         Run(nameof(ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases), ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases);
         Run(nameof(ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly), ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly);
         Run(nameof(GodotServerShellController_ExposesSharedControlSurface), GodotServerShellController_ExposesSharedControlSurface);
+        Run(nameof(GodotServerShellController_ContinuesWhenDiscoveryConfigurationIsInvalid), GodotServerShellController_ContinuesWhenDiscoveryConfigurationIsInvalid);
         Run(nameof(ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems), ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems);
         Run(nameof(ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents), ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents);
         Run(nameof(ServerRuntimeNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream), ServerRuntimeNetworkPublisher_UsesConfiguredOrderedEventCapacityWhenConstructingOwnStream);
@@ -411,6 +415,75 @@ internal static class TestRunner
         Assert.Equal(1, publisher.Published.Count);
         Assert.Equal(1, publisher.Unpublished.Count);
         Assert.Equal("test-shard", publisher.Unpublished[0]);
+    }
+
+    private static void ServerDiscoveryPublicationFactory_BuildsOfficialRegistryPlanFromSettings()
+    {
+        using var httpClient = new HttpClient();
+        var settings = new ServerDiscoveryPublicationSettings(
+            Enabled: true,
+            RegistryUrl: " http://registry.example.test ",
+            PublishMode: " verified ",
+            ServerId: " ",
+            DisplayName: " Test Shard ",
+            AdvertisedHost: " play.example.test ",
+            Port: 42042,
+            MaxUsers: 128,
+            Description: " registry test ",
+            Region: " us-central ",
+            PrimaryLanguage: " en-US ",
+            Tags: "pvp, custom, pvp",
+            HeartbeatIntervalSeconds: 0.25,
+            UnpublishOnStop: false,
+            StatusEndpointUrl: " http://play.example.test/status ",
+            PublishToken: "token",
+            OwnershipTokenHash: "owner-hash",
+            ProtocolVersion: "net-v1",
+            ContentVersion: "content-v1",
+            PasswordRequired: true,
+            WhitelistOnly: true,
+            Modded: true,
+            Visibility: ServerListingVisibility.Unlisted,
+            CompatibilityId: "compat-1",
+            CapabilityFlags: ServerCapabilityFlags.ServerDrivenUi);
+
+        ServerDiscoveryPublicationPlan plan = ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(settings, httpClient);
+
+        Assert.Equal(new Uri("http://registry.example.test/"), plan.RegistryUri);
+        Assert.Equal(new Uri("http://registry.example.test/"), httpClient.BaseAddress);
+        Assert.Equal(DiscoveryPublishMode.Verified, plan.PublishMode);
+        Assert.True(plan.Publisher is OfficialRegistryDiscoveryPublisher);
+        Assert.True(plan.PublisherOptions.Enabled);
+        Assert.Equal(TimeSpan.FromSeconds(1), plan.PublisherOptions.EffectiveHeartbeatInterval);
+        Assert.False(plan.PublisherOptions.UnpublishOnStop);
+        Assert.Equal("Test Shard", plan.AdvertisedSettings.ServerId);
+        Assert.Equal("Test Shard", plan.AdvertisedSettings.DisplayName);
+        Assert.Equal("play.example.test", plan.AdvertisedSettings.AdvertisedHost);
+        Assert.Equal(42042, plan.AdvertisedSettings.Port);
+        Assert.Equal(128, plan.AdvertisedSettings.MaxUsers);
+        Assert.Equal(ServerListingVisibility.Unlisted, plan.AdvertisedSettings.Visibility);
+        Assert.SequenceEqual(["pvp", "custom"], plan.AdvertisedSettings.TagsOrEmpty.ToArray());
+
+        ServerAdvertisedInfo advertised = ServerDiscoveryContractBuilder.BuildAdvertisedInfo(plan.AdvertisedSettings);
+        Assert.Equal("play.example.test:42042", advertised.ConnectHint);
+        Assert.Equal("registry test", advertised.Description);
+        Assert.Equal("en-US", advertised.PrimaryLanguage);
+        Assert.SequenceEqual(["en-US"], advertised.LanguagesOrEmpty.ToArray());
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.DirectConnect) != 0);
+        Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.ServerDrivenUi) != 0);
+
+        using var disabledHttpClient = new HttpClient();
+        ServerDiscoveryPublicationPlan disabled = ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(
+            settings with { Enabled = false, PublishMode = "verified" },
+            disabledHttpClient);
+        Assert.Equal(DiscoveryPublishMode.Disabled, disabled.PublishMode);
+        Assert.False(disabled.PublisherOptions.Enabled);
+
+        Assert.Throws<ArgumentException>(() => ServerDiscoveryPublicationFactory.ParsePublishMode("official"));
+        using var invalidRegistryClient = new HttpClient();
+        Assert.Throws<ArgumentException>(() => ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(
+            settings with { RegistryUrl = "ftp://registry.example.test" },
+            invalidRegistryClient));
     }
 
     private static ServerDiscoveryAdvertisedSettings CreateDiscoveryAdvertisedSettings()
@@ -1874,6 +1947,30 @@ internal static class TestRunner
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
+    private static void HeadlessServerShell_RunAsync_ContinuesWhenDiscoveryConfigurationIsInvalid()
+    {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new HeadlessServerShellOptions(
+            "discovery-invalid-headless",
+            TickMilliseconds: 10,
+            RunFor: TimeSpan.FromMilliseconds(30),
+            IdleDelay: TimeSpan.Zero,
+            EnableMovementWorld: false,
+            RuntimeRootPath: runtimeRoot.Path,
+            DiscoveryEnabled: true,
+            DiscoveryRegistryUrl: "ftp://registry.example.test",
+            DiscoveryAdvertisedHost: "127.0.0.1",
+            DiscoveryServerId: "discovery-invalid-headless");
+        var shell = new HeadlessServerShell(options, stdout, stderr);
+
+        int exitCode = shell.RunAsync().GetAwaiter().GetResult();
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Discovery disabled:", stderr.ToString());
+    }
+
     private static void HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults()
     {
         using var runtimeRoot = ServerTestRuntimeRoot.Create();
@@ -1980,7 +2077,7 @@ internal static class TestRunner
                 ["server.persistence.backup_zstd_level"] = "8",
                 ["server.discovery.enabled"] = "on",
                 ["server.discovery.registry_url"] = "http://127.0.0.1:5051",
-                ["server.discovery.publish_mode"] = "official",
+                ["server.discovery.publish_mode"] = "verified",
                 ["server.discovery.advertised_host"] = "console.example.test",
                 ["server.discovery.server_id"] = "console-shard",
                 ["server.discovery.description"] = "Console test shard",
@@ -2020,7 +2117,7 @@ internal static class TestRunner
         Assert.Equal(8, options.BackupZstdCompressionLevel);
         Assert.True(options.DiscoveryEnabled);
         Assert.Equal("http://127.0.0.1:5051", options.DiscoveryRegistryUrl);
-        Assert.Equal("official", options.DiscoveryPublishMode);
+        Assert.Equal("verified", options.DiscoveryPublishMode);
         Assert.Equal("console.example.test", options.DiscoveryAdvertisedHost);
         Assert.Equal("console-shard", options.DiscoveryServerId);
         Assert.Equal("Console test shard", options.DiscoveryDescription);
@@ -2135,6 +2232,28 @@ internal static class TestRunner
         Assert.Equal(1, accounts.Count);
         Assert.True(observed.Count > 0);
         Assert.Equal(ServerApplicationEventKind.StateChanged, observed[0].Kind);
+    }
+
+    private static void GodotServerShellController_ContinuesWhenDiscoveryConfigurationIsInvalid()
+    {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
+        using var controller = new GodotServerShellController(
+            new GodotServerShellOptions(
+                "discovery-invalid-godot",
+                TickMilliseconds: 10,
+                RuntimeRootPath: runtimeRoot.Path,
+                DiscoveryEnabled: true,
+                DiscoveryRegistryUrl: "ftp://registry.example.test",
+                DiscoveryAdvertisedHost: "127.0.0.1",
+                DiscoveryServerId: "discovery-invalid-godot"),
+            _ => new ServerApplication(new ServerApplicationOptions("discovery-invalid-godot")));
+
+        controller.Start();
+        controller.TickFrame(0.03d);
+        controller.Shutdown();
+
+        Assert.Equal(ServerApplicationState.Stopped, controller.State);
+        Assert.True(controller.StartupEvents.Any(evt => evt.Message.StartsWith("Discovery disabled:", StringComparison.Ordinal)));
     }
 
     private static void ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems()
