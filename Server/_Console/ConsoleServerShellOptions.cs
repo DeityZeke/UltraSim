@@ -1,3 +1,4 @@
+using UltraSim.Discovery;
 using UltraSim.Server.Persistence;
 
 namespace UltraSim.Server.Console;
@@ -35,7 +36,10 @@ public sealed record ConsoleServerShellOptions(
     string DiscoveryTags = "",
     double DiscoveryHeartbeatIntervalSeconds = 15.0,
     bool DiscoveryUnpublishOnStop = true,
-    string DiscoveryStatusEndpointUrl = "")
+    string DiscoveryStatusEndpointUrl = "",
+    bool DiscoveryLanEnabled = true,
+    int DiscoveryLanPort = LanDiscoveryDefaults.Port,
+    string DiscoveryLanBindAddress = "0.0.0.0")
 {
     public static ConsoleServerShellOptions Default { get; } =
         new("console", IdleDelay: TimeSpan.FromMilliseconds(1));

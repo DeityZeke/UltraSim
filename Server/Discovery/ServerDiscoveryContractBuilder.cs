@@ -4,6 +4,46 @@ namespace UltraSim.Server.Discovery;
 
 public static class ServerDiscoveryContractBuilder
 {
+    public static ServerDiscoveryRow BuildRow(
+        ServerDiscoveryAdvertisedSettings settings,
+        ServerStatusSnapshot status,
+        string providerId = "lan",
+        ServerDiscoveryProviderKind providerKind = ServerDiscoveryProviderKind.Lan,
+        ServerListingTrustLevel trustLevel = ServerListingTrustLevel.Unverified,
+        ServerListingHealthState healthState = ServerListingHealthState.Online,
+        DateTimeOffset? lastSeenUtc = null)
+    {
+        ServerAdvertisedInfo advertised = BuildAdvertisedInfo(settings);
+        ServerDiscoveryStatusInfo statusInfo = BuildStatusInfo(status);
+
+        return new ServerDiscoveryRow(
+            ProviderId: NormalizeRequired(providerId, nameof(providerId)),
+            ProviderKind: providerKind,
+            ServerId: advertised.ServerId,
+            DisplayName: advertised.DisplayName,
+            Host: settings.AdvertisedHost,
+            Port: settings.Port,
+            TrustLevel: trustLevel,
+            HealthState: healthState,
+            Visibility: advertised.Visibility,
+            ConnectTargetKind: advertised.ConnectTargetKind,
+            Region: advertised.Region,
+            PrimaryLanguage: advertised.PrimaryLanguage,
+            CurrentUsers: statusInfo.CurrentUsers,
+            MaxUsers: advertised.MaxUsers,
+            PeakUsers: statusInfo.PeakUsers,
+            QueueLength: statusInfo.QueueLength,
+            Uptime: statusInfo.Uptime,
+            PasswordRequired: advertised.PasswordRequired,
+            WhitelistOnly: advertised.WhitelistOnly,
+            ConnectHint: advertised.ConnectHint,
+            CompatibilityId: advertised.CompatibilityId,
+            VersionLabel: advertised.ContentVersion ?? advertised.ProtocolVersion,
+            Tags: advertised.TagsOrEmpty,
+            CapabilityFlags: advertised.CapabilityFlags,
+            LastSeenUtc: lastSeenUtc ?? DateTimeOffset.UtcNow);
+    }
+
     public static ServerAdvertisedInfo BuildAdvertisedInfo(ServerDiscoveryAdvertisedSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);

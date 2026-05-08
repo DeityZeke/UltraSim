@@ -62,6 +62,8 @@ public sealed class HeadlessServerShell
         using HttpClient? discoveryHttpClient = Options.DiscoveryEnabled ? new HttpClient() : null;
         ServerDiscoveryPublisherCoordinator? discovery = CreateDiscoveryCoordinator(runtime, discoveryHttpClient);
         using ServerDiscoveryStatusEndpointHost? discoveryStatusEndpoint = CreateDiscoveryStatusEndpoint(runtime);
+        ServerLanDiscoveryResponderHost? lanDiscovery = null;
+        bool lanDiscoveryFailed = false;
 
         if (Options.AutoStart)
             runtime.StartImmediately();
@@ -78,6 +80,7 @@ public sealed class HeadlessServerShell
                 previousElapsed = currentElapsed;
 
                 runtime.Pump(delta);
+                UpdateLanDiscoveryResponder(runtime, ref lanDiscovery, ref lanDiscoveryFailed);
                 await PublishDiscoveryIfDueAsync(discovery, runtime, cancellationToken).ConfigureAwait(false);
 
                 if (Options.RunFor.HasValue && currentElapsed >= Options.RunFor.Value)
@@ -100,11 +103,13 @@ public sealed class HeadlessServerShell
             _stderr.WriteLine(ex);
             _stderr.Flush();
             runtime.StopSafely();
+            StopLanDiscoveryResponder(ref lanDiscovery);
             await PublishDiscoveryShutdownAsync(discovery, CancellationToken.None).ConfigureAwait(false);
             return 1;
         }
 
         runtime.StopSafely();
+        StopLanDiscoveryResponder(ref lanDiscovery);
         await PublishDiscoveryShutdownAsync(discovery, CancellationToken.None).ConfigureAwait(false);
         return runtime.State == ServerApplicationState.Faulted ? 1 : 0;
     }
@@ -142,22 +147,7 @@ public sealed class HeadlessServerShell
         try
         {
             ServerDiscoveryPublicationPlan plan = ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(
-                new ServerDiscoveryPublicationSettings(
-                    Enabled: Options.DiscoveryEnabled,
-                    RegistryUrl: Options.DiscoveryRegistryUrl,
-                    PublishMode: Options.DiscoveryPublishMode,
-                    ServerId: Options.DiscoveryServerId,
-                    DisplayName: Options.ProfileName,
-                    AdvertisedHost: Options.DiscoveryAdvertisedHost,
-                    Port: Options.NetworkPort,
-                    MaxUsers: Options.MaxClients,
-                    Description: Options.DiscoveryDescription,
-                    Region: Options.DiscoveryRegion,
-                    PrimaryLanguage: Options.DiscoveryLanguage,
-                    Tags: Options.DiscoveryTags,
-                    HeartbeatIntervalSeconds: Options.DiscoveryHeartbeatIntervalSeconds,
-                    UnpublishOnStop: Options.DiscoveryUnpublishOnStop,
-                    StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl),
+                CreateDiscoveryPublicationSettings(),
                 httpClient);
 
             return new ServerDiscoveryPublisherCoordinator(
@@ -172,6 +162,52 @@ public sealed class HeadlessServerShell
             _stderr.Flush();
             return null;
         }
+    }
+
+    private void UpdateLanDiscoveryResponder(
+        HostedServerRuntime runtime,
+        ref ServerLanDiscoveryResponderHost? responder,
+        ref bool failed)
+    {
+        if (!Options.DiscoveryEnabled || !Options.DiscoveryLanEnabled)
+            return;
+
+        if (runtime.State != ServerApplicationState.Running)
+        {
+            StopLanDiscoveryResponder(ref responder);
+            return;
+        }
+
+        if (responder is not null || failed)
+            return;
+
+        try
+        {
+            responder = ServerLanDiscoveryResponderFactory.Create(
+                CreateDiscoveryPublicationSettings(),
+                runtime.GetStatusSnapshot,
+                Options.DiscoveryLanBindAddress,
+                Options.DiscoveryLanPort);
+            responder.Start();
+            if (!Options.Quiet)
+            {
+                _stdout.WriteLine($"LAN discovery responder listening at {responder.LocalEndPoint}");
+                _stdout.Flush();
+            }
+        }
+        catch (Exception ex)
+        {
+            failed = true;
+            StopLanDiscoveryResponder(ref responder);
+            _stderr.WriteLine($"LAN discovery disabled: {ex.Message}");
+            _stderr.Flush();
+        }
+    }
+
+    private static void StopLanDiscoveryResponder(ref ServerLanDiscoveryResponderHost? responder)
+    {
+        responder?.Dispose();
+        responder = null;
     }
 
     private ServerDiscoveryStatusEndpointHost? CreateDiscoveryStatusEndpoint(HostedServerRuntime runtime)
@@ -203,6 +239,26 @@ public sealed class HeadlessServerShell
             _stderr.Flush();
             return null;
         }
+    }
+
+    private ServerDiscoveryPublicationSettings CreateDiscoveryPublicationSettings()
+    {
+        return new ServerDiscoveryPublicationSettings(
+            Enabled: Options.DiscoveryEnabled,
+            RegistryUrl: Options.DiscoveryRegistryUrl,
+            PublishMode: Options.DiscoveryPublishMode,
+            ServerId: Options.DiscoveryServerId,
+            DisplayName: Options.ProfileName,
+            AdvertisedHost: Options.DiscoveryAdvertisedHost,
+            Port: Options.NetworkPort,
+            MaxUsers: Options.MaxClients,
+            Description: Options.DiscoveryDescription,
+            Region: Options.DiscoveryRegion,
+            PrimaryLanguage: Options.DiscoveryLanguage,
+            Tags: Options.DiscoveryTags,
+            HeartbeatIntervalSeconds: Options.DiscoveryHeartbeatIntervalSeconds,
+            UnpublishOnStop: Options.DiscoveryUnpublishOnStop,
+            StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl);
     }
 
     private async ValueTask PublishDiscoveryIfDueAsync(

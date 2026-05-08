@@ -35,6 +35,7 @@ internal static class TestRunner
         Run(nameof(ServerCommandResult_FactoryHelpers_ProduceExpectedKinds), ServerCommandResult_FactoryHelpers_ProduceExpectedKinds);
         Run(nameof(ServerStatusSnapshot_PreservesSuppliedValues), ServerStatusSnapshot_PreservesSuppliedValues);
         Run(nameof(ServerDiscoveryContractBuilder_BuildsAdvertisedInfoFromSettings), ServerDiscoveryContractBuilder_BuildsAdvertisedInfoFromSettings);
+        Run(nameof(ServerDiscoveryContractBuilder_BuildsDiscoveryRowFromSettingsAndStatus), ServerDiscoveryContractBuilder_BuildsDiscoveryRowFromSettingsAndStatus);
         Run(nameof(ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot), ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot);
         Run(nameof(ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown), ServerDiscoveryPublisherCoordinator_PublishesStartupHeartbeatAndShutdown);
         Run(nameof(ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions), ServerDiscoveryPublisherCoordinator_RespectsDisabledAndUnpublishOptions);
@@ -85,13 +86,16 @@ internal static class TestRunner
         Run(nameof(HeadlessServerArgumentParser_ParsesExpectedOptions), HeadlessServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides), HeadlessServerArgumentParser_LoadsConfigBeforeCommandLineOverrides);
         Run(nameof(HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly), HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly);
+        Run(nameof(HeadlessServerShell_RunAsync_AdvertisesLanDiscoveryWhileRunning), HeadlessServerShell_RunAsync_AdvertisesLanDiscoveryWhileRunning);
         Run(nameof(HeadlessServerShell_RunAsync_ContinuesWhenDiscoveryConfigurationIsInvalid), HeadlessServerShell_RunAsync_ContinuesWhenDiscoveryConfigurationIsInvalid);
         Run(nameof(HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults), HeadlessServerShell_RunAsync_ReturnsFailureWhenApplicationFaults);
         Run(nameof(ConsoleServerArgumentParser_ParsesExpectedOptions), ConsoleServerArgumentParser_ParsesExpectedOptions);
         Run(nameof(ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides), ConsoleServerArgumentParser_LoadsConfigBeforeCommandLineOverrides);
         Run(nameof(ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases), ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases);
         Run(nameof(ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly), ConsoleServerShell_RunAsync_ProcessesInputCommandsAndStopsCleanly);
+        Run(nameof(ConsoleServerShell_RunAsync_AdvertisesLanDiscoveryWhileRunning), ConsoleServerShell_RunAsync_AdvertisesLanDiscoveryWhileRunning);
         Run(nameof(GodotServerShellController_ExposesSharedControlSurface), GodotServerShellController_ExposesSharedControlSurface);
+        Run(nameof(GodotServerShellController_AdvertisesLanDiscoveryWhileRunning), GodotServerShellController_AdvertisesLanDiscoveryWhileRunning);
         Run(nameof(GodotServerShellController_ContinuesWhenDiscoveryConfigurationIsInvalid), GodotServerShellController_ContinuesWhenDiscoveryConfigurationIsInvalid);
         Run(nameof(ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems), ServerRuntimeNetworkPublisher_PublishCurrentState_EmitsScopedLatestStateItems);
         Run(nameof(ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents), ServerRuntimeNetworkPublisher_ApplicationEvents_PublishOrderedEvents);
@@ -297,6 +301,57 @@ internal static class TestRunner
         Assert.True((advertised.CapabilityFlags & ServerCapabilityFlags.ContentPatching) != 0);
 
         Assert.Throws<ArgumentOutOfRangeException>(() => ServerDiscoveryContractBuilder.BuildAdvertisedInfo(settings with { Port = 0 }));
+    }
+
+    private static void ServerDiscoveryContractBuilder_BuildsDiscoveryRowFromSettingsAndStatus()
+    {
+        DateTimeOffset now = new(2026, 5, 7, 17, 0, 0, TimeSpan.Zero);
+        var settings = new ServerDiscoveryAdvertisedSettings(
+            ServerId: "row-shard",
+            DisplayName: "Row Shard",
+            AdvertisedHost: "192.168.1.55",
+            Port: 42099,
+            ProtocolVersion: "net-v2",
+            ContentVersion: "content-v5",
+            PasswordRequired: true,
+            Region: "lan",
+            Tags: ["test", "lan"],
+            PrimaryLanguage: "en-US",
+            MaxUsers: 80,
+            CapabilityFlags: ServerCapabilityFlags.ServerDrivenUi);
+        var status = new ServerStatusSnapshot(
+            "row-shard",
+            ServerApplicationState.Running,
+            IsInitialized: true,
+            IsRunning: true,
+            IsAcceptingConnections: true,
+            TickCount: 123,
+            ActiveSessions: 7,
+            PeakSessions: 12,
+            StartedAtUtc: now.AddMinutes(-5),
+            Uptime: TimeSpan.FromMinutes(5));
+
+        ServerDiscoveryRow row = ServerDiscoveryContractBuilder.BuildRow(settings, status, lastSeenUtc: now);
+
+        Assert.Equal("lan", row.ProviderId);
+        Assert.Equal(ServerDiscoveryProviderKind.Lan, row.ProviderKind);
+        Assert.Equal("row-shard", row.ServerId);
+        Assert.Equal("Row Shard", row.DisplayName);
+        Assert.Equal("192.168.1.55", row.Host);
+        Assert.Equal(42099, row.Port);
+        Assert.Equal("192.168.1.55:42099", row.ConnectHint);
+        Assert.Equal("lan", row.Region);
+        Assert.Equal("en-US", row.PrimaryLanguage);
+        Assert.Equal(7, row.CurrentUsers);
+        Assert.Equal(12, row.PeakUsers);
+        Assert.Equal(80, row.MaxUsers);
+        Assert.Equal(TimeSpan.FromMinutes(5), row.Uptime);
+        Assert.True(row.PasswordRequired);
+        Assert.Equal("content-v5", row.VersionLabel);
+        Assert.True((row.CapabilityFlags & ServerCapabilityFlags.DirectConnect) != 0);
+        Assert.True((row.CapabilityFlags & ServerCapabilityFlags.ServerDrivenUi) != 0);
+        Assert.Equal(now, row.LastSeenUtc);
+        Assert.SequenceEqual(["test", "lan"], row.TagsOrEmpty.ToArray());
     }
 
     private static void ServerDiscoveryContractBuilder_BuildsStatusAndPollContractsFromRuntimeSnapshot()
@@ -547,7 +602,7 @@ internal static class TestRunner
                 ProviderKind: ServerDiscoveryProviderKind.Custom,
                 ServerId: "lan-shard",
                 DisplayName: "LAN Shard",
-                Host: "127.0.0.1",
+                Host: "0.0.0.0",
                 Port: 42042,
                 Region: "local",
                 PrimaryLanguage: "en-US",
@@ -612,6 +667,35 @@ internal static class TestRunner
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         listener.Stop();
         return port;
+    }
+
+    private static int GetAvailableUdpPort()
+    {
+        using var udp = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
+        return ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
+    }
+
+    private static IReadOnlyList<ServerDiscoveryRow> WaitForLanRows(
+        int port,
+        Func<ServerDiscoveryRow, bool> predicate,
+        TimeSpan? timeout = null)
+    {
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(3));
+        var query = new ClientLanDiscoveryQuery(new ClientLanDiscoveryOptions(
+            queryEndpoints: [new IPEndPoint(IPAddress.Loopback, port)],
+            timeout: TimeSpan.FromMilliseconds(150),
+            listenEndPoint: new IPEndPoint(IPAddress.Loopback, 0)));
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            IReadOnlyList<ServerDiscoveryRow> rows = query.QueryAsync().AsTask().GetAwaiter().GetResult();
+            if (rows.Any(predicate))
+                return rows;
+
+            Thread.Sleep(20);
+        }
+
+        throw new TimeoutException($"Timed out waiting for LAN discovery row on UDP port {port}.");
     }
 
     private static void ServerMetricsSnapshot_PreservesSuppliedValues()
@@ -1708,6 +1792,8 @@ internal static class TestRunner
         Assert.Equal(16, HeadlessServerShellOptions.Default.TickMilliseconds);
         Assert.True(HeadlessServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, HeadlessServerShellOptions.Default.NetworkPort);
+        Assert.True(HeadlessServerShellOptions.Default.DiscoveryLanEnabled);
+        Assert.Equal(LanDiscoveryDefaults.Port, HeadlessServerShellOptions.Default.DiscoveryLanPort);
         Assert.Equal(5.0, HeadlessServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, HeadlessServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(1, HeadlessServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
@@ -1716,6 +1802,8 @@ internal static class TestRunner
         Assert.Equal(16, ConsoleServerShellOptions.Default.TickMilliseconds);
         Assert.True(ConsoleServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, ConsoleServerShellOptions.Default.NetworkPort);
+        Assert.True(ConsoleServerShellOptions.Default.DiscoveryLanEnabled);
+        Assert.Equal(LanDiscoveryDefaults.Port, ConsoleServerShellOptions.Default.DiscoveryLanPort);
         Assert.Equal(5.0, ConsoleServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, ConsoleServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(1, ConsoleServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
@@ -1724,6 +1812,8 @@ internal static class TestRunner
         Assert.Equal(16, GodotServerShellOptions.Default.TickMilliseconds);
         Assert.True(GodotServerShellOptions.Default.EnableMovementWorld);
         Assert.Equal(42042, GodotServerShellOptions.Default.NetworkPort);
+        Assert.True(GodotServerShellOptions.Default.DiscoveryLanEnabled);
+        Assert.Equal(LanDiscoveryDefaults.Port, GodotServerShellOptions.Default.DiscoveryLanPort);
         Assert.Equal(5.0, GodotServerShellOptions.Default.SessionAuthTimeoutSeconds);
         Assert.Equal(10.0, GodotServerShellOptions.Default.SessionKeepAliveTimeoutSeconds);
         Assert.Equal(1, GodotServerShellOptions.Default.MaxAutoCreatedAccountsPerRemoteAddress);
@@ -1978,7 +2068,10 @@ internal static class TestRunner
                 ["server.discovery.tags"] = "test,pvp",
                 ["server.discovery.heartbeat_interval_seconds"] = "22.5",
                 ["server.discovery.unpublish_on_stop"] = "off",
-                ["server.discovery.status_endpoint_url"] = "http://shard.example.test/status"
+                ["server.discovery.status_endpoint_url"] = "http://shard.example.test/status",
+                ["server.discovery.lan_enabled"] = "off",
+                ["server.discovery.lan_port"] = "43043",
+                ["server.discovery.lan_bind_address"] = "127.0.0.1"
             });
 
         bool parsed = HeadlessServerArgumentParser.TryParse(
@@ -2019,6 +2112,9 @@ internal static class TestRunner
         Assert.Equal(22.5, options.DiscoveryHeartbeatIntervalSeconds);
         Assert.False(options.DiscoveryUnpublishOnStop);
         Assert.Equal("http://shard.example.test/status", options.DiscoveryStatusEndpointUrl);
+        Assert.False(options.DiscoveryLanEnabled);
+        Assert.Equal(43043, options.DiscoveryLanPort);
+        Assert.Equal("127.0.0.1", options.DiscoveryLanBindAddress);
     }
 
     private static void HeadlessServerShell_RunAsync_AutoStartsAndStopsCleanly()
@@ -2050,6 +2146,42 @@ internal static class TestRunner
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
+    private static void HeadlessServerShell_RunAsync_AdvertisesLanDiscoveryWhileRunning()
+    {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
+        int lanPort = GetAvailableUdpPort();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new HeadlessServerShellOptions(
+            "lan-headless",
+            TickMilliseconds: 10,
+            RunFor: TimeSpan.FromSeconds(2),
+            IdleDelay: TimeSpan.FromMilliseconds(1),
+            EnableMovementWorld: false,
+            RuntimeRootPath: runtimeRoot.Path,
+            DiscoveryEnabled: true,
+            DiscoveryPublishMode: "disabled",
+            DiscoveryAdvertisedHost: "0.0.0.0",
+            DiscoveryServerId: "lan-headless",
+            DiscoveryLanEnabled: true,
+            DiscoveryLanPort: lanPort,
+            DiscoveryLanBindAddress: "127.0.0.1");
+        var shell = new HeadlessServerShell(options, stdout, stderr);
+
+        using var cancel = new CancellationTokenSource();
+        Task<int> runTask = shell.RunAsync(cancel.Token);
+        IReadOnlyList<ServerDiscoveryRow> rows = WaitForLanRows(lanPort, row => row.ServerId == "lan-headless");
+        cancel.Cancel();
+        int exitCode = runTask.GetAwaiter().GetResult();
+
+        Assert.Equal(0, exitCode);
+        ServerDiscoveryRow row = rows.Single(row => row.ServerId == "lan-headless");
+        Assert.Equal(ServerDiscoveryProviderKind.Lan, row.ProviderKind);
+        Assert.Equal("127.0.0.1", row.Host);
+        Assert.Equal(42042, row.Port);
+        Assert.Contains("LAN discovery responder listening", stdout.ToString());
+    }
+
     private static void HeadlessServerShell_RunAsync_ContinuesWhenDiscoveryConfigurationIsInvalid()
     {
         using var runtimeRoot = ServerTestRuntimeRoot.Create();
@@ -2065,7 +2197,8 @@ internal static class TestRunner
             DiscoveryEnabled: true,
             DiscoveryRegistryUrl: "ftp://registry.example.test",
             DiscoveryAdvertisedHost: "127.0.0.1",
-            DiscoveryServerId: "discovery-invalid-headless");
+            DiscoveryServerId: "discovery-invalid-headless",
+            DiscoveryLanEnabled: false);
         var shell = new HeadlessServerShell(options, stdout, stderr);
 
         int exitCode = shell.RunAsync().GetAwaiter().GetResult();
@@ -2189,7 +2322,10 @@ internal static class TestRunner
                 ["server.discovery.tags"] = "test,roleplay",
                 ["server.discovery.heartbeat_interval_seconds"] = "30",
                 ["server.discovery.unpublish_on_stop"] = "on",
-                ["server.discovery.status_endpoint_url"] = "http://console.example.test/status"
+                ["server.discovery.status_endpoint_url"] = "http://console.example.test/status",
+                ["server.discovery.lan_enabled"] = "off",
+                ["server.discovery.lan_port"] = "43044",
+                ["server.discovery.lan_bind_address"] = "localhost"
             });
 
         bool parsed = ConsoleServerArgumentParser.TryParse(
@@ -2230,6 +2366,9 @@ internal static class TestRunner
         Assert.Equal(30d, options.DiscoveryHeartbeatIntervalSeconds);
         Assert.True(options.DiscoveryUnpublishOnStop);
         Assert.Equal("http://console.example.test/status", options.DiscoveryStatusEndpointUrl);
+        Assert.False(options.DiscoveryLanEnabled);
+        Assert.Equal(43044, options.DiscoveryLanPort);
+        Assert.Equal("localhost", options.DiscoveryLanBindAddress);
     }
 
     private static void ConsoleShellCommandParser_ParsesExpectedCommandsAndAliases()
@@ -2280,6 +2419,43 @@ internal static class TestRunner
         Assert.Contains("> Shutdown: Accepted", output);
         Assert.Contains("Core: Stopping... - done", output);
         Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    private static void ConsoleServerShell_RunAsync_AdvertisesLanDiscoveryWhileRunning()
+    {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
+        int lanPort = GetAvailableUdpPort();
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var options = new ConsoleServerShellOptions(
+            "lan-console",
+            TickMilliseconds: 10,
+            EnableInput: false,
+            RunFor: TimeSpan.FromSeconds(2),
+            IdleDelay: TimeSpan.FromMilliseconds(1),
+            EnableMovementWorld: false,
+            RuntimeRootPath: runtimeRoot.Path,
+            DiscoveryEnabled: true,
+            DiscoveryPublishMode: "disabled",
+            DiscoveryAdvertisedHost: "0.0.0.0",
+            DiscoveryServerId: "lan-console",
+            DiscoveryLanEnabled: true,
+            DiscoveryLanPort: lanPort,
+            DiscoveryLanBindAddress: "127.0.0.1");
+        var shell = new ConsoleServerShell(options, stdout: stdout, stderr: stderr);
+
+        using var cancel = new CancellationTokenSource();
+        Task<int> runTask = shell.RunAsync(cancel.Token);
+        IReadOnlyList<ServerDiscoveryRow> rows = WaitForLanRows(lanPort, row => row.ServerId == "lan-console");
+        cancel.Cancel();
+        int exitCode = runTask.GetAwaiter().GetResult();
+
+        Assert.Equal(0, exitCode);
+        ServerDiscoveryRow row = rows.Single(row => row.ServerId == "lan-console");
+        Assert.Equal(ServerDiscoveryProviderKind.Lan, row.ProviderKind);
+        Assert.Equal("127.0.0.1", row.Host);
+        Assert.Equal(42042, row.Port);
+        Assert.Contains("LAN discovery responder listening", stdout.ToString());
     }
 
     private static void GodotServerShellController_ExposesSharedControlSurface()
@@ -2337,6 +2513,38 @@ internal static class TestRunner
         Assert.Equal(ServerApplicationEventKind.StateChanged, observed[0].Kind);
     }
 
+    private static void GodotServerShellController_AdvertisesLanDiscoveryWhileRunning()
+    {
+        using var runtimeRoot = ServerTestRuntimeRoot.Create();
+        int lanPort = GetAvailableUdpPort();
+        using var controller = new GodotServerShellController(
+            new GodotServerShellOptions(
+                "lan-godot",
+                TickMilliseconds: 10,
+                EnableMovementWorld: false,
+                RuntimeRootPath: runtimeRoot.Path,
+                DiscoveryEnabled: true,
+                DiscoveryPublishMode: "disabled",
+                DiscoveryAdvertisedHost: "0.0.0.0",
+                DiscoveryServerId: "lan-godot",
+                DiscoveryLanEnabled: true,
+                DiscoveryLanPort: lanPort,
+                DiscoveryLanBindAddress: "127.0.0.1"),
+            _ => new ServerApplication(new ServerApplicationOptions("lan-godot")));
+
+        controller.Start();
+        controller.TickFrame(0.03d);
+        IReadOnlyList<ServerDiscoveryRow> rows = WaitForLanRows(lanPort, row => row.ServerId == "lan-godot");
+        GodotServerDiscoverySnapshot snapshot = controller.GetDiscoverySnapshot();
+        controller.Shutdown();
+
+        ServerDiscoveryRow row = rows.Single(row => row.ServerId == "lan-godot");
+        Assert.Equal(ServerDiscoveryProviderKind.Lan, row.ProviderKind);
+        Assert.Equal("127.0.0.1", row.Host);
+        Assert.Equal(42042, row.Port);
+        Assert.True(snapshot.Enabled);
+    }
+
     private static void GodotServerShellController_ContinuesWhenDiscoveryConfigurationIsInvalid()
     {
         using var runtimeRoot = ServerTestRuntimeRoot.Create();
@@ -2348,7 +2556,8 @@ internal static class TestRunner
                 DiscoveryEnabled: true,
                 DiscoveryRegistryUrl: "ftp://registry.example.test",
                 DiscoveryAdvertisedHost: "127.0.0.1",
-                DiscoveryServerId: "discovery-invalid-godot"),
+                DiscoveryServerId: "discovery-invalid-godot",
+                DiscoveryLanEnabled: false),
             _ => new ServerApplication(new ServerApplicationOptions("discovery-invalid-godot")));
 
         controller.Start();

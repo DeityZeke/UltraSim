@@ -632,7 +632,12 @@ Current status:
 
 Remaining deferred G4 work:
 
-- LAN server-shell responder lifecycle wiring is deferred
+- LAN server-shell responder lifecycle wiring is implemented for console,
+  headless, and Godot wrappers, with server-operation settings for LAN
+  enablement, UDP port, and bind address
+- `_Tests/UltraSim.LanDiscovery.LaunchSmoke` starts a real headless server
+  process, queries it through the LAN provider, resolves the row, and completes
+  a UDP handshake against the discovered game endpoint
 - mDNS/zeroconf provider is explicitly deferred
 - richer server row presentation can wait until the schema/menu work gives us better reusable UI primitives
 

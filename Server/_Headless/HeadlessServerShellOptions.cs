@@ -1,3 +1,4 @@
+using UltraSim.Discovery;
 using UltraSim.Server.Persistence;
 
 namespace UltraSim.Server.Headless;
@@ -35,7 +36,10 @@ public sealed record HeadlessServerShellOptions(
     string DiscoveryTags = "",
     double DiscoveryHeartbeatIntervalSeconds = 15.0,
     bool DiscoveryUnpublishOnStop = true,
-    string DiscoveryStatusEndpointUrl = "")
+    string DiscoveryStatusEndpointUrl = "",
+    bool DiscoveryLanEnabled = true,
+    int DiscoveryLanPort = LanDiscoveryDefaults.Port,
+    string DiscoveryLanBindAddress = "0.0.0.0")
 {
     public static HeadlessServerShellOptions Default { get; } =
         new("headless", IdleDelay: TimeSpan.FromMilliseconds(1));

@@ -368,24 +368,26 @@ public partial class ServerShellRoot : Control
 			}
 		}
 
-		return new GodotServerShellOptions(
-			profileName,
-			TickMilliseconds: tickMilliseconds,
-			MaxCatchUpTicksPerPump: maxCatchUpTicks,
-			SaveOnStop: saveOnStop,
-			EnableMovementWorld: enableMovementWorld,
-			NetworkPort: networkPort,
-			BindAddress: bindAddress,
-			MaxClients: maxClients,
-			AutoSaveIntervalSeconds: autoSaveIntervalSeconds,
-			SessionAuthTimeoutSeconds: sessionAuthTimeoutSeconds,
-			SessionKeepAliveTimeoutSeconds: sessionKeepAliveTimeoutSeconds,
-			CommandPrefix: commandPrefix,
-			MaxAutoCreatedAccountsPerRemoteAddress: maxAutoCreatedAccountsPerRemoteAddress,
-			RuntimeRootPath: runtimeRootPath,
-			BackupStorageMode: backupStorageMode,
-			BackupCount: backupCount,
-			BackupZstdCompressionLevel: backupZstdCompressionLevel);
+		return options with
+		{
+			ProfileName = profileName,
+			TickMilliseconds = tickMilliseconds,
+			MaxCatchUpTicksPerPump = maxCatchUpTicks,
+			SaveOnStop = saveOnStop,
+			EnableMovementWorld = enableMovementWorld,
+			NetworkPort = networkPort,
+			BindAddress = bindAddress,
+			MaxClients = maxClients,
+			AutoSaveIntervalSeconds = autoSaveIntervalSeconds,
+			SessionAuthTimeoutSeconds = sessionAuthTimeoutSeconds,
+			SessionKeepAliveTimeoutSeconds = sessionKeepAliveTimeoutSeconds,
+			CommandPrefix = commandPrefix,
+			MaxAutoCreatedAccountsPerRemoteAddress = maxAutoCreatedAccountsPerRemoteAddress,
+			RuntimeRootPath = runtimeRootPath,
+			BackupStorageMode = backupStorageMode,
+			BackupCount = backupCount,
+			BackupZstdCompressionLevel = backupZstdCompressionLevel
+		};
 	}
 
 	private static GodotServerShellOptions LoadConfiguredShellOptions(GodotServerShellOptions options)
@@ -2854,6 +2856,7 @@ public partial class ServerShellRoot : Control
 			editorKind: ServerSettingEditorKind.Choice,
 			choices:
 			[
+				new ServerSettingChoice("disabled", "disabled"),
 				new ServerSettingChoice("unverified", "unverified"),
 				new ServerSettingChoice("verified", "verified")
 			]);
@@ -2866,6 +2869,9 @@ public partial class ServerShellRoot : Control
 		registry.RegisterRestartRequired("server.discovery.heartbeat_interval_seconds", "Discovery heartbeat interval", options.DiscoveryHeartbeatIntervalSeconds.ToString("0.###", CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Decimal);
 		registry.RegisterRestartRequired("server.discovery.unpublish_on_stop", "Discovery unpublish on stop", FormatBool(options.DiscoveryUnpublishOnStop), editorKind: ServerSettingEditorKind.Boolean);
 		registry.RegisterRestartRequired("server.discovery.status_endpoint_url", "Discovery status endpoint URL", options.DiscoveryStatusEndpointUrl);
+		registry.RegisterRestartRequired("server.discovery.lan_enabled", "LAN discovery enabled", FormatBool(options.DiscoveryLanEnabled), editorKind: ServerSettingEditorKind.Boolean);
+		registry.RegisterRestartRequired("server.discovery.lan_port", "LAN discovery port", options.DiscoveryLanPort.ToString(CultureInfo.InvariantCulture), editorKind: ServerSettingEditorKind.Integer);
+		registry.RegisterRestartRequired("server.discovery.lan_bind_address", "LAN discovery bind address", options.DiscoveryLanBindAddress);
 		return registry;
 	}
 
@@ -3396,6 +3402,9 @@ public partial class ServerShellRoot : Control
 		double discoveryHeartbeatIntervalSeconds = options.DiscoveryHeartbeatIntervalSeconds;
 		bool discoveryUnpublishOnStop = options.DiscoveryUnpublishOnStop;
 		string discoveryStatusEndpointUrl = options.DiscoveryStatusEndpointUrl;
+		bool discoveryLanEnabled = options.DiscoveryLanEnabled;
+		int discoveryLanPort = options.DiscoveryLanPort;
+		string discoveryLanBindAddress = options.DiscoveryLanBindAddress;
 
 		for (int i = 0; i < changes.Count; i++)
 		{
@@ -3493,6 +3502,22 @@ public partial class ServerShellRoot : Control
 				case "server.discovery.status_endpoint_url":
 					discoveryStatusEndpointUrl = change.NormalizedValue;
 					break;
+				case "server.discovery.lan_enabled":
+					if (TryParseSettingBool(change.NormalizedValue, out bool parsedDiscoveryLanEnabled))
+						discoveryLanEnabled = parsedDiscoveryLanEnabled;
+					break;
+				case "server.discovery.lan_port":
+					if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedDiscoveryLanPort) &&
+						parsedDiscoveryLanPort >= 0 &&
+						parsedDiscoveryLanPort <= ushort.MaxValue)
+					{
+						discoveryLanPort = parsedDiscoveryLanPort;
+					}
+					break;
+				case "server.discovery.lan_bind_address":
+					if (!string.IsNullOrWhiteSpace(change.NormalizedValue))
+						discoveryLanBindAddress = change.NormalizedValue;
+					break;
 			}
 		}
 
@@ -3522,7 +3547,10 @@ public partial class ServerShellRoot : Control
 			DiscoveryTags = discoveryTags,
 			DiscoveryHeartbeatIntervalSeconds = discoveryHeartbeatIntervalSeconds,
 			DiscoveryUnpublishOnStop = discoveryUnpublishOnStop,
-			DiscoveryStatusEndpointUrl = discoveryStatusEndpointUrl
+			DiscoveryStatusEndpointUrl = discoveryStatusEndpointUrl,
+			DiscoveryLanEnabled = discoveryLanEnabled,
+			DiscoveryLanPort = discoveryLanPort,
+			DiscoveryLanBindAddress = discoveryLanBindAddress
 		};
 	}
 

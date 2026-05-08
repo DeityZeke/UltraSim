@@ -14,7 +14,9 @@ public sealed class GodotServerShellController : IDisposable
 	private readonly ServerDiscoveryPublisherCoordinator? _discovery;
 	private readonly ServerDiscoveryStatusEndpointHost? _discoveryStatusEndpoint;
 	private readonly SemaphoreSlim _discoveryGate = new(1, 1);
+	private ServerLanDiscoveryResponderHost? _lanDiscovery;
 	private string _lastDiscoveryMessage = "Not started.";
+	private bool _lanDiscoveryFailed;
 	private bool _disposed;
 
 	public GodotServerShellController(
@@ -61,6 +63,7 @@ public sealed class GodotServerShellController : IDisposable
 	public void Start()
 	{
 		_runtime.StartImmediately();
+		UpdateLanDiscoveryResponderLifecycle();
 		QueueDiscoveryPublishIfDue();
 	}
 
@@ -70,12 +73,14 @@ public sealed class GodotServerShellController : IDisposable
 			throw new ArgumentOutOfRangeException(nameof(deltaSeconds), "Frame delta must be non-negative.");
 
 		_runtime.Pump(TimeSpan.FromSeconds(deltaSeconds));
+		UpdateLanDiscoveryResponderLifecycle();
 		QueueDiscoveryPublishIfDue();
 	}
 
 	public ServerCommandResult Execute(ServerControlCommand command)
 	{
 		_runtime.TryExecuteCommand(command, out ServerCommandResult result);
+		UpdateLanDiscoveryResponderLifecycle();
 		if (_runtime.State == ServerApplicationState.Running)
 			QueueDiscoveryPublishIfDue();
 		else if (_runtime.State == ServerApplicationState.Stopped)
@@ -169,6 +174,7 @@ public sealed class GodotServerShellController : IDisposable
 	public void Shutdown()
 	{
 		_runtime.StopSafely();
+		StopLanDiscoveryResponder();
 		PublishDiscoveryShutdown();
 	}
 
@@ -179,6 +185,7 @@ public sealed class GodotServerShellController : IDisposable
 
 		_disposed = true;
 		_runtime.StopSafely();
+		StopLanDiscoveryResponder();
 		PublishDiscoveryShutdown();
 		_discoveryStatusEndpoint?.Dispose();
 		_runtime.Dispose();
@@ -217,22 +224,7 @@ public sealed class GodotServerShellController : IDisposable
 		try
 		{
 			ServerDiscoveryPublicationPlan plan = ServerDiscoveryPublicationFactory.CreateOfficialRegistryPlan(
-				new ServerDiscoveryPublicationSettings(
-					Enabled: Options.DiscoveryEnabled,
-					RegistryUrl: Options.DiscoveryRegistryUrl,
-					PublishMode: Options.DiscoveryPublishMode,
-					ServerId: Options.DiscoveryServerId,
-					DisplayName: Options.ProfileName,
-					AdvertisedHost: Options.DiscoveryAdvertisedHost,
-					Port: Options.NetworkPort,
-					MaxUsers: Options.MaxClients,
-					Description: Options.DiscoveryDescription,
-					Region: Options.DiscoveryRegion,
-					PrimaryLanguage: Options.DiscoveryLanguage,
-					Tags: Options.DiscoveryTags,
-					HeartbeatIntervalSeconds: Options.DiscoveryHeartbeatIntervalSeconds,
-					UnpublishOnStop: Options.DiscoveryUnpublishOnStop,
-					StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl),
+				CreateDiscoveryPublicationSettings(),
 				httpClient);
 
 			return new ServerDiscoveryPublisherCoordinator(
@@ -247,6 +239,44 @@ public sealed class GodotServerShellController : IDisposable
 			EmitLog($"Discovery disabled: {ex.Message}");
 			return null;
 		}
+	}
+
+	private void UpdateLanDiscoveryResponderLifecycle()
+	{
+		if (!Options.DiscoveryEnabled || !Options.DiscoveryLanEnabled)
+			return;
+
+		if (_runtime.State != ServerApplicationState.Running)
+		{
+			StopLanDiscoveryResponder();
+			return;
+		}
+
+		if (_lanDiscovery is not null || _lanDiscoveryFailed)
+			return;
+
+		try
+		{
+			_lanDiscovery = ServerLanDiscoveryResponderFactory.Create(
+				CreateDiscoveryPublicationSettings(),
+				_runtime.GetStatusSnapshot,
+				Options.DiscoveryLanBindAddress,
+				Options.DiscoveryLanPort);
+			_lanDiscovery.Start();
+			SetDiscoveryMessage($"LAN responder listening at {_lanDiscovery.LocalEndPoint}");
+		}
+		catch (Exception ex)
+		{
+			_lanDiscoveryFailed = true;
+			StopLanDiscoveryResponder();
+			SetDiscoveryMessage($"LAN responder disabled: {ex.Message}");
+		}
+	}
+
+	private void StopLanDiscoveryResponder()
+	{
+		_lanDiscovery?.Dispose();
+		_lanDiscovery = null;
 	}
 
 	private ServerDiscoveryStatusEndpointHost? CreateDiscoveryStatusEndpoint()
@@ -272,6 +302,26 @@ public sealed class GodotServerShellController : IDisposable
 			SetDiscoveryMessage($"Status endpoint disabled: {ex.Message}");
 			return null;
 		}
+	}
+
+	private ServerDiscoveryPublicationSettings CreateDiscoveryPublicationSettings()
+	{
+		return new ServerDiscoveryPublicationSettings(
+			Enabled: Options.DiscoveryEnabled,
+			RegistryUrl: Options.DiscoveryRegistryUrl,
+			PublishMode: Options.DiscoveryPublishMode,
+			ServerId: Options.DiscoveryServerId,
+			DisplayName: Options.ProfileName,
+			AdvertisedHost: Options.DiscoveryAdvertisedHost,
+			Port: Options.NetworkPort,
+			MaxUsers: Options.MaxClients,
+			Description: Options.DiscoveryDescription,
+			Region: Options.DiscoveryRegion,
+			PrimaryLanguage: Options.DiscoveryLanguage,
+			Tags: Options.DiscoveryTags,
+			HeartbeatIntervalSeconds: Options.DiscoveryHeartbeatIntervalSeconds,
+			UnpublishOnStop: Options.DiscoveryUnpublishOnStop,
+			StatusEndpointUrl: Options.DiscoveryStatusEndpointUrl);
 	}
 
 	private void QueueDiscoveryPublishIfDue()

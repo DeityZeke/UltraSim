@@ -44,6 +44,9 @@ public static class ConsoleServerArgumentParser
         double discoveryHeartbeatIntervalSeconds = ConsoleServerShellOptions.Default.DiscoveryHeartbeatIntervalSeconds;
         bool discoveryUnpublishOnStop = ConsoleServerShellOptions.Default.DiscoveryUnpublishOnStop;
         string discoveryStatusEndpointUrl = ConsoleServerShellOptions.Default.DiscoveryStatusEndpointUrl;
+        bool discoveryLanEnabled = ConsoleServerShellOptions.Default.DiscoveryLanEnabled;
+        int discoveryLanPort = ConsoleServerShellOptions.Default.DiscoveryLanPort;
+        string discoveryLanBindAddress = ConsoleServerShellOptions.Default.DiscoveryLanBindAddress;
 
         ServerWrapperSettingsConfigValues configValues = ServerWrapperSettingsConfigLoader.Load(
             runtimeRootPath,
@@ -72,7 +75,10 @@ public static class ConsoleServerArgumentParser
                 discoveryTags,
                 discoveryHeartbeatIntervalSeconds,
                 discoveryUnpublishOnStop,
-                discoveryStatusEndpointUrl));
+                discoveryStatusEndpointUrl,
+                discoveryLanEnabled,
+                discoveryLanPort,
+                discoveryLanBindAddress));
         profileName = configValues.ProfileName;
         saveOnStop = configValues.SaveOnStop;
         networkPort = configValues.NetworkPort;
@@ -98,6 +104,9 @@ public static class ConsoleServerArgumentParser
         discoveryHeartbeatIntervalSeconds = configValues.DiscoveryHeartbeatIntervalSeconds;
         discoveryUnpublishOnStop = configValues.DiscoveryUnpublishOnStop;
         discoveryStatusEndpointUrl = configValues.DiscoveryStatusEndpointUrl;
+        discoveryLanEnabled = configValues.DiscoveryLanEnabled;
+        discoveryLanPort = configValues.DiscoveryLanPort;
+        discoveryLanBindAddress = configValues.DiscoveryLanBindAddress;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -390,7 +399,10 @@ public static class ConsoleServerArgumentParser
             DiscoveryTags: discoveryTags,
             DiscoveryHeartbeatIntervalSeconds: discoveryHeartbeatIntervalSeconds,
             DiscoveryUnpublishOnStop: discoveryUnpublishOnStop,
-            DiscoveryStatusEndpointUrl: discoveryStatusEndpointUrl);
+            DiscoveryStatusEndpointUrl: discoveryStatusEndpointUrl,
+            DiscoveryLanEnabled: discoveryLanEnabled,
+            DiscoveryLanPort: discoveryLanPort,
+            DiscoveryLanBindAddress: discoveryLanBindAddress);
         error = null;
         showHelp = false;
         return true;

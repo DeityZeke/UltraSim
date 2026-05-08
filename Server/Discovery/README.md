@@ -41,9 +41,13 @@ contracts without moving registry, HTTP, or portal details into `Server/Core`.
   registry URL, advertised target, status endpoint state, last publish time, and
   latest discovery message.
 - `ServerLanDiscoveryResponderHost` answers shared UDP LAN discovery queries
-  with a server discovery row. The protocol and loopback client/server exchange
-  are covered by `UltraSim.Server.Tests`; console/headless/Godot lifecycle
-  wiring is still pending.
+  with a server discovery row. Console, headless, and Godot wrappers start it
+  while the runtime is `Running` and stop it when the runtime stops. The row uses
+  the same advertised settings and live status snapshot as the official
+  registry publisher. LAN discovery has server-operation settings for
+  enablement, UDP port, and bind address. The protocol, loopback client/server
+  exchange, shell lifecycle wiring, and row mapping are covered by
+  `UltraSim.Server.Tests`.
 - `_Tests/UltraSim.Registry.Tests` covers the shared contract loop from server
   publisher through official client query.
 - `_Tests/UltraSim.Registry.LaunchSmoke` starts the real registry service over
@@ -56,11 +60,10 @@ contracts without moving registry, HTTP, or portal details into `Server/Core`.
 
 ```bash
 PATH="$HOME/.dotnet:$PATH" dotnet run --project _Tests/UltraSim.Registry.LaunchSmoke/UltraSim.Registry.LaunchSmoke.csproj -c Release
+PATH="$HOME/.dotnet:$PATH" dotnet run --project _Tests/UltraSim.LanDiscovery.LaunchSmoke/UltraSim.LanDiscovery.LaunchSmoke.csproj -c Release
 ```
 
 ## Later Slices
 
-- Wire `ServerLanDiscoveryResponderHost` into console, headless, and Godot
-  server lifecycles.
 - mDNS/zeroconf provider.
 - Owner-claim UI/tooling for official registry moderation.

@@ -77,8 +77,13 @@ What now exists:
   - server browser filters are active for search, region, language, trust,
     password, and whitelist state; rows can be sorted by name, users, ping,
     region, and last seen time
-  - LAN browser provider uses the shared UDP LAN discovery query; server shell
-    lifecycle wiring for LAN responses is the next server-side slice
+  - LAN browser provider uses the shared UDP LAN discovery query; console,
+    headless, and Godot server shells now answer LAN queries while running, LAN
+    responder enabled/port/bind address are server-operation settings, and the
+    client falls back to the UDP sender address when a LAN row advertises a
+    loopback/any host
+  - `_Tests/UltraSim.LanDiscovery.LaunchSmoke` covers a real launched headless
+    server, LAN query, direct-connect resolution, and UDP handshake
   - initial UDP session driver wiring for movement, observer state, chat, ping/status, and disconnect
   - first server-driven UI renderer bridge:
     - `MenuCanvasManager` hosts server-driven menu, modal, and exclusive surface lanes separately

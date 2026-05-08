@@ -1,4 +1,5 @@
 using System.Globalization;
+using UltraSim.Discovery;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Scripting;
 
@@ -29,7 +30,10 @@ internal sealed record ServerWrapperSettingsConfigValues(
     string DiscoveryTags,
     double DiscoveryHeartbeatIntervalSeconds,
     bool DiscoveryUnpublishOnStop,
-    string DiscoveryStatusEndpointUrl);
+    string DiscoveryStatusEndpointUrl,
+    bool DiscoveryLanEnabled,
+    int DiscoveryLanPort,
+    string DiscoveryLanBindAddress);
 
 internal static class ServerWrapperSettingsConfigLoader
 {
@@ -166,6 +170,7 @@ internal static class ServerWrapperSettingsConfigLoader
             editorKind: ServerSettingEditorKind.Choice,
             choices:
             [
+                new ServerSettingChoice("disabled", "disabled"),
                 new ServerSettingChoice("unverified", "unverified"),
                 new ServerSettingChoice("verified", "verified")
             ]);
@@ -207,6 +212,20 @@ internal static class ServerWrapperSettingsConfigLoader
             "server.discovery.status_endpoint_url",
             "Discovery status endpoint URL",
             values.DiscoveryStatusEndpointUrl);
+        registry.RegisterRestartRequired(
+            "server.discovery.lan_enabled",
+            "LAN discovery enabled",
+            values.DiscoveryLanEnabled ? "on" : "off",
+            editorKind: ServerSettingEditorKind.Boolean);
+        registry.RegisterRestartRequired(
+            "server.discovery.lan_port",
+            "LAN discovery port",
+            values.DiscoveryLanPort.ToString(CultureInfo.InvariantCulture),
+            editorKind: ServerSettingEditorKind.Integer);
+        registry.RegisterRestartRequired(
+            "server.discovery.lan_bind_address",
+            "LAN discovery bind address",
+            values.DiscoveryLanBindAddress);
         return registry;
     }
 
@@ -239,6 +258,9 @@ internal static class ServerWrapperSettingsConfigLoader
         double discoveryHeartbeatIntervalSeconds = values.DiscoveryHeartbeatIntervalSeconds;
         bool discoveryUnpublishOnStop = values.DiscoveryUnpublishOnStop;
         string discoveryStatusEndpointUrl = values.DiscoveryStatusEndpointUrl;
+        bool discoveryLanEnabled = values.DiscoveryLanEnabled;
+        int discoveryLanPort = values.DiscoveryLanPort;
+        string discoveryLanBindAddress = values.DiscoveryLanBindAddress;
 
         for (int i = 0; i < changes.Count; i++)
         {
@@ -349,6 +371,21 @@ internal static class ServerWrapperSettingsConfigLoader
                 case "server.discovery.status_endpoint_url":
                     discoveryStatusEndpointUrl = change.NormalizedValue;
                     break;
+                case "server.discovery.lan_enabled":
+                    discoveryLanEnabled = string.Equals(change.NormalizedValue, "on", StringComparison.OrdinalIgnoreCase);
+                    break;
+                case "server.discovery.lan_port":
+                    if (int.TryParse(change.NormalizedValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedDiscoveryLanPort)
+                        && parsedDiscoveryLanPort >= 0
+                        && parsedDiscoveryLanPort <= ushort.MaxValue)
+                    {
+                        discoveryLanPort = parsedDiscoveryLanPort;
+                    }
+                    break;
+                case "server.discovery.lan_bind_address":
+                    if (!string.IsNullOrWhiteSpace(change.NormalizedValue))
+                        discoveryLanBindAddress = change.NormalizedValue;
+                    break;
             }
         }
 
@@ -377,7 +414,10 @@ internal static class ServerWrapperSettingsConfigLoader
             discoveryTags,
             discoveryHeartbeatIntervalSeconds,
             discoveryUnpublishOnStop,
-            discoveryStatusEndpointUrl);
+            discoveryStatusEndpointUrl,
+            discoveryLanEnabled,
+            discoveryLanPort,
+            discoveryLanBindAddress);
     }
 
     private static string FormatBackupStorageMode(ServerPersistenceBackupStorageMode mode)

@@ -1,3 +1,4 @@
+using UltraSim.Discovery;
 using UltraSim.Server.Persistence;
 
 namespace UltraSim.Server.Godot;
@@ -31,7 +32,10 @@ public sealed record GodotServerShellOptions(
     string DiscoveryTags = "",
     double DiscoveryHeartbeatIntervalSeconds = 15.0,
     bool DiscoveryUnpublishOnStop = true,
-    string DiscoveryStatusEndpointUrl = "")
+    string DiscoveryStatusEndpointUrl = "",
+    bool DiscoveryLanEnabled = true,
+    int DiscoveryLanPort = LanDiscoveryDefaults.Port,
+    string DiscoveryLanBindAddress = "0.0.0.0")
 {
     public static GodotServerShellOptions Default { get; } = new("godot");
 }

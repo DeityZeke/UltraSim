@@ -66,7 +66,7 @@ public sealed class ClientLanDiscoveryQuery : IServerDiscoveryQuery
 
     private static ServerDiscoveryRow NormalizeRow(ServerDiscoveryRow row, IPEndPoint remoteEndPoint, int pingMs)
     {
-        string host = string.IsNullOrWhiteSpace(row.Host)
+        string host = ShouldUseRemoteEndpointHost(row.Host)
             ? remoteEndPoint.Address.ToString()
             : row.Host.Trim();
 
@@ -78,5 +78,24 @@ public sealed class ClientLanDiscoveryQuery : IServerDiscoveryQuery
             PingMs = row.PingMs ?? Math.Max(0, pingMs),
             LastSeenUtc = DateTimeOffset.UtcNow,
         };
+    }
+
+    private static bool ShouldUseRemoteEndpointHost(string? advertisedHost)
+    {
+        if (string.IsNullOrWhiteSpace(advertisedHost))
+            return true;
+
+        string trimmed = advertisedHost.Trim();
+        if (string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "any", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "*", StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        if (!IPAddress.TryParse(trimmed, out IPAddress? address))
+            return false;
+
+        return IPAddress.IsLoopback(address) || address.Equals(IPAddress.Any);
     }
 }
