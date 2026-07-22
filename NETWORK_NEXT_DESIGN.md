@@ -49,11 +49,15 @@ The repository contains three useful network generations or reference bands:
 
 | Name in this document | Location or intended location | Role |
 | --- | --- | --- |
-| Legacy | `_OLD/UltraSim/Network`, `_OLD/Docs`, and older client/server runtime paths | Historical behavior, implementation lessons, and archived benchmark baselines |
-| Current | `Kernels/Network` plus `Server/Network`, `Client/Network`, current tests, and current benchmark tools | Functional base, current correctness baseline, and primary performance comparison |
-| Next | An isolated `Kernels/Network.Next` project and matching bridge projects until cutover | Implementation specified here |
+| Legacy | `_V2/_OLD/UltraSim/Network`, `_V2/_OLD/Docs`, and older V2 client/server runtime paths | Historical behavior, implementation lessons, and archived benchmark baselines |
+| Current | `_V2/Kernels/Network` plus `_V2/Server/Network`, `_V2/Client/Network`, `_V2/_Tests`, and `_V2/_Benchmarks` | Frozen V2 functional base, current correctness baseline, and primary performance comparison |
+| Next | `Kernels/Network` plus root `Server/Network` and `Client/Network` bridges | Implementation specified here, built directly in the normal root locations |
 
-Legacy and Current should remain runnable while Next develops. Do not optimize or repair a baseline in place without recording the change and producing a new baseline ID. Where old code cannot coexist in one process, keep the existing separate-process comparison approach and join JSON reports by a stable scenario ID and semantic trace hash.
+The repository move makes the generation boundary physical: `_V2/` contains Legacy and Current, while unprefixed root paths belong to Next. Therefore, an unprefixed `Kernels/...`, `Server/...`, `Client/...`, `_Tests/...`, `_Benchmarks/...`, or `_Tools/...` path in a proposed-layout section means Next; a Current source, test, tool, document, or artifact path must start with `_V2/`.
+
+Legacy and Current should remain runnable while Next develops. Do not optimize or semantically change a baseline in place without recording the change and producing a new baseline ID. Narrow repairs required for relocated benchmark projects to compile, execute, and keep their output beneath `_V2/_Benchmarks/results` are allowed, but pre-repair artifacts must remain labeled as such. Where old code cannot coexist in one process, keep the existing separate-process comparison approach and join JSON reports by a stable scenario ID and semantic trace hash.
+
+Relocation verification on 2026-07-21 repaired V2 benchmark drift to the current `ulong` server-tick/projector API, replaced brittle hand-maintained DLL references in the two network executables with project references, and made every executable default its output to `_V2/_Benchmarks/results` independent of the caller's working directory. All `11` V2 benchmark projects then built in Release; the `24`-scenario network microbenchmark runner, a real-UDP combined bot smoke, and a separate-process sharded server/client smoke completed with valid JSON and exact ready-client counts. These are execution-integrity checks, not new accepted capacity baselines.
 
 Comparison priorities are:
 
@@ -167,10 +171,10 @@ This section describes verified Current functionality. It distinguishes a workin
 
 Current does well:
 
-- the audited source surface is substantial: `137` kernel C# source files / approximately `7,864` lines, plus `63` C# bridge files / approximately `5,814` lines across `Server/Network` and `Client/Network` (excluding generated `obj` files);
-- `Kernels/Network` is engine-agnostic and has no ECS, Godot, gameplay, server-host, or client-host dependency.
-- Server ECS/network integration lives in `Server/Network`.
-- Client projection and movement integration lives in `Client/Network`.
+- the audited source surface is substantial: `137` kernel C# source files / approximately `7,864` lines, plus `63` C# bridge files / approximately `5,814` lines across `_V2/Server/Network` and `_V2/Client/Network` (excluding generated `obj` files);
+- `_V2/Kernels/Network` is engine-agnostic and has no ECS, Godot, gameplay, server-host, or client-host dependency.
+- Current server ECS/network integration lives in `_V2/Server/Network`.
+- Current client projection and movement integration lives in `_V2/Client/Network`.
 - The kernel is split into `Core`, `Serialization`, `Protocol`, `Transport`, `Session`, `Subscriptions`, `Streams`, `Publish`, `Scheduler`, `Assembly`, `Transform`, and metrics/profile records.
 - The design documents explicitly preserve immutable outbound data, traffic-class isolation, a transform seam, build-once fanout, and chunk-backed world-space AOI.
 
@@ -576,8 +580,8 @@ The important caveat is that many tests prove seams in isolation. They do not pr
 
 Current tools include:
 
-- `_Benchmarks/UltraSim.Network.Benchmarks` microbenchmark runner;
-- `_Benchmarks/UltraSim.Network.BotHarness` real UDP client/server load harness;
+- `_V2/_Benchmarks/UltraSim.Network.Benchmarks` microbenchmark runner;
+- `_V2/_Benchmarks/UltraSim.Network.BotHarness` real UDP client/server load harness;
 - a sharded wrapper launching separate server and client processes;
 - staged CCU ramps;
 - dense and spread geometry;
@@ -589,7 +593,7 @@ Current tools include:
 - server pump/publish/dispatch/flush substages;
 - client poll/decode/apply substages;
 - p50-style averages, p95, p99, max, allocation, and GC telemetry;
-- report archives under `_Benchmarks/results` and historical `_tmp`/`_OLD` paths.
+- report archives under `_V2/_Benchmarks/results` and historical `_V2/_TMP`/`_V2/_OLD` paths.
 
 The current toolchain has unusually good instincts: real sockets, separate processes, sharding, client consumption, staged load, and tail metrics. It must be repaired and made trustworthy before it becomes a Next gate.
 
@@ -2497,7 +2501,7 @@ Tests-as-we-go may point in a different direction. The protected semantics remai
 
 ### 18.2 Current tracked microbenchmark snapshot
 
-The tracked `_Benchmarks/results/network-benchmarks.json` was produced on .NET `8.0.25`, Release, `16` logical processors, timestamp `2026-04-28T01:51:33Z`. Selected historical results:
+The tracked `_V2/_Benchmarks/results/network-benchmarks.json` was produced on .NET `8.0.25`, Release, `16` logical processors, timestamp `2026-04-28T01:51:33Z`. Selected historical results:
 
 | Scenario | Mean ms | Mean allocated bytes | Interpretation |
 | --- | ---: | ---: | --- |
@@ -2704,9 +2708,9 @@ Initial policy, revisable with evidence:
 ## 19. Proposed Repository Shape
 
 ```text
-Kernels/Network.Next/
+NETWORK_NEXT_DESIGN.md        # Root implementation specification retained during the rewrite
+Kernels/Network/
   AGENTS.md
-  NETWORK_NEXT_DESIGN.md
   Core/
     Ids/
     Time/
@@ -2744,7 +2748,7 @@ Kernels/Network.Next/
 Server/
   Core/                       # Engine-agnostic application runtime
   Hosting/                    # Shared fixed-step host and control surface
-  Network.Next/               # Engine-agnostic bridge over Network Next
+  Network/                    # Engine-agnostic bridge over Network Next
     EcsCapture/
     Movement/
     Sessions/
@@ -2763,7 +2767,7 @@ Client/
       CanonicalCoordinates/
       RenderWindow/
       ChunkCache/
-  Network.Next/               # Engine-agnostic bridge over Network Next
+  Network/                    # Engine-agnostic bridge over Network Next
     Session/
     Input/
     Prediction/
@@ -2775,16 +2779,25 @@ Client/
     Content/
   _Godot/                     # Rendering/input/audio/UI wrapper
 
-_Tests/UltraSim.Network.Next.Tests/
-_Tests/UltraSim.Network.Next.Fuzz/
-_Tests/UltraSim.Network.Next.Integration/
-_Benchmarks/UltraSim.Network.Next.Benchmarks/
-_Benchmarks/UltraSim.Network.Next.Harness/
+_Tests/UltraSim.Network.Tests/
+_Tests/UltraSim.Network.Fuzz/
+_Tests/UltraSim.Network.Integration/
+_Benchmarks/UltraSim.Network.Benchmarks/
+_Benchmarks/UltraSim.Network.Harness/
 _Tools/UltraSim.Network.ProtocolGenerator/
 _Tools/UltraSim.Network.Trace/
 _Tools/UltraSim.Network.PacketInspector/
 _Tools/UltraSim.Network.CapacityPlanner/
 _Tools/UltraSim.Network.AoiVisualizer/
+
+_V2/                          # Frozen Current/Legacy comparison tree
+  Kernels/Network/
+  Server/Network/
+  Client/Network/
+  _Tests/
+  _Benchmarks/UltraSim.Network.Benchmarks/
+  _Benchmarks/UltraSim.Network.BotHarness/
+  _OLD/UltraSim/Network/
 ```
 
 Do not physically duplicate shared `Server/Core`, `Server/Hosting`, `Client/Core`, prediction, content, or UI code merely to match this diagram. The key rules are:
@@ -3579,14 +3592,14 @@ The rewrite incorporates the current networking documentation and cross-system p
 
 | Area | Documents | Material contribution |
 | --- | --- | --- |
-| Network kernel | `Kernels/Network/AGENTS.md`, `README.md`, `NETWORK_REWORK_IMPLEMENTATION_PLAN.md`, `NETWORK_PARITY_CHECKLIST.md` | Required layering, immutable buffers, lanes, transform seam, shared fanout, AOI policy, Current feature/status and parity gaps |
-| ECS | `Kernels/ECS/README.md`, `Kernels/ECS/ECS_NEXT_DESIGN.md` | Capture barrier, independent change/lifecycle streams, stable item identity, immutable network views, old/current/new comparison method |
-| Client | `Client/README.md`, `CLIENT_IMPLEMENTATION_PLAN.md`, `GODOT_CLIENT_SHELL_ROADMAP.md` | Prediction/interpolation, live UDP host, reconnect/keepalive, Godot presentation boundaries and smokes |
-| UI/content | `Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`, `Client/CONTENT_PACK_PIPELINE_PLAN.md`, `Client/UI/README.md` | Server-driven UI hot/cold schemas, bounded action/model flow, server-scoped cache, logical content IDs, manifest/hash/download needs |
-| Server | `Server/SERVER.md`, `SERVER_WRAPPER_IMPLEMENTATION_PLAN.md`, `Gameplay/README.md`, `SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md` | Tick/barrier order, host lifecycle, movement authority, script-owned commands/panels/prefabs and content generations |
-| Admission/accounting | `Server/Admission/README.md`, `Server/Accounting/README.md`, runtime admission package README | Secure login/character flow, durable identity, session/entity mapping |
-| Chat/inventory/persistence | `Server/CHAT_COMMAND_SYSTEM_PLAN.md`, `Server/Inventory/README.md`, `Kernels/Inventory/README.md`, `Server/Persistence/README.md` | Chat permissions/locality, runtime versus durable identity, save/load rebind boundaries |
-| Benchmarks | `_Benchmarks/README.md`, `_Benchmarks/UltraSim.Network.BotHarness/README.md` | Current scenario inventory, sharded runner, AOI/cadence options, logical/wire and stage telemetry, allocation/GC observations |
+| Network kernel | `_V2/Kernels/Network/AGENTS.md`, `_V2/Kernels/Network/README.md`, `_V2/Kernels/Network/NETWORK_REWORK_IMPLEMENTATION_PLAN.md`, `_V2/Kernels/Network/NETWORK_PARITY_CHECKLIST.md` | Required layering, immutable buffers, lanes, transform seam, shared fanout, AOI policy, Current feature/status and parity gaps |
+| ECS | `_V2/Kernels/ECS/README.md`, root `ECS_NEXT_DESIGN.md` | Capture barrier, independent change/lifecycle streams, stable item identity, immutable network views, old/current/new comparison method |
+| Client | `_V2/Client/README.md`, `_V2/Client/CLIENT_IMPLEMENTATION_PLAN.md`, `_V2/Client/GODOT_CLIENT_SHELL_ROADMAP.md` | Prediction/interpolation, live UDP host, reconnect/keepalive, Godot presentation boundaries and smokes |
+| UI/content | `_V2/Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`, `_V2/Client/CONTENT_PACK_PIPELINE_PLAN.md`, `_V2/Client/UI/README.md` | Server-driven UI hot/cold schemas, bounded action/model flow, server-scoped cache, logical content IDs, manifest/hash/download needs |
+| Server | `_V2/Server/SERVER.md`, `_V2/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md`, `_V2/Server/Gameplay/README.md`, `_V2/Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md` | Tick/barrier order, host lifecycle, movement authority, script-owned commands/panels/prefabs and content generations |
+| Admission/accounting | `_V2/Server/Admission/README.md`, `_V2/Server/Accounting/README.md`, runtime admission package README | Secure login/character flow, durable identity, session/entity mapping |
+| Chat/inventory/persistence | `_V2/Server/CHAT_COMMAND_SYSTEM_PLAN.md`, `_V2/Server/Inventory/README.md`, `_V2/Kernels/Inventory/README.md`, `_V2/Server/Persistence/README.md` | Chat permissions/locality, runtime versus durable identity, save/load rebind boundaries |
+| Benchmarks | `_V2/_Benchmarks/README.md`, `_V2/_Benchmarks/UltraSim.Network.BotHarness/README.md` | Current scenario inventory, sharded runner, AOI/cadence options, logical/wire and stage telemetry, allocation/GC observations |
 
 The audit does not move those domains into the kernel. It ensures the kernel and bridges expose fast neutral seams.
 
@@ -3594,19 +3607,19 @@ The audit does not move those domains into the kernel. It ensures the kernel and
 
 Historical networking/world-streaming documents provided design intent and benchmark context:
 
-- `_OLD/Docs/NETOWRK V2 DESIGN.md`;
-- `_OLD/Docs/NETWORK_PRD.md`;
-- `_OLD/Docs/NETWORK_IMPLEMENTATION_PLAN.md`;
-- `_OLD/Docs/NETWORK_OPTIMIZATION_BACKLOG_2026-02-26.md`;
-- `_OLD/Docs/NETWORK_BASELINE_2026-02-22.md`;
-- `_OLD/Docs/NETWORK_BASELINE_2026-03-09.md`;
-- `_OLD/Docs/NETWORK_BASELINE_2026-03-23.md`;
-- `_OLD/Docs/SPATIAL_FIRST_REPLICATION_DESIGN.md`;
-- `_OLD/Docs/PARALLEL_REPLICATION_BUILD_DESIGN.md`;
-- `_OLD/Docs/REPLICATION_PRIORITY_LOD_PHASE1_SPEC.md`;
-- `_OLD/Docs/REPLICATION_SHARED_FANOUT_REUSE_PHASE1_SPEC.md`;
-- `_OLD/Docs/CHUNK_TERRAIN_STATICS_IMPLEMENTATION_GUIDE.md`;
-- `_OLD/_OLD/Docs/WorldStreamingAndRendering.md` and related terrain/rendering references.
+- `_V2/_OLD/Docs/NETOWRK V2 DESIGN.md`;
+- `_V2/_OLD/Docs/NETWORK_PRD.md`;
+- `_V2/_OLD/Docs/NETWORK_IMPLEMENTATION_PLAN.md`;
+- `_V2/_OLD/Docs/NETWORK_OPTIMIZATION_BACKLOG_2026-02-26.md`;
+- `_V2/_OLD/Docs/NETWORK_BASELINE_2026-02-22.md`;
+- `_V2/_OLD/Docs/NETWORK_BASELINE_2026-03-09.md`;
+- `_V2/_OLD/Docs/NETWORK_BASELINE_2026-03-23.md`;
+- `_V2/_OLD/Docs/SPATIAL_FIRST_REPLICATION_DESIGN.md`;
+- `_V2/_OLD/Docs/PARALLEL_REPLICATION_BUILD_DESIGN.md`;
+- `_V2/_OLD/Docs/REPLICATION_PRIORITY_LOD_PHASE1_SPEC.md`;
+- `_V2/_OLD/Docs/REPLICATION_SHARED_FANOUT_REUSE_PHASE1_SPEC.md`;
+- `_V2/_OLD/Docs/CHUNK_TERRAIN_STATICS_IMPLEMENTATION_GUIDE.md`;
+- `_V2/_OLD/_OLD/Docs/WorldStreamingAndRendering.md` and related terrain/rendering references.
 
 They reinforce:
 

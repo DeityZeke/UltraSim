@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: proposed implementation specification  
+Status: active implementation specification; Phase 1 started 2026-07-21
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -37,17 +37,39 @@ Documentation is requirement evidence, not proof that a feature currently exists
 
 Accordingly, a feature described as planned elsewhere is a Next design input, not part of the Current feature inventory unless code/tests were also verified.
 
+### 1.1 Active implementation status
+
+Phase 1 has begun in root `Kernels/ECS`. The first bounded slice implements:
+
+- transient process-unique `WorldId` values with no retained global world registry and no wrap/reuse;
+- an initial 12-byte world/index/generation `Entity` layout;
+- fixed-capacity, preallocated, single-owner entity-slot allocation;
+- explicit capacity failure, stale/foreign rejection, and generation-wrap slot retirement;
+- scalar and span-based bulk allocation/free paths;
+- `15` executable primitive tests, including a warmed million-operation zero-allocation assertion;
+- `9` Next-only primitive/layout benchmark scenarios with JSON output, natural GC reporting, and 8-byte/12-byte handle candidates explicitly marked non-comparable.
+
+The first local run favored direct 12-byte field access over the packed 8-byte candidate at both one million and ten million handles, while every scenario measured zero managed bytes. That is a hypothesis-generating result, not an accepted layout decision: both representations still need chunk traversal, entity-aware query, metadata-cache, memory-footprint, and repeated isolated-process measurements.
+
+The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for bounded adversarial architecture, patch, and benchmark reviews; its output remains untrusted until verified by source, tests, or measurements. Early reviews usefully exposed the need to make world-ID allocation process-unique and to test slot retirement through the pool, while also demonstrating why model suggestions must be filtered: proposals such as dynamically growing the fixed free list or reclaiming retired generations contradict the bounded-memory and stale-handle contracts.
+
+Generated schema, native/fixed arena experiments, chunk layout, public world lifecycle, queries, and structural command arenas are not implemented yet.
+
 ## 2. Generation Names and Comparison Policy
 
 The project has three useful ECS generations:
 
 | Name in this document | Location or intended location | Role |
 | --- | --- | --- |
-| Legacy | `_OLD/UltraSim/ECS` | Historical implementation and existing old benchmark baseline |
-| Current | `Kernels/ECS` | Current functional reference, integration reference, and second benchmark baseline |
-| Next | Initially isolated from `Kernels/ECS`, then promoted after acceptance | New implementation described here |
+| Legacy | `_V2/_OLD/UltraSim/ECS` | Historical implementation and existing old benchmark baseline, retained inside the V2 snapshot |
+| Current | `_V2/Kernels/ECS` | Frozen V2 functional reference, integration reference, and primary comparison baseline |
+| Next | `Kernels/ECS` | New implementation described here, built directly in the normal root location |
 
-Legacy and Current must remain runnable during Next development. Do not rewrite the baselines while using them as performance references. Corrections needed only for benchmark validity should be recorded and versioned rather than silently folded into a baseline.
+The repository move makes the generation boundary physical: `_V2/` contains both Legacy and Current, while unprefixed root paths belong to Next. Thus, an unprefixed `Kernels/ECS`, `Server/...`, `Client/...`, `_Tests/...`, or `_Benchmarks/...` path in a proposed-layout section means Next; a Current source, test, tool, document, or artifact path must start with `_V2/`.
+
+Legacy and Current must remain runnable during Next development. Do not rewrite the functional baselines while using them as performance references. Corrections required to make relocated benchmark projects compile, execute, or write into their own V2 result tree are allowed, but must be narrowly recorded and followed by a new baseline artifact rather than silently treating an older artifact as post-repair output.
+
+Relocation verification on 2026-07-21 confirmed that all `11` projects beneath `_V2/_Benchmarks` build in Release, the full `77`-scenario Legacy and `80`-scenario V2 Current ECS runners complete, and `_V2/_Benchmarks/UltraSim.ECS.Compare` consumes their fresh JSON successfully. The V2 phase-stagger and scheduler-feature report modes also complete, and a bounded four-scenario soak smoke produces valid JSON without a collection during the measured one-second windows. These checks prove runner integrity after relocation; their short/single-process measurements are not a replacement for a controlled accepted baseline.
 
 The existing separate-process benchmark approach is appropriate because Legacy and Current may have conflicting namespaces and types. Add a third Next runner and let the comparison tool join the three JSON reports by stable scenario ID.
 
@@ -1552,12 +1574,11 @@ Do not broadly add `AggressiveInlining`, unsafe reference arithmetic, or SIMD wi
 
 ## 9. Proposed Next Repository Shape
 
-An initial isolated layout could be:
+Because the prior implementation is now isolated under `_V2/`, Next can use the canonical root project names from its first commit:
 
 ```text
-Kernels/
-  ECS/                         # Current, unchanged baseline during development
-  ECS.Next/
+ECS_NEXT_DESIGN.md             # Root implementation specification retained during the rewrite
+Kernels/ECS/
     Core/
     Memory/
     Storage/
@@ -1570,8 +1591,8 @@ Kernels/
     Persistence/
     Inspection/
     Generated/
-    UltraSim.ECS.Next.csproj
-  ECS.Generators/
+    UltraSim.ECS.csproj
+Kernels/ECS.Generators/
     Components/
     Queries/
     Systems/
@@ -1579,16 +1600,19 @@ Kernels/
     Persistence/
 
 _Tests/
-  UltraSim.ECS.Tests/          # Current baseline remains runnable
-  UltraSim.ECS.Next.Tests/
+  UltraSim.ECS.Tests/
   UltraSim.ECS.Differential.Tests/
   UltraSim.ECS.Integration.Tests/
 
 _Benchmarks/
-  UltraSim.ECS.OldBenchmarks/
-  UltraSim.ECS.NewBenchmarks/  # Current runner; rename only after tooling migration
-  UltraSim.ECS.NextBenchmarks/
+  UltraSim.ECS.Benchmarks/
   UltraSim.ECS.Compare/
+
+_V2/                           # Frozen comparison tree; never linked into Next hot paths
+  Kernels/ECS/
+  _Tests/UltraSim.ECS.Tests/
+  _Benchmarks/UltraSim.ECS.NewBenchmarks/  # V2 Current runner; historical name retained
+  _Benchmarks/UltraSim.ECS.OldBenchmarks/  # Legacy runner
 ```
 
 The outer integration topology remains one portable runtime with thin entry points:
@@ -1610,7 +1634,7 @@ Client/
 
 ECS Next plugs into the portable `Server`/`Client` layers. It does not grow separate Console, Headless, Godot, or single-player ECS implementations. Single-player composes the ordinary `_Headless` server plus ordinary client and connects them through the normal localhost network/session boundary.
 
-The confusing existing use of “NewBenchmarks” for Current should be resolved in report labels before Next comparisons begin. File/project renaming is optional; stable report metadata is mandatory.
+The confusing existing use of “NewBenchmarks” for V2 Current should be resolved in report labels before three-way comparisons begin. Renaming the frozen V2 project is unnecessary; stable report metadata, generation labels, semantic/profile hashes, and explicit executable paths are mandatory.
 
 ## 10. Implementation Phases and Gates
 
@@ -2161,13 +2185,13 @@ The supporting documents were:
 
 | Area | Files read | Relevance to ECS Next |
 | --- | --- | --- |
-| Current ECS | `Kernels/ECS/README.md`; `Kernels/ECS/Extensions/Prefabs/README.md`; `Kernels/ECS/Extensions/Persistence/README.md` | Current kernel surface, prefab state, persistence state, known defers |
-| Kernel boundaries and Network | `Kernels/KERNELS.md`; `Kernels/Network/AGENTS.md`; `Kernels/Network/README.md`; `Kernels/Network/NETWORK_REWORK_IMPLEMENTATION_PLAN.md`; `Kernels/Network/NETWORK_PARITY_CHECKLIST.md` | Standalone-kernel rule, immutable handoffs, lanes, AOI, stable item identity, parity/harness gaps |
-| Inventory and UI kernels | `Kernels/Inventory/AGENTS.md`; `Kernels/Inventory/README.md`; `Kernels/UI/AGENTS.md` | Runtime/durable owner refs, definition-versus-instance identity, admin/schema bridge requirements |
-| Server core and bridges | `Server/AGENTS.md`; `Server/SERVER.md`; `Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md`; `Server/Gameplay/README.md`; `Server/Inventory/README.md`; `Server/Persistence/README.md`; `Server/Accounting/README.md`; `Server/Admission/README.md`; `Server/Discovery/README.md`; `Server/CHAT_COMMAND_SYSTEM_PLAN.md` | Host lifecycle, movement, spawners, persistence coordination, character identity, inventory refs, permissions, network classification |
-| Script/content runtime | `Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md`; `Server/RuntimeTemplate/README.md`; `Server/RuntimeTemplate/scripts/README.md`; `Server/RuntimeTemplate/scripts/Packages/Admission/README.md` | RunUO facade intent, module lifecycle, content groups, prefab keys/origins, live data authoring, script cache/generation |
-| Client, UI, and content | `Client/AGENTS.md`; `Client/README.md`; `Client/CLIENT_IMPLEMENTATION_PLAN.md`; `Client/GODOT_CLIENT_SHELL_ROADMAP.md`; `Client/UI/README.md`; `Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`; `Client/CONTENT_PACK_PIPELINE_PLAN.md`; `Client/_Godot/ASSET_LAYOUT.md` | ECS inspector/control-panel needs, generated admin metadata, stable logical content IDs, state binding, content provenance |
-| Benchmarks and operations | `_Benchmarks/README.md`; `_Benchmarks/UltraSim.Network.BotHarness/README.md`; `Services/Registry/README.md` | Existing ECS matrix, GC soak, widened network workload/telemetry, operational boundaries |
+| Current ECS | `_V2/Kernels/ECS/README.md`; `_V2/Kernels/ECS/Extensions/Prefabs/README.md`; `_V2/Kernels/ECS/Extensions/Persistence/README.md` | Current kernel surface, prefab state, persistence state, known defers |
+| Kernel boundaries and Network | `_V2/Kernels/KERNELS.md`; `_V2/Kernels/Network/AGENTS.md`; `_V2/Kernels/Network/README.md`; `_V2/Kernels/Network/NETWORK_REWORK_IMPLEMENTATION_PLAN.md`; `_V2/Kernels/Network/NETWORK_PARITY_CHECKLIST.md` | Standalone-kernel rule, immutable handoffs, lanes, AOI, stable item identity, parity/harness gaps |
+| Inventory and UI kernels | `_V2/Kernels/Inventory/AGENTS.md`; `_V2/Kernels/Inventory/README.md`; `_V2/Kernels/UI/AGENTS.md` | Runtime/durable owner refs, definition-versus-instance identity, admin/schema bridge requirements |
+| Server core and bridges | `_V2/Server/AGENTS.md`; `_V2/Server/SERVER.md`; `_V2/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md`; `_V2/Server/Gameplay/README.md`; `_V2/Server/Inventory/README.md`; `_V2/Server/Persistence/README.md`; `_V2/Server/Accounting/README.md`; `_V2/Server/Admission/README.md`; `_V2/Server/Discovery/README.md`; `_V2/Server/CHAT_COMMAND_SYSTEM_PLAN.md` | Host lifecycle, movement, spawners, persistence coordination, character identity, inventory refs, permissions, network classification |
+| Script/content runtime | `_V2/Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md`; `_V2/Server/RuntimeTemplate/README.md`; `_V2/Server/RuntimeTemplate/scripts/README.md`; `_V2/Server/RuntimeTemplate/scripts/Packages/Admission/README.md` | RunUO facade intent, module lifecycle, content groups, prefab keys/origins, live data authoring, script cache/generation |
+| Client, UI, and content | `_V2/Client/AGENTS.md`; `_V2/Client/README.md`; `_V2/Client/CLIENT_IMPLEMENTATION_PLAN.md`; `_V2/Client/GODOT_CLIENT_SHELL_ROADMAP.md`; `_V2/Client/UI/README.md`; `_V2/Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`; `_V2/Client/CONTENT_PACK_PIPELINE_PLAN.md`; `_V2/Client/_Godot/ASSET_LAYOUT.md` | ECS inspector/control-panel needs, generated admin metadata, stable logical content IDs, state binding, content provenance |
+| Benchmarks and operations | `_V2/_Benchmarks/README.md`; `_V2/_Benchmarks/UltraSim.Network.BotHarness/README.md`; `_V2/Services/Registry/README.md` | Existing ECS matrix, GC soak, widened network workload/telemetry, operational boundaries |
 
 The audit does not convert every plan into a kernel requirement. It traces which layer owns each need and ensures the ECS exposes a fast neutral seam where necessary.
 
