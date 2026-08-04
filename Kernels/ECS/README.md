@@ -35,14 +35,22 @@ allocation:
 - `ComponentMetadata` is exactly 16 bytes. Tag components consume no column
   bytes, while runtime size and alignment are captured once during schema
   construction for ordinary components.
+- `ChunkLayoutPlanner` converts a canonical signature into deterministic SoA
+  column offsets using caller-owned spans. It reserves a local entity-index
+  column, omits tag data, word-rounds enable masks, searches for the maximum
+  fitting row count, and reports every padding/tail byte with checked arithmetic.
+- `ArchetypeCapacityPlan` projects a population onto that layout, while
+  `WorldCapacityPlanner` combines archetype chunks with fixed entity metadata
+  and explicit command/change/scratch arena budgets. These planners allocate
+  no memory; the arena and executable chunk implementations are the next slice.
 
 `EntityPool` is intentionally single-owner. Parallel systems will submit
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
 This is not yet a usable component/archetype world. The current generator emits
-the core manifest only; field/serializer/query/prefab descriptors, capacity
-planning, memory/chunk experiments, and a public world lifecycle come next.
+the core manifest only; field/serializer/query/prefab descriptors, arena/chunk
+experiments, and a public world lifecycle come next.
 
 Run both executable test suites from the repository root:
 

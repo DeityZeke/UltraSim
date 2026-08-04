@@ -281,6 +281,8 @@ public sealed class ComponentSchema
             throw new ArgumentException("Component alignment must be a nonzero power of two.");
         if (metadata.IsTag != (metadata.Size == 0))
             throw new ArgumentException("Only tag components may have zero storage size.");
+        if (!metadata.IsTag && (metadata.Size % metadata.Alignment) != 0)
+            throw new ArgumentException("Component size must be a multiple of its natural alignment.");
         if (metadata.IsPersistent != (metadata.PersistenceId != 0))
             throw new ArgumentException("Persistent flags and persistence IDs must agree.");
         if (!IsCanonicalKey(current.CanonicalKey))

@@ -46,6 +46,9 @@ internal static class PrimitiveBenchmarks
         var handleScan1M = new HandleScanFixture(1_000_000, scanCount: 8);
         var handleScan10M = new HandleScanFixture(10_000_000, scanCount: 2);
         var schemaLookup = new SchemaLookupFixture(10_000_000);
+        var layoutPlanner = new LayoutPlannerFixture(100_000);
+        var archetypeCapacity = new ArchetypeCapacityFixture(1_000_000);
+        var worldCapacity = new WorldCapacityFixture(1_000_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -64,6 +67,9 @@ internal static class PrimitiveBenchmarks
             new("ComponentId_StableHash_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteStableHash),
             new("ComponentId_PersistenceId_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecutePersistenceId),
             new("ComponentMetadata_ById_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteMetadataById),
+            new("ChunkLayoutPlanner_Normal_100000", "CapacityPlanning", 100_000, layoutPlanner.Execute),
+            new("ArchetypeCapacityPlan_Normal_1000000", "CapacityPlanning", 1_000_000, archetypeCapacity.Execute),
+            new("WorldCapacityPlanner_ThreeArchetypes_1000000", "CapacityPlanning", 1_000_000, worldCapacity.Execute),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -74,7 +80,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-schema-v2",
+            SemanticProfile = "ecs-next-phase1-layout-v3",
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
             ProcessorCount = Environment.ProcessorCount,
@@ -86,6 +92,7 @@ internal static class PrimitiveBenchmarks
             SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
             TimestampUtc = DateTimeOffset.UtcNow,
+            LayoutPlans = LayoutReportBuilder.Create(),
             Results = results,
         };
     }
@@ -368,6 +375,98 @@ internal static class PrimitiveBenchmarks
         }
     }
 
+    private sealed class LayoutPlannerFixture
+    {
+        private readonly ComponentSchema _schema = UltraSim.ECS.Benchmarks.BenchmarkSchema.CreateSchema();
+        private readonly ComponentId[] _signature = LayoutReportBuilder.CreateNormalSignature();
+        private readonly ComponentColumnLayout[] _columns;
+        private readonly int _operations;
+
+        internal LayoutPlannerFixture(int operations)
+        {
+            _operations = operations;
+            _columns = new ComponentColumnLayout[_signature.Length];
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                ChunkLayoutPlan plan = ChunkLayoutPlanner.Plan(
+                    _schema,
+                    _signature,
+                    ChunkLayoutOptions.KiB32,
+                    _columns);
+                checksum += plan.RowCapacity + plan.BytesUsed + _columns[0].DataOffsetBytes;
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+    }
+
+    private sealed class ArchetypeCapacityFixture
+    {
+        private readonly ChunkLayoutPlan _layout;
+        private readonly int _operations;
+
+        internal ArchetypeCapacityFixture(int operations)
+        {
+            _operations = operations;
+            ComponentSchema schema = UltraSim.ECS.Benchmarks.BenchmarkSchema.CreateSchema();
+            ComponentId[] signature = LayoutReportBuilder.CreateNormalSignature();
+            var columns = new ComponentColumnLayout[signature.Length];
+            _layout = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB32, columns);
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                var plan = new ArchetypeCapacityPlan(_layout, 100_000 + (i & 1));
+                checksum += plan.RequiredChunkCount + plan.ReservedChunkBytes;
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+    }
+
+    private sealed class WorldCapacityFixture
+    {
+        private readonly ArchetypeCapacityPlan[] _archetypes;
+        private readonly EntityCapacity _entityCapacity = new(500_000);
+        private readonly WorldArenaReservations _arenas = new(8 * 1024 * 1024, 4 * 1024 * 1024, 2 * 1024 * 1024);
+        private readonly int _operations;
+
+        internal WorldCapacityFixture(int operations)
+        {
+            _operations = operations;
+            ComponentSchema schema = UltraSim.ECS.Benchmarks.BenchmarkSchema.CreateSchema();
+            ComponentId[] signature = LayoutReportBuilder.CreateNormalSignature();
+            var columns = new ComponentColumnLayout[signature.Length];
+            ChunkLayoutPlan layout = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB32, columns);
+            _archetypes =
+            [
+                new ArchetypeCapacityPlan(layout, 100_000),
+                new ArchetypeCapacityPlan(layout, 50_000),
+                new ArchetypeCapacityPlan(layout, 25_000),
+            ];
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                WorldCapacityPlan plan = WorldCapacityPlanner.Plan(_entityCapacity, _archetypes, _arenas);
+                checksum += plan.RequiredChunkCount + plan.TotalReservedBytes;
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+    }
+
     private readonly struct PackedEntityCandidate
     {
         private const ulong IndexMask = 0x00FF_FFFFUL;
@@ -419,7 +518,128 @@ internal sealed class BenchmarkReport
     public required int SchemaIdSizeBytes { get; init; }
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }
+    public required IReadOnlyList<LayoutPlanFact> LayoutPlans { get; init; }
     public required IReadOnlyList<BenchmarkResult> Results { get; init; }
+}
+
+internal static class LayoutReportBuilder
+{
+    private const int ExpectedPopulation = 100_000;
+
+    internal static IReadOnlyList<LayoutPlanFact> Create()
+    {
+        ComponentSchema schema = UltraSim.ECS.Benchmarks.BenchmarkSchema.CreateSchema();
+        (string Name, ComponentId[] Signature)[] profiles =
+        [
+            ("Narrow", CreateSortedSignature(
+                UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkPosition>())),
+            ("Normal", CreateNormalSignature()),
+            ("Wide", CreateSortedSignature(
+                UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkDisabled>(),
+                UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkPosition>(),
+                UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkVelocity>(),
+                UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkWide>())),
+        ];
+        ChunkLayoutOptions[] candidates =
+        [
+            ChunkLayoutOptions.KiB16,
+            ChunkLayoutOptions.KiB32,
+            ChunkLayoutOptions.KiB64,
+        ];
+        var facts = new List<LayoutPlanFact>(profiles.Length * candidates.Length);
+        foreach ((string profileName, ComponentId[] signature) in profiles)
+        {
+            foreach (ChunkLayoutOptions options in candidates)
+            {
+                var columns = new ComponentColumnLayout[signature.Length];
+                ChunkLayoutPlan layout = ChunkLayoutPlanner.Plan(schema, signature, options, columns);
+                var capacity = new ArchetypeCapacityPlan(layout, ExpectedPopulation);
+                var columnFacts = new LayoutColumnFact[columns.Length];
+                for (int i = 0; i < columns.Length; i++)
+                {
+                    ComponentColumnLayout column = columns[i];
+                    columnFacts[i] = new LayoutColumnFact
+                    {
+                        ComponentId = column.ComponentId.Value,
+                        CanonicalKey = schema.GetCanonicalKey(column.ComponentId),
+                        Flags = column.Flags.ToString(),
+                        ElementSizeBytes = column.ElementSizeBytes,
+                        EffectiveAlignmentBytes = column.EffectiveAlignmentBytes,
+                        DataOffsetBytes = column.DataOffsetBytes,
+                        DataBytes = column.DataBytes,
+                        EnableBitsOffsetBytes = column.EnableBitsOffsetBytes,
+                        EnableBitsBytes = column.EnableBitsBytes,
+                    };
+                }
+
+                facts.Add(new LayoutPlanFact
+                {
+                    Profile = profileName,
+                    ChunkSizeBytes = options.ChunkSizeBytes,
+                    ReservedHeaderBytes = options.ReservedHeaderBytes,
+                    MinimumColumnAlignmentBytes = options.MinimumColumnAlignmentBytes,
+                    RequiredChunkAlignmentBytes = layout.RequiredChunkAlignmentBytes,
+                    RowCapacity = layout.RowCapacity,
+                    FixedRowBytes = layout.FixedRowBytes,
+                    BytesUsed = layout.BytesUsed,
+                    AlignmentPaddingBytes = layout.AlignmentPaddingBytes,
+                    TailUnusedBytes = layout.TailUnusedBytes,
+                    EnableBitsetBytes = layout.EnableBitsetBytes,
+                    ExpectedPopulation = ExpectedPopulation,
+                    RequiredChunkCount = capacity.RequiredChunkCount,
+                    ReservedChunkBytes = capacity.ReservedChunkBytes,
+                    UnusedRowSlots = capacity.UnusedRowSlots,
+                    Columns = columnFacts,
+                });
+            }
+        }
+
+        return facts;
+    }
+
+    internal static ComponentId[] CreateNormalSignature() => CreateSortedSignature(
+        UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkDisabled>(),
+        UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkPosition>(),
+        UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkVelocity>());
+
+    private static ComponentId[] CreateSortedSignature(params ComponentId[] componentIds)
+    {
+        Array.Sort(componentIds, static (left, right) => left.Value.CompareTo(right.Value));
+        return componentIds;
+    }
+}
+
+internal sealed class LayoutPlanFact
+{
+    public required string Profile { get; init; }
+    public required int ChunkSizeBytes { get; init; }
+    public required int ReservedHeaderBytes { get; init; }
+    public required int MinimumColumnAlignmentBytes { get; init; }
+    public required int RequiredChunkAlignmentBytes { get; init; }
+    public required int RowCapacity { get; init; }
+    public required int FixedRowBytes { get; init; }
+    public required int BytesUsed { get; init; }
+    public required int AlignmentPaddingBytes { get; init; }
+    public required int TailUnusedBytes { get; init; }
+    public required int EnableBitsetBytes { get; init; }
+    public required int ExpectedPopulation { get; init; }
+    public required int RequiredChunkCount { get; init; }
+    public required long ReservedChunkBytes { get; init; }
+    public required long UnusedRowSlots { get; init; }
+    public required IReadOnlyList<LayoutColumnFact> Columns { get; init; }
+}
+
+internal sealed class LayoutColumnFact
+{
+    public required ushort ComponentId { get; init; }
+    public required string CanonicalKey { get; init; }
+    public required string Flags { get; init; }
+    public required int ElementSizeBytes { get; init; }
+    public required int EffectiveAlignmentBytes { get; init; }
+    public required int DataOffsetBytes { get; init; }
+    public required int DataBytes { get; init; }
+    public required int EnableBitsOffsetBytes { get; init; }
+    public required int EnableBitsBytes { get; init; }
 }
 
 internal sealed class BenchmarkResult

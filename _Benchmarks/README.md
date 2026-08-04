@@ -20,6 +20,14 @@ dense ID. Every case records managed bytes and Gen0/1/2 collections. These
 microbenchmarks are useful for choosing mechanisms, but they do not replace
 large-schema scaling or end-to-end world measurements.
 
+Each JSON report also embeds nine reproducible layout facts: narrow, normal,
+and wide signatures planned into 16, 32, and 64 KiB chunks with a 256-byte
+reserved header, four-byte entity indices, 64-byte column-base alignment, and a
+100,000-entity population projection. Planner, archetype-capacity, and
+world-capacity execution are measured as separate zero-allocation scenarios.
+These inputs are explicit hypotheses for the coming storage prototype, not a
+final chunk-size decision.
+
 Run from the repository root:
 
 ```bash

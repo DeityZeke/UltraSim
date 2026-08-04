@@ -36,8 +36,19 @@ internal static class EcsPrimitiveTests
         Run(nameof(ComponentSchema_IndexedLookupsAreCorrectAndAllocateZero), ComponentSchema_IndexedLookupsAreCorrectAndAllocateZero);
         Run(nameof(ComponentSchema_DefensiveConstructionRejectsInvalidInput), ComponentSchema_DefensiveConstructionRejectsInvalidInput);
         Run(nameof(ComponentSchema_RejectsReservedIdSpaceOverflowFirst), ComponentSchema_RejectsReservedIdSpaceOverflowFirst);
+        Run(nameof(ChunkLayoutOptions_RejectInvalidAndMisalignedValues), ChunkLayoutOptions_RejectInvalidAndMisalignedValues);
+        Run(nameof(ChunkLayoutPlanner_ProducesAlignedNonOverlappingLayout), ChunkLayoutPlanner_ProducesAlignedNonOverlappingLayout);
+        Run(nameof(ChunkLayoutPlanner_EnableBitsetsRoundAtSixtyFourRows), ChunkLayoutPlanner_EnableBitsetsRoundAtSixtyFourRows);
+        Run(nameof(ChunkLayoutPlanner_RejectsInvalidSignaturesAndInsufficientOutput), ChunkLayoutPlanner_RejectsInvalidSignaturesAndInsufficientOutput);
+        Run(nameof(ChunkLayoutPlanner_CapacityIsMaximalAndOneRowFailureIsExplicit), ChunkLayoutPlanner_CapacityIsMaximalAndOneRowFailureIsExplicit);
+        Run(nameof(ChunkLayoutPlanner_MatchesBruteForceRandomizedReference), ChunkLayoutPlanner_MatchesBruteForceRandomizedReference);
+        Run(nameof(ChunkLayoutPlanner_LargeSignatureHeapSortIsDeterministic), ChunkLayoutPlanner_LargeSignatureHeapSortIsDeterministic);
+        Run(nameof(ChunkLayoutPlanner_IsConcurrentAndWarmedAllocationFree), ChunkLayoutPlanner_IsConcurrentAndWarmedAllocationFree);
+        Run(nameof(ArchetypeCapacityPlan_AccountsForPopulationBoundaries), ArchetypeCapacityPlan_AccountsForPopulationBoundaries);
+        Run(nameof(WorldCapacityPlanner_AggregatesAndRejectsOvercommit), WorldCapacityPlanner_AggregatesAndRejectsOvercommit);
+        Run(nameof(CapacityPlanning_CheckedArithmeticRejectsOverflow), CapacityPlanning_CheckedArithmeticRejectsOverflow);
 
-        Console.WriteLine($"All {_passed} ECS Next primitive tests passed.");
+        Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
 
     private static void WorldId_Create_ReturnsUniqueValidIds()
@@ -401,7 +412,7 @@ internal static class EcsPrimitiveTests
         ComponentSchema schema = UltraSim.ECS.Tests.IndexedTestSchema.CreateSchema();
         ulong lastHash = StableHash64.Compute("index.11");
 
-        Assert.Equal(12, schema.ComponentCount);
+        Assert.Equal(20, schema.ComponentCount);
         Assert.True(schema.TryGetComponentId<UltraSim.ECS.Tests.Indexed00>(out ComponentId first));
         Assert.True(schema.TryGetComponentId<UltraSim.ECS.Tests.Indexed05>(out ComponentId middle));
         Assert.True(schema.TryGetComponentId<UltraSim.ECS.Tests.Indexed11>(out ComponentId last));
@@ -495,6 +506,351 @@ internal static class EcsPrimitiveTests
         var registrations = new ComponentRegistration[ComponentSchema.MaximumComponentCount + 1];
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             ComponentSchema.Create(new SchemaId(1, 0), registrations));
+    }
+
+    private static void ChunkLayoutOptions_RejectInvalidAndMisalignedValues()
+    {
+        Assert.False(default(ChunkLayoutOptions).IsValid);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, reservedHeaderBytes: -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, reservedHeaderBytes: 1025));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, entityIndexSizeBytes: 3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, entityIndexSizeBytes: 16));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, minimumColumnAlignmentBytes: 3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(16384, minimumColumnAlignmentBytes: 8192));
+        Assert.Throws<ArgumentException>(() => new ChunkLayoutOptions(1000, minimumColumnAlignmentBytes: 64));
+        Assert.Throws<ArgumentException>(() => new ChunkLayoutOptions(1004, minimumColumnAlignmentBytes: 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, maximumRows: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkLayoutOptions(1024, maximumRows: ushort.MaxValue + 1));
+        Assert.Equal(16 * 1024, ChunkLayoutOptions.KiB16.ChunkSizeBytes);
+        Assert.Equal(32 * 1024, ChunkLayoutOptions.KiB32.ChunkSizeBytes);
+        Assert.Equal(64 * 1024, ChunkLayoutOptions.KiB64.ChunkSizeBytes);
+    }
+
+    private static void ChunkLayoutPlanner_ProducesAlignedNonOverlappingLayout()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = CreateLayoutSignature();
+        var columns = new ComponentColumnLayout[signature.Length];
+        ChunkLayoutPlan plan = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB16, columns);
+
+        Assert.True(plan.IsValid);
+        Assert.Equal(signature.Length, plan.SignatureComponentCount);
+        Assert.Equal(4, plan.DataColumnCount);
+        Assert.Equal(1, plan.TagCount);
+        Assert.Equal(2, plan.EnableableCount);
+        Assert.Equal(64, plan.RequiredChunkAlignmentBytes);
+        Assert.Equal(0, plan.EntityIndexOffsetBytes % 64);
+        Assert.Equal(plan.RowCapacity * sizeof(uint), plan.EntityIndexDataBytes);
+        Assert.Equal(
+            plan.Options.ChunkSizeBytes,
+            plan.Options.ReservedHeaderBytes +
+            plan.EntityIndexDataBytes +
+            plan.ComponentDataBytes +
+            plan.EnableBitsetBytes +
+            plan.AlignmentPaddingBytes +
+            plan.TailUnusedBytes);
+
+        Assert.Equal(UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>(), columns[0].ComponentId);
+        Assert.Equal(UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>(), columns[1].ComponentId);
+        Assert.Equal(UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>(), columns[2].ComponentId);
+        Assert.Equal(UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutByte>(), columns[3].ComponentId);
+        Assert.Equal(UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutTag>(), columns[4].ComponentId);
+
+        int previousEnd = plan.EntityIndexOffsetBytes + plan.EntityIndexDataBytes;
+        int finalDataEnd = previousEnd;
+        for (int i = 0; i < columns.Length; i++)
+        {
+            ComponentColumnLayout column = columns[i];
+            if (column.HasData)
+            {
+                Assert.Equal(0, column.DataOffsetBytes % column.EffectiveAlignmentBytes);
+                Assert.True(column.DataOffsetBytes >= previousEnd);
+                Assert.Equal(plan.RowCapacity * column.ElementSizeBytes, column.DataBytes);
+                previousEnd = column.DataOffsetBytes + column.DataBytes;
+                finalDataEnd = previousEnd;
+            }
+            else
+            {
+                Assert.Equal(ComponentColumnLayout.NoOffset, column.DataOffsetBytes);
+                Assert.Equal(0, column.DataBytes);
+            }
+        }
+
+        int expectedEnableBytes = ChunkLayoutPlanner.CalculateEnableBitsetBytes(plan.RowCapacity, 1);
+        for (int i = 0; i < columns.Length; i++)
+        {
+            ComponentColumnLayout column = columns[i];
+            if (!column.HasEnableBits)
+                continue;
+
+            Assert.True(column.EnableBitsOffsetBytes >= finalDataEnd);
+            Assert.Equal(0, column.EnableBitsOffsetBytes % sizeof(ulong));
+            Assert.Equal(expectedEnableBytes, column.EnableBitsBytes);
+        }
+    }
+
+    private static void ChunkLayoutPlanner_EnableBitsetsRoundAtSixtyFourRows()
+    {
+        Assert.Equal(0, ChunkLayoutPlanner.CalculateEnableBitsetBytes(0, 1));
+        Assert.Equal(8, ChunkLayoutPlanner.CalculateEnableBitsetBytes(1, 1));
+        Assert.Equal(8, ChunkLayoutPlanner.CalculateEnableBitsetBytes(63, 1));
+        Assert.Equal(8, ChunkLayoutPlanner.CalculateEnableBitsetBytes(64, 1));
+        Assert.Equal(16, ChunkLayoutPlanner.CalculateEnableBitsetBytes(65, 1));
+        Assert.Equal(32, ChunkLayoutPlanner.CalculateEnableBitsetBytes(65, 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChunkLayoutPlanner.CalculateEnableBitsetBytes(-1, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChunkLayoutPlanner.CalculateEnableBitsetBytes(1, -1));
+    }
+
+    private static void ChunkLayoutPlanner_RejectsInvalidSignaturesAndInsufficientOutput()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId first = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+        ComponentId second = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        var columns = new ComponentColumnLayout[2];
+
+        Assert.Throws<ArgumentException>(() => ChunkLayoutPlanner.Plan(schema, new[] { first }, default, columns));
+        Assert.Throws<ArgumentException>(() => ChunkLayoutPlanner.Plan(schema, new[] { first, second }, ChunkLayoutOptions.KiB16, new ComponentColumnLayout[1]));
+        Assert.Throws<ArgumentException>(() => ChunkLayoutPlanner.Plan(schema, new[] { first, first }, ChunkLayoutOptions.KiB16, columns));
+        Assert.Throws<ArgumentException>(() => ChunkLayoutPlanner.Plan(schema, new[] { second, first }, ChunkLayoutOptions.KiB16, columns));
+        Assert.Throws<ArgumentException>(() => ChunkLayoutPlanner.Plan(schema, new[] { ComponentId.Invalid }, ChunkLayoutOptions.KiB16, columns));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ChunkLayoutPlanner.Plan(schema, new[] { new ComponentId(100) }, ChunkLayoutOptions.KiB16, columns));
+    }
+
+    private static void ChunkLayoutPlanner_CapacityIsMaximalAndOneRowFailureIsExplicit()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = CreateLayoutSignature();
+        var columns = new ComponentColumnLayout[signature.Length];
+        ChunkLayoutOptions options = ChunkLayoutOptions.KiB16;
+        ChunkLayoutPlan plan = ChunkLayoutPlanner.Plan(schema, signature, options, columns);
+
+        Assert.True(plan.RowCapacity < options.MaximumRows);
+        Assert.True(plan.BytesUsed <= options.ChunkSizeBytes);
+        Assert.True(ChunkLayoutPlanner.CalculateRequiredBytes(options, columns, plan.RowCapacity + 1) > options.ChunkSizeBytes);
+
+        var noPayload = new ChunkLayoutOptions(
+            64,
+            reservedHeaderBytes: 64,
+            minimumColumnAlignmentBytes: 64);
+        Assert.False(ChunkLayoutPlanner.TryPlan(schema, signature, noPayload, columns, out ChunkLayoutPlan unavailable));
+        Assert.False(unavailable.IsValid);
+        Assert.Throws<InvalidOperationException>(() => ChunkLayoutPlanner.Plan(schema, signature, noPayload, columns));
+    }
+
+    private static void ChunkLayoutPlanner_MatchesBruteForceRandomizedReference()
+    {
+        const int cases = 512;
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] all = CreateLayoutSignature();
+        var signature = new ComponentId[all.Length];
+        var columns = new ComponentColumnLayout[all.Length];
+        var random = new Random(0x51A7C0DE);
+        int[] chunkSizes = [4 * 1024, 8 * 1024, 16 * 1024, 32 * 1024, 64 * 1024];
+        int[] alignments = [1, 8, 16, 64, 128];
+
+        for (int testCase = 0; testCase < cases; testCase++)
+        {
+            int count = 0;
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (random.Next(2) != 0)
+                    signature[count++] = all[i];
+            }
+
+            int chunkSize = chunkSizes[random.Next(chunkSizes.Length)];
+            int alignment = alignments[random.Next(alignments.Length)];
+            int maximumRows = random.Next(1, 1025);
+            var options = new ChunkLayoutOptions(
+                chunkSize,
+                reservedHeaderBytes: random.Next(0, 513),
+                minimumColumnAlignmentBytes: alignment,
+                maximumRows: maximumRows);
+            ChunkLayoutPlan actual = ChunkLayoutPlanner.Plan(
+                schema,
+                signature.AsSpan(0, count),
+                options,
+                columns.AsSpan(0, count));
+
+            int expectedRows = 0;
+            for (int rows = 1; rows <= maximumRows; rows++)
+            {
+                if (ReferenceRequiredBytes(options, columns.AsSpan(0, count), rows) > chunkSize)
+                    break;
+                expectedRows = rows;
+            }
+
+            Assert.Equal(expectedRows, actual.RowCapacity);
+        }
+    }
+
+    private static void ChunkLayoutPlanner_IsConcurrentAndWarmedAllocationFree()
+    {
+        const int operations = 100_000;
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = CreateLayoutSignature();
+        var columns = new ComponentColumnLayout[signature.Length];
+        ChunkLayoutPlan expected = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB32, columns);
+
+        Parallel.For(0, 1024, _ =>
+        {
+            var localColumns = new ComponentColumnLayout[signature.Length];
+            ChunkLayoutPlan concurrent = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB32, localColumns);
+            Assert.Equal(expected, concurrent);
+        });
+
+        for (int i = 0; i < 8; i++)
+            _ = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB32, columns);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        long checksum = 0;
+        for (int i = 0; i < operations; i++)
+            checksum += ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB32, columns).RowCapacity;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(checksum != 0);
+        Assert.Equal(0L, allocated);
+    }
+
+    private static void ChunkLayoutPlanner_LargeSignatureHeapSortIsDeterministic()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.IndexedTestSchema.CreateSchema();
+        var signature = new ComponentId[schema.ComponentCount];
+        var columns = new ComponentColumnLayout[schema.ComponentCount];
+        for (ushort i = 0; i < signature.Length; i++)
+            signature[i] = new ComponentId(i);
+
+        ChunkLayoutPlan plan = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB16, columns);
+
+        Assert.True(plan.IsValid);
+        Assert.Equal(20, plan.DataColumnCount);
+        for (ushort i = 0; i < columns.Length; i++)
+            Assert.Equal(new ComponentId(i), columns[i].ComponentId);
+    }
+
+    private static void ArchetypeCapacityPlan_AccountsForPopulationBoundaries()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = CreateLayoutSignature();
+        var columns = new ComponentColumnLayout[signature.Length];
+        ChunkLayoutPlan layout = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB16, columns);
+
+        var empty = new ArchetypeCapacityPlan(layout, 0);
+        var before = new ArchetypeCapacityPlan(layout, layout.RowCapacity - 1);
+        var exact = new ArchetypeCapacityPlan(layout, layout.RowCapacity);
+        var after = new ArchetypeCapacityPlan(layout, layout.RowCapacity + 1);
+
+        Assert.Equal(0, empty.RequiredChunkCount);
+        Assert.Equal(1, before.RequiredChunkCount);
+        Assert.Equal(1L, before.UnusedRowSlots);
+        Assert.Equal(1, exact.RequiredChunkCount);
+        Assert.Equal(0L, exact.UnusedRowSlots);
+        Assert.Equal(2, after.RequiredChunkCount);
+        Assert.Equal((long)layout.RowCapacity - 1, after.UnusedRowSlots);
+        Assert.Equal(after.UnusedRowSlots * layout.FixedRowBytes, after.PartialChunkUnusedRowBytes);
+        Assert.Equal(
+            after.ReservedChunkBytes,
+            after.ReservedHeaderBytes +
+            after.ReservedFixedRowBytes +
+            after.ReservedEnableBitsetBytes +
+            after.AlignmentPaddingBytes +
+            after.TailUnusedBytes);
+        Assert.True(after.UnusedEnableBits >= after.UnusedRowSlots * layout.EnableableCount);
+    }
+
+    private static void WorldCapacityPlanner_AggregatesAndRejectsOvercommit()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = CreateLayoutSignature();
+        var columns = new ComponentColumnLayout[signature.Length];
+        ChunkLayoutPlan layout = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB16, columns);
+        var first = new ArchetypeCapacityPlan(layout, 100);
+        var second = new ArchetypeCapacityPlan(layout, 200);
+        var arenas = new WorldArenaReservations(1024, 2048, 4096);
+        WorldCapacityPlan world = WorldCapacityPlanner.Plan(
+            new EntityCapacity(500),
+            new[] { first, second },
+            arenas);
+
+        Assert.Equal(2, world.ArchetypeCount);
+        Assert.Equal(300L, world.ExpectedPopulation);
+        Assert.Equal((long)first.RequiredChunkCount + second.RequiredChunkCount, world.RequiredChunkCount);
+        Assert.Equal(first.ReservedChunkBytes + second.ReservedChunkBytes, world.NativeChunkBytes);
+        Assert.Equal(world.NativeChunkBytes + arenas.TotalBytes, world.TotalNativeBytes);
+        Assert.Equal(world.ManagedEntityMetadataBytes + world.TotalNativeBytes, world.TotalReservedBytes);
+        Assert.Throws<ArgumentException>(() => WorldCapacityPlanner.Plan(
+            new EntityCapacity(299),
+            new[] { first, second },
+            arenas));
+        Assert.Throws<ArgumentException>(() => WorldCapacityPlanner.Plan(
+            default,
+            new[] { first },
+            arenas));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WorldArenaReservations(-1, 0, 0));
+    }
+
+    private static void CapacityPlanning_CheckedArithmeticRejectsOverflow()
+    {
+        Assert.Throws<OverflowException>(() => new WorldArenaReservations(long.MaxValue, 1, 0));
+
+        int maximumAlignedChunk = int.MaxValue & ~63;
+        var options = new ChunkLayoutOptions(
+            maximumAlignedChunk,
+            reservedHeaderBytes: 0,
+            entityIndexSizeBytes: 1,
+            minimumColumnAlignmentBytes: 64,
+            maximumRows: 2);
+        var oversized = new ComponentColumnLayout(
+            new ComponentId(0),
+            ComponentFlags.None,
+            int.MaxValue,
+            64);
+        ComponentColumnLayout[] columns = [oversized];
+        Assert.Equal(long.MaxValue, ChunkLayoutPlanner.CalculateRequiredBytes(options, columns, 2));
+    }
+
+    private static ComponentId[] CreateLayoutSignature() =>
+    [
+        UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutByte>(),
+        UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>(),
+        UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>(),
+        UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutTag>(),
+        UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>(),
+    ];
+
+    private static long ReferenceRequiredBytes(
+        ChunkLayoutOptions options,
+        ReadOnlySpan<ComponentColumnLayout> physicalColumns,
+        int rows)
+    {
+        long cursor = options.ReservedHeaderBytes;
+        cursor = ReferenceAlign(cursor, Math.Max(options.MinimumColumnAlignmentBytes, options.EntityIndexSizeBytes));
+        cursor += (long)rows * options.EntityIndexSizeBytes;
+        for (int i = 0; i < physicalColumns.Length; i++)
+        {
+            ComponentColumnLayout column = physicalColumns[i];
+            if (!column.HasData)
+                continue;
+            cursor = ReferenceAlign(cursor, column.EffectiveAlignmentBytes);
+            cursor += (long)rows * column.ElementSizeBytes;
+        }
+
+        long enableBytes = ((rows + 63L) / 64L) * sizeof(ulong);
+        for (int i = 0; i < physicalColumns.Length; i++)
+        {
+            if (!physicalColumns[i].HasEnableBits)
+                continue;
+            cursor = ReferenceAlign(cursor, sizeof(ulong));
+            cursor += enableBytes;
+        }
+
+        return cursor;
+    }
+
+    private static long ReferenceAlign(long value, int alignment)
+    {
+        long remainder = value % alignment;
+        return remainder == 0 ? value : value + alignment - remainder;
     }
 
     private static void Run(string name, Action test)

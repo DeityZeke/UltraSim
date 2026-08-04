@@ -20,7 +20,7 @@ dotnet run --project \
   -c Release
 ```
 
-Run the startup benchmark suite without replacing an accepted baseline:
+Run the Phase 1 entity/schema/layout benchmark suite without replacing an accepted baseline:
 
 ```bash
 dotnet run --project \
