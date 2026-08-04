@@ -5,7 +5,7 @@ This is the new engine-agnostic ECS described by the root
 implementations remain isolated under `_V2/` for differential tests and
 benchmarks.
 
-## Current implementation slice
+## Current implementation slices
 
 The first Phase 1 slice establishes runtime identity and bounded entity-slot
 allocation:
@@ -22,13 +22,34 @@ allocation:
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
+- `IComponent<TSelf>`, `[EcsComponent]`, and `[EcsSchema]` define a closed,
+  generated component set without runtime reflection or a mutable global
+  registry.
+- Generated component IDs are dense and sorted by canonical key. Generated
+  128-bit schema fingerprints include component identity, version, traits,
+  persistence identity, type, and field signature.
+- `ComponentSchema` owns immutable instance tables. Metadata-by-ID and generated
+  generic lookup are direct; type, canonical-key, stable-hash, and persistence-ID
+  lookup allocate nothing. Schemas with more than eight components use bounded
+  open-address indexes; small schemas retain the lower-overhead linear path.
+- `ComponentMetadata` is exactly 16 bytes. Tag components consume no column
+  bytes, while runtime size and alignment are captured once during schema
+  construction for ordinary components.
 
 `EntityPool` is intentionally single-owner. Parallel systems will submit
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-This is not yet a usable component/archetype world. Generated schema, capacity
+This is not yet a usable component/archetype world. The current generator emits
+the core manifest only; field/serializer/query/prefab descriptors, capacity
 planning, memory/chunk experiments, and a public world lifecycle come next.
+
+Run both executable test suites from the repository root:
+
+```bash
+dotnet run --project _Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj -c Release
+dotnet run --project _Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj -c Release
+```
 
 ## Local independent review
 

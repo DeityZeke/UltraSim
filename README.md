@@ -8,12 +8,15 @@ The rebuild starts with the ECS specification in
 [`NETWORK_NEXT_DESIGN.md`](NETWORK_NEXT_DESIGN.md) and will build on validated
 ECS capture/identity seams.
 
-## Current executable slice
+## Current executable slices
 
-Build and run the ECS primitive tests:
+Build and run the ECS runtime and generator tests:
 
 ```bash
 dotnet run --project _Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj \
+  -c Release
+dotnet run --project \
+  _Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj \
   -c Release
 ```
 
@@ -22,7 +25,7 @@ Run the startup benchmark suite without replacing an accepted baseline:
 ```bash
 dotnet run --project \
   _Benchmarks/UltraSim.ECS.Benchmarks/UltraSim.ECS.Benchmarks.csproj \
-  -c Release -- --output /tmp/ultrasim-next-ecs-primitives.json
+  -c Release -- --output /tmp/ultrasim-next-ecs-phase1.json
 ```
 
 ## Local Qwen reviewer

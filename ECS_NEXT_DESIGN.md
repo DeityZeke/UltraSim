@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: active implementation specification; Phase 1 started 2026-07-21
+Status: active implementation specification; Phase 1 in progress, generated-schema slice implemented 2026-08-04
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -39,21 +39,30 @@ Accordingly, a feature described as planned elsewhere is a Next design input, no
 
 ### 1.1 Active implementation status
 
-Phase 1 has begun in root `Kernels/ECS`. The first bounded slice implements:
+Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now include:
 
 - transient process-unique `WorldId` values with no retained global world registry and no wrap/reuse;
 - an initial 12-byte world/index/generation `Entity` layout;
 - fixed-capacity, preallocated, single-owner entity-slot allocation;
 - explicit capacity failure, stale/foreign rejection, and generation-wrap slot retirement;
 - scalar and span-based bulk allocation/free paths;
-- `15` executable primitive tests, including a warmed million-operation zero-allocation assertion;
-- `9` Next-only primitive/layout benchmark scenarios with JSON output, natural GC reporting, and 8-byte/12-byte handle candidates explicitly marked non-comparable.
+- source-generated closed component manifests using `[EcsComponent]` and `[EcsSchema]` declarations;
+- deterministic dense `ComponentId` assignment by canonical key, independent of declaration order;
+- deterministic 128-bit `SchemaId` fingerprints covering canonical identity, version, flags, persistence identity, type identity, and field signature;
+- exact runtime size/alignment capture, zero-storage tags, enableable flags, and nonzero stable persistence IDs;
+- a compact 16-byte hot `ComponentMetadata` record with names, stable hashes, and runtime type handles kept in cold parallel storage;
+- immutable instance-owned `ComponentSchema` objects with direct metadata-by-ID access, a generated generic ID path, and allocation-free type/key/hash/persistence lookup;
+- linear lookup for schemas of eight or fewer components and bounded open-address indexes above that threshold, avoiding dictionaries, boxing, and quadratic construction for larger schemas;
+- compile-time diagnostics for malformed schema/component declarations, invalid keys/versions, field-bearing tags, duplicate types/keys/nonzero persistence IDs, and exhaustion of the reserved `ushort` ID space;
+- `24` executable runtime/primitive tests, including warmed million-operation zero-allocation assertions, indexed-schema tests, defensive construction tests, and concurrency/isolation checks;
+- `13` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, and the full `65,536`-entry overflow boundary;
+- `15` Next-only primitive/layout/schema benchmark scenarios with JSON output, natural GC reporting, and explicit non-comparable status until equivalent Current adapters exist.
 
 The first local run favored direct 12-byte field access over the packed 8-byte candidate at both one million and ten million handles, while every scenario measured zero managed bytes. That is a hypothesis-generating result, not an accepted layout decision: both representations still need chunk traversal, entity-aware query, metadata-cache, memory-footprint, and repeated isolated-process measurements.
 
-The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for bounded adversarial architecture, patch, and benchmark reviews; its output remains untrusted until verified by source, tests, or measurements. Early reviews usefully exposed the need to make world-ID allocation process-unique and to test slot retirement through the pool, while also demonstrating why model suggestions must be filtered: proposals such as dynamically growing the fixed free list or reclaiming retired generations contradict the bounded-memory and stale-handle contracts.
+The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for bounded adversarial architecture, patch, and benchmark reviews; its output remains untrusted until verified by source, tests, or measurements. Early reviews usefully exposed the need to make world-ID allocation process-unique, to test slot retirement through the pool, to reserve `ComponentId` value `0xFFFF`, and to remove quadratic large-schema validation. They also demonstrated why model suggestions must be filtered: proposals such as dynamically growing the fixed free list, reclaiming retired generations, or unconditionally replacing tiny-schema scans with managed dictionaries contradict measured or bounded-memory goals.
 
-Generated schema, native/fixed arena experiments, chunk layout, public world lifecycle, queries, and structural command arenas are not implemented yet.
+The generated manifest is deliberately only the first generator slice. Field IDs/descriptors, serializers/migrations, prefab writers, query/system metadata, native/fixed arena experiments, chunk layout, the capacity planner, public world lifecycle, queries, and structural command arenas are not implemented yet.
 
 ## 2. Generation Names and Comparison Policy
 
@@ -1659,6 +1668,12 @@ Gate:
 Tests may reveal that an existing benchmark is not semantically comparable. Mark it noncomparable or repair the scenario before using it as a gate.
 
 ### Phase 1: generated schema, capacity plan, and memory primitives
+
+Implementation status as of 2026-08-04:
+
+- implemented: generated component manifest, deterministic component/schema identity, runtime layout/tag/enableable/persistence metadata, schema-local lookup, fixed entity-slot pool, primitive allocation tests, generator golden/diagnostic tests, and initial metadata/entity benchmarks;
+- still required: persistent field IDs and richer descriptors, capacity planner, arena candidates, fixed chunk candidates, final entity-metadata packing decision, disposal/native accounting, reference-model fuzzing, and comparable Current/Next scenario adapters;
+- current measurements are directional only. The implemented tests require zero allocation for warmed lookup/entity cycles, but no Phase 1 layout passes the gate until repeated isolated-process and Current/Next comparisons justify it.
 
 Deliverables:
 

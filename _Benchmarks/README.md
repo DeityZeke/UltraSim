@@ -3,15 +3,22 @@
 These projects measure the root Next implementation. Frozen V2 Current and
 Legacy runners remain beneath `_V2/_Benchmarks` and run in separate processes.
 
-The initial ECS primitive suite is intentionally marked non-comparable. It
-establishes allocation, validation, and layout-candidate measurements before a
-semantically equivalent Current/Next scenario adapter exists.
+The initial ECS primitive/schema suite is intentionally marked non-comparable.
+It establishes allocation, validation, layout-candidate, generated component-ID,
+runtime schema-lookup, and metadata-access measurements before a semantically
+equivalent Current/Next scenario adapter exists.
 
 The handle-layout cases include both one-million and ten-million element scans.
 The 8-byte candidate uses `16` world bits, `24` index bits, and `24` generation
 bits, while the implemented 12-byte candidate keeps full 32-bit fields. These
 are not semantically identical yet; the results answer layout questions and do
 not authorize reduced identity ranges without separate lifetime/capacity tests.
+
+The schema cases measure the direct generated generic path separately from
+instance type lookup, canonical-key lookup, stable-hash lookup, and metadata by
+dense ID. Every case records managed bytes and Gen0/1/2 collections. These
+microbenchmarks are useful for choosing mechanisms, but they do not replace
+large-schema scaling or end-to-end world measurements.
 
 Run from the repository root:
 
@@ -21,7 +28,7 @@ dotnet run --project \
   -c Release
 ```
 
-The default report is `_Benchmarks/results/next-ecs-primitives.json`. Override it
+The default report is `_Benchmarks/results/next-ecs-phase1.json`. Override it
 with `--output <path>`. Do not treat a single local run as an accepted baseline.
 Capture repeated isolated processes and environment/profile hashes before using
 results as a performance gate.

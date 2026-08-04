@@ -7,7 +7,7 @@ string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",
     "results",
-    "next-ecs-primitives.json"));
+    "next-ecs-phase1.json"));
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -25,7 +25,7 @@ File.WriteAllText(outputPath, JsonSerializer.Serialize(report, new JsonSerialize
     WriteIndented = true,
 }));
 
-Console.WriteLine($"ECS Next primitive benchmark: {report.Results.Count} scenarios");
+Console.WriteLine($"ECS Next Phase 1 benchmark: {report.Results.Count} scenarios");
 foreach (BenchmarkResult result in report.Results)
 {
     Console.WriteLine(
@@ -45,6 +45,7 @@ internal static class PrimitiveBenchmarks
         var foreign = AliveFixture.CreateForeign(100_000, scanCount: 32);
         var handleScan1M = new HandleScanFixture(1_000_000, scanCount: 8);
         var handleScan10M = new HandleScanFixture(10_000_000, scanCount: 2);
+        var schemaLookup = new SchemaLookupFixture(10_000_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -57,6 +58,12 @@ internal static class PrimitiveBenchmarks
             new("EntityHandle_Scan_8Byte_1000000", "HandleLayoutCandidate", 1_000_000, handleScan1M.ExecuteEightByte),
             new("EntityHandle_Scan_12Byte_10000000", "HandleLayoutCandidate", 10_000_000, handleScan10M.ExecuteTwelveByte),
             new("EntityHandle_Scan_8Byte_10000000", "HandleLayoutCandidate", 10_000_000, handleScan10M.ExecuteEightByte),
+            new("ComponentId_GeneratedGeneric_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteGeneratedGeneric),
+            new("ComponentId_InstanceType_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteInstanceType),
+            new("ComponentId_CanonicalKey_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteCanonicalKey),
+            new("ComponentId_StableHash_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteStableHash),
+            new("ComponentId_PersistenceId_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecutePersistenceId),
+            new("ComponentMetadata_ById_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteMetadataById),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -65,15 +72,18 @@ internal static class PrimitiveBenchmarks
 
         return new BenchmarkReport
         {
-            SuiteName = "UltraSim.ECS.Next.Primitives",
+            SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-primitives-v1",
+            SemanticProfile = "ecs-next-phase1-schema-v2",
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
             ProcessorCount = Environment.ProcessorCount,
             ProcessArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
             OperatingSystem = RuntimeInformation.OSDescription,
             EntitySizeBytes = Marshal.SizeOf<Entity>(),
+            ComponentIdSizeBytes = Marshal.SizeOf<ComponentId>(),
+            ComponentMetadataSizeBytes = Marshal.SizeOf<ComponentMetadata>(),
+            SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
             TimestampUtc = DateTimeOffset.UtcNow,
             Results = results,
@@ -284,6 +294,80 @@ internal static class PrimitiveBenchmarks
         }
     }
 
+    private sealed class SchemaLookupFixture
+    {
+        private readonly ComponentSchema _schema = UltraSim.ECS.Benchmarks.BenchmarkSchema.CreateSchema();
+        private readonly ComponentId _velocityId =
+            UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkVelocity>();
+        private readonly int _operations;
+        private readonly ulong _stableHash = StableHash64.Compute("benchmark.velocity");
+
+        internal SchemaLookupFixture(int operations)
+        {
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement ExecuteGeneratedGeneric()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+                checksum += UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkVelocity>().Value;
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteInstanceType()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                _schema.TryGetComponentId<UltraSim.ECS.Benchmarks.BenchmarkVelocity>(out ComponentId id);
+                checksum += id.Value;
+            }
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteCanonicalKey()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                _schema.TryGetComponentId("benchmark.velocity", out ComponentId id);
+                checksum += id.Value;
+            }
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteStableHash()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                _schema.TryGetComponentId(_stableHash, out ComponentId id);
+                checksum += id.Value;
+            }
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        internal ScenarioMeasurement ExecutePersistenceId()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                _schema.TryGetComponentIdByPersistenceId(1, out ComponentId id);
+                checksum += id.Value;
+            }
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteMetadataById()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+                checksum += _schema.GetMetadata(_velocityId).Size;
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+    }
+
     private readonly struct PackedEntityCandidate
     {
         private const ulong IndexMask = 0x00FF_FFFFUL;
@@ -330,6 +414,9 @@ internal sealed class BenchmarkReport
     public required string ProcessArchitecture { get; init; }
     public required string OperatingSystem { get; init; }
     public required int EntitySizeBytes { get; init; }
+    public required int ComponentIdSizeBytes { get; init; }
+    public required int ComponentMetadataSizeBytes { get; init; }
+    public required int SchemaIdSizeBytes { get; init; }
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }
     public required IReadOnlyList<BenchmarkResult> Results { get; init; }
