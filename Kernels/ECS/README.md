@@ -26,6 +26,11 @@ allocation:
   expected-location unbinds reject stale structural work, located entities cannot
   be freed, and trusted row-store swap relocations must match the donor's recorded
   archetype and source row before updating it.
+- `ArchetypeRegistry<TArena>` preallocates a bounded open-address lookup and dense
+  ID table. Cold registration copies and validates canonical sorted signatures,
+  plans their physical layouts, and takes exact ownership of one fixed arena/store.
+  Sealing drops the factory and permits concurrent immutable signature lookup;
+  hot ID-to-store routing is a direct indexed read.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -80,7 +85,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 61 passing tests, including
+The current runtime and primitive suite has 66 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -90,14 +95,17 @@ bit ranges, within/cross-chunk swap relocation, stale locations, two randomized
 reference models, owned disposal, and allocation-free churn. Entity-location tests
 also cover stale/foreign binding, overwrite and bound-free rejection, checked donor
 relocation, a 30,000-operation randomized integrated pool/store model, and warmed
-100,000-cycle allocation-free located churn. The generator suite has 13 passing
-tests.
+100,000-cycle allocation-free located churn. Registry tests cover empty and dense
+signatures, duplicate geometry, bounded exhaustion, forced open-address collisions,
+factory cleanup, exact arena capacity, native/pinned isolation and disposal,
+concurrent sealed reads, randomized lookup, and one million warmed allocation-free
+lookups. The generator suite has 13 passing tests.
 
 This is not yet a usable component/archetype world. The current generator emits
-the core manifest only. The next slice must assign the new dense archetype IDs
-through canonical signature lookup, bind each registered archetype to its owned
-row store, and implement tested cross-archetype migration. Field/serializer/query/
-prefab descriptors and a public world lifecycle remain later work.
+the core manifest only. The next slice must precompute source/destination column
+transfer plans and implement tested cross-archetype migration while keeping the
+entity location table consistent. Field/serializer/query/prefab descriptors and a
+public world lifecycle remain later work.
 
 Run both executable test suites from the repository root:
 

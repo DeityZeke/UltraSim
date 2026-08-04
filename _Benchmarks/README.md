@@ -60,8 +60,8 @@ The executable archetype-row extension adds six paired scenarios over a normal
 Reports also embed a cold fact for each backend. At 100,000 normal-layout rows,
 the current plan uses 63 chunks with 1,600 rows each, 2,064,384 payload bytes,
 1,764 bytes of 28-byte per-chunk records, and an eight-byte local `ChunkRow`.
-This excludes the still-undecided archetype/store identifier required by a full
-world entity-location record.
+The entity pool now combines that row with a four-byte world-local `ArchetypeId`
+in a 12-byte `EntityLocation`; final packing remains benchmark-driven.
 
 All six measured zero managed bytes and zero collections. Bulk creation is
 approximately `1.3-1.5 ns/row` for both backends and remains sensitive to run
@@ -71,6 +71,13 @@ index improved the native enable path to roughly `11.3 ns/toggle`, versus roughl
 `14-16 ns/toggle` for pinned storage. Whole-suite native swap p95 outliers did
 not reproduce in exact-filter processes, so those spikes are treated as
 scenario-order/OS noise rather than a backend conclusion.
+
+The archetype-registry extension adds two non-comparable guards over all 16
+signatures possible in the four-component benchmark schema: canonical span lookup
+at one million operations and dense-ID-to-store routing at ten million operations.
+The first focused run measured approximately `11.5 ns/lookup` and `1.07 ns/route`,
+respectively, with zero managed bytes or collections. Signature lookup is intended
+for bootstrap and transition-plan construction; hot entity access routes by ID.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

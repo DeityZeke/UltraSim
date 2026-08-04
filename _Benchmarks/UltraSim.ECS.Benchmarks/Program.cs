@@ -50,6 +50,9 @@ internal static class PrimitiveBenchmarks
         var handleScan1M = new HandleScanFixture(1_000_000, scanCount: 8);
         var handleScan10M = new HandleScanFixture(10_000_000, scanCount: 2);
         var schemaLookup = new SchemaLookupFixture(10_000_000);
+        using var archetypeLookup = new ArchetypeRegistryLookupFixture(
+            lookupOperations: 1_000_000,
+            routeOperations: 10_000_000);
         var layoutPlanner = new LayoutPlannerFixture(100_000);
         var archetypeCapacity = new ArchetypeCapacityFixture(1_000_000);
         var worldCapacity = new WorldCapacityFixture(1_000_000);
@@ -87,6 +90,8 @@ internal static class PrimitiveBenchmarks
             new("ComponentId_StableHash_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteStableHash),
             new("ComponentId_PersistenceId_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecutePersistenceId),
             new("ComponentMetadata_ById_10000000", "GeneratedSchema", 10_000_000, schemaLookup.ExecuteMetadataById),
+            new("ArchetypeRegistry_SignatureLookup_16_1000000", "ArchetypeRegistry", 1_000_000, archetypeLookup.ExecuteSignatureLookup),
+            new("ArchetypeRegistry_IdRoute_16_10000000", "ArchetypeRegistry", 10_000_000, archetypeLookup.ExecuteIdRoute),
             new("ChunkLayoutPlanner_Normal_100000", "CapacityPlanning", 100_000, layoutPlanner.Execute),
             new("ArchetypeCapacityPlan_Normal_1000000", "CapacityPlanning", 1_000_000, archetypeCapacity.Execute),
             new("WorldCapacityPlanner_ThreeArchetypes_1000000", "CapacityPlanning", 1_000_000, worldCapacity.Execute),
@@ -124,7 +129,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-archetype-rows-v5",
+            SemanticProfile = "ecs-next-phase1-archetype-registry-v6",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -428,6 +433,80 @@ internal static class PrimitiveBenchmarks
             for (int i = 0; i < _operations; i++)
                 checksum += _schema.GetMetadata(_velocityId).Size;
             return new ScenarioMeasurement(_operations, checksum);
+        }
+    }
+
+    private sealed class ArchetypeRegistryLookupFixture : IDisposable
+    {
+        private const int SignatureCount = 16;
+
+        private readonly ArchetypeRegistry<NativeChunkArena> _registry;
+        private readonly ComponentId[][] _signatures;
+        private readonly ArchetypeId[] _ids;
+        private readonly int _lookupOperations;
+        private readonly int _routeOperations;
+
+        internal ArchetypeRegistryLookupFixture(int lookupOperations, int routeOperations)
+        {
+            ComponentSchema schema = UltraSim.ECS.Benchmarks.BenchmarkSchema.CreateSchema();
+            _registry = new ArchetypeRegistry<NativeChunkArena>(
+                schema,
+                SignatureCount,
+                static capacity => new NativeChunkArena(capacity));
+            _signatures = new ComponentId[SignatureCount][];
+            _ids = new ArchetypeId[SignatureCount];
+            for (int mask = 0; mask < SignatureCount; mask++)
+            {
+                ComponentId[] signature = CreateSignature(mask, schema.ComponentCount);
+                _signatures[mask] = signature;
+                _ids[mask] = _registry.Register(signature, ChunkLayoutOptions.KiB16, maximumChunks: 1);
+            }
+            _registry.Seal();
+            _lookupOperations = lookupOperations;
+            _routeOperations = routeOperations;
+        }
+
+        internal ScenarioMeasurement ExecuteSignatureLookup()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _lookupOperations; i++)
+            {
+                if (!_registry.TryGetId(_signatures[i & (SignatureCount - 1)], out ArchetypeId id))
+                    throw new InvalidOperationException("A registered archetype signature was not found.");
+                checksum += id.Value;
+            }
+
+            return new ScenarioMeasurement(_lookupOperations, checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteIdRoute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _routeOperations; i++)
+            {
+                ArchetypeStorage<NativeChunkArena> storage =
+                    _registry.GetStorage(_ids[i & (SignatureCount - 1)]);
+                checksum = unchecked(checksum + (long)storage.SignatureHash);
+            }
+
+            return new ScenarioMeasurement(_routeOperations, checksum);
+        }
+
+        public void Dispose() => _registry.Dispose();
+
+        private static ComponentId[] CreateSignature(int mask, int componentCount)
+        {
+            var signature = new ComponentId[componentCount];
+            int count = 0;
+            for (ushort component = 0; component < componentCount; component++)
+            {
+                if ((mask & (1 << component)) != 0)
+                    signature[count++] = new ComponentId(component);
+            }
+
+            if (count == signature.Length)
+                return signature;
+            return signature.AsSpan(0, count).ToArray();
         }
     }
 

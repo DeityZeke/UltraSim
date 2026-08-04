@@ -73,6 +73,11 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeChunkStore_RandomizedPinnedOperationsMatchReferenceModel), ArchetypeChunkStore_RandomizedPinnedOperationsMatchReferenceModel);
         Run(nameof(ArchetypeChunkStore_WarmedChurnAllocatesZero), ArchetypeChunkStore_WarmedChurnAllocatesZero);
         Run(nameof(ArchetypeChunkStore_DisposalIsOwnedAndIdempotent), ArchetypeChunkStore_DisposalIsOwnedAndIdempotent);
+        Run(nameof(ArchetypeRegistry_RegistersDenseCanonicalIdsAndRoutesOwnedStorage), ArchetypeRegistry_RegistersDenseCanonicalIdsAndRoutesOwnedStorage);
+        Run(nameof(ArchetypeRegistry_RejectsInvalidSignaturesGeometryAndCapacity), ArchetypeRegistry_RejectsInvalidSignaturesGeometryAndCapacity);
+        Run(nameof(ArchetypeRegistry_OpenAddressCollisionsPreserveFullSignatureIdentity), ArchetypeRegistry_OpenAddressCollisionsPreserveFullSignatureIdentity);
+        Run(nameof(ArchetypeRegistry_RandomizedSealedLookupIsCorrectAndAllocationFree), ArchetypeRegistry_RandomizedSealedLookupIsCorrectAndAllocationFree);
+        Run(nameof(ArchetypeRegistry_IsolatesInstancesAndOwnsNativePinnedDisposal), ArchetypeRegistry_IsolatesInstancesAndOwnsNativePinnedDisposal);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -1812,6 +1817,265 @@ internal static class EcsPrimitiveTests
         Assert.Throws<ObjectDisposedException>(() => store.GetEntityIndex(location));
     }
 
+    private static void ArchetypeRegistry_RegistersDenseCanonicalIdsAndRoutesOwnedStorage()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        using var registry = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            maximumArchetypes: 4,
+            static capacity => new NativeChunkArena(capacity));
+        ComponentId[] fullSignature = CreateLayoutSignature();
+        ComponentId[] oneComponent = [fullSignature[0]];
+
+        ArchetypeId emptyId = registry.Register(
+            ReadOnlySpan<ComponentId>.Empty,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeId oneId = registry.Register(oneComponent, ChunkLayoutOptions.KiB16, maximumChunks: 2);
+        ArchetypeId fullId = registry.Register(fullSignature, ChunkLayoutOptions.KiB16, maximumChunks: 2);
+        ArchetypeId duplicate = registry.Register(fullSignature, ChunkLayoutOptions.KiB16, maximumChunks: 2);
+
+        Assert.Equal(new ArchetypeId(1), emptyId);
+        Assert.Equal(new ArchetypeId(2), oneId);
+        Assert.Equal(new ArchetypeId(3), fullId);
+        Assert.Equal(fullId, duplicate);
+        Assert.Equal(3, registry.Count);
+        Assert.Equal(4, registry.MaximumArchetypes);
+        Assert.Equal(8, registry.LookupCapacity);
+        Assert.True(registry.TryGetId(ReadOnlySpan<ComponentId>.Empty, out ArchetypeId foundEmpty));
+        Assert.True(registry.TryGetId(oneComponent, out ArchetypeId foundOne));
+        Assert.True(registry.TryGetId(fullSignature, out ArchetypeId foundFull));
+        Assert.Equal(emptyId, foundEmpty);
+        Assert.Equal(oneId, foundOne);
+        Assert.Equal(fullId, foundFull);
+
+        ArchetypeStorage<NativeChunkArena> storage = registry.GetStorage(fullId);
+        Assert.Equal(fullId, storage.Id);
+        Assert.True(storage.Signature.SequenceEqual(fullSignature));
+        Assert.Equal(fullSignature.Length, storage.Columns.Length);
+        Assert.Equal(2, storage.Store.GetSnapshot().MaximumChunks);
+
+        var pool = new EntityPool(WorldId.Create(), new EntityCapacity(1));
+        Entity entity = pool.Allocate();
+        Assert.True(storage.Store.TryAdd(entity.Index, out ChunkRow row));
+        Assert.True(pool.TryBindLocation(entity, new EntityLocation(storage.Id, row)));
+        Assert.True(pool.TryGetLocation(entity, out EntityLocation location));
+        ArchetypeStorage<NativeChunkArena> routed = registry.GetStorage(location.ArchetypeId);
+        Assert.Equal(entity.Index, routed.Store.GetEntityIndex(location.ChunkRow));
+
+        registry.Seal();
+        registry.Seal();
+        Assert.True(registry.IsSealed);
+        Assert.Throws<InvalidOperationException>(() =>
+            registry.Register([fullSignature[0], fullSignature[1]], ChunkLayoutOptions.KiB16, 1));
+    }
+
+    private static void ArchetypeRegistry_RejectsInvalidSignaturesGeometryAndCapacity()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] full = CreateLayoutSignature();
+        Assert.Throws<ArgumentNullException>(() =>
+            new ArchetypeRegistry<NativeChunkArena>(null!, 1, static capacity => new NativeChunkArena(capacity)));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ArchetypeRegistry<NativeChunkArena>(schema, 1, null!));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ArchetypeRegistry<NativeChunkArena>(schema, 0, static capacity => new NativeChunkArena(capacity)));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new ArchetypeRegistry<NativeChunkArena>(schema, (1 << 29) + 1, static capacity => new NativeChunkArena(capacity)));
+
+        using var registry = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            maximumArchetypes: 1,
+            static capacity => new NativeChunkArena(capacity));
+        Assert.Throws<ArgumentException>(() => registry.Register(full, default, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => registry.Register(full, ChunkLayoutOptions.KiB16, 0));
+        Assert.Throws<ArgumentException>(() => registry.Register([full[0], full[0]], ChunkLayoutOptions.KiB16, 1));
+        Assert.Throws<ArgumentException>(() => registry.Register([full[1], full[0]], ChunkLayoutOptions.KiB16, 1));
+        Assert.Throws<ArgumentException>(() => registry.Register([ComponentId.Invalid], ChunkLayoutOptions.KiB16, 1));
+        Assert.Throws<ArgumentException>(() => registry.Register([new ComponentId(100)], ChunkLayoutOptions.KiB16, 1));
+
+        ArchetypeId first = registry.Register([full[0]], ChunkLayoutOptions.KiB16, 1);
+        Assert.Throws<ArgumentException>(() => registry.Register([full[0]], ChunkLayoutOptions.KiB32, 1));
+        Assert.Throws<ArgumentException>(() => registry.Register([full[0]], ChunkLayoutOptions.KiB16, 2));
+        Assert.False(registry.TryRegister([full[1]], ChunkLayoutOptions.KiB16, 1, out ArchetypeId unavailable));
+        Assert.Equal(ArchetypeId.Invalid, unavailable);
+        Assert.False(registry.TryGetId([full[1]], out ArchetypeId missing));
+        Assert.Equal(ArchetypeId.Invalid, missing);
+        Assert.False(registry.TryGetStorage(ArchetypeId.Invalid, out _));
+        Assert.False(registry.TryGetStorage(new ArchetypeId(2), out _));
+        Assert.Throws<ArgumentOutOfRangeException>(() => registry.GetStorage(ArchetypeId.Invalid));
+        Assert.Throws<ArgumentOutOfRangeException>(() => registry.GetStorage(new ArchetypeId(2)));
+        Assert.Equal(first, registry.GetStorage(first).Id);
+
+        NativeChunkArena? rejectedArena = null;
+        using var rejecting = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            maximumArchetypes: 1,
+            capacity =>
+            {
+                rejectedArena = new NativeChunkArena(capacity);
+                _ = rejectedArena.Acquire();
+                return rejectedArena;
+            });
+        Assert.Throws<ArgumentException>(() =>
+            rejecting.Register([full[0]], ChunkLayoutOptions.KiB16, 1));
+        Assert.True(rejectedArena is not null && rejectedArena.IsDisposed);
+        Assert.Equal(0, rejecting.Count);
+
+        NativeChunkArena? wrongCapacityArena = null;
+        using var wrongCapacity = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            maximumArchetypes: 1,
+            capacity =>
+            {
+                wrongCapacityArena = new NativeChunkArena(new ChunkArenaCapacity(
+                    capacity.ChunkSizeBytes,
+                    capacity.ChunkAlignmentBytes,
+                    maximumChunks: 2));
+                return wrongCapacityArena;
+            });
+        Assert.Throws<ArgumentException>(() =>
+            wrongCapacity.Register([full[0]], ChunkLayoutOptions.KiB16, 1));
+        Assert.True(wrongCapacityArena is not null && wrongCapacityArena.IsDisposed);
+        Assert.Equal(0, wrongCapacity.Count);
+    }
+
+    private static void ArchetypeRegistry_OpenAddressCollisionsPreserveFullSignatureIdentity()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.IndexedTestSchema.CreateSchema();
+        using var registry = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            maximumArchetypes: 4,
+            static capacity => new NativeChunkArena(capacity));
+        int mask = registry.LookupCapacity - 1;
+        var firstBySlot = new int[registry.LookupCapacity];
+        Array.Fill(firstBySlot, -1);
+        int leftIndex = -1;
+        int rightIndex = -1;
+        for (ushort component = 0; component < schema.ComponentCount; component++)
+        {
+            ComponentId[] signature = [new ComponentId(component)];
+            int slot = ArchetypeSignatureHash.GetInitialSlot(
+                ArchetypeSignatureHash.Compute(signature),
+                mask);
+            if (firstBySlot[slot] >= 0)
+            {
+                leftIndex = firstBySlot[slot];
+                rightIndex = component;
+                break;
+            }
+
+            firstBySlot[slot] = component;
+        }
+
+        Assert.True(leftIndex >= 0 && rightIndex >= 0);
+        ComponentId[] left = [new ComponentId((ushort)leftIndex)];
+        ComponentId[] right = [new ComponentId((ushort)rightIndex)];
+        ArchetypeId leftId = registry.Register(left, ChunkLayoutOptions.KiB16, 1);
+        ArchetypeId rightId = registry.Register(right, ChunkLayoutOptions.KiB16, 1);
+        Assert.NotEqual(leftId, rightId);
+        Assert.True(registry.TryGetId(left, out ArchetypeId foundLeft));
+        Assert.True(registry.TryGetId(right, out ArchetypeId foundRight));
+        Assert.Equal(leftId, foundLeft);
+        Assert.Equal(rightId, foundRight);
+        Assert.True(registry.GetStorage(leftId).Signature.SequenceEqual(left));
+        Assert.True(registry.GetStorage(rightId).Signature.SequenceEqual(right));
+    }
+
+    private static void ArchetypeRegistry_RandomizedSealedLookupIsCorrectAndAllocationFree()
+    {
+        const int signatureCount = 128;
+        const int randomLookups = 30_000;
+        const int measuredLookups = 1_000_000;
+        ComponentSchema schema = UltraSim.ECS.Tests.IndexedTestSchema.CreateSchema();
+        using var registry = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            maximumArchetypes: signatureCount,
+            static capacity => new NativeChunkArena(capacity));
+        var signatures = new ComponentId[signatureCount][];
+        var ids = new ArchetypeId[signatureCount];
+        for (int mask = 0; mask < signatureCount; mask++)
+        {
+            signatures[mask] = CreateIndexedSignature(mask);
+            ids[mask] = registry.Register(signatures[mask], ChunkLayoutOptions.KiB16, 1);
+            Assert.Equal(new ArchetypeId((uint)mask + 1), ids[mask]);
+        }
+        registry.Seal();
+
+        var random = new Random(unchecked((int)0xA2C4E7F1));
+        for (int i = 0; i < randomLookups; i++)
+        {
+            int selected = random.Next(signatureCount);
+            Assert.True(registry.TryGetId(signatures[selected], out ArchetypeId actual));
+            Assert.Equal(ids[selected], actual);
+            Assert.Equal(actual, registry.GetStorage(actual).Id);
+        }
+
+        Parallel.For(0, 4096, i =>
+        {
+            int selected = i & (signatureCount - 1);
+            Assert.True(registry.TryGetId(signatures[selected], out ArchetypeId actual));
+            Assert.Equal(ids[selected], actual);
+            Assert.Equal(actual, registry.GetStorage(actual).Id);
+        });
+
+        for (int i = 0; i < 32; i++)
+            _ = registry.TryGetId(signatures[i], out _);
+
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < measuredLookups; i++)
+        {
+            int selected = i & (signatureCount - 1);
+            if (registry.TryGetId(signatures[selected], out ArchetypeId id))
+                checksum += registry.GetStorage(id).SignatureHash != 0 ? id.Value : 0;
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(checksum != 0);
+        Assert.Equal(0L, allocated);
+        Assert.Equal(signatureCount, registry.Count);
+    }
+
+    private static void ArchetypeRegistry_IsolatesInstancesAndOwnsNativePinnedDisposal()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = [CreateLayoutSignature()[0]];
+        var native = new ArchetypeRegistry<NativeChunkArena>(
+            schema,
+            1,
+            static capacity => new NativeChunkArena(capacity));
+        var pinned = new ArchetypeRegistry<PinnedChunkArena>(
+            schema,
+            1,
+            static capacity => new PinnedChunkArena(capacity));
+        ArchetypeId nativeId = native.Register(signature, ChunkLayoutOptions.KiB16, 1);
+        ArchetypeId pinnedId = pinned.Register(signature, ChunkLayoutOptions.KiB16, 1);
+        NativeChunkArena nativeArena = native.GetStorage(nativeId).Store.Arena;
+        PinnedChunkArena pinnedArena = pinned.GetStorage(pinnedId).Store.Arena;
+
+        Assert.Equal(new ArchetypeId(1), nativeId);
+        Assert.Equal(new ArchetypeId(1), pinnedId);
+        Assert.NotEqual(nativeArena.ArenaId.Value, pinnedArena.ArenaId.Value);
+        Assert.True(native.GetStorage(nativeId).Store.TryAdd(1, out _));
+        Assert.True(pinned.GetStorage(pinnedId).Store.TryAdd(2, out _));
+
+        native.Dispose();
+        native.Dispose();
+        Assert.True(native.IsDisposed);
+        Assert.True(nativeArena.IsDisposed);
+        Assert.False(pinned.IsDisposed);
+        Assert.False(pinnedArena.IsDisposed);
+        Assert.Equal(1, pinned.GetStorage(pinnedId).Store.Count);
+        Assert.Throws<ObjectDisposedException>(() => native.GetStorage(nativeId));
+
+        pinned.Dispose();
+        pinned.Dispose();
+        Assert.True(pinned.IsDisposed);
+        Assert.True(pinnedArena.IsDisposed);
+        Assert.Throws<ObjectDisposedException>(() => pinned.TryGetId(signature, out _));
+    }
+
     private static void RunRandomizedArchetypeModel<TArena>(int seed)
         where TArena : class, IChunkArenaBackend
     {
@@ -2022,6 +2286,23 @@ internal static class EcsPrimitiveTests
         UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutTag>(),
         UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>(),
     ];
+
+    private static ComponentId[] CreateIndexedSignature(int mask)
+    {
+        int count = 0;
+        for (int value = mask; value != 0; value >>= 1)
+            count += value & 1;
+
+        var signature = new ComponentId[count];
+        int destination = 0;
+        for (ushort component = 0; mask != 0; component++, mask >>= 1)
+        {
+            if ((mask & 1) != 0)
+                signature[destination++] = new ComponentId(component);
+        }
+
+        return signature;
+    }
 
     private static long ReferenceRequiredBytes(
         ChunkLayoutOptions options,
