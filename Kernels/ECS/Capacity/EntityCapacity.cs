@@ -5,8 +5,10 @@ namespace UltraSim.ECS;
 /// </summary>
 public readonly struct EntityCapacity : IEquatable<EntityCapacity>
 {
-    // generation uint + state byte + free-index int, excluding array headers.
-    private const int CurrentMetadataBytesPerSlot = sizeof(uint) + sizeof(byte) + sizeof(int);
+    // generation uint + state byte + free-index int + entity location,
+    // excluding array headers and object alignment.
+    private const int CurrentMetadataBytesPerSlot =
+        sizeof(uint) + sizeof(byte) + sizeof(int) + 12;
 
     public EntityCapacity(int maximumEntities)
     {

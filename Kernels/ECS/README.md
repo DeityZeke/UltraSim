@@ -19,6 +19,13 @@ allocation:
 - `EntityPool` preallocates all generation, state, and free-index storage. It has
   explicit `Try` APIs, never resizes, rejects stale/foreign handles, and retires a
   slot rather than wrapping its generation.
+- `ArchetypeId` is a four-byte dense world-local route key. `EntityLocation`
+  combines it with the existing eight-byte `ChunkRow` without duplicating entity
+  generation, for 12 bytes of preallocated location metadata per entity slot.
+- `EntityPool` now owns that location table. Live entities bind exactly once,
+  expected-location unbinds reject stale structural work, located entities cannot
+  be freed, and trusted row-store swap relocations must match the donor's recorded
+  archetype and source row before updating it.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -65,7 +72,7 @@ allocation:
 - Scalar and bulk adds explicitly zero every data row. Enableable components and
   tags start enabled. Swap removal works within or across chunks, preserves all
   data and enable states, clears the donor row, rejects an expected-entity
-  mismatch, and returns the donor's relocation for a future entity-location table.
+  mismatch, and returns the donor's relocation for the entity-location table.
 - Executable layouts are revalidated once before use. Hot access can bind a
   physical column index once, avoiding repeated component metadata scans.
 
@@ -73,20 +80,23 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 56 passing tests, including
+The current runtime and primitive suite has 61 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
 lifecycle and typed-access loops. New row tests cover every occupancy transition,
 retained-empty reuse, bulk/scalar and native/pinned byte parity, default-enabled
 bit ranges, within/cross-chunk swap relocation, stale locations, two randomized
-reference models, owned disposal, and allocation-free churn. The generator suite
-has 13 passing tests.
+reference models, owned disposal, and allocation-free churn. Entity-location tests
+also cover stale/foreign binding, overwrite and bound-free rejection, checked donor
+relocation, a 30,000-operation randomized integrated pool/store model, and warmed
+100,000-cycle allocation-free located churn. The generator suite has 13 passing
+tests.
 
 This is not yet a usable component/archetype world. The current generator emits
-the core manifest only. The next slice must bind entity-pool slots to eight-byte
-chunk/row locations, add archetype identity/signature lookup, and implement
-tested cross-archetype migration over the row store. Field/serializer/query/
+the core manifest only. The next slice must assign the new dense archetype IDs
+through canonical signature lookup, bind each registered archetype to its owned
+row store, and implement tested cross-archetype migration. Field/serializer/query/
 prefab descriptors and a public world lifecycle remain later work.
 
 Run both executable test suites from the repository root:

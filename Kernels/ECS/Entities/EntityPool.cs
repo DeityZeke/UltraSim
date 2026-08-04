@@ -18,10 +18,12 @@ internal sealed class EntityPool
     private readonly uint[] _generations;
     private readonly byte[] _states;
     private readonly int[] _freeIndices;
+    private readonly EntityLocation[] _locations;
     private int _nextUnusedIndex;
     private int _freeCount;
     private int _aliveCount;
     private int _retiredCount;
+    private int _locatedCount;
 
     internal EntityPool(WorldId worldId, EntityCapacity capacity)
     {
@@ -35,6 +37,7 @@ internal sealed class EntityPool
         _generations = new uint[capacity.MaximumEntities];
         _states = new byte[capacity.MaximumEntities];
         _freeIndices = new int[capacity.MaximumEntities];
+        _locations = new EntityLocation[capacity.MaximumEntities];
     }
 
     internal WorldId WorldId => _worldId;
@@ -44,6 +47,8 @@ internal sealed class EntityPool
     internal int AliveCount => _aliveCount;
 
     internal int RetiredCount => _retiredCount;
+
+    internal int LocatedCount => _locatedCount;
 
     internal int HighWatermark => _nextUnusedIndex;
 
@@ -75,6 +80,13 @@ internal sealed class EntityPool
             index = _nextUnusedIndex++;
             _generations[index] = EntityGeneration.First;
         }
+
+        // TryFree refuses located entities, so this is a construction invariant.
+        // Keep the diagnostic in debug builds without paying another location-table
+        // read on every production allocation.
+        System.Diagnostics.Debug.Assert(
+            !_locations[index].IsValid,
+            "An available entity slot retained a storage location.");
 
         _states[index] = SlotAlive;
         _aliveCount++;
@@ -108,6 +120,9 @@ internal sealed class EntityPool
             return false;
 
         int index = (int)entity.Index;
+        if (_locations[index].IsValid)
+            return false;
+
         _aliveCount--;
 
         if (!EntityGeneration.TryAdvance(_generations[index], out uint nextGeneration))
@@ -135,13 +150,93 @@ internal sealed class EntityPool
         return freed;
     }
 
+    internal bool TryBindLocation(Entity entity, EntityLocation location)
+    {
+        if (!location.IsValid)
+            throw new ArgumentException("A valid entity location is required.", nameof(location));
+        if (!IsAlive(entity))
+            return false;
+
+        int index = checked((int)entity.Index);
+        if (_locations[index].IsValid)
+            return false;
+
+        _locations[index] = location;
+        _locatedCount++;
+        return true;
+    }
+
+    internal bool TryGetLocation(Entity entity, out EntityLocation location)
+    {
+        if (!IsAlive(entity))
+        {
+            location = EntityLocation.Invalid;
+            return false;
+        }
+
+        location = _locations[entity.Index];
+        return location.IsValid;
+    }
+
+    internal bool TryUnbindLocation(Entity entity, EntityLocation expected)
+    {
+        if (!expected.IsValid)
+            throw new ArgumentException("A valid expected entity location is required.", nameof(expected));
+        if (!IsAlive(entity))
+            return false;
+
+        int index = checked((int)entity.Index);
+        if (_locations[index] != expected)
+            return false;
+
+        _locations[index] = EntityLocation.Invalid;
+        _locatedCount--;
+        return true;
+    }
+
+    /// <summary>
+    /// Applies a trusted row-store swap relocation to the moved live entity.
+    /// Any mismatch is an internal structural invariant failure, not a stale
+    /// public-handle result.
+    /// </summary>
+    internal void ApplyRelocation(ArchetypeId archetypeId, in ChunkRowRelocation relocation)
+    {
+        if (!relocation.HasValue)
+            return;
+        if (!archetypeId.IsValid)
+            throw new ArgumentException("A valid archetype ID is required.", nameof(archetypeId));
+        if (!relocation.Source.IsValid || !relocation.Destination.IsValid)
+            ThrowLocationInvariant("A row relocation contains an invalid source or destination.");
+
+        uint entityIndex = relocation.EntityIndex;
+        if (entityIndex >= (uint)_nextUnusedIndex || _states[entityIndex] != SlotAlive)
+            ThrowLocationInvariant("A row relocation refers to an entity slot that is not alive.");
+
+        var expected = new EntityLocation(archetypeId, relocation.Source);
+        if (_locations[entityIndex] != expected)
+            ThrowLocationInvariant("A row relocation source does not match the entity location table.");
+
+        _locations[entityIndex] = new EntityLocation(archetypeId, relocation.Destination);
+    }
+
     internal SlotSnapshot GetSlotSnapshot(int index)
     {
         if ((uint)index >= (uint)_nextUnusedIndex)
             throw new ArgumentOutOfRangeException(nameof(index));
 
-        return new SlotSnapshot(_generations[index], _states[index] == SlotAlive, _states[index] == SlotRetired);
+        return new SlotSnapshot(
+            _generations[index],
+            _states[index] == SlotAlive,
+            _states[index] == SlotRetired,
+            _locations[index]);
     }
 
-    internal readonly record struct SlotSnapshot(uint Generation, bool IsAlive, bool IsRetired);
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void ThrowLocationInvariant(string message) => throw new InvalidOperationException(message);
+
+    internal readonly record struct SlotSnapshot(
+        uint Generation,
+        bool IsAlive,
+        bool IsRetired,
+        EntityLocation Location);
 }

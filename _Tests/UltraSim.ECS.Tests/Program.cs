@@ -16,6 +16,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(WorldId_Create_IsUniqueUnderConcurrency), WorldId_Create_IsUniqueUnderConcurrency);
         Run(nameof(Entity_Layout_IsExactlyTwelveBytes), Entity_Layout_IsExactlyTwelveBytes);
         Run(nameof(Entity_NullAndValidSemantics_AreExplicit), Entity_NullAndValidSemantics_AreExplicit);
+        Run(nameof(ArchetypeId_AndEntityLocation_LayoutsAndNullSemanticsAreExplicit), ArchetypeId_AndEntityLocation_LayoutsAndNullSemanticsAreExplicit);
         Run(nameof(EntityCapacity_RejectsInvalidValues), EntityCapacity_RejectsInvalidValues);
         Run(nameof(EntityCapacity_EstimatesCurrentMetadata), EntityCapacity_EstimatesCurrentMetadata);
         Run(nameof(EntityPool_RejectsInvalidWorldAndDefaultCapacity), EntityPool_RejectsInvalidWorldAndDefaultCapacity);
@@ -27,6 +28,10 @@ internal static class EcsPrimitiveTests
         Run(nameof(EntityGeneration_WrapBoundaryRetiresSlot), EntityGeneration_WrapBoundaryRetiresSlot);
         Run(nameof(EntityPool_GenerationMaximumRetiresSlotWithoutReuse), EntityPool_GenerationMaximumRetiresSlotWithoutReuse);
         Run(nameof(EntityPool_WarmedAllocateFreeCycle_AllocatesZeroManagedBytes), EntityPool_WarmedAllocateFreeCycle_AllocatesZeroManagedBytes);
+        Run(nameof(EntityPool_LocationBindingRejectsStaleForeignAndOverwrite), EntityPool_LocationBindingRejectsStaleForeignAndOverwrite);
+        Run(nameof(EntityPool_AppliesRowStoreSwapRelocation), EntityPool_AppliesRowStoreSwapRelocation);
+        Run(nameof(EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent), EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent);
+        Run(nameof(EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes), EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes);
         Run(nameof(GeneratedSchema_AssignsStableCanonicalIds), GeneratedSchema_AssignsStableCanonicalIds);
         Run(nameof(GeneratedSchema_EmitsExactLayoutFlagsAndPersistence), GeneratedSchema_EmitsExactLayoutFlagsAndPersistence);
         Run(nameof(GeneratedSchema_FingerprintAndInstancesAreStable), GeneratedSchema_FingerprintAndInstancesAreStable);
@@ -118,6 +123,26 @@ internal static class EcsPrimitiveTests
         Assert.Equal(worldId, entity.World);
     }
 
+    private static void ArchetypeId_AndEntityLocation_LayoutsAndNullSemanticsAreExplicit()
+    {
+        Assert.Equal(4, Unsafe.SizeOf<ArchetypeId>());
+        Assert.Equal(4, Marshal.SizeOf<ArchetypeId>());
+        Assert.Equal(12, Unsafe.SizeOf<EntityLocation>());
+        Assert.Equal(12, Marshal.SizeOf<EntityLocation>());
+        Assert.False(ArchetypeId.Invalid.IsValid);
+        Assert.False(EntityLocation.Invalid.IsValid);
+
+        var archetypeId = new ArchetypeId(7);
+        var chunkRow = new ChunkRow(3, 29);
+        var location = new EntityLocation(archetypeId, chunkRow);
+        Assert.True(archetypeId.IsValid);
+        Assert.True(location.IsValid);
+        Assert.Equal(7u, location.ArchetypeId.Value);
+        Assert.Equal(chunkRow, location.ChunkRow);
+        Assert.Throws<ArgumentException>(() => new EntityLocation(ArchetypeId.Invalid, chunkRow));
+        Assert.Throws<ArgumentException>(() => new EntityLocation(archetypeId, ChunkRow.Invalid));
+    }
+
     private static void EntityCapacity_RejectsInvalidValues()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new EntityCapacity(0));
@@ -130,7 +155,7 @@ internal static class EcsPrimitiveTests
     private static void EntityCapacity_EstimatesCurrentMetadata()
     {
         var capacity = new EntityCapacity(1000);
-        Assert.Equal(9000L, capacity.EstimatedMetadataBytes);
+        Assert.Equal(21000L, capacity.EstimatedMetadataBytes);
     }
 
     private static void EntityPool_RejectsInvalidWorldAndDefaultCapacity()
@@ -306,6 +331,193 @@ internal static class EcsPrimitiveTests
         Assert.True(checksum != 0);
         Assert.Equal(0L, allocated);
         Assert.Equal(capacity, pool.AliveCount);
+    }
+
+    private static void EntityPool_LocationBindingRejectsStaleForeignAndOverwrite()
+    {
+        var pool = new EntityPool(WorldId.Create(), new EntityCapacity(2));
+        var foreign = new EntityPool(WorldId.Create(), new EntityCapacity(1));
+        Entity entity = pool.Allocate();
+        Entity foreignEntity = foreign.Allocate();
+        var first = new EntityLocation(new ArchetypeId(1), new ChunkRow(2, 3));
+        var second = new EntityLocation(new ArchetypeId(2), new ChunkRow(4, 5));
+
+        Assert.False(pool.TryGetLocation(entity, out EntityLocation initiallyUnbound));
+        Assert.Equal(EntityLocation.Invalid, initiallyUnbound);
+        Assert.True(pool.TryBindLocation(entity, first));
+        Assert.Equal(1, pool.LocatedCount);
+        Assert.True(pool.TryGetLocation(entity, out EntityLocation actual));
+        Assert.Equal(first, actual);
+        Assert.False(pool.TryBindLocation(entity, second));
+        Assert.False(pool.TryBindLocation(foreignEntity, second));
+        Assert.False(pool.TryUnbindLocation(foreignEntity, first));
+        Assert.False(pool.TryUnbindLocation(entity, second));
+        Assert.False(pool.TryFree(entity));
+        Assert.True(pool.IsAlive(entity));
+
+        Assert.True(pool.TryUnbindLocation(entity, first));
+        Assert.Equal(0, pool.LocatedCount);
+        Assert.False(pool.TryGetLocation(entity, out EntityLocation afterUnbind));
+        Assert.Equal(EntityLocation.Invalid, afterUnbind);
+        Assert.True(pool.TryFree(entity));
+        Assert.False(pool.TryBindLocation(entity, first));
+        Assert.False(pool.TryGetLocation(entity, out _));
+
+        Entity replacement = pool.Allocate();
+        Assert.Equal(entity.Index, replacement.Index);
+        Assert.False(pool.TryGetLocation(replacement, out _));
+        Assert.True(pool.TryBindLocation(replacement, second));
+        Assert.True(pool.TryUnbindLocation(replacement, second));
+        Assert.True(pool.TryFree(replacement));
+
+        Assert.Throws<ArgumentException>(() => pool.TryBindLocation(foreignEntity, EntityLocation.Invalid));
+        Assert.Throws<ArgumentException>(() => pool.TryUnbindLocation(foreignEntity, EntityLocation.Invalid));
+    }
+
+    private static void EntityPool_AppliesRowStoreSwapRelocation()
+    {
+        using ArchetypeChunkStore<NativeChunkArena> store = CreateArchetypeStore<NativeChunkArena>(
+            maximumChunks: 2,
+            out ChunkLayoutPlan layout,
+            out _);
+        int count = layout.RowCapacity + 3;
+        var pool = new EntityPool(WorldId.Create(), new EntityCapacity(count));
+        var archetypeId = new ArchetypeId(1);
+        var entities = new Entity[count];
+
+        for (int i = 0; i < entities.Length; i++)
+        {
+            Entity entity = pool.Allocate();
+            Assert.True(store.TryAdd(entity.Index, out ChunkRow row));
+            Assert.True(pool.TryBindLocation(entity, new EntityLocation(archetypeId, row)));
+            entities[i] = entity;
+        }
+
+        Entity victim = entities[0];
+        Entity donor = entities[^1];
+        Assert.True(pool.TryGetLocation(victim, out EntityLocation victimLocation));
+        Assert.True(pool.TryGetLocation(donor, out EntityLocation donorLocation));
+        Assert.True(store.TryRemove(victimLocation.ChunkRow, victim.Index, out ChunkRowRelocation relocation));
+        Assert.True(relocation.HasValue);
+        Assert.Equal(donor.Index, relocation.EntityIndex);
+        Assert.Equal(donorLocation.ChunkRow, relocation.Source);
+        Assert.Equal(victimLocation.ChunkRow, relocation.Destination);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyRelocation(new ArchetypeId(2), relocation));
+        Assert.True(pool.TryUnbindLocation(victim, victimLocation));
+        pool.ApplyRelocation(archetypeId, relocation);
+        Assert.True(pool.TryGetLocation(donor, out EntityLocation movedDonor));
+        Assert.Equal(archetypeId, movedDonor.ArchetypeId);
+        Assert.Equal(victimLocation.ChunkRow, movedDonor.ChunkRow);
+        Assert.Equal(donor.Index, store.GetEntityIndex(movedDonor.ChunkRow));
+        Assert.True(pool.TryFree(victim));
+        Assert.Equal(count - 1, pool.AliveCount);
+        Assert.Equal(count - 1, pool.LocatedCount);
+
+        pool.ApplyRelocation(archetypeId, default);
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyRelocation(archetypeId, new ChunkRowRelocation(uint.MaxValue, donorLocation.ChunkRow, victimLocation.ChunkRow)));
+        store.ValidateInvariants();
+    }
+
+    private static void EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent()
+    {
+        const int operations = 30_000;
+        using ArchetypeChunkStore<NativeChunkArena> store = CreateArchetypeStore<NativeChunkArena>(
+            maximumChunks: 3,
+            out ChunkLayoutPlan layout,
+            out _);
+        int capacity = checked(layout.RowCapacity * 3);
+        var pool = new EntityPool(WorldId.Create(), new EntityCapacity(capacity));
+        var archetypeId = new ArchetypeId(1);
+        var live = new Entity[capacity];
+        var random = new Random(unchecked((int)0xE171710C));
+        int liveCount = 0;
+
+        for (int operation = 0; operation < operations; operation++)
+        {
+            bool add = liveCount == 0 || (liveCount < capacity && random.Next(100) < 57);
+            if (add)
+            {
+                Entity entity = pool.Allocate();
+                Assert.True(store.TryAdd(entity.Index, out ChunkRow row));
+                Assert.True(pool.TryBindLocation(entity, new EntityLocation(archetypeId, row)));
+                live[liveCount++] = entity;
+            }
+            else
+            {
+                int victimIndex = random.Next(liveCount);
+                Entity victim = live[victimIndex];
+                Assert.True(pool.TryGetLocation(victim, out EntityLocation location));
+                Assert.True(store.TryRemove(location.ChunkRow, victim.Index, out ChunkRowRelocation relocation));
+                Assert.True(pool.TryUnbindLocation(victim, location));
+                pool.ApplyRelocation(archetypeId, relocation);
+                Assert.True(pool.TryFree(victim));
+                Assert.False(pool.TryGetLocation(victim, out _));
+                live[victimIndex] = live[--liveCount];
+            }
+
+            if ((operation & 255) == 0)
+            {
+                Assert.Equal(liveCount, pool.AliveCount);
+                Assert.Equal(liveCount, pool.LocatedCount);
+                Assert.Equal(liveCount, store.Count);
+                for (int i = 0; i < liveCount; i++)
+                {
+                    Entity entity = live[i];
+                    Assert.True(pool.TryGetLocation(entity, out EntityLocation location));
+                    Assert.Equal(archetypeId, location.ArchetypeId);
+                    Assert.Equal(entity.Index, store.GetEntityIndex(location.ChunkRow));
+                }
+                store.ValidateInvariants();
+            }
+        }
+
+        Assert.Equal(liveCount, pool.AliveCount);
+        Assert.Equal(liveCount, pool.LocatedCount);
+        Assert.Equal(liveCount, store.Count);
+        store.ValidateInvariants();
+    }
+
+    private static void EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes()
+    {
+        const int operations = 100_000;
+        using ArchetypeChunkStore<NativeChunkArena> store = CreateArchetypeStore<NativeChunkArena>(
+            maximumChunks: 2,
+            out ChunkLayoutPlan layout,
+            out _);
+        int capacity = checked(layout.RowCapacity + 17);
+        var pool = new EntityPool(WorldId.Create(), new EntityCapacity(capacity));
+        var archetypeId = new ArchetypeId(1);
+        var live = new Entity[capacity];
+
+        for (int i = 0; i < live.Length; i++)
+        {
+            Entity entity = pool.Allocate();
+            Assert.True(store.TryAdd(entity.Index, out ChunkRow row));
+            Assert.True(pool.TryBindLocation(entity, new EntityLocation(archetypeId, row)));
+            live[i] = entity;
+        }
+
+        for (int i = 0; i < 32; i++)
+            LocatedChurnOnce(pool, store, archetypeId, live, i % live.Length);
+
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < operations; i++)
+        {
+            int victimIndex = i % live.Length;
+            LocatedChurnOnce(pool, store, archetypeId, live, victimIndex);
+            checksum += live[victimIndex].Generation;
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(checksum != 0);
+        Assert.Equal(0L, allocated);
+        Assert.Equal(capacity, pool.AliveCount);
+        Assert.Equal(capacity, pool.LocatedCount);
+        store.ValidateInvariants();
     }
 
     private static void GeneratedSchema_AssignsStableCanonicalIds()
@@ -1697,6 +1909,28 @@ internal static class EcsPrimitiveTests
             pinnedLocations[pinnedMove.EntityIndex] = pinnedMove.Destination;
         Assert.True(native.TryAdd(entityIndex, out nativeLocations[victim]));
         Assert.True(pinned.TryAdd(entityIndex, out pinnedLocations[victim]));
+    }
+
+    private static void LocatedChurnOnce<TArena>(
+        EntityPool pool,
+        ArchetypeChunkStore<TArena> store,
+        ArchetypeId archetypeId,
+        Entity[] live,
+        int victimIndex)
+        where TArena : class, IChunkArenaBackend
+    {
+        Entity victim = live[victimIndex];
+        Assert.True(pool.TryGetLocation(victim, out EntityLocation location));
+        Assert.True(store.TryRemove(location.ChunkRow, victim.Index, out ChunkRowRelocation relocation));
+        Assert.True(pool.TryUnbindLocation(victim, location));
+        pool.ApplyRelocation(archetypeId, relocation);
+        Assert.True(pool.TryFree(victim));
+
+        Entity replacement = pool.Allocate();
+        Assert.Equal(victim.Index, replacement.Index);
+        Assert.True(store.TryAdd(replacement.Index, out ChunkRow row));
+        Assert.True(pool.TryBindLocation(replacement, new EntityLocation(archetypeId, row)));
+        live[victimIndex] = replacement;
     }
 
     private static ArchetypeChunkStore<TArena> CreateArchetypeStore<TArena>(
