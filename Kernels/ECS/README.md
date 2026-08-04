@@ -42,15 +42,36 @@ allocation:
 - `ArchetypeCapacityPlan` projects a population onto that layout, while
   `WorldCapacityPlanner` combines archetype chunks with fixed entity metadata
   and explicit command/change/scratch arena budgets. These planners allocate
-  no memory; the arena and executable chunk implementations are the next slice.
+  no memory.
+- `NativeChunkArena` and `PinnedChunkArena` are internal, fixed-capacity storage
+  candidates over the same 12-byte generational `ChunkHandle` lifecycle. Both
+  reserve one contiguous 64-byte-aligned slab, reject stale/foreign handles,
+  retire generation-exhausted slots, clear a whole chunk on acquisition, and
+  provide allocation-free typed SoA/entity-index/enable-word spans.
+- Native storage uses `NativeMemory.AlignedAlloc` and explicit aligned release.
+  The managed comparison uses one pinned object-heap byte array plus at most
+  `alignment - 1` bytes of alignment slack. Both expose cold payload, release,
+  slot, retirement, and high-water accounting; explicit `Dispose` is required.
+- Arena structure is single-owner. Disjoint live chunks may be processed in
+  parallel after a barrier, but no chunk span may survive release or arena
+  disposal. The arenas remain internal until generated archetype/query bindings
+  can prevent callers from requesting a same-sized but semantically wrong type.
 
 `EntityPool` is intentionally single-owner. Parallel systems will submit
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
+The current runtime and primitive suite has 47 passing tests, including
+randomized chunk-slot lifecycle parity, alignment/range/type rejection,
+alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
+disposal/accounting, terminal generation retirement, and warmed zero-allocation
+lifecycle and typed-access loops. The generator suite has 13 passing tests.
+
 This is not yet a usable component/archetype world. The current generator emits
-the core manifest only; field/serializer/query/prefab descriptors, arena/chunk
-experiments, and a public world lifecycle come next.
+the core manifest only. The next storage slice must put row occupancy,
+full/partial/empty lists, bulk row reservation, swap removal, and recycling over
+the arena candidates. Field/serializer/query/prefab descriptors and a public
+world lifecycle remain later work.
 
 Run both executable test suites from the repository root:
 

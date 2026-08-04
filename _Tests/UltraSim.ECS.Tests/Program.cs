@@ -47,6 +47,18 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeCapacityPlan_AccountsForPopulationBoundaries), ArchetypeCapacityPlan_AccountsForPopulationBoundaries);
         Run(nameof(WorldCapacityPlanner_AggregatesAndRejectsOvercommit), WorldCapacityPlanner_AggregatesAndRejectsOvercommit);
         Run(nameof(CapacityPlanning_CheckedArithmeticRejectsOverflow), CapacityPlanning_CheckedArithmeticRejectsOverflow);
+        Run(nameof(ChunkHandle_LayoutAndNullSemanticsAreExplicit), ChunkHandle_LayoutAndNullSemanticsAreExplicit);
+        Run(nameof(ChunkArenaId_Create_IsUniqueUnderConcurrency), ChunkArenaId_Create_IsUniqueUnderConcurrency);
+        Run(nameof(ChunkArenaCapacity_ValidatesGeometryAndLayoutCompatibility), ChunkArenaCapacity_ValidatesGeometryAndLayoutCompatibility);
+        Run(nameof(ChunkArenas_HonorMinimumAndMaximumAlignment), ChunkArenas_HonorMinimumAndMaximumAlignment);
+        Run(nameof(NativeChunkArena_ExhaustionReuseClearAndForeignSafety), NativeChunkArena_ExhaustionReuseClearAndForeignSafety);
+        Run(nameof(PinnedChunkArena_ExhaustionReuseClearAndForeignSafety), PinnedChunkArena_ExhaustionReuseClearAndForeignSafety);
+        Run(nameof(ChunkArenas_TypedStorageAndBytesRemainEquivalent), ChunkArenas_TypedStorageAndBytesRemainEquivalent);
+        Run(nameof(ChunkArenas_RejectIncompatiblePlansAndInvalidColumns), ChunkArenas_RejectIncompatiblePlansAndInvalidColumns);
+        Run(nameof(ChunkArenas_DisposalAccountingAndUseAfterDispose), ChunkArenas_DisposalAccountingAndUseAfterDispose);
+        Run(nameof(ChunkSlotPool_GenerationMaximumRetiresWithoutReuse), ChunkSlotPool_GenerationMaximumRetiresWithoutReuse);
+        Run(nameof(ChunkSlotPool_RandomizedLifecycleMatchesSlowModel), ChunkSlotPool_RandomizedLifecycleMatchesSlowModel);
+        Run(nameof(ChunkArenas_WarmedLifecycleAndTypedAccessAllocateZero), ChunkArenas_WarmedLifecycleAndTypedAccessAllocateZero);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -807,6 +819,422 @@ internal static class EcsPrimitiveTests
             64);
         ComponentColumnLayout[] columns = [oversized];
         Assert.Equal(long.MaxValue, ChunkLayoutPlanner.CalculateRequiredBytes(options, columns, 2));
+    }
+
+    private static void ChunkHandle_LayoutAndNullSemanticsAreExplicit()
+    {
+        Assert.Equal(12, Unsafe.SizeOf<ChunkHandle>());
+        Assert.Equal(12, Marshal.SizeOf<ChunkHandle>());
+        Assert.False(ChunkHandle.Null.IsValid);
+        Assert.Equal(ChunkArenaId.Invalid, ChunkHandle.Null.ArenaId);
+        Assert.Equal(0u, ChunkHandle.Null.Index);
+        Assert.Equal(0u, ChunkHandle.Null.Generation);
+    }
+
+    private static void ChunkArenaId_Create_IsUniqueUnderConcurrency()
+    {
+        const int count = 4096;
+        var values = new ConcurrentDictionary<uint, byte>(Environment.ProcessorCount, count);
+
+        Parallel.For(0, count, _ =>
+        {
+            ChunkArenaId id = ChunkArenaId.Create();
+            if (!id.IsValid || !values.TryAdd(id.Value, 0))
+                throw new InvalidOperationException($"Invalid or duplicate chunk arena ID {id.Value}.");
+        });
+
+        Assert.Equal(count, values.Count);
+    }
+
+    private static void ChunkArenaCapacity_ValidatesGeometryAndLayoutCompatibility()
+    {
+        Assert.False(default(ChunkArenaCapacity).IsValid);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkArenaCapacity(0, 64, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkArenaCapacity(1024, 3, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkArenaCapacity(8192, 8192, 1));
+        Assert.Throws<ArgumentException>(() => new ChunkArenaCapacity(32, 64, 1));
+        Assert.Throws<ArgumentException>(() => new ChunkArenaCapacity(1000, 64, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ChunkArenaCapacity(1024, 64, 0));
+
+        CreateLayoutStoragePlan(ChunkLayoutOptions.KiB16, out _, out ChunkLayoutPlan layout, out _);
+        ChunkArenaCapacity capacity = ChunkArenaCapacity.FromLayout(layout, 17);
+        Assert.True(capacity.IsValid);
+        Assert.True(capacity.Supports(layout));
+        Assert.Equal(16 * 1024, capacity.ChunkSizeBytes);
+        Assert.Equal(64, capacity.ChunkAlignmentBytes);
+        Assert.Equal(17, capacity.MaximumChunks);
+        Assert.Equal(17L * 16 * 1024, capacity.TotalPayloadBytes);
+        Assert.Equal(17L * 9, capacity.EstimatedSlotMetadataBytes);
+
+        CreateLayoutStoragePlan(ChunkLayoutOptions.KiB32, out _, out ChunkLayoutPlan otherLayout, out _);
+        Assert.False(capacity.Supports(otherLayout));
+
+        var oversizedPinned = new ChunkArenaCapacity(1024 * 1024, 64, 3000);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PinnedChunkArena(oversizedPinned));
+    }
+
+    private static void ChunkArenas_HonorMinimumAndMaximumAlignment()
+    {
+        int[] alignments = [1, 4096];
+        foreach (int alignment in alignments)
+        {
+            var capacity = new ChunkArenaCapacity(4096, alignment, 2);
+            using var native = new NativeChunkArena(capacity);
+            using var pinned = new PinnedChunkArena(capacity);
+
+            Assert.Equal(0UL, (ulong)(native.BaseAddress % (nuint)alignment));
+            Assert.Equal(0UL, (ulong)(pinned.BaseAddress % (nuint)alignment));
+            for (int i = 0; i < capacity.MaximumChunks; i++)
+            {
+                ChunkHandle nativeChunk = native.Acquire();
+                ChunkHandle pinnedChunk = pinned.Acquire();
+                Assert.Equal(0UL, (ulong)((native.BaseAddress + ((nuint)nativeChunk.Index * 4096)) % (nuint)alignment));
+                Assert.Equal(0UL, (ulong)((pinned.BaseAddress + ((nuint)pinnedChunk.Index * 4096)) % (nuint)alignment));
+            }
+        }
+    }
+
+    private static void NativeChunkArena_ExhaustionReuseClearAndForeignSafety()
+    {
+        var capacity = new ChunkArenaCapacity(1024, 64, 2);
+        using var arena = new NativeChunkArena(capacity);
+        using var foreignArena = new NativeChunkArena(new ChunkArenaCapacity(1024, 64, 1));
+
+        Assert.Equal(0UL, (ulong)(arena.BaseAddress % 64));
+        ChunkHandle first = arena.Acquire();
+        ChunkHandle second = arena.Acquire();
+        Assert.True(first.IsValid && second.IsValid);
+        Assert.False(arena.TryAcquire(out ChunkHandle unavailable));
+        Assert.Equal(ChunkHandle.Null, unavailable);
+        Assert.Throws<InvalidOperationException>(() => arena.Acquire());
+        Assert.Equal(0UL, (ulong)((arena.BaseAddress + ((nuint)first.Index * 1024)) % 64));
+        Assert.Equal(0UL, (ulong)((arena.BaseAddress + ((nuint)second.Index * 1024)) % 64));
+
+        arena.GetChunkBytes(first)[0] = 0xA5;
+        Assert.True(arena.TryRelease(first));
+        Assert.False(arena.TryRelease(first));
+        Assert.False(arena.IsAlive(first));
+        Assert.Throws<ArgumentException>(() => arena.GetChunkBytes(first));
+
+        ChunkHandle replacement = arena.Acquire();
+        Assert.Equal(first.Index, replacement.Index);
+        Assert.Equal(first.Generation + 1, replacement.Generation);
+        Assert.Equal((byte)0, arena.GetChunkBytes(replacement)[0]);
+
+        ChunkHandle foreign = foreignArena.Acquire();
+        Assert.False(arena.IsAlive(foreign));
+        Assert.False(arena.TryRelease(foreign));
+        Assert.Throws<ArgumentException>(() => arena.GetChunkBytes(foreign));
+        var injected = new ChunkHandle(ChunkArenaId.Create(), replacement.Index, replacement.Generation);
+        Assert.Throws<ArgumentException>(() => arena.GetChunkBytes(injected));
+
+        ChunkArenaSnapshot snapshot = arena.GetSnapshot();
+        Assert.Equal(ChunkArenaMemoryKind.NativeAligned, snapshot.MemoryKind);
+        Assert.Equal(2, snapshot.AliveCount);
+        Assert.Equal(2, snapshot.HighWatermark);
+        Assert.Equal(capacity.TotalPayloadBytes, snapshot.PayloadBytesInUse);
+    }
+
+    private static void PinnedChunkArena_ExhaustionReuseClearAndForeignSafety()
+    {
+        var capacity = new ChunkArenaCapacity(1024, 64, 1);
+        using var arena = new PinnedChunkArena(capacity);
+        using var foreignArena = new PinnedChunkArena(capacity);
+
+        Assert.Equal(0UL, (ulong)(arena.BaseAddress % 64));
+        ChunkHandle original = arena.Acquire();
+        arena.GetChunkBytes(original).Fill(0x7B);
+        Assert.False(arena.TryAcquire(out ChunkHandle unavailable));
+        Assert.Equal(ChunkHandle.Null, unavailable);
+        Assert.True(arena.TryRelease(original));
+        Assert.False(arena.TryRelease(original));
+
+        ChunkHandle replacement = arena.Acquire();
+        Assert.Equal(original.Index, replacement.Index);
+        Assert.Equal(original.Generation + 1, replacement.Generation);
+        Assert.True(IsAllZero(arena.GetChunkBytes(replacement)));
+
+        ChunkHandle foreign = foreignArena.Acquire();
+        Assert.False(arena.IsAlive(foreign));
+        Assert.False(arena.TryRelease(foreign));
+        Assert.Throws<ArgumentException>(() => arena.GetChunkBytes(foreign));
+
+        ChunkArenaSnapshot snapshot = arena.GetSnapshot();
+        Assert.Equal(ChunkArenaMemoryKind.PinnedManaged, snapshot.MemoryKind);
+        Assert.Equal(1, snapshot.AliveCount);
+        Assert.Equal(capacity.TotalPayloadBytes, snapshot.PayloadBytesInUse);
+    }
+
+    private static void ChunkArenas_TypedStorageAndBytesRemainEquivalent()
+    {
+        CreateLayoutStoragePlan(
+            ChunkLayoutOptions.KiB16,
+            out _,
+            out ChunkLayoutPlan layout,
+            out ComponentColumnLayout[] columns);
+        ChunkArenaCapacity capacity = ChunkArenaCapacity.FromLayout(layout, 2);
+        using var native = new NativeChunkArena(capacity);
+        using var pinned = new PinnedChunkArena(capacity);
+        ChunkHandle nativeChunk = native.Acquire();
+        ChunkHandle pinnedChunk = pinned.Acquire();
+
+        ComponentColumnLayout wideColumn = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        ComponentColumnLayout enableColumn = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        ComponentColumnLayout tagColumn = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutTag>());
+
+        Span<uint> nativeEntities = native.GetEntityIndices(nativeChunk, layout);
+        Span<uint> pinnedEntities = pinned.GetEntityIndices(pinnedChunk, layout);
+        Span<UltraSim.ECS.Tests.LayoutWide> nativeWide = native.GetColumn<UltraSim.ECS.Tests.LayoutWide>(nativeChunk, layout, wideColumn);
+        Span<UltraSim.ECS.Tests.LayoutWide> pinnedWide = pinned.GetColumn<UltraSim.ECS.Tests.LayoutWide>(pinnedChunk, layout, wideColumn);
+        Span<ulong> nativeEnable = native.GetEnableWords(nativeChunk, layout, enableColumn);
+        Span<ulong> pinnedEnable = pinned.GetEnableWords(pinnedChunk, layout, enableColumn);
+        Span<ulong> nativeTagEnable = native.GetEnableWords(nativeChunk, layout, tagColumn);
+        Span<ulong> pinnedTagEnable = pinned.GetEnableWords(pinnedChunk, layout, tagColumn);
+
+        Assert.Equal(layout.RowCapacity, nativeEntities.Length);
+        Assert.Equal(layout.RowCapacity, nativeWide.Length);
+        Assert.Equal(ChunkLayoutPlanner.CalculateEnableBitsetBytes(layout.RowCapacity, 1) / sizeof(ulong), nativeEnable.Length);
+        Assert.Equal(0UL, (ulong)((native.BaseAddress + ((nuint)nativeChunk.Index * (nuint)capacity.ChunkSizeBytes) + (nuint)wideColumn.DataOffsetBytes) % (nuint)wideColumn.EffectiveAlignmentBytes));
+        Assert.Equal(0UL, (ulong)((pinned.BaseAddress + ((nuint)pinnedChunk.Index * (nuint)capacity.ChunkSizeBytes) + (nuint)wideColumn.DataOffsetBytes) % (nuint)wideColumn.EffectiveAlignmentBytes));
+
+        for (int i = 0; i < layout.RowCapacity; i++)
+        {
+            nativeEntities[i] = pinnedEntities[i] = (uint)(i + 1);
+            var value = new UltraSim.ECS.Tests.LayoutWide
+            {
+                A = i,
+                B = i * 2L,
+                C = i * 3L,
+                D = i * 4L,
+            };
+            nativeWide[i] = pinnedWide[i] = value;
+        }
+        nativeEnable[0] = pinnedEnable[0] = 0x5555_5555_5555_5555UL;
+        nativeTagEnable[0] = pinnedTagEnable[0] = 0xAAAA_AAAA_AAAA_AAAAUL;
+
+        Assert.True(native.GetChunkBytes(nativeChunk).SequenceEqual(pinned.GetChunkBytes(pinnedChunk)));
+        Assert.Throws<ArgumentException>(() => native.GetColumn<UltraSim.ECS.Tests.LayoutTag>(nativeChunk, layout, tagColumn));
+        Assert.Throws<ArgumentException>(() => native.GetColumn<int>(nativeChunk, layout, wideColumn));
+
+        Assert.True(native.TryRelease(nativeChunk));
+        Assert.True(pinned.TryRelease(pinnedChunk));
+        ChunkHandle clearedNative = native.Acquire();
+        ChunkHandle clearedPinned = pinned.Acquire();
+        Assert.True(IsAllZero(native.GetChunkBytes(clearedNative)));
+        Assert.True(IsAllZero(pinned.GetChunkBytes(clearedPinned)));
+    }
+
+    private static void ChunkArenas_RejectIncompatiblePlansAndInvalidColumns()
+    {
+        CreateLayoutStoragePlan(ChunkLayoutOptions.KiB16, out _, out ChunkLayoutPlan layout16, out ComponentColumnLayout[] columns16);
+        CreateLayoutStoragePlan(ChunkLayoutOptions.KiB32, out _, out ChunkLayoutPlan layout32, out _);
+        ChunkArenaCapacity capacity = ChunkArenaCapacity.FromLayout(layout16, 1);
+        using var native = new NativeChunkArena(capacity);
+        using var pinned = new PinnedChunkArena(capacity);
+        ChunkHandle nativeChunk = native.Acquire();
+        ChunkHandle pinnedChunk = pinned.Acquire();
+        ComponentColumnLayout wide = FindColumn(
+            columns16,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+
+        Assert.Throws<ArgumentException>(() => native.GetEntityIndices(nativeChunk, layout32));
+        Assert.Throws<ArgumentException>(() => pinned.GetEntityIndices(pinnedChunk, layout32));
+        var malformed = new ComponentColumnLayout(
+            wide.ComponentId,
+            wide.Flags,
+            wide.ElementSizeBytes,
+            wide.EffectiveAlignmentBytes,
+            dataOffsetBytes: capacity.ChunkSizeBytes,
+            dataBytes: wide.DataBytes);
+        Assert.Throws<ArgumentOutOfRangeException>(() => native.GetColumn<UltraSim.ECS.Tests.LayoutWide>(nativeChunk, layout16, malformed));
+        Assert.Throws<ArgumentOutOfRangeException>(() => pinned.GetColumn<UltraSim.ECS.Tests.LayoutWide>(pinnedChunk, layout16, malformed));
+    }
+
+    private static void ChunkArenas_DisposalAccountingAndUseAfterDispose()
+    {
+        var capacity = new ChunkArenaCapacity(4096, 64, 4);
+        var native = new NativeChunkArena(capacity);
+        var pinned = new PinnedChunkArena(capacity);
+        ChunkHandle nativeChunk = native.Acquire();
+        ChunkHandle pinnedChunk = pinned.Acquire();
+
+        native.Dispose();
+        native.Dispose();
+        pinned.Dispose();
+        pinned.Dispose();
+
+        ChunkArenaSnapshot nativeSnapshot = native.GetSnapshot();
+        ChunkArenaSnapshot pinnedSnapshot = pinned.GetSnapshot();
+        Assert.True(nativeSnapshot.IsDisposed);
+        Assert.True(pinnedSnapshot.IsDisposed);
+        Assert.Equal(0, nativeSnapshot.AvailableCount);
+        Assert.Equal(0, pinnedSnapshot.AvailableCount);
+        Assert.Equal(0L, nativeSnapshot.PayloadBytesInUse);
+        Assert.Equal(0L, pinnedSnapshot.PayloadBytesInUse);
+        Assert.Equal(capacity.TotalPayloadBytes, nativeSnapshot.ReleasedPayloadBytes);
+        Assert.Equal(capacity.TotalPayloadBytes, pinnedSnapshot.ReleasedPayloadBytes);
+        Assert.Throws<ObjectDisposedException>(() => native.GetChunkBytes(nativeChunk));
+        Assert.Throws<ObjectDisposedException>(() => pinned.GetChunkBytes(pinnedChunk));
+        Assert.Throws<ObjectDisposedException>(() => native.Acquire());
+        Assert.Throws<ObjectDisposedException>(() => pinned.Acquire());
+    }
+
+    private static void ChunkSlotPool_GenerationMaximumRetiresWithoutReuse()
+    {
+        var pool = new ChunkSlotPool(ChunkArenaId.Create(), 1);
+        ChunkHandle first = pool.Acquire();
+        FieldInfo generationsField = typeof(ChunkSlotPool).GetField(
+            "_generations",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Chunk generation storage was not found.");
+        var generations = (uint[])(generationsField.GetValue(pool)
+            ?? throw new InvalidOperationException("Chunk generation storage was null."));
+        generations[first.Index] = uint.MaxValue;
+
+        var maximum = new ChunkHandle(pool.ArenaId, first.Index, uint.MaxValue);
+        Assert.False(pool.IsAlive(first));
+        Assert.True(pool.IsAlive(maximum));
+        Assert.True(pool.TryRelease(maximum));
+        ChunkSlotPool.SlotSnapshot snapshot = pool.GetSlotSnapshot((int)first.Index);
+        Assert.True(snapshot.IsRetired);
+        Assert.False(snapshot.IsAlive);
+        Assert.Equal(uint.MaxValue, snapshot.Generation);
+        Assert.Equal(1, pool.RetiredCount);
+        Assert.Equal(0, pool.AvailableCount);
+        Assert.False(pool.TryAcquire(out ChunkHandle unavailable));
+        Assert.Equal(ChunkHandle.Null, unavailable);
+    }
+
+    private static void ChunkSlotPool_RandomizedLifecycleMatchesSlowModel()
+    {
+        const int capacity = 257;
+        const int operations = 100_000;
+        var pool = new ChunkSlotPool(ChunkArenaId.Create(), capacity);
+        var live = new List<ChunkHandle>(capacity);
+        var random = new Random(unchecked((int)0xC4A55EED));
+
+        for (int operation = 0; operation < operations; operation++)
+        {
+            bool acquire = live.Count == 0 || (live.Count < capacity && random.Next(100) < 57);
+            if (acquire)
+            {
+                Assert.True(pool.TryAcquire(out ChunkHandle handle));
+                Assert.True(pool.IsAlive(handle));
+                live.Add(handle);
+            }
+            else
+            {
+                int victimIndex = random.Next(live.Count);
+                ChunkHandle victim = live[victimIndex];
+                live[victimIndex] = live[^1];
+                live.RemoveAt(live.Count - 1);
+                Assert.True(pool.TryRelease(victim));
+                Assert.False(pool.IsAlive(victim));
+                Assert.False(pool.TryRelease(victim));
+            }
+
+            if ((operation & 1023) == 0)
+            {
+                Assert.Equal(live.Count, pool.AliveCount);
+                Assert.Equal(capacity - live.Count, pool.AvailableCount);
+                foreach (ChunkHandle handle in live)
+                    Assert.True(pool.IsAlive(handle));
+            }
+        }
+
+        Assert.Equal(live.Count, pool.AliveCount);
+    }
+
+    private static void ChunkArenas_WarmedLifecycleAndTypedAccessAllocateZero()
+    {
+        const int lifecycleOperations = 100_000;
+        const int accessOperations = 1_000_000;
+        CreateLayoutStoragePlan(
+            ChunkLayoutOptions.KiB16,
+            out _,
+            out ChunkLayoutPlan layout,
+            out ComponentColumnLayout[] columns);
+        ComponentColumnLayout wide = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        ChunkArenaCapacity capacity = ChunkArenaCapacity.FromLayout(layout, 1);
+        using var native = new NativeChunkArena(capacity);
+        using var pinned = new PinnedChunkArena(capacity);
+
+        ChunkHandle nativeChunk = native.Acquire();
+        ChunkHandle pinnedChunk = pinned.Acquire();
+        for (int i = 0; i < 8; i++)
+        {
+            Assert.True(native.TryRelease(nativeChunk));
+            nativeChunk = native.Acquire();
+            Assert.True(pinned.TryRelease(pinnedChunk));
+            pinnedChunk = pinned.Acquire();
+        }
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        long checksum = 0;
+        for (int i = 0; i < lifecycleOperations; i++)
+        {
+            native.TryRelease(nativeChunk);
+            native.TryAcquire(out nativeChunk);
+            pinned.TryRelease(pinnedChunk);
+            pinned.TryAcquire(out pinnedChunk);
+            checksum += nativeChunk.Generation + pinnedChunk.Generation;
+        }
+        for (int i = 0; i < accessOperations; i++)
+        {
+            Span<UltraSim.ECS.Tests.LayoutWide> nativeWide = native.GetColumn<UltraSim.ECS.Tests.LayoutWide>(nativeChunk, layout, wide);
+            Span<UltraSim.ECS.Tests.LayoutWide> pinnedWide = pinned.GetColumn<UltraSim.ECS.Tests.LayoutWide>(pinnedChunk, layout, wide);
+            nativeWide[0].A = i;
+            pinnedWide[0].A = i;
+            checksum += nativeWide[0].A + pinnedWide[0].A;
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(checksum != 0);
+        Assert.Equal(0L, allocated);
+    }
+
+    private static void CreateLayoutStoragePlan(
+        ChunkLayoutOptions options,
+        out ComponentSchema schema,
+        out ChunkLayoutPlan layout,
+        out ComponentColumnLayout[] columns)
+    {
+        schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId[] signature = CreateLayoutSignature();
+        columns = new ComponentColumnLayout[signature.Length];
+        layout = ChunkLayoutPlanner.Plan(schema, signature, options, columns);
+    }
+
+    private static ComponentColumnLayout FindColumn(
+        ReadOnlySpan<ComponentColumnLayout> columns,
+        ComponentId componentId)
+    {
+        for (int i = 0; i < columns.Length; i++)
+        {
+            if (columns[i].ComponentId == componentId)
+                return columns[i];
+        }
+
+        throw new InvalidOperationException($"Component column {componentId} was not found.");
+    }
+
+    private static bool IsAllZero(ReadOnlySpan<byte> bytes)
+    {
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            if (bytes[i] != 0)
+                return false;
+        }
+
+        return true;
     }
 
     private static ComponentId[] CreateLayoutSignature() =>

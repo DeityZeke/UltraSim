@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: active implementation specification; Phase 1 in progress, generated-schema slice implemented 2026-08-04
+Status: active implementation specification; Phase 1 in progress, fixed-arena prototype implemented 2026-08-04
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -56,18 +56,23 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
 - an allocation-free `ChunkLayoutPlanner` with checked arithmetic, caller-provided output spans, deterministic physical column ordering, 64-bit enable masks, explicit alignment/padding/tail accounting, and binary-searched maximum row capacity;
 - `ArchetypeCapacityPlan` population accounting and `WorldCapacityPlanner` aggregation of chunk, entity-metadata, structural-command, change-tracking, and scratch reservations;
 - embedded narrow/normal/wide layout facts for 16/32/64 KiB candidates in every Phase 1 benchmark artifact, including physical column offsets and 100k-population chunk reservations;
+- fixed-capacity native-aligned and pinned-managed chunk-arena candidates sharing a 12-byte arena/index/generation handle, preallocated slot state, O(1) acquisition/recycling, stale/foreign rejection, and terminal generation retirement;
+- clear-on-acquire chunk reuse plus validated, allocation-free typed views over local entity indices, ordinary SoA columns, and enable-word columns;
+- explicit arena disposal and cold payload/released-byte/slot/high-water accounting, with an unmanaged finalizer only as a leak safety net rather than the ownership contract;
 - compile-time diagnostics for malformed schema/component declarations, invalid keys/versions, field-bearing tags, duplicate types/keys/nonzero persistence IDs, and exhaustion of the reserved `ushort` ID space;
-- `35` executable runtime/primitive tests, including warmed zero-allocation assertions, indexed-schema tests, defensive construction tests, planner boundary/invariant/overflow tests, randomized brute-force layout parity, large-signature heap-sort determinism, capacity accounting, and concurrency/isolation checks;
+- `47` executable runtime/primitive tests, including warmed zero-allocation assertions, indexed-schema tests, defensive construction tests, planner boundary/invariant/overflow tests, randomized brute-force layout parity, randomized chunk-slot lifecycle parity, alignment extrema/range/type rejection, concurrent arena-ID uniqueness, clear-on-reuse, disposal/accounting, terminal retirement, capacity accounting, and concurrency/isolation checks;
 - `13` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, and the full `65,536`-entry overflow boundary;
-- `18` Next-only primitive/layout/schema/capacity benchmark scenarios with JSON output, natural GC reporting, and explicit non-comparable status until equivalent Current adapters exist.
+- `30` Next-only primitive/layout/schema/capacity/arena benchmark scenarios with JSON output, natural GC reporting, and explicit non-comparable status until equivalent Current adapters exist.
 
 The first local run favored direct 12-byte field access over the packed 8-byte candidate at both one million and ten million handles, while every scenario measured zero managed bytes. That is a hypothesis-generating result, not an accepted layout decision: both representations still need chunk traversal, entity-aware query, metadata-cache, memory-footprint, and repeated isolated-process measurements.
 
 The first layout-planner run also remained allocation/collection free. At a projected 100,000 entities, the 32 KiB candidate reserved the fewest bytes for the narrow and normal fixtures (`1,212,416` and `2,064,384` bytes), while 64 KiB reserved the fewest for the wide fixture (`8,519,680` bytes). The margins are small and exclude actual traversal/cache/TLB behavior, so 32 KiB is only the initial general-purpose arena prototype candidate; 16 and 64 KiB remain in the executable matrix.
 
+The first arena run compared equivalent native-aligned and pinned-managed storage at 16, 32, and 64 KiB. It measured zero managed bytes and zero Gen0/1/2 collections in all twelve new arena scenarios. Paired lifecycle/clear/traversal means differed by no more than roughly three and a half percent on that run: too close to select a winner. Native remains the expected server direction because its lifetime and footprint are independent of the managed heap, while pinned storage remains an executable engine/platform candidate. Repeated isolated processes, server-scale retained footprints, induced managed-heap pressure, first-touch/NUMA behavior, cache/TLB counters, and disposal/leak soaks must decide. The current arena types are internal because a public raw typed-span API could request a same-sized but semantically wrong component; generated archetype/query bindings must own that mapping before exposure.
+
 The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for bounded adversarial architecture, patch, and benchmark reviews; its output remains untrusted until verified by source, tests, or measurements. Early reviews usefully exposed the need to make world-ID allocation process-unique, to test slot retirement through the pool, to reserve `ComponentId` value `0xFFFF`, and to remove quadratic large-schema validation. They also demonstrated why model suggestions must be filtered: proposals such as dynamically growing the fixed free list, reclaiming retired generations, or unconditionally replacing tiny-schema scans with managed dictionaries contradict measured or bounded-memory goals.
 
-The generated manifest is deliberately only the first generator slice, and the planner describes memory rather than allocating it. Field IDs/descriptors, serializers/migrations, prefab writers, query/system metadata, native/fixed arena implementations, executable chunk storage, public world lifecycle, queries, and structural command arenas are not implemented yet.
+The generated manifest and arena are still bounded primitives rather than a usable ECS world. Field IDs/descriptors, serializers/migrations, prefab writers, query/system metadata, archetype row occupancy and chunk lists, swap removal/migration, public world lifecycle, queries, and structural command arenas are not implemented yet.
 
 ## 2. Generation Names and Comparison Policy
 
@@ -343,6 +348,8 @@ Benchmarks:
 Expected direction:
 
 Fixed-size chunks are the default hypothesis, not an untouchable conclusion. Tests may show that tiny worlds benefit from an inline/single-page representation or that a different chunk size is best for particular signatures. A hybrid is acceptable if it remains generated, predictable, and allocation-free after sealing.
+
+Implemented evidence as of 2026-08-04: the native and pinned candidates share identical fixed geometry and slot semantics, guarantee 64-byte-aligned bases for the current matrix, and pass typed byte-equivalence and zero-allocation tests. Their first hot-path benchmark was effectively tied. This satisfies the prototype requirement, not the backend-selection or fixed-chunk-storage gate: neither candidate yet owns row counts, archetype-local chunk-state lists, or migration.
 
 ### 4.5 Read, lookup, and query features
 
@@ -1676,9 +1683,9 @@ Tests may reveal that an existing benchmark is not semantically comparable. Mark
 
 Implementation status as of 2026-08-04:
 
-- implemented: generated component manifest, deterministic component/schema identity, runtime layout/tag/enableable/persistence metadata, schema-local lookup, fixed entity-slot pool, checked chunk/archetype/world capacity planners, primitive allocation tests, generator golden/diagnostic tests, and initial metadata/entity/layout benchmarks;
-- still required: persistent field IDs and richer descriptors, managed/native arena candidates, executable fixed chunk candidates, final entity-metadata packing decision, disposal/native accounting, reference-model fuzzing, and comparable Current/Next scenario adapters;
-- current measurements are directional only. The implemented tests require zero allocation for warmed lookup/entity cycles, but no Phase 1 layout passes the gate until repeated isolated-process and Current/Next comparisons justify it.
+- implemented: generated component manifest, deterministic component/schema identity, runtime layout/tag/enableable/persistence metadata, schema-local lookup, fixed entity-slot pool, checked chunk/archetype/world capacity planners, native-aligned and pinned-managed fixed arena candidates, generational chunk slots, typed SoA/entity/enable access, clear-on-acquire reuse, disposal/payload accounting, randomized slot-model tests, primitive allocation tests, generator golden/diagnostic tests, and initial metadata/entity/layout/arena benchmarks;
+- still required: persistent field IDs and richer descriptors, row-owning executable archetype chunks, full/partial/empty lists, bulk row reservation, swap removal and migration, final entity-location packing decision, longer native leak/retention soaks, and comparable Current/Next scenario adapters;
+- current measurements are directional only. The implemented tests require zero allocation for warmed lookup/entity/chunk cycles, and the first native-versus-pinned comparison is a statistical tie. No Phase 1 layout/backend passes the gate until repeated isolated-process, large-footprint, and Current/Next comparisons justify it.
 
 Deliverables:
 
@@ -2019,20 +2026,20 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 
 ### Core
 
-- [ ] Generated component registration and metadata
+- [x] Generated component registration and metadata
 - [ ] Multiple isolated worlds
-- [ ] World/runtime identity
-- [ ] Generational entity handles
+- [x] World/runtime identity
+- [x] Generational entity handles
 - [ ] Durable entity identity/remapping
 - [ ] Fixed chunk storage
-- [ ] SoA columns
-- [ ] Storage-free tags
-- [ ] Enableable components/tags
+- [x] SoA column layout and internal typed arena access
+- [x] Storage-free tag layout
+- [x] Enableable component/tag layout and internal word access
 - [ ] Archetype lookup and transitions
 - [ ] Immediate create/destroy
 - [ ] Deferred bulk structural commands
 - [ ] Explicit lifecycle and disposal
-- [ ] Capacity planning and diagnostics
+- [x] Capacity planning and primitive diagnostics
 - [ ] Faulted-world behavior
 
 ### Queries and mutation

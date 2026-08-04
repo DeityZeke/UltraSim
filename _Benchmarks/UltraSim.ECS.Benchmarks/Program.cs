@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using UltraSim.ECS;
+using UltraSim.ECS.Benchmarks;
 
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
@@ -49,6 +50,16 @@ internal static class PrimitiveBenchmarks
         var layoutPlanner = new LayoutPlannerFixture(100_000);
         var archetypeCapacity = new ArchetypeCapacityFixture(1_000_000);
         var worldCapacity = new WorldCapacityFixture(1_000_000);
+        using var nativeLifecycle16 = new NativeArenaLifecycleFixture(ChunkLayoutOptions.KiB16, 2_048);
+        using var pinnedLifecycle16 = new PinnedArenaLifecycleFixture(ChunkLayoutOptions.KiB16, 2_048);
+        using var nativeLifecycle32 = new NativeArenaLifecycleFixture(ChunkLayoutOptions.KiB32, 1_024);
+        using var pinnedLifecycle32 = new PinnedArenaLifecycleFixture(ChunkLayoutOptions.KiB32, 1_024);
+        using var nativeLifecycle64 = new NativeArenaLifecycleFixture(ChunkLayoutOptions.KiB64, 512);
+        using var pinnedLifecycle64 = new PinnedArenaLifecycleFixture(ChunkLayoutOptions.KiB64, 512);
+        using var nativeTraversal = new NativeArenaTraversalFixture(100_000);
+        using var pinnedTraversal = new PinnedArenaTraversalFixture(100_000);
+        using var nativeClear = new NativeArenaClearFixture(wholeChunkOperations: 1_024, activeRowOperations: 100_000);
+        using var pinnedClear = new PinnedArenaClearFixture(wholeChunkOperations: 1_024, activeRowOperations: 100_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -70,6 +81,18 @@ internal static class PrimitiveBenchmarks
             new("ChunkLayoutPlanner_Normal_100000", "CapacityPlanning", 100_000, layoutPlanner.Execute),
             new("ArchetypeCapacityPlan_Normal_1000000", "CapacityPlanning", 1_000_000, archetypeCapacity.Execute),
             new("WorldCapacityPlanner_ThreeArchetypes_1000000", "CapacityPlanning", 1_000_000, worldCapacity.Execute),
+            new("NativeArena_AcquireClearRelease_16KiB", "ChunkArenaLifecycle", 2_048, nativeLifecycle16.Execute),
+            new("PinnedArena_AcquireClearRelease_16KiB", "ChunkArenaLifecycle", 2_048, pinnedLifecycle16.Execute),
+            new("NativeArena_AcquireClearRelease_32KiB", "ChunkArenaLifecycle", 1_024, nativeLifecycle32.Execute),
+            new("PinnedArena_AcquireClearRelease_32KiB", "ChunkArenaLifecycle", 1_024, pinnedLifecycle32.Execute),
+            new("NativeArena_AcquireClearRelease_64KiB", "ChunkArenaLifecycle", 512, nativeLifecycle64.Execute),
+            new("PinnedArena_AcquireClearRelease_64KiB", "ChunkArenaLifecycle", 512, pinnedLifecycle64.Execute),
+            new("NativeArena_PositionTraversal_100000", "ChunkTraversal", 100_000, nativeTraversal.Execute),
+            new("PinnedArena_PositionTraversal_100000", "ChunkTraversal", 100_000, pinnedTraversal.Execute),
+            new("NativeArena_ClearWhole_32KiB", "ChunkClear", 1_024, nativeClear.ExecuteWholeChunk),
+            new("PinnedArena_ClearWhole_32KiB", "ChunkClear", 1_024, pinnedClear.ExecuteWholeChunk),
+            new("NativeArena_ClearActiveRows_32KiB", "ChunkClear", 100_000, nativeClear.ExecuteActiveRows),
+            new("PinnedArena_ClearActiveRows_32KiB", "ChunkClear", 100_000, pinnedClear.ExecuteActiveRows),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -80,7 +103,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-layout-v3",
+            SemanticProfile = "ecs-next-phase1-arena-v4",
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
             ProcessorCount = Environment.ProcessorCount,
@@ -93,6 +116,7 @@ internal static class PrimitiveBenchmarks
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
             TimestampUtc = DateTimeOffset.UtcNow,
             LayoutPlans = LayoutReportBuilder.Create(),
+            ArenaFacts = ArenaFactBuilder.Create(),
             Results = results,
         };
     }
@@ -467,6 +491,270 @@ internal static class PrimitiveBenchmarks
         }
     }
 
+    private sealed class NativeArenaLifecycleFixture : IDisposable
+    {
+        private readonly NativeChunkArena _arena;
+        private readonly int _operations;
+        private ChunkHandle _handle;
+
+        internal NativeArenaLifecycleFixture(ChunkLayoutOptions options, int operations)
+        {
+            _arena = new NativeChunkArena(new ChunkArenaCapacity(
+                options.ChunkSizeBytes,
+                options.MinimumColumnAlignmentBytes,
+                maximumChunks: 1));
+            _handle = _arena.Acquire();
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            ulong checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                if (!_arena.TryRelease(_handle) || !_arena.TryAcquire(out _handle))
+                    throw new InvalidOperationException("Native lifecycle fixture lost its only chunk.");
+                checksum += _handle.Generation;
+            }
+
+            return new ScenarioMeasurement(_operations, unchecked((long)checksum));
+        }
+
+        public void Dispose() => _arena.Dispose();
+    }
+
+    private sealed class PinnedArenaLifecycleFixture : IDisposable
+    {
+        private readonly PinnedChunkArena _arena;
+        private readonly int _operations;
+        private ChunkHandle _handle;
+
+        internal PinnedArenaLifecycleFixture(ChunkLayoutOptions options, int operations)
+        {
+            _arena = new PinnedChunkArena(new ChunkArenaCapacity(
+                options.ChunkSizeBytes,
+                options.MinimumColumnAlignmentBytes,
+                maximumChunks: 1));
+            _handle = _arena.Acquire();
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            ulong checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                if (!_arena.TryRelease(_handle) || !_arena.TryAcquire(out _handle))
+                    throw new InvalidOperationException("Pinned lifecycle fixture lost its only chunk.");
+                checksum += _handle.Generation;
+            }
+
+            return new ScenarioMeasurement(_operations, unchecked((long)checksum));
+        }
+
+        public void Dispose() => _arena.Dispose();
+    }
+
+    private sealed class NativeArenaTraversalFixture : IDisposable
+    {
+        private readonly NativeChunkArena _arena;
+        private readonly ChunkLayoutPlan _layout;
+        private readonly ComponentColumnLayout _positionColumn;
+        private readonly ChunkHandle[] _chunks;
+        private readonly int[] _rowCounts;
+        private readonly int _population;
+
+        internal NativeArenaTraversalFixture(int population)
+        {
+            LayoutReportBuilder.CreateNormalLayout(
+                ChunkLayoutOptions.KiB32,
+                out _layout,
+                out ComponentColumnLayout[] columns);
+            _positionColumn = LayoutReportBuilder.FindColumn<BenchmarkPosition>(columns);
+            var capacityPlan = new ArchetypeCapacityPlan(_layout, population);
+            _arena = new NativeChunkArena(ChunkArenaCapacity.FromLayout(_layout, capacityPlan.RequiredChunkCount));
+            _chunks = new ChunkHandle[capacityPlan.RequiredChunkCount];
+            _rowCounts = new int[_chunks.Length];
+            _population = population;
+            Initialize();
+        }
+
+        private void Initialize()
+        {
+            int remaining = _population;
+            int ordinal = 0;
+            for (int chunkIndex = 0; chunkIndex < _chunks.Length; chunkIndex++)
+            {
+                ChunkHandle chunk = _arena.Acquire();
+                int rows = Math.Min(remaining, _layout.RowCapacity);
+                Span<BenchmarkPosition> positions = _arena.GetColumn<BenchmarkPosition>(chunk, _layout, _positionColumn);
+                for (int row = 0; row < rows; row++, ordinal++)
+                    positions[row] = new BenchmarkPosition { X = ordinal, Y = ordinal * 0.5f };
+                _chunks[chunkIndex] = chunk;
+                _rowCounts[chunkIndex] = rows;
+                remaining -= rows;
+            }
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            double checksum = 0;
+            for (int chunkIndex = 0; chunkIndex < _chunks.Length; chunkIndex++)
+            {
+                Span<BenchmarkPosition> positions = _arena
+                    .GetColumn<BenchmarkPosition>(_chunks[chunkIndex], _layout, _positionColumn)
+                    [.._rowCounts[chunkIndex]];
+                for (int row = 0; row < positions.Length; row++)
+                    checksum += positions[row].X + positions[row].Y;
+            }
+
+            return new ScenarioMeasurement(_population, BitConverter.DoubleToInt64Bits(checksum));
+        }
+
+        public void Dispose() => _arena.Dispose();
+    }
+
+    private sealed class PinnedArenaTraversalFixture : IDisposable
+    {
+        private readonly PinnedChunkArena _arena;
+        private readonly ChunkLayoutPlan _layout;
+        private readonly ComponentColumnLayout _positionColumn;
+        private readonly ChunkHandle[] _chunks;
+        private readonly int[] _rowCounts;
+        private readonly int _population;
+
+        internal PinnedArenaTraversalFixture(int population)
+        {
+            LayoutReportBuilder.CreateNormalLayout(
+                ChunkLayoutOptions.KiB32,
+                out _layout,
+                out ComponentColumnLayout[] columns);
+            _positionColumn = LayoutReportBuilder.FindColumn<BenchmarkPosition>(columns);
+            var capacityPlan = new ArchetypeCapacityPlan(_layout, population);
+            _arena = new PinnedChunkArena(ChunkArenaCapacity.FromLayout(_layout, capacityPlan.RequiredChunkCount));
+            _chunks = new ChunkHandle[capacityPlan.RequiredChunkCount];
+            _rowCounts = new int[_chunks.Length];
+            _population = population;
+            Initialize();
+        }
+
+        private void Initialize()
+        {
+            int remaining = _population;
+            int ordinal = 0;
+            for (int chunkIndex = 0; chunkIndex < _chunks.Length; chunkIndex++)
+            {
+                ChunkHandle chunk = _arena.Acquire();
+                int rows = Math.Min(remaining, _layout.RowCapacity);
+                Span<BenchmarkPosition> positions = _arena.GetColumn<BenchmarkPosition>(chunk, _layout, _positionColumn);
+                for (int row = 0; row < rows; row++, ordinal++)
+                    positions[row] = new BenchmarkPosition { X = ordinal, Y = ordinal * 0.5f };
+                _chunks[chunkIndex] = chunk;
+                _rowCounts[chunkIndex] = rows;
+                remaining -= rows;
+            }
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            double checksum = 0;
+            for (int chunkIndex = 0; chunkIndex < _chunks.Length; chunkIndex++)
+            {
+                Span<BenchmarkPosition> positions = _arena
+                    .GetColumn<BenchmarkPosition>(_chunks[chunkIndex], _layout, _positionColumn)
+                    [.._rowCounts[chunkIndex]];
+                for (int row = 0; row < positions.Length; row++)
+                    checksum += positions[row].X + positions[row].Y;
+            }
+
+            return new ScenarioMeasurement(_population, BitConverter.DoubleToInt64Bits(checksum));
+        }
+
+        public void Dispose() => _arena.Dispose();
+    }
+
+    private sealed class NativeArenaClearFixture : IDisposable
+    {
+        private readonly NativeChunkArena _arena;
+        private readonly ChunkLayoutPlan _layout;
+        private readonly ComponentColumnLayout _positionColumn;
+        private readonly ChunkHandle _chunk;
+        private readonly int _wholeChunkOperations;
+        private readonly int _activeRowOperations;
+        private readonly int _activeRows;
+
+        internal NativeArenaClearFixture(int wholeChunkOperations, int activeRowOperations)
+        {
+            LayoutReportBuilder.CreateNormalLayout(ChunkLayoutOptions.KiB32, out _layout, out ComponentColumnLayout[] columns);
+            _positionColumn = LayoutReportBuilder.FindColumn<BenchmarkPosition>(columns);
+            _arena = new NativeChunkArena(ChunkArenaCapacity.FromLayout(_layout, maximumChunks: 1));
+            _chunk = _arena.Acquire();
+            _wholeChunkOperations = wholeChunkOperations;
+            _activeRowOperations = activeRowOperations;
+            _activeRows = Math.Max(1, _layout.RowCapacity / 10);
+        }
+
+        internal ScenarioMeasurement ExecuteWholeChunk()
+        {
+            for (int i = 0; i < _wholeChunkOperations; i++)
+                _arena.ClearChunk(_chunk);
+            return new ScenarioMeasurement(_wholeChunkOperations, _layout.BytesUsed);
+        }
+
+        internal ScenarioMeasurement ExecuteActiveRows()
+        {
+            Span<BenchmarkPosition> active = _arena
+                .GetColumn<BenchmarkPosition>(_chunk, _layout, _positionColumn)
+                [.._activeRows];
+            for (int i = 0; i < _activeRowOperations; i++)
+                active.Clear();
+            return new ScenarioMeasurement(_activeRowOperations, _activeRows);
+        }
+
+        public void Dispose() => _arena.Dispose();
+    }
+
+    private sealed class PinnedArenaClearFixture : IDisposable
+    {
+        private readonly PinnedChunkArena _arena;
+        private readonly ChunkLayoutPlan _layout;
+        private readonly ComponentColumnLayout _positionColumn;
+        private readonly ChunkHandle _chunk;
+        private readonly int _wholeChunkOperations;
+        private readonly int _activeRowOperations;
+        private readonly int _activeRows;
+
+        internal PinnedArenaClearFixture(int wholeChunkOperations, int activeRowOperations)
+        {
+            LayoutReportBuilder.CreateNormalLayout(ChunkLayoutOptions.KiB32, out _layout, out ComponentColumnLayout[] columns);
+            _positionColumn = LayoutReportBuilder.FindColumn<BenchmarkPosition>(columns);
+            _arena = new PinnedChunkArena(ChunkArenaCapacity.FromLayout(_layout, maximumChunks: 1));
+            _chunk = _arena.Acquire();
+            _wholeChunkOperations = wholeChunkOperations;
+            _activeRowOperations = activeRowOperations;
+            _activeRows = Math.Max(1, _layout.RowCapacity / 10);
+        }
+
+        internal ScenarioMeasurement ExecuteWholeChunk()
+        {
+            for (int i = 0; i < _wholeChunkOperations; i++)
+                _arena.ClearChunk(_chunk);
+            return new ScenarioMeasurement(_wholeChunkOperations, _layout.BytesUsed);
+        }
+
+        internal ScenarioMeasurement ExecuteActiveRows()
+        {
+            Span<BenchmarkPosition> active = _arena
+                .GetColumn<BenchmarkPosition>(_chunk, _layout, _positionColumn)
+                [.._activeRows];
+            for (int i = 0; i < _activeRowOperations; i++)
+                active.Clear();
+            return new ScenarioMeasurement(_activeRowOperations, _activeRows);
+        }
+
+        public void Dispose() => _arena.Dispose();
+    }
+
     private readonly struct PackedEntityCandidate
     {
         private const ulong IndexMask = 0x00FF_FFFFUL;
@@ -519,6 +807,7 @@ internal sealed class BenchmarkReport
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }
     public required IReadOnlyList<LayoutPlanFact> LayoutPlans { get; init; }
+    public required IReadOnlyList<ArenaFact> ArenaFacts { get; init; }
     public required IReadOnlyList<BenchmarkResult> Results { get; init; }
 }
 
@@ -602,11 +891,91 @@ internal static class LayoutReportBuilder
         UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkPosition>(),
         UltraSim.ECS.Benchmarks.BenchmarkSchema.GetComponentId<UltraSim.ECS.Benchmarks.BenchmarkVelocity>());
 
+    internal static void CreateNormalLayout(
+        ChunkLayoutOptions options,
+        out ChunkLayoutPlan layout,
+        out ComponentColumnLayout[] columns)
+    {
+        ComponentSchema schema = BenchmarkSchema.CreateSchema();
+        ComponentId[] signature = CreateNormalSignature();
+        columns = new ComponentColumnLayout[signature.Length];
+        layout = ChunkLayoutPlanner.Plan(schema, signature, options, columns);
+    }
+
+    internal static ComponentColumnLayout FindColumn<T>(ComponentColumnLayout[] columns)
+        where T : unmanaged, IComponent<T>
+    {
+        ComponentId componentId = BenchmarkSchema.GetComponentId<T>();
+        for (int i = 0; i < columns.Length; i++)
+        {
+            if (columns[i].ComponentId == componentId)
+                return columns[i];
+        }
+
+        throw new InvalidOperationException($"Layout does not contain {typeof(T).Name}.");
+    }
+
     private static ComponentId[] CreateSortedSignature(params ComponentId[] componentIds)
     {
         Array.Sort(componentIds, static (left, right) => left.Value.CompareTo(right.Value));
         return componentIds;
     }
+}
+
+internal static class ArenaFactBuilder
+{
+    internal static IReadOnlyList<ArenaFact> Create()
+    {
+        ChunkLayoutOptions[] candidates =
+        [
+            ChunkLayoutOptions.KiB16,
+            ChunkLayoutOptions.KiB32,
+            ChunkLayoutOptions.KiB64,
+        ];
+        var facts = new List<ArenaFact>(candidates.Length * 2);
+        foreach (ChunkLayoutOptions options in candidates)
+        {
+            var capacity = new ChunkArenaCapacity(
+                options.ChunkSizeBytes,
+                options.MinimumColumnAlignmentBytes,
+                maximumChunks: 8);
+            using (var native = new NativeChunkArena(capacity))
+                facts.Add(CreateFact(native.GetSnapshot(), native.BaseAddress, capacity.TotalPayloadBytes));
+            using (var pinned = new PinnedChunkArena(capacity))
+            {
+                facts.Add(CreateFact(
+                    pinned.GetSnapshot(),
+                    pinned.BaseAddress,
+                    capacity.TotalPayloadBytes + capacity.ChunkAlignmentBytes - 1L));
+            }
+        }
+
+        return facts;
+    }
+
+    private static ArenaFact CreateFact(ChunkArenaSnapshot snapshot, nuint baseAddress, long backingAllocationBytes) => new()
+    {
+        MemoryKind = snapshot.MemoryKind.ToString(),
+        ChunkSizeBytes = snapshot.Capacity.ChunkSizeBytes,
+        ChunkAlignmentBytes = snapshot.Capacity.ChunkAlignmentBytes,
+        MaximumChunks = snapshot.Capacity.MaximumChunks,
+        PayloadBytes = snapshot.Capacity.TotalPayloadBytes,
+        BackingAllocationBytes = backingAllocationBytes,
+        EstimatedSlotMetadataBytes = snapshot.Capacity.EstimatedSlotMetadataBytes,
+        BaseAddressAligned = baseAddress % (nuint)snapshot.Capacity.ChunkAlignmentBytes == 0,
+    };
+}
+
+internal sealed class ArenaFact
+{
+    public required string MemoryKind { get; init; }
+    public required int ChunkSizeBytes { get; init; }
+    public required int ChunkAlignmentBytes { get; init; }
+    public required int MaximumChunks { get; init; }
+    public required long PayloadBytes { get; init; }
+    public required long BackingAllocationBytes { get; init; }
+    public required long EstimatedSlotMetadataBytes { get; init; }
+    public required bool BaseAddressAligned { get; init; }
 }
 
 internal sealed class LayoutPlanFact

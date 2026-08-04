@@ -28,6 +28,32 @@ world-capacity execution are measured as separate zero-allocation scenarios.
 These inputs are explicit hypotheses for the coming storage prototype, not a
 final chunk-size decision.
 
+The Phase 1 arena extension adds twelve scenarios and six cold arena facts:
+
+- native-aligned versus pinned-managed acquire/clear/release with equal bytes
+  cleared per iteration at 16, 32, and 64 KiB;
+- equivalent 100,000-row `BenchmarkPosition` SoA traversal through a normal
+  32 KiB layout;
+- equivalent whole-32-KiB and ten-percent-active-row clearing;
+- payload, backing allocation, slot-metadata estimate, and observed base-address
+  alignment for both backends at all three chunk sizes.
+
+The 2026-08-04 local directional run measured zero managed bytes and zero
+Gen0/1/2 collections in all 30 scenarios. Native and pinned arena results were
+within roughly three percent for every new paired case; that is a tie at this
+methodology/noise level, not evidence that either backend is universally
+faster. Native remains the expected server candidate because it avoids retaining
+a large managed object and has explicit ownership, while pinned remains a real
+engine/platform comparison candidate. Repeated isolated processes, server-scale
+footprints, GC pressure, first-touch, cache/TLB counters, and disposal soaks must
+decide the backend.
+
+The generated generic-ID loop is a code-generation floor and may be constant
+propagated or hoisted by the JIT. Do not interpret its sub-nanosecond result as a
+general schema-lookup throughput claim; the instance/type/key/hash cases are
+reported separately. Read-only traversal deliberately reuses initialized data,
+so initialization cost is excluded from its steady-state scan timing.
+
 Run from the repository root:
 
 ```bash
