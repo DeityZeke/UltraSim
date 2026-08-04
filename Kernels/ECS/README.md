@@ -56,22 +56,38 @@ allocation:
   parallel after a barrier, but no chunk span may survive release or arena
   disposal. The arenas remain internal until generated archetype/query bindings
   can prevent callers from requesting a same-sized but semantically wrong type.
+- `ArchetypeChunkStore<TArena>` now makes both candidates executable row stores.
+  It owns a fresh fixed arena; keeps compact intrusive full, partial, and empty
+  chunk lists; acquires lazily; and retains empty chunks for immediate reuse.
+- `ChunkRow` is the current eight-byte entity-location candidate: chunk index
+  plus row, with an all-zero invalid value. The store remains densely packed,
+  with every occupied chunk full except at most one partial chunk.
+- Scalar and bulk adds explicitly zero every data row. Enableable components and
+  tags start enabled. Swap removal works within or across chunks, preserves all
+  data and enable states, clears the donor row, rejects an expected-entity
+  mismatch, and returns the donor's relocation for a future entity-location table.
+- Executable layouts are revalidated once before use. Hot access can bind a
+  physical column index once, avoiding repeated component metadata scans.
 
 `EntityPool` is intentionally single-owner. Parallel systems will submit
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 47 passing tests, including
+The current runtime and primitive suite has 56 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
-lifecycle and typed-access loops. The generator suite has 13 passing tests.
+lifecycle and typed-access loops. New row tests cover every occupancy transition,
+retained-empty reuse, bulk/scalar and native/pinned byte parity, default-enabled
+bit ranges, within/cross-chunk swap relocation, stale locations, two randomized
+reference models, owned disposal, and allocation-free churn. The generator suite
+has 13 passing tests.
 
 This is not yet a usable component/archetype world. The current generator emits
-the core manifest only. The next storage slice must put row occupancy,
-full/partial/empty lists, bulk row reservation, swap removal, and recycling over
-the arena candidates. Field/serializer/query/prefab descriptors and a public
-world lifecycle remain later work.
+the core manifest only. The next slice must bind entity-pool slots to eight-byte
+chunk/row locations, add archetype identity/signature lookup, and implement
+tested cross-archetype migration over the row store. Field/serializer/query/
+prefab descriptors and a public world lifecycle remain later work.
 
 Run both executable test suites from the repository root:
 

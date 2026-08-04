@@ -3,7 +3,7 @@ namespace UltraSim.ECS;
 /// <summary>
 /// Fixed-capacity pinned-managed chunk slab used as the managed storage comparison candidate.
 /// </summary>
-internal sealed unsafe class PinnedChunkArena : IDisposable
+internal sealed unsafe class PinnedChunkArena : IChunkArenaBackend
 {
     private readonly ChunkSlotPool _slots;
     private byte[]? _storage;

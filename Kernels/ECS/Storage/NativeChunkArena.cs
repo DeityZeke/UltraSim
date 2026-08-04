@@ -6,7 +6,7 @@ namespace UltraSim.ECS;
 /// Fixed-capacity, aligned native chunk slab. Structural acquire/release is single-owner;
 /// callers may process disjoint live chunk spans in parallel after a barrier.
 /// </summary>
-internal sealed unsafe class NativeChunkArena : IDisposable
+internal sealed unsafe class NativeChunkArena : IChunkArenaBackend
 {
     private readonly ChunkSlotPool _slots;
     private void* _baseAddress;

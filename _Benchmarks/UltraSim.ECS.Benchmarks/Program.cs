@@ -9,14 +9,17 @@ string outputPath = Path.GetFullPath(Path.Combine(
     "..", "..", "..", "..",
     "results",
     "next-ecs-phase1.json"));
+string? scenarioFilter = null;
 
 for (int i = 0; i < args.Length; i++)
 {
     if (args[i] == "--output" && i + 1 < args.Length)
         outputPath = Path.GetFullPath(args[++i]);
+    else if (args[i] == "--filter" && i + 1 < args.Length)
+        scenarioFilter = args[++i];
 }
 
-BenchmarkReport report = PrimitiveBenchmarks.Run();
+BenchmarkReport report = PrimitiveBenchmarks.Run(scenarioFilter);
 string? outputDirectory = Path.GetDirectoryName(outputPath);
 if (!string.IsNullOrEmpty(outputDirectory))
     Directory.CreateDirectory(outputDirectory);
@@ -37,7 +40,7 @@ Console.WriteLine($"Results: {outputPath}");
 
 internal static class PrimitiveBenchmarks
 {
-    internal static BenchmarkReport Run()
+    internal static BenchmarkReport Run(string? scenarioFilter)
     {
         var allocate1K = new AllocateFreeFixture(1_024);
         var allocate100K = new AllocateFreeFixture(100_000);
@@ -60,6 +63,12 @@ internal static class PrimitiveBenchmarks
         using var pinnedTraversal = new PinnedArenaTraversalFixture(100_000);
         using var nativeClear = new NativeArenaClearFixture(wholeChunkOperations: 1_024, activeRowOperations: 100_000);
         using var pinnedClear = new PinnedArenaClearFixture(wholeChunkOperations: 1_024, activeRowOperations: 100_000);
+        using var nativeBulkRows = new ArchetypeBulkAddFixture<NativeChunkArena>(100_000);
+        using var pinnedBulkRows = new ArchetypeBulkAddFixture<PinnedChunkArena>(100_000);
+        using var nativeRowChurn = new ArchetypeSwapChurnFixture<NativeChunkArena>(100_000, 100_000);
+        using var pinnedRowChurn = new ArchetypeSwapChurnFixture<PinnedChunkArena>(100_000, 100_000);
+        using var nativeEnableToggle = new ArchetypeEnableToggleFixture<NativeChunkArena>(100_000, 1_000_000);
+        using var pinnedEnableToggle = new ArchetypeEnableToggleFixture<PinnedChunkArena>(100_000, 1_000_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -93,17 +102,30 @@ internal static class PrimitiveBenchmarks
             new("PinnedArena_ClearWhole_32KiB", "ChunkClear", 1_024, pinnedClear.ExecuteWholeChunk),
             new("NativeArena_ClearActiveRows_32KiB", "ChunkClear", 100_000, nativeClear.ExecuteActiveRows),
             new("PinnedArena_ClearActiveRows_32KiB", "ChunkClear", 100_000, pinnedClear.ExecuteActiveRows),
+            new("NativeArchetype_BulkAddDefault_100000", "ArchetypeRows", 100_000, nativeBulkRows.Execute, nativeBulkRows.Prepare),
+            new("PinnedArchetype_BulkAddDefault_100000", "ArchetypeRows", 100_000, pinnedBulkRows.Execute, pinnedBulkRows.Prepare),
+            new("NativeArchetype_SwapRemoveAdd_100000Cycles", "ArchetypeRows", 100_000, nativeRowChurn.Execute),
+            new("PinnedArchetype_SwapRemoveAdd_100000Cycles", "ArchetypeRows", 100_000, pinnedRowChurn.Execute),
+            new("NativeArchetype_EnableToggle_1000000", "ArchetypeRows", 1_000_000, nativeEnableToggle.Execute),
+            new("PinnedArchetype_EnableToggle_1000000", "ArchetypeRows", 1_000_000, pinnedEnableToggle.Execute),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
         foreach (BenchmarkScenario scenario in scenarios)
+        {
+            if (!MatchesFilter(scenario, scenarioFilter))
+                continue;
             results.Add(RunScenario(scenario));
+        }
+        if (results.Count == 0 && !string.IsNullOrWhiteSpace(scenarioFilter))
+            throw new ArgumentException($"No benchmark scenario matched filter '{scenarioFilter}'.", nameof(scenarioFilter));
 
         return new BenchmarkReport
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-arena-v4",
+            SemanticProfile = "ecs-next-phase1-archetype-rows-v5",
+            ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
             ProcessorCount = Environment.ProcessorCount,
@@ -117,17 +139,26 @@ internal static class PrimitiveBenchmarks
             TimestampUtc = DateTimeOffset.UtcNow,
             LayoutPlans = LayoutReportBuilder.Create(),
             ArenaFacts = ArenaFactBuilder.Create(),
+            ArchetypeFacts = ArchetypeFactBuilder.Create(),
             Results = results,
         };
     }
 
+    private static bool MatchesFilter(in BenchmarkScenario scenario, string? filter) =>
+        string.IsNullOrWhiteSpace(filter) ||
+        scenario.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+        scenario.Category.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
     private static BenchmarkResult RunScenario(BenchmarkScenario scenario)
     {
-        const int warmupCount = 3;
+        const int warmupCount = 8;
         const int iterationCount = 31;
 
         for (int i = 0; i < warmupCount; i++)
+        {
+            scenario.Prepare?.Invoke();
             _ = scenario.Execute();
+        }
 
         GC.Collect();
         GC.WaitForPendingFinalizers();
@@ -143,6 +174,7 @@ internal static class PrimitiveBenchmarks
 
         for (int iteration = 0; iteration < iterationCount; iteration++)
         {
+            scenario.Prepare?.Invoke();
             long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             long started = Stopwatch.GetTimestamp();
             ScenarioMeasurement measurement = scenario.Execute();
@@ -755,6 +787,120 @@ internal static class PrimitiveBenchmarks
         public void Dispose() => _arena.Dispose();
     }
 
+    private sealed class ArchetypeBulkAddFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly ArchetypeChunkStore<TArena> _store;
+        private readonly uint[] _entityIndices;
+        private readonly ChunkRow[] _locations;
+
+        internal ArchetypeBulkAddFixture(int population)
+        {
+            _store = ArchetypeBenchmarkFactory.CreateStore<TArena>(population, out _, out _);
+            _entityIndices = new uint[population];
+            _locations = new ChunkRow[population];
+            for (int i = 0; i < population; i++)
+                _entityIndices[i] = (uint)i;
+        }
+
+        internal void Prepare()
+        {
+            for (int i = _store.Count - 1; i >= 0; i--)
+            {
+                if (!_store.TryRemove(_locations[i], _entityIndices[i], out ChunkRowRelocation relocation) || relocation.HasValue)
+                    throw new InvalidOperationException("Descending bulk fixture removal violated dense insertion order.");
+            }
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            int added = _store.Add(_entityIndices, _locations);
+            long checksum = _store.Count + _locations[0].Row + _locations[^1].Row;
+            return new ScenarioMeasurement(added, checksum);
+        }
+
+        public void Dispose() => _store.Dispose();
+    }
+
+    private sealed class ArchetypeSwapChurnFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly ArchetypeChunkStore<TArena> _store;
+        private readonly ChunkRow[] _locations;
+        private readonly int _cycles;
+
+        internal ArchetypeSwapChurnFixture(int population, int cycles)
+        {
+            _store = ArchetypeBenchmarkFactory.CreateStore<TArena>(population, out _, out _);
+            _locations = new ChunkRow[population];
+            var entityIndices = new uint[population];
+            for (int i = 0; i < population; i++)
+                entityIndices[i] = (uint)i;
+            if (_store.Add(entityIndices, _locations) != population)
+                throw new InvalidOperationException("Swap-churn fixture initialization exhausted its store.");
+            _cycles = cycles;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int cycle = 0; cycle < _cycles; cycle++)
+            {
+                uint entityIndex = (uint)cycle % (uint)_locations.Length;
+                if (!_store.TryRemove(_locations[entityIndex], entityIndex, out ChunkRowRelocation relocation))
+                    throw new InvalidOperationException("Swap-churn fixture lost a live entity.");
+                if (relocation.HasValue)
+                    _locations[relocation.EntityIndex] = relocation.Destination;
+                if (!_store.TryAdd(entityIndex, out _locations[entityIndex]))
+                    throw new InvalidOperationException("Swap-churn fixture failed to restore capacity.");
+                checksum += _locations[entityIndex].Row + (relocation.HasValue ? 1 : 0);
+            }
+
+            return new ScenarioMeasurement(_cycles, checksum);
+        }
+
+        public void Dispose() => _store.Dispose();
+    }
+
+    private sealed class ArchetypeEnableToggleFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly ArchetypeChunkStore<TArena> _store;
+        private readonly int _enableColumnIndex;
+        private readonly ChunkRow[] _locations;
+        private readonly int _operations;
+
+        internal ArchetypeEnableToggleFixture(int population, int operations)
+        {
+            _store = ArchetypeBenchmarkFactory.CreateStore<TArena>(population, out _, out ComponentColumnLayout[] columns);
+            ComponentColumnLayout enableColumn = LayoutReportBuilder.FindColumn<BenchmarkVelocity>(columns);
+            _enableColumnIndex = _store.GetColumnIndex(enableColumn.ComponentId);
+            _locations = new ChunkRow[population];
+            var entityIndices = new uint[population];
+            for (int i = 0; i < population; i++)
+                entityIndices[i] = (uint)i;
+            if (_store.Add(entityIndices, _locations) != population)
+                throw new InvalidOperationException("Enable-toggle fixture initialization exhausted its store.");
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                ChunkRow location = _locations[i % _locations.Length];
+                bool enabled = (i & 1) == 0;
+                _store.SetEnabled(location, _enableColumnIndex, enabled);
+                checksum += enabled ? 1 : 0;
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        public void Dispose() => _store.Dispose();
+    }
+
     private readonly struct PackedEntityCandidate
     {
         private const ulong IndexMask = 0x00FF_FFFFUL;
@@ -786,7 +932,8 @@ internal readonly record struct BenchmarkScenario(
     string Name,
     string Category,
     int Scale,
-    Func<ScenarioMeasurement> Execute);
+    Func<ScenarioMeasurement> Execute,
+    Action? Prepare = null);
 
 internal readonly record struct ScenarioMeasurement(long Operations, long Checksum);
 
@@ -795,6 +942,7 @@ internal sealed class BenchmarkReport
     public required string SuiteName { get; init; }
     public required string Generation { get; init; }
     public required string SemanticProfile { get; init; }
+    public string? ScenarioFilter { get; init; }
     public required string RuntimeVersion { get; init; }
     public required string Configuration { get; init; }
     public required int ProcessorCount { get; init; }
@@ -808,6 +956,7 @@ internal sealed class BenchmarkReport
     public required DateTimeOffset TimestampUtc { get; init; }
     public required IReadOnlyList<LayoutPlanFact> LayoutPlans { get; init; }
     public required IReadOnlyList<ArenaFact> ArenaFacts { get; init; }
+    public required IReadOnlyList<ArchetypeFact> ArchetypeFacts { get; init; }
     public required IReadOnlyList<BenchmarkResult> Results { get; init; }
 }
 
@@ -964,6 +1113,71 @@ internal static class ArenaFactBuilder
         EstimatedSlotMetadataBytes = snapshot.Capacity.EstimatedSlotMetadataBytes,
         BaseAddressAligned = baseAddress % (nuint)snapshot.Capacity.ChunkAlignmentBytes == 0,
     };
+}
+
+internal static class ArchetypeBenchmarkFactory
+{
+    internal static ArchetypeChunkStore<TArena> CreateStore<TArena>(
+        int population,
+        out ChunkLayoutPlan layout,
+        out ComponentColumnLayout[] columns)
+        where TArena : class, IChunkArenaBackend
+    {
+        LayoutReportBuilder.CreateNormalLayout(ChunkLayoutOptions.KiB32, out layout, out columns);
+        var capacityPlan = new ArchetypeCapacityPlan(layout, population);
+        ChunkArenaCapacity capacity = ChunkArenaCapacity.FromLayout(layout, capacityPlan.RequiredChunkCount);
+        object arena = typeof(TArena) == typeof(NativeChunkArena)
+            ? new NativeChunkArena(capacity)
+            : typeof(TArena) == typeof(PinnedChunkArena)
+                ? new PinnedChunkArena(capacity)
+                : throw new InvalidOperationException($"Unsupported benchmark arena {typeof(TArena).Name}.");
+        return new ArchetypeChunkStore<TArena>((TArena)arena, layout, columns);
+    }
+}
+
+internal static class ArchetypeFactBuilder
+{
+    internal static IReadOnlyList<ArchetypeFact> Create()
+    {
+        const int population = 100_000;
+        return
+        [
+            Create<NativeChunkArena>(population),
+            Create<PinnedChunkArena>(population),
+        ];
+    }
+
+    private static ArchetypeFact Create<TArena>(int population)
+        where TArena : class, IChunkArenaBackend
+    {
+        using ArchetypeChunkStore<TArena> store = ArchetypeBenchmarkFactory.CreateStore<TArena>(population, out _, out _);
+        ArchetypeChunkSnapshot snapshot = store.GetSnapshot();
+        return new ArchetypeFact
+        {
+            MemoryKind = store.Arena.GetSnapshot().MemoryKind.ToString(),
+            ExpectedPopulation = population,
+            RowCapacity = snapshot.RowCapacity,
+            MaximumChunks = snapshot.MaximumChunks,
+            MaximumRows = snapshot.MaximumRows,
+            ChunkPayloadBytes = store.Arena.Capacity.TotalPayloadBytes,
+            ChunkRecordSizeBytes = snapshot.ChunkRecordSizeBytes,
+            ChunkMetadataBytes = snapshot.ChunkMetadataBytes,
+            ChunkRowSizeBytes = Marshal.SizeOf<ChunkRow>(),
+        };
+    }
+}
+
+internal sealed class ArchetypeFact
+{
+    public required string MemoryKind { get; init; }
+    public required int ExpectedPopulation { get; init; }
+    public required int RowCapacity { get; init; }
+    public required int MaximumChunks { get; init; }
+    public required long MaximumRows { get; init; }
+    public required long ChunkPayloadBytes { get; init; }
+    public required int ChunkRecordSizeBytes { get; init; }
+    public required long ChunkMetadataBytes { get; init; }
+    public required int ChunkRowSizeBytes { get; init; }
 }
 
 internal sealed class ArenaFact

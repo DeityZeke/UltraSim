@@ -20,7 +20,7 @@ dotnet run --project \
   -c Release
 ```
 
-Run the Phase 1 entity/schema/layout/arena benchmark suite without replacing an accepted baseline:
+Run the Phase 1 entity/schema/layout/arena/archetype-row benchmark suite without replacing an accepted baseline:
 
 ```bash
 dotnet run --project \

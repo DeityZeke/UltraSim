@@ -39,7 +39,7 @@ The Phase 1 arena extension adds twelve scenarios and six cold arena facts:
   alignment for both backends at all three chunk sizes.
 
 The 2026-08-04 local directional run measured zero managed bytes and zero
-Gen0/1/2 collections in all 30 scenarios. Native and pinned arena results were
+Gen0/1/2 collections in all 36 scenarios. Native and pinned arena results were
 within roughly three percent for every new paired case; that is a tie at this
 methodology/noise level, not evidence that either backend is universally
 faster. Native remains the expected server candidate because it avoids retaining
@@ -47,6 +47,37 @@ a large managed object and has explicit ownership, while pinned remains a real
 engine/platform comparison candidate. Repeated isolated processes, server-scale
 footprints, GC pressure, first-touch, cache/TLB counters, and disposal soaks must
 decide the backend.
+
+The executable archetype-row extension adds six paired scenarios over a normal
+32 KiB layout:
+
+- bulk zero-default creation of 100,000 rows, with removal/reset performed by an
+  explicit untimed `Prepare` callback;
+- 100,000 packed swap-remove-plus-add cycles with relocation-table maintenance;
+- one million enable-bit writes through a physical column index bound once
+  during cold fixture construction.
+
+Reports also embed a cold fact for each backend. At 100,000 normal-layout rows,
+the current plan uses 63 chunks with 1,600 rows each, 2,064,384 payload bytes,
+1,764 bytes of 28-byte per-chunk records, and an eight-byte local `ChunkRow`.
+This excludes the still-undecided archetype/store identifier required by a full
+world entity-location record.
+
+All six measured zero managed bytes and zero collections. Bulk creation is
+approximately `1.3-1.5 ns/row` for both backends and remains sensitive to run
+order. Three exact-filter isolated runs measured native swap churn at roughly
+`64.6-67.8 ns/cycle` and pinned at `68.6-75.9 ns/cycle`. Prebinding the column
+index improved the native enable path to roughly `11.3 ns/toggle`, versus roughly
+`14-16 ns/toggle` for pinned storage. Whole-suite native swap p95 outliers did
+not reproduce in exact-filter processes, so those spikes are treated as
+scenario-order/OS noise rather than a backend conclusion.
+
+Eight warmup iterations precede the 31 measured iterations. Forced collections
+isolate each microbenchmark before sampling; reported collection deltas cover
+the measured workload but are not production GC-pause distributions. Managed
+allocation uses the current-thread counter because these kernels are deliberately
+single-threaded. Correctness belongs to the unit/reference-model suites; the
+benchmark checksum is only an execution guard.
 
 The generated generic-ID loop is a code-generation floor and may be constant
 propagated or hoisted by the JIT. Do not interpret its sub-nanosecond result as a
@@ -63,6 +94,8 @@ dotnet run --project \
 ```
 
 The default report is `_Benchmarks/results/next-ecs-phase1.json`. Override it
-with `--output <path>`. Do not treat a single local run as an accepted baseline.
+with `--output <path>`. Use `--filter <name-or-category-fragment>` for focused
+repeated-process runs; the selected filter is recorded in JSON. Do not treat a
+single local run as an accepted baseline.
 Capture repeated isolated processes and environment/profile hashes before using
 results as a performance gate.
