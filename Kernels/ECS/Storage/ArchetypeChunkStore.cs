@@ -401,6 +401,60 @@ internal sealed class ArchetypeChunkStore<TArena> : IDisposable
             enableWords);
     }
 
+    /// <summary>
+    /// Resolves two distinct columns through one chunk lookup for a seal-compiled
+    /// read/write query route.
+    /// </summary>
+    internal BoundReadWriteComponentChunk<TRead, TWrite> GetBoundReadWriteComponentChunk<TRead, TWrite>(
+        int chunkIndex,
+        int readColumnIndex,
+        int writeColumnIndex,
+        bool includeReadEnableWords,
+        bool includeWriteEnableWords)
+        where TRead : unmanaged
+        where TWrite : unmanaged
+    {
+        ThrowIfDisposed();
+        if ((uint)chunkIndex >= (uint)_chunks.Length)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        ref readonly ChunkRecord chunk = ref _chunks[chunkIndex];
+        if (chunk.State != ChunkListState.Partial && chunk.State != ChunkListState.Full)
+            throw new ArgumentException("The index does not identify an occupied chunk.", nameof(chunkIndex));
+
+        ref readonly ComponentColumnLayout readColumn = ref _columns[readColumnIndex];
+        ref readonly ComponentColumnLayout writeColumn = ref _columns[writeColumnIndex];
+        System.Diagnostics.Debug.Assert(readColumnIndex != writeColumnIndex);
+        System.Diagnostics.Debug.Assert(readColumn.HasData);
+        System.Diagnostics.Debug.Assert(writeColumn.HasData);
+        System.Diagnostics.Debug.Assert(readColumn.ElementSizeBytes == Unsafe.SizeOf<TRead>());
+        System.Diagnostics.Debug.Assert(writeColumn.ElementSizeBytes == Unsafe.SizeOf<TWrite>());
+        System.Diagnostics.Debug.Assert(!includeReadEnableWords || readColumn.HasEnableBits);
+        System.Diagnostics.Debug.Assert(!includeWriteEnableWords || writeColumn.HasEnableBits);
+
+        Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
+        Span<TRead> readComponents = MemoryMarshal.Cast<byte, TRead>(
+            bytes.Slice(readColumn.DataOffsetBytes, readColumn.DataBytes));
+        Span<TWrite> writeComponents = MemoryMarshal.Cast<byte, TWrite>(
+            bytes.Slice(writeColumn.DataOffsetBytes, writeColumn.DataBytes));
+        Span<ulong> readEnableWords = includeReadEnableWords
+            ? MemoryMarshal.Cast<byte, ulong>(
+                bytes.Slice(readColumn.EnableBitsOffsetBytes, readColumn.EnableBitsBytes))
+            : Span<ulong>.Empty;
+        Span<ulong> writeEnableWords = includeWriteEnableWords
+            ? MemoryMarshal.Cast<byte, ulong>(
+                bytes.Slice(writeColumn.EnableBitsOffsetBytes, writeColumn.EnableBitsBytes))
+            : Span<ulong>.Empty;
+        int rowCount = chunk.RowCount;
+        return new BoundReadWriteComponentChunk<TRead, TWrite>(
+            (uint)chunkIndex,
+            GetEntityIndices(bytes).Slice(0, rowCount),
+            readComponents.Slice(0, rowCount),
+            writeComponents.Slice(0, rowCount),
+            readEnableWords,
+            writeEnableWords);
+    }
+
     internal int GetRowCount(uint chunkIndex)
     {
         ThrowIfDisposed();

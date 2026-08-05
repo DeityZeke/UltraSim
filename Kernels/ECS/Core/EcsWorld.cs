@@ -15,9 +15,13 @@ namespace UltraSim.ECS;
 internal sealed class EcsWorld<TArena> : IDisposable
     where TArena : class, IChunkArenaBackend
 {
+    private const int MaximumSupportedQueryPlans = 1 << 20;
+
     private readonly ComponentSchema _schema;
     private readonly EntityPool _entities;
     private readonly ArchetypeRegistry<TArena> _archetypes;
+    private readonly IArchetypeQueryPlan<TArena>?[] _queryPlans;
+    private int _queryPlanCount;
     private EcsWorldState _state;
     private bool _isVisitingChunks;
 
@@ -25,14 +29,18 @@ internal sealed class EcsWorld<TArena> : IDisposable
         ComponentSchema schema,
         EntityCapacity entityCapacity,
         int maximumArchetypes,
-        Func<ChunkArenaCapacity, TArena> arenaFactory)
+        Func<ChunkArenaCapacity, TArena> arenaFactory,
+        int maximumQueryPlans)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(arenaFactory);
+        if (maximumQueryPlans < 0 || maximumQueryPlans > MaximumSupportedQueryPlans)
+            throw new ArgumentOutOfRangeException(nameof(maximumQueryPlans));
 
         _schema = schema;
         _entities = new EntityPool(WorldId.Create(), entityCapacity);
         _archetypes = new ArchetypeRegistry<TArena>(schema, maximumArchetypes, arenaFactory);
+        _queryPlans = new IArchetypeQueryPlan<TArena>[maximumQueryPlans];
         _state = EcsWorldState.Created;
     }
 
@@ -74,6 +82,17 @@ internal sealed class EcsWorld<TArena> : IDisposable
             return _archetypes.Count;
         }
     }
+
+    internal int QueryPlanCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _queryPlanCount;
+        }
+    }
+
+    internal int MaximumQueryPlans => _queryPlans.Length;
 
     internal ArchetypeId RegisterArchetype(
         ReadOnlySpan<ComponentId> canonicalSignature,
@@ -132,6 +151,42 @@ internal sealed class EcsWorld<TArena> : IDisposable
             metadata.Flags);
     }
 
+    internal ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> PrepareReadWriteQuery<TRead, TWrite>(
+        ComponentId generatedReadComponentId,
+        ComponentId generatedWriteComponentId)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        EnsureCreated();
+        ref readonly ComponentMetadata readMetadata = ref ValidateGeneratedDataComponent<TRead>(
+            generatedReadComponentId,
+            nameof(generatedReadComponentId));
+        ref readonly ComponentMetadata writeMetadata = ref ValidateGeneratedDataComponent<TWrite>(
+            generatedWriteComponentId,
+            nameof(generatedWriteComponentId));
+        if (generatedReadComponentId == generatedWriteComponentId)
+        {
+            throw new ArgumentException(
+                "A query cannot declare the same component for both read and write access.",
+                nameof(generatedWriteComponentId));
+        }
+        if (_queryPlanCount == _queryPlans.Length)
+        {
+            throw new InvalidOperationException(
+                $"Query-plan capacity {_queryPlans.Length} is exhausted.");
+        }
+
+        var plan = new ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite>(
+            Id,
+            _queryPlanCount,
+            generatedReadComponentId,
+            readMetadata.Flags,
+            generatedWriteComponentId,
+            writeMetadata.Flags);
+        _queryPlans[_queryPlanCount++] = plan;
+        return plan;
+    }
+
     internal bool TryGetArchetypeId(
         ReadOnlySpan<ComponentId> canonicalSignature,
         out ArchetypeId archetypeId)
@@ -152,6 +207,12 @@ internal sealed class EcsWorld<TArena> : IDisposable
         if (_state == EcsWorldState.Sealed)
             return;
 
+        for (int index = 0; index < _queryPlanCount; index++)
+        {
+            IArchetypeQueryPlan<TArena> plan = _queryPlans[index]
+                ?? throw new InvalidOperationException("A registered query-plan slot is empty.");
+            plan.Compile(_archetypes);
+        }
         _archetypes.Seal();
         _state = EcsWorldState.Sealed;
     }
@@ -360,6 +421,61 @@ internal sealed class EcsWorld<TArena> : IDisposable
         }
     }
 
+    /// <summary>
+    /// Executes a seal-compiled query across every matched archetype while exposing
+    /// one read-only and one distinct writable component column.
+    /// </summary>
+    internal int VisitReadWriteChunks<TRead, TWrite, TVisitor>(
+        ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> plan,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TVisitor : struct, IComponentChunkReadWriteVisitor<TRead, TWrite>
+    {
+        EnsureSealed();
+        ValidateQueryPlan(plan);
+        EnterChunkVisit();
+        try
+        {
+            int visitedRows = 0;
+            ReadOnlySpan<ArchetypeReadWriteQueryRoute<TArena>> routes = plan.Routes;
+            for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
+            {
+                ref readonly ArchetypeReadWriteQueryRoute<TArena> route = ref routes[routeIndex];
+                ArchetypeChunkStore<TArena> store = route.Storage.Store;
+                for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
+                     chunkIndex >= 0;
+                     chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
+                {
+                    BoundReadWriteComponentChunk<TRead, TWrite> bound =
+                        store.GetBoundReadWriteComponentChunk<TRead, TWrite>(
+                            chunkIndex,
+                            route.ReadColumnIndex,
+                            route.WriteColumnIndex,
+                            plan.ReadIsEnableable,
+                            plan.WriteIsEnableable);
+                    var chunk = new ReadWriteComponentChunk<TRead, TWrite>(
+                        Id,
+                        route.Storage.Id,
+                        bound.ChunkIndex,
+                        bound.EntityIndices,
+                        bound.ReadComponents,
+                        bound.WriteComponents,
+                        bound.ReadEnableWords,
+                        bound.WriteEnableWords);
+                    visitor.Execute(in chunk);
+                    visitedRows += chunk.Count;
+                }
+            }
+
+            return visitedRows;
+        }
+        finally
+        {
+            ExitChunkVisit();
+        }
+    }
+
     private bool TryCreateDefaultCore(
         ArchetypeId archetypeId,
         out Entity entity,
@@ -459,6 +575,9 @@ internal sealed class EcsWorld<TArena> : IDisposable
         }
         finally
         {
+            for (int index = 0; index < _queryPlanCount; index++)
+                _queryPlans[index]?.Release();
+            Array.Clear(_queryPlans);
             _state = EcsWorldState.Disposed;
         }
     }
@@ -506,6 +625,43 @@ internal sealed class EcsWorld<TArena> : IDisposable
         ValidateBinding(binding, requireData: false);
         if (!binding.IsEnableable)
             throw new InvalidOperationException("The bound component is not enableable.");
+    }
+
+    private ref readonly ComponentMetadata ValidateGeneratedDataComponent<T>(
+        ComponentId generatedComponentId,
+        string parameterName)
+        where T : unmanaged, IComponent<T>
+    {
+        if (!_schema.TryGetComponentId<T>(out ComponentId actualComponentId) ||
+            actualComponentId != generatedComponentId)
+        {
+            throw new ArgumentException(
+                "The generated component ID does not identify the requested type in this world schema.",
+                parameterName);
+        }
+
+        ref readonly ComponentMetadata metadata = ref _schema.GetMetadata(generatedComponentId);
+        if (metadata.IsTag)
+            throw new InvalidOperationException("Storage-free tags cannot be data-query columns.");
+        if (metadata.Size != Unsafe.SizeOf<T>())
+            ThrowWorldInvariant("Generated component metadata and runtime type size disagree.");
+        return ref metadata;
+    }
+
+    private void ValidateQueryPlan<TRead, TWrite>(
+        ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> plan)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.WorldId != Id ||
+            (uint)plan.PlanIndex >= (uint)_queryPlanCount ||
+            !ReferenceEquals(_queryPlans[plan.PlanIndex], plan))
+        {
+            throw new ArgumentException("The query plan belongs to a different world.", nameof(plan));
+        }
+        if (!plan.IsCompiled)
+            ThrowWorldInvariant("A sealed world owns an uncompiled query plan.");
     }
 
     private static void RollBackJustAddedRow(

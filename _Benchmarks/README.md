@@ -139,6 +139,19 @@ guard, not cold-JIT, scheduling, change-tracking, filter, multi-component, or
 Current-comparison evidence. The code suite now contains 48 scenarios; the
 tracked accepted artifact remains unchanged pending a controlled full capture.
 
+The first seal-compiled multi-archetype plan adds two non-comparable 100,000-row
+scenarios. Two different archetype layouts both require `BenchmarkPosition` for
+read and enableable `BenchmarkVelocity` for write. Seal-time compilation prebinds
+both columns for both layouts; timed execution reads position, writes two velocity
+floats, updates one enable bit, and accumulates a checksum without signature scans,
+component lookup, delegates, boxing, or entity-handle materialization. Three
+repeated focused processes measured approximately `2.56-2.80 ns/row`; native and
+pinned remained tied and every run reported zero managed bytes and zero
+collections. The measured loop is still a hand-authored one-read/one-write shape,
+not evidence for arbitrary generated arities, filters, change tracking, parallel
+scheduling, or Current parity. The code suite now contains 50 scenarios, and the
+tracked accepted artifact remains unchanged.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed
