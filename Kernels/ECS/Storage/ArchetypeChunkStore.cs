@@ -271,6 +271,25 @@ internal sealed class ArchetypeChunkStore<TArena> : IDisposable
         return ref values[row];
     }
 
+    /// <summary>
+    /// Executes a column/type binding already validated by the owning world.
+    /// This deliberately skips repeated layout/type checks while retaining checked
+    /// chunk-row resolution and a final byte-span bounds check.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ref T GetBoundComponentRef<T>(ChunkRow location, int columnIndex)
+        where T : unmanaged
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasData);
+        System.Diagnostics.Debug.Assert(column.ElementSizeBytes == Unsafe.SizeOf<T>());
+        int offset = checked(column.DataOffsetBytes + (row * column.ElementSizeBytes));
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+        Span<byte> valueBytes = bytes.Slice(offset, column.ElementSizeBytes);
+        return ref Unsafe.As<byte, T>(ref MemoryMarshal.GetReference(valueBytes));
+    }
+
     internal bool IsEnabled(ChunkRow location, in ComponentColumnLayout column)
     {
         int columnIndex = GetOwnedColumnIndex(column);
@@ -294,6 +313,24 @@ internal sealed class ArchetypeChunkStore<TArena> : IDisposable
     {
         ResolveOrThrow(location, out int chunkIndex, out int row);
         ref readonly ComponentColumnLayout column = ref GetEnableColumn(columnIndex);
+        EnableBitOperations.Set(_arena.GetChunkBytes(_chunks[chunkIndex].Handle), column, row, enabled);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool IsBoundEnabled(ChunkRow location, int columnIndex)
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasEnableBits);
+        return EnableBitOperations.Get(_arena.GetChunkBytes(_chunks[chunkIndex].Handle), column, row);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetBoundEnabled(ChunkRow location, int columnIndex, bool enabled)
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasEnableBits);
         EnableBitOperations.Set(_arena.GetChunkBytes(_chunks[chunkIndex].Handle), column, row, enabled);
     }
 

@@ -51,6 +51,14 @@ allocation:
   generation, creation rollback removes a just-added row, destruction repairs a
   packed swap donor before invalidating the stale handle, and foreign-world plans
   are rejected by O(1) registry/store identity checks even when dense IDs collide.
+- `ArchetypeComponentBinding<T>` is a 16-byte, cold-built route from a generated
+  component ID to one exact world/archetype/physical column. Binding validates
+  schema type, flags, size, membership, and layout once before sealing; hot access
+  performs no component scan, metadata lookup, boxing, or managed allocation.
+- Bound world access copies values in/out rather than returning refs, rejects
+  stale/foreign/wrong-archetype entities, supports enableable data and tags, and
+  rejects data access for storage-free tags. Single-value initialized creation
+  writes through the same checked binding without exposing raw storage.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -86,8 +94,8 @@ allocation:
   slot, retirement, and high-water accounting; explicit `Dispose` is required.
 - Arena structure is single-owner. Disjoint live chunks may be processed in
   parallel after a barrier, but no chunk span may survive release or arena
-  disposal. The arenas remain internal until generated archetype/query bindings
-  can prevent callers from requesting a same-sized but semantically wrong type.
+  disposal. The arenas remain internal until generated query bindings can prevent
+  chunk-level callers from requesting a same-sized but semantically wrong type.
 - `ArchetypeChunkStore<TArena>` now makes both candidates executable row stores.
   It owns a fresh fixed arena; keeps compact intrusive full, partial, and empty
   chunk lists; acquires lazily; and retains empty chunks for immediate reuse.
@@ -105,7 +113,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 78 passing tests, including
+The current runtime and primitive suite has 86 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -127,14 +135,18 @@ suite has 13 passing tests. Composed-world tests cover lifecycle ordering,
 owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
 generation reuse, donor repair, cross-world plan and entity isolation, 30,000
 randomized create/transition/destroy operations, native/pinned parity, and 100,000
-warmed allocation-free full lifecycle cycles.
+warmed allocation-free full lifecycle cycles. Bound-access tests lock the 16-byte
+layout, generated-ID/type/membership validation, value and enable semantics,
+tag/non-enableable rejection, initialized creation, exact-archetype behavior over
+migration, stale/foreign isolation, a 30,000-operation randomized model,
+native/pinned parity, and one million warmed allocation-free access rounds.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generator emits the core manifest only. The
-next natural slice is generated/prebound safe component access and initialization
-through the world boundary, so callers and future prefab writers never receive raw
-same-sized typed spans or manually bind physical columns. Bounded deferred
-structural commands and field/serializer/prefab descriptors remain later work.
+next natural slice is barrier-scoped generated chunk query/view binding, building
+on the same validated physical routes while preventing spans from escaping a safe
+execution window. Bounded deferred structural commands and
+field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:
 

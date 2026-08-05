@@ -76,6 +76,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedMigration = new ArchetypeMigrationFixture<PinnedChunkArena>(100_000);
         using var nativeWorldLifecycle = new EcsWorldLifecycleFixture<NativeChunkArena>(100_000);
         using var pinnedWorldLifecycle = new EcsWorldLifecycleFixture<PinnedChunkArena>(100_000);
+        using var nativeBoundAccess = new EcsWorldBoundAccessFixture<NativeChunkArena>(1_000_000);
+        using var pinnedBoundAccess = new EcsWorldBoundAccessFixture<PinnedChunkArena>(1_000_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -121,6 +123,8 @@ internal static class PrimitiveBenchmarks
             new("PinnedArchetype_MigrationCycle_100000", "ArchetypeMigration", 100_000, pinnedMigration.Execute),
             new("NativeWorld_CreateTransitionDestroy_100000", "WorldLifecycle", 100_000, nativeWorldLifecycle.Execute),
             new("PinnedWorld_CreateTransitionDestroy_100000", "WorldLifecycle", 100_000, pinnedWorldLifecycle.Execute),
+            new("NativeWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, nativeBoundAccess.Execute),
+            new("PinnedWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, pinnedBoundAccess.Execute),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -137,7 +141,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-world-lifecycle-v8",
+            SemanticProfile = "ecs-next-phase1-bound-component-access-v9",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1160,6 +1164,70 @@ internal static class PrimitiveBenchmarks
         {
             Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
             return signature;
+        }
+    }
+
+    private sealed class EcsWorldBoundAccessFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeComponentBinding<BenchmarkVelocity> _binding;
+        private readonly Entity _entity;
+        private readonly int _operations;
+
+        internal EcsWorldBoundAccessFixture(int operations)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(1),
+                maximumArchetypes: 1,
+                static capacity => CreateArena(capacity));
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ArchetypeId archetype = _world.RegisterArchetype(
+                [velocity],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 1);
+            _binding = _world.BindComponent<BenchmarkVelocity>(archetype, velocity);
+            _world.Seal();
+            if (!_world.TryCreateDefault(archetype, out _entity))
+                throw new InvalidOperationException("Bound-access benchmark fixture failed to create its entity.");
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                var value = new BenchmarkVelocity { X = i, Y = -i };
+                if (!_world.TrySetComponent(_entity, _binding, value) ||
+                    !_world.TryGetComponent(_entity, _binding, out BenchmarkVelocity read) ||
+                    !_world.TrySetComponentEnabled(_entity, _binding, (i & 1) == 0) ||
+                    !_world.TryGetComponentEnabled(_entity, _binding, out bool enabled))
+                {
+                    throw new InvalidOperationException("Bound-access benchmark lost its entity or binding.");
+                }
+
+                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.X));
+                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.Y));
+                checksum += enabled ? 1 : 0;
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static TArena CreateArena(ChunkArenaCapacity capacity)
+        {
+            object arena = typeof(TArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported bound-access benchmark arena {typeof(TArena).Name}.");
+            return (TArena)arena;
         }
     }
 

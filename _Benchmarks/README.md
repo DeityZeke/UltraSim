@@ -109,6 +109,20 @@ is classified as scenario/process interference. The code suite now contains 42
 scenarios; the tracked accepted artifact remains historical until a controlled
 full-suite capture is intentionally accepted.
 
+The archetype-bound component-access extension adds two non-comparable one-million
+round scenarios. One round performs four checked world calls against an
+enableable data component: copied set, copied get, enable set, and enable get.
+The 16-byte binding is created from the source-generated component ID before
+sealing, so the measured path includes entity generation/location validation,
+exact-archetype and world ownership checks, dense store routing, and row bounds,
+but no component scan, metadata lookup, boxing, allocation, or mutable-ref escape.
+Final exact-filter isolated runs measured approximately `51.0 ns/round` native
+and `52.6 ns/round` pinned, with zero managed bytes and zero Gen0/1/2 collections.
+The paired run measured `50.2` and `67.5 ns/round`; the larger pinned difference
+again shrank materially in isolation. These cases bring the code suite to 44
+scenarios; they are not yet comparable with Current entity access or future
+barrier-scoped chunk iteration.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

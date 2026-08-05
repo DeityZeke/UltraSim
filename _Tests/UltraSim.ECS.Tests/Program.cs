@@ -90,6 +90,14 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_RandomizedLifecycleMatchesReferenceModel), EcsWorld_RandomizedLifecycleMatchesReferenceModel);
         Run(nameof(EcsWorld_NativeAndPinnedLifecycleRemainEquivalent), EcsWorld_NativeAndPinnedLifecycleRemainEquivalent);
         Run(nameof(EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes), EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes);
+        Run(nameof(ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit), ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit);
+        Run(nameof(EcsWorld_BoundAccessReadsWritesAndInitializes), EcsWorld_BoundAccessReadsWritesAndInitializes);
+        Run(nameof(EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings), EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings);
+        Run(nameof(EcsWorld_BoundAccessTracksExactArchetypeAcrossTransitions), EcsWorld_BoundAccessTracksExactArchetypeAcrossTransitions);
+        Run(nameof(EcsWorld_BoundAccessRejectsForeignWorldAndStaleEntities), EcsWorld_BoundAccessRejectsForeignWorldAndStaleEntities);
+        Run(nameof(EcsWorld_BoundAccessRandomizedModelRemainsConsistent), EcsWorld_BoundAccessRandomizedModelRemainsConsistent);
+        Run(nameof(EcsWorld_BoundAccessNativePinnedParity), EcsWorld_BoundAccessNativePinnedParity);
+        Run(nameof(EcsWorld_WarmedBoundAccessAllocatesZeroManagedBytes), EcsWorld_WarmedBoundAccessAllocatesZeroManagedBytes);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -2656,6 +2664,422 @@ internal static class EcsPrimitiveTests
         Assert.Equal(0, fixture.Destination.Store.Count);
     }
 
+    private static void ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit()
+    {
+        Assert.Equal(16, Unsafe.SizeOf<ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide>>());
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> invalid = default;
+        Assert.False(invalid.IsValid);
+        Assert.False(invalid.HasData);
+        Assert.False(invalid.IsEnableable);
+
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        using var world = new EcsWorld<NativeChunkArena>(
+            schema,
+            new EntityCapacity(8),
+            maximumArchetypes: 1,
+            static capacity => new NativeChunkArena(capacity));
+        ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+        ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ComponentId tagId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutTag>();
+        ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        ArchetypeId archetype = world.RegisterArchetype(
+            [byteId, enableId, wideId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> byteBinding =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutByte>(archetype, byteId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> duplicateByteBinding =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutByte>(archetype, byteId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> enableBinding =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(archetype, enableId);
+
+        Assert.True(byteBinding.IsValid);
+        Assert.Equal(world.Id, byteBinding.WorldId);
+        Assert.Equal(archetype, byteBinding.ArchetypeId);
+        Assert.Equal(byteId, byteBinding.ComponentId);
+        Assert.True(byteBinding.HasData);
+        Assert.False(byteBinding.IsEnableable);
+        Assert.Equal(byteBinding, duplicateByteBinding);
+        Assert.True(enableBinding.HasData);
+        Assert.True(enableBinding.IsEnableable);
+        Assert.Equal(
+            world.GetArchetypeStorage(archetype).Store.GetColumnIndex(enableId),
+            enableBinding.ColumnIndex);
+        Assert.Throws<ArgumentException>(() =>
+            world.BindComponent<UltraSim.ECS.Tests.LayoutByte>(archetype, intId));
+        Assert.Throws<ArgumentException>(() =>
+            world.BindComponent<UltraSim.ECS.Tests.LayoutTag>(archetype, tagId));
+
+        world.Seal();
+        Assert.Throws<InvalidOperationException>(() =>
+            world.BindComponent<UltraSim.ECS.Tests.LayoutWide>(archetype, wideId));
+    }
+
+    private static void EcsWorld_BoundAccessReadsWritesAndInitializes()
+    {
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 8);
+        var initial = new UltraSim.ECS.Tests.LayoutWide
+        {
+            A = 11,
+            B = 22,
+            C = 33,
+            D = 44,
+        };
+        Assert.True(fixture.World.TryCreateInitialized(
+            fixture.Source.Id,
+            fixture.SourceWideBinding,
+            initial,
+            out Entity entity));
+        Assert.True(fixture.World.HasComponent(entity, fixture.SourceWideBinding));
+        Assert.True(fixture.World.HasComponent(entity, fixture.SourceByteBinding));
+        Assert.False(fixture.World.HasComponent(entity, fixture.DestinationIntBinding));
+        Assert.True(fixture.World.TryGetComponent(
+            entity,
+            fixture.SourceWideBinding,
+            out UltraSim.ECS.Tests.LayoutWide read));
+        Assert.Equal(11L, read.A);
+        Assert.Equal(22L, read.B);
+        Assert.Equal(33L, read.C);
+        Assert.Equal(44L, read.D);
+
+        var byteValue = new UltraSim.ECS.Tests.LayoutByte { Value = 0xC7 };
+        Assert.True(fixture.World.TrySetComponent(entity, fixture.SourceByteBinding, byteValue));
+        Assert.True(fixture.World.TryGetComponent(
+            entity,
+            fixture.SourceByteBinding,
+            out UltraSim.ECS.Tests.LayoutByte readByte));
+        Assert.Equal((byte)0xC7, readByte.Value);
+        Assert.True(fixture.World.TryGetComponentEnabled(
+            entity,
+            fixture.SourceEnableBinding,
+            out bool enabled));
+        Assert.True(enabled);
+        Assert.True(fixture.World.TrySetComponentEnabled(
+            entity,
+            fixture.SourceEnableBinding,
+            enabled: false));
+        Assert.True(fixture.World.TryGetComponentEnabled(
+            entity,
+            fixture.SourceEnableBinding,
+            out enabled));
+        Assert.False(enabled);
+
+        int before = fixture.World.AliveCount;
+        Assert.Throws<ArgumentException>(() => fixture.World.TryCreateInitialized(
+            fixture.Source.Id,
+            fixture.DestinationIntBinding,
+            new UltraSim.ECS.Tests.LayoutInt { Value = 9 },
+            out _));
+        Assert.Equal(before, fixture.World.AliveCount);
+    }
+
+    private static void EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings()
+    {
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 4);
+        Assert.True(fixture.World.TryCreateDefault(fixture.Destination.Id, out Entity destination));
+        Assert.True(fixture.World.HasComponent(destination, fixture.DestinationTagBinding));
+        Assert.False(fixture.DestinationTagBinding.HasData);
+        Assert.True(fixture.DestinationTagBinding.IsEnableable);
+        Assert.Throws<InvalidOperationException>(() => fixture.World.TryGetComponent(
+            destination,
+            fixture.DestinationTagBinding,
+            out _));
+        Assert.Throws<InvalidOperationException>(() => fixture.World.TrySetComponent(
+            destination,
+            fixture.DestinationTagBinding,
+            default));
+        Assert.True(fixture.World.TryGetComponentEnabled(
+            destination,
+            fixture.DestinationTagBinding,
+            out bool tagEnabled));
+        Assert.True(tagEnabled);
+        Assert.True(fixture.World.TrySetComponentEnabled(
+            destination,
+            fixture.DestinationTagBinding,
+            enabled: false));
+
+        Assert.Throws<InvalidOperationException>(() => fixture.World.TryGetComponentEnabled(
+            destination,
+            fixture.DestinationIntBinding,
+            out _));
+        Assert.Throws<InvalidOperationException>(() => fixture.World.TrySetComponentEnabled(
+            destination,
+            fixture.DestinationIntBinding,
+            enabled: false));
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> invalid = default;
+        Assert.Throws<ArgumentException>(() => fixture.World.HasComponent(destination, invalid));
+    }
+
+    private static void EcsWorld_BoundAccessTracksExactArchetypeAcrossTransitions()
+    {
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 2);
+        var initial = new UltraSim.ECS.Tests.LayoutEnableLong { Value = 0x1234_5678 };
+        Assert.True(fixture.World.TryCreateInitialized(
+            fixture.Source.Id,
+            fixture.SourceEnableBinding,
+            initial,
+            out Entity entity));
+        Assert.True(fixture.World.TrySetComponentEnabled(
+            entity,
+            fixture.SourceEnableBinding,
+            enabled: false));
+        Assert.False(fixture.World.TryGetComponent(
+            entity,
+            fixture.DestinationEnableBinding,
+            out _));
+
+        Assert.True(fixture.World.TryTransition(
+            entity,
+            fixture.SourceToDestination,
+            out _));
+        Assert.False(fixture.World.HasComponent(entity, fixture.SourceEnableBinding));
+        Assert.False(fixture.World.TryGetComponent(
+            entity,
+            fixture.SourceEnableBinding,
+            out UltraSim.ECS.Tests.LayoutEnableLong staleSource));
+        Assert.Equal(0L, staleSource.Value);
+        Assert.True(fixture.World.TryGetComponent(
+            entity,
+            fixture.DestinationEnableBinding,
+            out UltraSim.ECS.Tests.LayoutEnableLong retained));
+        Assert.Equal(initial.Value, retained.Value);
+        Assert.True(fixture.World.TryGetComponentEnabled(
+            entity,
+            fixture.DestinationEnableBinding,
+            out bool enabled));
+        Assert.False(enabled);
+        Assert.True(fixture.World.TryGetComponent(
+            entity,
+            fixture.DestinationIntBinding,
+            out UltraSim.ECS.Tests.LayoutInt added));
+        Assert.Equal(0, added.Value);
+        Assert.True(fixture.World.TryGetComponentEnabled(
+            entity,
+            fixture.DestinationTagBinding,
+            out bool tagEnabled));
+        Assert.True(tagEnabled);
+    }
+
+    private static void EcsWorld_BoundAccessRejectsForeignWorldAndStaleEntities()
+    {
+        using var first = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 2);
+        using var second = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 2);
+        Assert.True(first.World.TryCreateDefault(first.Source.Id, out Entity entity));
+        Assert.Throws<ArgumentException>(() => second.World.HasComponent(entity, first.SourceByteBinding));
+        Assert.Throws<ArgumentException>(() => second.World.TryGetComponent(
+            entity,
+            first.SourceByteBinding,
+            out _));
+        Assert.False(first.World.TryGetComponent(
+            new Entity(second.World.Id, entity.Index, entity.Generation),
+            first.SourceByteBinding,
+            out _));
+
+        Assert.True(first.World.TryDestroy(entity));
+        Assert.False(first.World.HasComponent(entity, first.SourceByteBinding));
+        Assert.False(first.World.TryGetComponent(
+            entity,
+            first.SourceByteBinding,
+            out UltraSim.ECS.Tests.LayoutByte stale));
+        Assert.Equal((byte)0, stale.Value);
+        Assert.False(first.World.TrySetComponent(
+            entity,
+            first.SourceByteBinding,
+            new UltraSim.ECS.Tests.LayoutByte { Value = 1 }));
+    }
+
+    private static void EcsWorld_BoundAccessRandomizedModelRemainsConsistent()
+    {
+        const int entityCount = 257;
+        const int operations = 30_000;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 2, entityCapacity: entityCount);
+        var entities = new Entity[entityCount];
+        var values = new long[entityCount];
+        var enabled = new bool[entityCount];
+        var inSource = new bool[entityCount];
+        for (int i = 0; i < entityCount; i++)
+        {
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out entities[i]));
+            values[i] = i * 31L;
+            enabled[i] = (i & 1) == 0;
+            inSource[i] = true;
+            Assert.True(fixture.World.TrySetComponent(
+                entities[i],
+                fixture.SourceEnableBinding,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = values[i] }));
+            Assert.True(fixture.World.TrySetComponentEnabled(
+                entities[i],
+                fixture.SourceEnableBinding,
+                enabled[i]));
+        }
+
+        var random = new Random(unchecked((int)0xB17DACC5));
+        for (int operation = 0; operation < operations; operation++)
+        {
+            int selected = random.Next(entityCount);
+            Entity entity = entities[selected];
+            int choice = random.Next(4);
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> binding = inSource[selected]
+                ? fixture.SourceEnableBinding
+                : fixture.DestinationEnableBinding;
+            if (choice == 0)
+            {
+                values[selected] = unchecked(values[selected] * 33 + operation + 1);
+                Assert.True(fixture.World.TrySetComponent(
+                    entity,
+                    binding,
+                    new UltraSim.ECS.Tests.LayoutEnableLong { Value = values[selected] }));
+            }
+            else if (choice == 1)
+            {
+                enabled[selected] = !enabled[selected];
+                Assert.True(fixture.World.TrySetComponentEnabled(
+                    entity,
+                    binding,
+                    enabled[selected]));
+            }
+            else if (choice == 2)
+            {
+                ArchetypeTransitionPlan<NativeChunkArena> plan = inSource[selected]
+                    ? fixture.SourceToDestination
+                    : fixture.DestinationToSource;
+                Assert.True(fixture.World.TryTransition(entity, plan, out _));
+                inSource[selected] = !inSource[selected];
+            }
+            else
+            {
+                Assert.True(fixture.World.TryGetComponent(
+                    entity,
+                    binding,
+                    out UltraSim.ECS.Tests.LayoutEnableLong value));
+                Assert.Equal(values[selected], value.Value);
+                Assert.True(fixture.World.TryGetComponentEnabled(entity, binding, out bool actualEnabled));
+                Assert.Equal(enabled[selected], actualEnabled);
+            }
+
+            if ((operation & 255) == 0)
+            {
+                for (int i = 0; i < entityCount; i++)
+                {
+                    ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> currentBinding = inSource[i]
+                        ? fixture.SourceEnableBinding
+                        : fixture.DestinationEnableBinding;
+                    Assert.True(fixture.World.TryGetComponent(
+                        entities[i],
+                        currentBinding,
+                        out UltraSim.ECS.Tests.LayoutEnableLong value));
+                    Assert.Equal(values[i], value.Value);
+                    Assert.True(fixture.World.TryGetComponentEnabled(
+                        entities[i],
+                        currentBinding,
+                        out bool actualEnabled));
+                    Assert.Equal(enabled[i], actualEnabled);
+                }
+                fixture.Source.Store.ValidateInvariants();
+                fixture.Destination.Store.ValidateInvariants();
+            }
+        }
+    }
+
+    private static void EcsWorld_BoundAccessNativePinnedParity()
+    {
+        long native = RunBoundAccessParity<NativeChunkArena>();
+        long pinned = RunBoundAccessParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void EcsWorld_WarmedBoundAccessAllocatesZeroManagedBytes()
+    {
+        const int operations = 1_000_000;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 1);
+        Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity entity));
+        for (int i = 0; i < 32; i++)
+        {
+            Assert.True(fixture.World.TrySetComponent(
+                entity,
+                fixture.SourceEnableBinding,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = i }));
+            Assert.True(fixture.World.TryGetComponent(
+                entity,
+                fixture.SourceEnableBinding,
+                out _));
+            Assert.True(fixture.World.TrySetComponentEnabled(
+                entity,
+                fixture.SourceEnableBinding,
+                (i & 1) == 0));
+            Assert.True(fixture.World.TryGetComponentEnabled(
+                entity,
+                fixture.SourceEnableBinding,
+                out _));
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        long checksum = 0;
+        for (int i = 0; i < operations; i++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong { Value = i * 17L };
+            if (!fixture.World.TrySetComponent(entity, fixture.SourceEnableBinding, value) ||
+                !fixture.World.TryGetComponent(
+                    entity,
+                    fixture.SourceEnableBinding,
+                    out UltraSim.ECS.Tests.LayoutEnableLong read) ||
+                !fixture.World.TrySetComponentEnabled(
+                    entity,
+                    fixture.SourceEnableBinding,
+                    (i & 1) == 0) ||
+                !fixture.World.TryGetComponentEnabled(
+                    entity,
+                    fixture.SourceEnableBinding,
+                    out bool isEnabled))
+            {
+                throw new InvalidOperationException("Warmed bound component access unexpectedly failed.");
+            }
+            checksum = unchecked(checksum + read.Value + (isEnabled ? 1 : 0));
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(checksum != 0);
+    }
+
+    private static long RunBoundAccessParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int operations = 10_000;
+        using var fixture = new WorldFixture<TArena>(maximumChunks: 1, entityCapacity: 1);
+        Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity entity));
+        long checksum = 0;
+        for (int i = 0; i < operations; i++)
+        {
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> binding = (i & 1) == 0
+                ? fixture.SourceEnableBinding
+                : fixture.DestinationEnableBinding;
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong { Value = i * 19L };
+            Assert.True(fixture.World.TrySetComponent(entity, binding, value));
+            Assert.True(fixture.World.TrySetComponentEnabled(entity, binding, (i & 2) == 0));
+            Assert.True(fixture.World.TryGetComponent(
+                entity,
+                binding,
+                out UltraSim.ECS.Tests.LayoutEnableLong read));
+            Assert.True(fixture.World.TryGetComponentEnabled(entity, binding, out bool isEnabled));
+            checksum = unchecked(checksum + read.Value + (isEnabled ? 1 : 0));
+            ArchetypeTransitionPlan<TArena> plan = (i & 1) == 0
+                ? fixture.SourceToDestination
+                : fixture.DestinationToSource;
+            Assert.True(fixture.World.TryTransition(entity, plan, out _));
+        }
+        return checksum;
+    }
+
     private static long RunWorldLifecycleParity<TArena>()
         where TArena : class, IChunkArenaBackend
     {
@@ -2791,6 +3215,14 @@ internal static class EcsPrimitiveTests
             SourceToDestination = World.PrepareTransition(sourceId, destinationId);
             DestinationToSource = World.PrepareTransition(destinationId, sourceId);
 
+            SourceByteBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutByte>(sourceId, byteId);
+            SourceEnableBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(sourceId, enableId);
+            SourceWideBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutWide>(sourceId, wideId);
+            DestinationEnableBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(destinationId, enableId);
+            DestinationIntBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutInt>(destinationId, intId);
+            DestinationTagBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutTag>(destinationId, tagId);
+            DestinationWideBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutWide>(destinationId, wideId);
+
             SourceByte = FindColumn(Source.Columns, byteId);
             SourceEnable = FindColumn(Source.Columns, enableId);
             DestinationEnable = FindColumn(Destination.Columns, enableId);
@@ -2802,6 +3234,13 @@ internal static class EcsPrimitiveTests
         internal ArchetypeStorage<TArena> Destination { get; }
         internal ArchetypeTransitionPlan<TArena> SourceToDestination { get; }
         internal ArchetypeTransitionPlan<TArena> DestinationToSource { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> SourceByteBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> SourceEnableBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> SourceWideBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> DestinationEnableBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> DestinationIntBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutTag> DestinationTagBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> DestinationWideBinding { get; }
         internal ComponentColumnLayout SourceByte { get; }
         internal ComponentColumnLayout SourceEnable { get; }
         internal ComponentColumnLayout DestinationEnable { get; }
