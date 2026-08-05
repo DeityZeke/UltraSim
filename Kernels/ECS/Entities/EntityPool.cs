@@ -194,6 +194,26 @@ internal sealed class EntityPool
         return true;
     }
 
+    internal bool TryReplaceLocation(
+        Entity entity,
+        EntityLocation expected,
+        EntityLocation replacement)
+    {
+        if (!expected.IsValid)
+            throw new ArgumentException("A valid expected entity location is required.", nameof(expected));
+        if (!replacement.IsValid)
+            throw new ArgumentException("A valid replacement entity location is required.", nameof(replacement));
+        if (!IsAlive(entity))
+            return false;
+
+        int index = checked((int)entity.Index);
+        if (_locations[index] != expected)
+            return false;
+
+        _locations[index] = replacement;
+        return true;
+    }
+
     /// <summary>
     /// Applies a trusted row-store swap relocation to the moved live entity.
     /// Any mismatch is an internal structural invariant failure, not a stale

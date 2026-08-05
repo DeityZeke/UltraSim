@@ -72,6 +72,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedRowChurn = new ArchetypeSwapChurnFixture<PinnedChunkArena>(100_000, 100_000);
         using var nativeEnableToggle = new ArchetypeEnableToggleFixture<NativeChunkArena>(100_000, 1_000_000);
         using var pinnedEnableToggle = new ArchetypeEnableToggleFixture<PinnedChunkArena>(100_000, 1_000_000);
+        using var nativeMigration = new ArchetypeMigrationFixture<NativeChunkArena>(100_000);
+        using var pinnedMigration = new ArchetypeMigrationFixture<PinnedChunkArena>(100_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -113,6 +115,8 @@ internal static class PrimitiveBenchmarks
             new("PinnedArchetype_SwapRemoveAdd_100000Cycles", "ArchetypeRows", 100_000, pinnedRowChurn.Execute),
             new("NativeArchetype_EnableToggle_1000000", "ArchetypeRows", 1_000_000, nativeEnableToggle.Execute),
             new("PinnedArchetype_EnableToggle_1000000", "ArchetypeRows", 1_000_000, pinnedEnableToggle.Execute),
+            new("NativeArchetype_MigrationCycle_100000", "ArchetypeMigration", 100_000, nativeMigration.Execute),
+            new("PinnedArchetype_MigrationCycle_100000", "ArchetypeMigration", 100_000, pinnedMigration.Execute),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -129,7 +133,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-archetype-registry-v6",
+            SemanticProfile = "ecs-next-phase1-archetype-migration-v7",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -978,6 +982,107 @@ internal static class PrimitiveBenchmarks
         }
 
         public void Dispose() => _store.Dispose();
+    }
+
+    private sealed class ArchetypeMigrationFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly ArchetypeRegistry<TArena> _registry;
+        private readonly EntityPool _pool;
+        private readonly Entity _entity;
+        private readonly ArchetypeTransitionPlan<TArena> _forward;
+        private readonly ArchetypeTransitionPlan<TArena> _backward;
+        private readonly ComponentColumnLayout _sourceVelocity;
+        private readonly int _operations;
+
+        internal ArchetypeMigrationFixture(int operations)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _registry = new ArchetypeRegistry<TArena>(
+                schema,
+                maximumArchetypes: 2,
+                static capacity => CreateArena(capacity));
+            ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
+            ComponentId[] sourceSignature = CreateSortedSignature(position, velocity);
+            ComponentId[] destinationSignature = CreateSortedSignature(disabled, velocity, wide);
+            ArchetypeId sourceId = _registry.Register(sourceSignature, ChunkLayoutOptions.KiB16, 1);
+            ArchetypeId destinationId = _registry.Register(destinationSignature, ChunkLayoutOptions.KiB16, 1);
+            ArchetypeStorage<TArena> source = _registry.GetStorage(sourceId);
+            _sourceVelocity = FindColumn(source.Columns, velocity);
+            _forward = _registry.PrepareTransition(sourceId, destinationId);
+            _backward = _registry.PrepareTransition(destinationId, sourceId);
+            _registry.Seal();
+
+            _pool = new EntityPool(WorldId.Create(), new EntityCapacity(1));
+            _entity = _pool.Allocate();
+            if (!source.Store.TryAdd(_entity.Index, out ChunkRow row) ||
+                !_pool.TryBindLocation(_entity, new EntityLocation(sourceId, row)))
+            {
+                throw new InvalidOperationException("Migration benchmark fixture initialization failed.");
+            }
+            source.Store.GetComponentRef<BenchmarkVelocity>(row, _sourceVelocity) =
+                new BenchmarkVelocity { X = 123.5f, Y = -77.25f };
+            source.Store.SetEnabled(row, _sourceVelocity, enabled: false);
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                ArchetypeTransitionPlan<TArena> plan = (i & 1) == 0 ? _forward : _backward;
+                if (!ArchetypeMigrator.TryMigrate(_pool, _entity, plan, out EntityLocation location))
+                    throw new InvalidOperationException("Migration benchmark lost its entity.");
+                checksum += location.ArchetypeId.Value + (uint)location.ChunkRow.Row;
+            }
+
+            if (!_pool.TryGetLocation(_entity, out EntityLocation finalLocation) ||
+                finalLocation.ArchetypeId != _backward.Destination.Id)
+            {
+                throw new InvalidOperationException("Migration benchmark ended in the wrong archetype.");
+            }
+            BenchmarkVelocity retained = _backward.Destination.Store
+                .GetComponentRef<BenchmarkVelocity>(finalLocation.ChunkRow, _sourceVelocity);
+            checksum += BitConverter.SingleToInt32Bits(retained.X);
+            checksum += BitConverter.SingleToInt32Bits(retained.Y);
+            checksum += _backward.Destination.Store.IsEnabled(finalLocation.ChunkRow, _sourceVelocity) ? 1 : 0;
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        public void Dispose() => _registry.Dispose();
+
+        private static TArena CreateArena(ChunkArenaCapacity capacity)
+        {
+            object arena = typeof(TArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException($"Unsupported migration benchmark arena {typeof(TArena).Name}.");
+            return (TArena)arena;
+        }
+
+        private static ComponentId[] CreateSortedSignature(params ComponentId[] signature)
+        {
+            Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
+            return signature;
+        }
+
+        private static ComponentColumnLayout FindColumn(
+            ReadOnlySpan<ComponentColumnLayout> columns,
+            ComponentId componentId)
+        {
+            for (int i = 0; i < columns.Length; i++)
+            {
+                if (columns[i].ComponentId == componentId)
+                    return columns[i];
+            }
+
+            throw new InvalidOperationException($"Migration benchmark column {componentId} was not found.");
+        }
     }
 
     private readonly struct PackedEntityCandidate

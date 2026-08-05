@@ -79,6 +79,22 @@ The first focused run measured approximately `11.5 ns/lookup` and `1.07 ns/route
 respectively, with zero managed bytes or collections. Signature lookup is intended
 for bootstrap and transition-plan construction; hot entity access routes by ID.
 
+The cross-archetype migration extension adds two non-comparable 100,000-move
+cycle scenarios, one per backend. The source contains `BenchmarkPosition` and
+`BenchmarkVelocity`; the destination retains velocity, adds an enableable tag and
+`BenchmarkWide`, and removes position. Both directions use cold-built plans with
+prebound physical columns, so the measured loop includes row reservation/default
+initialization, retained-state copy, entity-location replacement, packed source
+removal, and any donor-location repair—but no signature or component lookup.
+
+The initial paired run measured native at roughly `77.7 ns/move` and pinned at
+`115.8 ns/move`, with a conspicuous pinned tail. Exact-filter isolated reruns
+measured native at approximately `76.9 ns/move` (`7.73 ms` p95 per 100,000 moves)
+and pinned at `78.5 ns/move` (`7.90 ms` p95), both at zero managed bytes and zero
+collections. The isolated result is effectively tied at this noise level; the
+paired pinned result is retained as evidence of scenario/process interference,
+not attributed to the storage backend. The code suite now contains 40 scenarios.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

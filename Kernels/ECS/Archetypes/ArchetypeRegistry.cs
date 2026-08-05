@@ -199,6 +199,19 @@ internal sealed class ArchetypeRegistry<TArena> : IDisposable
         return storage is not null;
     }
 
+    internal ArchetypeTransitionPlan<TArena> PrepareTransition(
+        ArchetypeId sourceId,
+        ArchetypeId destinationId)
+    {
+        ThrowIfDisposed();
+        if (_sealed)
+            throw new InvalidOperationException("Transition plans must be prepared before the archetype registry is sealed.");
+
+        return ArchetypeTransitionPlan<TArena>.Create(
+            GetStorage(sourceId),
+            GetStorage(destinationId));
+    }
+
     internal void Seal()
     {
         ThrowIfDisposed();

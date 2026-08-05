@@ -185,6 +185,61 @@ internal sealed class ArchetypeChunkStore<TArena> : IDisposable
         return GetEntityIndices(bytes)[row];
     }
 
+    internal bool Contains(ChunkRow location, uint expectedEntityIndex)
+    {
+        ThrowIfDisposed();
+        if (!TryResolve(location, out int chunkIndex, out int row))
+            return false;
+
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+        return GetEntityIndices(bytes)[row] == expectedEntityIndex;
+    }
+
+    internal void CopyColumnsTo(
+        ChunkRow sourceLocation,
+        ArchetypeChunkStore<TArena> destination,
+        ChunkRow destinationLocation,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ResolveOrThrow(sourceLocation, out int sourceChunkIndex, out int sourceRow);
+        destination.ResolveOrThrow(
+            destinationLocation,
+            out int destinationChunkIndex,
+            out int destinationRow);
+        Span<byte> sourceBytes = _arena.GetChunkBytes(_chunks[sourceChunkIndex].Handle);
+        Span<byte> destinationBytes = destination._arena.GetChunkBytes(
+            destination._chunks[destinationChunkIndex].Handle);
+
+        for (int i = 0; i < transfers.Length; i++)
+        {
+            ArchetypeColumnTransfer transfer = transfers[i];
+            ref readonly ComponentColumnLayout sourceColumn =
+                ref _columns[transfer.SourceColumnIndex];
+            ref readonly ComponentColumnLayout destinationColumn =
+                ref destination._columns[transfer.DestinationColumnIndex];
+            System.Diagnostics.Debug.Assert(sourceColumn.ComponentId == transfer.ComponentId);
+            System.Diagnostics.Debug.Assert(destinationColumn.ComponentId == transfer.ComponentId);
+            System.Diagnostics.Debug.Assert(sourceColumn.ElementSizeBytes == destinationColumn.ElementSizeBytes);
+            System.Diagnostics.Debug.Assert(sourceColumn.HasEnableBits == destinationColumn.HasEnableBits);
+
+            if (sourceColumn.HasData)
+            {
+                int sourceOffset = checked(
+                    sourceColumn.DataOffsetBytes + (sourceRow * sourceColumn.ElementSizeBytes));
+                int destinationOffset = checked(
+                    destinationColumn.DataOffsetBytes + (destinationRow * destinationColumn.ElementSizeBytes));
+                sourceBytes.Slice(sourceOffset, sourceColumn.ElementSizeBytes)
+                    .CopyTo(destinationBytes.Slice(destinationOffset, destinationColumn.ElementSizeBytes));
+            }
+            if (sourceColumn.HasEnableBits)
+            {
+                bool enabled = EnableBitOperations.Get(sourceBytes, sourceColumn, sourceRow);
+                EnableBitOperations.Set(destinationBytes, destinationColumn, destinationRow, enabled);
+            }
+        }
+    }
+
     internal int GetColumnIndex(ComponentId componentId)
     {
         ThrowIfDisposed();
