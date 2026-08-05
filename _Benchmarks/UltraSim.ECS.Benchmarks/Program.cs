@@ -78,6 +78,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedWorldLifecycle = new EcsWorldLifecycleFixture<PinnedChunkArena>(100_000);
         using var nativeBoundAccess = new EcsWorldBoundAccessFixture<NativeChunkArena>(1_000_000);
         using var pinnedBoundAccess = new EcsWorldBoundAccessFixture<PinnedChunkArena>(1_000_000);
+        using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
+        using var pinnedChunkVisit = new EcsWorldChunkVisitFixture<PinnedChunkArena>(100_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -125,6 +127,10 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_CreateTransitionDestroy_100000", "WorldLifecycle", 100_000, pinnedWorldLifecycle.Execute),
             new("NativeWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, nativeBoundAccess.Execute),
             new("PinnedWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, pinnedBoundAccess.Execute),
+            new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
+            new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
+            new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
+            new("PinnedWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteWrite),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -141,7 +147,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-bound-component-access-v9",
+            SemanticProfile = "ecs-next-phase1-bound-chunk-query-v10",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1228,6 +1234,123 @@ internal static class PrimitiveBenchmarks
                     : throw new InvalidOperationException(
                         $"Unsupported bound-access benchmark arena {typeof(TArena).Name}.");
             return (TArena)arena;
+        }
+    }
+
+    private sealed class EcsWorldChunkVisitFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeComponentBinding<BenchmarkVelocity> _binding;
+        private readonly int _population;
+
+        internal EcsWorldChunkVisitFixture(int population)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(population),
+                maximumArchetypes: 1,
+                static capacity => CreateArena(capacity));
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ArchetypeId archetype = _world.RegisterArchetype(
+                [velocity],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 128);
+            _binding = _world.BindComponent<BenchmarkVelocity>(archetype, velocity);
+            _world.Seal();
+            for (int i = 0; i < population; i++)
+            {
+                if (!_world.TryCreateDefault(archetype, out _))
+                    throw new InvalidOperationException("Chunk-query benchmark fixture exhausted unexpectedly.");
+            }
+
+            _population = population;
+            var initialize = new ChunkWriteVisitor(1);
+            if (_world.VisitWriteChunks(_binding, ref initialize) != population)
+                throw new InvalidOperationException("Chunk-query benchmark initialization lost rows.");
+        }
+
+        internal ScenarioMeasurement ExecuteRead()
+        {
+            var visitor = new ChunkReadVisitor();
+            int visited = _world.VisitReadChunks(_binding, ref visitor);
+            if (visited != _population)
+                throw new InvalidOperationException("Chunk-query read lost rows.");
+            return new ScenarioMeasurement(visited, visitor.Checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteWrite()
+        {
+            var visitor = new ChunkWriteVisitor(round: 1);
+            int visited = _world.VisitWriteChunks(_binding, ref visitor);
+            if (visited != _population)
+                throw new InvalidOperationException("Chunk-query write lost rows.");
+            return new ScenarioMeasurement(visited, visitor.Checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static TArena CreateArena(ChunkArenaCapacity capacity)
+        {
+            object arena = typeof(TArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported chunk-query benchmark arena {typeof(TArena).Name}.");
+            return (TArena)arena;
+        }
+
+        private struct ChunkReadVisitor : IComponentChunkReadVisitor<BenchmarkVelocity>
+        {
+            internal long Checksum;
+
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in ReadOnlyComponentChunk<BenchmarkVelocity> chunk)
+            {
+                long checksum = Checksum;
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(chunk.Components[row].X));
+                    checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(chunk.Components[row].Y));
+                    checksum += chunk.IsEnabled(row) ? 1 : 0;
+                }
+                Checksum = checksum;
+            }
+        }
+
+        private struct ChunkWriteVisitor : IComponentChunkWriteVisitor<BenchmarkVelocity>
+        {
+            private readonly int _round;
+
+            internal ChunkWriteVisitor(int round)
+            {
+                _round = round;
+                Checksum = 0;
+            }
+
+            internal long Checksum;
+
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in WritableComponentChunk<BenchmarkVelocity> chunk)
+            {
+                long checksum = Checksum;
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    uint entityIndex = chunk.EntityIndices[row];
+                    float x = entityIndex + _round;
+                    float y = _round - entityIndex;
+                    chunk.Components[row] = new BenchmarkVelocity { X = x, Y = y };
+                    bool enabled = ((entityIndex + (uint)_round) & 1) == 0;
+                    chunk.SetEnabled(row, enabled);
+                    checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(x));
+                    checksum += enabled ? 1 : 0;
+                }
+                Checksum = checksum;
+            }
         }
     }
 

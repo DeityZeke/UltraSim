@@ -98,6 +98,13 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_BoundAccessRandomizedModelRemainsConsistent), EcsWorld_BoundAccessRandomizedModelRemainsConsistent);
         Run(nameof(EcsWorld_BoundAccessNativePinnedParity), EcsWorld_BoundAccessNativePinnedParity);
         Run(nameof(EcsWorld_WarmedBoundAccessAllocatesZeroManagedBytes), EcsWorld_WarmedBoundAccessAllocatesZeroManagedBytes);
+        Run(nameof(EcsWorld_ChunkReadVisitsExactPackedRowsAndMetadata), EcsWorld_ChunkReadVisitsExactPackedRowsAndMetadata);
+        Run(nameof(EcsWorld_ChunkWriteUpdatesDataAndEnableState), EcsWorld_ChunkWriteUpdatesDataAndEnableState);
+        Run(nameof(EcsWorld_ChunkViewsRejectTagsForeignBindingsAndInvalidOperations), EcsWorld_ChunkViewsRejectTagsForeignBindingsAndInvalidOperations);
+        Run(nameof(EcsWorld_ChunkVisitEnforcesBarrierAndReleasesAfterException), EcsWorld_ChunkVisitEnforcesBarrierAndReleasesAfterException);
+        Run(nameof(EcsWorld_ChunkVisitRandomizedModelRemainsConsistent), EcsWorld_ChunkVisitRandomizedModelRemainsConsistent);
+        Run(nameof(EcsWorld_ChunkVisitNativePinnedParity), EcsWorld_ChunkVisitNativePinnedParity);
+        Run(nameof(EcsWorld_WarmedChunkVisitsAllocateZeroManagedBytes), EcsWorld_WarmedChunkVisitsAllocateZeroManagedBytes);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -3049,6 +3056,470 @@ internal static class EcsPrimitiveTests
 
         Assert.Equal(0L, allocated);
         Assert.True(checksum != 0);
+    }
+
+    private static void EcsWorld_ChunkReadVisitsExactPackedRowsAndMetadata()
+    {
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 2, entityCapacity: 2_000);
+        int count = fixture.Source.Store.Layout.RowCapacity + 17;
+        var seen = new bool[count];
+        long expectedChecksum = 0;
+        for (int i = 0; i < count; i++)
+        {
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity entity));
+            Assert.True(fixture.World.TrySetComponent(
+                entity,
+                fixture.SourceEnableBinding,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = i * 13L + 7 }));
+            expectedChecksum += i * 13L + 7;
+        }
+
+        var visitor = new ChunkReadAuditVisitor(
+            fixture.World.Id,
+            fixture.Source.Id,
+            fixture.Source.Store.Layout.RowCapacity,
+            seen);
+        int visited = fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref visitor);
+
+        Assert.Equal(count, visited);
+        Assert.Equal(count, visitor.Rows);
+        Assert.Equal(2, visitor.Chunks);
+        Assert.Equal(expectedChecksum, visitor.Checksum);
+        for (int i = 0; i < seen.Length; i++)
+            Assert.True(seen[i]);
+
+        var empty = new ChunkCountVisitor<UltraSim.ECS.Tests.LayoutInt>();
+        Assert.Equal(0, fixture.World.VisitReadChunks(fixture.DestinationIntBinding, ref empty));
+        Assert.Equal(0, empty.Chunks);
+    }
+
+    private static void EcsWorld_ChunkWriteUpdatesDataAndEnableState()
+    {
+        const int count = 257;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 2, entityCapacity: count);
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out entities[i]));
+
+        var writer = new EnableChunkWriter(salt: 0x1234);
+        Assert.Equal(count, fixture.World.VisitWriteChunks(fixture.SourceEnableBinding, ref writer));
+        Assert.Equal(count, writer.Rows);
+        Assert.True(writer.Chunks > 0);
+
+        for (int i = 0; i < count; i++)
+        {
+            Assert.True(fixture.World.TryGetComponent(
+                entities[i],
+                fixture.SourceEnableBinding,
+                out UltraSim.ECS.Tests.LayoutEnableLong value));
+            Assert.Equal(0x1234L + (entities[i].Index * 31L), value.Value);
+            Assert.True(fixture.World.TryGetComponentEnabled(
+                entities[i],
+                fixture.SourceEnableBinding,
+                out bool enabled));
+            Assert.Equal((entities[i].Index & 1) == 0, enabled);
+        }
+    }
+
+    private static void EcsWorld_ChunkViewsRejectTagsForeignBindingsAndInvalidOperations()
+    {
+        using var first = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 4);
+        using var second = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 4);
+        Assert.True(first.World.TryCreateDefault(first.Source.Id, out _));
+
+        var tagVisitor = new ChunkCountVisitor<UltraSim.ECS.Tests.LayoutTag>();
+        Assert.Throws<InvalidOperationException>(() =>
+            first.World.VisitReadChunks(first.DestinationTagBinding, ref tagVisitor));
+
+        var foreignVisitor = new ChunkCountVisitor<UltraSim.ECS.Tests.LayoutEnableLong>();
+        Assert.Throws<ArgumentException>(() =>
+            second.World.VisitReadChunks(first.SourceEnableBinding, ref foreignVisitor));
+
+        var ordinaryWriter = new OrdinaryChunkMisuseVisitor();
+        Assert.Equal(1, first.World.VisitWriteChunks(first.SourceByteBinding, ref ordinaryWriter));
+        Assert.True(ordinaryWriter.NonEnableableRejected);
+        Assert.True(ordinaryWriter.RowBoundsRejected);
+    }
+
+    private static void EcsWorld_ChunkVisitEnforcesBarrierAndReleasesAfterException()
+    {
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 4);
+        Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity entity));
+        var probe = new ChunkBarrierProbeVisitor<NativeChunkArena>(
+            fixture.World,
+            fixture.SourceEnableBinding,
+            fixture.SourceToDestination,
+            entity);
+        Assert.Equal(1, fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref probe));
+        Assert.Equal(7, probe.Rejections);
+        Assert.True(fixture.World.IsAlive(entity));
+
+        var throwing = new ThrowingChunkVisitor();
+        Assert.Throws<ChunkVisitorSentinelException>(() =>
+            fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref throwing));
+
+        Assert.True(fixture.World.TrySetComponent(
+            entity,
+            fixture.SourceEnableBinding,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 91 }));
+        Assert.True(fixture.World.TryTransition(entity, fixture.SourceToDestination, out _));
+        Assert.True(fixture.World.TryDestroy(entity));
+    }
+
+    private static void EcsWorld_ChunkVisitRandomizedModelRemainsConsistent()
+    {
+        const int entityCount = 513;
+        const int rounds = 2_000;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 3, entityCapacity: entityCount);
+        var entities = new Entity[entityCount];
+        var expected = new long[entityCount];
+        var enabled = new bool[entityCount];
+        for (int i = 0; i < entityCount; i++)
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out entities[i]));
+
+        var random = new Random(unchecked((int)0xC11A5EED));
+        for (int round = 0; round < rounds; round++)
+        {
+            long salt = random.NextInt64();
+            var writer = new EnableChunkWriter(salt);
+            Assert.Equal(entityCount, fixture.World.VisitWriteChunks(fixture.SourceEnableBinding, ref writer));
+            for (int i = 0; i < entityCount; i++)
+            {
+                expected[i] = unchecked(salt + (entities[i].Index * 31L));
+                enabled[i] = (entities[i].Index & 1) == 0;
+            }
+
+            int selected = random.Next(entityCount);
+            long overrideValue = random.NextInt64();
+            Assert.True(fixture.World.TrySetComponent(
+                entities[selected],
+                fixture.SourceEnableBinding,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = overrideValue }));
+            expected[selected] = overrideValue;
+            bool overrideEnabled = random.Next(2) == 0;
+            Assert.True(fixture.World.TrySetComponentEnabled(
+                entities[selected],
+                fixture.SourceEnableBinding,
+                overrideEnabled));
+            enabled[selected] = overrideEnabled;
+
+            if ((round & 63) == 0)
+            {
+                var audit = new ChunkModelAuditVisitor(expected, enabled);
+                Assert.Equal(entityCount, fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref audit));
+                Assert.Equal(entityCount, audit.Rows);
+            }
+        }
+    }
+
+    private static void EcsWorld_ChunkVisitNativePinnedParity()
+    {
+        long native = RunChunkVisitParity<NativeChunkArena>();
+        long pinned = RunChunkVisitParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void EcsWorld_WarmedChunkVisitsAllocateZeroManagedBytes()
+    {
+        const int entityCount = 1_000;
+        const int rounds = 10_000;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 4, entityCapacity: entityCount);
+        for (int i = 0; i < entityCount; i++)
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out _));
+
+        var writer = new EnableChunkWriter(1);
+        var reader = new ChunkChecksumVisitor();
+        for (int i = 0; i < 32; i++)
+        {
+            writer.Salt = i;
+            fixture.World.VisitWriteChunks(fixture.SourceEnableBinding, ref writer);
+            fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref reader);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < rounds; i++)
+        {
+            writer.Salt = i * 17L;
+            fixture.World.VisitWriteChunks(fixture.SourceEnableBinding, ref writer);
+            fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref reader);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(reader.Checksum != 0);
+    }
+
+    private static long RunChunkVisitParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int entityCount = 1_000;
+        const int rounds = 1_000;
+        using var fixture = new WorldFixture<TArena>(maximumChunks: 4, entityCapacity: entityCount);
+        for (int i = 0; i < entityCount; i++)
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out _));
+
+        var writer = new EnableChunkWriter(0);
+        var reader = new ChunkChecksumVisitor();
+        for (int round = 0; round < rounds; round++)
+        {
+            writer.Salt = round * 97L;
+            Assert.Equal(entityCount, fixture.World.VisitWriteChunks(fixture.SourceEnableBinding, ref writer));
+            Assert.Equal(entityCount, fixture.World.VisitReadChunks(fixture.SourceEnableBinding, ref reader));
+        }
+
+        fixture.Source.Store.ValidateInvariants();
+        return unchecked(reader.Checksum + writer.Rows + writer.Chunks);
+    }
+
+    private struct ChunkReadAuditVisitor : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly WorldId _worldId;
+        private readonly ArchetypeId _archetypeId;
+        private readonly int _rowCapacity;
+        private readonly bool[] _seen;
+
+        internal ChunkReadAuditVisitor(
+            WorldId worldId,
+            ArchetypeId archetypeId,
+            int rowCapacity,
+            bool[] seen)
+        {
+            _worldId = worldId;
+            _archetypeId = archetypeId;
+            _rowCapacity = rowCapacity;
+            _seen = seen;
+            Rows = 0;
+            Chunks = 0;
+            Checksum = 0;
+        }
+
+        internal int Rows;
+        internal int Chunks;
+        internal long Checksum;
+
+        public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            Assert.Equal(_worldId, chunk.WorldId);
+            Assert.Equal(_archetypeId, chunk.ArchetypeId);
+            Assert.True(chunk.ChunkIndex < 2);
+            Assert.True(chunk.Count > 0 && chunk.Count <= _rowCapacity);
+            Assert.Equal(chunk.Count, chunk.EntityIndices.Length);
+            Assert.Equal(chunk.Count, chunk.Components.Length);
+            Assert.True(chunk.IsEnableable);
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint entityIndex = chunk.EntityIndices[row];
+                Assert.True(entityIndex < (uint)_seen.Length);
+                Assert.False(_seen[entityIndex]);
+                _seen[entityIndex] = true;
+                Assert.True(chunk.IsEnabled(row));
+                Checksum += chunk.Components[row].Value;
+            }
+            Rows += chunk.Count;
+            Chunks++;
+        }
+    }
+
+    private struct ChunkCountVisitor<T> : IComponentChunkReadVisitor<T>
+        where T : unmanaged, IComponent<T>
+    {
+        internal int Chunks;
+
+        public void Execute(in ReadOnlyComponentChunk<T> chunk) => Chunks++;
+    }
+
+    private struct EnableChunkWriter : IComponentChunkWriteVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        internal EnableChunkWriter(long salt)
+        {
+            Salt = salt;
+            Rows = 0;
+            Chunks = 0;
+        }
+
+        internal long Salt;
+        internal int Rows;
+        internal int Chunks;
+
+        public void Execute(in WritableComponentChunk<UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            Assert.True(chunk.IsEnableable);
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint entityIndex = chunk.EntityIndices[row];
+                chunk.Components[row].Value = unchecked(Salt + (entityIndex * 31L));
+                chunk.SetEnabled(row, (entityIndex & 1) == 0);
+            }
+            Rows += chunk.Count;
+            Chunks++;
+        }
+    }
+
+    private struct OrdinaryChunkMisuseVisitor : IComponentChunkWriteVisitor<UltraSim.ECS.Tests.LayoutByte>
+    {
+        internal bool NonEnableableRejected;
+        internal bool RowBoundsRejected;
+
+        public void Execute(in WritableComponentChunk<UltraSim.ECS.Tests.LayoutByte> chunk)
+        {
+            Assert.False(chunk.IsEnableable);
+            Assert.True(chunk.IsEnabled(0));
+            try
+            {
+                chunk.SetEnabled(0, false);
+            }
+            catch (InvalidOperationException)
+            {
+                NonEnableableRejected = true;
+            }
+
+            try
+            {
+                chunk.IsEnabled(chunk.Count);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                RowBoundsRejected = true;
+            }
+        }
+    }
+
+    private struct ChunkBarrierProbeVisitor<TArena> : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> _binding;
+        private readonly ArchetypeTransitionPlan<TArena> _transition;
+        private readonly Entity _entity;
+
+        internal ChunkBarrierProbeVisitor(
+            EcsWorld<TArena> world,
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> binding,
+            ArchetypeTransitionPlan<TArena> transition,
+            Entity entity)
+        {
+            _world = world;
+            _binding = binding;
+            _transition = transition;
+            _entity = entity;
+            Rejections = 0;
+        }
+
+        internal int Rejections;
+
+        public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            try
+            {
+                _world.TryCreateDefault(_binding.ArchetypeId, out _);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TryDestroy(_entity);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TryTransition(_entity, _transition, out _);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TrySetComponent(
+                    _entity,
+                    _binding,
+                    new UltraSim.ECS.Tests.LayoutEnableLong { Value = 1 });
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TrySetComponentEnabled(_entity, _binding, false);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.Dispose();
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                var nested = new ChunkCountVisitor<UltraSim.ECS.Tests.LayoutEnableLong>();
+                _world.VisitReadChunks(_binding, ref nested);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+        }
+    }
+
+    private struct ThrowingChunkVisitor : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutEnableLong> chunk) =>
+            throw new ChunkVisitorSentinelException();
+    }
+
+    private sealed class ChunkVisitorSentinelException : Exception;
+
+    private struct ChunkModelAuditVisitor : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly long[] _expected;
+        private readonly bool[] _enabled;
+
+        internal ChunkModelAuditVisitor(long[] expected, bool[] enabled)
+        {
+            _expected = expected;
+            _enabled = enabled;
+            Rows = 0;
+        }
+
+        internal int Rows;
+
+        public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                int index = checked((int)chunk.EntityIndices[row]);
+                Assert.Equal(_expected[index], chunk.Components[row].Value);
+                Assert.Equal(_enabled[index], chunk.IsEnabled(row));
+            }
+            Rows += chunk.Count;
+        }
+    }
+
+    private struct ChunkChecksumVisitor : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        internal long Checksum;
+
+        public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+                checksum = unchecked(checksum + chunk.Components[row].Value + (chunk.IsEnabled(row) ? 1 : 0));
+            Checksum = checksum;
+        }
     }
 
     private static long RunBoundAccessParity<TArena>()

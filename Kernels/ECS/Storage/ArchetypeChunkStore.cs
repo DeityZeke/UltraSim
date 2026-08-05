@@ -334,6 +334,73 @@ internal sealed class ArchetypeChunkStore<TArena> : IDisposable
         EnableBitOperations.Set(_arena.GetChunkBytes(_chunks[chunkIndex].Handle), column, row, enabled);
     }
 
+    /// <summary>
+    /// Returns the first occupied packed chunk without scanning unallocated capacity.
+    /// The single partial chunk is visited before the intrusive full-chunk list.
+    /// </summary>
+    internal int GetFirstOccupiedChunkIndex()
+    {
+        ThrowIfDisposed();
+        return _partialHead != NoChunk ? _partialHead : _fullHead;
+    }
+
+    /// <summary>Advances an occupied-chunk cursor produced by this store.</summary>
+    internal int GetNextOccupiedChunkIndex(int chunkIndex)
+    {
+        ThrowIfDisposed();
+        if ((uint)chunkIndex >= (uint)_chunks.Length)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        ChunkListState state = _chunks[chunkIndex].State;
+        if (state == ChunkListState.Partial)
+        {
+            if (chunkIndex != _partialHead)
+                ThrowInvariant("The packed partial chunk is not its list head.");
+            return _fullHead;
+        }
+        if (state != ChunkListState.Full)
+            throw new ArgumentException("The cursor does not identify an occupied chunk.", nameof(chunkIndex));
+        return _chunks[chunkIndex].Next;
+    }
+
+    /// <summary>
+    /// Executes a column/type binding already validated by the owning world and
+    /// exposes only the occupied prefix of the chunk.
+    /// </summary>
+    internal BoundComponentChunk<T> GetBoundComponentChunk<T>(
+        int chunkIndex,
+        int columnIndex,
+        bool includeEnableWords)
+        where T : unmanaged
+    {
+        ThrowIfDisposed();
+        if ((uint)chunkIndex >= (uint)_chunks.Length)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        ref readonly ChunkRecord chunk = ref _chunks[chunkIndex];
+        if (chunk.State != ChunkListState.Partial && chunk.State != ChunkListState.Full)
+            throw new ArgumentException("The index does not identify an occupied chunk.", nameof(chunkIndex));
+
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasData);
+        System.Diagnostics.Debug.Assert(column.ElementSizeBytes == Unsafe.SizeOf<T>());
+        System.Diagnostics.Debug.Assert(!includeEnableWords || column.HasEnableBits);
+
+        Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
+        Span<T> components = MemoryMarshal.Cast<byte, T>(
+            bytes.Slice(column.DataOffsetBytes, column.DataBytes));
+        Span<ulong> enableWords = includeEnableWords
+            ? MemoryMarshal.Cast<byte, ulong>(
+                bytes.Slice(column.EnableBitsOffsetBytes, column.EnableBitsBytes))
+            : Span<ulong>.Empty;
+        int rowCount = chunk.RowCount;
+        return new BoundComponentChunk<T>(
+            (uint)chunkIndex,
+            GetEntityIndices(bytes).Slice(0, rowCount),
+            components.Slice(0, rowCount),
+            enableWords);
+    }
+
     internal int GetRowCount(uint chunkIndex)
     {
         ThrowIfDisposed();

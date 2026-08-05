@@ -59,6 +59,15 @@ allocation:
   stale/foreign/wrong-archetype entities, supports enableable data and tags, and
   rejects data access for storage-free tags. Single-value initialized creation
   writes through the same checked binding without exposing raw storage.
+- `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
+  path. They reuse an exact binding, walk only occupied partial/full chunk lists,
+  and invoke constrained struct visitors with stack-only component/entity-index
+  views. Enable words stay encapsulated behind checked row operations.
+- The synchronous chunk barrier rejects nested visits, structural operations,
+  scalar writes, enable writes, and world disposal until the visitor returns.
+  A `finally` releases it on exceptions. Safe managed code cannot retain the
+  view or its spans beyond the callback; this is not yet the parallel scheduler
+  or the final generated multi-component query surface.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -113,7 +122,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 86 passing tests, including
+The current runtime and primitive suite has 93 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -140,13 +149,18 @@ layout, generated-ID/type/membership validation, value and enable semantics,
 tag/non-enableable rejection, initialized creation, exact-archetype behavior over
 migration, stale/foreign isolation, a 30,000-operation randomized model,
 native/pinned parity, and one million warmed allocation-free access rounds.
+Chunk-visitor tests add empty and multi-chunk traversal, exact metadata and local
+indices, data/enable writes, tag/foreign/non-enableable rejection, synchronous
+mutation and nesting rejection, exception cleanup, randomized reference parity,
+native/pinned equivalence, and warmed zero-allocation scans.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generator emits the core manifest only. The
-next natural slice is barrier-scoped generated chunk query/view binding, building
-on the same validated physical routes while preventing spans from escaping a safe
-execution window. Bounded deferred structural commands and
-field/serializer/prefab descriptors remain later work.
+next natural query slice is a cold-built multi-component/multi-archetype plan
+with declared read/write access and alias rejection, followed by required/excluded
+and enabled/disabled filters. It must retain the same stack-only execution window
+and gain per-chunk tracked-write versions before becoming public. Bounded deferred
+structural commands and field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:
 

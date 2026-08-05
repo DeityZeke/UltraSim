@@ -119,9 +119,25 @@ but no component scan, metadata lookup, boxing, allocation, or mutable-ref escap
 Final exact-filter isolated runs measured approximately `51.0 ns/round` native
 and `52.6 ns/round` pinned, with zero managed bytes and zero Gen0/1/2 collections.
 The paired run measured `50.2` and `67.5 ns/round`; the larger pinned difference
-again shrank materially in isolation. These cases bring the code suite to 44
-scenarios; they are not yet comparable with Current entity access or future
-barrier-scoped chunk iteration.
+again shrank materially in isolation. These cases brought the code suite to 44
+scenarios; they are not yet comparable with Current entity access.
+
+The first barrier-scoped chunk-query extension adds four non-comparable
+100,000-row scenarios: enable-aware reads and two-float-plus-enable writes over
+native and pinned stores. Exact generated-ID-backed bindings are prepared before
+sealing; timed execution walks only occupied chunks and invokes constrained struct
+visitors with stack-only spans. No entity generation/location lookup, delegate,
+closure, materialized entity handle, or structural work occurs per row. The
+benchmark visitors use `AggressiveOptimization`: the first ordinary paired run
+showed a false late-scenario uplift from shared generic tiered PGO (`~35-39`
+ns/row early versus `~2` ns/row late), and isolated processes confirmed that was
+execution-order warmup rather than an arena difference. Three repeated optimized
+focused processes measured reads at approximately `1.49-1.61 ns/row` and writes
+at `2.08-2.23 ns/row`; native and pinned were effectively identical, with zero
+managed bytes and zero collections. These figures are a steady optimized-loop
+guard, not cold-JIT, scheduling, change-tracking, filter, multi-component, or
+Current-comparison evidence. The code suite now contains 48 scenarios; the
+tracked accepted artifact remains unchanged pending a controlled full capture.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

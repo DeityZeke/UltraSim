@@ -19,6 +19,7 @@ internal sealed class EcsWorld<TArena> : IDisposable
     private readonly EntityPool _entities;
     private readonly ArchetypeRegistry<TArena> _archetypes;
     private EcsWorldState _state;
+    private bool _isVisitingChunks;
 
     internal EcsWorld(
         ComponentSchema schema,
@@ -169,7 +170,7 @@ internal sealed class EcsWorld<TArena> : IDisposable
 
     internal bool TryCreateDefault(ArchetypeId archetypeId, out Entity entity)
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         return TryCreateDefaultCore(archetypeId, out entity, out _);
     }
 
@@ -180,7 +181,7 @@ internal sealed class EcsWorld<TArena> : IDisposable
         out Entity entity)
         where T : unmanaged, IComponent<T>
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         ValidateBinding(binding, requireData: true);
         if (binding.ArchetypeId != archetypeId)
         {
@@ -229,7 +230,7 @@ internal sealed class EcsWorld<TArena> : IDisposable
         in T value)
         where T : unmanaged, IComponent<T>
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         ValidateBinding(binding, requireData: true);
         if (!TryResolveBinding(entity, binding, out ArchetypeStorage<TArena>? storage, out ChunkRow row))
             return false;
@@ -262,13 +263,101 @@ internal sealed class EcsWorld<TArena> : IDisposable
         bool enabled)
         where T : unmanaged, IComponent<T>
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         ValidateEnableBinding(binding);
         if (!TryResolveBinding(entity, binding, out ArchetypeStorage<TArena>? storage, out ChunkRow row))
             return false;
 
         storage.Store.SetBoundEnabled(row, binding.ColumnIndex, enabled);
         return true;
+    }
+
+    /// <summary>
+    /// Synchronously visits the occupied chunks of one exact-archetype data binding.
+    /// Structural or nested world mutation is rejected until the visitor returns.
+    /// </summary>
+    internal int VisitReadChunks<T, TVisitor>(
+        in ArchetypeComponentBinding<T> binding,
+        ref TVisitor visitor)
+        where T : unmanaged, IComponent<T>
+        where TVisitor : struct, IComponentChunkReadVisitor<T>
+    {
+        EnsureSealed();
+        ValidateBinding(binding, requireData: true);
+        EnterChunkVisit();
+        try
+        {
+            ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(binding.ArchetypeId).Store;
+            int visitedRows = 0;
+            for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
+                 chunkIndex >= 0;
+                 chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
+            {
+                BoundComponentChunk<T> bound = store.GetBoundComponentChunk<T>(
+                    chunkIndex,
+                    binding.ColumnIndex,
+                    binding.IsEnableable);
+                var chunk = new ReadOnlyComponentChunk<T>(
+                    Id,
+                    binding.ArchetypeId,
+                    bound.ChunkIndex,
+                    bound.EntityIndices,
+                    bound.Components,
+                    bound.EnableWords);
+                visitor.Execute(in chunk);
+                visitedRows += chunk.Count;
+            }
+
+            return visitedRows;
+        }
+        finally
+        {
+            ExitChunkVisit();
+        }
+    }
+
+    /// <summary>
+    /// Synchronously visits writable occupied chunks of one exact-archetype data
+    /// binding. Later change tracking will mark each visited column once per chunk.
+    /// </summary>
+    internal int VisitWriteChunks<T, TVisitor>(
+        in ArchetypeComponentBinding<T> binding,
+        ref TVisitor visitor)
+        where T : unmanaged, IComponent<T>
+        where TVisitor : struct, IComponentChunkWriteVisitor<T>
+    {
+        EnsureSealed();
+        ValidateBinding(binding, requireData: true);
+        EnterChunkVisit();
+        try
+        {
+            ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(binding.ArchetypeId).Store;
+            int visitedRows = 0;
+            for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
+                 chunkIndex >= 0;
+                 chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
+            {
+                BoundComponentChunk<T> bound = store.GetBoundComponentChunk<T>(
+                    chunkIndex,
+                    binding.ColumnIndex,
+                    binding.IsEnableable);
+                var chunk = new WritableComponentChunk<T>(
+                    Id,
+                    binding.ArchetypeId,
+                    bound.ChunkIndex,
+                    bound.EntityIndices,
+                    bound.Components,
+                    bound.EnableWords);
+                visitor.Execute(in chunk);
+                visitedRows += chunk.Count;
+            }
+
+            return visitedRows;
+        }
+        finally
+        {
+            ExitChunkVisit();
+        }
     }
 
     private bool TryCreateDefaultCore(
@@ -315,7 +404,7 @@ internal sealed class EcsWorld<TArena> : IDisposable
         ArchetypeTransitionPlan<TArena> plan,
         out EntityLocation destinationLocation)
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         ArgumentNullException.ThrowIfNull(plan);
         if (!_archetypes.Owns(plan))
         {
@@ -333,7 +422,7 @@ internal sealed class EcsWorld<TArena> : IDisposable
 
     internal bool TryDestroy(Entity entity)
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         if (!_entities.TryGetLocation(entity, out EntityLocation location))
             return false;
         if (!_archetypes.TryGetStorage(location.ArchetypeId, out ArchetypeStorage<TArena>? storage))
@@ -361,6 +450,8 @@ internal sealed class EcsWorld<TArena> : IDisposable
     {
         if (_state == EcsWorldState.Disposed)
             return;
+        if (_isVisitingChunks)
+            throw new InvalidOperationException("The world cannot be disposed during a chunk visitor.");
 
         try
         {
@@ -442,6 +533,26 @@ internal sealed class EcsWorld<TArena> : IDisposable
         if (_state != EcsWorldState.Sealed)
             throw new InvalidOperationException("World runtime mutation requires a sealed world.");
     }
+
+    private void EnsureRuntimeMutationAllowed()
+    {
+        EnsureSealed();
+        if (_isVisitingChunks)
+        {
+            throw new InvalidOperationException(
+                "World mutation is forbidden while a synchronous chunk visitor is active.");
+        }
+    }
+
+    private void EnterChunkVisit()
+    {
+        if (_isVisitingChunks)
+            throw new InvalidOperationException("Chunk visitors cannot be nested or re-entered.");
+        _isVisitingChunks = true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ExitChunkVisit() => _isVisitingChunks = false;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(IsDisposed, this);
