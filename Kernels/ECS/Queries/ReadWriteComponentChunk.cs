@@ -17,6 +17,7 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
         WorldId worldId,
         ArchetypeId archetypeId,
         uint chunkIndex,
+        int rowOffset,
         ReadOnlySpan<uint> entityIndices,
         ReadOnlySpan<TRead> readComponents,
         Span<TWrite> writeComponents,
@@ -25,11 +26,13 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     {
         System.Diagnostics.Debug.Assert(worldId.IsValid);
         System.Diagnostics.Debug.Assert(archetypeId.IsValid);
+        System.Diagnostics.Debug.Assert(rowOffset >= 0);
         System.Diagnostics.Debug.Assert(entityIndices.Length == readComponents.Length);
         System.Diagnostics.Debug.Assert(entityIndices.Length == writeComponents.Length);
         WorldId = worldId;
         ArchetypeId = archetypeId;
         ChunkIndex = chunkIndex;
+        RowOffset = rowOffset;
         EntityIndices = entityIndices;
         ReadComponents = readComponents;
         WriteComponents = writeComponents;
@@ -42,6 +45,9 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     internal ArchetypeId ArchetypeId { get; }
 
     internal uint ChunkIndex { get; }
+
+    /// <summary>Physical row represented by local row zero in this sliced view.</summary>
+    internal int RowOffset { get; }
 
     internal ReadOnlySpan<uint> EntityIndices { get; }
 
@@ -59,16 +65,18 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     internal bool IsReadEnabled(int row)
     {
         ValidateRow(row);
+        int absoluteRow = RowOffset + row;
         return _readEnableWords.IsEmpty ||
-            (_readEnableWords[row >> 6] & (1UL << (row & 63))) != 0;
+            (_readEnableWords[absoluteRow >> 6] & (1UL << (absoluteRow & 63))) != 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool IsWriteEnabled(int row)
     {
         ValidateRow(row);
+        int absoluteRow = RowOffset + row;
         return _writeEnableWords.IsEmpty ||
-            (_writeEnableWords[row >> 6] & (1UL << (row & 63))) != 0;
+            (_writeEnableWords[absoluteRow >> 6] & (1UL << (absoluteRow & 63))) != 0;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -77,8 +85,9 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
         if (_writeEnableWords.IsEmpty)
             throw new InvalidOperationException("The writable component is not enableable.");
         ValidateRow(row);
-        ref ulong word = ref _writeEnableWords[row >> 6];
-        ulong mask = 1UL << (row & 63);
+        int absoluteRow = RowOffset + row;
+        ref ulong word = ref _writeEnableWords[absoluteRow >> 6];
+        ulong mask = 1UL << (absoluteRow & 63);
         word = enabled ? word | mask : word & ~mask;
     }
 

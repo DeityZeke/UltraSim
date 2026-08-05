@@ -1,5 +1,11 @@
 # UltraSim Next Benchmarks
 
+Future cross-generation validation, canonical final-state hashing, effective-byte
+throughput, and scheduler-crossover requirements are recorded in
+[`ECS_NEXT_BENCHMARK_RECOMMENDATIONS.md`](ECS_NEXT_BENCHMARK_RECOMMENDATIONS.md).
+They should be adopted feature by feature without pulling implementation out of
+dependency order.
+
 These projects measure the root Next implementation. Frozen V2 Current and
 Legacy runners remain beneath `_V2/_Benchmarks` and run in separate processes.
 
@@ -151,6 +157,25 @@ collections. The measured loop is still a hand-authored one-read/one-write shape
 not evidence for arbitrary generated arities, filters, change tracking, parallel
 scheduling, or Current parity. The code suite now contains 50 scenarios, and the
 tracked accepted artifact remains unchanged.
+
+The normalized-filter extension adds four non-comparable 100,000-row scenarios.
+One required-enabled tag and one required-disabled data component are reduced to
+direct enable-word offsets at sealing, while a required/excluded signature pair
+leaves exactly one of three archetypes routed. The dense cases match every row and
+coalesce each occupied chunk into one visitor slice. The alternating cases match
+50,000 rows but deliberately fragment them into single-row slices, guarding the
+current safe-view worst case where unmatched rows are never exposed for writing.
+
+Exact isolated runs after eagerly optimizing the range-dispatch generic measured
+the dense native/pinned cases at approximately `2.23-2.29 ns/matched row` and the
+alternating cases at approximately `10.56-11.09 ns/matched row`, all with zero
+managed bytes and zero collections. Before the range helper was excluded from
+tiered recompilation, alternating runs became bimodal at roughly `0.5` versus
+`3.7-4.9 ms` per visit; a no-tier diagnostic isolated that effect and motivated
+the measured optimization. Filter density, number of enable predicates, long
+contiguous runs, random masks, and a future generated mask-consumer still require
+their own matrix. The code suite now contains 54 scenarios, and the tracked
+accepted artifact remains unchanged.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

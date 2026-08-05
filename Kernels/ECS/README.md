@@ -78,6 +78,17 @@ allocation:
   one arena lookup; the constrained visitor retains the existing barrier rules.
   World disposal invalidates plans and clears their routes so a retained plan
   object cannot retain all matched storage objects.
+- `ArchetypeQueryFilter` is a cold-built, world-owned descriptor over normalized
+  required, excluded, enabled, and disabled component sets. Enabled/disabled
+  components become structural requirements; contradictions, foreign descriptors,
+  non-enableable row filters, invalid IDs, and access/exclusion conflicts fail
+  before sealing.
+- Seal compilation merge-matches structural filters against canonical signatures
+  and reduces row filters to direct enable-bit offsets per route. Runtime combines
+  those words and exposes only contiguous matching slices, with a physical
+  `RowOffset` preserving enable access. Visitors cannot write unmatched rows, the
+  unfiltered route remains branch-minimal, and warmed dense, fragmented, native,
+  and pinned tests allocate zero managed bytes.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -132,7 +143,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 100 passing tests, including
+The current runtime and primitive suite has 106 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -167,14 +178,18 @@ Query-plan tests add seal-complete matching, archetypes registered after descrip
 creation, multiple layouts, explicit zero/bounded plan capacity, alias/tag/type/
 foreign rejection, barrier and exception cleanup, randomized transition parity,
 native/pinned equivalence, and ten million warmed allocation-free row visits.
+Filter tests add normalization/deduplication, contradictory and foreign constraint
+rejection, required/excluded seal matching, enableable data/tag row predicates,
+noncontiguous slices crossing enable words and chunks, randomized reference parity,
+native/pinned equivalence, and warmed allocation-free filtered visits.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generator emits the core manifest only. The
-next natural query slice is a normalized required/excluded filter descriptor plus
-enabled/disabled row filtering, followed by generated access/arity families. It
-must retain the same stack-only execution window and gain per-chunk tracked-write
-versions before becoming public. Bounded deferred structural commands and field/
-serializer/prefab descriptors remain later work.
+next natural query slice is generated access/arity families over the normalized
+filter and route substrate. It must retain the same stack-only execution window
+and gain per-chunk tracked-write versions before becoming public. Optional/change
+filters, bounded deferred structural commands, and field/serializer/prefab
+descriptors remain later work.
 
 Run both executable test suites from the repository root:
 

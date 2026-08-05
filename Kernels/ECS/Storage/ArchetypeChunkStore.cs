@@ -448,6 +448,7 @@ internal sealed class ArchetypeChunkStore<TArena> : IDisposable
         int rowCount = chunk.RowCount;
         return new BoundReadWriteComponentChunk<TRead, TWrite>(
             (uint)chunkIndex,
+            bytes,
             GetEntityIndices(bytes).Slice(0, rowCount),
             readComponents.Slice(0, rowCount),
             writeComponents.Slice(0, rowCount),

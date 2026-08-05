@@ -7,6 +7,7 @@ internal readonly ref struct BoundReadWriteComponentChunk<TRead, TWrite>
 {
     internal BoundReadWriteComponentChunk(
         uint chunkIndex,
+        ReadOnlySpan<byte> chunkBytes,
         ReadOnlySpan<uint> entityIndices,
         ReadOnlySpan<TRead> readComponents,
         Span<TWrite> writeComponents,
@@ -14,6 +15,7 @@ internal readonly ref struct BoundReadWriteComponentChunk<TRead, TWrite>
         Span<ulong> writeEnableWords)
     {
         ChunkIndex = chunkIndex;
+        ChunkBytes = chunkBytes;
         EntityIndices = entityIndices;
         ReadComponents = readComponents;
         WriteComponents = writeComponents;
@@ -22,6 +24,7 @@ internal readonly ref struct BoundReadWriteComponentChunk<TRead, TWrite>
     }
 
     internal uint ChunkIndex { get; }
+    internal ReadOnlySpan<byte> ChunkBytes { get; }
     internal ReadOnlySpan<uint> EntityIndices { get; }
     internal ReadOnlySpan<TRead> ReadComponents { get; }
     internal Span<TWrite> WriteComponents { get; }

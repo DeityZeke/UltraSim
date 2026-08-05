@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 
 namespace UltraSim.ECS;
@@ -157,7 +158,45 @@ internal sealed class EcsWorld<TArena> : IDisposable
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
     {
+        ArchetypeQueryFilter filter = ArchetypeQueryFilter.Create(
+            Id,
+            _schema,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty);
+        return PrepareReadWriteQuery<TRead, TWrite>(
+            generatedReadComponentId,
+            generatedWriteComponentId,
+            filter);
+    }
+
+    internal ArchetypeQueryFilter CreateQueryFilter(
+        ReadOnlySpan<ComponentId> requiredComponents,
+        ReadOnlySpan<ComponentId> excludedComponents,
+        ReadOnlySpan<ComponentId> enabledComponents,
+        ReadOnlySpan<ComponentId> disabledComponents)
+    {
         EnsureCreated();
+        return ArchetypeQueryFilter.Create(
+            Id,
+            _schema,
+            requiredComponents,
+            excludedComponents,
+            enabledComponents,
+            disabledComponents);
+    }
+
+    internal ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> PrepareReadWriteQuery<TRead, TWrite>(
+        ComponentId generatedReadComponentId,
+        ComponentId generatedWriteComponentId,
+        in ArchetypeQueryFilter filter)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        EnsureCreated();
+        if (!filter.IsValid || filter.WorldId != Id)
+            throw new ArgumentException("The query filter belongs to a different world.", nameof(filter));
         ref readonly ComponentMetadata readMetadata = ref ValidateGeneratedDataComponent<TRead>(
             generatedReadComponentId,
             nameof(generatedReadComponentId));
@@ -169,6 +208,12 @@ internal sealed class EcsWorld<TArena> : IDisposable
             throw new ArgumentException(
                 "A query cannot declare the same component for both read and write access.",
                 nameof(generatedWriteComponentId));
+        }
+        if (filter.Excludes(generatedReadComponentId) || filter.Excludes(generatedWriteComponentId))
+        {
+            throw new ArgumentException(
+                "A read or write component cannot also be excluded by its query filter.",
+                nameof(filter));
         }
         if (_queryPlanCount == _queryPlans.Length)
         {
@@ -182,7 +227,8 @@ internal sealed class EcsWorld<TArena> : IDisposable
             generatedReadComponentId,
             readMetadata.Flags,
             generatedWriteComponentId,
-            writeMetadata.Flags);
+            writeMetadata.Flags,
+            filter);
         _queryPlans[_queryPlanCount++] = plan;
         return plan;
     }
@@ -458,13 +504,24 @@ internal sealed class EcsWorld<TArena> : IDisposable
                         Id,
                         route.Storage.Id,
                         bound.ChunkIndex,
+                        rowOffset: 0,
                         bound.EntityIndices,
                         bound.ReadComponents,
                         bound.WriteComponents,
                         bound.ReadEnableWords,
                         bound.WriteEnableWords);
-                    visitor.Execute(in chunk);
-                    visitedRows += chunk.Count;
+                    if (!route.HasRowFilters)
+                    {
+                        visitor.Execute(in chunk);
+                        visitedRows += chunk.Count;
+                    }
+                    else
+                    {
+                        visitedRows += VisitFilteredReadWriteChunk(
+                            route,
+                            bound,
+                            ref visitor);
+                    }
                 }
             }
 
@@ -474,6 +531,93 @@ internal sealed class EcsWorld<TArena> : IDisposable
         {
             ExitChunkVisit();
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private int VisitFilteredReadWriteChunk<TRead, TWrite, TVisitor>(
+        in ArchetypeReadWriteQueryRoute<TArena> route,
+        in BoundReadWriteComponentChunk<TRead, TWrite> bound,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TVisitor : struct, IComponentChunkReadWriteVisitor<TRead, TWrite>
+    {
+        int rowCount = bound.EntityIndices.Length;
+        int pendingStart = -1;
+        int pendingEnd = -1;
+        int matchedRows = 0;
+        int wordCount = (rowCount + 63) >> 6;
+        for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)
+        {
+            ulong mask = route.GetMatchingRowMask(bound.ChunkBytes, wordIndex);
+            int wordStart = wordIndex << 6;
+            int activeRows = Math.Min(64, rowCount - wordStart);
+            if (activeRows != 64)
+                mask &= (1UL << activeRows) - 1UL;
+
+            while (mask != 0)
+            {
+                int startBit = BitOperations.TrailingZeroCount(mask);
+                ulong shifted = mask >> startBit;
+                int runLength = BitOperations.TrailingZeroCount(~shifted);
+                int runStart = wordStart + startBit;
+                int runEnd = runStart + runLength;
+                if (pendingStart < 0)
+                {
+                    pendingStart = runStart;
+                    pendingEnd = runEnd;
+                }
+                else if (pendingEnd == runStart)
+                {
+                    pendingEnd = runEnd;
+                }
+                else
+                {
+                    ExecuteReadWriteRange(route, bound, pendingStart, pendingEnd - pendingStart, ref visitor);
+                    matchedRows += pendingEnd - pendingStart;
+                    pendingStart = runStart;
+                    pendingEnd = runEnd;
+                }
+
+                ulong runMask = runLength == 64
+                    ? ulong.MaxValue
+                    : ((1UL << runLength) - 1UL) << startBit;
+                mask &= ~runMask;
+            }
+        }
+
+        if (pendingStart >= 0)
+        {
+            ExecuteReadWriteRange(route, bound, pendingStart, pendingEnd - pendingStart, ref visitor);
+            matchedRows += pendingEnd - pendingStart;
+        }
+        return matchedRows;
+    }
+
+    [MethodImpl(
+        MethodImplOptions.AggressiveInlining |
+        MethodImplOptions.AggressiveOptimization)]
+    private void ExecuteReadWriteRange<TRead, TWrite, TVisitor>(
+        in ArchetypeReadWriteQueryRoute<TArena> route,
+        in BoundReadWriteComponentChunk<TRead, TWrite> bound,
+        int rowOffset,
+        int rowCount,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TVisitor : struct, IComponentChunkReadWriteVisitor<TRead, TWrite>
+    {
+        var chunk = new ReadWriteComponentChunk<TRead, TWrite>(
+            Id,
+            route.Storage.Id,
+            bound.ChunkIndex,
+            rowOffset,
+            bound.EntityIndices.Slice(rowOffset, rowCount),
+            bound.ReadComponents.Slice(rowOffset, rowCount),
+            bound.WriteComponents.Slice(rowOffset, rowCount),
+            bound.ReadEnableWords,
+            bound.WriteEnableWords);
+        visitor.Execute(in chunk);
     }
 
     private bool TryCreateDefaultCore(
