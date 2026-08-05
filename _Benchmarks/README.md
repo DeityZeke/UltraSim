@@ -93,7 +93,21 @@ measured native at approximately `76.9 ns/move` (`7.73 ms` p95 per 100,000 moves
 and pinned at `78.5 ns/move` (`7.90 ms` p95), both at zero managed bytes and zero
 collections. The isolated result is effectively tied at this noise level; the
 paired pinned result is retained as evidence of scenario/process interference,
-not attributed to the storage backend. The code suite now contains 40 scenarios.
+not attributed to the storage backend. That extension brought the code suite to
+40 scenarios before the composed-world cases below.
+
+The minimal composed-world extension adds two non-comparable 100,000-cycle
+create-default, transition, and destroy scenarios. These exercise the checked
+sealed-world boundary, entity allocation/location publication, registry-owned
+plan validation, retained-column migration, source donor handling, destruction,
+location removal, and generation advancement as one complete lifecycle cycle.
+Exact-filter isolated runs measured approximately `149.3 ns/cycle` native and
+`149.4 ns/cycle` pinned, both with zero managed bytes and zero collections. The
+paired run measured `147.7 ns/cycle` native and `205.8 ns/cycle` pinned; as with
+the primitive migration guard, the pinned slowdown disappeared in isolation and
+is classified as scenario/process interference. The code suite now contains 42
+scenarios; the tracked accepted artifact remains historical until a controlled
+full-suite capture is intentionally accepted.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

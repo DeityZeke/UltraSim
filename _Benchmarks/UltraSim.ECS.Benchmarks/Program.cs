@@ -74,6 +74,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedEnableToggle = new ArchetypeEnableToggleFixture<PinnedChunkArena>(100_000, 1_000_000);
         using var nativeMigration = new ArchetypeMigrationFixture<NativeChunkArena>(100_000);
         using var pinnedMigration = new ArchetypeMigrationFixture<PinnedChunkArena>(100_000);
+        using var nativeWorldLifecycle = new EcsWorldLifecycleFixture<NativeChunkArena>(100_000);
+        using var pinnedWorldLifecycle = new EcsWorldLifecycleFixture<PinnedChunkArena>(100_000);
 
         BenchmarkScenario[] scenarios =
         [
@@ -117,6 +119,8 @@ internal static class PrimitiveBenchmarks
             new("PinnedArchetype_EnableToggle_1000000", "ArchetypeRows", 1_000_000, pinnedEnableToggle.Execute),
             new("NativeArchetype_MigrationCycle_100000", "ArchetypeMigration", 100_000, nativeMigration.Execute),
             new("PinnedArchetype_MigrationCycle_100000", "ArchetypeMigration", 100_000, pinnedMigration.Execute),
+            new("NativeWorld_CreateTransitionDestroy_100000", "WorldLifecycle", 100_000, nativeWorldLifecycle.Execute),
+            new("PinnedWorld_CreateTransitionDestroy_100000", "WorldLifecycle", 100_000, pinnedWorldLifecycle.Execute),
         ];
 
         var results = new List<BenchmarkResult>(scenarios.Length);
@@ -133,7 +137,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-archetype-migration-v7",
+            SemanticProfile = "ecs-next-phase1-world-lifecycle-v8",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1082,6 +1086,80 @@ internal static class PrimitiveBenchmarks
             }
 
             throw new InvalidOperationException($"Migration benchmark column {componentId} was not found.");
+        }
+    }
+
+    private sealed class EcsWorldLifecycleFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeId _sourceId;
+        private readonly ArchetypeTransitionPlan<TArena> _forward;
+        private readonly int _operations;
+
+        internal EcsWorldLifecycleFixture(int operations)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(1),
+                maximumArchetypes: 2,
+                static capacity => CreateArena(capacity));
+            ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
+            ComponentId[] sourceSignature = CreateSortedSignature(position, velocity);
+            ComponentId[] destinationSignature = CreateSortedSignature(disabled, velocity, wide);
+            _sourceId = _world.RegisterArchetype(
+                sourceSignature,
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 1);
+            ArchetypeId destinationId = _world.RegisterArchetype(
+                destinationSignature,
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 1);
+            _forward = _world.PrepareTransition(_sourceId, destinationId);
+            _world.Seal();
+            _operations = operations;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                if (!_world.TryCreateDefault(_sourceId, out Entity entity))
+                    throw new InvalidOperationException("World lifecycle benchmark failed to create an entity.");
+                if (!_world.TryTransition(entity, _forward, out EntityLocation destination))
+                    throw new InvalidOperationException("World lifecycle benchmark failed to transition an entity.");
+                checksum = unchecked(checksum + entity.Generation + destination.ArchetypeId.Value);
+                if (!_world.TryDestroy(entity))
+                    throw new InvalidOperationException("World lifecycle benchmark failed to destroy an entity.");
+            }
+
+            if (_world.AliveCount != 0 || _world.LocatedCount != 0)
+                throw new InvalidOperationException("World lifecycle benchmark leaked a live entity.");
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static TArena CreateArena(ChunkArenaCapacity capacity)
+        {
+            object arena = typeof(TArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported world lifecycle benchmark arena {typeof(TArena).Name}.");
+            return (TArena)arena;
+        }
+
+        private static ComponentId[] CreateSortedSignature(params ComponentId[] signature)
+        {
+            Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
+            return signature;
         }
     }
 

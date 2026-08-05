@@ -42,6 +42,15 @@ allocation:
   source unchanged; guarded rollback paths protect later transaction failures. Added
   components retain store-defined zero/enabled defaults and removed components
   are discarded.
+- `EcsWorld<TArena>` is the first internal composition root over a process-unique
+  world ID, fixed entity pool, owned archetype registry/stores, and prepared
+  transitions. Its explicit `Created -> Sealed -> Disposed` lifecycle closes
+  registration and transition-plan construction before runtime mutation.
+- Immediate default creation, transition, and destruction are checked at one
+  boundary. Full-archetype rejection does not allocate or burn an entity
+  generation, creation rollback removes a just-added row, destruction repairs a
+  packed swap donor before invalidating the stale handle, and foreign-world plans
+  are rejected by O(1) registry/store identity checks even when dense IDs collide.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -96,7 +105,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 71 passing tests, including
+The current runtime and primitive suite has 78 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -114,14 +123,18 @@ lookups. Migration tests cover retained data and enable state, added-component
 defaults, removed components, source donor relocation, stale-plan and bounded
 destination rejection, 30,000 randomized bidirectional moves, native/pinned byte
 equivalence, and 100,000 warmed allocation-free migration cycles. The generator
-suite has 13 passing tests.
+suite has 13 passing tests. Composed-world tests cover lifecycle ordering,
+owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
+generation reuse, donor repair, cross-world plan and entity isolation, 30,000
+randomized create/transition/destroy operations, native/pinned parity, and 100,000
+warmed allocation-free full lifecycle cycles.
 
-This is not yet a usable component/archetype world. The current generator emits
-the core manifest only. The next natural slice is a minimal instance-owned world
-lifecycle that assembles the pool, sealed registry, prepared transitions, and
-immediate create/destroy/add/remove operations behind one checked boundary.
-Generated safe component/query bindings, bounded deferred structural commands,
-and field/serializer/prefab descriptors remain later work.
+This is now a minimal internal component/archetype world, not yet the public
+scheduler/host facade. The current generator emits the core manifest only. The
+next natural slice is generated/prebound safe component access and initialization
+through the world boundary, so callers and future prefab writers never receive raw
+same-sized typed spans or manually bind physical columns. Bounded deferred
+structural commands and field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:
 

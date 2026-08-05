@@ -83,6 +83,13 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeMigrator_RandomizedBidirectionalModelRemainsConsistent), ArchetypeMigrator_RandomizedBidirectionalModelRemainsConsistent);
         Run(nameof(ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent), ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent);
         Run(nameof(ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes), ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes);
+        Run(nameof(EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal), EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal);
+        Run(nameof(EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations), EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations);
+        Run(nameof(EcsWorld_CapacityFailuresAreAtomicAndDoNotBurnSlots), EcsWorld_CapacityFailuresAreAtomicAndDoNotBurnSlots);
+        Run(nameof(EcsWorld_RejectsForeignEntitiesAndTransitionPlans), EcsWorld_RejectsForeignEntitiesAndTransitionPlans);
+        Run(nameof(EcsWorld_RandomizedLifecycleMatchesReferenceModel), EcsWorld_RandomizedLifecycleMatchesReferenceModel);
+        Run(nameof(EcsWorld_NativeAndPinnedLifecycleRemainEquivalent), EcsWorld_NativeAndPinnedLifecycleRemainEquivalent);
+        Run(nameof(EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes), EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -2352,6 +2359,337 @@ internal static class EcsPrimitiveTests
         Assert.False(fixture.Source.Store.IsEnabled(final.ChunkRow, fixture.SourceEnable));
     }
 
+    private static void EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        var world = new EcsWorld<NativeChunkArena>(
+            schema,
+            new EntityCapacity(32),
+            maximumArchetypes: 2,
+            static capacity => new NativeChunkArena(capacity));
+        ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        ArchetypeId source = world.RegisterArchetype(
+            [enableId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeId destination = world.RegisterArchetype(
+            [enableId, wideId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeTransitionPlan<NativeChunkArena> plan = world.PrepareTransition(source, destination);
+        NativeChunkArena sourceArena = world.GetArchetypeStorage(source).Store.Arena;
+        NativeChunkArena destinationArena = world.GetArchetypeStorage(destination).Store.Arena;
+
+        Assert.Equal(EcsWorldState.Created, world.State);
+        Assert.False(world.IsSealed);
+        Assert.False(world.IsDisposed);
+        Assert.Equal(schema, world.Schema);
+        Assert.Equal(2, world.ArchetypeCount);
+        Assert.Throws<InvalidOperationException>(() => world.TryCreateDefault(source, out _));
+        Assert.Throws<InvalidOperationException>(() => world.TryDestroy(Entity.Null));
+        Assert.Throws<InvalidOperationException>(() => world.TryTransition(Entity.Null, plan, out _));
+
+        world.Seal();
+        world.Seal();
+        Assert.Equal(EcsWorldState.Sealed, world.State);
+        Assert.True(world.IsSealed);
+        Assert.Throws<InvalidOperationException>(() => world.RegisterArchetype(
+            ReadOnlySpan<ComponentId>.Empty,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1));
+        Assert.Throws<InvalidOperationException>(() => world.PrepareTransition(source, destination));
+        Assert.True(world.TryCreateDefault(source, out Entity entity));
+        Assert.True(world.IsAlive(entity));
+
+        world.Dispose();
+        world.Dispose();
+        Assert.Equal(EcsWorldState.Disposed, world.State);
+        Assert.True(world.IsDisposed);
+        Assert.False(world.IsSealed);
+        Assert.True(sourceArena.IsDisposed);
+        Assert.True(destinationArena.IsDisposed);
+        Assert.Throws<ObjectDisposedException>(() => _ = world.AliveCount);
+        Assert.Throws<ObjectDisposedException>(() => world.IsAlive(entity));
+        Assert.Throws<ObjectDisposedException>(() => world.TryCreateDefault(source, out _));
+    }
+
+    private static void EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations()
+    {
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 2, entityCapacity: 20_000);
+        int count = fixture.Source.Layout.RowCapacity + 3;
+        var entities = new Entity[count];
+        for (int i = 0; i < entities.Length; i++)
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out entities[i]));
+
+        Entity victim = entities[0];
+        Entity donor = entities[^1];
+        Assert.True(fixture.World.TryGetLocation(victim, out EntityLocation victimLocation));
+        Assert.True(fixture.World.TryGetLocation(donor, out EntityLocation donorLocation));
+        fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutByte>(
+            victimLocation.ChunkRow,
+            fixture.SourceByte).Value = 0xA5;
+
+        Assert.True(fixture.World.TryDestroy(victim));
+        Assert.False(fixture.World.IsAlive(victim));
+        Assert.False(fixture.World.TryGetLocation(victim, out EntityLocation removedLocation));
+        Assert.Equal(EntityLocation.Invalid, removedLocation);
+        Assert.False(fixture.World.TryDestroy(victim));
+        Assert.True(fixture.World.TryGetLocation(donor, out EntityLocation relocatedDonor));
+        Assert.Equal(victimLocation, relocatedDonor);
+        Assert.NotEqual(donorLocation, relocatedDonor);
+        Assert.Equal(donor.Index, fixture.Source.Store.GetEntityIndex(relocatedDonor.ChunkRow));
+
+        Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity replacement));
+        Assert.Equal(victim.Index, replacement.Index);
+        Assert.NotEqual(victim.Generation, replacement.Generation);
+        Assert.True(fixture.World.TryGetLocation(replacement, out EntityLocation replacementLocation));
+        Assert.Equal(
+            (byte)0,
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutByte>(
+                replacementLocation.ChunkRow,
+                fixture.SourceByte).Value);
+        Assert.Equal(count, fixture.World.AliveCount);
+        Assert.Equal(count, fixture.World.LocatedCount);
+        Assert.Equal(count, fixture.Source.Store.Count);
+        fixture.Source.Store.ValidateInvariants();
+    }
+
+    private static void EcsWorld_CapacityFailuresAreAtomicAndDoNotBurnSlots()
+    {
+        using (var entityBound = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 1))
+        {
+            Assert.True(entityBound.World.TryCreateDefault(entityBound.Source.Id, out Entity only));
+            Assert.False(entityBound.World.TryCreateDefault(entityBound.Destination.Id, out Entity unavailable));
+            Assert.Equal(Entity.Null, unavailable);
+            Assert.Equal(1, entityBound.World.AliveCount);
+            Assert.Equal(1, entityBound.World.LocatedCount);
+            Assert.Equal(1, entityBound.Source.Store.Count);
+            Assert.Equal(0, entityBound.Destination.Store.Count);
+            Assert.True(entityBound.World.IsAlive(only));
+        }
+
+        using var rowBound = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 20_000);
+        int sourceCapacity = checked((int)rowBound.Source.Store.MaximumRows);
+        for (int i = 0; i < sourceCapacity; i++)
+            Assert.True(rowBound.World.TryCreateDefault(rowBound.Source.Id, out _));
+
+        Assert.False(rowBound.World.TryCreateDefault(rowBound.Source.Id, out Entity full));
+        Assert.Equal(Entity.Null, full);
+        Assert.Equal(sourceCapacity, rowBound.World.AliveCount);
+        Assert.Equal(sourceCapacity, rowBound.World.LocatedCount);
+        Assert.True(rowBound.World.TryCreateDefault(rowBound.Destination.Id, out Entity next));
+        Assert.Equal((uint)sourceCapacity, next.Index);
+        Assert.Equal(1u, next.Generation);
+        Assert.Equal(sourceCapacity + 1, rowBound.World.AliveCount);
+        Assert.Equal(sourceCapacity, rowBound.Source.Store.Count);
+        Assert.Equal(1, rowBound.Destination.Store.Count);
+    }
+
+    private static void EcsWorld_RejectsForeignEntitiesAndTransitionPlans()
+    {
+        using var first = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 16);
+        using var second = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 16);
+        Assert.Equal(first.Source.Id, second.Source.Id);
+        Assert.Equal(first.Destination.Id, second.Destination.Id);
+        Assert.NotEqual(first.World.Id, second.World.Id);
+        Assert.True(first.World.TryCreateDefault(first.Source.Id, out Entity firstEntity));
+        Assert.True(second.World.TryCreateDefault(second.Source.Id, out Entity secondEntity));
+
+        Assert.False(first.World.IsAlive(secondEntity));
+        Assert.False(first.World.TryDestroy(secondEntity));
+        Assert.False(first.World.TryTransition(
+            secondEntity,
+            first.SourceToDestination,
+            out EntityLocation foreignEntityLocation));
+        Assert.Equal(EntityLocation.Invalid, foreignEntityLocation);
+        Assert.Throws<ArgumentException>(() => first.World.TryTransition(
+            firstEntity,
+            second.SourceToDestination,
+            out _));
+
+        Assert.True(first.World.IsAlive(firstEntity));
+        Assert.True(second.World.IsAlive(secondEntity));
+        Assert.Equal(1, first.Source.Store.Count);
+        Assert.Equal(1, second.Source.Store.Count);
+        Assert.Equal(0, first.Destination.Store.Count);
+        Assert.Equal(0, second.Destination.Store.Count);
+    }
+
+    private static void EcsWorld_RandomizedLifecycleMatchesReferenceModel()
+    {
+        const int operations = 30_000;
+        const int maximumPopulation = 512;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 4, entityCapacity: 1_024);
+        var entities = new List<Entity>(maximumPopulation);
+        var inSource = new List<bool>(maximumPopulation);
+        var values = new List<long>(maximumPopulation);
+        var random = new Random(unchecked((int)0x91C7D20B));
+        Entity lastDestroyed = Entity.Null;
+
+        for (int operation = 0; operation < operations; operation++)
+        {
+            int choice = random.Next(100);
+            if (entities.Count == 0 || (choice < 35 && entities.Count < maximumPopulation))
+            {
+                bool source = random.Next(2) == 0;
+                ArchetypeStorage<NativeChunkArena> storage = source
+                    ? fixture.Source
+                    : fixture.Destination;
+                Assert.True(fixture.World.TryCreateDefault(storage.Id, out Entity entity));
+                Assert.True(fixture.World.TryGetLocation(entity, out EntityLocation location));
+                long value = unchecked(((long)entity.Generation << 32) ^ entity.Index ^ operation);
+                ComponentColumnLayout enableColumn = source
+                    ? fixture.SourceEnable
+                    : fixture.DestinationEnable;
+                storage.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                    location.ChunkRow,
+                    enableColumn).Value = value;
+                storage.Store.SetEnabled(location.ChunkRow, enableColumn, (operation & 1) == 0);
+                entities.Add(entity);
+                inSource.Add(source);
+                values.Add(value);
+            }
+            else
+            {
+                int selected = random.Next(entities.Count);
+                Entity entity = entities[selected];
+                if (choice < 78)
+                {
+                    ArchetypeTransitionPlan<NativeChunkArena> plan = inSource[selected]
+                        ? fixture.SourceToDestination
+                        : fixture.DestinationToSource;
+                    Assert.True(fixture.World.TryTransition(entity, plan, out EntityLocation destination));
+                    inSource[selected] = !inSource[selected];
+                    ArchetypeStorage<NativeChunkArena> storage = inSource[selected]
+                        ? fixture.Source
+                        : fixture.Destination;
+                    ComponentColumnLayout enableColumn = inSource[selected]
+                        ? fixture.SourceEnable
+                        : fixture.DestinationEnable;
+                    Assert.Equal(storage.Id, destination.ArchetypeId);
+                    Assert.Equal(
+                        values[selected],
+                        storage.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                            destination.ChunkRow,
+                            enableColumn).Value);
+                }
+                else
+                {
+                    Assert.True(fixture.World.TryDestroy(entity));
+                    lastDestroyed = entity;
+                    int last = entities.Count - 1;
+                    entities[selected] = entities[last];
+                    inSource[selected] = inSource[last];
+                    values[selected] = values[last];
+                    entities.RemoveAt(last);
+                    inSource.RemoveAt(last);
+                    values.RemoveAt(last);
+                }
+            }
+
+            if ((operation & 255) == 0)
+            {
+                Assert.Equal(entities.Count, fixture.World.AliveCount);
+                Assert.Equal(entities.Count, fixture.World.LocatedCount);
+                Assert.Equal(
+                    entities.Count,
+                    fixture.Source.Store.Count + fixture.Destination.Store.Count);
+                if (lastDestroyed.IsValid)
+                    Assert.False(fixture.World.IsAlive(lastDestroyed));
+                for (int i = 0; i < entities.Count; i++)
+                {
+                    Assert.True(fixture.World.TryGetLocation(entities[i], out EntityLocation location));
+                    Assert.Equal(
+                        inSource[i] ? fixture.Source.Id : fixture.Destination.Id,
+                        location.ArchetypeId);
+                }
+                fixture.Source.Store.ValidateInvariants();
+                fixture.Destination.Store.ValidateInvariants();
+            }
+        }
+    }
+
+    private static void EcsWorld_NativeAndPinnedLifecycleRemainEquivalent()
+    {
+        long native = RunWorldLifecycleParity<NativeChunkArena>();
+        long pinned = RunWorldLifecycleParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes()
+    {
+        const int operations = 100_000;
+        using var fixture = new WorldFixture<NativeChunkArena>(maximumChunks: 1, entityCapacity: 1);
+
+        for (int i = 0; i < 32; i++)
+        {
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity warm));
+            Assert.True(fixture.World.TryTransition(warm, fixture.SourceToDestination, out _));
+            Assert.True(fixture.World.TryDestroy(warm));
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        long checksum = 0;
+        for (int i = 0; i < operations; i++)
+        {
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity entity));
+            Assert.True(fixture.World.TryTransition(
+                entity,
+                fixture.SourceToDestination,
+                out EntityLocation destination));
+            checksum = unchecked(checksum + entity.Generation + destination.ChunkRow.Row);
+            Assert.True(fixture.World.TryDestroy(entity));
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(checksum != 0);
+        Assert.Equal(0, fixture.World.AliveCount);
+        Assert.Equal(0, fixture.World.LocatedCount);
+        Assert.Equal(0, fixture.Source.Store.Count);
+        Assert.Equal(0, fixture.Destination.Store.Count);
+    }
+
+    private static long RunWorldLifecycleParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int operations = 10_000;
+        using var fixture = new WorldFixture<TArena>(maximumChunks: 1, entityCapacity: 1);
+        long checksum = 0;
+        for (int i = 0; i < operations; i++)
+        {
+            Assert.True(fixture.World.TryCreateDefault(fixture.Source.Id, out Entity entity));
+            Assert.True(fixture.World.TryGetLocation(entity, out EntityLocation source));
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                source.ChunkRow,
+                fixture.SourceEnable).Value = i * 17L;
+            fixture.Source.Store.SetEnabled(source.ChunkRow, fixture.SourceEnable, (i & 1) == 0);
+            Assert.True(fixture.World.TryTransition(
+                entity,
+                fixture.SourceToDestination,
+                out EntityLocation destination));
+            checksum = unchecked(checksum + entity.Generation + destination.ArchetypeId.Value);
+            checksum = unchecked(checksum + fixture.Destination.Store
+                .GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                    destination.ChunkRow,
+                    fixture.DestinationEnable).Value);
+            checksum = unchecked(checksum + (fixture.Destination.Store.IsEnabled(
+                destination.ChunkRow,
+                fixture.DestinationEnable) ? 1 : 0));
+            Assert.True(fixture.World.TryDestroy(entity));
+        }
+
+        fixture.Source.Store.ValidateInvariants();
+        fixture.Destination.Store.ValidateInvariants();
+        return checksum;
+    }
+
     private static long RunMigrationParity<TArena>()
         where TArena : class, IChunkArenaBackend
     {
@@ -2413,6 +2751,74 @@ internal static class EcsPrimitiveTests
         fixture.Source.Store.ValidateInvariants();
         fixture.Destination.Store.ValidateInvariants();
         return checksum;
+    }
+
+    private sealed class WorldFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        internal WorldFixture(int maximumChunks, int entityCapacity)
+        {
+            ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+            World = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(entityCapacity),
+                maximumArchetypes: 2,
+                static capacity => CreateWorldArena<TArena>(capacity));
+
+            ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+            ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+            ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+            ComponentId tagId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutTag>();
+            ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+            ComponentId[] sourceSignature = [byteId, enableId, wideId];
+            ComponentId[] destinationSignature = [enableId, intId, tagId, wideId];
+
+            ArchetypeId sourceId = World.RegisterArchetype(
+                sourceSignature,
+                ChunkLayoutOptions.KiB16,
+                maximumChunks);
+            ArchetypeId destinationId = World.RegisterArchetype(
+                destinationSignature,
+                ChunkLayoutOptions.KiB16,
+                maximumChunks);
+            Source = World.GetArchetypeStorage(sourceId);
+            Destination = World.GetArchetypeStorage(destinationId);
+            SourceToDestination = World.PrepareTransition(sourceId, destinationId);
+            DestinationToSource = World.PrepareTransition(destinationId, sourceId);
+
+            SourceByte = FindColumn(Source.Columns, byteId);
+            SourceEnable = FindColumn(Source.Columns, enableId);
+            DestinationEnable = FindColumn(Destination.Columns, enableId);
+            World.Seal();
+        }
+
+        internal EcsWorld<TArena> World { get; }
+        internal ArchetypeStorage<TArena> Source { get; }
+        internal ArchetypeStorage<TArena> Destination { get; }
+        internal ArchetypeTransitionPlan<TArena> SourceToDestination { get; }
+        internal ArchetypeTransitionPlan<TArena> DestinationToSource { get; }
+        internal ComponentColumnLayout SourceByte { get; }
+        internal ComponentColumnLayout SourceEnable { get; }
+        internal ComponentColumnLayout DestinationEnable { get; }
+
+        public void Dispose() => World.Dispose();
+
+        private static TRequestedArena CreateWorldArena<TRequestedArena>(ChunkArenaCapacity capacity)
+            where TRequestedArena : class, IChunkArenaBackend
+        {
+            object arena = typeof(TRequestedArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TRequestedArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported world test arena {typeof(TRequestedArena).Name}.");
+            return (TRequestedArena)arena;
+        }
     }
 
     private sealed class MigrationFixture<TArena> : IDisposable

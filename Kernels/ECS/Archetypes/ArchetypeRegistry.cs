@@ -212,6 +212,19 @@ internal sealed class ArchetypeRegistry<TArena> : IDisposable
             GetStorage(destinationId));
     }
 
+    internal bool Owns(ArchetypeTransitionPlan<TArena> plan)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(plan);
+
+        uint sourceIndex = plan.Source.Id.Value - 1;
+        uint destinationIndex = plan.Destination.Id.Value - 1;
+        return sourceIndex < (uint)_count &&
+            destinationIndex < (uint)_count &&
+            ReferenceEquals(_storage[sourceIndex], plan.Source) &&
+            ReferenceEquals(_storage[destinationIndex], plan.Destination);
+    }
+
     internal void Seal()
     {
         ThrowIfDisposed();
