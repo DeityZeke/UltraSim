@@ -317,6 +317,35 @@ now require an opt-in 1K through 10M working-set ladder, explicit retained-byte
 accounting, hardware-cache classification, and counters where available. The
 tracked accepted artifact remains unchanged.
 
+The v21 public-world extension adds three non-comparable native-backed scenarios
+and brings the executable suite to 85 cases. `ComponentLookup<T>` uses a
+seal-compiled two-byte route per registered archetype and follows the entity's
+current archetype, so random access does not require a signature scan and remains
+valid across migration. One scenario keeps the fully checked public route; a
+second acquires a stack-only `ComponentAccessor<T>` once before the timed loop;
+the third adds one alternating archetype migration per accessor round. Each round
+otherwise performs copied write/read plus enable write/read with scalar change
+stamping.
+
+One same-process focused comparison measured the internal native exact-archetype
+binding at `55.963 ns/round`, the safe public world-wide lookup at `75.333
+ns/round`, and the scoped public accessor at `43.801 ns/round` before the public
+values were detached from world ownership. After removing that hidden retention,
+the final same-process guard measured `55.126 ns/round` internal, `61.618 ns/round`
+safe public, and `43.775 ns/round` scoped public. A separate focused public-only
+process measured `75.661 ns/round` safe, `46.247 ns/round` scoped, and `128.343
+ns/round` scoped plus migration. All paths reported zero managed bytes.
+The subsequent full 85-scenario process measured `64.746`, `43.705`, and
+`134.524 ns/round` for those three public cases; every scenario reported zero
+managed allocation and zero Gen0/1/2 collections. The retained lookup-route fact
+was four bytes for the two-archetype fixture, and the public archetype handle was
+eight bytes.
+The result demonstrates why ownership/lifecycle checks should be amortized at a
+system boundary, but it is still directional: tiered JIT, scenario order, cache
+state, and the different exact versus world-wide route shapes prevent treating
+one capture as a stable ranking. Keep both safe and scoped guards, repeat them in
+isolated processes, and later compare the scoped API inside real generated jobs.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

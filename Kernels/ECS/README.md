@@ -42,10 +42,22 @@ allocation:
   source unchanged; guarded rollback paths protect later transaction failures. Added
   components retain store-defined zero/enabled defaults and removed components
   are discarded.
-- `EcsWorld<TArena>` is the first internal composition root over a process-unique
+- `EcsWorld<TArena>` is the internal composition root over a process-unique
   world ID, fixed entity pool, owned archetype registry/stores, and prepared
-  transitions. Its explicit `Created -> Sealed -> Disposed` lifecycle closes
-  registration and transition-plan construction before runtime mutation.
+  transitions. Its lifecycle now supports `Created`, `Sealed`, `Initialized`,
+  `Running`, terminal `Faulted`, and `Disposed` states while retaining the
+  seal-only runtime compatibility path used by low-level tests.
+- The public non-generic `EcsWorld` facade owns the native-backed kernel without
+  exposing arenas or raw storage. `EcsWorldOptions` fixes entity, archetype, and
+  prepared-plan capacity up front; explicit sealing compiles routes and closes
+  allocation, initialization opens bootstrap mutation, and `BeginRun` publishes
+  the running state. The current facade is deliberately engine-neutral and
+  single-owner, rejecting access from other threads until scheduler-issued worker
+  tokens exist.
+- Public `ArchetypeHandle` values are eight-byte world/archetype pairs, preventing
+  dense archetype IDs from colliding across worlds. Public immediate creation,
+  initialized creation, transition, destruction, liveness, and current-archetype
+  operations preserve the internal stale/entity/transaction checks.
 - Immediate default creation, transition, and destruction are checked at one
   boundary. Full-archetype rejection does not allocate or burn an entity
   generation, creation rollback removes a just-added row, destruction repairs a
@@ -59,6 +71,17 @@ allocation:
   stale/foreign/wrong-archetype entities, supports enableable data and tags, and
   rejects data access for storage-free tags. Single-value initialized creation
   writes through the same checked binding without exposing raw storage.
+- `ComponentLookup<T>` is the first public world-wide random-access plan. Sealing
+  compiles one `ushort` physical-column route per archetype, using `0xFFFF` as the
+  missing sentinel, so it remains valid as entities move between archetypes while
+  consuming only two route bytes per registered archetype. Safe calls revalidate
+  lifecycle, owner thread, and lookup ownership. `ComponentAccessor<T>` is a
+  stack-only system-invocation path that pays those checks once and retains entity
+  generation/location, current-archetype routing, row bounds, enable semantics,
+  and exact scalar change stamping on every operation. Neither path allocates or
+  returns mutable refs. Retained lookup and public-transition values do not retain
+  the facade, entity pool, archetype stores, or arenas after world disposal;
+  disposal releases the lookup route array.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index
@@ -213,7 +236,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 165 passing tests, including
+The current runtime and primitive suite has 171 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -240,6 +263,12 @@ layout, generated-ID/type/membership validation, value and enable semantics,
 tag/non-enableable rejection, initialized creation, exact-archetype behavior over
 migration, stale/foreign isolation, a 30,000-operation randomized model,
 native/pinned parity, and one million warmed allocation-free access rounds.
+Public-facade tests add explicit created/sealed/initialized/running/faulted/disposed
+ordering, eight-byte world-checked archetype handles, fixed option/plan capacity,
+single-owner rejection, terminal fault behavior, cross-world/default/stale route
+rejection, data/tag/enable semantics, lookup continuity across bidirectional
+migration, a 20,000-operation randomized reference model, and a 250,000-round
+allocation-free scoped-access/migration gate.
 Chunk-visitor tests add empty and multi-chunk traversal, exact metadata and local
 indices, data/enable writes, tag/foreign/non-enableable rejection, synchronous
 mutation and nesting rejection, exception cleanup, randomized reference parity,
@@ -283,15 +312,16 @@ row-filter intersection, cursor acknowledgement on empty `All` observations,
 exception retry, ownership/capacity/alias/mode rejection, wrap, Native/Pinned
 parity, and 10,000 warmed allocation-free two-write/exact-read cycles.
 
-This is now a minimal internal component/archetype world, not yet the public
-scheduler/host facade. The current generators emit the core manifest, a
+This is now a usable public single-owner component/archetype slice, not yet the
+public scheduler/host ECS. The current generators emit the core manifest, a
 systematic catalog containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W access families,
 and the first 2R2C any/all changed family. Further access/watch arities should be
 added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
 refinement entirely. Public tracked-write scopes, structural
 creation/migration/removal events, optional filters, bounded deferred structural
-commands, and field/serializer/prefab descriptors remain later work.
+commands, generated public chunk jobs, scheduler worker tokens, and
+field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:
 

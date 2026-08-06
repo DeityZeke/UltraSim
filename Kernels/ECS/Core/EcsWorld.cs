@@ -25,6 +25,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private int _queryPlanCount;
     private ChangeVersion _changeVersion;
     private EcsWorldState _state;
+    private Exception? _faultException;
+    private bool _hasSealed;
     private bool _isVisitingChunks;
 
     internal EcsWorld(
@@ -56,9 +58,15 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     internal EcsWorldState State => _state;
 
-    internal bool IsSealed => _state == EcsWorldState.Sealed;
+    internal bool IsSealed => _hasSealed && _state != EcsWorldState.Disposed;
+
+    internal bool IsInitialized => _state is EcsWorldState.Initialized or EcsWorldState.Running;
+
+    internal bool IsRunning => _state == EcsWorldState.Running;
 
     internal bool IsDisposed => _state == EcsWorldState.Disposed;
+
+    internal Exception? FaultException => _faultException;
 
     internal int AliveCount
     {
@@ -124,6 +132,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return _archetypes.PrepareTransition(sourceId, destinationId);
     }
 
+    internal PreparedArchetypeTransition PreparePublicTransition(
+        ArchetypeId sourceId,
+        ArchetypeId destinationId)
+    {
+        ArchetypeTransitionPlan<TArena> plan = PrepareTransition(sourceId, destinationId);
+        return plan.ToPrepared(Id);
+    }
+
     internal ArchetypeComponentBinding<T> BindComponent<T>(
         ArchetypeId archetypeId,
         ComponentId generatedComponentId)
@@ -162,6 +178,32 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             generatedComponentId,
             columnIndex,
             metadata.Flags);
+    }
+
+    internal ComponentLookupPlan<TArena, T> PrepareComponentLookup<T>()
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureCreated();
+        if (!_schema.TryGetComponentId<T>(out ComponentId componentId))
+        {
+            throw new ArgumentException(
+                "The requested component type is not registered in this world schema.",
+                nameof(T));
+        }
+        if (_queryPlanCount == _queryPlans.Length)
+        {
+            throw new InvalidOperationException(
+                $"Query-plan capacity {_queryPlans.Length} is exhausted.");
+        }
+
+        ref readonly ComponentMetadata metadata = ref _schema.GetMetadata(componentId);
+        var plan = new ComponentLookupPlan<TArena, T>(
+            Id,
+            _queryPlanCount,
+            componentId,
+            metadata.Flags);
+        _queryPlans[_queryPlanCount++] = plan;
+        return plan;
     }
 
     internal ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> PrepareReadWriteQuery<TRead, TWrite>(
@@ -375,17 +417,70 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     internal void Seal()
     {
         ThrowIfDisposed();
-        if (_state == EcsWorldState.Sealed)
+        if (_state is EcsWorldState.Sealed or EcsWorldState.Initialized or EcsWorldState.Running)
             return;
+        if (_state == EcsWorldState.Faulted)
+            throw new InvalidOperationException("A faulted world cannot be sealed.", _faultException);
+        if (_state != EcsWorldState.Created)
+            ThrowWorldInvariant("The world has an unknown lifecycle state.");
 
-        for (int index = 0; index < _queryPlanCount; index++)
+        try
         {
-            IArchetypeQueryPlan<TArena> plan = _queryPlans[index]
-                ?? throw new InvalidOperationException("A registered query-plan slot is empty.");
-            plan.Compile(_archetypes);
+            for (int index = 0; index < _queryPlanCount; index++)
+            {
+                IArchetypeQueryPlan<TArena> plan = _queryPlans[index]
+                    ?? throw new InvalidOperationException("A registered query-plan slot is empty.");
+                plan.Compile(_archetypes);
+            }
+            _archetypes.Seal();
+            _hasSealed = true;
+            _state = EcsWorldState.Sealed;
         }
-        _archetypes.Seal();
-        _state = EcsWorldState.Sealed;
+        catch (Exception exception)
+        {
+            _faultException = exception;
+            _state = EcsWorldState.Faulted;
+            throw;
+        }
+    }
+
+    internal void Initialize()
+    {
+        ThrowIfDisposed();
+        if (_state is EcsWorldState.Initialized or EcsWorldState.Running)
+            return;
+        if (_state == EcsWorldState.Faulted)
+            throw new InvalidOperationException("A faulted world cannot be initialized.", _faultException);
+        if (_state != EcsWorldState.Sealed)
+            throw new InvalidOperationException("World initialization requires an explicitly sealed world.");
+
+        _state = EcsWorldState.Initialized;
+    }
+
+    internal void BeginRun()
+    {
+        ThrowIfDisposed();
+        if (_state == EcsWorldState.Running)
+            return;
+        if (_state == EcsWorldState.Faulted)
+            throw new InvalidOperationException("A faulted world cannot begin running.", _faultException);
+        if (_state != EcsWorldState.Initialized)
+            throw new InvalidOperationException("A world must be initialized before it can begin running.");
+
+        _state = EcsWorldState.Running;
+    }
+
+    internal void MarkFaulted(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        ThrowIfDisposed();
+        if (_state == EcsWorldState.Faulted)
+            return;
+        if (_state == EcsWorldState.Created)
+            throw new InvalidOperationException("An unsealed world cannot enter runtime fault handling.");
+
+        _faultException = exception;
+        _state = EcsWorldState.Faulted;
     }
 
     internal bool IsAlive(Entity entity)
@@ -517,6 +612,179 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             row.ChunkIndex,
             binding.ColumnIndex,
             row.Row,
+            rowCount: 1,
+            AdvanceChangeVersion());
+        return true;
+    }
+
+    internal bool HasComponent<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureSealed();
+        ValidateComponentLookupPlan(lookup, requireData: false, requireEnableable: false);
+        return HasComponentPrepared(entity, lookup);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasComponentPrepared<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup)
+        where T : unmanaged, IComponent<T> =>
+        _entities.TryGetLocation(entity, out EntityLocation location) &&
+        lookup.TryGetColumnIndex(location.ArchetypeId, out _);
+
+    internal bool TryGetComponent<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        out T value)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureSealed();
+        ValidateComponentLookupPlan(lookup, requireData: true, requireEnableable: false);
+        return TryGetComponentPrepared(entity, lookup, out value);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryGetComponentPrepared<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        out T value)
+        where T : unmanaged, IComponent<T>
+    {
+        if (!lookup.HasData)
+            ThrowComponentLookupHasNoData();
+        if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
+        {
+            value = default;
+            return false;
+        }
+
+        value = storage.Store.GetBoundComponentRef<T>(row, columnIndex);
+        return true;
+    }
+
+    internal bool TrySetComponent<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        in T value)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureRuntimeMutationAllowed();
+        ValidateComponentLookupPlan(lookup, requireData: true, requireEnableable: false);
+        return TrySetComponentPrepared(entity, lookup, value);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TrySetComponentPrepared<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        in T value)
+        where T : unmanaged, IComponent<T>
+    {
+        if (!lookup.HasData)
+            ThrowComponentLookupHasNoData();
+        if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
+            return false;
+
+        storage.Store.GetBoundComponentRef<T>(row, columnIndex) = value;
+        storage.Store.StampSparseChangeVersion(
+            row.ChunkIndex,
+            columnIndex,
+            row.Row,
+            rowCount: 1,
+            AdvanceChangeVersion());
+        return true;
+    }
+
+    internal bool TryGetComponentEnabled<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        out bool enabled)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureSealed();
+        ValidateComponentLookupPlan(lookup, requireData: false, requireEnableable: true);
+        return TryGetComponentEnabledPrepared(entity, lookup, out enabled);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryGetComponentEnabledPrepared<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        out bool enabled)
+        where T : unmanaged, IComponent<T>
+    {
+        if (!lookup.IsEnableable)
+            ThrowComponentLookupIsNotEnableable();
+        if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
+        {
+            enabled = false;
+            return false;
+        }
+
+        enabled = storage.Store.IsBoundEnabled(row, columnIndex);
+        return true;
+    }
+
+    internal bool TrySetComponentEnabled<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        bool enabled)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureRuntimeMutationAllowed();
+        ValidateComponentLookupPlan(lookup, requireData: false, requireEnableable: true);
+        return TrySetComponentEnabledPrepared(entity, lookup, enabled);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TrySetComponentEnabledPrepared<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        bool enabled)
+        where T : unmanaged, IComponent<T>
+    {
+        if (!lookup.IsEnableable)
+            ThrowComponentLookupIsNotEnableable();
+        if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
+            return false;
+
+        storage.Store.SetBoundEnabled(row, columnIndex, enabled);
+        storage.Store.StampSparseChangeVersion(
+            row.ChunkIndex,
+            columnIndex,
+            row.Row,
+            rowCount: 1,
+            AdvanceChangeVersion());
+        return true;
+    }
+
+    internal bool TryCreateInitialized<T>(
+        ArchetypeId archetypeId,
+        ComponentLookupPlan<TArena, T> lookup,
+        in T initialValue,
+        out Entity entity)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureRuntimeMutationAllowed();
+        ValidateComponentLookupPlan(lookup, requireData: true, requireEnableable: false);
+        if (!lookup.TryGetColumnIndex(archetypeId, out int columnIndex))
+        {
+            throw new ArgumentException(
+                "The initialization archetype does not contain the lookup component.",
+                nameof(archetypeId));
+        }
+        if (!TryCreateDefaultCore(archetypeId, out entity, out EntityLocation location))
+            return false;
+
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
+        storage.Store.GetBoundComponentRef<T>(location.ChunkRow, columnIndex) = initialValue;
+        storage.Store.StampSparseChangeVersion(
+            location.ChunkRow.ChunkIndex,
+            columnIndex,
+            location.ChunkRow.Row,
             rowCount: 1,
             AdvanceChangeVersion());
         return true;
@@ -1217,6 +1485,38 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             out destinationLocation);
     }
 
+    internal bool TryTransition(
+        Entity entity,
+        PreparedArchetypeTransition transition,
+        out EntityLocation destinationLocation)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArgumentNullException.ThrowIfNull(transition);
+        if (transition.WorldId != Id)
+        {
+            throw new ArgumentException(
+                "The archetype transition belongs to a different world.",
+                nameof(transition));
+        }
+
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
+        return ArchetypeMigrator.TryMigrate(
+            _entities,
+            entity,
+            source,
+            destination,
+            transition.Transfers,
+            out destinationLocation);
+    }
+
+    internal void ValidatePreparedComponentLookup<T>(ComponentLookupPlan<TArena, T> lookup)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureSealed();
+        ValidateComponentLookupPlan(lookup, requireData: false, requireEnableable: false);
+    }
+
     internal bool TryDestroy(Entity entity)
     {
         EnsureRuntimeMutationAllowed();
@@ -1259,8 +1559,32 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             for (int index = 0; index < _queryPlanCount; index++)
                 _queryPlans[index]?.Release();
             Array.Clear(_queryPlans);
+            _faultException = null;
             _state = EcsWorldState.Disposed;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private bool TryResolveLookup<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        [NotNullWhen(true)] out ArchetypeStorage<TArena>? storage,
+        out ChunkRow row,
+        out int columnIndex)
+        where T : unmanaged, IComponent<T>
+    {
+        columnIndex = -1;
+        if (!_entities.TryGetLocation(entity, out EntityLocation location) ||
+            !lookup.TryGetColumnIndex(location.ArchetypeId, out columnIndex))
+        {
+            storage = null;
+            row = ChunkRow.Invalid;
+            return false;
+        }
+
+        storage = _archetypes.GetStorage(location.ArchetypeId);
+        row = location.ChunkRow;
+        return true;
     }
 
     private bool TryResolveBinding<T>(
@@ -1382,6 +1706,27 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             ThrowWorldInvariant("A sealed world owns an uncompiled query plan.");
     }
 
+    private void ValidateComponentLookupPlan<T>(
+        ComponentLookupPlan<TArena, T> lookup,
+        bool requireData,
+        bool requireEnableable)
+        where T : unmanaged, IComponent<T>
+    {
+        ArgumentNullException.ThrowIfNull(lookup);
+        if (lookup.WorldId != Id ||
+            unchecked((uint)lookup.PlanIndex) >= unchecked((uint)_queryPlanCount) ||
+            !ReferenceEquals(_queryPlans[lookup.PlanIndex], lookup))
+        {
+            throw new ArgumentException("The component lookup belongs to a different world.", nameof(lookup));
+        }
+        if (!lookup.IsCompiled)
+            ThrowWorldInvariant("A sealed world owns an uncompiled component lookup.");
+        if (requireData && !lookup.HasData)
+            throw new InvalidOperationException("Storage-free tag components cannot be read or written as data.");
+        if (requireEnableable && !lookup.IsEnableable)
+            throw new InvalidOperationException("The component lookup is not enableable.");
+    }
+
     private static void RollBackJustAddedRow(
         ArchetypeChunkStore<TArena> store,
         ChunkRow row,
@@ -1404,8 +1749,12 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private void EnsureSealed()
     {
         ThrowIfDisposed();
-        if (_state != EcsWorldState.Sealed)
-            throw new InvalidOperationException("World runtime mutation requires a sealed world.");
+        if (_state is EcsWorldState.Sealed or EcsWorldState.Initialized or EcsWorldState.Running)
+            return;
+        if (_state == EcsWorldState.Faulted)
+            throw new InvalidOperationException("A faulted world cannot execute ECS operations.", _faultException);
+
+        throw new InvalidOperationException("World ECS operations require a sealed world.");
     }
 
     private void EnsureRuntimeMutationAllowed()
@@ -1442,4 +1791,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     [DoesNotReturn]
     private static void ThrowWorldInvariant(string message) =>
         throw new InvalidOperationException(message);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    [DoesNotReturn]
+    private static void ThrowComponentLookupHasNoData() =>
+        throw new InvalidOperationException("Storage-free tag components cannot be read or written as data.");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    [DoesNotReturn]
+    private static void ThrowComponentLookupIsNotEnableable() =>
+        throw new InvalidOperationException("The component lookup is not enableable.");
 }

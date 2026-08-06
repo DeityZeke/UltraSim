@@ -15,55 +15,77 @@ internal static class ArchetypeMigrator
         ArgumentNullException.ThrowIfNull(entityPool);
         ArgumentNullException.ThrowIfNull(plan);
 
+        return TryMigrate(
+            entityPool,
+            entity,
+            plan.Source,
+            plan.Destination,
+            plan.Transfers,
+            out destinationLocation);
+    }
+
+    internal static bool TryMigrate<TArena>(
+        EntityPool entityPool,
+        Entity entity,
+        ArchetypeStorage<TArena> source,
+        ArchetypeStorage<TArena> destination,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers,
+        out EntityLocation destinationLocation)
+        where TArena : class, IChunkArenaBackend
+    {
+        ArgumentNullException.ThrowIfNull(entityPool);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+
         if (!entityPool.TryGetLocation(entity, out EntityLocation sourceLocation) ||
-            sourceLocation.ArchetypeId != plan.Source.Id ||
-            !plan.Source.Store.Contains(sourceLocation.ChunkRow, entity.Index))
+            sourceLocation.ArchetypeId != source.Id ||
+            !source.Store.Contains(sourceLocation.ChunkRow, entity.Index))
         {
             destinationLocation = EntityLocation.Invalid;
             return false;
         }
 
-        if (!plan.Destination.Store.TryAdd(entity.Index, out ChunkRow destinationRow))
+        if (!destination.Store.TryAdd(entity.Index, out ChunkRow destinationRow))
         {
             destinationLocation = EntityLocation.Invalid;
             return false;
         }
 
-        var replacement = new EntityLocation(plan.Destination.Id, destinationRow);
+        var replacement = new EntityLocation(destination.Id, destinationRow);
         try
         {
-            plan.Source.Store.CopyColumnsTo(
+            source.Store.CopyColumnsTo(
                 sourceLocation.ChunkRow,
-                plan.Destination.Store,
+                destination.Store,
                 destinationRow,
-                plan.Transfers);
+                transfers);
         }
         catch
         {
-            RollBackDestination(plan.Destination.Store, destinationRow, entity.Index);
+            RollBackDestination(destination.Store, destinationRow, entity.Index);
             throw;
         }
 
         if (!entityPool.TryReplaceLocation(entity, sourceLocation, replacement))
         {
-            RollBackDestination(plan.Destination.Store, destinationRow, entity.Index);
+            RollBackDestination(destination.Store, destinationRow, entity.Index);
             destinationLocation = EntityLocation.Invalid;
             return false;
         }
 
-        if (!plan.Source.Store.TryRemove(
+        if (!source.Store.TryRemove(
                 sourceLocation.ChunkRow,
                 entity.Index,
                 out ChunkRowRelocation sourceRelocation))
         {
             if (!entityPool.TryReplaceLocation(entity, replacement, sourceLocation))
                 ThrowMigrationInvariant("Failed to restore an entity location after source removal rejection.");
-            RollBackDestination(plan.Destination.Store, destinationRow, entity.Index);
+            RollBackDestination(destination.Store, destinationRow, entity.Index);
             destinationLocation = EntityLocation.Invalid;
             return false;
         }
 
-        entityPool.ApplyRelocation(plan.Source.Id, sourceRelocation);
+        entityPool.ApplyRelocation(source.Id, sourceRelocation);
         destinationLocation = replacement;
         return true;
     }

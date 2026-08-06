@@ -38,6 +38,12 @@ internal sealed class ArchetypeTransitionPlan<TArena>
 
     internal int RemovedComponentCount { get; }
 
+    internal PreparedArchetypeTransition ToPrepared(WorldId worldId) => new(
+        worldId,
+        Source.Id,
+        Destination.Id,
+        _transfers);
+
     internal static ArchetypeTransitionPlan<TArena> Create(
         ArchetypeStorage<TArena> source,
         ArchetypeStorage<TArena> destination)

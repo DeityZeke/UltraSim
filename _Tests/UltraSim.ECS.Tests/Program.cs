@@ -90,6 +90,12 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_RandomizedLifecycleMatchesReferenceModel), EcsWorld_RandomizedLifecycleMatchesReferenceModel);
         Run(nameof(EcsWorld_NativeAndPinnedLifecycleRemainEquivalent), EcsWorld_NativeAndPinnedLifecycleRemainEquivalent);
         Run(nameof(EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes), EcsWorld_WarmedCreateTransitionDestroyAllocatesZeroManagedBytes);
+        Run(nameof(PublicEcsWorld_OptionsHandlesAndLifecycleAreExplicit), PublicEcsWorld_OptionsHandlesAndLifecycleAreExplicit);
+        Run(nameof(PublicEcsWorld_LookupFollowsArchetypeTransitions), PublicEcsWorld_LookupFollowsArchetypeTransitions);
+        Run(nameof(PublicEcsWorld_RejectsForeignStaleAndInvalidPublicRoutes), PublicEcsWorld_RejectsForeignStaleAndInvalidPublicRoutes);
+        Run(nameof(PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit), PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit);
+        Run(nameof(PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel), PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel);
+        Run(nameof(PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes), PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes);
         Run(nameof(ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit), ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit);
         Run(nameof(EcsWorld_BoundAccessReadsWritesAndInitializes), EcsWorld_BoundAccessReadsWritesAndInitializes);
         Run(nameof(EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings), EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings);
@@ -2745,6 +2751,305 @@ internal static class EcsPrimitiveTests
         Assert.Equal(0, fixture.World.LocatedCount);
         Assert.Equal(0, fixture.Source.Store.Count);
         Assert.Equal(0, fixture.Destination.Store.Count);
+    }
+
+    private static void PublicEcsWorld_OptionsHandlesAndLifecycleAreExplicit()
+    {
+        Assert.Equal(8, Unsafe.SizeOf<ArchetypeHandle>());
+        Assert.Equal(8, Marshal.SizeOf<ArchetypeHandle>());
+        Assert.False(ArchetypeHandle.Invalid.IsValid);
+        foreach (FieldInfo field in typeof(ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong>)
+            .GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
+        {
+            Assert.NotEqual(typeof(EcsWorld), field.FieldType);
+        }
+        foreach (FieldInfo field in typeof(PreparedArchetypeTransition)
+            .GetFields(BindingFlags.Instance | BindingFlags.NonPublic))
+        {
+            Assert.False(typeof(ArchetypeStorage<NativeChunkArena>).IsAssignableFrom(field.FieldType));
+            Assert.NotEqual(typeof(EcsWorld), field.FieldType);
+        }
+        Assert.Throws<ArgumentException>(() => new EcsWorldOptions(default, 1, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new EcsWorldOptions(new EntityCapacity(1), 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new EcsWorldOptions(new EntityCapacity(1), 1, -1));
+
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        var options = new EcsWorldOptions(new EntityCapacity(32), 2, 1);
+        var world = new EcsWorld(schema, options);
+        ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ArchetypeHandle source = world.RegisterArchetype(
+            [enableId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> lookup =
+            world.PrepareLookup<UltraSim.ECS.Tests.LayoutEnableLong>();
+
+        Assert.Equal(EcsWorldState.Created, world.State);
+        Assert.Equal(options, world.Options);
+        Assert.Equal(world.Id, source.World);
+        Assert.Equal(1, world.ArchetypeCount);
+        Assert.Equal(1, world.PreparedPlanCount);
+        Assert.Throws<InvalidOperationException>(() => world.TryCreate(source, out _));
+        Assert.Throws<InvalidOperationException>(world.Initialize);
+
+        world.Seal();
+        world.Seal();
+        Assert.Equal(EcsWorldState.Sealed, world.State);
+        Assert.True(world.IsSealed);
+        Assert.False(world.IsInitialized);
+        Assert.Equal(1, lookup.MatchedArchetypeCount);
+        Assert.Equal(2L, lookup.RouteBytes);
+        Assert.Throws<InvalidOperationException>(() => world.TryCreate(source, out _));
+
+        world.Initialize();
+        world.Initialize();
+        Assert.Equal(EcsWorldState.Initialized, world.State);
+        Assert.True(world.IsInitialized);
+        Assert.True(world.TryCreate(source, out Entity entity));
+        Assert.True(world.IsAlive(entity));
+
+        world.BeginRun();
+        world.BeginRun();
+        Assert.Equal(EcsWorldState.Running, world.State);
+        Assert.True(world.IsRunning);
+        Assert.Throws<InvalidOperationException>(() => world.RegisterArchetype(
+            ReadOnlySpan<ComponentId>.Empty,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1));
+
+        world.Dispose();
+        world.Dispose();
+        Assert.Equal(EcsWorldState.Disposed, world.State);
+        Assert.True(world.IsDisposed);
+        Assert.False(world.IsSealed);
+        Assert.True(lookup.IsValid);
+        Assert.Equal(0L, lookup.RouteBytes);
+        Assert.Throws<ObjectDisposedException>(() => world.IsAlive(entity));
+        Assert.Throws<ObjectDisposedException>(() => world.Has(entity, lookup));
+    }
+
+    private static void PublicEcsWorld_LookupFollowsArchetypeTransitions()
+    {
+        using var fixture = new PublicWorldFixture(entityCapacity: 8);
+        var initial = new UltraSim.ECS.Tests.LayoutEnableLong { Value = 0x1234_5678 };
+        Assert.True(fixture.World.TryCreate(
+            fixture.Source,
+            fixture.EnableLookup,
+            initial,
+            out Entity entity));
+        Assert.True(fixture.EnableLookup.Has(fixture.World, entity));
+        Assert.True(fixture.EnableLookup.TryRead(
+            fixture.World,
+            entity,
+            out UltraSim.ECS.Tests.LayoutEnableLong read));
+        Assert.Equal(initial.Value, read.Value);
+        Assert.True(fixture.EnableLookup.TrySetEnabled(fixture.World, entity, enabled: false));
+        Assert.True(fixture.EnableLookup.TryGetEnabled(fixture.World, entity, out bool sourceEnabled));
+        Assert.False(sourceEnabled);
+        Assert.False(fixture.World.Has(entity, fixture.IntLookup));
+        Assert.False(fixture.World.Has(entity, fixture.TagLookup));
+
+        Assert.True(fixture.World.TryTransition(entity, fixture.SourceToDestination));
+        Assert.True(fixture.World.TryGetArchetype(entity, out ArchetypeHandle destination));
+        Assert.Equal(fixture.Destination, destination);
+        Assert.True(fixture.World.TryRead(entity, fixture.EnableLookup, out read));
+        Assert.Equal(initial.Value, read.Value);
+        Assert.True(fixture.World.TryGetEnabled(entity, fixture.EnableLookup, out bool destinationEnabled));
+        Assert.False(destinationEnabled);
+        Assert.True(fixture.World.TryRead(entity, fixture.IntLookup, out UltraSim.ECS.Tests.LayoutInt added));
+        Assert.Equal(0, added.Value);
+        Assert.True(fixture.World.Has(entity, fixture.TagLookup));
+        Assert.True(fixture.World.TryGetEnabled(entity, fixture.TagLookup, out bool tagEnabled));
+        Assert.True(tagEnabled);
+        Assert.Throws<InvalidOperationException>(() => fixture.World.TryRead(entity, fixture.TagLookup, out _));
+
+        Assert.True(fixture.World.TryWrite(
+            entity,
+            fixture.EnableLookup,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 99 }));
+        Assert.True(fixture.World.TryTransition(entity, fixture.DestinationToSource));
+        Assert.True(fixture.World.TryRead(entity, fixture.EnableLookup, out read));
+        Assert.Equal(99L, read.Value);
+        Assert.False(fixture.World.Has(entity, fixture.IntLookup));
+        Assert.False(fixture.World.Has(entity, fixture.TagLookup));
+    }
+
+    private static void PublicEcsWorld_RejectsForeignStaleAndInvalidPublicRoutes()
+    {
+        using var first = new PublicWorldFixture(entityCapacity: 4);
+        using var second = new PublicWorldFixture(entityCapacity: 4);
+        Assert.True(first.World.TryCreate(first.Source, out Entity entity));
+
+        Assert.Throws<ArgumentException>(() => first.World.TryCreate(second.Source, out _));
+        Assert.Throws<ArgumentException>(() => first.World.TryTransition(entity, second.SourceToDestination));
+        Assert.Throws<ArgumentException>(() => first.World.TryRead(entity, second.EnableLookup, out _));
+        Assert.False(second.World.Has(entity, second.EnableLookup));
+
+        ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> invalidLookup = default;
+        ArchetypeTransition invalidTransition = default;
+        Assert.Throws<InvalidOperationException>(() => first.World.Has(entity, invalidLookup));
+        Assert.Throws<ArgumentException>(() => first.World.TryTransition(entity, invalidTransition));
+
+        Assert.True(first.World.TryDestroy(entity));
+        Assert.False(first.World.IsAlive(entity));
+        Assert.False(first.World.Has(entity, first.EnableLookup));
+        Assert.False(first.World.TryRead(entity, first.EnableLookup, out _));
+        Assert.False(first.World.TryWrite(
+            entity,
+            first.EnableLookup,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 7 }));
+        Assert.False(first.World.TryGetEnabled(entity, first.EnableLookup, out _));
+        Assert.False(first.World.TrySetEnabled(entity, first.EnableLookup, false));
+    }
+
+    private static void PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit()
+    {
+        var fixture = new PublicWorldFixture(entityCapacity: 2);
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity entity));
+
+        Exception? foreignThreadFailure = null;
+        Task.Run(() =>
+        {
+            try
+            {
+                fixture.World.IsAlive(entity);
+            }
+            catch (Exception exception)
+            {
+                foreignThreadFailure = exception;
+            }
+        }).GetAwaiter().GetResult();
+        Assert.True(foreignThreadFailure is InvalidOperationException);
+        Assert.True(fixture.World.IsAlive(entity));
+
+        var fault = new InvalidOperationException("test fault");
+        fixture.World.MarkFaulted(fault);
+        fixture.World.MarkFaulted(new Exception("later fault"));
+        Assert.Equal(EcsWorldState.Faulted, fixture.World.State);
+        Assert.True(fixture.World.IsFaulted);
+        Assert.Equal(fault, fixture.World.FaultException);
+        Assert.Throws<InvalidOperationException>(() => fixture.World.IsAlive(entity));
+        Assert.Throws<InvalidOperationException>(fixture.World.BeginRun);
+
+        fixture.Dispose();
+        Assert.True(fixture.World.IsDisposed);
+        Assert.Equal<Exception?>(null, fixture.World.FaultException);
+    }
+
+    private static void PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel()
+    {
+        const int entityCount = 128;
+        const int operations = 20_000;
+        using var fixture = new PublicWorldFixture(entityCount);
+        var entities = new Entity[entityCount];
+        var values = new long[entityCount];
+        var enabled = new bool[entityCount];
+        var inSource = new bool[entityCount];
+        for (int i = 0; i < entityCount; i++)
+        {
+            values[i] = i * 31L + 5;
+            enabled[i] = (i & 1) == 0;
+            inSource[i] = true;
+            Assert.True(fixture.World.TryCreate(
+                fixture.Source,
+                fixture.EnableLookup,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = values[i] },
+                out entities[i]));
+            Assert.True(fixture.World.TrySetEnabled(entities[i], fixture.EnableLookup, enabled[i]));
+        }
+
+        var random = new Random(unchecked((int)0x6C00_10A7));
+        for (int operation = 0; operation < operations; operation++)
+        {
+            int index = random.Next(entityCount);
+            if (random.Next(3) == 0)
+            {
+                values[index] = unchecked(values[index] * 33 + operation + 1);
+                enabled[index] = !enabled[index];
+                Assert.True(fixture.World.TryWrite(
+                    entities[index],
+                    fixture.EnableLookup,
+                    new UltraSim.ECS.Tests.LayoutEnableLong { Value = values[index] }));
+                Assert.True(fixture.World.TrySetEnabled(entities[index], fixture.EnableLookup, enabled[index]));
+            }
+            else
+            {
+                ArchetypeTransition transition = inSource[index]
+                    ? fixture.SourceToDestination
+                    : fixture.DestinationToSource;
+                Assert.True(fixture.World.TryTransition(entities[index], transition));
+                inSource[index] = !inSource[index];
+            }
+
+            if ((operation & 255) == 0)
+            {
+                for (int i = 0; i < entityCount; i++)
+                {
+                    Assert.True(fixture.World.TryRead(
+                        entities[i],
+                        fixture.EnableLookup,
+                        out UltraSim.ECS.Tests.LayoutEnableLong value));
+                    Assert.Equal(values[i], value.Value);
+                    Assert.True(fixture.World.TryGetEnabled(
+                        entities[i],
+                        fixture.EnableLookup,
+                        out bool actualEnabled));
+                    Assert.Equal(enabled[i], actualEnabled);
+                    Assert.Equal(!inSource[i], fixture.World.Has(entities[i], fixture.IntLookup));
+                    Assert.Equal(!inSource[i], fixture.World.Has(entities[i], fixture.TagLookup));
+                }
+            }
+        }
+    }
+
+    private static void PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes()
+    {
+        const int operations = 250_000;
+        using var fixture = new PublicWorldFixture(entityCapacity: 1);
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity entity));
+        ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access =
+            fixture.EnableLookup.OpenAccess(fixture.World);
+        for (int i = 0; i < 64; i++)
+        {
+            Assert.True(access.TryWrite(
+                entity,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = i }));
+            Assert.True(access.TryRead(entity, out _));
+            Assert.True(access.TrySetEnabled(entity, (i & 1) == 0));
+            Assert.True(access.TryGetEnabled(entity, out _));
+            Assert.True(fixture.World.TryTransition(
+                entity,
+                (i & 1) == 0 ? fixture.SourceToDestination : fixture.DestinationToSource));
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < operations; i++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong { Value = i * 17L };
+            if (!access.TryWrite(entity, value) ||
+                !access.TryRead(entity, out UltraSim.ECS.Tests.LayoutEnableLong read) ||
+                !access.TrySetEnabled(entity, (i & 1) == 0) ||
+                !access.TryGetEnabled(entity, out bool enabled) ||
+                !fixture.World.TryTransition(
+                    entity,
+                    (i & 1) == 0 ? fixture.SourceToDestination : fixture.DestinationToSource))
+            {
+                throw new InvalidOperationException("Warmed public lookup cycle unexpectedly failed.");
+            }
+            checksum = unchecked(checksum + read.Value + (enabled ? 1 : 0));
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(checksum != 0);
+        Assert.True(access.TryRead(entity, out _));
     }
 
     private static void ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit()
@@ -9583,6 +9888,60 @@ internal static class EcsPrimitiveTests
                         $"Unsupported filtered-query test arena {typeof(TRequestedArena).Name}.");
             return (TRequestedArena)arena;
         }
+    }
+
+    private sealed class PublicWorldFixture : IDisposable
+    {
+        internal PublicWorldFixture(int entityCapacity)
+        {
+            ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+            World = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(entityCapacity),
+                    maximumArchetypes: 2,
+                    maximumPreparedPlans: 4));
+            ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+            ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+            ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+            ComponentId tagId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutTag>();
+            ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+
+            Source = World.RegisterArchetype(
+                [byteId, enableId, wideId],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 1);
+            Destination = World.RegisterArchetype(
+                [enableId, intId, tagId, wideId],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 1);
+            SourceToDestination = World.PrepareTransition(Source, Destination);
+            DestinationToSource = World.PrepareTransition(Destination, Source);
+            EnableLookup = World.PrepareLookup<UltraSim.ECS.Tests.LayoutEnableLong>();
+            IntLookup = World.PrepareLookup<UltraSim.ECS.Tests.LayoutInt>();
+            TagLookup = World.PrepareLookup<UltraSim.ECS.Tests.LayoutTag>();
+            WideLookup = World.PrepareLookup<UltraSim.ECS.Tests.LayoutWide>();
+            World.Seal();
+            World.Initialize();
+            World.BeginRun();
+        }
+
+        internal EcsWorld World { get; }
+        internal ArchetypeHandle Source { get; }
+        internal ArchetypeHandle Destination { get; }
+        internal ArchetypeTransition SourceToDestination { get; }
+        internal ArchetypeTransition DestinationToSource { get; }
+        internal ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> EnableLookup { get; }
+        internal ComponentLookup<UltraSim.ECS.Tests.LayoutInt> IntLookup { get; }
+        internal ComponentLookup<UltraSim.ECS.Tests.LayoutTag> TagLookup { get; }
+        internal ComponentLookup<UltraSim.ECS.Tests.LayoutWide> WideLookup { get; }
+
+        public void Dispose() => World.Dispose();
     }
 
     private sealed class WorldFixture<TArena> : IDisposable

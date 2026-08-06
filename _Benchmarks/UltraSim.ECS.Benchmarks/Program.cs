@@ -78,6 +78,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedWorldLifecycle = new EcsWorldLifecycleFixture<PinnedChunkArena>(100_000);
         using var nativeBoundAccess = new EcsWorldBoundAccessFixture<NativeChunkArena>(1_000_000);
         using var pinnedBoundAccess = new EcsWorldBoundAccessFixture<PinnedChunkArena>(1_000_000);
+        using var publicLookupAccess = new PublicEcsWorldLookupFixture(1_000_000, includeTransition: false);
+        using var publicLookupTransition = new PublicEcsWorldLookupFixture(250_000, includeTransition: true);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
         using var pinnedChunkVisit = new EcsWorldChunkVisitFixture<PinnedChunkArena>(100_000);
         using var nativeReadWriteQuery = new EcsWorldReadWriteQueryFixture<NativeChunkArena>(100_000);
@@ -139,6 +141,9 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_CreateTransitionDestroy_100000", "WorldLifecycle", 100_000, pinnedWorldLifecycle.Execute),
             new("NativeWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, nativeBoundAccess.Execute),
             new("PinnedWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, pinnedBoundAccess.Execute),
+            new("PublicWorld_PreparedLookupReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.Execute),
+            new("PublicWorld_ScopedAccessorReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.ExecutePrepared),
+            new("PublicWorld_ScopedAccessorReadWriteEnableTransition_250000", "PublicWorldComponentLookup", 250_000, publicLookupTransition.ExecutePrepared),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
             new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
             new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
@@ -193,7 +198,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-generated-multi-change-v20",
+            SemanticProfile = "ecs-next-phase1-public-lookup-v21",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -205,6 +210,8 @@ internal static class PrimitiveBenchmarks
             ComponentMetadataSizeBytes = Marshal.SizeOf<ComponentMetadata>(),
             ChangeVersionSizeBytes = Marshal.SizeOf<ChangeVersion>(),
             ChangeCursorSizeBytes = Marshal.SizeOf<ChangeCursor>(),
+            ArchetypeHandleSizeBytes = Marshal.SizeOf<ArchetypeHandle>(),
+            PublicLookupRouteBytes = publicLookupTransition.RouteBytes,
             ExactChangedRowsMetadataBytes = nativeGeneratedWideQuery.ExactChangedRowsMetadataBytes,
             SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
@@ -1285,6 +1292,121 @@ internal static class PrimitiveBenchmarks
                     : throw new InvalidOperationException(
                         $"Unsupported bound-access benchmark arena {typeof(TArena).Name}.");
             return (TArena)arena;
+        }
+    }
+
+    private sealed class PublicEcsWorldLookupFixture : IDisposable
+    {
+        private readonly EcsWorld _world;
+        private readonly ComponentLookup<BenchmarkVelocity> _lookup;
+        private readonly ArchetypeTransition _forward;
+        private readonly ArchetypeTransition _backward;
+        private readonly Entity _entity;
+        private readonly int _operations;
+        private readonly bool _includeTransition;
+
+        internal PublicEcsWorldLookupFixture(int operations, bool includeTransition)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(1),
+                    maximumArchetypes: includeTransition ? 2 : 1,
+                    maximumPreparedPlans: 1));
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
+            ArchetypeHandle source = _world.RegisterArchetype(
+                CreateSortedSignature(position, velocity),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 1);
+            if (includeTransition)
+            {
+                ArchetypeHandle destination = _world.RegisterArchetype(
+                    CreateSortedSignature(velocity, wide),
+                    ChunkLayoutOptions.KiB16,
+                    maximumChunks: 1);
+                _forward = _world.PrepareTransition(source, destination);
+                _backward = _world.PrepareTransition(destination, source);
+            }
+
+            _lookup = _world.PrepareLookup<BenchmarkVelocity>();
+            _world.Seal();
+            _world.Initialize();
+            _world.BeginRun();
+            if (!_world.TryCreate(source, out _entity))
+                throw new InvalidOperationException("Public lookup benchmark fixture failed to create its entity.");
+
+            _operations = operations;
+            _includeTransition = includeTransition;
+        }
+
+        internal long RouteBytes => _lookup.RouteBytes;
+
+        internal ScenarioMeasurement ExecutePrepared()
+        {
+            ComponentAccessor<BenchmarkVelocity> access = _lookup.OpenAccess(_world);
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                var value = new BenchmarkVelocity { X = i, Y = -i };
+                if (!access.TryWrite(_entity, value) ||
+                    !access.TryRead(_entity, out BenchmarkVelocity read) ||
+                    !access.TrySetEnabled(_entity, (i & 1) == 0) ||
+                    !access.TryGetEnabled(_entity, out bool enabled))
+                {
+                    throw new InvalidOperationException("Public scoped component accessor lost its entity route.");
+                }
+
+                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.X));
+                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.Y));
+                checksum += enabled ? 1 : 0;
+                if (_includeTransition && !_world.TryTransition(
+                    _entity,
+                    (i & 1) == 0 ? _forward : _backward))
+                {
+                    throw new InvalidOperationException("Public scoped component accessor transition failed.");
+                }
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            long checksum = 0;
+            for (int i = 0; i < _operations; i++)
+            {
+                var value = new BenchmarkVelocity { X = i, Y = -i };
+                if (!_world.TryWrite(_entity, _lookup, value) ||
+                    !_world.TryRead(_entity, _lookup, out BenchmarkVelocity read) ||
+                    !_world.TrySetEnabled(_entity, _lookup, (i & 1) == 0) ||
+                    !_world.TryGetEnabled(_entity, _lookup, out bool enabled))
+                {
+                    throw new InvalidOperationException("Public prepared lookup lost its entity route.");
+                }
+
+                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.X));
+                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.Y));
+                checksum += enabled ? 1 : 0;
+                if (_includeTransition && !_world.TryTransition(
+                    _entity,
+                    (i & 1) == 0 ? _forward : _backward))
+                {
+                    throw new InvalidOperationException("Public prepared lookup transition failed.");
+                }
+            }
+
+            return new ScenarioMeasurement(_operations, checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static ComponentId[] CreateSortedSignature(params ComponentId[] signature)
+        {
+            Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
+            return signature;
         }
     }
 
@@ -2783,6 +2905,8 @@ internal sealed class BenchmarkReport
     public required int ComponentMetadataSizeBytes { get; init; }
     public required int ChangeVersionSizeBytes { get; init; }
     public required int ChangeCursorSizeBytes { get; init; }
+    public required int ArchetypeHandleSizeBytes { get; init; }
+    public required long PublicLookupRouteBytes { get; init; }
     public required long ExactChangedRowsMetadataBytes { get; init; }
     public required int SchemaIdSizeBytes { get; init; }
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
