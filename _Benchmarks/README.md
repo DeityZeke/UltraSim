@@ -207,6 +207,19 @@ processes must determine how much is store pressure versus generated loop shape.
 All 58 scenarios reported zero managed allocation and zero Gen0/1/2 collections.
 The tracked accepted artifact remains unchanged.
 
+The generated read-only-axis extension adds a 2R0W pair over the same two
+archetype layouts. It reads an eight-byte `BenchmarkPosition` and every field of
+a 64-byte `BenchmarkWide`, for 72 effective component bytes per row, without a
+writable component or enable-word update. The focused run measured `3.643`
+ns/row native and `3.692` pinned. The following full-suite run measured `3.495`
+and `3.490 ns/row`, or approximately `20.6 GB/s` of effective component reads.
+The existing 2R1W and 1R2W guards remained at `4.433-4.515` and
+`5.119-5.147 ns/row`, respectively. All 60 scenarios reported zero managed
+allocation and zero Gen0/1/2 collections. This is directional evidence from one
+machine, not a cache/main-memory bandwidth classification; repeated isolated
+processes and hardware counters remain required. The tracked accepted artifact
+remains unchanged.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

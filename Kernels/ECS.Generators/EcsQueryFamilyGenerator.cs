@@ -18,6 +18,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
     private static readonly QueryFamilySpec[] Families =
     {
+        new QueryFamilySpec(readCount: 2, writeCount: 0),
         new QueryFamilySpec(readCount: 2, writeCount: 1),
         new QueryFamilySpec(readCount: 1, writeCount: 2),
     };
@@ -961,7 +962,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         {
             if (readCount <= 0)
                 throw new ArgumentOutOfRangeException(nameof(readCount));
-            if (writeCount <= 0)
+            if (writeCount < 0)
                 throw new ArgumentOutOfRangeException(nameof(writeCount));
 
             ReadCount = readCount;
@@ -982,7 +983,15 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         internal AccessSlot[] Slots { get; }
         internal string Name { get; }
         internal string TypeParameters { get; }
-        internal string Summary => $"{ReadCount} read column{(ReadCount == 1 ? string.Empty : "s")} and {WriteCount} write column{(WriteCount == 1 ? string.Empty : "s")}";
+        internal string Summary
+        {
+            get
+            {
+                if (WriteCount == 0)
+                    return $"{ReadCount} read-only column{(ReadCount == 1 ? string.Empty : "s")}";
+                return $"{ReadCount} read column{(ReadCount == 1 ? string.Empty : "s")} and {WriteCount} write column{(WriteCount == 1 ? string.Empty : "s")}";
+            }
+        }
         internal string HintName => $"UltraSim.ECS.QueryFamilies.{ReadCount}R{WriteCount}W.g.cs";
         internal string VisitorType => "IComponentChunk" + Name + "Visitor";
         internal string ChunkType => Name + "ComponentChunk";

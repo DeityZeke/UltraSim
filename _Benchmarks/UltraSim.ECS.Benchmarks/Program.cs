@@ -86,6 +86,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedGeneratedQuery = new EcsWorldGeneratedQueryFixture<PinnedChunkArena>(100_000);
         using var nativeGeneratedWriteQuery = new EcsWorldGeneratedWriteQueryFixture<NativeChunkArena>(100_000);
         using var pinnedGeneratedWriteQuery = new EcsWorldGeneratedWriteQueryFixture<PinnedChunkArena>(100_000);
+        using var nativeGeneratedReadQuery = new EcsWorldGeneratedReadQueryFixture<NativeChunkArena>(100_000);
+        using var pinnedGeneratedReadQuery = new EcsWorldGeneratedReadQueryFixture<PinnedChunkArena>(100_000);
         using var nativeFilteredReadWriteQuery = new EcsWorldFilteredReadWriteQueryFixture<NativeChunkArena>(100_000);
         using var pinnedFilteredReadWriteQuery = new EcsWorldFilteredReadWriteQueryFixture<PinnedChunkArena>(100_000);
 
@@ -145,6 +147,8 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_Generated2R1W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedQuery.Execute),
             new("NativeWorld_Generated1R2W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, nativeGeneratedWriteQuery.Execute),
             new("PinnedWorld_Generated1R2W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedWriteQuery.Execute),
+            new("NativeWorld_Generated2R0W_PositionWide_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, nativeGeneratedReadQuery.Execute),
+            new("PinnedWorld_Generated2R0W_PositionWide_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedReadQuery.Execute),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareDense),
             new("PinnedWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, pinnedFilteredReadWriteQuery.Execute, pinnedFilteredReadWriteQuery.PrepareDense),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Alternating_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareAlternating),
@@ -165,7 +169,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-generated-query-family-matrix-v14",
+            SemanticProfile = "ecs-next-phase1-generated-read-only-family-v15",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1636,6 +1640,143 @@ internal static class PrimitiveBenchmarks
                     checksum = unchecked(
                         checksum + wideSum + BitConverter.SingleToInt32Bits(position.X));
                     checksum += enabled ? 1 : 0;
+                }
+                Checksum = checksum;
+            }
+        }
+    }
+
+    private sealed class EcsWorldGeneratedReadQueryFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeReadReadQueryPlan<
+            TArena,
+            BenchmarkPosition,
+            BenchmarkWide> _plan;
+        private readonly int _population;
+
+        internal EcsWorldGeneratedReadQueryFixture(int population)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(population),
+                maximumArchetypes: 2,
+                static capacity => CreateArena(capacity),
+                maximumQueryPlans: 1);
+            ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
+            ArchetypeId first = _world.RegisterArchetype(
+                CreateSortedSignature(position, velocity, wide),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 512);
+            ArchetypeId second = _world.RegisterArchetype(
+                CreateSortedSignature(disabled, position, velocity, wide),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 512);
+            ArchetypeComponentBinding<BenchmarkPosition> firstPosition =
+                _world.BindComponent<BenchmarkPosition>(first, position);
+            ArchetypeComponentBinding<BenchmarkPosition> secondPosition =
+                _world.BindComponent<BenchmarkPosition>(second, position);
+            ArchetypeComponentBinding<BenchmarkWide> firstWide =
+                _world.BindComponent<BenchmarkWide>(first, wide);
+            ArchetypeComponentBinding<BenchmarkWide> secondWide =
+                _world.BindComponent<BenchmarkWide>(second, wide);
+            _plan = _world.PrepareReadReadQuery<BenchmarkPosition, BenchmarkWide>(position, wide);
+            _world.Seal();
+
+            for (int i = 0; i < population; i++)
+            {
+                bool useFirst = (i & 1) == 0;
+                ArchetypeId archetype = useFirst ? first : second;
+                ArchetypeComponentBinding<BenchmarkPosition> positionBinding = useFirst
+                    ? firstPosition
+                    : secondPosition;
+                ArchetypeComponentBinding<BenchmarkWide> wideBinding = useFirst
+                    ? firstWide
+                    : secondWide;
+                if (!_world.TryCreateInitialized(
+                    archetype,
+                    positionBinding,
+                    new BenchmarkPosition { X = i, Y = -i },
+                    out Entity entity) ||
+                    !_world.TrySetComponent(
+                        entity,
+                        wideBinding,
+                        new BenchmarkWide
+                        {
+                            A = i + 1L,
+                            B = i + 2L,
+                            C = i + 3L,
+                            D = i + 4L,
+                            E = i + 5L,
+                            F = i + 6L,
+                            G = i + 7L,
+                            H = i + 8L,
+                        }))
+                {
+                    throw new InvalidOperationException(
+                        "Generated-read-query benchmark fixture exhausted unexpectedly.");
+                }
+            }
+
+            if (_plan.MatchedArchetypeCount != 2)
+                throw new InvalidOperationException("Generated-read-query benchmark did not compile both archetypes.");
+            _population = population;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            var visitor = new PositionWideReadVisitor();
+            int visited = _world.VisitReadReadChunks(_plan, ref visitor);
+            if (visited != _population)
+                throw new InvalidOperationException("Generated-read-query benchmark lost rows.");
+            return new ScenarioMeasurement(visited, visitor.Checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static TArena CreateArena(ChunkArenaCapacity capacity)
+        {
+            object arena = typeof(TArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported generated-read-query benchmark arena {typeof(TArena).Name}.");
+            return (TArena)arena;
+        }
+
+        private static ComponentId[] CreateSortedSignature(params ComponentId[] componentIds)
+        {
+            Array.Sort(componentIds, static (left, right) => left.Value.CompareTo(right.Value));
+            return componentIds;
+        }
+
+        private struct PositionWideReadVisitor :
+            IComponentChunkReadReadVisitor<BenchmarkPosition, BenchmarkWide>
+        {
+            internal long Checksum;
+
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in ReadReadComponentChunk<BenchmarkPosition, BenchmarkWide> chunk)
+            {
+                long checksum = Checksum;
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    ref readonly BenchmarkPosition position = ref chunk.ReadComponents1[row];
+                    ref readonly BenchmarkWide wide = ref chunk.ReadComponents2[row];
+                    checksum = unchecked(
+                        checksum +
+                        wide.A + wide.B + wide.C + wide.D +
+                        wide.E + wide.F + wide.G + wide.H +
+                        BitConverter.SingleToInt32Bits(position.X) +
+                        BitConverter.SingleToInt32Bits(position.Y) +
+                        chunk.EntityIndices[row]);
                 }
                 Checksum = checksum;
             }
