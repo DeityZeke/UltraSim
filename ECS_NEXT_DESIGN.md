@@ -76,12 +76,18 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
 - conservative stamping for successful scalar value/enable writes, single-component writable visitors, and every generated writable family; one lazily acquired version is shared across one visit's chunks and writable columns, filtered visits stamp only chunks with matching rows, stamps precede visitor dispatch so partial writes followed by exceptions remain visible, and read-only families perform no version work;
 - a 16-byte world-bound `ChangeCursor` value with beginning/now factories and copy-to-fork independent-consumer semantics, plus a bounded seal-compiled changed-read plan that prebinds one data column and one same-or-different tracked column across all matching archetypes, rejects unchanged chunks before component binding, composes with existing structural/enable-state filters, and acknowledges the captured observation boundary only after successful visitor completion;
 - opt-in exact changed-row histories for selected tracked columns, with dense chunk rejection, row-version mask reconstruction, scalar/range precision, dense full-chunk fallback, copied slow-consumer cursors, explicit retained-byte accounting, and zero steady-state allocation;
+- an initial source-generated two-read/two-watched changed family over those same
+  routes, with watched columns distinct from one another but allowed to alias a
+  read column, explicit `Any`/`All` semantics for both dense chunks and exact
+  rows, success-only cursor acknowledgement, current row-filter composition,
+  data-or-tag watched columns, Native/Pinned parity, and zero steady-state
+  allocation;
 - explicit unchecked unsigned normalization for one-branch hot range tests under project-wide checked arithmetic, so negative indices take the intended bounds-failure path rather than a conversion-overflow path;
 - cold executable-layout validation covering range overlap, reserved-header intrusion, alignment, tag/data disagreement, duplicate IDs, and exact data/enable accounting before any raw storage path is accepted;
 - compile-time diagnostics for malformed schema/component declarations, invalid keys/versions, field-bearing tags, duplicate types/keys/nonzero persistence IDs, and exhaustion of the reserved `ushort` ID space;
-- `159` executable runtime/primitive tests, including warmed zero-allocation assertions, indexed-schema tests, defensive construction tests, planner boundary/invariant/overflow tests, randomized brute-force layout parity, randomized chunk-slot lifecycle parity, native/pinned randomized archetype reference-model parity, scalar/bulk and byte parity, within/cross-chunk relocation, entity-location binding and donor updates, an integrated randomized pool/store model, canonical registry collision/capacity/ownership/concurrent-read tests, transactional bidirectional migration and donor relocation, destination-capacity rollback, retained/default/removed state, composed-world lifecycle/capacity/generation/disposal/foreign-plan tests, randomized world/bound-access/chunk/query-plan/filter/generated-family models, 16-byte binding layout and misuse tests, generated-ID/type/membership validation, exact-archetype/stale/foreign component and chunk access, initialized creation, seal-complete multi-archetype matching, normalized filter contradiction/ownership checks, required/excluded signature selection, enabled/disabled data/tag row selection, noncontiguous row slices, query alias/tag/capacity/ownership rejection, generated distinct-access/capacity/ownership/non-enableable-write/row-boundary rejection, synchronous barrier/reentrancy/exception-release checks, multi-chunk metadata and enable-state views, enabled-default/state preservation, retained-empty reuse, dense change-version wrap/reset/exact-column/filter/exception semantics, independent cursor acknowledgement/retry/ownership/wrap semantics, exact-row scalar/filter/dense refinement and memory accounting, changed-read plan routing/filtering/backend parity, alignment/range/type rejection, disposal/accounting, terminal retirement, capacity accounting, backend equivalence, and concurrency/isolation checks;
-- `20` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 2R0W/2R1W/1R2W/3R1W/2R2W catalog surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
-- `74` Next-only primitive/layout/schema/capacity/arena/archetype-row/registry/migration/world-lifecycle/bound-access/chunk-query/query-plan/query-filter/generated-query/change-version/change-cursor/exact-row benchmark scenarios with JSON output, exact version/cursor layout and dense/sparse-version metadata facts, natural GC reporting, focused scenario filtering, and explicit non-comparable status until equivalent Current adapters exist.
+- `165` executable runtime/primitive tests, including warmed zero-allocation assertions, indexed-schema tests, defensive construction tests, planner boundary/invariant/overflow tests, randomized brute-force layout parity, randomized chunk-slot lifecycle parity, native/pinned randomized archetype reference-model parity, scalar/bulk and byte parity, within/cross-chunk relocation, entity-location binding and donor updates, an integrated randomized pool/store model, canonical registry collision/capacity/ownership/concurrent-read tests, transactional bidirectional migration and donor relocation, destination-capacity rollback, retained/default/removed state, composed-world lifecycle/capacity/generation/disposal/foreign-plan tests, randomized world/bound-access/chunk/query-plan/filter/generated-family models, 16-byte binding layout and misuse tests, generated-ID/type/membership validation, exact-archetype/stale/foreign component and chunk access, initialized creation, seal-complete multi-archetype matching, normalized filter contradiction/ownership checks, required/excluded signature selection, enabled/disabled data/tag row selection, noncontiguous row slices, query alias/tag/capacity/ownership rejection, generated distinct-access/capacity/ownership/non-enableable-write/row-boundary rejection, synchronous barrier/reentrancy/exception-release checks, multi-chunk metadata and enable-state views, enabled-default/state preservation, retained-empty reuse, dense change-version wrap/reset/exact-column/filter/exception semantics, independent cursor acknowledgement/retry/ownership/wrap semantics, exact-row scalar/filter/dense refinement and memory accounting, one/two-watched any/all observation and exact-mask semantics, changed-read plan routing/filtering/backend parity, alignment/range/type rejection, disposal/accounting, terminal retirement, capacity accounting, backend equivalence, and concurrency/isolation checks;
+- `21` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 2R0W/2R1W/1R2W/3R1W/2R2W catalog surfaces, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
+- `82` Next-only primitive/layout/schema/capacity/arena/archetype-row/registry/migration/world-lifecycle/bound-access/chunk-query/query-plan/query-filter/generated-query/change-version/change-cursor/exact-row/multi-change benchmark scenarios with JSON output, exact version/cursor layout and dense/sparse-version metadata facts, natural GC reporting, focused scenario filtering, and explicit non-comparable status until equivalent Current adapters exist.
 
 The first local run favored direct 12-byte field access over the packed 8-byte candidate at both one million and ten million handles, while every scenario measured zero managed bytes. That is a hypothesis-generating result, not an accepted layout decision: both representations still need chunk traversal, entity-aware query, metadata-cache, memory-footprint, and repeated isolated-process measurements.
 
@@ -93,7 +99,25 @@ The first row-store measurements also allocated zero managed bytes and caused no
 
 The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for bounded adversarial architecture, patch, and benchmark reviews; its output remains untrusted until verified by source, tests, or measurements. Early reviews usefully exposed the need to make world-ID allocation process-unique, to test slot retirement through the pool, to reserve `ComponentId` value `0xFFFF`, and to remove quadratic large-schema validation. They also demonstrated why model suggestions must be filtered: proposals such as dynamically growing the fixed free list, reclaiming retired generations, or unconditionally replacing tiny-schema scans with managed dictionaries contradict measured or bounded-memory goals.
 
-The generated manifest, registry, arenas, row stores, transition executor, minimal internal world, archetype-specific entity component bindings, synchronous one-component views, first seal-compiled multi-archetype two-component plan, normalized required/excluded/enabled/disabled filters, data-driven 2R0W/2R1W/1R2W/3R1W/2R2W generated access-family catalog, dense per-chunk/per-component write versions, independent-cursor changed-read plan, and opt-in exact changed-row refinement now form an executable bounded lifecycle, but not yet a usable public scheduler/host ECS. Field IDs/descriptors, serializers/schema migrations, prefab writers, additional workload-driven arities, optional filters, general generated multi-column changed-since filters, complete structural change/lifecycle streams, query/system metadata, public initialized/running/faulted lifecycle, and structural command arenas are not implemented yet. The entity pool validates a runtime `Entity` generation before exposing its 12-byte archetype/chunk/row route; the location intentionally does not duplicate entity generation.
+The generated manifest, registry, arenas, row stores, transition executor, minimal internal world, archetype-specific entity component bindings, synchronous one-component views, first seal-compiled multi-archetype two-component plan, normalized required/excluded/enabled/disabled filters, data-driven 2R0W/2R1W/1R2W/3R1W/2R2W generated access-family catalog, dense per-chunk/per-component write versions, independent-cursor changed-read plan, opt-in exact changed-row refinement, and initial generated two-read/two-watched any/all family now form an executable bounded lifecycle, but not yet a usable public scheduler/host ECS. Field IDs/descriptors, serializers/schema migrations, prefab writers, additional workload-driven access/watch arities, optional filters, public tracked-write scopes, complete structural change/lifecycle streams, query/system metadata, public initialized/running/faulted lifecycle, and structural command arenas are not implemented yet. The entity pool validates a runtime `Entity` generation before exposing its 12-byte archetype/chunk/row route; the location intentionally does not duplicate entity generation.
+
+### 1.2 Current risk posture
+
+Next has retired much of the technical risk around whether generated schema,
+bounded chunk storage, safe entity identity, transactional migration, generated
+query execution, and dense/exact change tracking can form an allocation-free
+kernel. It has not yet retired the product and integration risk around public
+ownership, deferred mutation, scheduler semantics, prefab compilation,
+persistence, replication, tooling, and migration of real systems. A stronger
+kernel is not a replacement until those interactions preserve its correctness,
+bounded-memory, determinism, and hot-path constraints.
+
+Integration must occur through explicit generated, compiled, or bounded bridges.
+Server, client, scripting, persistence, networking, inspection, and wrapper code
+must not gain independent escape paths for unbounded collections, convenience
+allocation, reflection in hot execution, hidden locks, runtime schema mutation,
+raw storage access, or lifecycle bypasses. Tests should treat those pressures as
+architectural regression risks rather than harmless adapter details.
 
 ## 2. Generation Names and Comparison Policy
 
@@ -214,6 +238,11 @@ Next requirements:
 - make `Seal()` the allocation boundary and plan-compilation boundary;
 - make capacity configuration first-class;
 - retain extension seams without putting transport, UI, or storage policy in the kernel.
+- define whether every facade operation is checked or prepared/trusted, when
+  sealing occurs, which thread owns each lifecycle transition, and which prepared
+  handles remain valid across structural changes;
+- make the safe facade path natural while proving prepared hot paths do not pay
+  repeated ownership, schema, or route-discovery costs.
 
 Tests:
 
@@ -225,6 +254,8 @@ Tests:
 - faulted-world behavior tests;
 - capacity-overflow policy tests;
 - multi-world isolation and cross-world handle rejection tests.
+- stale binding/plan behavior across structural changes and disposal;
+- facade thread-affinity and checked-versus-trusted path equivalence tests.
 
 ### 4.2 Components and schema
 
@@ -527,6 +558,9 @@ Next implemented foundation:
 - deterministic/catalog/mutability/opt-in generator tests plus seal-complete,
   filtered, randomized, native/pinned, misuse, row-boundary, exception, and warmed
   zero-allocation runtime tests.
+- a generated 2R2C changed family that reuses the existing two-read stack-only
+  view while prebinding two distinct watched data/tag columns, with dense and
+  exact-row entry points plus explicit `Any`/`All` matching.
 
 Next requirements:
 
@@ -627,6 +661,9 @@ Tests:
 - command capacity boundaries;
 - overflow policy;
 - failure injection during each phase;
+- commands emitted during command playback;
+- visibility and targetability of entities created earlier in the same barrier;
+- stale-handle commands and destroy mixed with value/enable/structural mutation;
 - no stale values after default creation;
 - migration preservation across every generated transition;
 - random command replay against a reference model;
@@ -674,12 +711,21 @@ Next requirements and current status:
   row versions at sealing; scalar and filtered writes publish exact exposed rows,
   full-chunk writes retain a dense stamp, and consumers reconstruct 64-row masks
   only after the dense chunk gate;
-- still required for the dense path: generated multi-column changed-since plans,
-  scheduler write scopes, complete structural mutation coverage, safe publish
-  leases for asynchronous consumers, and parallel publication rules;
+- implemented initial generated multi-column path: one generated two-read/two-watch
+  family supports `Any`/`All` dense chunk gates and OR/AND exact-row masks,
+  acknowledges one shared observation cursor after success, composes current row
+  filters, and remains allocation-free on both arena backends;
+- still required for the dense path: additional workload-driven read/watch
+  arities, scheduler write scopes, complete structural mutation coverage, safe
+  publish leases for asynchronous consumers, and parallel publication rules;
 - evaluate versioned bitset/history alternatives only if they preserve independent
   slow cursors or expose an explicit tested lag/overflow policy;
 - fixed lifecycle event rings for created, component-added, component-removed, and destroyed events;
+- lifecycle records shaped for independent replication, persistence, scripting,
+  inspection, spatial, inventory, rendering, and AI consumers rather than only
+  immediate local systems;
+- deterministic lifecycle ordering with runtime entity index/generation and
+  component identity preserved in tombstones where required;
 - independent consumers without destructive shared drains;
 - no duplicated global dirty stream;
 - no random entity-index deduplication for dense chunk writes;
@@ -701,6 +747,8 @@ Tests:
 - cursor/version wrap;
 - parallel bitset merge;
 - consumer exception does not lose unacknowledged changes;
+- lifecycle ordering, delayed-reader retention, tombstone identity, and explicit
+  overflow behavior across several independent consumer classes;
 - zero-allocation repeated write/read cycles;
 - canonical change stream comparison with reference events.
 
@@ -754,6 +802,17 @@ roughly `13.1-14.6 ns/matched row` by stamping every range. The existing full
 suite caught the regression. The corrected route caches whether each written
 column actually has an exact consumer, preserves once-per-chunk stamping
 otherwise, and restored the focused guard to `10.54-10.62 ns/matched row`.
+
+The v20 generated 2R2C guard adds eight Native/Pinned scenarios. Across focused
+and full processes, an unchanged `Any` scan of two watched columns measured
+`30.58-33.59 ns/chunk`; unchanged `All` short-circuited after the first false
+stamp at `22.87-27.61 ns/chunk`. When both watched columns changed, both modes
+delivered the 72-byte logical two-read view at `3.63-4.07 ns/row`, approximately
+`17.7-19.8 GB/s` before entity-index traffic. All scenarios allocated zero bytes
+and caused no collections. Tests separately lock the observation contract: a
+successful `All` poll advances its one cursor even when no route qualifies, so
+its meaning is "all watched columns changed since the previous successful
+observation," not indefinite accumulation until every column eventually changes.
 
 ### 4.8 Scheduler and systems
 
@@ -1893,13 +1952,20 @@ Gate:
 
 Tests may reveal that an existing benchmark is not semantically comparable. Mark it noncomparable or repair the scenario before using it as a gate.
 
+The canonical state includes living entities, generations, logical archetype
+membership, component bytes, enable states, destroyed identities where the
+scenario observes them, applied command results, lifecycle outputs, and
+cursor-visible changes. It normalizes intentionally physical details including
+chunk placement, packed-row order, dense internal archetype IDs, allocator
+addresses, world IDs, and arena backend.
+
 ### Phase 1: generated schema, capacity plan, and memory primitives
 
 Implementation status as of 2026-08-05:
 
 - implemented: generated component manifest, deterministic component/schema identity, runtime layout/tag/enableable/persistence metadata, schema-local lookup, fixed entity-slot pool, four-byte world-local archetype IDs, 12-byte archetype/chunk/row entity locations, checked location bind/unbind and donor relocation, canonical bounded archetype registration, stable collision-checked signature lookup, dense ID-to-store routing, sealed concurrent reads, exact arena ownership, checked chunk/archetype/world capacity planners, native-aligned and pinned-managed fixed arena candidates, generational chunk slots, typed SoA/entity/enable access, clear-on-acquire reuse, disposal/payload accounting, row-owning executable archetype chunks, full/partial/empty lists, retained-empty recycling, bulk default row reservation, within/cross-chunk swap removal, cold-built prebound transition plans, transactional cross-archetype migration with rollback and donor repair, a sealed minimal internal world with capacity-atomic create/transition/destroy/disposal and cross-world plan isolation, 16-byte generated-ID-backed exact-archetype component bindings with copied read/write/enable/initialization paths, synchronous exact-archetype one-column read/write chunk views behind a mutation barrier, an explicitly bounded seal-compiled one-read/one-write plan spanning multiple archetypes, normalized required/excluded/enabled/disabled filters, an opt-in data-driven generated 2R0W/2R1W/1R2W/3R1W/2R2W family catalog, initial preallocated dense per-chunk/per-component versions wired into scalar and writable-query paths, native/pinned randomized row/migration/world/access/query/change-version model tests, integrated randomized pool/store tests, primitive allocation tests, generator golden/diagnostic/catalog tests, and initial metadata/entity/layout/arena/row/registry/migration/world/access/query/change-version benchmarks;
-- implemented follow-on: a world-bound independent cursor value and bounded seal-compiled one-read changed plan with a distinct tracked-column option, existing row-filter composition, success-only acknowledgement, direct unchanged-chunk rejection, opt-in exact-row histories for scalar/filtered/dense writes, and zero-allocation native/pinned execution;
-- still required: a public scheduler/host world facade with initialized/running/faulted states, persistent field IDs and richer descriptors, additional workload-driven arities, optional filters, generated multi-column any/all changed-since plans, public tracked-write scopes, structural lifecycle streams, query-route memory accounting and possible cold plan interning, bounded deferred structural commands, final entity-metadata packing decision, longer native leak/retention soaks, and comparable Current/Next scenario adapters;
+- implemented follow-on: a world-bound independent cursor value and bounded seal-compiled one-read changed plan with a distinct tracked-column option, existing row-filter composition, success-only acknowledgement, direct unchanged-chunk rejection, opt-in exact-row histories for scalar/filtered/dense writes, an initial generated two-read/two-watched any/all family, and zero-allocation native/pinned execution;
+- still required: a public scheduler/host world facade with initialized/running/faulted states, persistent field IDs and richer descriptors, additional workload-driven access/watch arities, optional filters, public tracked-write scopes, structural lifecycle streams, query-route memory accounting and possible cold plan interning, bounded deferred structural commands, final entity-metadata packing decision, longer native leak/retention soaks, and comparable Current/Next scenario adapters;
 - current measurements are directional only. The implemented tests require zero allocation for warmed lookup/entity/chunk/location/registry cycles, and the first native-versus-pinned comparison is a statistical tie. No Phase 1 layout/backend passes the gate until repeated isolated-process, large-footprint, and Current/Next comparisons justify it.
 
 Deliverables:
@@ -2002,10 +2068,11 @@ Gate:
 ### Phase 4: change tracking and lifecycle streams
 
 The initial dense chunk-version storage, conservative scalar/query stamping,
-independent cursor value, and one-read changed plan were pulled forward into
-Phase 1 because later writable and replication APIs depend on them. Phase 4 still
-owns general generated changed filters, sparse precision, asynchronous publish
-leases, parallel merge/publication rules, and lifecycle streams.
+independent cursor value, one-read changed plan, exact-row refinement, and first
+generated two-watch any/all family were pulled forward into Phase 1 because later
+writable and replication APIs depend on them. Phase 4 still owns additional
+generated changed arities, adaptive sparse precision, asynchronous publish leases,
+parallel merge/publication rules, and lifecycle streams.
 
 Deliverables:
 
@@ -2272,8 +2339,8 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 - [x] Excluded component filters
 - [ ] Optional component filters
 - [x] Enabled/disabled filters
-- [x] Changed-since chunk filter (initial one-read plan)
-- [x] Exact changed-row refinement (initial one-read/one-tracked plan)
+- [x] Changed-since chunk filters (one-watch plus generated two-watch any/all)
+- [x] Exact changed-row refinement (one-watch plus generated two-watch any/all)
 - [ ] Entity-aware and entity-free jobs
 - [x] Dense tracked writes (initial internal scalar/query paths)
 - [x] Sparse tracked writes (scalar and filtered exposed ranges)

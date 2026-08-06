@@ -128,8 +128,8 @@ allocation:
   state; a successful scan acknowledges its observation boundary even when no
   rows pass those predicates. Exceptions preserve the old cursor for an
   at-least-once retry without loss; chunks delivered before the exception may be
-  delivered again. The initial plan reads one data component; generated
-  arbitrary-width changed queries are not implemented yet.
+  delivered again. The initial handwritten plan reads one data component and
+  watches one same-or-different component.
 - `PrepareChangedRowsQuery` opts a tracked column into exact-row history at world
   sealing. Ordinary dense plans reserve no additional row storage. Each opted-in
   archetype column preallocates eight bytes per possible physical row plus one
@@ -143,6 +143,16 @@ allocation:
   conservatively considered written even if visitor code leaves their bytes
   unchanged. Empty reuse and packed donor relocation clear or move the row
   history with the physical row.
+- The query-family generator now also emits an initial 2R2C changed family. It
+  returns the existing two-read stack-only view while watching two distinct data
+  or tag columns that may alias either read. `ChangedMatchMode.Any` ORs watched
+  chunk/row histories; `All` requires both chunk stamps or intersects both exact
+  row masks. One cursor baseline applies to both columns and advances after every
+  successful observation, including an `All` scan with no qualifying route.
+  Required/excluded/enabled/disabled filters, exception retry, wrap, backend
+  parity, and zero-allocation execution retain the one-watch contracts. Further
+  read/watch counts remain workload-driven rather than a promise of arbitrary
+  runtime-width mutation.
 - Unsigned one-branch range checks now use explicit `unchecked` normalization.
   This preserves negative-index rejection as `ArgumentOutOfRangeException` under
   the kernel's project-wide checked arithmetic instead of paying for or surfacing
@@ -203,7 +213,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 159 passing tests, including
+The current runtime and primitive suite has 165 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -221,7 +231,7 @@ lookups. Migration tests cover retained data and enable state, added-component
 defaults, removed components, source donor relocation, stale-plan and bounded
 destination rejection, 30,000 randomized bidirectional moves, native/pinned byte
 equivalence, and 100,000 warmed allocation-free migration cycles. The generator
-suite has 20 passing tests. Composed-world tests cover lifecycle ordering,
+suite has 21 passing tests. Composed-world tests cover lifecycle ordering,
 owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
 generation reuse, donor repair, cross-world plan and entity isolation, 30,000
 randomized create/transition/destroy operations, native/pinned parity, and 100,000
@@ -267,17 +277,19 @@ Exact-row tests add opt-in memory accounting, sparse scalar refinement within a
 densely changed chunk, independent consumer progress, filtered handwritten and
 generated writable ranges, full-chunk dense fallback, packed-row reset, cursor
 wrap and exception retry, backend parity, and 10,000 warmed allocation-free
-write/read cycles.
+write/read cycles. Generated multi-change tests add seal-complete two-watch
+routing, explicit any/all observation behavior, OR/AND exact masks, current
+row-filter intersection, cursor acknowledgement on empty `All` observations,
+exception retry, ownership/capacity/alias/mode rejection, wrap, Native/Pinned
+parity, and 10,000 warmed allocation-free two-write/exact-read cycles.
 
 This is now a minimal internal component/archetype world, not yet the public
-scheduler/host facade. The current generators emit the core manifest and a
-systematic catalog currently containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W
-families. Further arities should now be added only when real system signatures
-require them. The next natural change-tracking work is generated multi-column
-changed plans, including one/several watched columns and explicit any-changed
-versus all-changed semantics. Occupancy/density measurements may show that some
-shapes should remain dense or bypass change refinement entirely. Public
-tracked-write scopes, structural
+scheduler/host facade. The current generators emit the core manifest, a
+systematic catalog containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W access families,
+and the first 2R2C any/all changed family. Further access/watch arities should be
+added only when real system signatures require them. Occupancy/density
+measurements may show that some shapes should remain dense or bypass change
+refinement entirely. Public tracked-write scopes, structural
 creation/migration/removal events, optional filters, bounded deferred structural
 commands, and field/serializer/prefab descriptors remain later work.
 

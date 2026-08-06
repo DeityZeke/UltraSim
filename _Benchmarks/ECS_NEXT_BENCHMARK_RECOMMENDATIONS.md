@@ -22,14 +22,21 @@ arithmetic checksum while disagreeing about:
 - removal behavior;
 - archetype population;
 - entity generation/version state.
+- destroyed identities retained by the scenario contract;
+- applied structural-command results and conflict resolution;
+- lifecycle records visible to each independent consumer;
+- change rows/chunks visible from each consumer cursor.
 
 The canonical hash should be independent of physical chunk allocation, packed-row
 order, arena backend, process-local world IDs, and other intentionally transient
 representation details unless those details are the subject of the benchmark.
 Canonicalization should sort or otherwise visit entities by a stable benchmark-local
 identity, then hash the entity's expected lifecycle state, logical archetype
-signature, component bytes, enable states, and generation state. V2 and V3 adapters
-must use the same hash specification and test vectors.
+signature, component bytes, enable states, generation state, normalized command
+outcomes, lifecycle output, and cursor-visible change state. It must normalize
+chunk placement, packed-row order, internal archetype IDs, allocator addresses,
+process-local world IDs, and storage backend. V2 and V3 adapters must use the same
+hash specification and test vectors.
 
 For migration and lifecycle benchmarks, development and correctness runs should
 validate the complete state before and after the timed measurement. Production
@@ -180,6 +187,16 @@ It preserves the unchanged dense gate at `17.60-17.65 ns/chunk` and finds plus
 delivers one row across 552 chunks in `10.06-10.23 us`, while reserving
 `1,495,040` additional metadata bytes in the two-archetype fixture. These focused
 runs allocate zero managed bytes and collect nothing.
+
+The v20 foothold generates one two-read/two-watch family with explicit `Any` and
+`All` modes. Across focused and full Native/Pinned processes, unchanged `Any`
+measured `30.58-33.59 ns/chunk` while unchanged `All` short-circuited at
+`22.87-27.61 ns/chunk`. With both watched columns changed, the 72-byte logical
+two-read view measured `3.63-4.07 ns/row` (`17.7-19.8 GB/s` before entity-index
+traffic). All eight scenarios allocated zero bytes and caused no collections.
+These are fixed two-watch guards, not the completed watch-count/density matrix.
+Tests define successful empty `All` polling as an acknowledged observation rather
+than indefinite accumulation across polls.
 
 The full change-version matrix should vary independently:
 

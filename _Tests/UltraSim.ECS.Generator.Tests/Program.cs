@@ -68,6 +68,7 @@ internal static class GeneratorTests
         Run(nameof(QueryFamilyCatalog_EmitsRepresentativeWideFamilies), QueryFamilyCatalog_EmitsRepresentativeWideFamilies);
         Run(nameof(QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans), QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans);
         Run(nameof(QueryFamilyCatalog_EmitsTrackedWriteStampsOnlyForWritableFamilies), QueryFamilyCatalog_EmitsTrackedWriteStampsOnlyForWritableFamilies);
+        Run(nameof(QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily), QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
         Console.WriteLine($"All {_passed} ECS generator tests passed.");
@@ -134,8 +135,8 @@ internal static class GeneratorTests
         Generation second = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(first);
         AssertNoGeneratorErrors(second);
-        TestAssert.Equal(5, first.GeneratedSourceCount);
-        TestAssert.Equal(5, second.GeneratedSourceCount);
+        TestAssert.Equal(6, first.GeneratedSourceCount);
+        TestAssert.Equal(6, second.GeneratedSourceCount);
         TestAssert.Equal(first.GeneratedSource, second.GeneratedSource);
         TestAssert.True(first.GeneratedSource.Contains(
             "IComponentChunkReadReadWriteVisitor<TRead1, TRead2, TWrite>",
@@ -156,7 +157,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(5, generation.GeneratedSourceCount);
+        TestAssert.Equal(6, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadReadVisitor<TRead1, TRead2>",
             StringComparison.Ordinal));
@@ -201,7 +202,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(5, generation.GeneratedSourceCount);
+        TestAssert.Equal(6, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadWriteWriteVisitor<TRead, TWrite1, TWrite2>",
             StringComparison.Ordinal));
@@ -221,7 +222,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(5, generation.GeneratedSourceCount);
+        TestAssert.Equal(6, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "global::System.ReadOnlySpan<TRead> ReadComponents { get; }",
             StringComparison.Ordinal));
@@ -247,7 +248,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(5, generation.GeneratedSourceCount);
+        TestAssert.Equal(6, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadReadReadWriteVisitor<TRead1, TRead2, TRead3, TWrite>",
             StringComparison.Ordinal));
@@ -314,6 +315,47 @@ internal static class GeneratorTests
         TestAssert.False(readOnlyFamily.Contains("ChangeVersion", StringComparison.Ordinal));
         TestAssert.False(readOnlyFamily.Contains("StampDenseChangeVersion", StringComparison.Ordinal));
         TestAssert.False(readOnlyFamily.Contains("StampFilteredChangeVersion", StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(6, generation.GeneratedSourceCount);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "ArchetypeReadReadChangedQueryPlan<TArena, TRead1, TRead2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "PrepareReadReadChangedQuery<TRead1, TRead2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "PrepareReadReadChangedRowsQuery<TRead1, TRead2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "VisitReadReadChangedChunks<TRead1, TRead2, TVisitor>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "VisitReadReadChangedRows<TRead1, TRead2, TVisitor>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "matchMode == ChangedMatchMode.Any",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "? first | second",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            ": first & second;",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "changed1ComponentId == changed2ComponentId",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "EnableSparseRowChangeTracking(changed1ColumnIndex)",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "EnableSparseRowChangeTracking(changed2ColumnIndex)",
+            StringComparison.Ordinal));
     }
 
     private static void DuplicateCanonicalKey_ReportsECSGEN003()

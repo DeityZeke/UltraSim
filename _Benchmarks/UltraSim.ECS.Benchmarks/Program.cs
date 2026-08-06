@@ -161,6 +161,14 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_ChangedRead_UnchangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedChangedRead),
             new("NativeWorld_ChangedRead_AllChangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteAllChangedRead, nativeGeneratedWideQuery.PrepareAllChangedRead),
             new("PinnedWorld_ChangedRead_AllChangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteAllChangedRead, pinnedGeneratedWideQuery.PrepareAllChangedRead),
+            new("NativeWorld_Changed2Any_UnchangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedMultiAny, nativeGeneratedWideQuery.PrepareUnchangedMultiAny),
+            new("PinnedWorld_Changed2Any_UnchangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedMultiAny, pinnedGeneratedWideQuery.PrepareUnchangedMultiAny),
+            new("NativeWorld_Changed2All_UnchangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedMultiAll, nativeGeneratedWideQuery.PrepareUnchangedMultiAll),
+            new("PinnedWorld_Changed2All_UnchangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedMultiAll, pinnedGeneratedWideQuery.PrepareUnchangedMultiAll),
+            new("NativeWorld_Changed2Any_AllChangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteAllChangedMultiAny, nativeGeneratedWideQuery.PrepareAllChangedMultiAny),
+            new("PinnedWorld_Changed2Any_AllChangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteAllChangedMultiAny, pinnedGeneratedWideQuery.PrepareAllChangedMultiAny),
+            new("NativeWorld_Changed2All_AllChangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteAllChangedMultiAll, nativeGeneratedWideQuery.PrepareAllChangedMultiAll),
+            new("PinnedWorld_Changed2All_AllChangedScalarVelocity_2Archetypes_100000", "WorldMultiChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteAllChangedMultiAll, pinnedGeneratedWideQuery.PrepareAllChangedMultiAll),
             new("NativeWorld_ChangedRows_UnchangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedChangedRows, nativeGeneratedWideQuery.PrepareUnchangedChangedRows),
             new("PinnedWorld_ChangedRows_UnchangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedChangedRows, pinnedGeneratedWideQuery.PrepareUnchangedChangedRows),
             new("NativeWorld_ChangedRows_OneChangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, nativeGeneratedWideQuery.ExecuteOneChangedRow, nativeGeneratedWideQuery.PrepareOneChangedRow),
@@ -185,7 +193,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-exact-changed-rows-v19",
+            SemanticProfile = "ecs-next-phase1-generated-multi-change-v20",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1831,12 +1839,22 @@ internal static class PrimitiveBenchmarks
             BenchmarkVelocity> _changePreparationPlan;
         private readonly ArchetypeChangedReadQueryPlan<TArena, BenchmarkWide> _changedReadPlan;
         private readonly ArchetypeChangedReadQueryPlan<TArena, BenchmarkWide> _changedRowsPlan;
+        private readonly ArchetypeReadReadChangedQueryPlan<
+            TArena,
+            BenchmarkPosition,
+            BenchmarkWide> _multiAnyPlan;
+        private readonly ArchetypeReadReadChangedQueryPlan<
+            TArena,
+            BenchmarkPosition,
+            BenchmarkWide> _multiAllPlan;
         private readonly ArchetypeComponentBinding<BenchmarkScalar> _sparseScalarBinding;
         private readonly Entity _sparseEntity;
         private ChangeCursor _unchangedCursor;
         private ChangeCursor _changedCursor;
         private ChangeCursor _unchangedRowsCursor;
         private ChangeCursor _oneChangedRowCursor;
+        private ChangeCursor _multiAnyCursor;
+        private ChangeCursor _multiAllCursor;
         private readonly int _occupiedChunkCount;
         private readonly int _population;
 
@@ -1848,7 +1866,7 @@ internal static class PrimitiveBenchmarks
                 new EntityCapacity(population),
                 maximumArchetypes: 2,
                 static capacity => CreateArena(capacity),
-                maximumQueryPlans: 5);
+                maximumQueryPlans: 7);
             ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             ComponentId scalar = BenchmarkSchema.GetComponentId<BenchmarkScalar>();
@@ -1895,6 +1913,22 @@ internal static class PrimitiveBenchmarks
                 BenchmarkVelocity>(position, wide, scalar, velocity);
             _changedReadPlan = _world.PrepareChangedReadQuery<BenchmarkWide>(wide, scalar);
             _changedRowsPlan = _world.PrepareChangedRowsQuery<BenchmarkWide>(wide, scalar);
+            _multiAnyPlan = _world.PrepareReadReadChangedQuery<
+                BenchmarkPosition,
+                BenchmarkWide>(
+                    position,
+                    wide,
+                    scalar,
+                    velocity,
+                    ChangedMatchMode.Any);
+            _multiAllPlan = _world.PrepareReadReadChangedQuery<
+                BenchmarkPosition,
+                BenchmarkWide>(
+                    position,
+                    wide,
+                    scalar,
+                    velocity,
+                    ChangedMatchMode.All);
             _world.Seal();
 
             Entity sparseEntity = default;
@@ -1946,7 +1980,9 @@ internal static class PrimitiveBenchmarks
                 _balancedPlan.MatchedArchetypeCount != 2 ||
                 _changePreparationPlan.MatchedArchetypeCount != 2 ||
                 _changedReadPlan.MatchedArchetypeCount != 2 ||
-                _changedRowsPlan.MatchedArchetypeCount != 2)
+                _changedRowsPlan.MatchedArchetypeCount != 2 ||
+                _multiAnyPlan.MatchedArchetypeCount != 2 ||
+                _multiAllPlan.MatchedArchetypeCount != 2)
             {
                 throw new InvalidOperationException(
                     "Generated-wide-query benchmark did not compile both archetypes.");
@@ -1956,6 +1992,8 @@ internal static class PrimitiveBenchmarks
             _changedCursor = _unchangedCursor;
             _unchangedRowsCursor = _unchangedCursor;
             _oneChangedRowCursor = _unchangedCursor;
+            _multiAnyCursor = _unchangedCursor;
+            _multiAllCursor = _unchangedCursor;
             _sparseScalarBinding = firstScalar;
             _sparseEntity = sparseEntity;
             _occupiedChunkCount = CountOccupiedChunks(_firstStorage) +
@@ -2066,6 +2104,93 @@ internal static class PrimitiveBenchmarks
                 unchecked(visitor.Checksum + (long)_changedCursor.Version.Value));
         }
 
+        internal void PrepareUnchangedMultiAny() =>
+            _multiAnyCursor = _world.CreateChangeCursorFromNow();
+
+        internal void PrepareUnchangedMultiAll() =>
+            _multiAllCursor = _world.CreateChangeCursorFromNow();
+
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+        internal ScenarioMeasurement ExecuteUnchangedMultiAny() =>
+            ExecuteUnchangedMulti(_multiAnyPlan, ref _multiAnyCursor);
+
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+        internal ScenarioMeasurement ExecuteUnchangedMultiAll() =>
+            ExecuteUnchangedMulti(_multiAllPlan, ref _multiAllCursor);
+
+        internal void PrepareAllChangedMultiAny()
+        {
+            _multiAnyCursor = _world.CreateChangeCursorFromNow();
+            WriteBothMultiWatchedColumns();
+        }
+
+        internal void PrepareAllChangedMultiAll()
+        {
+            _multiAllCursor = _world.CreateChangeCursorFromNow();
+            WriteBothMultiWatchedColumns();
+        }
+
+        internal ScenarioMeasurement ExecuteAllChangedMultiAny() =>
+            ExecuteAllChangedMulti(_multiAnyPlan, ref _multiAnyCursor);
+
+        internal ScenarioMeasurement ExecuteAllChangedMultiAll() =>
+            ExecuteAllChangedMulti(_multiAllPlan, ref _multiAllCursor);
+
+        private ScenarioMeasurement ExecuteUnchangedMulti(
+            ArchetypeReadReadChangedQueryPlan<
+                TArena,
+                BenchmarkPosition,
+                BenchmarkWide> plan,
+            ref ChangeCursor cursor)
+        {
+            const int scanCount = 64;
+            int visited = 0;
+            var visitor = new PositionWideChangedVisitor();
+            for (int scan = 0; scan < scanCount; scan++)
+            {
+                visited += _world.VisitReadReadChangedChunks(
+                    plan,
+                    ref cursor,
+                    ref visitor);
+            }
+            if (visited != 0 || visitor.Rows != 0)
+                throw new InvalidOperationException("Unchanged multi-column query returned rows.");
+            return new ScenarioMeasurement(
+                (long)_occupiedChunkCount * scanCount,
+                unchecked((long)cursor.Version.Value + visitor.Checksum));
+        }
+
+        private ScenarioMeasurement ExecuteAllChangedMulti(
+            ArchetypeReadReadChangedQueryPlan<
+                TArena,
+                BenchmarkPosition,
+                BenchmarkWide> plan,
+            ref ChangeCursor cursor)
+        {
+            var visitor = new PositionWideChangedVisitor();
+            int visited = _world.VisitReadReadChangedChunks(
+                plan,
+                ref cursor,
+                ref visitor);
+            if (visited != _population || visitor.Rows != _population)
+                throw new InvalidOperationException("All-changed multi-column query lost rows.");
+            return new ScenarioMeasurement(
+                visited,
+                unchecked(visitor.Checksum + (long)cursor.Version.Value));
+        }
+
+        private void WriteBothMultiWatchedColumns()
+        {
+            var visitor = new ScalarVelocityChangeWriter();
+            int visited = _world.VisitReadReadWriteWriteChunks(
+                _changePreparationPlan,
+                ref visitor);
+            if (visited != _population)
+                throw new InvalidOperationException("Multi-column change preparation lost rows.");
+        }
+
         internal void PrepareUnchangedChangedRows() =>
             _unchangedRowsCursor = _world.CreateChangeCursorFromNow();
 
@@ -2166,6 +2291,34 @@ internal static class PrimitiveBenchmarks
                     checksum = unchecked(
                         checksum + wide.A + wide.B + wide.C + wide.D +
                         wide.E + wide.F + wide.G + wide.H + chunk.EntityIndices[row]);
+                }
+                Rows += chunk.Count;
+                Checksum = checksum;
+            }
+        }
+
+        private struct PositionWideChangedVisitor :
+            IComponentChunkReadReadVisitor<BenchmarkPosition, BenchmarkWide>
+        {
+            internal int Rows;
+            internal long Checksum;
+
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in ReadReadComponentChunk<BenchmarkPosition, BenchmarkWide> chunk)
+            {
+                long checksum = Checksum;
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    ref readonly BenchmarkPosition position = ref chunk.ReadComponents1[row];
+                    ref readonly BenchmarkWide wide = ref chunk.ReadComponents2[row];
+                    checksum = unchecked(
+                        checksum +
+                        wide.A + wide.B + wide.C + wide.D +
+                        wide.E + wide.F + wide.G + wide.H +
+                        BitConverter.SingleToInt32Bits(position.X) +
+                        BitConverter.SingleToInt32Bits(position.Y) +
+                        chunk.EntityIndices[row]);
                 }
                 Rows += chunk.Count;
                 Checksum = checksum;
