@@ -27,6 +27,7 @@ internal sealed class ArchetypeChangedReadQueryPlan<TArena, TRead> :
         ComponentFlags readFlags,
         ComponentId changedComponentId,
         ComponentFlags changedFlags,
+        bool tracksExactRows,
         in ArchetypeQueryFilter filter)
     {
         if (!worldId.IsValid)
@@ -44,6 +45,7 @@ internal sealed class ArchetypeChangedReadQueryPlan<TArena, TRead> :
         PlanIndex = planIndex;
         ReadComponentId = readComponentId;
         ChangedComponentId = changedComponentId;
+        TracksExactRows = tracksExactRows;
         _readFlags = readFlags;
         _changedFlags = changedFlags;
         _requiredComponents = ArchetypeQueryPlanUtilities.MergeRequiredComponents(
@@ -61,6 +63,8 @@ internal sealed class ArchetypeChangedReadQueryPlan<TArena, TRead> :
     internal ComponentId ReadComponentId { get; }
 
     internal ComponentId ChangedComponentId { get; }
+
+    internal bool TracksExactRows { get; }
 
     internal bool ReadIsEnableable => (_readFlags & ComponentFlags.Enableable) != 0;
 
@@ -117,10 +121,14 @@ internal sealed class ArchetypeChangedReadQueryPlan<TArena, TRead> :
                 storage.Columns[changedColumnIndex],
                 ChangedComponentId,
                 _changedFlags);
+            SparseRowChangeVersions? sparseRowChangeVersions = TracksExactRows
+                ? storage.Store.EnableSparseRowChangeTracking(changedColumnIndex)
+                : null;
             routes[destination++] = new ArchetypeChangedReadQueryRoute<TArena>(
                 storage,
                 readColumnIndex,
                 changedColumnIndex,
+                sparseRowChangeVersions,
                 _enabledComponents,
                 _disabledComponents);
         }

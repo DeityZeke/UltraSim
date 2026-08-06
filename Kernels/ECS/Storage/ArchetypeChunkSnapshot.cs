@@ -13,6 +13,7 @@ public readonly struct ArchetypeChunkSnapshot
         int emptyChunkCount,
         int chunkRecordSizeBytes,
         long changeVersionMetadataBytes,
+        long sparseRowChangeVersionMetadataBytes,
         bool isDisposed)
     {
         EntityCount = entityCount;
@@ -24,6 +25,7 @@ public readonly struct ArchetypeChunkSnapshot
         EmptyChunkCount = emptyChunkCount;
         ChunkRecordSizeBytes = chunkRecordSizeBytes;
         ChangeVersionMetadataBytes = changeVersionMetadataBytes;
+        SparseRowChangeVersionMetadataBytes = sparseRowChangeVersionMetadataBytes;
         IsDisposed = isDisposed;
     }
 
@@ -37,7 +39,9 @@ public readonly struct ArchetypeChunkSnapshot
     public int ChunkRecordSizeBytes { get; }
     public long ChunkMetadataBytes => (long)MaximumChunks * ChunkRecordSizeBytes;
     public long ChangeVersionMetadataBytes { get; }
-    public long TotalMetadataBytes => ChunkMetadataBytes + ChangeVersionMetadataBytes;
+    public long SparseRowChangeVersionMetadataBytes { get; }
+    public long TotalMetadataBytes =>
+        ChunkMetadataBytes + ChangeVersionMetadataBytes + SparseRowChangeVersionMetadataBytes;
     public int UnallocatedChunkCount => MaximumChunks - AcquiredChunkCount;
     public int OccupiedChunkCount => FullChunkCount + PartialChunkCount;
     public long MaximumRows => (long)MaximumChunks * RowCapacity;

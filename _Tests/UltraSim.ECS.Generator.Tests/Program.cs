@@ -289,7 +289,10 @@ internal static class GeneratorTests
             "ChangeVersion writeVersion = default;",
             StringComparison.Ordinal));
         TestAssert.True(generation.GeneratedSource.Contains(
-            "store.StampChangeVersion(",
+            "store.StampDenseChangeVersion(",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "route.Storage.Store.StampFilteredChangeVersion(",
             StringComparison.Ordinal));
         TestAssert.True(generation.GeneratedSource.Contains(
             "route.Write1ColumnIndex,",
@@ -309,7 +312,8 @@ internal static class GeneratorTests
         TestAssert.True(nextSource > readOnlyStart);
         string readOnlyFamily = generation.GeneratedSource[readOnlyStart..nextSource];
         TestAssert.False(readOnlyFamily.Contains("ChangeVersion", StringComparison.Ordinal));
-        TestAssert.False(readOnlyFamily.Contains("StampChangeVersion", StringComparison.Ordinal));
+        TestAssert.False(readOnlyFamily.Contains("StampDenseChangeVersion", StringComparison.Ordinal));
+        TestAssert.False(readOnlyFamily.Contains("StampFilteredChangeVersion", StringComparison.Ordinal));
     }
 
     private static void DuplicateCanonicalKey_ReportsECSGEN003()

@@ -161,6 +161,10 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_ChangedRead_UnchangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedChangedRead),
             new("NativeWorld_ChangedRead_AllChangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteAllChangedRead, nativeGeneratedWideQuery.PrepareAllChangedRead),
             new("PinnedWorld_ChangedRead_AllChangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteAllChangedRead, pinnedGeneratedWideQuery.PrepareAllChangedRead),
+            new("NativeWorld_ChangedRows_UnchangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedChangedRows, nativeGeneratedWideQuery.PrepareUnchangedChangedRows),
+            new("PinnedWorld_ChangedRows_UnchangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedChangedRows, pinnedGeneratedWideQuery.PrepareUnchangedChangedRows),
+            new("NativeWorld_ChangedRows_OneChangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, nativeGeneratedWideQuery.ExecuteOneChangedRow, nativeGeneratedWideQuery.PrepareOneChangedRow),
+            new("PinnedWorld_ChangedRows_OneChangedScalar_2Archetypes_100000", "WorldChangeRows", 100_000, pinnedGeneratedWideQuery.ExecuteOneChangedRow, pinnedGeneratedWideQuery.PrepareOneChangedRow),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareDense),
             new("PinnedWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, pinnedFilteredReadWriteQuery.Execute, pinnedFilteredReadWriteQuery.PrepareDense),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Alternating_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareAlternating),
@@ -181,7 +185,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-changed-read-cursors-v18",
+            SemanticProfile = "ecs-next-phase1-exact-changed-rows-v19",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -193,6 +197,7 @@ internal static class PrimitiveBenchmarks
             ComponentMetadataSizeBytes = Marshal.SizeOf<ComponentMetadata>(),
             ChangeVersionSizeBytes = Marshal.SizeOf<ChangeVersion>(),
             ChangeCursorSizeBytes = Marshal.SizeOf<ChangeCursor>(),
+            ExactChangedRowsMetadataBytes = nativeGeneratedWideQuery.ExactChangedRowsMetadataBytes,
             SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
             TimestampUtc = DateTimeOffset.UtcNow,
@@ -1825,8 +1830,13 @@ internal static class PrimitiveBenchmarks
             BenchmarkScalar,
             BenchmarkVelocity> _changePreparationPlan;
         private readonly ArchetypeChangedReadQueryPlan<TArena, BenchmarkWide> _changedReadPlan;
+        private readonly ArchetypeChangedReadQueryPlan<TArena, BenchmarkWide> _changedRowsPlan;
+        private readonly ArchetypeComponentBinding<BenchmarkScalar> _sparseScalarBinding;
+        private readonly Entity _sparseEntity;
         private ChangeCursor _unchangedCursor;
         private ChangeCursor _changedCursor;
+        private ChangeCursor _unchangedRowsCursor;
+        private ChangeCursor _oneChangedRowCursor;
         private readonly int _occupiedChunkCount;
         private readonly int _population;
 
@@ -1838,7 +1848,7 @@ internal static class PrimitiveBenchmarks
                 new EntityCapacity(population),
                 maximumArchetypes: 2,
                 static capacity => CreateArena(capacity),
-                maximumQueryPlans: 4);
+                maximumQueryPlans: 5);
             ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             ComponentId scalar = BenchmarkSchema.GetComponentId<BenchmarkScalar>();
@@ -1884,8 +1894,10 @@ internal static class PrimitiveBenchmarks
                 BenchmarkScalar,
                 BenchmarkVelocity>(position, wide, scalar, velocity);
             _changedReadPlan = _world.PrepareChangedReadQuery<BenchmarkWide>(wide, scalar);
+            _changedRowsPlan = _world.PrepareChangedRowsQuery<BenchmarkWide>(wide, scalar);
             _world.Seal();
 
+            Entity sparseEntity = default;
             for (int i = 0; i < population; i++)
             {
                 bool useFirst = (i & 1) == 0;
@@ -1926,12 +1938,15 @@ internal static class PrimitiveBenchmarks
                     throw new InvalidOperationException(
                         "Generated-wide-query benchmark fixture exhausted unexpectedly.");
                 }
+                if (i == 0)
+                    sparseEntity = entity;
             }
 
             if (_threeReadPlan.MatchedArchetypeCount != 2 ||
                 _balancedPlan.MatchedArchetypeCount != 2 ||
                 _changePreparationPlan.MatchedArchetypeCount != 2 ||
-                _changedReadPlan.MatchedArchetypeCount != 2)
+                _changedReadPlan.MatchedArchetypeCount != 2 ||
+                _changedRowsPlan.MatchedArchetypeCount != 2)
             {
                 throw new InvalidOperationException(
                     "Generated-wide-query benchmark did not compile both archetypes.");
@@ -1939,6 +1954,10 @@ internal static class PrimitiveBenchmarks
             _scanBaseline = _world.CurrentChangeVersion;
             _unchangedCursor = _world.CreateChangeCursorFromNow();
             _changedCursor = _unchangedCursor;
+            _unchangedRowsCursor = _unchangedCursor;
+            _oneChangedRowCursor = _unchangedCursor;
+            _sparseScalarBinding = firstScalar;
+            _sparseEntity = sparseEntity;
             _occupiedChunkCount = CountOccupiedChunks(_firstStorage) +
                 CountOccupiedChunks(_secondStorage);
             _population = population;
@@ -1952,6 +1971,10 @@ internal static class PrimitiveBenchmarks
                 throw new InvalidOperationException("Generated 3R1W benchmark lost rows.");
             return new ScenarioMeasurement(visited, visitor.Checksum);
         }
+
+        internal long ExactChangedRowsMetadataBytes => checked(
+            _firstStorage.Store.GetSnapshot().SparseRowChangeVersionMetadataBytes +
+            _secondStorage.Store.GetSnapshot().SparseRowChangeVersionMetadataBytes);
 
         internal ScenarioMeasurement ExecuteBalanced()
         {
@@ -2041,6 +2064,59 @@ internal static class PrimitiveBenchmarks
             return new ScenarioMeasurement(
                 visited,
                 unchecked(visitor.Checksum + (long)_changedCursor.Version.Value));
+        }
+
+        internal void PrepareUnchangedChangedRows() =>
+            _unchangedRowsCursor = _world.CreateChangeCursorFromNow();
+
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+        internal ScenarioMeasurement ExecuteUnchangedChangedRows()
+        {
+            const int scanCount = 64;
+            int visited = 0;
+            var visitor = new WideChangedReadVisitor();
+            for (int scan = 0; scan < scanCount; scan++)
+            {
+                visited += _world.VisitChangedReadRows(
+                    _changedRowsPlan,
+                    ref _unchangedRowsCursor,
+                    ref visitor);
+            }
+            if (visited != 0 || visitor.Rows != 0)
+                throw new InvalidOperationException("Unchanged exact-row benchmark returned rows.");
+            return new ScenarioMeasurement(
+                (long)_occupiedChunkCount * scanCount,
+                unchecked((long)_unchangedRowsCursor.Version.Value + visitor.Checksum));
+        }
+
+        internal void PrepareOneChangedRow()
+        {
+            _oneChangedRowCursor = _world.CreateChangeCursorFromNow();
+            if (!_world.TrySetComponent(
+                _sparseEntity,
+                _sparseScalarBinding,
+                new BenchmarkScalar
+                {
+                    Value = unchecked((int)_world.CurrentChangeVersion.Value + 1),
+                }))
+            {
+                throw new InvalidOperationException("Exact-row benchmark preparation lost its entity.");
+            }
+        }
+
+        internal ScenarioMeasurement ExecuteOneChangedRow()
+        {
+            var visitor = new WideChangedReadVisitor();
+            int visited = _world.VisitChangedReadRows(
+                _changedRowsPlan,
+                ref _oneChangedRowCursor,
+                ref visitor);
+            if (visited != 1 || visitor.Rows != 1)
+                throw new InvalidOperationException("One-row exact changed-read benchmark lost precision.");
+            return new ScenarioMeasurement(
+                visited,
+                unchecked(visitor.Checksum + (long)_oneChangedRowCursor.Version.Value));
         }
 
         public void Dispose() => _world.Dispose();
@@ -2554,6 +2630,7 @@ internal sealed class BenchmarkReport
     public required int ComponentMetadataSizeBytes { get; init; }
     public required int ChangeVersionSizeBytes { get; init; }
     public required int ChangeCursorSizeBytes { get; init; }
+    public required long ExactChangedRowsMetadataBytes { get; init; }
     public required int SchemaIdSizeBytes { get; init; }
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }
@@ -2766,6 +2843,7 @@ internal static class ArchetypeFactBuilder
             ChunkRecordSizeBytes = snapshot.ChunkRecordSizeBytes,
             ChunkMetadataBytes = snapshot.ChunkMetadataBytes,
             ChangeVersionMetadataBytes = snapshot.ChangeVersionMetadataBytes,
+            SparseRowChangeVersionMetadataBytes = snapshot.SparseRowChangeVersionMetadataBytes,
             TotalMetadataBytes = snapshot.TotalMetadataBytes,
             ChunkRowSizeBytes = Marshal.SizeOf<ChunkRow>(),
         };
@@ -2783,6 +2861,7 @@ internal sealed class ArchetypeFact
     public required int ChunkRecordSizeBytes { get; init; }
     public required long ChunkMetadataBytes { get; init; }
     public required long ChangeVersionMetadataBytes { get; init; }
+    public required long SparseRowChangeVersionMetadataBytes { get; init; }
     public required long TotalMetadataBytes { get; init; }
     public required int ChunkRowSizeBytes { get; init; }
 }

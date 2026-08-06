@@ -795,7 +795,19 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("int pendingEnd = -1;");
         writer.Line("int matchedRows = 0;");
         if (family.WriteCount != 0)
+        {
             writer.Line("bool stamped = false;");
+            for (int index = 0; index < family.Slots.Length; index++)
+            {
+                AccessSlot slot = family.Slots[index];
+                if (!slot.IsWrite)
+                    continue;
+                writer.Line($"bool track{slot.Name}Rows = route.Storage.Store.HasSparseRowChangeTracking(");
+                writer.Indent();
+                writer.Line($"route.{slot.ColumnProperty});");
+                writer.Unindent();
+            }
+        }
         writer.Line("int wordCount = (rowCount + 63) >> 6;");
         writer.Open("for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)");
         writer.Line("ulong mask = route.GetMatchingRowMask(bound.ChunkBytes, wordIndex);");
@@ -820,7 +832,12 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("pendingEnd = runEnd;");
         writer.Close();
         writer.Open("else");
-        AppendWriteStamp(writer, family, filtered: true);
+        AppendWriteStamp(
+            writer,
+            family,
+            filtered: true,
+            rowOffset: "pendingStart",
+            rowCount: "pendingEnd - pendingStart");
         writer.Line($"Execute{family.Name}Range(");
         writer.Indent();
         writer.Line("route,");
@@ -844,7 +861,12 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Close();
         writer.Line();
         writer.Open("if (pendingStart >= 0)");
-        AppendWriteStamp(writer, family, filtered: true);
+        AppendWriteStamp(
+            writer,
+            family,
+            filtered: true,
+            rowOffset: "pendingStart",
+            rowCount: "pendingEnd - pendingStart");
         writer.Line($"Execute{family.Name}Range(");
         writer.Indent();
         writer.Line("route,");
@@ -898,13 +920,22 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
     private static void AppendWriteStamp(
         CodeWriter writer,
         QueryFamilySpec family,
-        bool filtered)
+        bool filtered,
+        string? rowOffset = null,
+        string? rowCount = null)
     {
         if (family.WriteCount == 0)
             return;
 
         if (filtered)
-            writer.Open("if (!stamped)");
+        {
+            string exactCondition = string.Join(
+                " || ",
+                family.Slots
+                    .Where(static slot => slot.IsWrite)
+                    .Select(static slot => "track" + slot.Name + "Rows"));
+            writer.Open($"if (!stamped || {exactCondition})");
+        }
         writer.Line("if (!writeVersion.IsValid)");
         writer.Indent();
         writer.Line("writeVersion = AdvanceChangeVersion();");
@@ -915,12 +946,26 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             AccessSlot slot = family.Slots[index];
             if (!slot.IsWrite)
                 continue;
-            writer.Line($"{store}.StampChangeVersion(");
+            if (filtered)
+                writer.Open($"if (!stamped || track{slot.Name}Rows)");
+            string method = filtered
+                ? "StampFilteredChangeVersion"
+                : "StampDenseChangeVersion";
+            writer.Line($"{store}.{method}(");
             writer.Indent();
             writer.Line("bound.ChunkIndex,");
             writer.Line($"route.{slot.ColumnProperty},");
-            writer.Line("writeVersion);");
+            if (filtered)
+            {
+                writer.Line($"{rowOffset},");
+                writer.Line($"{rowCount},");
+            }
+            writer.Line(filtered
+                ? "writeVersion, stampChunk: !stamped);"
+                : "writeVersion);");
             writer.Unindent();
+            if (filtered)
+                writer.Close();
         }
         if (filtered)
         {

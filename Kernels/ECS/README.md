@@ -114,8 +114,8 @@ allocation:
   columns; filtered visits stamp only chunks that expose at least one matching
   row, and stamping happens before the visitor so exceptions cannot hide a
   possibly partial write. Read-only families neither advance nor stamp versions.
-  This is the initial dense substrate; sparse row masks, lifecycle event streams,
-  and complete structural-change tracking remain later work.
+  Unfiltered writable chunks publish a dense stamp; scalar and filtered writable
+  ranges publish row-precise stamps when that column has an exact-row consumer.
 - `ChangeCursor` is a 16-byte world-bound value. A cursor may begin at zero to
   consume all previously stamped chunks or at the world's current version to
   observe only future changes; copying it creates an independent consumer with
@@ -130,6 +130,19 @@ allocation:
   at-least-once retry without loss; chunks delivered before the exception may be
   delivered again. The initial plan reads one data component; generated
   arbitrary-width changed queries are not implemented yet.
+- `PrepareChangedRowsQuery` opts a tracked column into exact-row history at world
+  sealing. Ordinary dense plans reserve no additional row storage. Each opted-in
+  archetype column preallocates eight bytes per possible physical row plus one
+  dense version per possible chunk; snapshots expose that cost separately.
+  `VisitChangedReadRows` first uses the existing chunk version as a cheap reject,
+  then constructs 64-row masks from the bounded row versions. Scalar writes mark
+  one row, filtered visitors mark precisely the ranges they were allowed to
+  mutate, and full writable chunks remain a one-stamp dense fast path. Multiple
+  consumers and arbitrarily delayed consumers retain the existing copied-cursor
+  semantics without a destructive shared dirty mask. Exposed writable rows are
+  conservatively considered written even if visitor code leaves their bytes
+  unchanged. Empty reuse and packed donor relocation clear or move the row
+  history with the physical row.
 - Unsigned one-branch range checks now use explicit `unchecked` normalization.
   This preserves negative-index rejection as `ArgumentOutOfRangeException` under
   the kernel's project-wide checked arithmetic instead of paying for or surfacing
@@ -190,7 +203,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 153 passing tests, including
+The current runtime and primitive suite has 159 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -250,15 +263,21 @@ column distinct from the tracked column, independent copied consumers, no replay
 after acknowledgement, filtered physical row offsets and enable state,
 exception-without-acknowledgement retry, foreign/default cursor and plan rejection,
 bounded plan capacity, native/pinned parity, and warmed zero-allocation execution.
+Exact-row tests add opt-in memory accounting, sparse scalar refinement within a
+densely changed chunk, independent consumer progress, filtered handwritten and
+generated writable ranges, full-chunk dense fallback, packed-row reset, cursor
+wrap and exception retry, backend parity, and 10,000 warmed allocation-free
+write/read cycles.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generators emit the core manifest and a
 systematic catalog currently containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W
 families. Further arities should now be added only when real system signatures
-require them. The next natural change-tracking work is exact sparse row masks over
-the dense chunk gate, beginning with scalar writes and filtered writable ranges.
-Tests may instead show that general generated multi-column changed plans should be
-finished first. Public tracked-write scopes, structural
+require them. The next natural change-tracking work is generated multi-column
+changed plans, including one/several watched columns and explicit any-changed
+versus all-changed semantics. Occupancy/density measurements may show that some
+shapes should remain dense or bypass change refinement entirely. Public
+tracked-write scopes, structural
 creation/migration/removal events, optional filters, bounded deferred structural
 commands, and field/serializer/prefab descriptors remain later work.
 

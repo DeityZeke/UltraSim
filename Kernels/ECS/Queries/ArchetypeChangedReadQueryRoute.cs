@@ -8,6 +8,7 @@ internal readonly struct ArchetypeChangedReadQueryRoute<TArena>
         ArchetypeStorage<TArena> storage,
         int readColumnIndex,
         int changedColumnIndex,
+        SparseRowChangeVersions? sparseRowChangeVersions,
         ReadOnlySpan<ComponentId> enabledComponents,
         ReadOnlySpan<ComponentId> disabledComponents)
     {
@@ -20,6 +21,7 @@ internal readonly struct ArchetypeChangedReadQueryRoute<TArena>
         Storage = storage;
         ReadColumnIndex = (ushort)readColumnIndex;
         ChangedColumnIndex = (ushort)changedColumnIndex;
+        SparseRowChangeVersions = sparseRowChangeVersions;
         RowFilter = ArchetypeQueryRowFilter.Bind(
             storage,
             enabledComponents,
@@ -32,10 +34,31 @@ internal readonly struct ArchetypeChangedReadQueryRoute<TArena>
 
     internal int ChangedColumnIndex { get; }
 
+    private SparseRowChangeVersions? SparseRowChangeVersions { get; }
+
+    internal bool HasSparseRowChangeVersions => SparseRowChangeVersions is not null;
+
     private ArchetypeQueryRowFilter RowFilter { get; }
 
     internal bool HasRowFilters => RowFilter.HasFilters;
 
     internal ulong GetMatchingRowMask(ReadOnlySpan<byte> chunkBytes, int wordIndex) =>
         RowFilter.GetMatchingRowMask(chunkBytes, wordIndex);
+
+    internal ulong GetChangedRowMask(
+        uint chunkIndex,
+        int wordIndex,
+        int activeRows,
+        ChangeVersion baseline)
+    {
+        SparseRowChangeVersions sparse = SparseRowChangeVersions ??
+            throw new InvalidOperationException(
+                "The changed-read route was not compiled for exact row tracking.");
+        return Storage.Store.GetBoundChangedRowMask(
+            sparse,
+            chunkIndex,
+            wordIndex,
+            activeRows,
+            baseline);
+    }
 }

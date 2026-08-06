@@ -285,6 +285,32 @@ scenarios reported zero managed allocation and zero Gen0/1/2 collections. These
 are V3-internal mechanism comparisons, not Current/V3 claims, and the accepted
 artifact remains unchanged.
 
+The v19 exact-row extension adds four scenarios and makes sparse row history
+opt-in per tracked archetype column. The exact consumer retains the v18 chunk
+gate, then constructs 64-row masks only inside changed chunks. Scalar writes mark
+one physical row, filtered writable ranges mark their exposed rows, and dense
+chunk writes remain a single dense stamp. Copied cursors can lag independently;
+the implementation does not destructively drain shared dirty masks.
+
+The final focused 100,000-row/two-archetype run reserved `1,495,040` bytes for the
+one exact-tracked scalar column. Native and pinned unchanged scans measured
+`17.599` and `17.649 ns/chunk` over 35,328 checks per iteration. Scanning all 552
+chunks and returning exactly one 64-byte row measured approximately `10.06 us`
+native and `10.23 us` pinned total. All four scenarios reported zero managed
+allocation and zero collections. The suite now contains 74 scenarios. The
+planned occupancy/change-density matrix must determine where that memory and row
+refinement beat dense false-positive delivery; this focused guard alone does not.
+The final full v19 pass measured unchanged exact polling at `15.18-15.21
+ns/chunk` and one-row delivery at `9.06-9.38 us`; all 74 scenarios again reported
+zero managed allocation and zero collections. As with v18, the focused/full
+difference is retained as process/order/cache-state evidence, not averaged away.
+The first implementation accidentally published every filtered range even when
+the written column had no exact consumer, pushing the alternating guard to roughly
+`13.1-14.6 ns/matched row`. The full suite exposed it. Caching the per-column
+opt-in and retaining once-per-chunk publication for dense-only columns restored
+the final focused guard to `10.54-10.62 ns/matched row`, within the earlier
+documented band.
+
 These 100,000-row figures may be strongly cache-resident on the test machine and
 must not be labeled true main-memory bandwidth. The benchmark recommendations
 now require an opt-in 1K through 10M working-set ladder, explicit retained-byte

@@ -165,6 +165,12 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_ChangedReadQueryRejectsInvalidOwnershipAndCapacity), EcsWorld_ChangedReadQueryRejectsInvalidOwnershipAndCapacity);
         Run(nameof(EcsWorld_ChangedReadQueryNativePinnedParity), EcsWorld_ChangedReadQueryNativePinnedParity);
         Run(nameof(EcsWorld_WarmedChangedReadQueryAllocatesZeroManagedBytes), EcsWorld_WarmedChangedReadQueryAllocatesZeroManagedBytes);
+        Run(nameof(ArchetypeChunkStore_SparseRowVersionsAreOptInBoundedAndReset), ArchetypeChunkStore_SparseRowVersionsAreOptInBoundedAndReset);
+        Run(nameof(EcsWorld_ChangedRowsRefineScalarWritesInsideChangedChunks), EcsWorld_ChangedRowsRefineScalarWritesInsideChangedChunks);
+        Run(nameof(EcsWorld_ChangedRowsTrackFilteredAndDenseWritesExactly), EcsWorld_ChangedRowsTrackFilteredAndDenseWritesExactly);
+        Run(nameof(EcsWorld_ChangedRowsRetainCursorAfterExceptionAndWrap), EcsWorld_ChangedRowsRetainCursorAfterExceptionAndWrap);
+        Run(nameof(EcsWorld_ChangedRowsNativePinnedParity), EcsWorld_ChangedRowsNativePinnedParity);
+        Run(nameof(EcsWorld_WarmedChangedRowsAllocateZeroManagedBytes), EcsWorld_WarmedChangedRowsAllocateZeroManagedBytes);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -5519,6 +5525,7 @@ internal static class EcsPrimitiveTests
             for (int i = 0; i < entities.Length; i++)
                 entities[i] = CreateGeneratedWideEntity(fixture, i < firstCount, i);
 
+            ChangeCursor exactCursor = fixture.World.CreateChangeCursorFromNow();
             var visitor = new BalancedWideGeneratedVisitor(
                 fixture.First.Id,
                 fixture.Second.Id,
@@ -5529,6 +5536,11 @@ internal static class EcsPrimitiveTests
             Assert.Equal(secondCount, visitor.SecondRows);
             Assert.Equal(1, visitor.NonEnableableWriteRejections);
             Assert.Equal(2, visitor.RowBoundsRejections);
+            var exactDense = new ChangedWideVisitor();
+            Assert.Equal(entities.Length, fixture.World.VisitChangedReadRows(
+                fixture.ExactWideChangedByInt,
+                ref exactCursor,
+                ref exactDense));
             for (int i = 0; i < entities.Length; i++)
             {
                 bool first = i < firstCount;
@@ -5570,10 +5582,18 @@ internal static class EcsPrimitiveTests
             salt: 71,
             expected,
             seen);
+        ChangeCursor filteredExactCursor = filtered.World.CreateChangeCursorFromNow();
         Assert.Equal(matches, filtered.World.VisitReadReadWriteWriteChunks(
             filtered.FilteredBalancedQuery,
             ref filteredVisitor));
         Assert.True(filteredVisitor.NonZeroRowOffsets > 0);
+        var exactExpected = (bool[])expected.Clone();
+        var exactFiltered = new ExactChangedWideVisitor(exactExpected);
+        Assert.Equal(matches, filtered.World.VisitChangedReadRows(
+            filtered.ExactWideChangedByInt,
+            ref filteredExactCursor,
+            ref exactFiltered));
+        Assert.Equal(matches, exactFiltered.SeenRows);
         for (int i = 0; i < filteredCount; i++)
             Assert.Equal(expected[i], seen[i]);
     }
@@ -6143,10 +6163,13 @@ internal static class EcsPrimitiveTests
         using var fixture = new ChangedQueryFixture<NativeChunkArena>(2, 8);
         Assert.True(fixture.WideChangedByInt.IsCompiled);
         Assert.Equal(2, fixture.WideChangedByInt.MatchedArchetypeCount);
+        Assert.True(fixture.ExactWideChangedByInt.IsCompiled);
+        Assert.True(fixture.ExactWideChangedByInt.TracksExactRows);
+        Assert.Equal(2, fixture.ExactWideChangedByInt.MatchedArchetypeCount);
         Assert.Equal(1, fixture.FilteredEnableChangedByInt.MatchedArchetypeCount);
         Assert.True(fixture.WideChangedByInt.RequiredComponents.Contains(fixture.IntId));
         Assert.True(fixture.WideChangedByInt.RequiredComponents.Contains(fixture.WideId));
-        Assert.Equal(2, fixture.World.QueryPlanCount);
+        Assert.Equal(4, fixture.World.QueryPlanCount);
 
         _ = fixture.Create(first: true, seed: 1);
         _ = fixture.Create(first: false, seed: 2);
@@ -6168,6 +6191,7 @@ internal static class EcsPrimitiveTests
         fixture.World.Dispose();
         Assert.False(fixture.WideChangedByInt.IsCompiled);
         Assert.Equal(0, fixture.WideChangedByInt.MatchedArchetypeCount);
+        Assert.False(fixture.ExactWideChangedByInt.IsCompiled);
     }
 
     private static void EcsWorld_ChangedReadQueryConsumersAdvanceIndependently()
@@ -6428,6 +6452,283 @@ internal static class EcsPrimitiveTests
         Assert.Equal(0L, allocated);
         Assert.Equal(fixture.World.CurrentChangeVersion, cursor.Version);
         Assert.True(visitor.Checksum != 0);
+    }
+
+    private static void ArchetypeChunkStore_SparseRowVersionsAreOptInBoundedAndReset()
+    {
+        using ArchetypeChunkStore<NativeChunkArena> store = CreateArchetypeStore<NativeChunkArena>(
+            maximumChunks: 2,
+            out _,
+            out ComponentColumnLayout[] columns);
+        int intColumn = FindColumnIndex(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>());
+        Assert.Equal(0L, store.GetSnapshot().SparseRowChangeVersionMetadataBytes);
+        SparseRowChangeVersions sparse = store.EnableSparseRowChangeTracking(intColumn);
+        long expectedBytes = checked(
+            (2L + (2L * store.Layout.RowCapacity)) * sizeof(ulong));
+        Assert.Equal(expectedBytes, sparse.MetadataBytes);
+        Assert.Equal(expectedBytes, store.GetSnapshot().SparseRowChangeVersionMetadataBytes);
+
+        Assert.True(store.TryAdd(11, out ChunkRow first));
+        Assert.True(store.TryAdd(12, out ChunkRow second));
+        store.StampSparseChangeVersion(
+            first.ChunkIndex,
+            intColumn,
+            second.Row,
+            rowCount: 1,
+            new ChangeVersion(7));
+        Assert.Equal(1UL << second.Row, store.GetBoundChangedRowMask(
+            sparse,
+            first.ChunkIndex,
+            wordIndex: 0,
+            activeRows: 2,
+            new ChangeVersion(6)));
+        Assert.True(store.TryRemove(first, 11, out _));
+        Assert.Equal(1UL, store.GetBoundChangedRowMask(
+            sparse,
+            first.ChunkIndex,
+            wordIndex: 0,
+            activeRows: 1,
+            new ChangeVersion(6)));
+        store.StampDenseChangeVersion(first.ChunkIndex, intColumn, new ChangeVersion(8));
+        Assert.Equal(1UL, store.GetBoundChangedRowMask(
+            sparse,
+            first.ChunkIndex,
+            wordIndex: 0,
+            activeRows: 1,
+            new ChangeVersion(7)));
+        Assert.True(store.TryRemove(new ChunkRow(second.ChunkIndex, 0), 12, out _));
+        store.ValidateInvariants();
+        Assert.True(store.TryAdd(13, out ChunkRow reused));
+        Assert.Equal(0UL, store.GetBoundChangedRowMask(
+            sparse,
+            reused.ChunkIndex,
+            wordIndex: 0,
+            activeRows: 1,
+            ChangeVersion.None));
+    }
+
+    private static void EcsWorld_ChangedRowsRefineScalarWritesInsideChangedChunks()
+    {
+        const int entityCount = 130;
+        using var fixture = new ChangedQueryFixture<NativeChunkArena>(2, entityCount);
+        var entities = new Entity[entityCount];
+        for (int index = 0; index < entities.Length; index++)
+            entities[index] = fixture.Create(first: false, seed: index);
+
+        ChangeCursor denseCursor = fixture.World.CreateChangeCursorFromNow();
+        ChangeCursor exactFirst = denseCursor;
+        ChangeCursor exactSecond = denseCursor;
+        int[] changedIndices = [1, 3, 67, 129];
+        var expected = new bool[entityCount];
+        for (int index = 0; index < changedIndices.Length; index++)
+        {
+            int entityIndex = changedIndices[index];
+            expected[entities[entityIndex].Index] = true;
+            Assert.True(fixture.World.TrySetComponent(
+                entities[entityIndex],
+                fixture.SecondIntBinding,
+                new UltraSim.ECS.Tests.LayoutInt { Value = entityIndex * 101 }));
+        }
+
+        var exact = new ExactChangedWideVisitor(expected);
+        Assert.Equal(changedIndices.Length, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref exactFirst,
+            ref exact));
+        Assert.Equal(changedIndices.Length, exact.Rows);
+        Assert.Equal(changedIndices.Length, exact.SeenRows);
+        Assert.True(exact.SawPhysicalOffset);
+        Assert.Equal(0, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref exactFirst,
+            ref exact));
+
+        var independent = new ChangedWideVisitor();
+        Assert.Equal(changedIndices.Length, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref exactSecond,
+            ref independent));
+        Assert.True(independent.Chunks >= 2);
+
+        var dense = new ChangedWideVisitor();
+        int denseRows = fixture.World.VisitChangedReadChunks(
+            fixture.WideChangedByInt,
+            ref denseCursor,
+            ref dense);
+        Assert.True(denseRows > changedIndices.Length);
+        Assert.Equal(entityCount, denseRows);
+    }
+
+    private static void EcsWorld_ChangedRowsTrackFilteredAndDenseWritesExactly()
+    {
+        const int entityCount = 130;
+        using var fixture = new ChangedQueryFixture<NativeChunkArena>(2, entityCount);
+        var expected = new bool[entityCount];
+        int expectedFiltered = 0;
+        for (int index = 0; index < entityCount; index++)
+        {
+            Entity entity = fixture.Create(first: false, seed: index);
+            bool matches = index % 3 == 0 && (index & 1) == 0;
+            Assert.True(fixture.World.TrySetComponentEnabled(
+                entity,
+                fixture.SecondTagBinding,
+                index % 3 == 0));
+            Assert.True(fixture.World.TrySetComponentEnabled(
+                entity,
+                fixture.SecondEnableBinding,
+                (index & 1) != 0));
+            if (matches)
+            {
+                expected[entity.Index] = true;
+                expectedFiltered++;
+            }
+        }
+
+        ChangeCursor cursor = fixture.World.CreateChangeCursorFromNow();
+        var writer = new WideIntSparseRangeWriter();
+        Assert.Equal(expectedFiltered, fixture.World.VisitReadWriteChunks(
+            fixture.FilteredWideIntWrite,
+            ref writer));
+        var exact = new ExactChangedWideVisitor(expected);
+        Assert.Equal(expectedFiltered, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref cursor,
+            ref exact));
+        Assert.Equal(expectedFiltered, exact.SeenRows);
+
+        cursor = fixture.World.CreateChangeCursorFromNow();
+        var denseWriter = new IntChunkWriter();
+        Assert.Equal(entityCount, fixture.World.VisitWriteChunks(
+            fixture.SecondIntBinding,
+            ref denseWriter));
+        var denseExact = new ChangedWideVisitor();
+        Assert.Equal(entityCount, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref cursor,
+            ref denseExact));
+    }
+
+    private static void EcsWorld_ChangedRowsRetainCursorAfterExceptionAndWrap()
+    {
+        using var fixture = new ChangedQueryFixture<NativeChunkArena>(
+            1,
+            4,
+            initialChangeVersion: new ChangeVersion(ulong.MaxValue));
+        Assert.True(fixture.World.TryCreateDefault(fixture.First.Id, out Entity entity));
+        ChangeCursor cursor = fixture.World.CreateChangeCursorFromNow();
+        Assert.True(fixture.World.TrySetComponent(
+            entity,
+            fixture.FirstIntBinding,
+            new UltraSim.ECS.Tests.LayoutInt { Value = 77 }));
+        Assert.Equal(new ChangeVersion(1), fixture.World.CurrentChangeVersion);
+        ChangeCursor before = cursor;
+        var throwing = new ThrowingChangedReadVisitor();
+        Assert.Throws<ChunkVisitorSentinelException>(() =>
+            fixture.World.VisitChangedReadRows(
+                fixture.ExactWideChangedByInt,
+                ref cursor,
+                ref throwing));
+        Assert.Equal(before, cursor);
+        var retry = new ChangedWideVisitor();
+        Assert.Equal(1, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref cursor,
+            ref retry));
+        Assert.Equal(fixture.World.CurrentChangeVersion, cursor.Version);
+
+        ChangeCursor denseOnlyCursor = fixture.World.CreateChangeCursorFromNow();
+        Assert.Throws<ArgumentException>(() => fixture.World.VisitChangedReadRows(
+            fixture.WideChangedByInt,
+            ref denseOnlyCursor,
+            ref retry));
+    }
+
+    private static void EcsWorld_ChangedRowsNativePinnedParity()
+    {
+        long native = RunChangedRowsParity<NativeChunkArena>();
+        long pinned = RunChangedRowsParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void EcsWorld_WarmedChangedRowsAllocateZeroManagedBytes()
+    {
+        const int entityCount = 1_000;
+        const int rounds = 10_000;
+        using var fixture = new ChangedQueryFixture<NativeChunkArena>(8, entityCount);
+        var entities = new Entity[entityCount];
+        for (int index = 0; index < entities.Length; index++)
+            entities[index] = fixture.Create((index & 1) == 0, index);
+        ChangeCursor cursor = fixture.World.CreateChangeCursorFromNow();
+        var visitor = new ChangedWideVisitor();
+        for (int index = 0; index < 64; index++)
+        {
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> binding = (index & 1) == 0
+                ? fixture.FirstIntBinding
+                : fixture.SecondIntBinding;
+            Assert.True(fixture.World.TrySetComponent(
+                entities[index],
+                binding,
+                new UltraSim.ECS.Tests.LayoutInt { Value = index }));
+            _ = fixture.World.VisitChangedReadRows(
+                fixture.ExactWideChangedByInt,
+                ref cursor,
+                ref visitor);
+        }
+
+        bool valid = true;
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int index = 0; index < rounds; index++)
+        {
+            int entityIndex = index % entities.Length;
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> binding = (entityIndex & 1) == 0
+                ? fixture.FirstIntBinding
+                : fixture.SecondIntBinding;
+            valid &= fixture.World.TrySetComponent(
+                entities[entityIndex],
+                binding,
+                new UltraSim.ECS.Tests.LayoutInt { Value = index * 13 });
+            valid &= fixture.World.VisitChangedReadRows(
+                fixture.ExactWideChangedByInt,
+                ref cursor,
+                ref visitor) == 1;
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(valid);
+        Assert.Equal(0L, allocated);
+        Assert.Equal(fixture.World.CurrentChangeVersion, cursor.Version);
+    }
+
+    private static long RunChangedRowsParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int entityCount = 1_000;
+        using var fixture = new ChangedQueryFixture<TArena>(8, entityCount);
+        var entities = new Entity[entityCount];
+        for (int index = 0; index < entities.Length; index++)
+            entities[index] = fixture.Create((index & 1) == 0, index);
+        ChangeCursor cursor = fixture.World.CreateChangeCursorFromNow();
+        for (int index = 0; index < entities.Length; index += 17)
+        {
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> binding = (index & 1) == 0
+                ? fixture.FirstIntBinding
+                : fixture.SecondIntBinding;
+            Assert.True(fixture.World.TrySetComponent(
+                entities[index],
+                binding,
+                new UltraSim.ECS.Tests.LayoutInt { Value = index * 29 }));
+        }
+        var visitor = new ChangedWideVisitor();
+        int visited = fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref cursor,
+            ref visitor);
+        return unchecked(visitor.Checksum + visited + (long)cursor.Version.Value);
     }
 
     private static long RunChangedReadParity<TArena>()
@@ -7871,6 +8172,61 @@ internal static class EcsPrimitiveTests
         }
     }
 
+    private struct ExactChangedWideVisitor :
+        IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutWide>
+    {
+        private readonly bool[] _expected;
+
+        internal ExactChangedWideVisitor(bool[] expected)
+        {
+            _expected = expected;
+            Rows = 0;
+            SeenRows = 0;
+            SawPhysicalOffset = false;
+        }
+
+        internal int Rows;
+        internal int SeenRows;
+        internal bool SawPhysicalOffset;
+
+        public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutWide> chunk)
+        {
+            SawPhysicalOffset |= chunk.RowOffset > 0;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint entityIndex = chunk.EntityIndices[row];
+                Assert.True(entityIndex < (uint)_expected.Length);
+                Assert.True(_expected[entityIndex]);
+                _expected[entityIndex] = false;
+                SeenRows++;
+            }
+            Rows += chunk.Count;
+        }
+    }
+
+    private struct WideIntSparseRangeWriter :
+        IComponentChunkReadWriteVisitor<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt>
+    {
+        public void Execute(in ReadWriteComponentChunk<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+                chunk.WriteComponents[row].Value = unchecked((int)chunk.EntityIndices[row] * 37);
+        }
+    }
+
+    private struct IntChunkWriter : IComponentChunkWriteVisitor<UltraSim.ECS.Tests.LayoutInt>
+    {
+        public void Execute(in WritableComponentChunk<UltraSim.ECS.Tests.LayoutInt> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+                chunk.Components[row].Value = unchecked((int)chunk.EntityIndices[row] * 41);
+        }
+    }
+
     private struct ChangedEnableFilterVisitor :
         IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
     {
@@ -8254,7 +8610,7 @@ internal static class EcsPrimitiveTests
                 new EntityCapacity(entityCapacity),
                 maximumArchetypes: 3,
                 static capacity => CreateArena<TArena>(capacity),
-                maximumQueryPlans: 2,
+                maximumQueryPlans: 4,
                 initialChangeVersion: initialChangeVersion);
 
             ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
@@ -8291,12 +8647,18 @@ internal static class EcsPrimitiveTests
             WideChangedByInt = World.PrepareChangedReadQuery<UltraSim.ECS.Tests.LayoutWide>(
                 WideId,
                 IntId);
+            ExactWideChangedByInt = World.PrepareChangedRowsQuery<UltraSim.ECS.Tests.LayoutWide>(
+                WideId,
+                IntId);
             ArchetypeQueryFilter filter = World.CreateQueryFilter([], [], [tagId], [enableId]);
             FilteredEnableChangedByInt =
                 World.PrepareChangedReadQuery<UltraSim.ECS.Tests.LayoutEnableLong>(
                     enableId,
                     IntId,
                     filter);
+            FilteredWideIntWrite = World.PrepareReadWriteQuery<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt>(WideId, IntId, filter);
             World.Seal();
         }
 
@@ -8312,7 +8674,12 @@ internal static class EcsPrimitiveTests
         internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutTag> SecondTagBinding { get; }
         internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> SecondWideBinding { get; }
         internal ArchetypeChangedReadQueryPlan<TArena, UltraSim.ECS.Tests.LayoutWide> WideChangedByInt { get; }
+        internal ArchetypeChangedReadQueryPlan<TArena, UltraSim.ECS.Tests.LayoutWide> ExactWideChangedByInt { get; }
         internal ArchetypeChangedReadQueryPlan<TArena, UltraSim.ECS.Tests.LayoutEnableLong> FilteredEnableChangedByInt { get; }
+        internal ArchetypeReadWriteQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt> FilteredWideIntWrite { get; }
 
         internal Entity Create(bool first, int seed)
         {
@@ -8487,7 +8854,7 @@ internal static class EcsPrimitiveTests
                 new EntityCapacity(entityCapacity),
                 maximumArchetypes: 3,
                 static capacity => CreateArena<TArena>(capacity),
-                maximumQueryPlans: 4);
+                maximumQueryPlans: 5);
             ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
                 .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
             ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
@@ -8543,6 +8910,9 @@ internal static class EcsPrimitiveTests
                 UltraSim.ECS.Tests.LayoutByte,
                 UltraSim.ECS.Tests.LayoutInt,
                 UltraSim.ECS.Tests.LayoutEnableLong>(wideId, byteId, intId, enableId, filter);
+            ExactWideChangedByInt = World.PrepareChangedRowsQuery<UltraSim.ECS.Tests.LayoutWide>(
+                wideId,
+                intId);
             World.Seal();
         }
 
@@ -8582,6 +8952,9 @@ internal static class EcsPrimitiveTests
             UltraSim.ECS.Tests.LayoutByte,
             UltraSim.ECS.Tests.LayoutInt,
             UltraSim.ECS.Tests.LayoutEnableLong> FilteredBalancedQuery { get; }
+        internal ArchetypeChangedReadQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide> ExactWideChangedByInt { get; }
 
         public void Dispose() => World.Dispose();
 

@@ -226,13 +226,56 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return PrepareChangedReadQuery<TRead>(
             generatedReadComponentId,
             changedComponentId,
-            filter);
+            filter,
+            tracksExactRows: false);
     }
 
     internal ArchetypeChangedReadQueryPlan<TArena, TRead> PrepareChangedReadQuery<TRead>(
         ComponentId generatedReadComponentId,
         ComponentId changedComponentId,
         in ArchetypeQueryFilter filter)
+        where TRead : unmanaged, IComponent<TRead>
+        => PrepareChangedReadQuery<TRead>(
+            generatedReadComponentId,
+            changedComponentId,
+            filter,
+            tracksExactRows: false);
+
+    internal ArchetypeChangedReadQueryPlan<TArena, TRead> PrepareChangedRowsQuery<TRead>(
+        ComponentId generatedReadComponentId,
+        ComponentId changedComponentId)
+        where TRead : unmanaged, IComponent<TRead>
+    {
+        ArchetypeQueryFilter filter = ArchetypeQueryFilter.Create(
+            Id,
+            _schema,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty);
+        return PrepareChangedReadQuery<TRead>(
+            generatedReadComponentId,
+            changedComponentId,
+            filter,
+            tracksExactRows: true);
+    }
+
+    internal ArchetypeChangedReadQueryPlan<TArena, TRead> PrepareChangedRowsQuery<TRead>(
+        ComponentId generatedReadComponentId,
+        ComponentId changedComponentId,
+        in ArchetypeQueryFilter filter)
+        where TRead : unmanaged, IComponent<TRead> =>
+        PrepareChangedReadQuery<TRead>(
+            generatedReadComponentId,
+            changedComponentId,
+            filter,
+            tracksExactRows: true);
+
+    private ArchetypeChangedReadQueryPlan<TArena, TRead> PrepareChangedReadQuery<TRead>(
+        ComponentId generatedReadComponentId,
+        ComponentId changedComponentId,
+        in ArchetypeQueryFilter filter,
+        bool tracksExactRows)
         where TRead : unmanaged, IComponent<TRead>
     {
         EnsureCreated();
@@ -263,6 +306,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             readMetadata.Flags,
             changedComponentId,
             changedMetadata.Flags,
+            tracksExactRows,
             filter);
         _queryPlans[_queryPlanCount++] = plan;
         return plan;
@@ -382,9 +426,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
         storage.Store.GetBoundComponentRef<T>(location.ChunkRow, binding.ColumnIndex) = initialValue;
-        storage.Store.StampChangeVersion(
+        storage.Store.StampSparseChangeVersion(
             location.ChunkRow.ChunkIndex,
             binding.ColumnIndex,
+            location.ChunkRow.Row,
+            rowCount: 1,
             AdvanceChangeVersion());
         return true;
     }
@@ -428,9 +474,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             return false;
 
         storage.Store.GetBoundComponentRef<T>(row, binding.ColumnIndex) = value;
-        storage.Store.StampChangeVersion(
+        storage.Store.StampSparseChangeVersion(
             row.ChunkIndex,
             binding.ColumnIndex,
+            row.Row,
+            rowCount: 1,
             AdvanceChangeVersion());
         return true;
     }
@@ -465,9 +513,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             return false;
 
         storage.Store.SetBoundEnabled(row, binding.ColumnIndex, enabled);
-        storage.Store.StampChangeVersion(
+        storage.Store.StampSparseChangeVersion(
             row.ChunkIndex,
             binding.ColumnIndex,
+            row.Row,
+            rowCount: 1,
             AdvanceChangeVersion());
         return true;
     }
@@ -571,6 +621,149 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         {
             ExitChunkVisit();
         }
+    }
+
+    /// <summary>
+    /// Visits only exact physical rows changed since the supplied cursor. A cheap
+    /// per-chunk version gate runs first; dense writes return the occupied chunk,
+    /// while scalar and filtered writes are refined through preallocated row stamps.
+    /// </summary>
+    internal int VisitChangedReadRows<TRead, TVisitor>(
+        ArchetypeChangedReadQueryPlan<TArena, TRead> plan,
+        ref ChangeCursor cursor,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+    {
+        EnsureSealed();
+        ValidateChangedReadQueryPlan(plan);
+        if (!plan.TracksExactRows)
+        {
+            throw new ArgumentException(
+                "Exact changed-row traversal requires a plan prepared with PrepareChangedRowsQuery.",
+                nameof(plan));
+        }
+        ValidateChangeCursor(cursor);
+        ChangeVersion observationVersion = _changeVersion;
+        ChangeVersion baseline = cursor.Version;
+        EnterChunkVisit();
+        try
+        {
+            int visitedRows = 0;
+            ReadOnlySpan<ArchetypeChangedReadQueryRoute<TArena>> routes = plan.Routes;
+            for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
+            {
+                ref readonly ArchetypeChangedReadQueryRoute<TArena> route = ref routes[routeIndex];
+                if (!route.HasSparseRowChangeVersions)
+                    ThrowWorldInvariant("An exact changed-row route has no sparse row state.");
+                ArchetypeChunkStore<TArena> store = route.Storage.Store;
+                for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
+                     chunkIndex >= 0;
+                     chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
+                {
+                    uint occupiedChunkIndex = (uint)chunkIndex;
+                    if (!store.HasBoundColumnChangedSince(
+                        occupiedChunkIndex,
+                        route.ChangedColumnIndex,
+                        baseline))
+                    {
+                        continue;
+                    }
+
+                    BoundComponentChunk<TRead> bound = store.GetBoundComponentChunk<TRead>(
+                        chunkIndex,
+                        route.ReadColumnIndex,
+                        plan.ReadIsEnableable);
+                    visitedRows += VisitExactChangedReadChunk(
+                        route,
+                        bound,
+                        baseline,
+                        ref visitor);
+                }
+            }
+
+            cursor = cursor.AdvanceTo(observationVersion);
+            return visitedRows;
+        }
+        finally
+        {
+            ExitChunkVisit();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private int VisitExactChangedReadChunk<TRead, TVisitor>(
+        in ArchetypeChangedReadQueryRoute<TArena> route,
+        in BoundComponentChunk<TRead> bound,
+        ChangeVersion baseline,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+    {
+        int rowCount = bound.EntityIndices.Length;
+        int pendingStart = -1;
+        int pendingEnd = -1;
+        int matchedRows = 0;
+        int wordCount = (rowCount + 63) >> 6;
+        for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)
+        {
+            int wordStart = wordIndex << 6;
+            int activeRows = Math.Min(64, rowCount - wordStart);
+            ulong mask = route.GetChangedRowMask(
+                bound.ChunkIndex,
+                wordIndex,
+                activeRows,
+                baseline);
+            if (route.HasRowFilters)
+                mask &= route.GetMatchingRowMask(bound.ChunkBytes, wordIndex);
+
+            while (mask != 0)
+            {
+                int startBit = BitOperations.TrailingZeroCount(mask);
+                ulong shifted = mask >> startBit;
+                int runLength = BitOperations.TrailingZeroCount(~shifted);
+                int runStart = wordStart + startBit;
+                int runEnd = runStart + runLength;
+                if (pendingStart < 0)
+                {
+                    pendingStart = runStart;
+                    pendingEnd = runEnd;
+                }
+                else if (pendingEnd == runStart)
+                {
+                    pendingEnd = runEnd;
+                }
+                else
+                {
+                    ExecuteChangedReadRange(
+                        route,
+                        bound,
+                        pendingStart,
+                        pendingEnd - pendingStart,
+                        ref visitor);
+                    matchedRows += pendingEnd - pendingStart;
+                    pendingStart = runStart;
+                    pendingEnd = runEnd;
+                }
+
+                ulong runMask = runLength == 64
+                    ? ulong.MaxValue
+                    : ((1UL << runLength) - 1UL) << startBit;
+                mask &= ~runMask;
+            }
+        }
+
+        if (pendingStart >= 0)
+        {
+            ExecuteChangedReadRange(
+                route,
+                bound,
+                pendingStart,
+                pendingEnd - pendingStart,
+                ref visitor);
+            matchedRows += pendingEnd - pendingStart;
+        }
+        return matchedRows;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]
@@ -746,7 +939,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                     bound.EnableWords);
                 if (!writeVersion.IsValid)
                     writeVersion = AdvanceChangeVersion();
-                store.StampChangeVersion(bound.ChunkIndex, binding.ColumnIndex, writeVersion);
+                store.StampDenseChangeVersion(bound.ChunkIndex, binding.ColumnIndex, writeVersion);
                 visitor.Execute(in chunk);
                 visitedRows += chunk.Count;
             }
@@ -807,7 +1000,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                     {
                         if (!writeVersion.IsValid)
                             writeVersion = AdvanceChangeVersion();
-                        store.StampChangeVersion(
+                        store.StampDenseChangeVersion(
                             bound.ChunkIndex,
                             route.WriteColumnIndex,
                             writeVersion);
@@ -848,6 +1041,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         int pendingEnd = -1;
         int matchedRows = 0;
         bool stamped = false;
+        bool tracksExactRows = route.Storage.Store.HasSparseRowChangeTracking(
+            route.WriteColumnIndex);
         int wordCount = (rowCount + 63) >> 6;
         for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)
         {
@@ -875,11 +1070,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                 }
                 else
                 {
-                    StampFilteredReadWriteChunk(
+                    StampFilteredReadWriteRange(
                         route,
                         bound.ChunkIndex,
+                        pendingStart,
+                        pendingEnd - pendingStart,
                         ref writeVersion,
-                        ref stamped);
+                        ref stamped,
+                        tracksExactRows);
                     ExecuteReadWriteRange(route, bound, pendingStart, pendingEnd - pendingStart, ref visitor);
                     matchedRows += pendingEnd - pendingStart;
                     pendingStart = runStart;
@@ -895,11 +1093,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         if (pendingStart >= 0)
         {
-            StampFilteredReadWriteChunk(
+            StampFilteredReadWriteRange(
                 route,
                 bound.ChunkIndex,
+                pendingStart,
+                pendingEnd - pendingStart,
                 ref writeVersion,
-                ref stamped);
+                ref stamped,
+                tracksExactRows);
             ExecuteReadWriteRange(route, bound, pendingStart, pendingEnd - pendingStart, ref visitor);
             matchedRows += pendingEnd - pendingStart;
         }
@@ -907,20 +1108,26 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void StampFilteredReadWriteChunk(
+    private void StampFilteredReadWriteRange(
         in ArchetypeReadWriteQueryRoute<TArena> route,
         uint chunkIndex,
+        int rowOffset,
+        int rowCount,
         ref ChangeVersion writeVersion,
-        ref bool stamped)
+        ref bool stamped,
+        bool tracksExactRows)
     {
-        if (stamped)
+        if (stamped && !tracksExactRows)
             return;
         if (!writeVersion.IsValid)
             writeVersion = AdvanceChangeVersion();
-        route.Storage.Store.StampChangeVersion(
+        route.Storage.Store.StampFilteredChangeVersion(
             chunkIndex,
             route.WriteColumnIndex,
-            writeVersion);
+            rowOffset,
+            rowCount,
+            writeVersion,
+            stampChunk: !stamped);
         stamped = true;
     }
 

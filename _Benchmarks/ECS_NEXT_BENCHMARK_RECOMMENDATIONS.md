@@ -174,21 +174,41 @@ scalar scan performs world/binding validation for every chunk and uses one
 processes its trusted route reduced unchanged checks from `44.6-45.0` to
 `17.8-19.6 ns/chunk`, while all-changed 64-byte reads measured
 `3.07-3.17 ns/row`. This is still only a foothold: it has one read column, one
-tracked column, one cursor per invocation, and no sparse-row precision or
-asynchronous publish lease.
+tracked column, one cursor per invocation, and no asynchronous publish lease.
+The v19 exact-row foothold opts only its tracked scalar columns into row history.
+It preserves the unchanged dense gate at `17.60-17.65 ns/chunk` and finds plus
+delivers one row across 552 chunks in `10.06-10.23 us`, while reserving
+`1,495,040` additional metadata bytes in the two-archetype fixture. These focused
+runs allocate zero managed bytes and collect nothing.
 
 The full change-version matrix should vary independently:
 
 - working-set sizes from the common 1K-through-10M cache ladder;
+- row capacities of 8, 16, 32, 64, 128, 256, and 512 while holding total rows
+  constant, separating chunk occupancy from total useful work;
 - one large archetype versus many small archetypes with the same row count;
 - one, two, four, and wide writable-column sets;
-- 0%, 1%, 10%, 35%, and 100% changed chunks;
+- 0%, 1%, 10%, 35%, 50%, and 100% changed chunks and changed rows;
 - contiguous versus scattered changed chunks;
+- one watched component versus several watched components;
+- explicit any-watched-changed versus all-watched-changed semantics;
+- dense gates prebound across many archetypes, including sparse matching routes;
 - one, two, and many independent consumer cursors;
+- repeated unchanged polling by one, several, and many systems;
 - scan only, scan plus query execution, and scan plus serialization;
 - version metadata layouts, including the current column-major baseline;
 - wrap-boundary correctness outside timing and ordinary steady versions inside
   timing.
+
+The fixed-total-row occupancy sweep is especially important. Small chunks reduce
+false-positive rows but increase chunk/version/route overhead; large chunks do
+the reverse. Crossing occupancy with 0%, 1%, 10%, 50%, and 100% change density
+should expose the practical break-even surface for dense delivery, exact-row
+refinement, and an unconditional scan. It also reveals whether many partially
+populated archetypes can erase the version-gate gain. Record chunks scanned,
+changed chunks, version words inspected, changed-mask words inspected, ranges
+dispatched, and rows returned so the result can explain rather than merely rank
+the paths.
 
 Report nanoseconds per scanned chunk, nanoseconds per returned row, false-positive
 rows caused by dense chunk granularity, version-metadata bytes, total retained

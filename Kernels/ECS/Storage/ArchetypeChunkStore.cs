@@ -17,6 +17,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     private readonly ComponentColumnLayout[] _columns;
     private readonly ChunkRecord[] _chunks;
     private readonly ulong[] _changeVersions;
+    private readonly SparseRowChangeVersions?[] _sparseRowChangeVersions;
     private int _fullHead = NoChunk;
     private int _partialHead = NoChunk;
     private int _emptyHead = NoChunk;
@@ -53,6 +54,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         _arena = arena;
         _chunks = new ChunkRecord[arena.Capacity.MaximumChunks];
         _changeVersions = new ulong[checked(_columns.Length * _chunks.Length)];
+        _sparseRowChangeVersions = new SparseRowChangeVersions[_columns.Length];
         for (int i = 0; i < _chunks.Length; i++)
         {
             _chunks[i].Next = NoChunk;
@@ -74,6 +76,17 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
 
     internal long ChangeVersionMetadataBytes => checked((long)_changeVersions.Length * sizeof(ulong));
 
+    internal long SparseRowChangeVersionMetadataBytes
+    {
+        get
+        {
+            long bytes = 0;
+            for (int columnIndex = 0; columnIndex < _sparseRowChangeVersions.Length; columnIndex++)
+                bytes = checked(bytes + (_sparseRowChangeVersions[columnIndex]?.MetadataBytes ?? 0));
+            return bytes;
+        }
+    }
+
     internal bool TryAdd(uint entityIndex, out ChunkRow location)
     {
         ThrowIfDisposed();
@@ -87,7 +100,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         ref ChunkRecord chunk = ref _chunks[chunkIndex];
         int row = chunk.RowCount;
         Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
-        InitializeRows(bytes, row, 1);
+        InitializeRows(chunkIndex, bytes, row, 1);
         GetEntityIndices(bytes)[row] = entityIndex;
         chunk.RowCount = row + 1;
         _entityCount++;
@@ -115,7 +128,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             int startRow = chunk.RowCount;
             int count = Math.Min(_layout.RowCapacity - startRow, entityIndices.Length - written);
             Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
-            InitializeRows(bytes, startRow, count);
+            InitializeRows(chunkIndex, bytes, startRow, count);
             entityIndices.Slice(written, count).CopyTo(GetEntityIndices(bytes).Slice(startRow, count));
             for (int i = 0; i < count; i++)
                 locations[written + i] = new ChunkRow((uint)chunkIndex, startRow + i);
@@ -162,9 +175,18 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         uint donorEntityIndex = GetEntityIndices(donorBytes)[donorRow];
         bool moved = donorChunkIndex != targetChunkIndex || donorRow != targetRow;
         if (moved)
-            CopyRow(donorBytes, donorRow, targetBytes, targetRow);
+        {
+            CopyRow(
+                donorChunkIndex,
+                donorBytes,
+                donorRow,
+                targetChunkIndex,
+                targetBytes,
+                targetRow);
+        }
 
         ClearRow(donorBytes, donorRow);
+        ClearSparseRowChangeVersions((uint)donorChunkIndex, donorRow);
         int previousDonorCount = donor.RowCount;
         donor.RowCount = previousDonorCount - 1;
         _entityCount--;
@@ -515,8 +537,120 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         return new ChangeVersion(_changeVersions[index]).IsNewerThan(baseline);
     }
 
+    /// <summary>
+    /// Enables bounded exact-row history for a seal-validated component column.
+    /// Repeated exact plans share the same preallocated state.
+    /// </summary>
+    internal SparseRowChangeVersions EnableSparseRowChangeTracking(int columnIndex)
+    {
+        ThrowIfDisposed();
+        if (unchecked((uint)columnIndex) >= unchecked((uint)_columns.Length))
+            throw new ArgumentOutOfRangeException(nameof(columnIndex));
+        return _sparseRowChangeVersions[columnIndex] ??=
+            new SparseRowChangeVersions(_chunks.Length, _layout.RowCapacity);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasSparseRowChangeTracking(int boundColumnIndex)
+    {
+        System.Diagnostics.Debug.Assert(
+            unchecked((uint)boundColumnIndex) < unchecked((uint)_columns.Length));
+        return _sparseRowChangeVersions[boundColumnIndex] is not null;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void StampSparseChangeVersion(
+        uint chunkIndex,
+        int columnIndex,
+        int rowOffset,
+        int rowCount,
+        ChangeVersion version)
+    {
+        ThrowIfDisposed();
+        if (!version.IsValid)
+            throw new ArgumentException("A valid nonzero change version is required.", nameof(version));
+        int index = GetChangeVersionIndex(chunkIndex, columnIndex);
+        ref readonly ChunkRecord chunk = ref _chunks[chunkIndex];
+        if (chunk.State is not (ChunkListState.Partial or ChunkListState.Full))
+            throw new ArgumentException("Only occupied chunks can be marked changed.", nameof(chunkIndex));
+        if (rowOffset < 0 || rowCount <= 0 || rowOffset > chunk.RowCount - rowCount)
+            throw new ArgumentOutOfRangeException(nameof(rowOffset));
+
+        _changeVersions[index] = version.Value;
+        _sparseRowChangeVersions[columnIndex]?.StampRange(
+            chunkIndex,
+            rowOffset,
+            rowCount,
+            version);
+    }
+
+    /// <summary>
+    /// Publishes one filtered writable range. Columns without an exact-row
+    /// consumer keep the legacy once-per-chunk stamp; opted-in columns retain
+    /// every exposed range under the shared invocation version.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void StampFilteredChangeVersion(
+        uint chunkIndex,
+        int columnIndex,
+        int rowOffset,
+        int rowCount,
+        ChangeVersion version,
+        bool stampChunk)
+    {
+        SparseRowChangeVersions? sparse = _sparseRowChangeVersions[columnIndex];
+        if (sparse is null)
+        {
+            if (stampChunk)
+                StampChunkChangeVersion(chunkIndex, columnIndex, version);
+            return;
+        }
+
+        StampSparseChangeVersion(
+            chunkIndex,
+            columnIndex,
+            rowOffset,
+            rowCount,
+            version);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void StampDenseChangeVersion(
+        uint chunkIndex,
+        int columnIndex,
+        ChangeVersion version)
+    {
+        StampChunkChangeVersion(chunkIndex, columnIndex, version);
+        _sparseRowChangeVersions[columnIndex]?.StampDense(chunkIndex, version);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ulong GetBoundChangedRowMask(
+        SparseRowChangeVersions sparseVersions,
+        uint occupiedChunkIndex,
+        int wordIndex,
+        int activeRows,
+        ChangeVersion baseline)
+    {
+        System.Diagnostics.Debug.Assert(sparseVersions is not null);
+        System.Diagnostics.Debug.Assert(occupiedChunkIndex < unchecked((uint)_chunks.Length));
+        System.Diagnostics.Debug.Assert(
+            _chunks[occupiedChunkIndex].State is ChunkListState.Partial or ChunkListState.Full);
+        return sparseVersions.GetChangedRowMask(
+            occupiedChunkIndex,
+            wordIndex,
+            activeRows,
+            baseline);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void StampChangeVersion(
+        uint chunkIndex,
+        int columnIndex,
+        ChangeVersion version) =>
+        StampDenseChangeVersion(chunkIndex, columnIndex, version);
+
+    private void StampChunkChangeVersion(
         uint chunkIndex,
         int columnIndex,
         ChangeVersion version)
@@ -541,6 +675,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         _emptyChunkCount,
         Unsafe.SizeOf<ChunkRecord>(),
         ChangeVersionMetadataBytes,
+        SparseRowChangeVersionMetadataBytes,
         _disposed);
 
     internal void ValidateInvariants()
@@ -657,7 +792,10 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     private void ClearChangeVersions(int chunkIndex)
     {
         for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
+        {
             _changeVersions[(columnIndex * _chunks.Length) + chunkIndex] = 0;
+            _sparseRowChangeVersions[columnIndex]?.ClearChunk((uint)chunkIndex);
+        }
     }
 
     private void ValidateNoChangeVersions(int chunkIndex)
@@ -666,10 +804,15 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         {
             if (_changeVersions[(columnIndex * _chunks.Length) + chunkIndex] != 0)
                 ThrowInvariant("An empty or unallocated chunk retains component change versions.");
+            if (_sparseRowChangeVersions[columnIndex] is { } sparse &&
+                !sparse.IsChunkClear((uint)chunkIndex))
+            {
+                ThrowInvariant("An empty or unallocated chunk retains sparse row change versions.");
+            }
         }
     }
 
-    private void InitializeRows(Span<byte> chunk, int startRow, int count)
+    private void InitializeRows(int chunkIndex, Span<byte> chunk, int startRow, int count)
     {
         for (int i = 0; i < _columns.Length; i++)
         {
@@ -682,10 +825,19 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             }
             if (column.HasEnableBits)
                 EnableBitOperations.SetRange(chunk, column, startRow, count, enabled: true);
+            SparseRowChangeVersions? sparse = _sparseRowChangeVersions[i];
+            if (sparse is not null)
+                sparse.ClearRange((uint)chunkIndex, startRow, count);
         }
     }
 
-    private void CopyRow(Span<byte> source, int sourceRow, Span<byte> destination, int destinationRow)
+    private void CopyRow(
+        int sourceChunkIndex,
+        Span<byte> source,
+        int sourceRow,
+        int destinationChunkIndex,
+        Span<byte> destination,
+        int destinationRow)
     {
         GetEntityIndices(source)[sourceRow..(sourceRow + 1)]
             .CopyTo(GetEntityIndices(destination)[destinationRow..(destinationRow + 1)]);
@@ -704,7 +856,29 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 bool enabled = EnableBitOperations.Get(source, column, sourceRow);
                 EnableBitOperations.Set(destination, column, destinationRow, enabled);
             }
+            SparseRowChangeVersions? sparse = _sparseRowChangeVersions[i];
+            if (sparse is not null)
+            {
+                sparse.MoveRow(
+                    (uint)sourceChunkIndex,
+                    sourceRow,
+                    (uint)destinationChunkIndex,
+                    destinationRow);
+                int destinationVersionIndex =
+                    (i * _chunks.Length) + destinationChunkIndex;
+                ChangeVersion current = new(_changeVersions[destinationVersionIndex]);
+                ChangeVersion sourceVersion = new(
+                    _changeVersions[(i * _chunks.Length) + sourceChunkIndex]);
+                if (sourceVersion.IsNewerThan(current))
+                    _changeVersions[destinationVersionIndex] = sourceVersion.Value;
+            }
         }
+    }
+
+    private void ClearSparseRowChangeVersions(uint chunkIndex, int row)
+    {
+        for (int columnIndex = 0; columnIndex < _sparseRowChangeVersions.Length; columnIndex++)
+            _sparseRowChangeVersions[columnIndex]?.ClearRow(chunkIndex, row);
     }
 
     private void ClearRow(Span<byte> chunk, int row)
