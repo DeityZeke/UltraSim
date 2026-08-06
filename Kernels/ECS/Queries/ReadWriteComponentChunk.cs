@@ -94,7 +94,7 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ValidateRow(int row)
     {
-        if ((uint)row >= (uint)Count)
+        if (unchecked((uint)row) >= unchecked((uint)Count))
             throw new ArgumentOutOfRangeException(nameof(row));
     }
 }

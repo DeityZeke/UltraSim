@@ -84,6 +84,8 @@ internal static class PrimitiveBenchmarks
         using var pinnedReadWriteQuery = new EcsWorldReadWriteQueryFixture<PinnedChunkArena>(100_000);
         using var nativeGeneratedQuery = new EcsWorldGeneratedQueryFixture<NativeChunkArena>(100_000);
         using var pinnedGeneratedQuery = new EcsWorldGeneratedQueryFixture<PinnedChunkArena>(100_000);
+        using var nativeGeneratedWriteQuery = new EcsWorldGeneratedWriteQueryFixture<NativeChunkArena>(100_000);
+        using var pinnedGeneratedWriteQuery = new EcsWorldGeneratedWriteQueryFixture<PinnedChunkArena>(100_000);
         using var nativeFilteredReadWriteQuery = new EcsWorldFilteredReadWriteQueryFixture<NativeChunkArena>(100_000);
         using var pinnedFilteredReadWriteQuery = new EcsWorldFilteredReadWriteQueryFixture<PinnedChunkArena>(100_000);
 
@@ -141,6 +143,8 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_ReadPositionWriteVelocity_2Archetypes_100000", "WorldQueryPlan", 100_000, pinnedReadWriteQuery.Execute),
             new("NativeWorld_Generated2R1W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, nativeGeneratedQuery.Execute),
             new("PinnedWorld_Generated2R1W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedQuery.Execute),
+            new("NativeWorld_Generated1R2W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, nativeGeneratedWriteQuery.Execute),
+            new("PinnedWorld_Generated1R2W_PositionWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedWriteQuery.Execute),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareDense),
             new("PinnedWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, pinnedFilteredReadWriteQuery.Execute, pinnedFilteredReadWriteQuery.PrepareDense),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Alternating_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareAlternating),
@@ -161,7 +165,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-generated-query-2r1w-v13",
+            SemanticProfile = "ecs-next-phase1-generated-query-family-matrix-v14",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1632,6 +1636,144 @@ internal static class PrimitiveBenchmarks
                     checksum = unchecked(
                         checksum + wideSum + BitConverter.SingleToInt32Bits(position.X));
                     checksum += enabled ? 1 : 0;
+                }
+                Checksum = checksum;
+            }
+        }
+    }
+
+    private sealed class EcsWorldGeneratedWriteQueryFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeReadWriteWriteQueryPlan<
+            TArena,
+            BenchmarkPosition,
+            BenchmarkWide,
+            BenchmarkVelocity> _plan;
+        private readonly int _population;
+
+        internal EcsWorldGeneratedWriteQueryFixture(int population)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(population),
+                maximumArchetypes: 2,
+                static capacity => CreateArena(capacity),
+                maximumQueryPlans: 1);
+            ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
+            ArchetypeId first = _world.RegisterArchetype(
+                CreateSortedSignature(position, velocity, wide),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 512);
+            ArchetypeId second = _world.RegisterArchetype(
+                CreateSortedSignature(disabled, position, velocity, wide),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 512);
+            ArchetypeComponentBinding<BenchmarkPosition> firstPosition =
+                _world.BindComponent<BenchmarkPosition>(first, position);
+            ArchetypeComponentBinding<BenchmarkPosition> secondPosition =
+                _world.BindComponent<BenchmarkPosition>(second, position);
+            _plan = _world.PrepareReadWriteWriteQuery<
+                BenchmarkPosition,
+                BenchmarkWide,
+                BenchmarkVelocity>(position, wide, velocity);
+            _world.Seal();
+
+            for (int i = 0; i < population; i++)
+            {
+                bool useFirst = (i & 1) == 0;
+                ArchetypeId archetype = useFirst ? first : second;
+                ArchetypeComponentBinding<BenchmarkPosition> binding = useFirst
+                    ? firstPosition
+                    : secondPosition;
+                if (!_world.TryCreateInitialized(
+                    archetype,
+                    binding,
+                    new BenchmarkPosition { X = i, Y = -i },
+                    out _))
+                {
+                    throw new InvalidOperationException(
+                        "Generated-write-query benchmark fixture exhausted unexpectedly.");
+                }
+            }
+
+            if (_plan.MatchedArchetypeCount != 2)
+                throw new InvalidOperationException("Generated-write-query benchmark did not compile both archetypes.");
+            _population = population;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            var visitor = new PositionWideVelocityWriteVisitor();
+            int visited = _world.VisitReadWriteWriteChunks(_plan, ref visitor);
+            if (visited != _population)
+                throw new InvalidOperationException("Generated-write-query benchmark lost rows.");
+            return new ScenarioMeasurement(visited, visitor.Checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static TArena CreateArena(ChunkArenaCapacity capacity)
+        {
+            object arena = typeof(TArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported generated-write-query benchmark arena {typeof(TArena).Name}.");
+            return (TArena)arena;
+        }
+
+        private static ComponentId[] CreateSortedSignature(params ComponentId[] componentIds)
+        {
+            Array.Sort(componentIds, static (left, right) => left.Value.CompareTo(right.Value));
+            return componentIds;
+        }
+
+        private struct PositionWideVelocityWriteVisitor :
+            IComponentChunkReadWriteWriteVisitor<BenchmarkPosition, BenchmarkWide, BenchmarkVelocity>
+        {
+            internal long Checksum;
+
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in ReadWriteWriteComponentChunk<
+                BenchmarkPosition,
+                BenchmarkWide,
+                BenchmarkVelocity> chunk)
+            {
+                long checksum = Checksum;
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    ref readonly BenchmarkPosition position = ref chunk.ReadComponents[row];
+                    long seed = unchecked(
+                        BitConverter.SingleToInt32Bits(position.X) +
+                        ((long)BitConverter.SingleToInt32Bits(position.Y) << 1) +
+                        chunk.EntityIndices[row]);
+                    chunk.WriteComponents1[row] = new BenchmarkWide
+                    {
+                        A = seed + 1,
+                        B = seed + 2,
+                        C = seed + 3,
+                        D = seed + 4,
+                        E = seed + 5,
+                        F = seed + 6,
+                        G = seed + 7,
+                        H = seed + 8,
+                    };
+                    chunk.WriteComponents2[row] = new BenchmarkVelocity
+                    {
+                        X = position.X * 2f,
+                        Y = position.Y * 2f,
+                    };
+                    bool enabled = (chunk.EntityIndices[row] & 1) == 0;
+                    chunk.SetWrite2Enabled(row, enabled);
+                    checksum = unchecked(checksum + seed + (enabled ? 1 : 0));
                 }
                 Checksum = checksum;
             }

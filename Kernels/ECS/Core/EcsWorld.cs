@@ -799,7 +799,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         ArgumentNullException.ThrowIfNull(plan);
         if (plan.WorldId != Id ||
-            (uint)plan.PlanIndex >= (uint)_queryPlanCount ||
+            unchecked((uint)plan.PlanIndex) >= unchecked((uint)_queryPlanCount) ||
             !ReferenceEquals(_queryPlans[plan.PlanIndex], plan))
         {
             throw new ArgumentException("The query plan belongs to a different world.", nameof(plan));

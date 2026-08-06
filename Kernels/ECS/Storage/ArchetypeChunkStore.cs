@@ -348,7 +348,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     internal int GetNextOccupiedChunkIndex(int chunkIndex)
     {
         ThrowIfDisposed();
-        if ((uint)chunkIndex >= (uint)_chunks.Length)
+        if (unchecked((uint)chunkIndex) >= unchecked((uint)_chunks.Length))
             throw new ArgumentOutOfRangeException(nameof(chunkIndex));
 
         ChunkListState state = _chunks[chunkIndex].State;
@@ -374,7 +374,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         where T : unmanaged
     {
         ThrowIfDisposed();
-        if ((uint)chunkIndex >= (uint)_chunks.Length)
+        if (unchecked((uint)chunkIndex) >= unchecked((uint)_chunks.Length))
             throw new ArgumentOutOfRangeException(nameof(chunkIndex));
 
         ref readonly ChunkRecord chunk = ref _chunks[chunkIndex];
@@ -415,7 +415,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         where TWrite : unmanaged
     {
         ThrowIfDisposed();
-        if ((uint)chunkIndex >= (uint)_chunks.Length)
+        if (unchecked((uint)chunkIndex) >= unchecked((uint)_chunks.Length))
             throw new ArgumentOutOfRangeException(nameof(chunkIndex));
 
         ref readonly ChunkRecord chunk = ref _chunks[chunkIndex];
@@ -652,7 +652,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         row = location.Row;
         ChunkListState state = _chunks[chunkIndex].State;
         return (state == ChunkListState.Partial || state == ChunkListState.Full) &&
-            (uint)row < (uint)_chunks[chunkIndex].RowCount;
+            unchecked((uint)row) < unchecked((uint)_chunks[chunkIndex].RowCount);
     }
 
     private void ResolveOrThrow(ChunkRow location, out int chunkIndex, out int row)
@@ -664,14 +664,14 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
 
     private ref readonly ComponentColumnLayout GetDataColumn(int columnIndex)
     {
-        if ((uint)columnIndex >= (uint)_columns.Length || !_columns[columnIndex].HasData)
+        if (unchecked((uint)columnIndex) >= unchecked((uint)_columns.Length) || !_columns[columnIndex].HasData)
             throw new ArgumentOutOfRangeException(nameof(columnIndex), "The index does not identify a data column.");
         return ref _columns[columnIndex];
     }
 
     private ref readonly ComponentColumnLayout GetEnableColumn(int columnIndex)
     {
-        if ((uint)columnIndex >= (uint)_columns.Length || !_columns[columnIndex].HasEnableBits)
+        if (unchecked((uint)columnIndex) >= unchecked((uint)_columns.Length) || !_columns[columnIndex].HasEnableBits)
             throw new ArgumentOutOfRangeException(nameof(columnIndex), "The index does not identify an enableable column.");
         return ref _columns[columnIndex];
     }
@@ -772,7 +772,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         int index = head;
         while (index != NoChunk)
         {
-            if ((uint)index >= (uint)_chunks.Length || count >= _chunks.Length)
+            if (unchecked((uint)index) >= unchecked((uint)_chunks.Length) || count >= _chunks.Length)
                 ThrowInvariant("A chunk list is cyclic or out of range.");
             ref readonly ChunkRecord chunk = ref _chunks[index];
             if (chunk.State != state || chunk.Previous != previous)

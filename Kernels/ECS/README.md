@@ -89,13 +89,22 @@ allocation:
   `RowOffset` preserving enable access. Visitors cannot write unmatched rows, the
   unfiltered route remains branch-minimal, and warmed dense, fragmented, native,
   and pinned tests allocate zero managed bytes.
-- The kernel now opts into its first source-generated access family: two typed
-  read columns plus one typed write column. The generated descriptor, seal-compiled
+- The kernel now opts into a data-driven source-generated access-family catalog.
+  Its first two specifications cover two typed reads plus one typed write and one
+  typed read plus two typed writes. The generated descriptors, seal-compiled
   physical routes, trusted store binding, stack-only view, filter range dispatch,
   visitor contract, and world entry points all encode access without per-row
   lookup, delegate dispatch, boxing, or entity-handle materialization. Consumer
   schema assemblies do not receive duplicate runtime families; generation is
-  gated by an assembly marker and covered by deterministic/opt-in generator tests.
+  gated by an assembly marker. One emitter derives naming, generic constraints,
+  distinct-access checks, span mutability, enable APIs, plan compilation, and hot
+  execution for both access shapes.
+- Unsigned one-branch range checks now use explicit `unchecked` normalization.
+  This preserves negative-index rejection as `ArgumentOutOfRangeException` under
+  the kernel's project-wide checked arithmetic instead of paying for or surfacing
+  a checked signed-to-unsigned overflow. Entity/chunk slot snapshots, storage
+  indices, handwritten views, generated views, routes, and plan ownership share
+  regression coverage for that boundary.
 - Runtime handles are not durable IDs and will not be serialized. Persistence
   restore will construct a temporary old-index-to-new-entity remap during a
   bounded transactional load.
@@ -150,7 +159,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 114 passing tests, including
+The current runtime and primitive suite has 122 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -168,7 +177,7 @@ lookups. Migration tests cover retained data and enable state, added-component
 defaults, removed components, source donor relocation, stale-plan and bounded
 destination rejection, 30,000 randomized bidirectional moves, native/pinned byte
 equivalence, and 100,000 warmed allocation-free migration cycles. The generator
-suite has 15 passing tests. Composed-world tests cover lifecycle ordering,
+suite has 17 passing tests. Composed-world tests cover lifecycle ordering,
 owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
 generation reuse, donor repair, cross-world plan and entity isolation, 30,000
 randomized create/transition/destroy operations, native/pinned parity, and 100,000
@@ -190,17 +199,20 @@ rejection, required/excluded seal matching, enableable data/tag row predicates,
 noncontiguous slices crossing enable words and chunks, randomized reference parity,
 native/pinned equivalence, and warmed allocation-free filtered visits.
 Generated-family tests add deterministic and explicitly opt-in source emission;
-seal-complete two-read/one-write routing; alias/tag/type/access-exclusion/capacity/
-foreign-plan rejection; full and filtered multi-archetype traversal; physical row
-offsets; barrier and exception cleanup; randomized state parity; native/pinned
-equivalence; and five million warmed allocation-free row visits.
+read-only versus writable span contracts; seal-complete two-read/one-write and
+one-read/two-write routing; alias/tag/type/access-exclusion/capacity/foreign-plan
+rejection; full and filtered multi-archetype traversal; physical row offsets;
+non-enableable-write and row-boundary rejection; barrier and exception cleanup;
+randomized state parity; native/pinned equivalence; and ten million warmed
+allocation-free row visits across both shapes.
 
 This is now a minimal internal component/archetype world, not yet the public
-scheduler/host facade. The current generators emit the core manifest and one
-kernel-owned two-read/one-write family. The next natural query work is to turn
-that proven family into a systematic generated arity matrix while retaining the
-same normalized filter/route substrate and stack-only execution window. Generated
-per-chunk tracked-write versions must follow before writable views become public.
+scheduler/host facade. The current generators emit the core manifest and a
+systematic catalog currently containing 2R1W and 1R2W families. The next natural
+query work is to add generated read-only shapes and broaden the production arity
+matrix while retaining the same normalized filter/route substrate and stack-only
+execution window. Generated per-chunk tracked-write versions must follow before
+writable views become public.
 Optional/change filters, bounded deferred structural commands, and field/
 serializer/prefab descriptors remain later work.
 

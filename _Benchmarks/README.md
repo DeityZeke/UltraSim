@@ -191,6 +191,22 @@ scenarios in the full run reported zero managed bytes and zero Gen0/1/2
 collections. The new results remain temporary directional evidence; the tracked
 accepted artifact was not replaced.
 
+The generated-family write-axis extension adds a mirrored pair with one eight-byte
+position read, one 64-byte wide write, and one eight-byte velocity write. Its
+effective component width is also 80 bytes, but 72 bytes are written instead of
+read. The focused native/pinned results were both `5.307-5.308 ns/row`; the
+following full-suite results were `5.094` and `5.078 ns/row`, or roughly
+`15.7 GB/s` before entity-index/enable-word traffic. In the final full pass after
+the checked-boundary correction, 1R2W measured `5.048` and `5.021 ns/row`, or
+roughly `15.8-15.9 GB/s`. In that same process the regenerated 2R1W family measured
+`4.381-4.434 ns/row`, remaining consistent with
+its pre-refactor focused guard. This is directional evidence that the common
+data-driven emitter did not regress 2R1W and that the write-heavy kernel costs
+roughly 13-14 percent more on this machine; hardware counters and repeated isolated
+processes must determine how much is store pressure versus generated loop shape.
+All 58 scenarios reported zero managed allocation and zero Gen0/1/2 collections.
+The tracked accepted artifact remains unchanged.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

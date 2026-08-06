@@ -12,9 +12,9 @@ internal readonly struct ArchetypeReadWriteQueryRoute<TArena>
         ReadOnlySpan<ComponentId> disabledComponents)
     {
         ArgumentNullException.ThrowIfNull(storage);
-        if ((uint)readColumnIndex >= ushort.MaxValue)
+        if (unchecked((uint)readColumnIndex) >= ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(readColumnIndex));
-        if ((uint)writeColumnIndex >= ushort.MaxValue)
+        if (unchecked((uint)writeColumnIndex) >= ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(writeColumnIndex));
         if (readColumnIndex == writeColumnIndex)
             throw new ArgumentException("Read and write query columns must not alias.");

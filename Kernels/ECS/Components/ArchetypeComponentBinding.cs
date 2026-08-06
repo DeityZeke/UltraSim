@@ -34,7 +34,7 @@ internal readonly struct ArchetypeComponentBinding<T> : IEquatable<ArchetypeComp
             throw new ArgumentException("A valid archetype ID is required.", nameof(archetypeId));
         if (!componentId.IsValid)
             throw new ArgumentException("A valid component ID is required.", nameof(componentId));
-        if ((uint)columnIndex >= ushort.MaxValue)
+        if (unchecked((uint)columnIndex) >= ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(columnIndex));
 
         _worldId = worldId.Value;

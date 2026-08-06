@@ -39,13 +39,15 @@ internal readonly struct ArchetypeQueryRowFilter
         for (int index = 0; index < _enabledBitOffsetsBytes.Length; index++)
         {
             int offset = _enabledBitOffsetsBytes[index] + wordOffset;
-            System.Diagnostics.Debug.Assert((uint)offset <= (uint)(chunkBytes.Length - sizeof(ulong)));
+            System.Diagnostics.Debug.Assert(
+                unchecked((uint)offset) <= unchecked((uint)(chunkBytes.Length - sizeof(ulong))));
             mask &= Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref chunkStart, offset));
         }
         for (int index = 0; index < _disabledBitOffsetsBytes.Length; index++)
         {
             int offset = _disabledBitOffsetsBytes[index] + wordOffset;
-            System.Diagnostics.Debug.Assert((uint)offset <= (uint)(chunkBytes.Length - sizeof(ulong)));
+            System.Diagnostics.Debug.Assert(
+                unchecked((uint)offset) <= unchecked((uint)(chunkBytes.Length - sizeof(ulong))));
             mask &= ~Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref chunkStart, offset));
         }
         return mask;

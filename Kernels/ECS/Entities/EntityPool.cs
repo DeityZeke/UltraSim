@@ -241,7 +241,7 @@ internal sealed class EntityPool
 
     internal SlotSnapshot GetSlotSnapshot(int index)
     {
-        if ((uint)index >= (uint)_nextUnusedIndex)
+        if (unchecked((uint)index) >= unchecked((uint)_nextUnusedIndex))
             throw new ArgumentOutOfRangeException(nameof(index));
 
         return new SlotSnapshot(

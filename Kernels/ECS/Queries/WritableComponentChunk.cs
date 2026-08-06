@@ -47,7 +47,7 @@ internal readonly ref struct WritableComponentChunk<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool IsEnabled(int row)
     {
-        if ((uint)row >= (uint)Count)
+        if (unchecked((uint)row) >= unchecked((uint)Count))
             throw new ArgumentOutOfRangeException(nameof(row));
         return _enableWords.IsEmpty ||
             (_enableWords[row >> 6] & (1UL << (row & 63))) != 0;
@@ -58,7 +58,7 @@ internal readonly ref struct WritableComponentChunk<T>
     {
         if (_enableWords.IsEmpty)
             throw new InvalidOperationException("The component is not enableable.");
-        if ((uint)row >= (uint)Count)
+        if (unchecked((uint)row) >= unchecked((uint)Count))
             throw new ArgumentOutOfRangeException(nameof(row));
 
         ref ulong word = ref _enableWords[row >> 6];

@@ -107,7 +107,7 @@ internal sealed class ChunkSlotPool
 
     internal SlotSnapshot GetSlotSnapshot(int index)
     {
-        if ((uint)index >= (uint)_nextUnusedIndex)
+        if (unchecked((uint)index) >= unchecked((uint)_nextUnusedIndex))
             throw new ArgumentOutOfRangeException(nameof(index));
         return new SlotSnapshot(_generations[index], _states[index] == SlotAlive, _states[index] == SlotRetired);
     }

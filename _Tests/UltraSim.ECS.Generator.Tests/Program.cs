@@ -63,6 +63,8 @@ internal static class GeneratorTests
         Run(nameof(ComponentLimit_ReservesInvalidIdAndReportsECSGEN007), ComponentLimit_ReservesInvalidIdAndReportsECSGEN007);
         Run(nameof(DuplicateComponentType_ReportsECSGEN008), DuplicateComponentType_ReportsECSGEN008);
         Run(nameof(QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily), QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily);
+        Run(nameof(QueryFamilyCatalog_EmitsOneReadTwoWriteFamily), QueryFamilyCatalog_EmitsOneReadTwoWriteFamily);
+        Run(nameof(QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans), QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
         Console.WriteLine($"All {_passed} ECS generator tests passed.");
@@ -129,6 +131,8 @@ internal static class GeneratorTests
         Generation second = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(first);
         AssertNoGeneratorErrors(second);
+        TestAssert.Equal(2, first.GeneratedSourceCount);
+        TestAssert.Equal(2, second.GeneratedSourceCount);
         TestAssert.Equal(first.GeneratedSource, second.GeneratedSource);
         TestAssert.True(first.GeneratedSource.Contains(
             "IComponentChunkReadReadWriteVisitor<TRead1, TRead2, TWrite>",
@@ -150,7 +154,54 @@ internal static class GeneratorTests
             "internal sealed class NoQueryFamilyMarker { }",
             new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(0, generation.GeneratedSourceCount);
         TestAssert.Equal(string.Empty, generation.GeneratedSource);
+    }
+
+    private static void QueryFamilyCatalog_EmitsOneReadTwoWriteFamily()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(2, generation.GeneratedSourceCount);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "IComponentChunkReadWriteWriteVisitor<TRead, TWrite1, TWrite2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "ArchetypeReadWriteWriteQueryPlan<TArena, TRead, TWrite1, TWrite2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "PrepareReadWriteWriteQuery<TRead, TWrite1, TWrite2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "VisitReadWriteWriteChunks<TRead, TWrite1, TWrite2, TVisitor>",
+            StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(2, generation.GeneratedSourceCount);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "global::System.ReadOnlySpan<TRead> ReadComponents { get; }",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "global::System.Span<TWrite1> WriteComponents1 { get; }",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "global::System.Span<TWrite2> WriteComponents2 { get; }",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "void SetWrite1Enabled(int row, bool enabled)",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "void SetWrite2Enabled(int row, bool enabled)",
+            StringComparison.Ordinal));
+        TestAssert.False(generation.GeneratedSource.Contains(
+            "void SetReadEnabled(int row, bool enabled)",
+            StringComparison.Ordinal));
     }
 
     private static void DuplicateCanonicalKey_ReportsECSGEN003()
@@ -284,11 +335,14 @@ internal static class GeneratorTests
 
         GeneratorDriverRunResult result = driver.GetRunResult();
         ImmutableArray<Diagnostic> diagnostics = result.Diagnostics.AddRange(driverDiagnostics).Distinct().ToImmutableArray();
-        string generatedSource = result.Results
+        GeneratedSourceResult[] generatedSources = result.Results
             .SelectMany(static generatorResult => generatorResult.GeneratedSources)
-            .Select(static generated => generated.SourceText.ToString())
-            .SingleOrDefault() ?? string.Empty;
-        return new Generation(outputCompilation, diagnostics, generatedSource);
+            .OrderBy(static generated => generated.HintName, StringComparer.Ordinal)
+            .ToArray();
+        string generatedSource = string.Join(
+            "\n",
+            generatedSources.Select(static generated => generated.SourceText.ToString()));
+        return new Generation(outputCompilation, diagnostics, generatedSource, generatedSources.Length);
     }
 
     private static string Normalize(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
@@ -305,16 +359,19 @@ internal static class GeneratorTests
         internal Generation(
             Compilation outputCompilation,
             ImmutableArray<Diagnostic> diagnostics,
-            string generatedSource)
+            string generatedSource,
+            int generatedSourceCount)
         {
             OutputCompilation = outputCompilation;
             Diagnostics = diagnostics;
             GeneratedSource = generatedSource;
+            GeneratedSourceCount = generatedSourceCount;
         }
 
         internal Compilation OutputCompilation { get; }
         internal ImmutableArray<Diagnostic> Diagnostics { get; }
         internal string GeneratedSource { get; }
+        internal int GeneratedSourceCount { get; }
     }
 }
 
