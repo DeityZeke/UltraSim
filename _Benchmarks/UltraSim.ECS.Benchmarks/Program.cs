@@ -157,6 +157,10 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_Generated2R2W_PositionScalarWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedWideQuery.ExecuteBalanced),
             new("NativeWorld_ChangeVersionScan_UnchangedPosition_2Archetypes_100000", "WorldChangeVersion", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedVersionScan),
             new("PinnedWorld_ChangeVersionScan_UnchangedPosition_2Archetypes_100000", "WorldChangeVersion", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedVersionScan),
+            new("NativeWorld_ChangedRead_UnchangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedChangedRead),
+            new("PinnedWorld_ChangedRead_UnchangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedChangedRead),
+            new("NativeWorld_ChangedRead_AllChangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, nativeGeneratedWideQuery.ExecuteAllChangedRead, nativeGeneratedWideQuery.PrepareAllChangedRead),
+            new("PinnedWorld_ChangedRead_AllChangedScalar_2Archetypes_100000", "WorldChangeCursor", 100_000, pinnedGeneratedWideQuery.ExecuteAllChangedRead, pinnedGeneratedWideQuery.PrepareAllChangedRead),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareDense),
             new("PinnedWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, pinnedFilteredReadWriteQuery.Execute, pinnedFilteredReadWriteQuery.PrepareDense),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Alternating_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareAlternating),
@@ -177,7 +181,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-dense-change-versions-v17",
+            SemanticProfile = "ecs-next-phase1-changed-read-cursors-v18",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -188,6 +192,7 @@ internal static class PrimitiveBenchmarks
             ComponentIdSizeBytes = Marshal.SizeOf<ComponentId>(),
             ComponentMetadataSizeBytes = Marshal.SizeOf<ComponentMetadata>(),
             ChangeVersionSizeBytes = Marshal.SizeOf<ChangeVersion>(),
+            ChangeCursorSizeBytes = Marshal.SizeOf<ChangeCursor>(),
             SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
             TimestampUtc = DateTimeOffset.UtcNow,
@@ -1813,6 +1818,16 @@ internal static class PrimitiveBenchmarks
             BenchmarkScalar,
             BenchmarkWide,
             BenchmarkVelocity> _balancedPlan;
+        private readonly ArchetypeReadReadWriteWriteQueryPlan<
+            TArena,
+            BenchmarkPosition,
+            BenchmarkWide,
+            BenchmarkScalar,
+            BenchmarkVelocity> _changePreparationPlan;
+        private readonly ArchetypeChangedReadQueryPlan<TArena, BenchmarkWide> _changedReadPlan;
+        private ChangeCursor _unchangedCursor;
+        private ChangeCursor _changedCursor;
+        private readonly int _occupiedChunkCount;
         private readonly int _population;
 
         internal EcsWorldGeneratedWideQueryFixture(int population)
@@ -1823,7 +1838,7 @@ internal static class PrimitiveBenchmarks
                 new EntityCapacity(population),
                 maximumArchetypes: 2,
                 static capacity => CreateArena(capacity),
-                maximumQueryPlans: 2);
+                maximumQueryPlans: 4);
             ComponentId disabled = BenchmarkSchema.GetComponentId<BenchmarkDisabled>();
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             ComponentId scalar = BenchmarkSchema.GetComponentId<BenchmarkScalar>();
@@ -1863,6 +1878,12 @@ internal static class PrimitiveBenchmarks
                 BenchmarkScalar,
                 BenchmarkWide,
                 BenchmarkVelocity>(position, scalar, wide, velocity);
+            _changePreparationPlan = _world.PrepareReadReadWriteWriteQuery<
+                BenchmarkPosition,
+                BenchmarkWide,
+                BenchmarkScalar,
+                BenchmarkVelocity>(position, wide, scalar, velocity);
+            _changedReadPlan = _world.PrepareChangedReadQuery<BenchmarkWide>(wide, scalar);
             _world.Seal();
 
             for (int i = 0; i < population; i++)
@@ -1908,12 +1929,18 @@ internal static class PrimitiveBenchmarks
             }
 
             if (_threeReadPlan.MatchedArchetypeCount != 2 ||
-                _balancedPlan.MatchedArchetypeCount != 2)
+                _balancedPlan.MatchedArchetypeCount != 2 ||
+                _changePreparationPlan.MatchedArchetypeCount != 2 ||
+                _changedReadPlan.MatchedArchetypeCount != 2)
             {
                 throw new InvalidOperationException(
                     "Generated-wide-query benchmark did not compile both archetypes.");
             }
             _scanBaseline = _world.CurrentChangeVersion;
+            _unchangedCursor = _world.CreateChangeCursorFromNow();
+            _changedCursor = _unchangedCursor;
+            _occupiedChunkCount = CountOccupiedChunks(_firstStorage) +
+                CountOccupiedChunks(_secondStorage);
             _population = population;
         }
 
@@ -1970,6 +1997,52 @@ internal static class PrimitiveBenchmarks
             return new ScenarioMeasurement(scanned, checksum);
         }
 
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+        internal ScenarioMeasurement ExecuteUnchangedChangedRead()
+        {
+            const int scanCount = 64;
+            int visited = 0;
+            var visitor = new WideChangedReadVisitor();
+            for (int scan = 0; scan < scanCount; scan++)
+            {
+                visited += _world.VisitChangedReadChunks(
+                    _changedReadPlan,
+                    ref _unchangedCursor,
+                    ref visitor);
+            }
+            if (visited != 0 || visitor.Rows != 0)
+                throw new InvalidOperationException("Unchanged changed-read benchmark returned rows.");
+            return new ScenarioMeasurement(
+                (long)_occupiedChunkCount * scanCount,
+                unchecked((long)_unchangedCursor.Version.Value + visitor.Checksum));
+        }
+
+        internal void PrepareAllChangedRead()
+        {
+            _changedCursor = _world.CreateChangeCursorFromNow();
+            var visitor = new ScalarVelocityChangeWriter();
+            int visited = _world.VisitReadReadWriteWriteChunks(
+                _changePreparationPlan,
+                ref visitor);
+            if (visited != _population)
+                throw new InvalidOperationException("Changed-read preparation lost rows.");
+        }
+
+        internal ScenarioMeasurement ExecuteAllChangedRead()
+        {
+            var visitor = new WideChangedReadVisitor();
+            int visited = _world.VisitChangedReadChunks(
+                _changedReadPlan,
+                ref _changedCursor,
+                ref visitor);
+            if (visited != _population || visitor.Rows != _population)
+                throw new InvalidOperationException("All-changed changed-read benchmark lost rows.");
+            return new ScenarioMeasurement(
+                visited,
+                unchecked(visitor.Checksum + (long)_changedCursor.Version.Value));
+        }
+
         public void Dispose() => _world.Dispose();
 
         private static TArena CreateArena(ChunkArenaCapacity capacity)
@@ -1987,6 +2060,72 @@ internal static class PrimitiveBenchmarks
         {
             Array.Sort(componentIds, static (left, right) => left.Value.CompareTo(right.Value));
             return componentIds;
+        }
+
+        private static int CountOccupiedChunks(ArchetypeStorage<TArena> storage)
+        {
+            int count = 0;
+            for (int chunk = storage.Store.GetFirstOccupiedChunkIndex();
+                 chunk >= 0;
+                 chunk = storage.Store.GetNextOccupiedChunkIndex(chunk))
+            {
+                count++;
+            }
+            return count;
+        }
+
+        private struct WideChangedReadVisitor : IComponentChunkReadVisitor<BenchmarkWide>
+        {
+            internal int Rows;
+            internal long Checksum;
+
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in ReadOnlyComponentChunk<BenchmarkWide> chunk)
+            {
+                long checksum = Checksum;
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    ref readonly BenchmarkWide wide = ref chunk.Components[row];
+                    checksum = unchecked(
+                        checksum + wide.A + wide.B + wide.C + wide.D +
+                        wide.E + wide.F + wide.G + wide.H + chunk.EntityIndices[row]);
+                }
+                Rows += chunk.Count;
+                Checksum = checksum;
+            }
+        }
+
+        private struct ScalarVelocityChangeWriter :
+            IComponentChunkReadReadWriteWriteVisitor<
+                BenchmarkPosition,
+                BenchmarkWide,
+                BenchmarkScalar,
+                BenchmarkVelocity>
+        {
+            [System.Runtime.CompilerServices.MethodImpl(
+                System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+            public void Execute(in ReadReadWriteWriteComponentChunk<
+                BenchmarkPosition,
+                BenchmarkWide,
+                BenchmarkScalar,
+                BenchmarkVelocity> chunk)
+            {
+                for (int row = 0; row < chunk.Count; row++)
+                {
+                    ref readonly BenchmarkPosition position = ref chunk.ReadComponents1[row];
+                    ref readonly BenchmarkWide wide = ref chunk.ReadComponents2[row];
+                    chunk.WriteComponents1[row] = new BenchmarkScalar
+                    {
+                        Value = unchecked((int)(wide.A + chunk.EntityIndices[row])),
+                    };
+                    chunk.WriteComponents2[row] = new BenchmarkVelocity
+                    {
+                        X = position.X + row,
+                        Y = position.Y - row,
+                    };
+                }
+            }
         }
 
         private struct PositionWideScalarVelocityVisitor :
@@ -2414,6 +2553,7 @@ internal sealed class BenchmarkReport
     public required int ComponentIdSizeBytes { get; init; }
     public required int ComponentMetadataSizeBytes { get; init; }
     public required int ChangeVersionSizeBytes { get; init; }
+    public required int ChangeCursorSizeBytes { get; init; }
     public required int SchemaIdSizeBytes { get; init; }
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }

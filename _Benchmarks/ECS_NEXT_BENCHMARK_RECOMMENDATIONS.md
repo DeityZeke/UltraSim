@@ -166,11 +166,16 @@ measurements suggest that a previously expected crossover is wrong.
 
 ## Dense change-tracking matrix
 
-The initial v17 guard now measures conservative stamp overhead inside the existing
-3R1W and 2R2W traversals and an unchanged-position scan across two archetypes. It
-is only a foothold: the current scan performs world/binding validation for every
-chunk, uses one 100,000-row working set, and has no consumer cursor or changed-since
-query plan. Preserve it as the old V3 point when the prebound path arrives.
+The initial v17 guard measures conservative stamp overhead inside the existing
+3R1W and 2R2W traversals and an unchanged-position scan across two archetypes. Its
+scalar scan performs world/binding validation for every chunk and uses one
+100,000-row working set. Preserve it as the old V3 point. The v18 guard adds a
+16-byte independent cursor and seal-compiled direct route; in three isolated
+processes its trusted route reduced unchanged checks from `44.6-45.0` to
+`17.8-19.6 ns/chunk`, while all-changed 64-byte reads measured
+`3.07-3.17 ns/row`. This is still only a foothold: it has one read column, one
+tracked column, one cursor per invocation, and no sparse-row precision or
+asynchronous publish lease.
 
 The full change-version matrix should vary independently:
 

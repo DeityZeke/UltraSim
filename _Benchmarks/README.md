@@ -260,9 +260,30 @@ dominate. Three isolated focused processes measured native at
 `55.0 ns/chunk` tail. A later full-suite pass measured approximately `25.0`
 ns/chunk, exposing substantial process/order/cache state rather than a credible
 instant speedup. The current path includes world/binding validation per chunk and
-does not predict a future prebound changed-filter scan. Every 66-scenario full
-capture reported zero managed allocation and zero Gen0/1/2 collections. The
-tracked accepted artifact remains unchanged.
+therefore provides the deliberately heavier baseline for the v18 route. Every
+66-scenario full capture reported zero managed allocation and zero Gen0/1/2
+collections. The tracked accepted artifact remains unchanged.
+
+The v18 changed-read extension adds four scenarios around the first independent
+consumer cursor and seal-compiled direct route. The unchanged pair reads no rows:
+it performs 64 sweeps over 552 chunks (`35,328` version checks), using a cursor
+created after scalar initialization and a plan that prebinds `BenchmarkWide` for
+read while tracking the distinct `BenchmarkScalar` column. Three isolated paired
+processes measured the validation-heavy scalar polling guard at
+`44.6-45.0 ns/chunk` and the trusted prebound cursor route at
+`17.8-19.6 ns/chunk`, approximately `2.3-2.5x` the throughput without changing
+version storage.
+
+The all-changed pair resets its cursor and marks every scalar chunk during the
+untimed prepare callback, then reads every field of the 64-byte wide component.
+Isolated means were `3.07-3.17 ns/row`, approximately `20.2-20.9 GB/s` of
+logical component reads before entity-index traffic. The final full-suite pass
+measured the unchanged path at `16.35-16.50 ns/chunk` and all-changed delivery at
+`2.95-2.98 ns/row`, again demonstrating process/cache-state sensitivity. The report
+now records the 16-byte cursor layout alongside the eight-byte version. All 70
+scenarios reported zero managed allocation and zero Gen0/1/2 collections. These
+are V3-internal mechanism comparisons, not Current/V3 claims, and the accepted
+artifact remains unchanged.
 
 These 100,000-row figures may be strongly cache-resident on the test machine and
 must not be labeled true main-memory bandwidth. The benchmark recommendations

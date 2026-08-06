@@ -403,6 +403,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         int rowCount = chunk.RowCount;
         return new BoundComponentChunk<T>(
             (uint)chunkIndex,
+            bytes,
             GetEntityIndices(bytes).Slice(0, rowCount),
             components.Slice(0, rowCount),
             enableWords);
@@ -493,6 +494,26 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         int columnIndex,
         ChangeVersion baseline) =>
         GetChangeVersion(chunkIndex, columnIndex).IsNewerThan(baseline);
+
+    /// <summary>
+    /// Trusted hot check for a seal-validated column while traversing this store's
+    /// occupied list. The caller owns disposal, bounds, and occupancy invariants.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasBoundColumnChangedSince(
+        uint occupiedChunkIndex,
+        int boundColumnIndex,
+        ChangeVersion baseline)
+    {
+        System.Diagnostics.Debug.Assert(occupiedChunkIndex < unchecked((uint)_chunks.Length));
+        System.Diagnostics.Debug.Assert(
+            unchecked((uint)boundColumnIndex) < unchecked((uint)_columns.Length));
+        System.Diagnostics.Debug.Assert(
+            _chunks[occupiedChunkIndex].State is ChunkListState.Partial or ChunkListState.Full);
+        int index = unchecked(
+            (boundColumnIndex * _chunks.Length) + (int)occupiedChunkIndex);
+        return new ChangeVersion(_changeVersions[index]).IsNewerThan(baseline);
+    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void StampChangeVersion(

@@ -199,6 +199,75 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             disabledComponents);
     }
 
+    internal ChangeCursor CreateChangeCursorFromBeginning()
+    {
+        EnsureSealed();
+        return new ChangeCursor(Id, ChangeVersion.None);
+    }
+
+    internal ChangeCursor CreateChangeCursorFromNow()
+    {
+        EnsureSealed();
+        return new ChangeCursor(Id, _changeVersion);
+    }
+
+    internal ArchetypeChangedReadQueryPlan<TArena, TRead> PrepareChangedReadQuery<TRead>(
+        ComponentId generatedReadComponentId,
+        ComponentId changedComponentId)
+        where TRead : unmanaged, IComponent<TRead>
+    {
+        ArchetypeQueryFilter filter = ArchetypeQueryFilter.Create(
+            Id,
+            _schema,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty);
+        return PrepareChangedReadQuery<TRead>(
+            generatedReadComponentId,
+            changedComponentId,
+            filter);
+    }
+
+    internal ArchetypeChangedReadQueryPlan<TArena, TRead> PrepareChangedReadQuery<TRead>(
+        ComponentId generatedReadComponentId,
+        ComponentId changedComponentId,
+        in ArchetypeQueryFilter filter)
+        where TRead : unmanaged, IComponent<TRead>
+    {
+        EnsureCreated();
+        if (!filter.IsValid || filter.WorldId != Id)
+            throw new ArgumentException("The query filter belongs to a different world.", nameof(filter));
+        ref readonly ComponentMetadata readMetadata = ref ValidateGeneratedDataComponent<TRead>(
+            generatedReadComponentId,
+            nameof(generatedReadComponentId));
+        ref readonly ComponentMetadata changedMetadata = ref ValidateTrackedComponent(
+            changedComponentId,
+            nameof(changedComponentId));
+        if (filter.Excludes(generatedReadComponentId) || filter.Excludes(changedComponentId))
+        {
+            throw new ArgumentException(
+                "A read or changed component cannot also be excluded by its query filter.",
+                nameof(filter));
+        }
+        if (_queryPlanCount == _queryPlans.Length)
+        {
+            throw new InvalidOperationException(
+                $"Query-plan capacity {_queryPlans.Length} is exhausted.");
+        }
+
+        var plan = new ArchetypeChangedReadQueryPlan<TArena, TRead>(
+            Id,
+            _queryPlanCount,
+            generatedReadComponentId,
+            readMetadata.Flags,
+            changedComponentId,
+            changedMetadata.Flags,
+            filter);
+        _queryPlans[_queryPlanCount++] = plan;
+        return plan;
+    }
+
     internal ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> PrepareReadWriteQuery<TRead, TWrite>(
         ComponentId generatedReadComponentId,
         ComponentId generatedWriteComponentId,
@@ -430,6 +499,174 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     /// <summary>
+    /// Visits only chunks whose selected tracked component is newer than the
+    /// supplied independent cursor. The cursor advances to the observation
+    /// boundary only after every visitor returns successfully.
+    /// </summary>
+    internal int VisitChangedReadChunks<TRead, TVisitor>(
+        ArchetypeChangedReadQueryPlan<TArena, TRead> plan,
+        ref ChangeCursor cursor,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+    {
+        EnsureSealed();
+        ValidateChangedReadQueryPlan(plan);
+        ValidateChangeCursor(cursor);
+        ChangeVersion observationVersion = _changeVersion;
+        ChangeVersion baseline = cursor.Version;
+        EnterChunkVisit();
+        try
+        {
+            int visitedRows = 0;
+            ReadOnlySpan<ArchetypeChangedReadQueryRoute<TArena>> routes = plan.Routes;
+            for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
+            {
+                ref readonly ArchetypeChangedReadQueryRoute<TArena> route = ref routes[routeIndex];
+                ArchetypeChunkStore<TArena> store = route.Storage.Store;
+                for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
+                     chunkIndex >= 0;
+                     chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
+                {
+                    uint occupiedChunkIndex = (uint)chunkIndex;
+                    if (!store.HasBoundColumnChangedSince(
+                        occupiedChunkIndex,
+                        route.ChangedColumnIndex,
+                        baseline))
+                    {
+                        continue;
+                    }
+
+                    BoundComponentChunk<TRead> bound = store.GetBoundComponentChunk<TRead>(
+                        chunkIndex,
+                        route.ReadColumnIndex,
+                        plan.ReadIsEnableable);
+                    if (!route.HasRowFilters)
+                    {
+                        var chunk = new ReadOnlyComponentChunk<TRead>(
+                            Id,
+                            route.Storage.Id,
+                            bound.ChunkIndex,
+                            rowOffset: 0,
+                            bound.EntityIndices,
+                            bound.Components,
+                            bound.EnableWords);
+                        visitor.Execute(in chunk);
+                        visitedRows += chunk.Count;
+                    }
+                    else
+                    {
+                        visitedRows += VisitFilteredChangedReadChunk(
+                            route,
+                            bound,
+                            ref visitor);
+                    }
+                }
+            }
+
+            cursor = cursor.AdvanceTo(observationVersion);
+            return visitedRows;
+        }
+        finally
+        {
+            ExitChunkVisit();
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private int VisitFilteredChangedReadChunk<TRead, TVisitor>(
+        in ArchetypeChangedReadQueryRoute<TArena> route,
+        in BoundComponentChunk<TRead> bound,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+    {
+        int rowCount = bound.EntityIndices.Length;
+        int pendingStart = -1;
+        int pendingEnd = -1;
+        int matchedRows = 0;
+        int wordCount = (rowCount + 63) >> 6;
+        for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)
+        {
+            ulong mask = route.GetMatchingRowMask(bound.ChunkBytes, wordIndex);
+            int wordStart = wordIndex << 6;
+            int activeRows = Math.Min(64, rowCount - wordStart);
+            if (activeRows != 64)
+                mask &= (1UL << activeRows) - 1UL;
+
+            while (mask != 0)
+            {
+                int startBit = BitOperations.TrailingZeroCount(mask);
+                ulong shifted = mask >> startBit;
+                int runLength = BitOperations.TrailingZeroCount(~shifted);
+                int runStart = wordStart + startBit;
+                int runEnd = runStart + runLength;
+                if (pendingStart < 0)
+                {
+                    pendingStart = runStart;
+                    pendingEnd = runEnd;
+                }
+                else if (pendingEnd == runStart)
+                {
+                    pendingEnd = runEnd;
+                }
+                else
+                {
+                    ExecuteChangedReadRange(
+                        route,
+                        bound,
+                        pendingStart,
+                        pendingEnd - pendingStart,
+                        ref visitor);
+                    matchedRows += pendingEnd - pendingStart;
+                    pendingStart = runStart;
+                    pendingEnd = runEnd;
+                }
+
+                ulong runMask = runLength == 64
+                    ? ulong.MaxValue
+                    : ((1UL << runLength) - 1UL) << startBit;
+                mask &= ~runMask;
+            }
+        }
+
+        if (pendingStart >= 0)
+        {
+            ExecuteChangedReadRange(
+                route,
+                bound,
+                pendingStart,
+                pendingEnd - pendingStart,
+                ref visitor);
+            matchedRows += pendingEnd - pendingStart;
+        }
+        return matchedRows;
+    }
+
+    [MethodImpl(
+        MethodImplOptions.AggressiveInlining |
+        MethodImplOptions.AggressiveOptimization)]
+    private void ExecuteChangedReadRange<TRead, TVisitor>(
+        in ArchetypeChangedReadQueryRoute<TArena> route,
+        in BoundComponentChunk<TRead> bound,
+        int rowOffset,
+        int rowCount,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+    {
+        var chunk = new ReadOnlyComponentChunk<TRead>(
+            Id,
+            route.Storage.Id,
+            bound.ChunkIndex,
+            rowOffset,
+            bound.EntityIndices.Slice(rowOffset, rowCount),
+            bound.Components.Slice(rowOffset, rowCount),
+            bound.EnableWords);
+        visitor.Execute(in chunk);
+    }
+
+    /// <summary>
     /// Synchronously visits the occupied chunks of one exact-archetype data binding.
     /// Structural or nested world mutation is rejected until the visitor returns.
     /// </summary>
@@ -458,6 +695,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                     Id,
                     binding.ArchetypeId,
                     bound.ChunkIndex,
+                    rowOffset: 0,
                     bound.EntityIndices,
                     bound.Components,
                     bound.EnableWords);
@@ -475,7 +713,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     /// <summary>
     /// Synchronously visits writable occupied chunks of one exact-archetype data
-    /// binding. Later change tracking will mark each visited column once per chunk.
+    /// binding. Dense change tracking marks each visited column once per chunk.
     /// </summary>
     internal int VisitWriteChunks<T, TVisitor>(
         in ArchetypeComponentBinding<T> binding,
@@ -882,6 +1120,43 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (metadata.Size != Unsafe.SizeOf<T>())
             ThrowWorldInvariant("Generated component metadata and runtime type size disagree.");
         return ref metadata;
+    }
+
+    private ref readonly ComponentMetadata ValidateTrackedComponent(
+        ComponentId componentId,
+        string parameterName)
+    {
+        if (!_schema.TryGetMetadata(componentId, out _))
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                componentId,
+                "The changed component ID is not in this world schema.");
+        }
+        return ref _schema.GetMetadata(componentId);
+    }
+
+    private void ValidateChangeCursor(in ChangeCursor cursor)
+    {
+        if (!cursor.IsValid)
+            throw new ArgumentException("A valid change cursor is required.", nameof(cursor));
+        if (cursor.WorldId != Id)
+            throw new ArgumentException("The change cursor belongs to a different world.", nameof(cursor));
+    }
+
+    private void ValidateChangedReadQueryPlan<TRead>(
+        ArchetypeChangedReadQueryPlan<TArena, TRead> plan)
+        where TRead : unmanaged, IComponent<TRead>
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.WorldId != Id ||
+            unchecked((uint)plan.PlanIndex) >= unchecked((uint)_queryPlanCount) ||
+            !ReferenceEquals(_queryPlans[plan.PlanIndex], plan))
+        {
+            throw new ArgumentException("The changed-read plan belongs to a different world.", nameof(plan));
+        }
+        if (!plan.IsCompiled)
+            ThrowWorldInvariant("A sealed world owns an uncompiled changed-read plan.");
     }
 
     private void ValidateQueryPlan<TRead, TWrite>(

@@ -15,16 +15,19 @@ internal readonly ref struct ReadOnlyComponentChunk<T>
         WorldId worldId,
         ArchetypeId archetypeId,
         uint chunkIndex,
+        int rowOffset,
         ReadOnlySpan<uint> entityIndices,
         ReadOnlySpan<T> components,
         ReadOnlySpan<ulong> enableWords)
     {
         System.Diagnostics.Debug.Assert(worldId.IsValid);
         System.Diagnostics.Debug.Assert(archetypeId.IsValid);
+        System.Diagnostics.Debug.Assert(rowOffset >= 0);
         System.Diagnostics.Debug.Assert(entityIndices.Length == components.Length);
         WorldId = worldId;
         ArchetypeId = archetypeId;
         ChunkIndex = chunkIndex;
+        RowOffset = rowOffset;
         EntityIndices = entityIndices;
         Components = components;
         _enableWords = enableWords;
@@ -35,6 +38,8 @@ internal readonly ref struct ReadOnlyComponentChunk<T>
     internal ArchetypeId ArchetypeId { get; }
 
     internal uint ChunkIndex { get; }
+
+    internal int RowOffset { get; }
 
     internal ReadOnlySpan<uint> EntityIndices { get; }
 
@@ -49,7 +54,8 @@ internal readonly ref struct ReadOnlyComponentChunk<T>
     {
         if (unchecked((uint)row) >= unchecked((uint)Count))
             throw new ArgumentOutOfRangeException(nameof(row));
+        int absoluteRow = RowOffset + row;
         return _enableWords.IsEmpty ||
-            (_enableWords[row >> 6] & (1UL << (row & 63))) != 0;
+            (_enableWords[absoluteRow >> 6] & (1UL << (absoluteRow & 63))) != 0;
     }
 }

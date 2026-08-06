@@ -6,17 +6,21 @@ internal readonly ref struct BoundComponentChunk<T>
 {
     internal BoundComponentChunk(
         uint chunkIndex,
+        ReadOnlySpan<byte> chunkBytes,
         ReadOnlySpan<uint> entityIndices,
         Span<T> components,
         Span<ulong> enableWords)
     {
         ChunkIndex = chunkIndex;
+        ChunkBytes = chunkBytes;
         EntityIndices = entityIndices;
         Components = components;
         EnableWords = enableWords;
     }
 
     internal uint ChunkIndex { get; }
+
+    internal ReadOnlySpan<byte> ChunkBytes { get; }
 
     internal ReadOnlySpan<uint> EntityIndices { get; }
 

@@ -49,6 +49,15 @@ internal static class ArchetypeQueryPlanUtilities
         }
     }
 
+    internal static void ValidateTrackedColumn(
+        in ComponentColumnLayout column,
+        ComponentId componentId,
+        ComponentFlags flags)
+    {
+        if (column.ComponentId != componentId || column.Flags != flags)
+            ThrowQueryInvariant("Tracked component metadata and archetype storage disagree.");
+    }
+
     private static bool ContainsAll(
         ReadOnlySpan<ComponentId> signature,
         ReadOnlySpan<ComponentId> required)

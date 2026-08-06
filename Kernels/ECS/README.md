@@ -114,9 +114,22 @@ allocation:
   columns; filtered visits stamp only chunks that expose at least one matching
   row, and stamping happens before the visitor so exceptions cannot hide a
   possibly partial write. Read-only families neither advance nor stamp versions.
-  This is the initial dense substrate, not yet a public changed-since query,
-  sparse row mask, independent consumer cursor, lifecycle event stream, or
-  complete structural-change tracker.
+  This is the initial dense substrate; sparse row masks, lifecycle event streams,
+  and complete structural-change tracking remain later work.
+- `ChangeCursor` is a 16-byte world-bound value. A cursor may begin at zero to
+  consume all previously stamped chunks or at the world's current version to
+  observe only future changes; copying it creates an independent consumer with
+  no registry entry or per-consumer heap state. A seal-compiled
+  `ArchetypeChangedReadQueryPlan<TArena,TRead>` prebinds the read column and a
+  potentially different tracked column for every matching archetype. Runtime
+  rejects unchanged chunks before binding component spans, composes with existing
+  required/excluded/enabled/disabled filters, and advances the caller's cursor
+  only after every visitor succeeds. Row predicates are evaluated against current
+  state; a successful scan acknowledges its observation boundary even when no
+  rows pass those predicates. Exceptions preserve the old cursor for an
+  at-least-once retry without loss; chunks delivered before the exception may be
+  delivered again. The initial plan reads one data component; generated
+  arbitrary-width changed queries are not implemented yet.
 - Unsigned one-branch range checks now use explicit `unchecked` normalization.
   This preserves negative-index rejection as `ArgumentOutOfRangeException` under
   the kernel's project-wide checked arithmetic instead of paying for or surfacing
@@ -177,7 +190,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 145 passing tests, including
+The current runtime and primitive suite has 153 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -231,18 +244,23 @@ stamping, read-only noninterference, multi-column/multi-chunk generated writes,
 filtered unmatched-chunk suppression, stamp-before-exception behavior,
 native/pinned parity, and warmed zero-allocation tracked reads and writes. A
 generator source-shape assertion confirms that read-only families emit no
-tracking work while every writable slot emits a stamp.
+tracking work while every writable slot emits a stamp. Changed-read tests cover
+the 16-byte cursor layout, maximum-to-one wrap, complete seal matching, a read
+column distinct from the tracked column, independent copied consumers, no replay
+after acknowledgement, filtered physical row offsets and enable state,
+exception-without-acknowledgement retry, foreign/default cursor and plan rejection,
+bounded plan capacity, native/pinned parity, and warmed zero-allocation execution.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generators emit the core manifest and a
 systematic catalog currently containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W
 families. Further arities should now be added only when real system signatures
-require them. The next natural change-tracking work is a prebound changed-since
-query/filter path plus explicit per-consumer cursor semantics over the dense
-versions. Tests must decide whether that should precede or be combined with sparse
-row masks. Public tracked-write scopes, structural creation/migration/removal
-events, optional filters, bounded deferred structural commands, and field/
-serializer/prefab descriptors remain later work.
+require them. The next natural change-tracking work is exact sparse row masks over
+the dense chunk gate, beginning with scalar writes and filtered writable ranges.
+Tests may instead show that general generated multi-column changed plans should be
+finished first. Public tracked-write scopes, structural
+creation/migration/removal events, optional filters, bounded deferred structural
+commands, and field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:
 
