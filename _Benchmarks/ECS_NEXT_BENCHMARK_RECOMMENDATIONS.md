@@ -82,6 +82,52 @@ because the workload has reached the hardware's bandwidth ceiling. Tests should
 verify byte accounting for every generated query shape and reject overflow when
 row counts and component widths are multiplied.
 
+## Characterize the memory-hierarchy crossover
+
+Every representative traversal shape should eventually run over a working-set
+ladder, not only the current 100,000-row guard. At minimum, include:
+
+- 1,000 rows;
+- 10,000 rows;
+- 50,000 rows;
+- 250,000 rows;
+- 1,000,000 rows;
+- 10,000,000 rows.
+
+Record the exact logical component bytes, entity-index bytes, enable-word bytes,
+chunk metadata, and total retained arena payload for each point. Classify results
+against measured hardware cache sizes rather than assuming a row count maps to a
+particular cache. The intended coverage is a data set that fits in L1, one that
+fits in L2, multiple points within the processor's last-level cache, the first
+point beyond that cache, and a substantially larger main-memory streaming case.
+Add smaller shape-specific boundary points when even 1,000 rows exceed L1 or L2;
+the common ladder is for cross-shape comparison, not a claim that its first point
+fits every cache for every component width.
+
+This distinction is especially important on large-cache processors such as the
+Ryzen 7 7800X3D. Mid-sized ECS cases may remain resident in its large L3 and make
+query throughput look like memory throughput when it is actually cache throughput.
+The ladder should separate:
+
+- fixed query-plan and per-chunk dispatch cost;
+- L1/L2-resident loop throughput;
+- last-level-cache-resident throughput;
+- true main-memory streaming throughput;
+- mixed read/write effects such as write allocation and read-for-ownership.
+
+Report nanoseconds per row and logical GB/s at every point. Where supported, also
+capture cycles, instructions, cache misses, memory-controller bandwidth, branch
+misses, and writeback traffic in isolated processes. Avoid interpreting the
+expected decline from read-only to mixed-write bandwidth as an ECS regression
+unless equivalent working sets and hardware counters show excess query overhead.
+
+Tests must validate identical results and row coverage at every size, including
+chunk-boundary and capacity-boundary neighbors. The 10-million-row cases require
+an explicit opt-in or separate large-world profile so the ordinary development
+suite remains fast and does not reserve multi-gigabyte fixtures accidentally.
+Tests and measurements may move, add, or remove ladder points when actual cache
+boundaries differ from the initial hypothesis.
+
 ## Scheduler crossover is a primary future benchmark
 
 When the scheduler arrives, do not report only maximum parallel throughput.

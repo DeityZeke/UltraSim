@@ -90,15 +90,15 @@ allocation:
   unfiltered route remains branch-minimal, and warmed dense, fragmented, native,
   and pinned tests allocate zero managed bytes.
 - The kernel now opts into a data-driven source-generated access-family catalog.
-  Its first three specifications cover two typed reads, two typed reads plus one
-  typed write, and one typed read plus two typed writes. The generated descriptors, seal-compiled
+  Its first five specifications cover 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W access.
+  The generated descriptors, seal-compiled
   physical routes, trusted store binding, stack-only view, filter range dispatch,
   visitor contract, and world entry points all encode access without per-row
   lookup, delegate dispatch, boxing, or entity-handle materialization. Consumer
   schema assemblies do not receive duplicate runtime families; generation is
   gated by an assembly marker. One emitter derives naming, generic constraints,
   distinct-access checks, span mutability, enable APIs, plan compilation, and hot
-  execution for all three access shapes. The 2R0W view exposes only read-only
+  execution for all five access shapes. The 2R0W view exposes only read-only
   component spans and enable-state reads; it has no generated writable span or
   enable setter.
 - Unsigned one-branch range checks now use explicit `unchecked` normalization.
@@ -161,7 +161,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 130 passing tests, including
+The current runtime and primitive suite has 137 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -179,7 +179,7 @@ lookups. Migration tests cover retained data and enable state, added-component
 defaults, removed components, source donor relocation, stale-plan and bounded
 destination rejection, 30,000 randomized bidirectional moves, native/pinned byte
 equivalence, and 100,000 warmed allocation-free migration cycles. The generator
-suite has 18 passing tests. Composed-world tests cover lifecycle ordering,
+suite has 19 passing tests. Composed-world tests cover lifecycle ordering,
 owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
 generation reuse, donor repair, cross-world plan and entity isolation, 30,000
 randomized create/transition/destroy operations, native/pinned parity, and 100,000
@@ -201,19 +201,22 @@ rejection, required/excluded seal matching, enableable data/tag row predicates,
 noncontiguous slices crossing enable words and chunks, randomized reference parity,
 native/pinned equivalence, and warmed allocation-free filtered visits.
 Generated-family tests add deterministic and explicitly opt-in source emission;
-read-only versus writable span contracts; seal-complete two-read, two-read/one-write,
-and one-read/two-write routing; alias/tag/type/access-exclusion/capacity/foreign-plan
+read-only versus writable span contracts; seal-complete 2R0W, 2R1W, 1R2W, 3R1W,
+and 2R2W routing; alias/tag/type/access-exclusion/capacity/foreign-plan
 rejection; full and filtered multi-archetype traversal; physical row offsets;
 non-enableable-write and row-boundary rejection; barrier and exception cleanup;
 randomized state parity; native/pinned equivalence; and ten million warmed
-allocation-free row visits across all three shapes.
+allocation-free row visits across all five shapes. The wider-family tests exercise
+four distinct component slots, two matching layouts, a structurally excluded
+layout, filtered execution, randomized state, and a joint ten-million-row warmed
+allocation gate.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generators emit the core manifest and a
-systematic catalog currently containing 2R0W, 2R1W, and 1R2W families. The next
-natural query work is to broaden the production arity matrix while retaining the
-same normalized filter/route substrate and stack-only execution window. Generated
-per-chunk tracked-write versions must follow before
+systematic catalog currently containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W
+families. Further arities should now be added only when real system signatures
+require them. The next natural query work is generated per-chunk tracked-write
+versions and change versions before
 writable views become public.
 Optional/change filters, bounded deferred structural commands, and field/
 serializer/prefab descriptors remain later work.

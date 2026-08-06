@@ -34,10 +34,17 @@ internal struct BenchmarkWide : IComponent<BenchmarkWide>
     public long H { get; set; }
 }
 
+[EcsComponent("benchmark.scalar")]
+internal struct BenchmarkScalar : IComponent<BenchmarkScalar>
+{
+    public int Value { get; set; }
+}
+
 [EcsSchema(
     typeof(BenchmarkVelocity),
     typeof(BenchmarkDisabled),
     typeof(BenchmarkWide),
+    typeof(BenchmarkScalar),
     typeof(BenchmarkPosition))]
 internal static partial class BenchmarkSchema
 {

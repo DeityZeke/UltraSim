@@ -65,6 +65,7 @@ internal static class GeneratorTests
         Run(nameof(QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily), QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily);
         Run(nameof(QueryFamilyCatalog_EmitsTwoReadOnlyFamily), QueryFamilyCatalog_EmitsTwoReadOnlyFamily);
         Run(nameof(QueryFamilyCatalog_EmitsOneReadTwoWriteFamily), QueryFamilyCatalog_EmitsOneReadTwoWriteFamily);
+        Run(nameof(QueryFamilyCatalog_EmitsRepresentativeWideFamilies), QueryFamilyCatalog_EmitsRepresentativeWideFamilies);
         Run(nameof(QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans), QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
@@ -132,8 +133,8 @@ internal static class GeneratorTests
         Generation second = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(first);
         AssertNoGeneratorErrors(second);
-        TestAssert.Equal(3, first.GeneratedSourceCount);
-        TestAssert.Equal(3, second.GeneratedSourceCount);
+        TestAssert.Equal(5, first.GeneratedSourceCount);
+        TestAssert.Equal(5, second.GeneratedSourceCount);
         TestAssert.Equal(first.GeneratedSource, second.GeneratedSource);
         TestAssert.True(first.GeneratedSource.Contains(
             "IComponentChunkReadReadWriteVisitor<TRead1, TRead2, TWrite>",
@@ -154,7 +155,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(3, generation.GeneratedSourceCount);
+        TestAssert.Equal(5, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadReadVisitor<TRead1, TRead2>",
             StringComparison.Ordinal));
@@ -199,7 +200,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(3, generation.GeneratedSourceCount);
+        TestAssert.Equal(5, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadWriteWriteVisitor<TRead, TWrite1, TWrite2>",
             StringComparison.Ordinal));
@@ -219,7 +220,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(3, generation.GeneratedSourceCount);
+        TestAssert.Equal(5, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "global::System.ReadOnlySpan<TRead> ReadComponents { get; }",
             StringComparison.Ordinal));
@@ -237,6 +238,44 @@ internal static class GeneratorTests
             StringComparison.Ordinal));
         TestAssert.False(generation.GeneratedSource.Contains(
             "void SetReadEnabled(int row, bool enabled)",
+            StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EmitsRepresentativeWideFamilies()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(5, generation.GeneratedSourceCount);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "IComponentChunkReadReadReadWriteVisitor<TRead1, TRead2, TRead3, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "ArchetypeReadReadReadWriteQueryPlan<TArena, TRead1, TRead2, TRead3, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "PrepareReadReadReadWriteQuery<TRead1, TRead2, TRead3, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "IComponentChunkReadReadWriteWriteVisitor<TRead1, TRead2, TWrite1, TWrite2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "ArchetypeReadReadWriteWriteQueryPlan<TArena, TRead1, TRead2, TWrite1, TWrite2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "PrepareReadReadWriteWriteQuery<TRead1, TRead2, TWrite1, TWrite2>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "global::System.ReadOnlySpan<TRead3> ReadComponents3 { get; }",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "global::System.Span<TWrite2> WriteComponents2 { get; }",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "void SetWrite2Enabled(int row, bool enabled)",
+            StringComparison.Ordinal));
+        TestAssert.False(generation.GeneratedSource.Contains(
+            "void SetRead3Enabled(int row, bool enabled)",
             StringComparison.Ordinal));
     }
 

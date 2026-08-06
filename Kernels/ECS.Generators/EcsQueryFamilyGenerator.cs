@@ -21,6 +21,8 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         new QueryFamilySpec(readCount: 2, writeCount: 0),
         new QueryFamilySpec(readCount: 2, writeCount: 1),
         new QueryFamilySpec(readCount: 1, writeCount: 2),
+        new QueryFamilySpec(readCount: 3, writeCount: 1),
+        new QueryFamilySpec(readCount: 2, writeCount: 2),
     };
 
     public void Initialize(IncrementalGeneratorInitializationContext context)

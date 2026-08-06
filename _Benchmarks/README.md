@@ -220,6 +220,23 @@ machine, not a cache/main-memory bandwidth classification; repeated isolated
 processes and hardware counters remain required. The tracked accepted artifact
 remains unchanged.
 
+The representative wide-arity extension adds equal-width 3R1W and 2R2W pairs.
+Both process 84 logical component bytes per row: 3R1W reads an eight-byte
+position, 64-byte wide value, and four-byte scalar before writing eight-byte
+velocity; 2R2W reads position and scalar before writing the wide value and
+velocity. Focused runs measured 3R1W at `5.269-5.371 ns/row` and 2R2W at
+`6.011-6.055 ns/row`. The following full-suite run measured `5.049-5.099` and
+`5.807-5.811 ns/row`, approximately `16.5-16.6 GB/s` and `14.5 GB/s`,
+respectively. Equal logical width makes this cleaner directional evidence of
+write-distribution cost than comparisons between different component widths.
+All 64 scenarios reported zero managed allocation and zero Gen0/1/2 collections.
+
+These 100,000-row figures may be strongly cache-resident on the test machine and
+must not be labeled true main-memory bandwidth. The benchmark recommendations
+now require an opt-in 1K through 10M working-set ladder, explicit retained-byte
+accounting, hardware-cache classification, and counters where available. The
+tracked accepted artifact remains unchanged.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

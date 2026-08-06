@@ -142,6 +142,13 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_Generated2R0WRandomizedModelRemainsConsistent), EcsWorld_Generated2R0WRandomizedModelRemainsConsistent);
         Run(nameof(EcsWorld_Generated2R0WNativePinnedParity), EcsWorld_Generated2R0WNativePinnedParity);
         Run(nameof(EcsWorld_WarmedGenerated2R0WAllocatesZeroManagedBytes), EcsWorld_WarmedGenerated2R0WAllocatesZeroManagedBytes);
+        Run(nameof(GeneratedWideFamilies_SealCompileAndRejectMisuse), GeneratedWideFamilies_SealCompileAndRejectMisuse);
+        Run(nameof(EcsWorld_Generated3R1WVisitsAndFiltersRows), EcsWorld_Generated3R1WVisitsAndFiltersRows);
+        Run(nameof(EcsWorld_Generated2R2WVisitsAndFiltersRows), EcsWorld_Generated2R2WVisitsAndFiltersRows);
+        Run(nameof(EcsWorld_GeneratedWideFamiliesEnforceBarrierAndReleaseAfterException), EcsWorld_GeneratedWideFamiliesEnforceBarrierAndReleaseAfterException);
+        Run(nameof(EcsWorld_GeneratedWideFamiliesRandomizedModelRemainsConsistent), EcsWorld_GeneratedWideFamiliesRandomizedModelRemainsConsistent);
+        Run(nameof(EcsWorld_GeneratedWideFamiliesNativePinnedParity), EcsWorld_GeneratedWideFamiliesNativePinnedParity);
+        Run(nameof(EcsWorld_WarmedGeneratedWideFamiliesAllocateZeroManagedBytes), EcsWorld_WarmedGeneratedWideFamiliesAllocateZeroManagedBytes);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -5330,6 +5337,465 @@ internal static class EcsPrimitiveTests
         return unchecked(checksum + visitor.Rows + visitor.FirstRows + visitor.SecondRows);
     }
 
+    private static void GeneratedWideFamilies_SealCompileAndRejectMisuse()
+    {
+        using (var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(1, 8))
+        {
+            Assert.True(fixture.ThreeReadQuery.IsCompiled);
+            Assert.True(fixture.BalancedQuery.IsCompiled);
+            Assert.Equal(2, fixture.ThreeReadQuery.MatchedArchetypeCount);
+            Assert.Equal(2, fixture.BalancedQuery.MatchedArchetypeCount);
+            Assert.Equal(1, fixture.FilteredThreeReadQuery.MatchedArchetypeCount);
+            Assert.Equal(1, fixture.FilteredBalancedQuery.MatchedArchetypeCount);
+            Assert.Equal(fixture.First.Id, fixture.ThreeReadQuery.Routes[0].Storage.Id);
+            Assert.Equal(fixture.Second.Id, fixture.ThreeReadQuery.Routes[1].Storage.Id);
+            Assert.NotEqual(
+                fixture.ThreeReadQuery.Routes[0].Read1ColumnIndex,
+                fixture.ThreeReadQuery.Routes[0].Read2ColumnIndex);
+            Assert.NotEqual(
+                fixture.ThreeReadQuery.Routes[0].Read2ColumnIndex,
+                fixture.ThreeReadQuery.Routes[0].Read3ColumnIndex);
+            Assert.NotEqual(
+                fixture.BalancedQuery.Routes[0].Write1ColumnIndex,
+                fixture.BalancedQuery.Routes[0].Write2ColumnIndex);
+        }
+
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        using var world = new EcsWorld<NativeChunkArena>(
+            schema,
+            new EntityCapacity(8),
+            maximumArchetypes: 1,
+            static capacity => new NativeChunkArena(capacity),
+            maximumQueryPlans: 1);
+        ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+        ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ComponentId tagId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutTag>();
+        ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        _ = world.RegisterArchetype(
+            [byteId, enableId, intId, tagId, wideId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+
+        Assert.Throws<ArgumentException>(() => world.PrepareReadReadReadWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, wideId, enableId));
+        Assert.Throws<InvalidOperationException>(() => world.PrepareReadReadReadWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutTag,
+            UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, tagId, enableId));
+        Assert.Throws<ArgumentException>(() => world.PrepareReadReadWriteWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutInt>(wideId, byteId, intId, intId));
+        Assert.Throws<ArgumentException>(() => world.PrepareReadReadWriteWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>(byteId, wideId, intId, enableId));
+        ArchetypeQueryFilter excludesAccess = world.CreateQueryFilter([], [byteId], [], []);
+        Assert.Throws<ArgumentException>(() => world.PrepareReadReadReadWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, byteId, enableId, excludesAccess));
+
+        _ = world.PrepareReadReadReadWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, byteId, enableId);
+        Assert.Throws<InvalidOperationException>(() => world.PrepareReadReadWriteWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>(wideId, byteId, intId, enableId));
+        world.Seal();
+        Assert.Throws<InvalidOperationException>(() => world.PrepareReadReadReadWriteQuery<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, byteId, enableId));
+
+        using var first = new GeneratedWideQueryFixture<NativeChunkArena>(1, 2);
+        using var second = new GeneratedWideQueryFixture<NativeChunkArena>(1, 2);
+        var visitor = new ThreeReadWideGeneratedVisitor(second.First.Id, second.Second.Id, 0);
+        Assert.Throws<ArgumentException>(() =>
+            second.World.VisitReadReadReadWriteChunks(first.ThreeReadQuery, ref visitor));
+    }
+
+    private static void EcsWorld_Generated3R1WVisitsAndFiltersRows()
+    {
+        const int firstCount = 193;
+        const int secondCount = 129;
+        using (var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(2, firstCount + secondCount))
+        {
+            var entities = new Entity[firstCount + secondCount];
+            for (int i = 0; i < entities.Length; i++)
+                entities[i] = CreateGeneratedWideEntity(fixture, i < firstCount, i);
+
+            var visitor = new ThreeReadWideGeneratedVisitor(
+                fixture.First.Id,
+                fixture.Second.Id,
+                salt: 41);
+            Assert.Equal(entities.Length,
+                fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref visitor));
+            Assert.Equal(firstCount, visitor.FirstRows);
+            Assert.Equal(secondCount, visitor.SecondRows);
+            Assert.Equal(2, visitor.RowBoundsRejections);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> binding = i < firstCount
+                    ? fixture.FirstEnableBinding
+                    : fixture.SecondEnableBinding;
+                Assert.True(fixture.World.TryGetComponent(
+                    entities[i], binding, out UltraSim.ECS.Tests.LayoutEnableLong value));
+                Assert.Equal(GeneratedThreeReadWideValue(i, entities[i].Index, 41), value.Value);
+            }
+        }
+
+        const int filteredCount = 1_000;
+        using var filtered = new GeneratedWideQueryFixture<NativeChunkArena>(8, filteredCount);
+        var expected = new bool[filteredCount];
+        var seen = new bool[filteredCount];
+        int matches = 0;
+        for (int i = 0; i < filteredCount; i++)
+        {
+            Entity entity = CreateGeneratedWideEntity(filtered, first: false, i);
+            bool tagEnabled = i % 5 != 0;
+            bool valueEnabled = i % 3 != 0;
+            Assert.True(filtered.World.TrySetComponentEnabled(entity, filtered.SecondTagBinding, tagEnabled));
+            Assert.True(filtered.World.TrySetComponentEnabled(entity, filtered.SecondEnableBinding, valueEnabled));
+            expected[entity.Index] = tagEnabled && !valueEnabled;
+            if (expected[entity.Index])
+                matches++;
+        }
+        var filteredVisitor = new ThreeReadWideGeneratedVisitor(
+            filtered.First.Id,
+            filtered.Second.Id,
+            salt: 71,
+            expected,
+            seen);
+        Assert.Equal(matches, filtered.World.VisitReadReadReadWriteChunks(
+            filtered.FilteredThreeReadQuery,
+            ref filteredVisitor));
+        Assert.True(filteredVisitor.NonZeroRowOffsets > 0);
+        for (int i = 0; i < filteredCount; i++)
+            Assert.Equal(expected[i], seen[i]);
+    }
+
+    private static void EcsWorld_Generated2R2WVisitsAndFiltersRows()
+    {
+        const int firstCount = 193;
+        const int secondCount = 129;
+        using (var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(2, firstCount + secondCount))
+        {
+            var entities = new Entity[firstCount + secondCount];
+            for (int i = 0; i < entities.Length; i++)
+                entities[i] = CreateGeneratedWideEntity(fixture, i < firstCount, i);
+
+            var visitor = new BalancedWideGeneratedVisitor(
+                fixture.First.Id,
+                fixture.Second.Id,
+                salt: 41);
+            Assert.Equal(entities.Length,
+                fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref visitor));
+            Assert.Equal(firstCount, visitor.FirstRows);
+            Assert.Equal(secondCount, visitor.SecondRows);
+            Assert.Equal(1, visitor.NonEnableableWriteRejections);
+            Assert.Equal(2, visitor.RowBoundsRejections);
+            for (int i = 0; i < entities.Length; i++)
+            {
+                bool first = i < firstCount;
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> intBinding = first
+                    ? fixture.FirstIntBinding
+                    : fixture.SecondIntBinding;
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> enableBinding = first
+                    ? fixture.FirstEnableBinding
+                    : fixture.SecondEnableBinding;
+                GeneratedBalancedWideValues(i, entities[i].Index, 41, out int integer, out long value);
+                Assert.True(fixture.World.TryGetComponent(
+                    entities[i], intBinding, out UltraSim.ECS.Tests.LayoutInt actualInt));
+                Assert.True(fixture.World.TryGetComponent(
+                    entities[i], enableBinding, out UltraSim.ECS.Tests.LayoutEnableLong actualLong));
+                Assert.Equal(integer, actualInt.Value);
+                Assert.Equal(value, actualLong.Value);
+            }
+        }
+
+        const int filteredCount = 1_000;
+        using var filtered = new GeneratedWideQueryFixture<NativeChunkArena>(8, filteredCount);
+        var expected = new bool[filteredCount];
+        var seen = new bool[filteredCount];
+        int matches = 0;
+        for (int i = 0; i < filteredCount; i++)
+        {
+            Entity entity = CreateGeneratedWideEntity(filtered, first: false, i);
+            bool tagEnabled = i % 5 != 0;
+            bool valueEnabled = i % 3 != 0;
+            Assert.True(filtered.World.TrySetComponentEnabled(entity, filtered.SecondTagBinding, tagEnabled));
+            Assert.True(filtered.World.TrySetComponentEnabled(entity, filtered.SecondEnableBinding, valueEnabled));
+            expected[entity.Index] = tagEnabled && !valueEnabled;
+            if (expected[entity.Index])
+                matches++;
+        }
+        var filteredVisitor = new BalancedWideGeneratedVisitor(
+            filtered.First.Id,
+            filtered.Second.Id,
+            salt: 71,
+            expected,
+            seen);
+        Assert.Equal(matches, filtered.World.VisitReadReadWriteWriteChunks(
+            filtered.FilteredBalancedQuery,
+            ref filteredVisitor));
+        Assert.True(filteredVisitor.NonZeroRowOffsets > 0);
+        for (int i = 0; i < filteredCount; i++)
+            Assert.Equal(expected[i], seen[i]);
+    }
+
+    private static void EcsWorld_GeneratedWideFamiliesEnforceBarrierAndReleaseAfterException()
+    {
+        using var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(1, 4);
+        Entity entity = CreateGeneratedWideEntity(fixture, first: true, seed: 1);
+        var probe = new GeneratedWideBarrierProbeVisitor<NativeChunkArena>(
+            fixture.World,
+            fixture.BalancedQuery,
+            fixture.FirstEnableBinding,
+            entity,
+            fixture.First.Id,
+            fixture.Second.Id);
+        Assert.Equal(1,
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref probe));
+        Assert.Equal(3, probe.Rejections);
+
+        var throwing = new ThrowingGeneratedWideVisitor();
+        Assert.Throws<ChunkVisitorSentinelException>(() =>
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref throwing));
+        Assert.True(fixture.World.TrySetComponent(
+            entity,
+            fixture.FirstEnableBinding,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 77 }));
+        Assert.True(fixture.World.TryDestroy(entity));
+    }
+
+    private static void EcsWorld_GeneratedWideFamiliesRandomizedModelRemainsConsistent()
+    {
+        const int entityCount = 257;
+        const int rounds = 300;
+        using var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(4, entityCount);
+        var entities = new Entity[entityCount];
+        var inFirst = new bool[entityCount];
+        var seeds = new int[entityCount];
+        var random = new Random(unchecked((int)0x62B41D39));
+        for (int i = 0; i < entityCount; i++)
+        {
+            inFirst[i] = (i & 1) == 0;
+            seeds[i] = i;
+            entities[i] = CreateGeneratedWideEntity(fixture, inFirst[i], seeds[i]);
+        }
+
+        for (int round = 0; round < rounds; round++)
+        {
+            for (int mutation = 0; mutation < 5; mutation++)
+            {
+                int index = random.Next(entityCount);
+                seeds[index] = random.Next();
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> wideBinding = inFirst[index]
+                    ? fixture.FirstWideBinding
+                    : fixture.SecondWideBinding;
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> byteBinding = inFirst[index]
+                    ? fixture.FirstByteBinding
+                    : fixture.SecondByteBinding;
+                Assert.True(fixture.World.TrySetComponent(
+                    entities[index], wideBinding, CreateGeneratedWideValue(seeds[index])));
+                Assert.True(fixture.World.TrySetComponent(
+                    entities[index], byteBinding, CreateGeneratedByteValue(seeds[index])));
+            }
+
+            long salt = random.NextInt64();
+            var visitor = new BalancedWideGeneratedVisitor(
+                fixture.First.Id,
+                fixture.Second.Id,
+                salt);
+            Assert.Equal(entityCount,
+                fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref visitor));
+            if ((round & 15) != 0)
+                continue;
+            for (int i = 0; i < entityCount; i++)
+            {
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> intBinding = inFirst[i]
+                    ? fixture.FirstIntBinding
+                    : fixture.SecondIntBinding;
+                ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> enableBinding = inFirst[i]
+                    ? fixture.FirstEnableBinding
+                    : fixture.SecondEnableBinding;
+                GeneratedBalancedWideValues(
+                    seeds[i], entities[i].Index, salt, out int expectedInt, out long expectedLong);
+                Assert.True(fixture.World.TryGetComponent(
+                    entities[i], intBinding, out UltraSim.ECS.Tests.LayoutInt actualInt));
+                Assert.True(fixture.World.TryGetComponent(
+                    entities[i], enableBinding, out UltraSim.ECS.Tests.LayoutEnableLong actualLong));
+                Assert.Equal(expectedInt, actualInt.Value);
+                Assert.Equal(expectedLong, actualLong.Value);
+            }
+        }
+    }
+
+    private static void EcsWorld_GeneratedWideFamiliesNativePinnedParity()
+    {
+        long native = RunGeneratedWideQueryParity<NativeChunkArena>();
+        long pinned = RunGeneratedWideQueryParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void EcsWorld_WarmedGeneratedWideFamiliesAllocateZeroManagedBytes()
+    {
+        const int entityCount = 1_000;
+        const int rounds = 5_000;
+        using var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(8, entityCount);
+        for (int i = 0; i < entityCount; i++)
+            _ = CreateGeneratedWideEntity(fixture, (i & 1) == 0, i);
+        var threeRead = new ThreeReadWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 0);
+        var balanced = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 0);
+        for (int i = 0; i < 32; i++)
+        {
+            threeRead.Salt = i;
+            balanced.Salt = i;
+            fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref threeRead);
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref balanced);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 0; round < rounds; round++)
+        {
+            threeRead.Salt = round * 19L;
+            balanced.Salt = round * 23L;
+            fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref threeRead);
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref balanced);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(threeRead.Checksum != 0);
+        Assert.True(balanced.Checksum != 0);
+    }
+
+    private static long RunGeneratedWideQueryParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int entityCount = 1_000;
+        const int rounds = 300;
+        using var fixture = new GeneratedWideQueryFixture<TArena>(8, entityCount);
+        for (int i = 0; i < entityCount; i++)
+            _ = CreateGeneratedWideEntity(fixture, (i & 1) == 0, i);
+        var threeRead = new ThreeReadWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 0);
+        var balanced = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 0);
+        long checksum = 0;
+        for (int round = 0; round < rounds; round++)
+        {
+            threeRead.Salt = round * 101L;
+            balanced.Salt = round * 103L;
+            Assert.Equal(entityCount,
+                fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref threeRead));
+            Assert.Equal(entityCount,
+                fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref balanced));
+            checksum = unchecked(checksum + threeRead.Checksum + balanced.Checksum);
+        }
+        return unchecked(checksum + threeRead.Rows + balanced.Rows);
+    }
+
+    private static Entity CreateGeneratedWideEntity<TArena>(
+        GeneratedWideQueryFixture<TArena> fixture,
+        bool first,
+        int seed)
+        where TArena : class, IChunkArenaBackend
+    {
+        ArchetypeStorage<TArena> storage = first ? fixture.First : fixture.Second;
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> wideBinding = first
+            ? fixture.FirstWideBinding
+            : fixture.SecondWideBinding;
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> intBinding = first
+            ? fixture.FirstIntBinding
+            : fixture.SecondIntBinding;
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> byteBinding = first
+            ? fixture.FirstByteBinding
+            : fixture.SecondByteBinding;
+        Assert.True(fixture.World.TryCreateInitialized(
+            storage.Id,
+            wideBinding,
+            CreateGeneratedWideValue(seed),
+            out Entity entity));
+        Assert.True(fixture.World.TrySetComponent(entity, intBinding, CreateGeneratedIntValue(seed)));
+        Assert.True(fixture.World.TrySetComponent(entity, byteBinding, CreateGeneratedByteValue(seed)));
+        return entity;
+    }
+
+    private static UltraSim.ECS.Tests.LayoutWide CreateGeneratedWideValue(int seed) => new()
+    {
+        A = unchecked(seed * 17L + 3),
+        B = unchecked(seed * 19L + 5),
+        C = unchecked(seed * 23L + 7),
+        D = unchecked(seed * 29L + 11),
+    };
+
+    private static UltraSim.ECS.Tests.LayoutInt CreateGeneratedIntValue(int seed) => new()
+    {
+        Value = unchecked(seed * 7 + 13),
+    };
+
+    private static UltraSim.ECS.Tests.LayoutByte CreateGeneratedByteValue(int seed) => new()
+    {
+        Value = unchecked((byte)(seed * 3 + 17)),
+    };
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static long GeneratedThreeReadWideValue(int seed, uint entityIndex, long salt)
+    {
+        UltraSim.ECS.Tests.LayoutWide wide = CreateGeneratedWideValue(seed);
+        return unchecked(
+            wide.A * 3L + wide.B * 5L + wide.C * 7L + wide.D * 11L +
+            CreateGeneratedIntValue(seed).Value * 13L +
+            CreateGeneratedByteValue(seed).Value * 17L + entityIndex + salt);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void GeneratedBalancedWideValues(
+        int seed,
+        uint entityIndex,
+        long salt,
+        out int integer,
+        out long value)
+    {
+        UltraSim.ECS.Tests.LayoutWide wide = CreateGeneratedWideValue(seed);
+        byte narrow = CreateGeneratedByteValue(seed).Value;
+        integer = unchecked((int)(wide.A + wide.C + narrow + entityIndex + salt));
+        value = unchecked(wide.B * 5L + wide.D * 11L + integer * 13L + narrow + salt);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void GeneratedWriteQueryValues(
         long wide,
@@ -5345,6 +5811,312 @@ internal static class EcsPrimitiveTests
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static long GeneratedQueryValue(long wide, int integer, uint entityIndex, long salt) =>
         unchecked(wide * 3L + integer * 5L + entityIndex + salt);
+
+    private struct ThreeReadWideGeneratedVisitor :
+        IComponentChunkReadReadReadWriteVisitor<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly ArchetypeId _firstId;
+        private readonly ArchetypeId _secondId;
+        private readonly bool[]? _expected;
+        private readonly bool[]? _seen;
+
+        internal ThreeReadWideGeneratedVisitor(
+            ArchetypeId firstId,
+            ArchetypeId secondId,
+            long salt,
+            bool[]? expected = null,
+            bool[]? seen = null)
+        {
+            _firstId = firstId;
+            _secondId = secondId;
+            _expected = expected;
+            _seen = seen;
+            Salt = salt;
+            Rows = 0;
+            FirstRows = 0;
+            SecondRows = 0;
+            NonZeroRowOffsets = 0;
+            RowBoundsRejections = 0;
+            Checksum = 0;
+        }
+
+        internal long Salt;
+        internal int Rows;
+        internal int FirstRows;
+        internal int SecondRows;
+        internal int NonZeroRowOffsets;
+        internal int RowBoundsRejections;
+        internal long Checksum;
+
+        public void Execute(in ReadReadReadWriteComponentChunk<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            Assert.False(chunk.IsRead1Enableable);
+            Assert.False(chunk.IsRead2Enableable);
+            Assert.False(chunk.IsRead3Enableable);
+            Assert.True(chunk.IsWriteEnableable);
+            if (chunk.RowOffset != 0)
+                NonZeroRowOffsets++;
+            if (chunk.Count != 0 && RowBoundsRejections == 0)
+            {
+                try
+                {
+                    _ = chunk.IsRead3Enabled(-1);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    RowBoundsRejections++;
+                }
+                try
+                {
+                    chunk.SetWriteEnabled(chunk.Count, false);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    RowBoundsRejections++;
+                }
+            }
+
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint entityIndex = chunk.EntityIndices[row];
+                if (_expected is not null && _seen is not null)
+                {
+                    Assert.True(_expected[entityIndex]);
+                    Assert.False(_seen[entityIndex]);
+                    _seen[entityIndex] = true;
+                }
+                ref readonly UltraSim.ECS.Tests.LayoutWide wide = ref chunk.ReadComponents1[row];
+                long value = unchecked(
+                    wide.A * 3L + wide.B * 5L + wide.C * 7L + wide.D * 11L +
+                    chunk.ReadComponents2[row].Value * 13L +
+                    chunk.ReadComponents3[row].Value * 17L + entityIndex + Salt);
+                chunk.WriteComponents[row].Value = value;
+                chunk.SetWriteEnabled(row, (value & 1) == 0);
+                checksum = unchecked(checksum + value);
+            }
+            Rows += chunk.Count;
+            if (chunk.ArchetypeId == _firstId)
+                FirstRows += chunk.Count;
+            else if (chunk.ArchetypeId == _secondId)
+                SecondRows += chunk.Count;
+            else
+                throw new InvalidOperationException("The generated 3R1W query visited an unmatched archetype.");
+            Checksum = checksum;
+        }
+    }
+
+    private struct BalancedWideGeneratedVisitor :
+        IComponentChunkReadReadWriteWriteVisitor<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly ArchetypeId _firstId;
+        private readonly ArchetypeId _secondId;
+        private readonly bool[]? _expected;
+        private readonly bool[]? _seen;
+
+        internal BalancedWideGeneratedVisitor(
+            ArchetypeId firstId,
+            ArchetypeId secondId,
+            long salt,
+            bool[]? expected = null,
+            bool[]? seen = null)
+        {
+            _firstId = firstId;
+            _secondId = secondId;
+            _expected = expected;
+            _seen = seen;
+            Salt = salt;
+            Rows = 0;
+            FirstRows = 0;
+            SecondRows = 0;
+            NonZeroRowOffsets = 0;
+            NonEnableableWriteRejections = 0;
+            RowBoundsRejections = 0;
+            Checksum = 0;
+        }
+
+        internal long Salt;
+        internal int Rows;
+        internal int FirstRows;
+        internal int SecondRows;
+        internal int NonZeroRowOffsets;
+        internal int NonEnableableWriteRejections;
+        internal int RowBoundsRejections;
+        internal long Checksum;
+
+        public void Execute(in ReadReadWriteWriteComponentChunk<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            Assert.False(chunk.IsRead1Enableable);
+            Assert.False(chunk.IsRead2Enableable);
+            Assert.False(chunk.IsWrite1Enableable);
+            Assert.True(chunk.IsWrite2Enableable);
+            if (chunk.RowOffset != 0)
+                NonZeroRowOffsets++;
+            if (chunk.Count != 0 && NonEnableableWriteRejections == 0)
+            {
+                try
+                {
+                    chunk.SetWrite1Enabled(0, false);
+                }
+                catch (InvalidOperationException)
+                {
+                    NonEnableableWriteRejections++;
+                }
+                try
+                {
+                    _ = chunk.IsRead2Enabled(-1);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    RowBoundsRejections++;
+                }
+                try
+                {
+                    chunk.SetWrite2Enabled(chunk.Count, false);
+                }
+                catch (ArgumentOutOfRangeException)
+                {
+                    RowBoundsRejections++;
+                }
+            }
+
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint entityIndex = chunk.EntityIndices[row];
+                if (_expected is not null && _seen is not null)
+                {
+                    Assert.True(_expected[entityIndex]);
+                    Assert.False(_seen[entityIndex]);
+                    _seen[entityIndex] = true;
+                }
+                ref readonly UltraSim.ECS.Tests.LayoutWide wide = ref chunk.ReadComponents1[row];
+                byte narrow = chunk.ReadComponents2[row].Value;
+                int integer = unchecked((int)(wide.A + wide.C + narrow + entityIndex + Salt));
+                long value = unchecked(wide.B * 5L + wide.D * 11L + integer * 13L + narrow + Salt);
+                chunk.WriteComponents1[row].Value = integer;
+                chunk.WriteComponents2[row].Value = value;
+                chunk.SetWrite2Enabled(row, (value & 1) == 0);
+                checksum = unchecked(checksum + integer + value);
+            }
+            Rows += chunk.Count;
+            if (chunk.ArchetypeId == _firstId)
+                FirstRows += chunk.Count;
+            else if (chunk.ArchetypeId == _secondId)
+                SecondRows += chunk.Count;
+            else
+                throw new InvalidOperationException("The generated 2R2W query visited an unmatched archetype.");
+            Checksum = checksum;
+        }
+    }
+
+    private struct GeneratedWideBarrierProbeVisitor<TArena> :
+        IComponentChunkReadReadWriteWriteVisitor<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>
+        where TArena : class, IChunkArenaBackend
+    {
+        private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeReadReadWriteWriteQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> _plan;
+        private readonly ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> _binding;
+        private readonly Entity _entity;
+        private readonly ArchetypeId _firstId;
+        private readonly ArchetypeId _secondId;
+
+        internal GeneratedWideBarrierProbeVisitor(
+            EcsWorld<TArena> world,
+            ArchetypeReadReadWriteWriteQueryPlan<
+                TArena,
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutByte,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong> plan,
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> binding,
+            Entity entity,
+            ArchetypeId firstId,
+            ArchetypeId secondId)
+        {
+            _world = world;
+            _plan = plan;
+            _binding = binding;
+            _entity = entity;
+            _firstId = firstId;
+            _secondId = secondId;
+            Rejections = 0;
+        }
+
+        internal int Rejections;
+
+        public void Execute(in ReadReadWriteWriteComponentChunk<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+        {
+            try
+            {
+                _world.TryDestroy(_entity);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TrySetComponentEnabled(_entity, _binding, false);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                var nested = new BalancedWideGeneratedVisitor(_firstId, _secondId, 0);
+                _world.VisitReadReadWriteWriteChunks(_plan, ref nested);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+        }
+    }
+
+    private struct ThrowingGeneratedWideVisitor :
+        IComponentChunkReadReadWriteWriteVisitor<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        public void Execute(in ReadReadWriteWriteComponentChunk<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> chunk) => throw new ChunkVisitorSentinelException();
+    }
 
     private struct WideIntGeneratedReadVisitor :
         IComponentChunkReadReadVisitor<
@@ -6712,6 +7484,128 @@ internal static class EcsPrimitiveTests
                     ? new PinnedChunkArena(capacity)
                     : throw new InvalidOperationException(
                         $"Unsupported generated-query test arena {typeof(TRequestedArena).Name}.");
+            return (TRequestedArena)arena;
+        }
+    }
+
+    private sealed class GeneratedWideQueryFixture<TArena> : IDisposable
+        where TArena : class, IChunkArenaBackend
+    {
+        internal GeneratedWideQueryFixture(int maximumChunks, int entityCapacity)
+        {
+            ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+            World = new EcsWorld<TArena>(
+                schema,
+                new EntityCapacity(entityCapacity),
+                maximumArchetypes: 3,
+                static capacity => CreateArena<TArena>(capacity),
+                maximumQueryPlans: 4);
+            ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+            ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+            ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+            ComponentId tagId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutTag>();
+            ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+
+            ArchetypeId firstId = World.RegisterArchetype(
+                [byteId, enableId, intId, wideId],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks);
+            ArchetypeId secondId = World.RegisterArchetype(
+                [byteId, enableId, intId, tagId, wideId],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks);
+            _ = World.RegisterArchetype(
+                [enableId, intId, wideId],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks);
+            First = World.GetArchetypeStorage(firstId);
+            Second = World.GetArchetypeStorage(secondId);
+            FirstByteBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutByte>(firstId, byteId);
+            FirstEnableBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(firstId, enableId);
+            FirstIntBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutInt>(firstId, intId);
+            FirstWideBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutWide>(firstId, wideId);
+            SecondByteBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutByte>(secondId, byteId);
+            SecondEnableBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(secondId, enableId);
+            SecondIntBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutInt>(secondId, intId);
+            SecondTagBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutTag>(secondId, tagId);
+            SecondWideBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutWide>(secondId, wideId);
+            ThreeReadQuery = World.PrepareReadReadReadWriteQuery<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutByte,
+                UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, byteId, enableId);
+            BalancedQuery = World.PrepareReadReadWriteWriteQuery<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutByte,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong>(wideId, byteId, intId, enableId);
+            ArchetypeQueryFilter filter = World.CreateQueryFilter([], [], [tagId], [enableId]);
+            FilteredThreeReadQuery = World.PrepareReadReadReadWriteQuery<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutByte,
+                UltraSim.ECS.Tests.LayoutEnableLong>(wideId, intId, byteId, enableId, filter);
+            FilteredBalancedQuery = World.PrepareReadReadWriteWriteQuery<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutByte,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong>(wideId, byteId, intId, enableId, filter);
+            World.Seal();
+        }
+
+        internal EcsWorld<TArena> World { get; }
+        internal ArchetypeStorage<TArena> First { get; }
+        internal ArchetypeStorage<TArena> Second { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> FirstByteBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> FirstEnableBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> FirstIntBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> FirstWideBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> SecondByteBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> SecondEnableBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> SecondIntBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutTag> SecondTagBinding { get; }
+        internal ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> SecondWideBinding { get; }
+        internal ArchetypeReadReadReadWriteQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong> ThreeReadQuery { get; }
+        internal ArchetypeReadReadWriteWriteQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> BalancedQuery { get; }
+        internal ArchetypeReadReadReadWriteQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutEnableLong> FilteredThreeReadQuery { get; }
+        internal ArchetypeReadReadWriteWriteQueryPlan<
+            TArena,
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutByte,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> FilteredBalancedQuery { get; }
+
+        public void Dispose() => World.Dispose();
+
+        private static TRequestedArena CreateArena<TRequestedArena>(ChunkArenaCapacity capacity)
+            where TRequestedArena : class, IChunkArenaBackend
+        {
+            object arena = typeof(TRequestedArena) == typeof(NativeChunkArena)
+                ? new NativeChunkArena(capacity)
+                : typeof(TRequestedArena) == typeof(PinnedChunkArena)
+                    ? new PinnedChunkArena(capacity)
+                    : throw new InvalidOperationException(
+                        $"Unsupported wide generated-query test arena {typeof(TRequestedArena).Name}.");
             return (TRequestedArena)arena;
         }
     }
