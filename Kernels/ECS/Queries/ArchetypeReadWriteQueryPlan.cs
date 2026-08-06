@@ -49,9 +49,8 @@ internal sealed class ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> :
         WriteComponentId = writeComponentId;
         _readFlags = readFlags;
         _writeFlags = writeFlags;
-        _requiredComponents = MergeRequiredComponents(
-            readComponentId,
-            writeComponentId,
+        _requiredComponents = ArchetypeQueryPlanUtilities.MergeRequiredComponents(
+            [readComponentId, writeComponentId],
             filter.RequiredComponents);
         _excludedComponents = filter.ExcludedComponents.ToArray();
         _enabledComponents = filter.EnabledComponents.ToArray();
@@ -115,11 +114,11 @@ internal sealed class ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> :
             if (!Matches(storage, out int readColumnIndex, out int writeColumnIndex))
                 continue;
 
-            ValidateColumn<TRead>(
+            ArchetypeQueryPlanUtilities.ValidateColumn<TRead>(
                 storage.Columns[readColumnIndex],
                 ReadComponentId,
                 _readFlags);
-            ValidateColumn<TWrite>(
+            ArchetypeQueryPlanUtilities.ValidateColumn<TWrite>(
                 storage.Columns[writeColumnIndex],
                 WriteComponentId,
                 _writeFlags);
@@ -132,7 +131,10 @@ internal sealed class ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> :
         }
 
         if (destination != routes.Length)
-            ThrowQueryInvariant("Query match counting and route compilation disagree.");
+        {
+            ArchetypeQueryPlanUtilities.ThrowQueryInvariant(
+                "Query match counting and route compilation disagree.");
+        }
         _routes = routes;
         _compiledArchetypeCount = registry.Count;
     }
@@ -152,96 +154,10 @@ internal sealed class ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> :
         writeColumnIndex = storage.Store.GetColumnIndex(WriteComponentId);
         return readColumnIndex >= 0 &&
             writeColumnIndex >= 0 &&
-            ContainsAll(storage.Signature, _requiredComponents) &&
-            !ContainsAny(storage.Signature, _excludedComponents);
+            ArchetypeQueryPlanUtilities.SignatureMatches(
+                storage.Signature,
+                _requiredComponents,
+                _excludedComponents);
     }
 
-    private static ComponentId[] MergeRequiredComponents(
-        ComponentId readComponentId,
-        ComponentId writeComponentId,
-        ReadOnlySpan<ComponentId> filterRequired)
-    {
-        var combined = new ComponentId[filterRequired.Length + 2];
-        filterRequired.CopyTo(combined);
-        combined[^2] = readComponentId;
-        combined[^1] = writeComponentId;
-        Array.Sort(combined);
-
-        int uniqueCount = 0;
-        for (int index = 0; index < combined.Length; index++)
-        {
-            if (uniqueCount == 0 || combined[uniqueCount - 1] != combined[index])
-                combined[uniqueCount++] = combined[index];
-        }
-        if (uniqueCount == combined.Length)
-            return combined;
-
-        var normalized = new ComponentId[uniqueCount];
-        combined.AsSpan(0, uniqueCount).CopyTo(normalized);
-        return normalized;
-    }
-
-    private static bool ContainsAll(
-        ReadOnlySpan<ComponentId> signature,
-        ReadOnlySpan<ComponentId> required)
-    {
-        int signatureIndex = 0;
-        int requiredIndex = 0;
-        while (signatureIndex < signature.Length && requiredIndex < required.Length)
-        {
-            int comparison = signature[signatureIndex].CompareTo(required[requiredIndex]);
-            if (comparison == 0)
-            {
-                signatureIndex++;
-                requiredIndex++;
-            }
-            else if (comparison < 0)
-            {
-                signatureIndex++;
-            }
-            else
-            {
-                return false;
-            }
-        }
-        return requiredIndex == required.Length;
-    }
-
-    private static bool ContainsAny(
-        ReadOnlySpan<ComponentId> signature,
-        ReadOnlySpan<ComponentId> excluded)
-    {
-        int signatureIndex = 0;
-        int excludedIndex = 0;
-        while (signatureIndex < signature.Length && excludedIndex < excluded.Length)
-        {
-            int comparison = signature[signatureIndex].CompareTo(excluded[excludedIndex]);
-            if (comparison == 0)
-                return true;
-            if (comparison < 0)
-                signatureIndex++;
-            else
-                excludedIndex++;
-        }
-        return false;
-    }
-
-    private static void ValidateColumn<T>(
-        in ComponentColumnLayout column,
-        ComponentId componentId,
-        ComponentFlags flags)
-        where T : unmanaged
-    {
-        if (column.ComponentId != componentId ||
-            column.Flags != flags ||
-            !column.HasData ||
-            column.ElementSizeBytes != Unsafe.SizeOf<T>())
-        {
-            ThrowQueryInvariant("Generated query metadata and archetype storage disagree.");
-        }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void ThrowQueryInvariant(string message) =>
-        throw new InvalidOperationException(message);
 }

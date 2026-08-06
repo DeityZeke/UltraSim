@@ -62,8 +62,10 @@ internal static class GeneratorTests
         Run(nameof(FieldBearingTag_ReportsECSGEN006), FieldBearingTag_ReportsECSGEN006);
         Run(nameof(ComponentLimit_ReservesInvalidIdAndReportsECSGEN007), ComponentLimit_ReservesInvalidIdAndReportsECSGEN007);
         Run(nameof(DuplicateComponentType_ReportsECSGEN008), DuplicateComponentType_ReportsECSGEN008);
+        Run(nameof(QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily), QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily);
+        Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
-        Console.WriteLine($"All {_passed} ECS schema-generator tests passed.");
+        Console.WriteLine($"All {_passed} ECS generator tests passed.");
     }
 
     private static void ValidSchema_MatchesCheckedInGoldenAndCompiles()
@@ -118,6 +120,37 @@ internal static class GeneratorTests
         AssertNoGeneratorErrors(generation);
         TestAssert.False(generation.Diagnostics.Any(static diagnostic => diagnostic.Id == "ECSGEN004"));
         TestAssert.True(generation.GeneratedSource.Contains("10U", StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation first = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        Generation second = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(first);
+        AssertNoGeneratorErrors(second);
+        TestAssert.Equal(first.GeneratedSource, second.GeneratedSource);
+        TestAssert.True(first.GeneratedSource.Contains(
+            "IComponentChunkReadReadWriteVisitor<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(first.GeneratedSource.Contains(
+            "ArchetypeReadReadWriteQueryPlan<TArena, TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(first.GeneratedSource.Contains(
+            "PrepareReadReadWriteQuery<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(first.GeneratedSource.Contains(
+            "ArchetypeQueryRowFilter.Bind(",
+            StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyGeneration_IsExplicitlyOptIn()
+    {
+        Generation generation = Generate(
+            "internal sealed class NoQueryFamilyMarker { }",
+            new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(string.Empty, generation.GeneratedSource);
     }
 
     private static void DuplicateCanonicalKey_ReportsECSGEN003()
@@ -221,7 +254,10 @@ internal static class GeneratorTests
             throw new InvalidOperationException("Generator failed:\n" + string.Join("\n", errors.AsEnumerable()));
     }
 
-    private static Generation Generate(string source)
+    private static Generation Generate(string source) =>
+        Generate(source, new EcsSchemaGenerator().AsSourceGenerator());
+
+    private static Generation Generate(string source, ISourceGenerator generator)
     {
         var parseOptions = new CSharpParseOptions(LanguageVersion.Latest);
         SyntaxTree syntaxTree = CSharpSyntaxTree.ParseText(source, parseOptions);
@@ -238,7 +274,6 @@ internal static class GeneratorTests
             [syntaxTree],
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        ISourceGenerator generator = new EcsSchemaGenerator().AsSourceGenerator();
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
             [generator],
             parseOptions: parseOptions);

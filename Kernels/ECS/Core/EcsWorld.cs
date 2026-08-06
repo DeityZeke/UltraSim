@@ -13,7 +13,7 @@ namespace UltraSim.ECS;
 /// allocation/plan-construction boundary and enables immediate single-owner runtime
 /// mutation. This is the minimal kernel world, not the later scheduler/host facade.
 /// </remarks>
-internal sealed class EcsWorld<TArena> : IDisposable
+internal sealed partial class EcsWorld<TArena> : IDisposable
     where TArena : class, IChunkArenaBackend
 {
     private const int MaximumSupportedQueryPlans = 1 << 20;

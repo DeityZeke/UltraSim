@@ -7,7 +7,7 @@ namespace UltraSim.ECS;
 /// Fixed-capacity, densely packed rows for one archetype. Structural methods are
 /// single-owner; disjoint occupied chunks may be processed in parallel after a barrier.
 /// </summary>
-internal sealed class ArchetypeChunkStore<TArena> : IDisposable
+internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     where TArena : class, IChunkArenaBackend
 {
     private const int NoChunk = -1;

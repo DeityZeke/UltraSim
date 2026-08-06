@@ -177,6 +177,20 @@ contiguous runs, random masks, and a future generated mask-consumer still requir
 their own matrix. The code suite now contains 54 scenarios, and the tracked
 accepted artifact remains unchanged.
 
+The first generated access-family extension adds two non-comparable 100,000-row
+scenarios over two matching archetype layouts. The generated two-read/one-write
+plan reads an eight-byte `BenchmarkPosition` plus a 64-byte `BenchmarkWide`,
+writes an eight-byte enableable `BenchmarkVelocity`, touches every wide field,
+and updates the enable bit. This is 80 effective component bytes per row before
+entity-index and enable-word traffic. A focused run measured `4.679 ns/row`
+native and `4.664 ns/row` pinned; the following full-suite run measured `4.438`
+and `4.456 ns/row`. That corresponds to roughly `17.1-18.0 GB/s` of effective
+component traffic, so the future report-level byte-throughput work is necessary
+to distinguish query overhead from cache or memory-bandwidth limits. All 56
+scenarios in the full run reported zero managed bytes and zero Gen0/1/2
+collections. The new results remain temporary directional evidence; the tracked
+accepted artifact was not replaced.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed
