@@ -16,6 +16,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     private readonly ChunkLayoutPlan _layout;
     private readonly ComponentColumnLayout[] _columns;
     private readonly ChunkRecord[] _chunks;
+    private readonly ulong[] _changeVersions;
     private int _fullHead = NoChunk;
     private int _partialHead = NoChunk;
     private int _emptyHead = NoChunk;
@@ -51,6 +52,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         _columns = ChunkLayoutValidator.CopyAndValidate(layout, columns);
         _arena = arena;
         _chunks = new ChunkRecord[arena.Capacity.MaximumChunks];
+        _changeVersions = new ulong[checked(_columns.Length * _chunks.Length)];
         for (int i = 0; i < _chunks.Length; i++)
         {
             _chunks[i].Next = NoChunk;
@@ -69,6 +71,8 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     internal long MaximumRows => (long)_chunks.Length * _layout.RowCapacity;
 
     internal bool IsDisposed => _disposed;
+
+    internal long ChangeVersionMetadataBytes => checked((long)_changeVersions.Length * sizeof(ulong));
 
     internal bool TryAdd(uint entityIndex, out ChunkRow location)
     {
@@ -165,7 +169,10 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         donor.RowCount = previousDonorCount - 1;
         _entityCount--;
         if (donor.RowCount == 0)
+        {
+            ClearChangeVersions(donorChunkIndex);
             MoveChunk(donorChunkIndex, ChunkListState.Empty);
+        }
         else if (previousDonorCount == _layout.RowCapacity)
             MoveChunk(donorChunkIndex, ChunkListState.Partial);
 
@@ -472,6 +479,37 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         return _chunks[chunkIndex].Handle;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ChangeVersion GetChangeVersion(uint chunkIndex, int columnIndex)
+    {
+        ThrowIfDisposed();
+        int index = GetChangeVersionIndex(chunkIndex, columnIndex);
+        return new ChangeVersion(_changeVersions[index]);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool HasChangedSince(
+        uint chunkIndex,
+        int columnIndex,
+        ChangeVersion baseline) =>
+        GetChangeVersion(chunkIndex, columnIndex).IsNewerThan(baseline);
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void StampChangeVersion(
+        uint chunkIndex,
+        int columnIndex,
+        ChangeVersion version)
+    {
+        ThrowIfDisposed();
+        if (!version.IsValid)
+            throw new ArgumentException("A valid nonzero change version is required.", nameof(version));
+        int index = GetChangeVersionIndex(chunkIndex, columnIndex);
+        ChunkListState state = _chunks[chunkIndex].State;
+        if (state != ChunkListState.Partial && state != ChunkListState.Full)
+            throw new ArgumentException("Only occupied chunks can be marked changed.", nameof(chunkIndex));
+        _changeVersions[index] = version.Value;
+    }
+
     internal ArchetypeChunkSnapshot GetSnapshot() => new(
         _entityCount,
         _layout.RowCapacity,
@@ -481,6 +519,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         _partialChunkCount,
         _emptyChunkCount,
         Unsafe.SizeOf<ChunkRecord>(),
+        ChangeVersionMetadataBytes,
         _disposed);
 
     internal void ValidateInvariants()
@@ -498,12 +537,14 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 case ChunkListState.Unallocated:
                     if (chunk.Handle.IsValid || chunk.RowCount != 0)
                         ThrowInvariant("An unallocated chunk contains state.");
+                    ValidateNoChangeVersions(index);
                     break;
                 case ChunkListState.Empty:
                     acquired++;
                     empty++;
                     if (!chunk.Handle.IsValid || chunk.RowCount != 0)
                         ThrowInvariant("An empty chunk has an invalid handle or nonzero rows.");
+                    ValidateNoChangeVersions(index);
                     break;
                 case ChunkListState.Partial:
                     acquired++;
@@ -578,6 +619,33 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
 
         MoveChunk(chunkIndex, ChunkListState.Partial);
         return chunkIndex;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private int GetChangeVersionIndex(uint chunkIndex, int columnIndex)
+    {
+        if (chunkIndex >= unchecked((uint)_chunks.Length))
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+        if (unchecked((uint)columnIndex) >= unchecked((uint)_columns.Length))
+            throw new ArgumentOutOfRangeException(nameof(columnIndex));
+        if (_chunks[chunkIndex].State == ChunkListState.Unallocated)
+            throw new ArgumentException("The chunk has not been acquired by this store.", nameof(chunkIndex));
+        return checked((columnIndex * _chunks.Length) + (int)chunkIndex);
+    }
+
+    private void ClearChangeVersions(int chunkIndex)
+    {
+        for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
+            _changeVersions[(columnIndex * _chunks.Length) + chunkIndex] = 0;
+    }
+
+    private void ValidateNoChangeVersions(int chunkIndex)
+    {
+        for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
+        {
+            if (_changeVersions[(columnIndex * _chunks.Length) + chunkIndex] != 0)
+                ThrowInvariant("An empty or unallocated chunk retains component change versions.");
+        }
     }
 
     private void InitializeRows(Span<byte> chunk, int startRow, int count)

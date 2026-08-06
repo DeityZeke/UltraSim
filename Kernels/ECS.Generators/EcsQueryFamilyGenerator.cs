@@ -710,6 +710,8 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("EnterChunkVisit();");
         writer.Open("try");
         writer.Line("int visitedRows = 0;");
+        if (family.WriteCount != 0)
+            writer.Line("ChangeVersion writeVersion = default;");
         writer.Line($"global::System.ReadOnlySpan<{family.RouteType}<TArena>> routes = plan.Routes;");
         writer.Open("for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)");
         writer.Line($"ref readonly {family.RouteType}<TArena> route = ref routes[routeIndex];");
@@ -750,6 +752,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             writer.Line($"bound.{family.Slots[index].EnableProperty}{suffix}");
         }
         writer.Unindent();
+        AppendWriteStamp(writer, family, filtered: false);
         writer.Line("visitor.Execute(in chunk);");
         writer.Line("visitedRows += chunk.Count;");
         writer.Close();
@@ -758,6 +761,8 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Indent();
         writer.Line("route,");
         writer.Line("bound,");
+        if (family.WriteCount != 0)
+            writer.Line("ref writeVersion,");
         writer.Line("ref visitor);");
         writer.Unindent();
         writer.Close();
@@ -778,6 +783,8 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Indent();
         writer.Line($"in {family.RouteType}<TArena> route,");
         writer.Line($"in {family.BoundChunkType}<{family.TypeParameters}> bound,");
+        if (family.WriteCount != 0)
+            writer.Line("ref ChangeVersion writeVersion,");
         writer.Line("ref TVisitor visitor)");
         writer.Unindent();
         AppendComponentConstraints(writer, family);
@@ -787,6 +794,8 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("int pendingStart = -1;");
         writer.Line("int pendingEnd = -1;");
         writer.Line("int matchedRows = 0;");
+        if (family.WriteCount != 0)
+            writer.Line("bool stamped = false;");
         writer.Line("int wordCount = (rowCount + 63) >> 6;");
         writer.Open("for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)");
         writer.Line("ulong mask = route.GetMatchingRowMask(bound.ChunkBytes, wordIndex);");
@@ -811,6 +820,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("pendingEnd = runEnd;");
         writer.Close();
         writer.Open("else");
+        AppendWriteStamp(writer, family, filtered: true);
         writer.Line($"Execute{family.Name}Range(");
         writer.Indent();
         writer.Line("route,");
@@ -834,6 +844,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Close();
         writer.Line();
         writer.Open("if (pendingStart >= 0)");
+        AppendWriteStamp(writer, family, filtered: true);
         writer.Line($"Execute{family.Name}Range(");
         writer.Indent();
         writer.Line("route,");
@@ -882,6 +893,40 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Unindent();
         writer.Line("visitor.Execute(in chunk);");
         writer.Close();
+    }
+
+    private static void AppendWriteStamp(
+        CodeWriter writer,
+        QueryFamilySpec family,
+        bool filtered)
+    {
+        if (family.WriteCount == 0)
+            return;
+
+        if (filtered)
+            writer.Open("if (!stamped)");
+        writer.Line("if (!writeVersion.IsValid)");
+        writer.Indent();
+        writer.Line("writeVersion = AdvanceChangeVersion();");
+        writer.Unindent();
+        string store = filtered ? "route.Storage.Store" : "store";
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            AccessSlot slot = family.Slots[index];
+            if (!slot.IsWrite)
+                continue;
+            writer.Line($"{store}.StampChangeVersion(");
+            writer.Indent();
+            writer.Line("bound.ChunkIndex,");
+            writer.Line($"route.{slot.ColumnProperty},");
+            writer.Line("writeVersion);");
+            writer.Unindent();
+        }
+        if (filtered)
+        {
+            writer.Line("stamped = true;");
+            writer.Close();
+        }
     }
 
     private static void AppendPlanValidation(CodeWriter writer, QueryFamilySpec family)

@@ -149,6 +149,14 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_GeneratedWideFamiliesRandomizedModelRemainsConsistent), EcsWorld_GeneratedWideFamiliesRandomizedModelRemainsConsistent);
         Run(nameof(EcsWorld_GeneratedWideFamiliesNativePinnedParity), EcsWorld_GeneratedWideFamiliesNativePinnedParity);
         Run(nameof(EcsWorld_WarmedGeneratedWideFamiliesAllocateZeroManagedBytes), EcsWorld_WarmedGeneratedWideFamiliesAllocateZeroManagedBytes);
+        Run(nameof(ChangeVersion_LayoutOrderingAndWrapAreExplicit), ChangeVersion_LayoutOrderingAndWrapAreExplicit);
+        Run(nameof(ArchetypeChunkStore_ChangeVersionsAreBoundedAndResetOnEmpty), ArchetypeChunkStore_ChangeVersionsAreBoundedAndResetOnEmpty);
+        Run(nameof(EcsWorld_ScalarWritesAdvanceAndStampExactComponent), EcsWorld_ScalarWritesAdvanceAndStampExactComponent);
+        Run(nameof(EcsWorld_ReadOnlyQueriesDoNotAdvanceOrStamp), EcsWorld_ReadOnlyQueriesDoNotAdvanceOrStamp);
+        Run(nameof(EcsWorld_DenseGeneratedWritesStampEveryVisitedChunk), EcsWorld_DenseGeneratedWritesStampEveryVisitedChunk);
+        Run(nameof(EcsWorld_FilteredGeneratedWritesStampOnlyMatchedChunks), EcsWorld_FilteredGeneratedWritesStampOnlyMatchedChunks);
+        Run(nameof(EcsWorld_ChangeVersionNativePinnedParity), EcsWorld_ChangeVersionNativePinnedParity);
+        Run(nameof(EcsWorld_WarmedTrackedWritesAndReadsAllocateZeroManagedBytes), EcsWorld_WarmedTrackedWritesAndReadsAllocateZeroManagedBytes);
 
         Console.WriteLine($"All {_passed} ECS Next runtime/primitive tests passed.");
     }
@@ -5726,6 +5734,447 @@ internal static class EcsPrimitiveTests
             checksum = unchecked(checksum + threeRead.Checksum + balanced.Checksum);
         }
         return unchecked(checksum + threeRead.Rows + balanced.Rows);
+    }
+
+    private static void ChangeVersion_LayoutOrderingAndWrapAreExplicit()
+    {
+        Assert.Equal(8, Unsafe.SizeOf<ChangeVersion>());
+        Assert.Equal(8, Marshal.SizeOf<ChangeVersion>());
+        Assert.False(ChangeVersion.None.IsValid);
+        Assert.Equal(0UL, ChangeVersion.None.Value);
+        Assert.Equal(new ChangeVersion(1), ChangeVersion.None.Next());
+        Assert.Equal(new ChangeVersion(1), new ChangeVersion(ulong.MaxValue).Next());
+        Assert.True(new ChangeVersion(7).IsNewerThan(ChangeVersion.None));
+        Assert.True(new ChangeVersion(8).IsNewerThan(new ChangeVersion(7)));
+        Assert.False(new ChangeVersion(7).IsNewerThan(new ChangeVersion(7)));
+        Assert.True(new ChangeVersion(1).IsNewerThan(new ChangeVersion(ulong.MaxValue)));
+        Assert.True(new ChangeVersion(ulong.MaxValue).IsNewerThan(new ChangeVersion(ulong.MaxValue - 1UL)));
+        Assert.True(new ChangeVersion(1UL << 63).IsNewerThan(ChangeVersion.None.Next()));
+        Assert.False(new ChangeVersion((1UL << 63) + 1UL).IsNewerThan(ChangeVersion.None.Next()));
+        Assert.False(new ChangeVersion(1).IsNewerThan(new ChangeVersion((1UL << 63) - 1UL)));
+        Assert.False(ChangeVersion.None.IsNewerThan(new ChangeVersion(1)));
+    }
+
+    private static void ArchetypeChunkStore_ChangeVersionsAreBoundedAndResetOnEmpty()
+    {
+        using ArchetypeChunkStore<NativeChunkArena> store = CreateArchetypeStore<NativeChunkArena>(
+            maximumChunks: 2,
+            out _,
+            out ComponentColumnLayout[] columns);
+        ArchetypeChunkSnapshot cold = store.GetSnapshot();
+        Assert.Equal((long)columns.Length * 2 * sizeof(ulong), cold.ChangeVersionMetadataBytes);
+        Assert.Equal(cold.ChunkMetadataBytes + cold.ChangeVersionMetadataBytes, cold.TotalMetadataBytes);
+        Assert.True(store.TryAdd(41, out ChunkRow row));
+        int wideColumn = FindColumnIndex(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        int intColumn = FindColumnIndex(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>());
+        Assert.Equal(ChangeVersion.None, store.GetChangeVersion(row.ChunkIndex, wideColumn));
+        store.StampChangeVersion(row.ChunkIndex, wideColumn, new ChangeVersion(7));
+        store.StampChangeVersion(row.ChunkIndex, intColumn, new ChangeVersion(9));
+        Assert.Equal(new ChangeVersion(7), store.GetChangeVersion(row.ChunkIndex, wideColumn));
+        Assert.Equal(new ChangeVersion(9), store.GetChangeVersion(row.ChunkIndex, intColumn));
+        Assert.True(store.HasChangedSince(row.ChunkIndex, wideColumn, new ChangeVersion(6)));
+        Assert.False(store.HasChangedSince(row.ChunkIndex, wideColumn, new ChangeVersion(7)));
+        Assert.Throws<ArgumentException>(() =>
+            store.StampChangeVersion(row.ChunkIndex, wideColumn, ChangeVersion.None));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            store.GetChangeVersion(row.ChunkIndex, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            store.GetChangeVersion(uint.MaxValue, wideColumn));
+
+        Assert.True(store.TryRemove(row, 41, out ChunkRowRelocation relocation));
+        Assert.False(relocation.HasValue);
+        Assert.Equal(ChangeVersion.None, store.GetChangeVersion(row.ChunkIndex, wideColumn));
+        Assert.Equal(ChangeVersion.None, store.GetChangeVersion(row.ChunkIndex, intColumn));
+        Assert.True(store.TryAdd(42, out ChunkRow reused));
+        Assert.Equal(row.ChunkIndex, reused.ChunkIndex);
+        Assert.Equal(ChangeVersion.None, store.GetChangeVersion(reused.ChunkIndex, wideColumn));
+        store.ValidateInvariants();
+    }
+
+    private static void EcsWorld_ScalarWritesAdvanceAndStampExactComponent()
+    {
+        using var fixture = new GeneratedQueryFixture<NativeChunkArena>(1, 4);
+        Assert.Equal(ChangeVersion.None, fixture.World.CurrentChangeVersion);
+        Assert.True(fixture.World.TryCreateDefault(fixture.First.Id, out Entity entity));
+        Assert.True(fixture.World.TryGetLocation(entity, out EntityLocation location));
+        Assert.Equal(ChangeVersion.None,
+            fixture.World.GetChunkChangeVersion(fixture.FirstIntBinding, location.ChunkRow.ChunkIndex));
+
+        Assert.True(fixture.World.TrySetComponent(
+            entity,
+            fixture.FirstIntBinding,
+            new UltraSim.ECS.Tests.LayoutInt { Value = 17 }));
+        Assert.Equal(new ChangeVersion(1), fixture.World.CurrentChangeVersion);
+        Assert.Equal(new ChangeVersion(1),
+            fixture.World.GetChunkChangeVersion(fixture.FirstIntBinding, location.ChunkRow.ChunkIndex));
+        Assert.Equal(ChangeVersion.None,
+            fixture.World.GetChunkChangeVersion(fixture.FirstWideBinding, location.ChunkRow.ChunkIndex));
+
+        Assert.True(fixture.World.TrySetComponentEnabled(entity, fixture.FirstEnableBinding, false));
+        Assert.Equal(new ChangeVersion(2), fixture.World.CurrentChangeVersion);
+        Assert.Equal(new ChangeVersion(2),
+            fixture.World.GetChunkChangeVersion(fixture.FirstEnableBinding, location.ChunkRow.ChunkIndex));
+        Assert.False(fixture.World.TrySetComponent(Entity.Null, fixture.FirstIntBinding, default));
+        Assert.Equal(new ChangeVersion(2), fixture.World.CurrentChangeVersion);
+
+        Assert.True(fixture.World.TryCreateInitialized(
+            fixture.First.Id,
+            fixture.FirstWideBinding,
+            new UltraSim.ECS.Tests.LayoutWide { A = 99 },
+            out Entity initialized));
+        Assert.True(fixture.World.TryGetLocation(initialized, out EntityLocation initializedLocation));
+        Assert.Equal(new ChangeVersion(3), fixture.World.CurrentChangeVersion);
+        Assert.Equal(new ChangeVersion(3), fixture.World.GetChunkChangeVersion(
+            fixture.FirstWideBinding,
+            initializedLocation.ChunkRow.ChunkIndex));
+
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        using var wrapping = new EcsWorld<NativeChunkArena>(
+            schema,
+            new EntityCapacity(1),
+            maximumArchetypes: 1,
+            static capacity => new NativeChunkArena(capacity),
+            maximumQueryPlans: 0,
+            initialChangeVersion: new ChangeVersion(ulong.MaxValue));
+        ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ArchetypeId archetype = wrapping.RegisterArchetype(
+            [intId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> binding =
+            wrapping.BindComponent<UltraSim.ECS.Tests.LayoutInt>(archetype, intId);
+        wrapping.Seal();
+        Assert.True(wrapping.TryCreateDefault(archetype, out Entity wrappedEntity));
+        Assert.True(wrapping.TrySetComponent(
+            wrappedEntity,
+            binding,
+            new UltraSim.ECS.Tests.LayoutInt { Value = 1 }));
+        Assert.Equal(new ChangeVersion(1), wrapping.CurrentChangeVersion);
+    }
+
+    private static void EcsWorld_ReadOnlyQueriesDoNotAdvanceOrStamp()
+    {
+        const int entityCount = 1_000;
+        using var fixture = new GeneratedQueryFixture<NativeChunkArena>(8, entityCount);
+        for (int i = 0; i < entityCount; i++)
+        {
+            bool first = (i & 1) == 0;
+            ArchetypeStorage<NativeChunkArena> storage = first ? fixture.First : fixture.Second;
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> wideBinding = first
+                ? fixture.FirstWideBinding
+                : fixture.SecondWideBinding;
+            ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> intBinding = first
+                ? fixture.FirstIntBinding
+                : fixture.SecondIntBinding;
+            Assert.True(fixture.World.TryCreateInitialized(
+                storage.Id,
+                wideBinding,
+                new UltraSim.ECS.Tests.LayoutWide { A = i + 1L },
+                out Entity entity));
+            Assert.True(fixture.World.TrySetComponent(
+                entity,
+                intBinding,
+                new UltraSim.ECS.Tests.LayoutInt { Value = i + 3 }));
+        }
+        ChangeVersion baseline = fixture.World.CurrentChangeVersion;
+        var visitor = new WideIntGeneratedReadVisitor(fixture.First.Id, fixture.Second.Id, 17);
+        Assert.Equal(entityCount, fixture.World.VisitReadReadChunks(fixture.ReadQuery, ref visitor));
+        Assert.Equal(baseline, fixture.World.CurrentChangeVersion);
+        AssertReadBindingsNotChangedSince(
+            fixture.World,
+            fixture.First,
+            fixture.FirstWideBinding,
+            fixture.FirstIntBinding,
+            baseline);
+        AssertReadBindingsNotChangedSince(
+            fixture.World,
+            fixture.Second,
+            fixture.SecondWideBinding,
+            fixture.SecondIntBinding,
+            baseline);
+    }
+
+    private static void EcsWorld_DenseGeneratedWritesStampEveryVisitedChunk()
+    {
+        const int entityCount = 2_000;
+        using var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(8, entityCount);
+        for (int i = 0; i < entityCount; i++)
+            _ = CreateGeneratedWideEntity(fixture, (i & 1) == 0, i);
+        ChangeVersion baseline = fixture.World.CurrentChangeVersion;
+        var balanced = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 41);
+        Assert.Equal(entityCount,
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref balanced));
+        ChangeVersion balancedVersion = baseline.Next();
+        Assert.Equal(balancedVersion, fixture.World.CurrentChangeVersion);
+        AssertWideWriteVersions(
+            fixture.World,
+            fixture.First,
+            fixture.FirstWideBinding,
+            fixture.FirstByteBinding,
+            fixture.FirstIntBinding,
+            fixture.FirstEnableBinding,
+            baseline,
+            balancedVersion,
+            expectIntWrite: true);
+        AssertWideWriteVersions(
+            fixture.World,
+            fixture.Second,
+            fixture.SecondWideBinding,
+            fixture.SecondByteBinding,
+            fixture.SecondIntBinding,
+            fixture.SecondEnableBinding,
+            baseline,
+            balancedVersion,
+            expectIntWrite: true);
+
+        var threeRead = new ThreeReadWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 73);
+        Assert.Equal(entityCount,
+            fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref threeRead));
+        ChangeVersion threeReadVersion = balancedVersion.Next();
+        Assert.Equal(threeReadVersion, fixture.World.CurrentChangeVersion);
+        AssertWideWriteVersions(
+            fixture.World,
+            fixture.First,
+            fixture.FirstWideBinding,
+            fixture.FirstByteBinding,
+            fixture.FirstIntBinding,
+            fixture.FirstEnableBinding,
+            balancedVersion,
+            threeReadVersion,
+            expectIntWrite: false);
+        AssertWideWriteVersions(
+            fixture.World,
+            fixture.Second,
+            fixture.SecondWideBinding,
+            fixture.SecondByteBinding,
+            fixture.SecondIntBinding,
+            fixture.SecondEnableBinding,
+            balancedVersion,
+            threeReadVersion,
+            expectIntWrite: false);
+
+        var throwing = new ThrowingGeneratedWideVisitor();
+        Assert.Throws<ChunkVisitorSentinelException>(() =>
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref throwing));
+        ChangeVersion exceptionVersion = threeReadVersion.Next();
+        Assert.Equal(exceptionVersion, fixture.World.CurrentChangeVersion);
+        int firstChunk = fixture.First.Store.GetFirstOccupiedChunkIndex();
+        Assert.True(firstChunk >= 0);
+        Assert.Equal(exceptionVersion, fixture.World.GetChunkChangeVersion(
+            fixture.FirstIntBinding,
+            (uint)firstChunk));
+        Assert.Equal(exceptionVersion, fixture.World.GetChunkChangeVersion(
+            fixture.FirstEnableBinding,
+            (uint)firstChunk));
+    }
+
+    private static void EcsWorld_FilteredGeneratedWritesStampOnlyMatchedChunks()
+    {
+        using var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(2, 2_000);
+        int rowCapacity = fixture.Second.Store.Layout.RowCapacity;
+        var entities = new Entity[rowCapacity + 1];
+        for (int i = 0; i < entities.Length; i++)
+            entities[i] = CreateGeneratedWideEntity(fixture, first: false, i);
+        for (int i = 0; i < rowCapacity; i++)
+            Assert.True(fixture.World.TrySetComponentEnabled(
+                entities[i], fixture.SecondTagBinding, false));
+        Assert.True(fixture.World.TrySetComponentEnabled(
+            entities[^1], fixture.SecondEnableBinding, false));
+        Assert.True(fixture.World.TryGetLocation(entities[0], out EntityLocation unmatchedLocation));
+        Assert.True(fixture.World.TryGetLocation(entities[^1], out EntityLocation matchedLocation));
+        Assert.NotEqual(unmatchedLocation.ChunkRow.ChunkIndex, matchedLocation.ChunkRow.ChunkIndex);
+        ChangeVersion baseline = fixture.World.CurrentChangeVersion;
+        var visitor = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 19);
+        Assert.Equal(1, fixture.World.VisitReadReadWriteWriteChunks(
+            fixture.FilteredBalancedQuery,
+            ref visitor));
+        ChangeVersion written = baseline.Next();
+        Assert.Equal(written, fixture.World.CurrentChangeVersion);
+        Assert.False(fixture.World.HasChunkChangedSince(
+            fixture.SecondIntBinding,
+            unmatchedLocation.ChunkRow.ChunkIndex,
+            baseline));
+        Assert.False(fixture.World.HasChunkChangedSince(
+            fixture.SecondEnableBinding,
+            unmatchedLocation.ChunkRow.ChunkIndex,
+            baseline));
+        Assert.Equal(written, fixture.World.GetChunkChangeVersion(
+            fixture.SecondIntBinding,
+            matchedLocation.ChunkRow.ChunkIndex));
+        Assert.Equal(written, fixture.World.GetChunkChangeVersion(
+            fixture.SecondEnableBinding,
+            matchedLocation.ChunkRow.ChunkIndex));
+
+        Assert.True(fixture.World.TrySetComponentEnabled(
+            entities[^1], fixture.SecondTagBinding, false));
+        ChangeVersion allUnmatchedBaseline = fixture.World.CurrentChangeVersion;
+        var noMatches = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 23);
+        Assert.Equal(0, fixture.World.VisitReadReadWriteWriteChunks(
+            fixture.FilteredBalancedQuery,
+            ref noMatches));
+        Assert.Equal(allUnmatchedBaseline, fixture.World.CurrentChangeVersion);
+    }
+
+    private static void EcsWorld_ChangeVersionNativePinnedParity()
+    {
+        long native = RunChangeVersionParity<NativeChunkArena>();
+        long pinned = RunChangeVersionParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void EcsWorld_WarmedTrackedWritesAndReadsAllocateZeroManagedBytes()
+    {
+        const int entityCount = 1_000;
+        const int rounds = 5_000;
+        using var fixture = new GeneratedWideQueryFixture<NativeChunkArena>(8, entityCount);
+        for (int i = 0; i < entityCount; i++)
+            _ = CreateGeneratedWideEntity(fixture, (i & 1) == 0, i);
+        int firstChunk = fixture.First.Store.GetFirstOccupiedChunkIndex();
+        var write = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 0);
+        var read = new ThreeReadWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 0);
+        for (int i = 0; i < 32; i++)
+        {
+            write.Salt = i;
+            read.Salt = i;
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref write);
+            _ = fixture.World.GetChunkChangeVersion(fixture.FirstIntBinding, (uint)firstChunk);
+            fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref read);
+        }
+
+        bool valid = true;
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 0; round < rounds; round++)
+        {
+            ChangeVersion baseline = fixture.World.CurrentChangeVersion;
+            write.Salt = round * 17L;
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref write);
+            valid &= fixture.World.HasChunkChangedSince(
+                fixture.FirstIntBinding,
+                (uint)firstChunk,
+                baseline);
+            ChangeVersion afterWrite = fixture.World.CurrentChangeVersion;
+            read.Salt = round * 19L;
+            fixture.World.VisitReadReadReadWriteChunks(fixture.ThreeReadQuery, ref read);
+            valid &= fixture.World.CurrentChangeVersion == afterWrite.Next();
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(valid);
+        Assert.True(write.Checksum != 0);
+        Assert.True(read.Checksum != 0);
+    }
+
+    private static long RunChangeVersionParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int entityCount = 1_000;
+        using var fixture = new GeneratedWideQueryFixture<TArena>(8, entityCount);
+        for (int i = 0; i < entityCount; i++)
+            _ = CreateGeneratedWideEntity(fixture, (i & 1) == 0, i);
+        ChangeVersion baseline = fixture.World.CurrentChangeVersion;
+        var balanced = new BalancedWideGeneratedVisitor(
+            fixture.First.Id,
+            fixture.Second.Id,
+            salt: 31);
+        Assert.Equal(entityCount,
+            fixture.World.VisitReadReadWriteWriteChunks(fixture.BalancedQuery, ref balanced));
+        long checksum = unchecked((long)fixture.World.CurrentChangeVersion.Value + balanced.Checksum);
+        for (int chunk = fixture.First.Store.GetFirstOccupiedChunkIndex();
+             chunk >= 0;
+             chunk = fixture.First.Store.GetNextOccupiedChunkIndex(chunk))
+        {
+            checksum = unchecked(checksum + (long)fixture.World.GetChunkChangeVersion(
+                fixture.FirstIntBinding,
+                (uint)chunk).Value);
+            checksum = unchecked(checksum + (fixture.World.HasChunkChangedSince(
+                fixture.FirstEnableBinding,
+                (uint)chunk,
+                baseline) ? 1 : 0));
+        }
+        for (int chunk = fixture.Second.Store.GetFirstOccupiedChunkIndex();
+             chunk >= 0;
+             chunk = fixture.Second.Store.GetNextOccupiedChunkIndex(chunk))
+        {
+            checksum = unchecked(checksum + (long)fixture.World.GetChunkChangeVersion(
+                fixture.SecondIntBinding,
+                (uint)chunk).Value);
+            checksum = unchecked(checksum + (fixture.World.HasChunkChangedSince(
+                fixture.SecondEnableBinding,
+                (uint)chunk,
+                baseline) ? 1 : 0));
+        }
+        return checksum;
+    }
+
+    private static void AssertReadBindingsNotChangedSince<TArena>(
+        EcsWorld<TArena> world,
+        ArchetypeStorage<TArena> storage,
+        in ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> wideBinding,
+        in ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> intBinding,
+        ChangeVersion baseline)
+        where TArena : class, IChunkArenaBackend
+    {
+        for (int chunk = storage.Store.GetFirstOccupiedChunkIndex();
+             chunk >= 0;
+             chunk = storage.Store.GetNextOccupiedChunkIndex(chunk))
+        {
+            Assert.False(world.HasChunkChangedSince(wideBinding, (uint)chunk, baseline));
+            Assert.False(world.HasChunkChangedSince(intBinding, (uint)chunk, baseline));
+        }
+    }
+
+    private static void AssertWideWriteVersions<TArena>(
+        EcsWorld<TArena> world,
+        ArchetypeStorage<TArena> storage,
+        in ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> wideBinding,
+        in ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutByte> byteBinding,
+        in ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> intBinding,
+        in ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> enableBinding,
+        ChangeVersion baseline,
+        ChangeVersion expectedWriteVersion,
+        bool expectIntWrite)
+        where TArena : class, IChunkArenaBackend
+    {
+        for (int chunk = storage.Store.GetFirstOccupiedChunkIndex();
+             chunk >= 0;
+             chunk = storage.Store.GetNextOccupiedChunkIndex(chunk))
+        {
+            uint chunkIndex = (uint)chunk;
+            Assert.False(world.HasChunkChangedSince(wideBinding, chunkIndex, baseline));
+            Assert.False(world.HasChunkChangedSince(byteBinding, chunkIndex, baseline));
+            if (expectIntWrite)
+                Assert.Equal(expectedWriteVersion, world.GetChunkChangeVersion(intBinding, chunkIndex));
+            else
+                Assert.False(world.HasChunkChangedSince(intBinding, chunkIndex, baseline));
+            Assert.Equal(expectedWriteVersion, world.GetChunkChangeVersion(enableBinding, chunkIndex));
+        }
     }
 
     private static Entity CreateGeneratedWideEntity<TArena>(

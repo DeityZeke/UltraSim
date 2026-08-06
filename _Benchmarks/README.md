@@ -66,8 +66,11 @@ The executable archetype-row extension adds six paired scenarios over a normal
 Reports also embed a cold fact for each backend. At 100,000 normal-layout rows,
 the current plan uses 63 chunks with 1,600 rows each, 2,064,384 payload bytes,
 1,764 bytes of 28-byte per-chunk records, and an eight-byte local `ChunkRow`.
-The entity pool now combines that row with a four-byte world-local `ArchetypeId`
-in a 12-byte `EntityLocation`; final packing remains benchmark-driven.
+The dense-version extension additionally reports 1,512 bytes for three component
+columns by 63 possible chunks by eight bytes, or 3,276 total store metadata bytes
+before managed object/array headers. The entity pool combines the row with a
+four-byte world-local `ArchetypeId` in a 12-byte `EntityLocation`; final packing
+remains benchmark-driven.
 
 All six measured zero managed bytes and zero collections. Bulk creation is
 approximately `1.3-1.5 ns/row` for both backends and remains sensitive to run
@@ -230,6 +233,36 @@ velocity. Focused runs measured 3R1W at `5.269-5.371 ns/row` and 2R2W at
 respectively. Equal logical width makes this cleaner directional evidence of
 write-distribution cost than comparisons between different component widths.
 All 64 scenarios reported zero managed allocation and zero Gen0/1/2 collections.
+
+The initial dense-change-version extension adds two unchanged-column scan
+scenarios and makes all pre-existing writable query benchmarks pay the real
+conservative stamp cost. Each store preallocates one eight-byte stamp per physical
+component column per possible chunk; report facts expose change-version bytes and
+total store metadata separately. One generated writable visit lazily advances one
+world version and stamps every exposed writable column once per visited chunk.
+Read-only execution performs no version work, and filtered execution stamps only
+chunks with matching rows. The scan uses `BenchmarkPosition`, which is initialized
+before its baseline and is not written by any preceding timed scenario, avoiding
+fixture-order contamination.
+
+Four v17 full captures measured tracked 3R1W across `5.029-5.234 ns/row` and
+tracked 2R2W across `5.804-5.966 ns/row`, versus the documented v16 full ranges
+of `5.049-5.099` and `5.807-5.811`. Paired native/pinned differences span roughly
+`-1.4%` through `+3.7%` for 3R1W and `-0.1%` through `+2.7%` for 2R2W. The
+spread is larger than the apparent cost, so these runs demonstrate no material
+regression but do not prove zero overhead; repeated isolated A/B processes are
+required for that claim.
+
+The unchanged-position scenario performs 64 complete sweeps of 552 occupied
+chunks per measured iteration (`35,328` checks) so timer granularity does not
+dominate. Three isolated focused processes measured native at
+`44.3-45.7 ns/chunk`; pinned measured `44.4-46.1` in two processes with one
+`55.0 ns/chunk` tail. A later full-suite pass measured approximately `25.0`
+ns/chunk, exposing substantial process/order/cache state rather than a credible
+instant speedup. The current path includes world/binding validation per chunk and
+does not predict a future prebound changed-filter scan. Every 66-scenario full
+capture reported zero managed allocation and zero Gen0/1/2 collections. The
+tracked accepted artifact remains unchanged.
 
 These 100,000-row figures may be strongly cache-resident on the test machine and
 must not be labeled true main-memory bandwidth. The benchmark recommendations

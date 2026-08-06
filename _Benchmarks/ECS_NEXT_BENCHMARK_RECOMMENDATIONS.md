@@ -164,6 +164,36 @@ parallel execution consistently, cover all rows exactly once, create no undersiz
 jobs except an unavoidable tail, honor dependencies, and remain correct when
 measurements suggest that a previously expected crossover is wrong.
 
+## Dense change-tracking matrix
+
+The initial v17 guard now measures conservative stamp overhead inside the existing
+3R1W and 2R2W traversals and an unchanged-position scan across two archetypes. It
+is only a foothold: the current scan performs world/binding validation for every
+chunk, uses one 100,000-row working set, and has no consumer cursor or changed-since
+query plan. Preserve it as the old V3 point when the prebound path arrives.
+
+The full change-version matrix should vary independently:
+
+- working-set sizes from the common 1K-through-10M cache ladder;
+- one large archetype versus many small archetypes with the same row count;
+- one, two, four, and wide writable-column sets;
+- 0%, 1%, 10%, 35%, and 100% changed chunks;
+- contiguous versus scattered changed chunks;
+- one, two, and many independent consumer cursors;
+- scan only, scan plus query execution, and scan plus serialization;
+- version metadata layouts, including the current column-major baseline;
+- wrap-boundary correctness outside timing and ordinary steady versions inside
+  timing.
+
+Report nanoseconds per scanned chunk, nanoseconds per returned row, false-positive
+rows caused by dense chunk granularity, version-metadata bytes, total retained
+bytes, allocations, collections, and physical/logical bandwidth. Tests must prove
+that unchanged columns are skipped, all relevant chunks are found, read-only
+queries do not perturb cursors, filtered all-unmatched writes do not advance the
+world, and slow consumers remain independent. Compare sparse row masks only after
+both paths produce an equivalent consumer result; lower scan time is irrelevant if
+one path silently serializes substantially more rows.
+
 ## V2-to-V3 comparison adapters
 
 Add exact cross-generation adapters as corresponding V3 features become real.

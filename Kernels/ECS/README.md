@@ -101,6 +101,22 @@ allocation:
   execution for all five access shapes. The 2R0W view exposes only read-only
   component spans and enable-state reads; it has no generated writable span or
   enable setter.
+- `ChangeVersion` is an eight-byte world-local sequence with zero reserved for
+  "never changed," explicit maximum-to-one wrap behavior, and half-range
+  changed-since comparison. Every archetype store preallocates one 64-bit stamp
+  per physical component column per possible chunk in column-major order. Empty
+  chunk reuse clears every stamp, and cold snapshots report this memory separately
+  from the existing 28-byte chunk records.
+- Successful scalar value writes, enable-state writes, initialized creation, the
+  handwritten writable visitors, and every generated family with at least one
+  writable slot now conservatively stamp the affected columns. One invocation
+  lazily acquires one version and shares it across its visited chunks and writable
+  columns; filtered visits stamp only chunks that expose at least one matching
+  row, and stamping happens before the visitor so exceptions cannot hide a
+  possibly partial write. Read-only families neither advance nor stamp versions.
+  This is the initial dense substrate, not yet a public changed-since query,
+  sparse row mask, independent consumer cursor, lifecycle event stream, or
+  complete structural-change tracker.
 - Unsigned one-branch range checks now use explicit `unchecked` normalization.
   This preserves negative-index rejection as `ArgumentOutOfRangeException` under
   the kernel's project-wide checked arithmetic instead of paying for or surfacing
@@ -161,7 +177,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 137 passing tests, including
+The current runtime and primitive suite has 145 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -179,7 +195,7 @@ lookups. Migration tests cover retained data and enable state, added-component
 defaults, removed components, source donor relocation, stale-plan and bounded
 destination rejection, 30,000 randomized bidirectional moves, native/pinned byte
 equivalence, and 100,000 warmed allocation-free migration cycles. The generator
-suite has 19 passing tests. Composed-world tests cover lifecycle ordering,
+suite has 20 passing tests. Composed-world tests cover lifecycle ordering,
 owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
 generation reuse, donor repair, cross-world plan and entity isolation, 30,000
 randomized create/transition/destroy operations, native/pinned parity, and 100,000
@@ -209,16 +225,23 @@ randomized state parity; native/pinned equivalence; and ten million warmed
 allocation-free row visits across all five shapes. The wider-family tests exercise
 four distinct component slots, two matching layouts, a structurally excluded
 layout, filtered execution, randomized state, and a joint ten-million-row warmed
-allocation gate.
+allocation gate. Dense-change tests lock the eight-byte version layout and wrap
+ordering, exact bounded metadata size, empty-chunk reset, exact scalar-column
+stamping, read-only noninterference, multi-column/multi-chunk generated writes,
+filtered unmatched-chunk suppression, stamp-before-exception behavior,
+native/pinned parity, and warmed zero-allocation tracked reads and writes. A
+generator source-shape assertion confirms that read-only families emit no
+tracking work while every writable slot emits a stamp.
 
 This is now a minimal internal component/archetype world, not yet the public
 scheduler/host facade. The current generators emit the core manifest and a
 systematic catalog currently containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W
 families. Further arities should now be added only when real system signatures
-require them. The next natural query work is generated per-chunk tracked-write
-versions and change versions before
-writable views become public.
-Optional/change filters, bounded deferred structural commands, and field/
+require them. The next natural change-tracking work is a prebound changed-since
+query/filter path plus explicit per-consumer cursor semantics over the dense
+versions. Tests must decide whether that should precede or be combined with sparse
+row masks. Public tracked-write scopes, structural creation/migration/removal
+events, optional filters, bounded deferred structural commands, and field/
 serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:

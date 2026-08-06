@@ -23,6 +23,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private readonly ArchetypeRegistry<TArena> _archetypes;
     private readonly IArchetypeQueryPlan<TArena>?[] _queryPlans;
     private int _queryPlanCount;
+    private ChangeVersion _changeVersion;
     private EcsWorldState _state;
     private bool _isVisitingChunks;
 
@@ -31,7 +32,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         EntityCapacity entityCapacity,
         int maximumArchetypes,
         Func<ChunkArenaCapacity, TArena> arenaFactory,
-        int maximumQueryPlans)
+        int maximumQueryPlans,
+        ChangeVersion initialChangeVersion = default)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(arenaFactory);
@@ -42,6 +44,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         _entities = new EntityPool(WorldId.Create(), entityCapacity);
         _archetypes = new ArchetypeRegistry<TArena>(schema, maximumArchetypes, arenaFactory);
         _queryPlans = new IArchetypeQueryPlan<TArena>[maximumQueryPlans];
+        _changeVersion = initialChangeVersion;
         _state = EcsWorldState.Created;
     }
 
@@ -94,6 +97,15 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     internal int MaximumQueryPlans => _queryPlans.Length;
+
+    internal ChangeVersion CurrentChangeVersion
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _changeVersion;
+        }
+    }
 
     internal ArchetypeId RegisterArchetype(
         ReadOnlySpan<ComponentId> canonicalSignature,
@@ -301,6 +313,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
         storage.Store.GetBoundComponentRef<T>(location.ChunkRow, binding.ColumnIndex) = initialValue;
+        storage.Store.StampChangeVersion(
+            location.ChunkRow.ChunkIndex,
+            binding.ColumnIndex,
+            AdvanceChangeVersion());
         return true;
     }
 
@@ -343,6 +359,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             return false;
 
         storage.Store.GetBoundComponentRef<T>(row, binding.ColumnIndex) = value;
+        storage.Store.StampChangeVersion(
+            row.ChunkIndex,
+            binding.ColumnIndex,
+            AdvanceChangeVersion());
         return true;
     }
 
@@ -376,7 +396,37 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             return false;
 
         storage.Store.SetBoundEnabled(row, binding.ColumnIndex, enabled);
+        storage.Store.StampChangeVersion(
+            row.ChunkIndex,
+            binding.ColumnIndex,
+            AdvanceChangeVersion());
         return true;
+    }
+
+    internal ChangeVersion GetChunkChangeVersion<T>(
+        in ArchetypeComponentBinding<T> binding,
+        uint chunkIndex)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureSealed();
+        ValidateBinding(binding, requireData: false);
+        return _archetypes.GetStorage(binding.ArchetypeId).Store.GetChangeVersion(
+            chunkIndex,
+            binding.ColumnIndex);
+    }
+
+    internal bool HasChunkChangedSince<T>(
+        in ArchetypeComponentBinding<T> binding,
+        uint chunkIndex,
+        ChangeVersion baseline)
+        where T : unmanaged, IComponent<T>
+    {
+        EnsureSealed();
+        ValidateBinding(binding, requireData: false);
+        return _archetypes.GetStorage(binding.ArchetypeId).Store.HasChangedSince(
+            chunkIndex,
+            binding.ColumnIndex,
+            baseline);
     }
 
     /// <summary>
@@ -440,6 +490,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         {
             ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(binding.ArchetypeId).Store;
             int visitedRows = 0;
+            ChangeVersion writeVersion = default;
             for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
                  chunkIndex >= 0;
                  chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
@@ -455,6 +506,9 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                     bound.EntityIndices,
                     bound.Components,
                     bound.EnableWords);
+                if (!writeVersion.IsValid)
+                    writeVersion = AdvanceChangeVersion();
+                store.StampChangeVersion(bound.ChunkIndex, binding.ColumnIndex, writeVersion);
                 visitor.Execute(in chunk);
                 visitedRows += chunk.Count;
             }
@@ -484,6 +538,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         try
         {
             int visitedRows = 0;
+            ChangeVersion writeVersion = default;
             ReadOnlySpan<ArchetypeReadWriteQueryRoute<TArena>> routes = plan.Routes;
             for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
             {
@@ -512,6 +567,12 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                         bound.WriteEnableWords);
                     if (!route.HasRowFilters)
                     {
+                        if (!writeVersion.IsValid)
+                            writeVersion = AdvanceChangeVersion();
+                        store.StampChangeVersion(
+                            bound.ChunkIndex,
+                            route.WriteColumnIndex,
+                            writeVersion);
                         visitor.Execute(in chunk);
                         visitedRows += chunk.Count;
                     }
@@ -520,6 +581,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                         visitedRows += VisitFilteredReadWriteChunk(
                             route,
                             bound,
+                            ref writeVersion,
                             ref visitor);
                     }
                 }
@@ -537,6 +599,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private int VisitFilteredReadWriteChunk<TRead, TWrite, TVisitor>(
         in ArchetypeReadWriteQueryRoute<TArena> route,
         in BoundReadWriteComponentChunk<TRead, TWrite> bound,
+        ref ChangeVersion writeVersion,
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
@@ -546,6 +609,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         int pendingStart = -1;
         int pendingEnd = -1;
         int matchedRows = 0;
+        bool stamped = false;
         int wordCount = (rowCount + 63) >> 6;
         for (int wordIndex = 0; wordIndex < wordCount; wordIndex++)
         {
@@ -573,6 +637,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                 }
                 else
                 {
+                    StampFilteredReadWriteChunk(
+                        route,
+                        bound.ChunkIndex,
+                        ref writeVersion,
+                        ref stamped);
                     ExecuteReadWriteRange(route, bound, pendingStart, pendingEnd - pendingStart, ref visitor);
                     matchedRows += pendingEnd - pendingStart;
                     pendingStart = runStart;
@@ -588,10 +657,33 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         if (pendingStart >= 0)
         {
+            StampFilteredReadWriteChunk(
+                route,
+                bound.ChunkIndex,
+                ref writeVersion,
+                ref stamped);
             ExecuteReadWriteRange(route, bound, pendingStart, pendingEnd - pendingStart, ref visitor);
             matchedRows += pendingEnd - pendingStart;
         }
         return matchedRows;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void StampFilteredReadWriteChunk(
+        in ArchetypeReadWriteQueryRoute<TArena> route,
+        uint chunkIndex,
+        ref ChangeVersion writeVersion,
+        ref bool stamped)
+    {
+        if (stamped)
+            return;
+        if (!writeVersion.IsValid)
+            writeVersion = AdvanceChangeVersion();
+        route.Storage.Store.StampChangeVersion(
+            chunkIndex,
+            route.WriteColumnIndex,
+            writeVersion);
+        stamped = true;
     }
 
     [MethodImpl(
@@ -849,6 +941,13 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (_isVisitingChunks)
             throw new InvalidOperationException("Chunk visitors cannot be nested or re-entered.");
         _isVisitingChunks = true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ChangeVersion AdvanceChangeVersion()
+    {
+        _changeVersion = _changeVersion.Next();
+        return _changeVersion;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

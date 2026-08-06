@@ -155,6 +155,8 @@ internal static class PrimitiveBenchmarks
             new("PinnedWorld_Generated3R1W_PositionWideScalarVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedWideQuery.ExecuteThreeRead),
             new("NativeWorld_Generated2R2W_PositionScalarWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, nativeGeneratedWideQuery.ExecuteBalanced),
             new("PinnedWorld_Generated2R2W_PositionScalarWideVelocity_2Archetypes_100000", "WorldGeneratedQueryPlan", 100_000, pinnedGeneratedWideQuery.ExecuteBalanced),
+            new("NativeWorld_ChangeVersionScan_UnchangedPosition_2Archetypes_100000", "WorldChangeVersion", 100_000, nativeGeneratedWideQuery.ExecuteUnchangedVersionScan),
+            new("PinnedWorld_ChangeVersionScan_UnchangedPosition_2Archetypes_100000", "WorldChangeVersion", 100_000, pinnedGeneratedWideQuery.ExecuteUnchangedVersionScan),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareDense),
             new("PinnedWorld_FilteredReadPositionWriteVelocity_Dense_100000", "WorldQueryFilter", 100_000, pinnedFilteredReadWriteQuery.Execute, pinnedFilteredReadWriteQuery.PrepareDense),
             new("NativeWorld_FilteredReadPositionWriteVelocity_Alternating_100000", "WorldQueryFilter", 100_000, nativeFilteredReadWriteQuery.Execute, nativeFilteredReadWriteQuery.PrepareAlternating),
@@ -175,7 +177,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-generated-wide-family-matrix-v16",
+            SemanticProfile = "ecs-next-phase1-dense-change-versions-v17",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -185,6 +187,7 @@ internal static class PrimitiveBenchmarks
             EntitySizeBytes = Marshal.SizeOf<Entity>(),
             ComponentIdSizeBytes = Marshal.SizeOf<ComponentId>(),
             ComponentMetadataSizeBytes = Marshal.SizeOf<ComponentMetadata>(),
+            ChangeVersionSizeBytes = Marshal.SizeOf<ChangeVersion>(),
             SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
             EstimatedEntityPoolMetadataBytesPerSlot = new EntityCapacity(1).EstimatedMetadataBytes,
             TimestampUtc = DateTimeOffset.UtcNow,
@@ -1793,6 +1796,11 @@ internal static class PrimitiveBenchmarks
         where TArena : class, IChunkArenaBackend
     {
         private readonly EcsWorld<TArena> _world;
+        private readonly ArchetypeStorage<TArena> _firstStorage;
+        private readonly ArchetypeStorage<TArena> _secondStorage;
+        private readonly ArchetypeComponentBinding<BenchmarkPosition> _firstPosition;
+        private readonly ArchetypeComponentBinding<BenchmarkPosition> _secondPosition;
+        private readonly ChangeVersion _scanBaseline;
         private readonly ArchetypeReadReadReadWriteQueryPlan<
             TArena,
             BenchmarkPosition,
@@ -1829,10 +1837,14 @@ internal static class PrimitiveBenchmarks
                 CreateSortedSignature(disabled, position, scalar, velocity, wide),
                 ChunkLayoutOptions.KiB16,
                 maximumChunks: 512);
+            _firstStorage = _world.GetArchetypeStorage(first);
+            _secondStorage = _world.GetArchetypeStorage(second);
             ArchetypeComponentBinding<BenchmarkPosition> firstPosition =
                 _world.BindComponent<BenchmarkPosition>(first, position);
             ArchetypeComponentBinding<BenchmarkPosition> secondPosition =
                 _world.BindComponent<BenchmarkPosition>(second, position);
+            _firstPosition = firstPosition;
+            _secondPosition = secondPosition;
             ArchetypeComponentBinding<BenchmarkScalar> firstScalar =
                 _world.BindComponent<BenchmarkScalar>(first, scalar);
             ArchetypeComponentBinding<BenchmarkScalar> secondScalar =
@@ -1901,6 +1913,7 @@ internal static class PrimitiveBenchmarks
                 throw new InvalidOperationException(
                     "Generated-wide-query benchmark did not compile both archetypes.");
             }
+            _scanBaseline = _world.CurrentChangeVersion;
             _population = population;
         }
 
@@ -1920,6 +1933,41 @@ internal static class PrimitiveBenchmarks
             if (visited != _population)
                 throw new InvalidOperationException("Generated 2R2W benchmark lost rows.");
             return new ScenarioMeasurement(visited, visitor.Checksum);
+        }
+
+        [System.Runtime.CompilerServices.MethodImpl(
+            System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+        internal ScenarioMeasurement ExecuteUnchangedVersionScan()
+        {
+            const int scanCount = 64;
+            int scanned = 0;
+            long checksum = 0;
+            for (int scan = 0; scan < scanCount; scan++)
+            {
+                for (int chunk = _firstStorage.Store.GetFirstOccupiedChunkIndex();
+                     chunk >= 0;
+                     chunk = _firstStorage.Store.GetNextOccupiedChunkIndex(chunk))
+                {
+                    bool changed = _world.HasChunkChangedSince(
+                        _firstPosition,
+                        (uint)chunk,
+                        _scanBaseline);
+                    checksum = unchecked(checksum + (changed ? 1 : 0) + chunk + scan);
+                    scanned++;
+                }
+                for (int chunk = _secondStorage.Store.GetFirstOccupiedChunkIndex();
+                     chunk >= 0;
+                     chunk = _secondStorage.Store.GetNextOccupiedChunkIndex(chunk))
+                {
+                    bool changed = _world.HasChunkChangedSince(
+                        _secondPosition,
+                        (uint)chunk,
+                        _scanBaseline);
+                    checksum = unchecked(checksum + (changed ? 1 : 0) + chunk + scan);
+                    scanned++;
+                }
+            }
+            return new ScenarioMeasurement(scanned, checksum);
         }
 
         public void Dispose() => _world.Dispose();
@@ -2365,6 +2413,7 @@ internal sealed class BenchmarkReport
     public required int EntitySizeBytes { get; init; }
     public required int ComponentIdSizeBytes { get; init; }
     public required int ComponentMetadataSizeBytes { get; init; }
+    public required int ChangeVersionSizeBytes { get; init; }
     public required int SchemaIdSizeBytes { get; init; }
     public required long EstimatedEntityPoolMetadataBytesPerSlot { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }
@@ -2576,6 +2625,8 @@ internal static class ArchetypeFactBuilder
             ChunkPayloadBytes = store.Arena.Capacity.TotalPayloadBytes,
             ChunkRecordSizeBytes = snapshot.ChunkRecordSizeBytes,
             ChunkMetadataBytes = snapshot.ChunkMetadataBytes,
+            ChangeVersionMetadataBytes = snapshot.ChangeVersionMetadataBytes,
+            TotalMetadataBytes = snapshot.TotalMetadataBytes,
             ChunkRowSizeBytes = Marshal.SizeOf<ChunkRow>(),
         };
     }
@@ -2591,6 +2642,8 @@ internal sealed class ArchetypeFact
     public required long ChunkPayloadBytes { get; init; }
     public required int ChunkRecordSizeBytes { get; init; }
     public required long ChunkMetadataBytes { get; init; }
+    public required long ChangeVersionMetadataBytes { get; init; }
+    public required long TotalMetadataBytes { get; init; }
     public required int ChunkRowSizeBytes { get; init; }
 }
 
