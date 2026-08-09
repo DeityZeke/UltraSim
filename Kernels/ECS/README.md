@@ -131,10 +131,18 @@ allocation:
   count, complete ordered entity coverage is validated before mutation, occupied
   chunks reset occupancy plus dense/exact history without eagerly clearing
   payload that creation always initializes, and the validated slots retire in
-  original command order. Any incomplete, duplicate, stale, unordered, mixed-
-  archetype, or sparse set retains scalar destruction. A measured attempt to
-  apply transition-style planned compaction to partial destroy sets regressed
-  both sparse and donor-tail cases and was removed. Per-worker
+  original command order. V29 moves dead-row clearing to the row-publication
+  boundary: removal only shrinks occupancy, while reservation explicitly resets
+  entity identity, payload, enable defaults, and exact history before reuse.
+  Scalar destroy also commits a caller-validated relocation and retirement
+  without repeating pool liveness, generation, and location checks. Exact
+  ordered partial suffixes validate backward against the store's real
+  partial/full donor chain and shrink in bulk; numeric chunk IDs are never
+  mistaken for physical adjacency. Incomplete, skipped, duplicate, stale,
+  unordered, mixed-archetype, and sparse sets retain scalar destruction. A
+  measured attempt to apply transition-style planned compaction to arbitrary
+  partial destroy sets regressed both sparse and donor-tail cases and was
+  removed. Per-worker
   arenas, deterministic worker merge, grouping across separated route runs,
   broader density/entropy-driven compaction, typed component payloads, prefab
   expansion, and lifecycle publication remain later structural work and must be measured
@@ -285,10 +293,12 @@ allocation:
 - `ChunkRow` is the current eight-byte entity-location candidate: chunk index
   plus row, with an all-zero invalid value. The store remains densely packed,
   with every occupied chunk full except at most one partial chunk.
-- Scalar and bulk adds explicitly zero every data row. Enableable components and
-  tags start enabled. Swap removal works within or across chunks, preserves all
-  data and enable states, clears the donor row, rejects an expected-entity
-  mismatch, and returns the donor's relocation for the entity-location table.
+- Scalar and bulk adds explicitly reset every entity-index/data row and exact
+  row history. Enableable components and tags start enabled. Swap removal works
+  within or across chunks, preserves all live data, enable states, and history,
+  leaves its inaccessible donor tail lazy, rejects an expected-entity mismatch,
+  and returns the donor's relocation for the entity-location table. Tests prove
+  that no stale identity, payload, enable bit, or history is observable on reuse.
 - Executable layouts are revalidated once before use. Hot access can bind a
   physical column index once, avoiding repeated component metadata scans.
 
@@ -296,7 +306,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 193 passing tests, including
+The current runtime and primitive suite has 195 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -337,9 +347,11 @@ and acknowledgement without migration-generated replay. Planned-compaction tests
 cover the scalar crossover, donor-tail overlap, whole-chunk evacuation, survivor
 state/enable/exact-history relocation, backend parity, transactional batch
 location rejection, and warmed zero-allocation grouped playback.
-Whole-destroy tests add multi-chunk scalar-oracle parity, stale and duplicate
-sparse fallback, exact generation/free-list reuse ordering, initialized default
-state after lazy payload reuse, and 256,000 warmed zero-allocation operations.
+Whole/tail-destroy tests add multi-chunk scalar-oracle parity, stale and duplicate
+sparse fallback, a false-tail candidate that skips packed chunks, exact
+generation/free-list reuse ordering, survivor history preservation, initialized
+default state after lazy payload reuse, and 256,000 warmed zero-allocation
+operations.
 Chunk-visitor tests add empty and multi-chunk traversal, exact metadata and local
 indices, data/enable writes, tag/foreign/non-enableable rejection, synchronous
 mutation and nesting rejection, exception cleanup, randomized reference parity,

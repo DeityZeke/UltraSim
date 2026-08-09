@@ -521,6 +521,35 @@ matched and V3 remained allocation-free. V2 still leads full playback at
 `2.45/2.47 ns/entity`, so the next partial-destroy design must be
 benchmark-selected rather than assumed to follow transition compaction.
 
+V29 expands the suite to 117 scenarios and makes the destroy matrix explicit:
+whole population plus physical tail and sparse selections at 1%, 10%, and 50%
+of a fixed 100,000-row resident store. Every selection has an equal-work scalar-
+oracle/production playback pair. Sparse fixtures destroy all survivors and
+rebuild creation-order-packed ownership outside the timed boundary before every
+sample; otherwise repeated swap removal would silently turn the requested stride
+into a different physical workload. Setup cost is intentionally excluded from
+these playback-only cases and must not be compared with end-to-end barriers.
+
+The complete run reported zero managed allocation in all 117 scenarios. Whole,
+tail-10%, and tail-50% scalar/production means were respectively
+`50.08/7.58`, `50.28/9.03`, and `50.18/7.72 ns/destroy`. Tail-1% measured a
+`49.5/31.1` median but a `49.57/57.91` mean because rare interruptions dominate
+one 1,000-command barrier; use median/p95 and repeated isolated processes for
+that crossover. Sparse 1/10/50% scalar/production means were
+`70.20/62.28`, `70.78/65.02`, and `70.97/63.46`. Those sparse differences come
+from the lower scalar floor and executor preflight, not a new source-chunk bulk
+compactor.
+
+The complete shared comparison, repeated in both child-process orders, retained
+87 comparable rows, zero state/descriptor/measurement mismatches, and zero V3
+timed allocation. At 50,000 entities, immutable-baseline/current V3 playback was
+`72.50 -> 14.37/13.36 ns/entity` for full destroy, `72.30 -> 45.64/44.19` for
+immediate destroy, and `85.03 -> 56.65/56.27` for 10%-sparse destroy. Their
+V2-control-normalized ratios were `0.199/0.185`, `0.643/0.624`, and
+`0.644/0.623`. Add/remove transition playback also improved roughly 5-9% at
+50,000 rows in both orders, which is the required evidence that moving clearing
+to reservation did not buy destruction by making migration slower.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

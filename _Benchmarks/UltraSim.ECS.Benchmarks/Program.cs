@@ -106,9 +106,24 @@ internal static class PrimitiveBenchmarks
             timedCycleCount: 256);
         using var publicDeferredCreate = new PublicDeferredCreateFixture(100_000);
         using var publicDeferredDestroy = new PublicDeferredDestroyFixture(100_000);
+        using var publicDeferredDestroyTail1 = new PublicDeferredDestroyFixture(
+            100_000,
+            DeferredDestroySelection.Tail1Percent);
         using var publicDeferredDestroyTail10 = new PublicDeferredDestroyFixture(
             100_000,
-            destroyTailTenPercent: true);
+            DeferredDestroySelection.Tail10Percent);
+        using var publicDeferredDestroyTail50 = new PublicDeferredDestroyFixture(
+            100_000,
+            DeferredDestroySelection.Tail50Percent);
+        using var publicDeferredDestroySparse1 = new PublicDeferredDestroyFixture(
+            100_000,
+            DeferredDestroySelection.Sparse1Percent);
+        using var publicDeferredDestroySparse10 = new PublicDeferredDestroyFixture(
+            100_000,
+            DeferredDestroySelection.Sparse10Percent);
+        using var publicDeferredDestroySparse50 = new PublicDeferredDestroyFixture(
+            100_000,
+            DeferredDestroySelection.Sparse50Percent);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
         using var pinnedChunkVisit = new EcsWorldChunkVisitFixture<PinnedChunkArena>(100_000);
         using var nativeReadWriteQuery = new EcsWorldReadWriteQueryFixture<NativeChunkArena>(100_000);
@@ -193,8 +208,18 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
             new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Whole_100000", "PublicWorldStructuralDestroy", 100_000, publicDeferredDestroy.ExecuteRecordedScalarOracle, publicDeferredDestroy.PrepareRecorded),
             new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Whole_100000", "PublicWorldStructuralDestroy", 100_000, publicDeferredDestroy.ExecuteRecorded, publicDeferredDestroy.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Tail1PctOf100000_1000Ops", "PublicWorldStructuralDestroy", 1_000, publicDeferredDestroyTail1.ExecuteRecordedScalarOracle, publicDeferredDestroyTail1.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Tail1PctOf100000_1000Ops", "PublicWorldStructuralDestroy", 1_000, publicDeferredDestroyTail1.ExecuteRecorded, publicDeferredDestroyTail1.PrepareRecorded),
             new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Tail10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroyTail10.ExecuteRecordedScalarOracle, publicDeferredDestroyTail10.PrepareRecorded),
             new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Tail10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroyTail10.ExecuteRecorded, publicDeferredDestroyTail10.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Tail50PctOf100000_50000Ops", "PublicWorldStructuralDestroy", 50_000, publicDeferredDestroyTail50.ExecuteRecordedScalarOracle, publicDeferredDestroyTail50.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Tail50PctOf100000_50000Ops", "PublicWorldStructuralDestroy", 50_000, publicDeferredDestroyTail50.ExecuteRecorded, publicDeferredDestroyTail50.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Sparse1PctOf100000_1000Ops", "PublicWorldStructuralDestroy", 1_000, publicDeferredDestroySparse1.ExecuteRecordedScalarOracle, publicDeferredDestroySparse1.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Sparse1PctOf100000_1000Ops", "PublicWorldStructuralDestroy", 1_000, publicDeferredDestroySparse1.ExecuteRecorded, publicDeferredDestroySparse1.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Sparse10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroySparse10.ExecuteRecordedScalarOracle, publicDeferredDestroySparse10.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Sparse10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroySparse10.ExecuteRecorded, publicDeferredDestroySparse10.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Sparse50PctOf100000_50000Ops", "PublicWorldStructuralDestroy", 50_000, publicDeferredDestroySparse50.ExecuteRecordedScalarOracle, publicDeferredDestroySparse50.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Sparse50PctOf100000_50000Ops", "PublicWorldStructuralDestroy", 50_000, publicDeferredDestroySparse50.ExecuteRecorded, publicDeferredDestroySparse50.PrepareRecorded),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
             new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
             new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
@@ -249,7 +274,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-whole-destroy-v28",
+            SemanticProfile = "ecs-next-phase1-trusted-tail-destroy-v29",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1780,6 +1805,17 @@ internal static class PrimitiveBenchmarks
         public void Dispose() => _world.Dispose();
     }
 
+    private enum DeferredDestroySelection
+    {
+        Whole,
+        Tail1Percent,
+        Tail10Percent,
+        Tail50Percent,
+        Sparse1Percent,
+        Sparse10Percent,
+        Sparse50Percent,
+    }
+
     private sealed class PublicDeferredDestroyFixture : IDisposable
     {
         private readonly EcsWorld _world;
@@ -1787,13 +1823,25 @@ internal static class PrimitiveBenchmarks
         private readonly ArchetypeHandle _archetype;
         private readonly Entity[] _entities;
         private readonly Entity[] _targets;
+        private readonly DeferredDestroySelection _selection;
         private readonly int _targetOffset;
         private bool _hasLiveTargets;
 
         internal PublicDeferredDestroyFixture(
             int entityCount,
-            bool destroyTailTenPercent = false)
+            DeferredDestroySelection selection = DeferredDestroySelection.Whole)
         {
+            int targetCount = selection switch
+            {
+                DeferredDestroySelection.Whole => entityCount,
+                DeferredDestroySelection.Tail1Percent or
+                DeferredDestroySelection.Sparse1Percent => entityCount / 100,
+                DeferredDestroySelection.Tail10Percent or
+                DeferredDestroySelection.Sparse10Percent => entityCount / 10,
+                DeferredDestroySelection.Tail50Percent or
+                DeferredDestroySelection.Sparse50Percent => entityCount / 2,
+                _ => throw new ArgumentOutOfRangeException(nameof(selection)),
+            };
             ComponentSchema schema = BenchmarkSchema.CreateSchema();
             _world = new EcsWorld(
                 schema,
@@ -1802,9 +1850,7 @@ internal static class PrimitiveBenchmarks
                     maximumArchetypes: 1,
                     maximumPreparedPlans: 0,
                     maximumPreparedTransitions: 0,
-                    maximumStructuralCommands: destroyTailTenPercent
-                        ? entityCount / 10
-                        : entityCount));
+                    maximumStructuralCommands: targetCount));
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             _archetype = _world.RegisterArchetype(
                 [position],
@@ -1815,12 +1861,13 @@ internal static class PrimitiveBenchmarks
             _world.BeginRun();
             _commands = _world.StructuralCommands;
             _entities = new Entity[entityCount];
-            _targetOffset = destroyTailTenPercent
-                ? entityCount - (entityCount / 10)
+            _selection = selection;
+            _targetOffset = IsTailSelection(selection)
+                ? entityCount - targetCount
                 : 0;
-            _targets = destroyTailTenPercent
-                ? new Entity[entityCount / 10]
-                : _entities;
+            _targets = selection == DeferredDestroySelection.Whole
+                ? _entities
+                : new Entity[targetCount];
             CreateInitialEntities();
         }
 
@@ -1828,6 +1875,33 @@ internal static class PrimitiveBenchmarks
         {
             if (_hasLiveTargets)
                 return;
+
+            if (IsSparseSelection(_selection))
+            {
+                // Sparse swap removal changes packed ownership. Rebuild the
+                // complete population outside timing so every measured sample
+                // again targets the requested ordinal physical stride.
+                for (int index = 0; index < _entities.Length; index++)
+                {
+                    if (_world.IsAlive(_entities[index]) &&
+                        !_world.TryDestroy(_entities[index]))
+                    {
+                        throw new InvalidOperationException(
+                            "Sparse destroy fixture could not clear a survivor.");
+                    }
+                }
+                for (int index = 0; index < _entities.Length; index++)
+                {
+                    if (!_world.TryCreate(_archetype, out _entities[index]))
+                    {
+                        throw new InvalidOperationException(
+                            "Sparse destroy fixture could not rebuild its packed population.");
+                    }
+                }
+                FillTargets();
+                _hasLiveTargets = true;
+                return;
+            }
 
             for (int index = 0; index < _targets.Length; index++)
             {
@@ -1881,10 +1955,43 @@ internal static class PrimitiveBenchmarks
                 if (!_world.TryCreate(_archetype, out _entities[index]))
                     throw new InvalidOperationException("Deferred-destroy fixture exhausted its source.");
             }
-            if (!ReferenceEquals(_targets, _entities))
-                _entities.AsSpan(_targetOffset, _targets.Length).CopyTo(_targets);
+            FillTargets();
             _hasLiveTargets = true;
         }
+
+        private void FillTargets()
+        {
+            if (ReferenceEquals(_targets, _entities))
+                return;
+            if (IsTailSelection(_selection))
+            {
+                _entities.AsSpan(_targetOffset, _targets.Length).CopyTo(_targets);
+                return;
+            }
+
+            int stride = _selection switch
+            {
+                DeferredDestroySelection.Sparse1Percent => 100,
+                DeferredDestroySelection.Sparse10Percent => 10,
+                DeferredDestroySelection.Sparse50Percent => 2,
+                _ => throw new InvalidOperationException(
+                    "A non-tail destroy selection has no physical stride."),
+            };
+            for (int index = 0; index < _targets.Length; index++)
+                _targets[index] = _entities[index * stride];
+        }
+
+        private static bool IsTailSelection(DeferredDestroySelection selection) =>
+            selection is
+                DeferredDestroySelection.Tail1Percent or
+                DeferredDestroySelection.Tail10Percent or
+                DeferredDestroySelection.Tail50Percent;
+
+        private static bool IsSparseSelection(DeferredDestroySelection selection) =>
+            selection is
+                DeferredDestroySelection.Sparse1Percent or
+                DeferredDestroySelection.Sparse10Percent or
+                DeferredDestroySelection.Sparse50Percent;
     }
 
     private sealed class EcsWorldChunkVisitFixture<TArena> : IDisposable

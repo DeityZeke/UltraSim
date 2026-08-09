@@ -1631,6 +1631,27 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return storage!.Store.Count == commandCount;
     }
 
+    internal bool IsArchetypeTailDestroyCandidate(
+        Entity first,
+        Entity last,
+        int commandCount)
+    {
+        if (commandCount <= 0 ||
+            !_entities.TryGetLocation(first, out EntityLocation firstLocation) ||
+            !_entities.TryGetLocation(last, out EntityLocation lastLocation) ||
+            firstLocation.ArchetypeId != lastLocation.ArchetypeId ||
+            !_archetypes.TryGetStorage(
+                firstLocation.ArchetypeId,
+                out ArchetypeStorage<TArena>? storage))
+        {
+            return false;
+        }
+
+        ArchetypeChunkStore<TArena> store = storage!.Store;
+        return commandCount < store.Count &&
+            store.IsCurrentDonorTail(lastLocation.ChunkRow);
+    }
+
     /// <summary>
     /// Destroys an exact, ordered complete archetype population after validating
     /// the entire logical set. Slot retirement follows supplied command order.
@@ -1656,7 +1677,6 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             Entity entity = entities[index];
             if (!_entities.TryGetLocation(entity, out EntityLocation location) ||
                 location.ArchetypeId != ownedStorage.Id ||
-                !ownedStorage.Store.Contains(location.ChunkRow, entity.Index) ||
                 !IsStrictOrderedDestroyRow(
                     previous,
                     location.ChunkRow,
@@ -1665,10 +1685,60 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             {
                 return false;
             }
+            System.Diagnostics.Debug.Assert(
+                ownedStorage.Store.Contains(location.ChunkRow, entity.Index),
+                "A whole-archetype destroy location does not match row ownership.");
             previous = location.ChunkRow;
         }
 
         ownedStorage.Store.ClearAllOccupiedRows();
+        _entities.RetireValidatedLocated(entities);
+        return true;
+    }
+
+    /// <summary>
+    /// Destroys one exact contiguous suffix ending at the current packed donor
+    /// tail. Validation completes before storage or entity-pool publication.
+    /// </summary>
+    internal bool TryDestroyArchetypeTail(ReadOnlySpan<Entity> entities)
+    {
+        EnsureRuntimeMutationAllowed();
+        if (entities.IsEmpty ||
+            !_entities.TryGetLocation(entities[0], out EntityLocation firstLocation) ||
+            !_archetypes.TryGetStorage(
+                firstLocation.ArchetypeId,
+                out ArchetypeStorage<TArena>? storage) ||
+            entities.Length >= storage!.Store.Count)
+        {
+            return false;
+        }
+
+        ArchetypeStorage<TArena> ownedStorage = storage!;
+        if (!ownedStorage.Store.TryCreateTailCursor(
+                out int expectedChunkIndex,
+                out int expectedRow))
+        {
+            return false;
+        }
+
+        for (int index = entities.Length - 1; index >= 0; index--)
+        {
+            Entity entity = entities[index];
+            if (!_entities.TryGetLocation(entity, out EntityLocation location) ||
+                location.ArchetypeId != ownedStorage.Id ||
+                !ownedStorage.Store.MatchAndAdvanceTail(
+                    location.ChunkRow,
+                    ref expectedChunkIndex,
+                    ref expectedRow))
+            {
+                return false;
+            }
+            System.Diagnostics.Debug.Assert(
+                ownedStorage.Store.Contains(location.ChunkRow, entity.Index),
+                "A donor-tail destroy location does not match row ownership.");
+        }
+
+        ownedStorage.Store.RemoveTailRows(entities.Length);
         _entities.RetireValidatedLocated(entities);
         return true;
     }
@@ -1683,11 +1753,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     private bool TryDestroyLocated(Entity entity, EntityLocation location)
     {
-        if (!_archetypes.TryGetStorage(location.ArchetypeId, out ArchetypeStorage<TArena>? storage))
-            ThrowWorldInvariant("A live entity location refers to an unknown archetype.");
-        ArchetypeStorage<TArena> ownedStorage = storage!;
-        if (!ownedStorage.Store.Contains(location.ChunkRow, entity.Index))
-            ThrowWorldInvariant("A live entity location does not match its archetype row.");
+        // A live pool location is a world-owned invariant. TryRemove remains the
+        // authoritative row/entity check, so avoid a registry branch plus a
+        // duplicate Contains resolution on every scalar destroy.
+        ArchetypeStorage<TArena> ownedStorage =
+            _archetypes.GetStorage(location.ArchetypeId);
         if (!ownedStorage.Store.TryRemove(
                 location.ChunkRow,
                 entity.Index,
@@ -1696,11 +1766,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             ThrowWorldInvariant("A validated archetype row rejected entity destruction.");
         }
 
-        _entities.ApplyRelocation(ownedStorage.Id, relocation);
-        if (!_entities.TryUnbindLocation(entity, location))
-            ThrowWorldInvariant("A destroyed entity rejected its expected location removal.");
-        if (!_entities.TryFree(entity))
-            ThrowWorldInvariant("An unlocated destroyed entity could not return to the entity pool.");
+        _entities.ApplyRelocationAndRetireValidated(
+            entity,
+            location,
+            ownedStorage.Id,
+            relocation);
         return true;
     }
 

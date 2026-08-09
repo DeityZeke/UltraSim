@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace UltraSim.ECS;
 
 /// <summary>
@@ -169,22 +171,44 @@ internal sealed class EntityPool
                 _locations[entityIndex].IsValid,
                 "A trusted whole-store retirement received an invalid entity.");
 
-            _locations[entityIndex] = EntityLocation.Invalid;
-            _locatedCount--;
-            _aliveCount--;
-            if (!EntityGeneration.TryAdvance(
-                    _generations[entityIndex],
-                    out uint nextGeneration))
-            {
-                _states[entityIndex] = SlotRetired;
-                _retiredCount++;
-                continue;
-            }
-
-            _generations[entityIndex] = nextGeneration;
-            _states[entityIndex] = SlotAvailable;
-            _freeIndices[_freeCount++] = entityIndex;
+            RetireValidatedIndex(entityIndex);
         }
+    }
+
+    /// <summary>
+    /// Publishes the donor repair and retires one entity after its owning store
+    /// has validated and removed the row. This is the scalar destroy commit:
+    /// expected public rejection has already happened, so release builds avoid
+    /// repeating liveness, generation, and location checks three more times.
+    /// </summary>
+    internal void ApplyRelocationAndRetireValidated(
+        Entity entity,
+        EntityLocation removedLocation,
+        ArchetypeId archetypeId,
+        in ChunkRowRelocation relocation)
+    {
+        int entityIndex = checked((int)entity.Index);
+        System.Diagnostics.Debug.Assert(
+            entity.World == _worldId &&
+            entityIndex < _nextUnusedIndex &&
+            _states[entityIndex] == SlotAlive &&
+            _generations[entityIndex] == entity.Generation &&
+            _locations[entityIndex] == removedLocation &&
+            removedLocation.ArchetypeId == archetypeId,
+            "A trusted scalar destroy commit received an invalid removed entity.");
+
+        if (relocation.HasValue)
+        {
+            uint donorIndex = relocation.EntityIndex;
+            System.Diagnostics.Debug.Assert(
+                donorIndex < unchecked((uint)_nextUnusedIndex) &&
+                _states[donorIndex] == SlotAlive &&
+                _locations[donorIndex] == new EntityLocation(archetypeId, relocation.Source),
+                "A trusted scalar destroy commit received an invalid donor relocation.");
+            _locations[donorIndex] = new EntityLocation(archetypeId, relocation.Destination);
+        }
+
+        RetireValidatedIndex(entityIndex);
     }
 
     internal bool TryBindLocation(Entity entity, EntityLocation location)
@@ -344,6 +368,26 @@ internal sealed class EntityPool
             _locations[relocation.EntityIndex] =
                 new EntityLocation(archetypeId, relocation.Destination);
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void RetireValidatedIndex(int entityIndex)
+    {
+        _locations[entityIndex] = EntityLocation.Invalid;
+        _locatedCount--;
+        _aliveCount--;
+        if (!EntityGeneration.TryAdvance(
+                _generations[entityIndex],
+                out uint nextGeneration))
+        {
+            _states[entityIndex] = SlotRetired;
+            _retiredCount++;
+            return;
+        }
+
+        _generations[entityIndex] = nextGeneration;
+        _states[entityIndex] = SlotAvailable;
+        _freeIndices[_freeCount++] = entityIndex;
     }
 
     internal SlotSnapshot GetSlotSnapshot(int index)

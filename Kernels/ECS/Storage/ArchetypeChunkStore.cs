@@ -170,6 +170,10 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             int count = Math.Min(_layout.RowCapacity - startRow, requestedCount - written);
             Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
             InitializeRows(chunkIndex, bytes, startRow, count);
+            // Unlike Add, anonymous reservations have no entity index to publish
+            // yet. Removed rows may retain unreachable ownership bytes, so make
+            // the reservation's zero-owner contract explicit at its boundary.
+            GetEntityIndices(bytes).Slice(startRow, count).Clear();
             for (int index = 0; index < count; index++)
                 locations[written + index] = new ChunkRow((uint)chunkIndex, startRow + index);
 
@@ -252,8 +256,10 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 targetRow);
         }
 
-        ClearRow(donorBytes, donorRow);
-        ClearSparseRowChangeVersions((uint)donorChunkIndex, donorRow);
+        // The donor tail becomes inaccessible as soon as RowCount shrinks.
+        // Reoccupation always passes through InitializeRows, which clears data,
+        // restores enable defaults, and resets exact-row history before the row
+        // is published. Avoid eagerly writing dead payload here.
         int previousDonorCount = donor.RowCount;
         donor.RowCount = previousDonorCount - 1;
         _entityCount--;
@@ -396,6 +402,107 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         }
 
         _entityCount = 0;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool IsCurrentDonorTail(ChunkRow location)
+    {
+        ThrowIfDisposed();
+        int donorChunkIndex = _partialHead != NoChunk ? _partialHead : _fullHead;
+        return donorChunkIndex != NoChunk &&
+            location.ChunkIndex == unchecked((uint)donorChunkIndex) &&
+            location.Row == _chunks[donorChunkIndex].RowCount - 1;
+    }
+
+    /// <summary>
+    /// Creates a cursor over the real packed donor order. Callers validate a
+    /// proposed suffix from last row to first with <see cref="MatchAndAdvanceTail"/>
+    /// before publishing a bulk tail shrink. Chunk indices are handles, not an
+    /// ordering contract, so numeric adjacency is deliberately insufficient.
+    /// </summary>
+    internal bool TryCreateTailCursor(out int chunkIndex, out int row)
+    {
+        ThrowIfDisposed();
+        chunkIndex = _partialHead != NoChunk ? _partialHead : _fullHead;
+        if (chunkIndex == NoChunk)
+        {
+            row = -1;
+            return false;
+        }
+
+        row = _chunks[chunkIndex].RowCount - 1;
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool MatchAndAdvanceTail(
+        ChunkRow location,
+        ref int expectedChunkIndex,
+        ref int expectedRow)
+    {
+        if (expectedChunkIndex == NoChunk ||
+            location.ChunkIndex != unchecked((uint)expectedChunkIndex) ||
+            location.Row != expectedRow)
+        {
+            return false;
+        }
+
+        if (expectedRow != 0)
+        {
+            expectedRow--;
+            return true;
+        }
+
+        ref readonly ChunkRecord chunk = ref _chunks[expectedChunkIndex];
+        expectedChunkIndex = chunk.State switch
+        {
+            ChunkListState.Partial => _fullHead,
+            ChunkListState.Full => chunk.Next,
+            _ => NoChunk,
+        };
+        expectedRow = expectedChunkIndex == NoChunk
+            ? -1
+            : _chunks[expectedChunkIndex].RowCount - 1;
+        return true;
+    }
+
+    /// <summary>
+    /// Shrinks a caller-validated suffix from the packed donor tail. Removed
+    /// bytes stay unreachable and are initialized before reuse; only chunks
+    /// that become empty must clear their dense/exact history immediately.
+    /// </summary>
+    internal void RemoveTailRows(int count)
+    {
+        ThrowIfDisposed();
+        if (count <= 0 || count > _entityCount)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        int remaining = count;
+        while (remaining != 0)
+        {
+            int chunkIndex = _partialHead != NoChunk ? _partialHead : _fullHead;
+            if (chunkIndex == NoChunk)
+                ThrowInvariant("A packed tail removal exhausted occupied chunks early.");
+
+            ref ChunkRecord chunk = ref _chunks[chunkIndex];
+            int previousCount = chunk.RowCount;
+            int removed = Math.Min(previousCount, remaining);
+            int nextCount = previousCount - removed;
+            chunk.RowCount = nextCount;
+            if (nextCount == 0)
+            {
+                ClearChangeVersions(chunkIndex);
+                MoveChunk(chunkIndex, ChunkListState.Empty);
+            }
+            else if (previousCount == _layout.RowCapacity)
+            {
+                MoveChunk(chunkIndex, ChunkListState.Partial);
+            }
+
+            remaining -= removed;
+        }
+
+        _entityCount -= count;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1386,28 +1493,6 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             startRow,
             rowCount,
             version);
-    }
-
-    private void ClearSparseRowChangeVersions(uint chunkIndex, int row)
-    {
-        for (int columnIndex = 0; columnIndex < _sparseRowChangeVersions.Length; columnIndex++)
-            _sparseRowChangeVersions[columnIndex]?.ClearRow(chunkIndex, row);
-    }
-
-    private void ClearRow(Span<byte> chunk, int row)
-    {
-        GetEntityIndices(chunk)[row] = 0;
-        for (int i = 0; i < _columns.Length; i++)
-        {
-            ComponentColumnLayout column = _columns[i];
-            if (column.HasData)
-            {
-                int offset = checked(column.DataOffsetBytes + (row * column.ElementSizeBytes));
-                chunk.Slice(offset, column.ElementSizeBytes).Clear();
-            }
-            if (column.HasEnableBits)
-                EnableBitOperations.Set(chunk, column, row, enabled: false);
-        }
     }
 
     private void ClearRows(int chunkIndex, Span<byte> chunk, int startRow, int rowCount)

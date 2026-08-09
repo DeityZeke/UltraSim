@@ -71,6 +71,8 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeChunkStore_BoundariesAndRetainedEmptyReuse), ArchetypeChunkStore_BoundariesAndRetainedEmptyReuse);
         Run(nameof(ArchetypeChunkStore_SwapRemovePreservesDataAndEnableBits), ArchetypeChunkStore_SwapRemovePreservesDataAndEnableBits);
         Run(nameof(ArchetypeChunkStore_BulkNativePinnedParityAndDefaultState), ArchetypeChunkStore_BulkNativePinnedParityAndDefaultState);
+        Run(nameof(ArchetypeChunkStore_LazyRemovedTailReinitializesBeforeReuse), ArchetypeChunkStore_LazyRemovedTailReinitializesBeforeReuse);
+        Run(nameof(ArchetypeChunkStore_TailRemovalPreservesSurvivorsAndResetsReuse), ArchetypeChunkStore_TailRemovalPreservesSurvivorsAndResetsReuse);
         Run(nameof(ArchetypeChunkStore_ClearAllOccupiedRowsResetsNativePinnedState), ArchetypeChunkStore_ClearAllOccupiedRowsResetsNativePinnedState);
         Run(nameof(ArchetypeChunkStore_RandomizedNativeOperationsMatchReferenceModel), ArchetypeChunkStore_RandomizedNativeOperationsMatchReferenceModel);
         Run(nameof(ArchetypeChunkStore_RandomizedPinnedOperationsMatchReferenceModel), ArchetypeChunkStore_RandomizedPinnedOperationsMatchReferenceModel);
@@ -2099,6 +2101,145 @@ internal static class EcsPrimitiveTests
         Assert.Equal(0L, allocated);
         native.ValidateInvariants();
         pinned.ValidateInvariants();
+    }
+
+    private static void ArchetypeChunkStore_LazyRemovedTailReinitializesBeforeReuse()
+    {
+        long native = RunLazyRemovedTailReuse<NativeChunkArena>();
+        long pinned = RunLazyRemovedTailReuse<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void ArchetypeChunkStore_TailRemovalPreservesSurvivorsAndResetsReuse()
+    {
+        long native = RunTailRemovalStoreCase<NativeChunkArena>();
+        long pinned = RunTailRemovalStoreCase<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static long RunTailRemovalStoreCase<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        using ArchetypeChunkStore<TArena> store = CreateArchetypeStore<TArena>(
+            maximumChunks: 3,
+            out ChunkLayoutPlan layout,
+            out ComponentColumnLayout[] columns);
+        int population = checked((layout.RowCapacity * 2) + 17);
+        int removedCount = layout.RowCapacity + 9;
+        int survivorCount = population - removedCount;
+        var entityIndices = new uint[population];
+        var locations = new ChunkRow[population];
+        for (int index = 0; index < population; index++)
+            entityIndices[index] = unchecked((uint)(index + 1));
+        Assert.Equal(population, store.Add(entityIndices, locations));
+
+        int wideColumnIndex = FindColumnIndex(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        ComponentColumnLayout wide = columns[wideColumnIndex];
+        ComponentColumnLayout enable = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        SparseRowChangeVersions sparse = store.EnableSparseRowChangeTracking(wideColumnIndex);
+        long expectedChecksum = 0;
+        for (int index = 0; index < population; index++)
+        {
+            long value = unchecked((index * 1_048_583L) ^ 0x29D5_10A7L);
+            ChangeVersion version = new(unchecked((ulong)(index + 1)));
+            store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(locations[index], wide).A = value;
+            store.SetEnabled(locations[index], enable, enabled: (index & 3) != 1);
+            store.StampSparseChangeVersion(
+                locations[index].ChunkIndex,
+                wideColumnIndex,
+                locations[index].Row,
+                rowCount: 1,
+                version);
+            if (index < survivorCount)
+                expectedChecksum = unchecked(expectedChecksum + value + (long)version.Value);
+        }
+
+        Assert.True(store.IsCurrentDonorTail(locations[^1]));
+        store.RemoveTailRows(removedCount);
+        Assert.Equal(survivorCount, store.Count);
+        long actualChecksum = 0;
+        for (int index = 0; index < survivorCount; index++)
+        {
+            ChunkRow location = locations[index];
+            long value = unchecked((index * 1_048_583L) ^ 0x29D5_10A7L);
+            ChangeVersion version = new(unchecked((ulong)(index + 1)));
+            Assert.True(store.Contains(location, entityIndices[index]));
+            Assert.Equal(value, store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(location, wide).A);
+            Assert.Equal((index & 3) != 1, store.IsEnabled(location, enable));
+            Assert.Equal(version, sparse.GetEffectiveRowVersion(location.ChunkIndex, location.Row));
+            actualChecksum = unchecked(actualChecksum + value + (long)version.Value);
+        }
+        Assert.Equal(expectedChecksum, actualChecksum);
+        for (int index = survivorCount; index < population; index++)
+            Assert.False(store.Contains(locations[index], entityIndices[index]));
+
+        var reused = new ChunkRow[removedCount];
+        var replacementIndices = new uint[removedCount];
+        for (int index = 0; index < removedCount; index++)
+            replacementIndices[index] = unchecked((uint)(900_000 + index));
+        Assert.Equal(removedCount, store.Add(replacementIndices, reused));
+        for (int index = 0; index < removedCount; index++)
+        {
+            Assert.Equal(0L, store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(reused[index], wide).A);
+            Assert.True(store.IsEnabled(reused[index], enable));
+            Assert.Equal(ChangeVersion.None, sparse.GetEffectiveRowVersion(
+                reused[index].ChunkIndex,
+                reused[index].Row));
+        }
+        store.ValidateInvariants();
+        return unchecked(actualChecksum + store.Count);
+    }
+
+    private static long RunLazyRemovedTailReuse<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        using ArchetypeChunkStore<TArena> store = CreateArchetypeStore<TArena>(
+            maximumChunks: 2,
+            out ChunkLayoutPlan layout,
+            out ComponentColumnLayout[] columns);
+        int count = layout.RowCapacity + 9;
+        var entityIndices = new uint[count];
+        var locations = new ChunkRow[count];
+        for (int index = 0; index < count; index++)
+            entityIndices[index] = unchecked((uint)(index + 1));
+        Assert.Equal(count, store.Add(entityIndices, locations));
+
+        int wideColumnIndex = FindColumnIndex(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        ComponentColumnLayout wide = columns[wideColumnIndex];
+        ComponentColumnLayout enable = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        SparseRowChangeVersions sparse = store.EnableSparseRowChangeTracking(wideColumnIndex);
+        ChunkRow removed = locations[^1];
+        store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(removed, wide).A = 0x5172_9ABCL;
+        store.SetEnabled(removed, enable, enabled: false);
+        store.StampSparseChangeVersion(
+            removed.ChunkIndex,
+            wideColumnIndex,
+            removed.Row,
+            rowCount: 1,
+            new ChangeVersion(91));
+        Assert.Equal(new ChangeVersion(91), sparse.GetEffectiveRowVersion(removed.ChunkIndex, removed.Row));
+
+        Assert.True(store.TryRemove(removed, entityIndices[^1], out ChunkRowRelocation relocation));
+        Assert.False(relocation.HasValue);
+        Assert.True(store.TryAdd(900_001, out ChunkRow reused));
+        Assert.Equal(removed, reused);
+        Assert.Equal(0L, store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(reused, wide).A);
+        Assert.True(store.IsEnabled(reused, enable));
+        Assert.Equal(ChangeVersion.None, sparse.GetEffectiveRowVersion(reused.ChunkIndex, reused.Row));
+        Assert.Equal(900_001u, store.GetEntityIndex(reused));
+        store.ValidateInvariants();
+        return unchecked(
+            (long)reused.ChunkIndex * 101L +
+            reused.Row +
+            store.Count);
     }
 
     private static void AssertClearedStoreState<TArena>(
@@ -4410,6 +4551,8 @@ internal static class EcsPrimitiveTests
     private static void PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle()
     {
         RunGroupedWholeDestroyDifferential();
+        RunGroupedTailDestroyDifferential();
+        RunGroupedNonContiguousTailCandidateDifferential();
         RunGroupedSparseDestroyDifferential();
         RunGroupedRejectedWholeCandidateDifferential();
     }
@@ -4555,6 +4698,140 @@ internal static class EcsPrimitiveTests
                 break;
             Assert.Equal(groupedEntity.Index, scalarEntity.Index);
             Assert.Equal(groupedEntity.Generation, scalarEntity.Generation);
+        }
+    }
+
+    private static void RunGroupedTailDestroyDifferential()
+    {
+        const int entityCount = 1_024;
+        const int destroyCount = 257;
+        using var grouped = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: destroyCount,
+            maximumChunks: 8);
+        using var scalar = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: destroyCount,
+            maximumChunks: 8);
+        var groupedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 32_771L) ^ 0x29A5_7011L),
+            };
+            Assert.True(grouped.World.TryCreate(
+                grouped.Source,
+                grouped.EnableLookup,
+                value,
+                out groupedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Source,
+                scalar.EnableLookup,
+                value,
+                out scalarEntities[index]));
+            bool enabled = (index & 3) != 2;
+            Assert.True(grouped.World.TrySetEnabled(groupedEntities[index], grouped.EnableLookup, enabled));
+            Assert.True(scalar.World.TrySetEnabled(scalarEntities[index], scalar.EnableLookup, enabled));
+        }
+
+        int firstDestroyed = entityCount - destroyCount;
+        grouped.World.StructuralCommands.EnqueueDestroy(groupedEntities.AsSpan(firstDestroyed));
+        scalar.World.StructuralCommands.EnqueueDestroy(scalarEntities.AsSpan(firstDestroyed));
+        StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult = scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(groupedResult, scalarResult);
+        Assert.Equal(destroyCount, groupedResult.DestroyedCount);
+        Assert.Equal(firstDestroyed, grouped.World.AliveCount);
+        Assert.Equal(grouped.World.AliveCount, scalar.World.AliveCount);
+        for (int index = 0; index < entityCount; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedEntities[index],
+                scalar,
+                scalarEntities[index]);
+        }
+
+        for (int index = 0; index < destroyCount; index++)
+        {
+            Assert.True(grouped.World.TryCreate(grouped.Source, out Entity groupedEntity));
+            Assert.True(scalar.World.TryCreate(scalar.Source, out Entity scalarEntity));
+            Assert.Equal(groupedEntity.Index, scalarEntity.Index);
+            Assert.Equal(groupedEntity.Generation, scalarEntity.Generation);
+            Assert.True(grouped.World.TryRead(
+                groupedEntity,
+                grouped.EnableLookup,
+                out UltraSim.ECS.Tests.LayoutEnableLong groupedDefault));
+            Assert.True(scalar.World.TryRead(
+                scalarEntity,
+                scalar.EnableLookup,
+                out UltraSim.ECS.Tests.LayoutEnableLong scalarDefault));
+            Assert.Equal(0L, groupedDefault.Value);
+            Assert.Equal(groupedDefault.Value, scalarDefault.Value);
+        }
+    }
+
+    private static void RunGroupedNonContiguousTailCandidateDifferential()
+    {
+        const int entityCount = 4_096;
+        const int earlyCount = 64;
+        const int tailCount = 64;
+        const int destroyCount = earlyCount + tailCount;
+        using var grouped = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: destroyCount,
+            maximumChunks: 16);
+        using var scalar = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: destroyCount,
+            maximumChunks: 16);
+        var groupedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 8_191L) ^ 0x671B_29D3L),
+            };
+            Assert.True(grouped.World.TryCreate(
+                grouped.Source,
+                grouped.EnableLookup,
+                value,
+                out groupedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Source,
+                scalar.EnableLookup,
+                value,
+                out scalarEntities[index]));
+        }
+
+        // The first/last entities and command count pass the cheap tail
+        // candidate test, but this deliberately skips most packed rows. The
+        // exact donor cursor must reject it before mutation and fall back to
+        // scalar semantics.
+        StructuralCommandBuffer groupedCommands = grouped.World.StructuralCommands;
+        StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
+        groupedCommands.EnqueueDestroy(groupedEntities.AsSpan(0, earlyCount));
+        scalarCommands.EnqueueDestroy(scalarEntities.AsSpan(0, earlyCount));
+        groupedCommands.EnqueueDestroy(groupedEntities.AsSpan(entityCount - tailCount));
+        scalarCommands.EnqueueDestroy(scalarEntities.AsSpan(entityCount - tailCount));
+
+        StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(groupedResult, scalarResult);
+        Assert.Equal(destroyCount, groupedResult.DestroyedCount);
+        Assert.Equal(entityCount - destroyCount, grouped.World.AliveCount);
+        Assert.Equal(grouped.World.AliveCount, scalar.World.AliveCount);
+        for (int index = 0; index < entityCount; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedEntities[index],
+                scalar,
+                scalarEntities[index]);
         }
     }
 

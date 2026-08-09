@@ -181,12 +181,12 @@ isolated repetitions or hardware counters before becoming optimization claims.
 The adapter changes the optimization discussion from speculation to named
 regression targets:
 
-1. Exact whole-archetype deferred destroy now has a post-baseline fast path. It
-   validates complete ordered coverage, resets occupied-store/change metadata
-   without clearing payload that creation must initialize anyway, and retires
-   the validated entity set in record order. The accepted baseline remains the
-   immutable pre-change point.
-2. Sparse destroy remains scalar. An attempted reuse of the v27 planned
+1. Exact whole-archetype and packed-suffix deferred destroy now have post-
+   baseline fast paths. They validate complete logical coverage against the
+   store's real donor order, shrink/reset occupancy and change metadata without
+   eagerly clearing inaccessible payload, and retire the validated entity set
+   in record order. The accepted baseline remains the immutable pre-change point.
+2. Arbitrary sparse destroy remains scalar. An attempted reuse of the v27 planned
    compactor regressed the shared 10%-sparse playback from roughly `85` to `155
    ns/destroy`; donor-tail gating reduced but did not justify the complexity, so
    the partial path was removed. A future sparse algorithm must group by source
@@ -237,3 +237,30 @@ whole-population playback in the ranges `50.27-63.92/11.63-12.03 ns/entity`
 both processes. Repeated isolated processes remain required before
 treating the exact values as accepted; the shared adapter result is the
 longitudinal generational guard.
+
+## V29 trusted destroy and exact-suffix result
+
+V29 moves clearing from row death to row publication, adds a trusted
+post-removal entity-pool commit, removes redundant release ownership probes, and
+bulk-shrinks exact suffixes after walking the store's actual partial/full donor
+chain backward. A false candidate that ends at the current tail but skips packed
+chunks is differential-tested against the scalar oracle; numeric chunk IDs do
+not establish adjacency.
+
+The complete 87-row comparison passed in both child-process orders with zero
+canonical-state, descriptor, measurement-policy, or catalog mismatches. V3
+allocated zero timed managed bytes in every row. At 50,000 entities:
+
+| Scenario | Immutable V3 ns/op | V29 V3-first/last ns/op | V2 current ns/op | Control-normalized V29/baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Full deferred destroy playback | 72.50 | 14.37 / 13.36 | 2.41 / 2.40 | 0.199 / 0.185 |
+| Immediate destroy | 72.30 | 45.64 / 44.19 | 29.03 / 28.96 | 0.643 / 0.624 |
+| Sparse 10% destroy playback | 85.03 | 56.65 / 56.27 | 14.47 / 14.86 | 0.644 / 0.623 |
+| Add-default playback | 82.70 | 78.34 / 76.70 | 20.05 / 20.04 | 0.946 / 0.927 |
+| Remove playback | 85.99 | 80.49 / 78.64 | 16.20 / 16.20 | 0.933 / 0.911 |
+
+The destroy movement is repeatable and material, and transition playback did
+not regress. It is not parity: V2 remains about `5.6x` faster for complete
+deferred evacuation and about `3.8x` for sparse 10% playback. The next sparse
+algorithm must therefore be selected with source-chunk locality and density
+sweeps; it must not infer that the exact-suffix result generalizes to holes.

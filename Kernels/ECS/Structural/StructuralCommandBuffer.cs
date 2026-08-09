@@ -555,10 +555,18 @@ public sealed class StructuralCommandBuffer
         in PhaseChain chain,
         ref PlaybackCounts counts)
     {
-        bool detachedWhole = false;
+        bool destroyedGrouped = false;
         Entity firstEntity = _commands[chain.HeadLink - 1].GetEntityTarget();
-        if (chain.Count >= MinimumGroupedDestroyRun &&
-            world.IsWholeArchetypeDestroyCandidate(firstEntity, chain.Count))
+        Entity lastEntity = _commands[chain.TailIndex].GetEntityTarget();
+        bool wholeCandidate = chain.Count >= MinimumGroupedDestroyRun &&
+            world.IsWholeArchetypeDestroyCandidate(firstEntity, chain.Count);
+        bool tailCandidate = !wholeCandidate &&
+            chain.Count >= MinimumGroupedDestroyRun &&
+            world.IsArchetypeTailDestroyCandidate(
+                firstEntity,
+                lastEntity,
+                chain.Count);
+        if (wholeCandidate || tailCandidate)
         {
             int candidateCount = 0;
             for (int link = chain.HeadLink; link != 0;)
@@ -571,11 +579,14 @@ public sealed class StructuralCommandBuffer
                 System.Diagnostics.Debug.Assert(candidateCount < _createdEntities.Length);
                 _createdEntities[candidateCount++] = command.GetEntityTarget();
             }
-            detachedWhole = world.TryDestroyWholeArchetype(
-                _createdEntities.AsSpan(0, candidateCount));
+            ReadOnlySpan<Entity> candidates =
+                _createdEntities.AsSpan(0, candidateCount);
+            destroyedGrouped = wholeCandidate
+                ? world.TryDestroyWholeArchetype(candidates)
+                : world.TryDestroyArchetypeTail(candidates);
         }
 
-        if (detachedWhole)
+        if (destroyedGrouped)
         {
             counts.Destroyed = checked(counts.Destroyed + chain.Count);
             return;

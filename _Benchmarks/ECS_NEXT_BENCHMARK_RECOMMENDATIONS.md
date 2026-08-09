@@ -321,6 +321,19 @@ archetype IDs, world IDs, and allocator addresses. Add V2/Current adapters only
 when setup, command ordering, conflict policy, and final state are genuinely
 equivalent; until then, retain the `Comparable=false` label.
 
+Deferred destroy needs a separate physical-selection matrix over a fixed
+resident population: exact whole, exact packed suffix, ordinal sparse stride,
+random sparse holes, and source-chunk-clustered holes at 1%, 10%, 50%, and 100%.
+Rebuild packed ownership outside each playback-only sample after sparse
+swap-removal; reusing the post-removal store silently changes physical locality.
+Report victim/source chunks, full-chunk evacuation rate, holes per touched chunk,
+donor moves, and location repairs in addition to ns/destroy. A 1% sample over
+100,000 residents contains only 1,000 timed commands and is vulnerable to OS
+interrupts: publish barrier p50/p95/max and per-operation medians, repeat it in
+fresh processes, and never choose a crossover from its arithmetic mean alone.
+Do not include rebuild cost in a playback-only claim, but add a distinct end-to-
+end scenario if real workload maintenance cost is the question.
+
 ## V2-to-V3 comparison adapters
 
 The first exact cross-generation adapter is implemented under root `_Benchmarks`
