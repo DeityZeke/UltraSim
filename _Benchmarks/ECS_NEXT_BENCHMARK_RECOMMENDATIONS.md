@@ -260,6 +260,45 @@ stamps separately. The canonical final-state hash must include cursor-visible
 change state for these scenarios; an arithmetic component-value checksum cannot
 detect lost or spuriously broadened history.
 
+## Structural command and barrier guards
+
+Treat the v23 main-thread command arena as a scalar correctness/memory baseline.
+Split later scenarios into record-only, playback-only, and end-to-end variants so
+a faster recorder cannot conceal a slower serial barrier. Cross 1K, 10K, 100K,
+and 1M commands with homogeneous create/destroy/remove/add streams, realistic
+mixed streams, sorted versus randomized entities, one versus many source
+archetypes, and one versus many destination transitions. Report commands/sec,
+nanoseconds/command, barrier p50/p95/p99/max, commands rejected by reason, chunks
+touched, rows reserved/copied/compacted, useful component bytes moved, fixed arena
+bytes, scratch high-water, allocations, and collections.
+
+As grouped playback lands, compare the same canonical workload at each step:
+
+- current scalar phase scans and scalar world operations;
+- phase partitioning without store grouping;
+- grouping by source archetype and transition;
+- bulk destination reservation and component copy;
+- ordered whole-chunk and sparse source compaction;
+- one main producer versus 1, 2, 4, physical-core, and logical-core producer
+  arenas plus deterministic merge.
+
+Test all expected-conflict densities—0%, 1%, 10%, and 50% duplicate/stale/
+destroy-plus-transition commands—because a fast successful stream can hide an
+expensive rejection path. Also vary create-token dependency depth, command
+capacity at exactly full and one-over-full, empty barriers, sparse phase mixes,
+and repeated unchanged/empty polling. Failure and overflow cases must preserve a
+documented consumed-versus-retryable policy and produce the same canonical final
+state as the reference model.
+
+Every structural benchmark should validate a full canonical state hash outside
+the timed region in development runs. It must include living entities,
+generations, logical archetype membership, component values/defaults, enable
+states, command results, destroyed identities where observable, and lifecycle/
+cursor-visible effects. Normalize physical row order, chunk placement, internal
+archetype IDs, world IDs, and allocator addresses. Add V2/Current adapters only
+when setup, command ordering, conflict policy, and final state are genuinely
+equivalent; until then, retain the `Comparable=false` label.
+
 ## V2-to-V3 comparison adapters
 
 Add exact cross-generation adapters as corresponding V3 features become real.

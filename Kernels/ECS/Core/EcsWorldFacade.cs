@@ -15,6 +15,7 @@ namespace UltraSim.ECS;
 public sealed class EcsWorld : IDisposable
 {
     private readonly EcsWorld<NativeChunkArena> _core;
+    private readonly StructuralCommandBuffer _structuralCommands;
     private readonly int _ownerThreadId;
 
     public EcsWorld(ComponentSchema schema, EcsWorldOptions options)
@@ -30,7 +31,12 @@ public sealed class EcsWorld : IDisposable
             options.EntityCapacity,
             options.MaximumArchetypes,
             static capacity => new NativeChunkArena(capacity),
-            options.MaximumPreparedPlans);
+            options.MaximumPreparedPlans,
+            maximumPublicTransitions: options.MaximumPreparedTransitions);
+        _structuralCommands = new StructuralCommandBuffer(
+            _core.Id,
+            _ownerThreadId,
+            options.MaximumStructuralCommands);
     }
 
     public WorldId Id => _core.Id;
@@ -131,12 +137,31 @@ public sealed class EcsWorld : IDisposable
         }
     }
 
+    public int PreparedTransitionCount
+    {
+        get
+        {
+            EnsureOwnerThread();
+            return _core.PublicTransitionCount;
+        }
+    }
+
     public ChangeVersion CurrentChangeVersion
     {
         get
         {
             EnsureOwnerThread();
             return _core.CurrentChangeVersion;
+        }
+    }
+
+    /// <summary>Fixed main-thread command arena reserved by this world.</summary>
+    public StructuralCommandBuffer StructuralCommands
+    {
+        get
+        {
+            EnsureRuntimeAccess();
+            return _structuralCommands;
         }
     }
 
@@ -172,8 +197,8 @@ public sealed class EcsWorld : IDisposable
         EnsureOwnerThread();
         ArchetypeId sourceId = ValidateArchetype(source, nameof(source));
         ArchetypeId destinationId = ValidateArchetype(destination, nameof(destination));
-        PreparedArchetypeTransition route = _core.PreparePublicTransition(sourceId, destinationId);
-        return new ArchetypeTransition(route, source, destination);
+        uint transitionId = _core.PreparePublicTransition(sourceId, destinationId);
+        return new ArchetypeTransition(Id, transitionId, source, destination);
     }
 
     public ComponentLookup<T> PrepareLookup<T>()
@@ -250,14 +275,48 @@ public sealed class EcsWorld : IDisposable
         EnsureRuntimeAccess();
         if (!transition.IsValid)
             throw new ArgumentException("The archetype transition is invalid or default initialized.", nameof(transition));
+        if (transition.WorldId != Id)
+            throw new ArgumentException("The archetype transition belongs to a different world.", nameof(transition));
 
-        return _core.TryTransition(entity, transition.Route, out _);
+        return _core.TryTransition(
+            entity,
+            transition.TransitionId,
+            transition.SourceId,
+            transition.DestinationId,
+            out _);
     }
 
     public bool TryDestroy(Entity entity)
     {
         EnsureRuntimeAccess();
         return _core.TryDestroy(entity);
+    }
+
+    /// <summary>
+    /// Consumes the current structural epoch in deterministic broad-phase order.
+    /// Expected stale/capacity failures are returned as rejection counts. An
+    /// unexpected exception consumes the arena and terminally faults the world.
+    /// </summary>
+    public StructuralPlaybackResult PlaybackStructuralCommands()
+    {
+        EnsureRuntimeAccess();
+        _core.ValidateStructuralPlayback();
+        try
+        {
+            return _structuralCommands.Playback(_core);
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                _core.MarkFaulted(exception);
+            }
+            finally
+            {
+                _structuralCommands.Invalidate();
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -331,12 +390,15 @@ public sealed class EcsWorld : IDisposable
 
         EnsureOwnerThread();
         _core.Dispose();
+        _structuralCommands.Invalidate();
     }
 
     internal void MarkFaulted(Exception exception)
     {
         EnsureOwnerThread();
         _core.MarkFaulted(exception);
+        if (_core.State == EcsWorldState.Faulted)
+            _structuralCommands.Invalidate();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

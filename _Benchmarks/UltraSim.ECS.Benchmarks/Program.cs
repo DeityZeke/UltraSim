@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using UltraSim.ECS;
@@ -80,6 +81,9 @@ internal static class PrimitiveBenchmarks
         using var pinnedBoundAccess = new EcsWorldBoundAccessFixture<PinnedChunkArena>(1_000_000);
         using var publicLookupAccess = new PublicEcsWorldLookupFixture(1_000_000, includeTransition: false);
         using var publicLookupTransition = new PublicEcsWorldLookupFixture(250_000, includeTransition: true);
+        using var publicDeferredTransition = new PublicDeferredTransitionFixture(100_000);
+        using var publicDeferredCreate = new PublicDeferredCreateFixture(100_000);
+        using var publicDeferredDestroy = new PublicDeferredDestroyFixture(100_000);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
         using var pinnedChunkVisit = new EcsWorldChunkVisitFixture<PinnedChunkArena>(100_000);
         using var nativeReadWriteQuery = new EcsWorldReadWriteQueryFixture<NativeChunkArena>(100_000);
@@ -144,6 +148,9 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_PreparedLookupReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.Execute),
             new("PublicWorld_BoundedAccessJobReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.ExecutePrepared),
             new("PublicWorld_BoundedAccessJobReadWriteEnableTransition_250000", "PublicWorldComponentLookup", 250_000, publicLookupTransition.ExecutePrepared),
+            new("PublicWorld_DeferredTransitionBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.Execute, publicDeferredTransition.Prepare),
+            new("PublicWorld_DeferredCreateDefaultBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredCreate.Execute, publicDeferredCreate.Prepare),
+            new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
             new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
             new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
@@ -198,7 +205,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-bounded-access-v22",
+            SemanticProfile = "ecs-next-phase1-structural-command-foothold-v23",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -211,6 +218,11 @@ internal static class PrimitiveBenchmarks
             ChangeVersionSizeBytes = Marshal.SizeOf<ChangeVersion>(),
             ChangeCursorSizeBytes = Marshal.SizeOf<ChangeCursor>(),
             ArchetypeHandleSizeBytes = Marshal.SizeOf<ArchetypeHandle>(),
+            ArchetypeTransitionSizeBytes = Marshal.SizeOf<ArchetypeTransition>(),
+            DeferredEntitySizeBytes = Marshal.SizeOf<DeferredEntity>(),
+            StructuralCommandRecordSizeBytes = Unsafe.SizeOf<StructuralCommandRecord>(),
+            StructuralPlaybackResultSizeBytes = Marshal.SizeOf<StructuralPlaybackResult>(),
+            StructuralCommandReservedBytes = publicDeferredTransition.CommandReservedBytes,
             PublicLookupRouteBytes = publicLookupTransition.RouteBytes,
             ExactChangedRowsMetadataBytes = nativeGeneratedWideQuery.ExactChangedRowsMetadataBytes,
             SchemaIdSizeBytes = Marshal.SizeOf<SchemaId>(),
@@ -1313,7 +1325,8 @@ internal static class PrimitiveBenchmarks
                 new EcsWorldOptions(
                     new EntityCapacity(1),
                     maximumArchetypes: includeTransition ? 2 : 1,
-                    maximumPreparedPlans: 1));
+                    maximumPreparedPlans: 1,
+                    maximumPreparedTransitions: includeTransition ? 2 : 0));
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
             ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
@@ -1444,6 +1457,216 @@ internal static class PrimitiveBenchmarks
         {
             Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
             return signature;
+        }
+    }
+
+    private sealed class PublicDeferredTransitionFixture : IDisposable
+    {
+        private readonly EcsWorld _world;
+        private readonly StructuralCommandBuffer _commands;
+        private readonly ArchetypeTransition _forward;
+        private readonly ArchetypeTransition _backward;
+        private readonly Entity[] _entities;
+        private bool _inDestination;
+
+        internal PublicDeferredTransitionFixture(int entityCount)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(entityCount),
+                    maximumArchetypes: 2,
+                    maximumPreparedPlans: 0,
+                    maximumPreparedTransitions: 2,
+                    maximumStructuralCommands: entityCount));
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+            ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
+            ArchetypeHandle source = _world.RegisterArchetype(
+                CreateSortedSignature(position, velocity),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 640);
+            ArchetypeHandle destination = _world.RegisterArchetype(
+                CreateSortedSignature(position, velocity, wide),
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 640);
+            _forward = _world.PrepareTransition(source, destination);
+            _backward = _world.PrepareTransition(destination, source);
+            _world.Seal();
+            _world.Initialize();
+            _world.BeginRun();
+            _commands = _world.StructuralCommands;
+            _entities = new Entity[entityCount];
+            for (int index = 0; index < _entities.Length; index++)
+            {
+                if (!_world.TryCreate(source, out _entities[index]))
+                    throw new InvalidOperationException("Deferred-transition fixture exhausted its source.");
+            }
+        }
+
+        internal long CommandReservedBytes => _commands.ReservedBytes;
+
+        internal void Prepare()
+        {
+            if (!_inDestination)
+                return;
+            _commands.EnqueueTransition(_entities, _backward);
+            StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
+            if (result.RemovedCount != _entities.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException("Deferred-transition fixture failed to reset.");
+            _inDestination = false;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            _commands.EnqueueTransition(_entities, _forward);
+            StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
+            if (result.AddedCount != _entities.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException("Deferred-transition batch was not applied exactly once.");
+            _inDestination = true;
+            long checksum = unchecked(
+                (long)result.Epoch + result.CommandCount + result.AddedCount);
+            return new ScenarioMeasurement(_entities.Length, checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private static ComponentId[] CreateSortedSignature(params ComponentId[] signature)
+        {
+            Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
+            return signature;
+        }
+    }
+
+    private sealed class PublicDeferredCreateFixture : IDisposable
+    {
+        private readonly EcsWorld _world;
+        private readonly StructuralCommandBuffer _commands;
+        private readonly ArchetypeHandle[] _archetypes;
+        private readonly DeferredEntity[] _tokens;
+        private readonly Entity[] _entities;
+        private bool _hasLiveEntities;
+
+        internal PublicDeferredCreateFixture(int entityCount)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(entityCount),
+                    maximumArchetypes: 1,
+                    maximumPreparedPlans: 0,
+                    maximumPreparedTransitions: 0,
+                    maximumStructuralCommands: entityCount));
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ArchetypeHandle archetype = _world.RegisterArchetype(
+                [position],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 128);
+            _world.Seal();
+            _world.Initialize();
+            _world.BeginRun();
+            _commands = _world.StructuralCommands;
+            _archetypes = new ArchetypeHandle[entityCount];
+            _tokens = new DeferredEntity[entityCount];
+            _entities = new Entity[entityCount];
+            Array.Fill(_archetypes, archetype);
+        }
+
+        internal void Prepare()
+        {
+            if (!_hasLiveEntities)
+                return;
+            for (int index = 0; index < _entities.Length; index++)
+            {
+                if (!_world.TryDestroy(_entities[index]))
+                    throw new InvalidOperationException("Deferred-create fixture failed to reset.");
+            }
+            _hasLiveEntities = false;
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            _commands.EnqueueCreateDefault(_archetypes, _tokens);
+            StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
+            if (result.CreatedCount != _entities.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException("Deferred-create batch was not applied exactly once.");
+
+            long checksum = result.Epoch;
+            for (int index = 0; index < _tokens.Length; index++)
+            {
+                if (!_commands.TryResolve(_tokens[index], out _entities[index]))
+                    throw new InvalidOperationException("Deferred-create token did not resolve.");
+                checksum = unchecked(checksum + _entities[index].Index + _entities[index].Generation);
+            }
+            _hasLiveEntities = true;
+            return new ScenarioMeasurement(_entities.Length, checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+    }
+
+    private sealed class PublicDeferredDestroyFixture : IDisposable
+    {
+        private readonly EcsWorld _world;
+        private readonly StructuralCommandBuffer _commands;
+        private readonly ArchetypeHandle _archetype;
+        private readonly Entity[] _entities;
+        private bool _hasLiveEntities;
+
+        internal PublicDeferredDestroyFixture(int entityCount)
+        {
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(entityCount),
+                    maximumArchetypes: 1,
+                    maximumPreparedPlans: 0,
+                    maximumPreparedTransitions: 0,
+                    maximumStructuralCommands: entityCount));
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            _archetype = _world.RegisterArchetype(
+                [position],
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: 128);
+            _world.Seal();
+            _world.Initialize();
+            _world.BeginRun();
+            _commands = _world.StructuralCommands;
+            _entities = new Entity[entityCount];
+            CreateEntities();
+        }
+
+        internal void Prepare()
+        {
+            if (!_hasLiveEntities)
+                CreateEntities();
+        }
+
+        internal ScenarioMeasurement Execute()
+        {
+            _commands.EnqueueDestroy(_entities);
+            StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
+            if (result.DestroyedCount != _entities.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException("Deferred-destroy batch was not applied exactly once.");
+            _hasLiveEntities = false;
+            long checksum = unchecked(
+                (long)result.Epoch + result.CommandCount + result.DestroyedCount);
+            return new ScenarioMeasurement(_entities.Length, checksum);
+        }
+
+        public void Dispose() => _world.Dispose();
+
+        private void CreateEntities()
+        {
+            for (int index = 0; index < _entities.Length; index++)
+            {
+                if (!_world.TryCreate(_archetype, out _entities[index]))
+                    throw new InvalidOperationException("Deferred-destroy fixture exhausted its source.");
+            }
+            _hasLiveEntities = true;
         }
     }
 
@@ -2943,6 +3166,11 @@ internal sealed class BenchmarkReport
     public required int ChangeVersionSizeBytes { get; init; }
     public required int ChangeCursorSizeBytes { get; init; }
     public required int ArchetypeHandleSizeBytes { get; init; }
+    public required int ArchetypeTransitionSizeBytes { get; init; }
+    public required int DeferredEntitySizeBytes { get; init; }
+    public required int StructuralCommandRecordSizeBytes { get; init; }
+    public required int StructuralPlaybackResultSizeBytes { get; init; }
+    public required long StructuralCommandReservedBytes { get; init; }
     public required long PublicLookupRouteBytes { get; init; }
     public required long ExactChangedRowsMetadataBytes { get; init; }
     public required int SchemaIdSizeBytes { get; init; }

@@ -17,12 +17,15 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     where TArena : class, IChunkArenaBackend
 {
     private const int MaximumSupportedQueryPlans = 1 << 20;
+    private const int MaximumSupportedPublicTransitions = 1 << 20;
 
     private readonly ComponentSchema _schema;
     private readonly EntityPool _entities;
     private readonly ArchetypeRegistry<TArena> _archetypes;
     private readonly IArchetypeQueryPlan<TArena>?[] _queryPlans;
+    private readonly PreparedArchetypeTransition?[] _publicTransitions;
     private int _queryPlanCount;
+    private int _publicTransitionCount;
     private ChangeVersion _changeVersion;
     private EcsWorldState _state;
     private Exception? _faultException;
@@ -35,17 +38,21 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         int maximumArchetypes,
         Func<ChunkArenaCapacity, TArena> arenaFactory,
         int maximumQueryPlans,
-        ChangeVersion initialChangeVersion = default)
+        ChangeVersion initialChangeVersion = default,
+        int maximumPublicTransitions = 0)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(arenaFactory);
         if (maximumQueryPlans < 0 || maximumQueryPlans > MaximumSupportedQueryPlans)
             throw new ArgumentOutOfRangeException(nameof(maximumQueryPlans));
+        if (maximumPublicTransitions < 0 || maximumPublicTransitions > MaximumSupportedPublicTransitions)
+            throw new ArgumentOutOfRangeException(nameof(maximumPublicTransitions));
 
         _schema = schema;
         _entities = new EntityPool(WorldId.Create(), entityCapacity);
         _archetypes = new ArchetypeRegistry<TArena>(schema, maximumArchetypes, arenaFactory);
         _queryPlans = new IArchetypeQueryPlan<TArena>[maximumQueryPlans];
+        _publicTransitions = new PreparedArchetypeTransition[maximumPublicTransitions];
         _changeVersion = initialChangeVersion;
         _state = EcsWorldState.Created;
     }
@@ -106,6 +113,15 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     internal int MaximumQueryPlans => _queryPlans.Length;
 
+    internal int PublicTransitionCount
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _publicTransitionCount;
+        }
+    }
+
     internal ChangeVersion CurrentChangeVersion
     {
         get
@@ -132,12 +148,21 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return _archetypes.PrepareTransition(sourceId, destinationId);
     }
 
-    internal PreparedArchetypeTransition PreparePublicTransition(
+    internal uint PreparePublicTransition(
         ArchetypeId sourceId,
         ArchetypeId destinationId)
     {
+        EnsureCreated();
+        if (_publicTransitionCount == _publicTransitions.Length)
+        {
+            throw new InvalidOperationException(
+                $"Public transition capacity {_publicTransitions.Length} is exhausted.");
+        }
+
         ArchetypeTransitionPlan<TArena> plan = PrepareTransition(sourceId, destinationId);
-        return plan.ToPrepared(Id);
+        _publicTransitions[_publicTransitionCount] = plan.ToPrepared(Id);
+        _publicTransitionCount++;
+        return checked((uint)_publicTransitionCount);
     }
 
     internal ArchetypeComponentBinding<T> BindComponent<T>(
@@ -1487,18 +1512,24 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             out destinationLocation);
     }
 
+    internal StructuralTransitionPhase GetPublicTransitionPhase(uint transitionId)
+        => GetPublicTransition(transitionId).Phase;
+
     internal bool TryTransition(
         Entity entity,
-        PreparedArchetypeTransition transition,
+        uint transitionId,
+        ArchetypeId expectedSourceId,
+        ArchetypeId expectedDestinationId,
         out EntityLocation destinationLocation)
     {
         EnsureRuntimeMutationAllowed();
-        ArgumentNullException.ThrowIfNull(transition);
-        if (transition.WorldId != Id)
+        PreparedArchetypeTransition transition = GetPublicTransition(transitionId);
+        if (transition.SourceId != expectedSourceId ||
+            transition.DestinationId != expectedDestinationId)
         {
             throw new ArgumentException(
-                "The archetype transition belongs to a different world.",
-                nameof(transition));
+                "The archetype transition handle does not match its prepared route.",
+                nameof(transitionId));
         }
 
         ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
@@ -1512,6 +1543,32 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             out destinationLocation);
     }
 
+    internal bool TryTransition(Entity entity, uint transitionId, out EntityLocation destinationLocation)
+    {
+        PreparedArchetypeTransition transition = GetPublicTransition(transitionId);
+        return TryTransition(
+            entity,
+            transitionId,
+            transition.SourceId,
+            transition.DestinationId,
+            out destinationLocation);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private PreparedArchetypeTransition GetPublicTransition(uint transitionId)
+    {
+        uint index = unchecked(transitionId - 1U);
+        if (index >= unchecked((uint)_publicTransitionCount) ||
+            _publicTransitions[index] is not { } transition)
+        {
+            throw new ArgumentException(
+                "The public archetype transition is invalid or was not prepared by this world.",
+                nameof(transitionId));
+        }
+
+        return transition;
+    }
+
     internal void EnterPreparedComponentAccess<T>(ComponentLookupPlan<TArena, T> lookup)
         where T : unmanaged, IComponent<T>
     {
@@ -1521,6 +1578,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     internal void ExitPreparedComponentAccess() => ExitExecutionScope();
+
+    internal void ValidateStructuralPlayback() => EnsureRuntimeMutationAllowed();
 
     internal bool TryDestroy(Entity entity)
     {
@@ -1564,6 +1623,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             for (int index = 0; index < _queryPlanCount; index++)
                 _queryPlans[index]?.Release();
             Array.Clear(_queryPlans);
+            Array.Clear(_publicTransitions);
             _faultException = null;
             _state = EcsWorldState.Disposed;
         }

@@ -361,6 +361,26 @@ bytes and zero Gen0/1/2 collections. Keep both safe and bounded-job guards, repe
 them in isolated processes, and later measure the bounded API inside real
 generated systems.
 
+The v23 structural-command foothold adds three non-comparable public-world
+scenarios and brings the executable suite to 88 cases. Each scenario includes
+atomic span recording plus deterministic playback; create additionally resolves
+every deferred token inside the timed operation. Fixture repair/reset occurs
+outside timing. The implementation is the first scalar-playback baseline, not the
+planned per-worker/grouped/bulk Phase 3 path.
+
+A focused process measured 100,000 deferred transition, create-default, and
+destroy commands at `105.690`, `41.671`, and `57.304 ns/command`. The subsequent
+complete 88-scenario process measured `125.114`, `37.485`, and `69.338
+ns/command`. Its transition/create/destroy p50 barriers were `12.360`, `3.689`,
+and `6.767 ms`; p95 barriers were `13.558`, `3.960`, and `7.220 ms`; and p99
+barriers were `13.830`, `4.013`, and `7.224 ms`. Every scenario reported zero
+managed bytes and zero Gen0/1/2 collections. The v23 artifact also locks a 16-byte
+public transition, 16-byte deferred token, 24-byte command record, 36-byte
+playback result, and 3,600,000 fixed bytes for the 100,000-slot command fixture
+(24-byte records plus 12-byte create-result slots). Keep focused and full-process
+captures separate, then compare this scalar baseline against grouped/bulk playback
+using equivalent canonical final state.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

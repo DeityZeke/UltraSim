@@ -51,15 +51,19 @@ allocation:
   seal-only runtime compatibility path used by low-level tests.
 - The public non-generic `EcsWorld` facade owns the native-backed kernel without
   exposing arenas or raw storage. `EcsWorldOptions` fixes entity, archetype, and
-  prepared-plan capacity up front; explicit sealing compiles routes and closes
-  allocation, initialization opens bootstrap mutation, and `BeginRun` publishes
-  the running state. The current facade is deliberately engine-neutral and
-  single-owner, rejecting access from other threads until scheduler-issued worker
-  tokens exist.
+  prepared-plan, public-transition, and structural-command capacity up front;
+  explicit sealing compiles routes and closes allocation, initialization opens
+  bootstrap mutation, and `BeginRun` publishes the running state. The current
+  facade is deliberately engine-neutral and single-owner, rejecting access from
+  other threads until scheduler-issued worker tokens exist.
 - Public `ArchetypeHandle` values are eight-byte world/archetype pairs, preventing
   dense archetype IDs from colliding across worlds. Public immediate creation,
   initialized creation, transition, destruction, liveness, and current-archetype
   operations preserve the internal stale/entity/transaction checks.
+- Public `ArchetypeTransition` is a 16-byte unmanaged numeric catalog handle,
+  not a reference to an internal migration plan. Cold preparation validates and
+  stores a bounded world-owned route; hot immediate or deferred use validates the
+  world and indexes that route without retaining an arena or store after disposal.
 - Immediate default creation, transition, and destruction are checked at one
   boundary. Full-archetype rejection does not allocate or burn an entity
   generation, creation rollback removes a just-added row, destruction repairs a
@@ -89,6 +93,25 @@ allocation:
   public-transition values do not retain the facade,
   entity pool, archetype stores, or arenas after world disposal; disposal
   releases the lookup route array.
+- `StructuralCommandBuffer` is the first bounded deferred-mutation foothold. It
+  preallocates a 24-byte unmanaged command plus a 12-byte entity-result slot for
+  every configured command, records scalar or atomic span batches without
+  managed allocation, and issues 16-byte barrier-local `DeferredEntity` tokens
+  so a create can be targeted by later transition/destroy commands in the same
+  epoch. Playback is explicitly ordered as live destroy, create, deferred
+  destroy, remove transition, then add/replacement transition, while preserving
+  record order inside each phase. Expected stale, duplicate, source-mismatch,
+  and capacity failures are consumed and counted; unexpected failures fault the
+  world and invalidate the buffer. Tokens expire when a new recording epoch
+  begins, and resolution reports the creation result rather than promising that
+  the entity survived later commands.
+- This first command path is main-thread/single-owner and deliberately scalar
+  underneath its phase scans. It proves bounded storage, composition, conflict
+  semantics, lifecycle barriers, and zero warmed allocation. Per-worker arenas,
+  deterministic worker merge, operation/source/transition grouping, bulk row
+  reservation/copy/compaction, typed component payloads, prefab expansion, and
+  lifecycle publication remain later structural work and must be measured
+  against this baseline rather than hidden behind it.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index
@@ -246,7 +269,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 174 passing tests, including
+The current runtime and primitive suite has 180 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -325,7 +348,13 @@ write/read cycles. Generated multi-change tests add seal-complete two-watch
 routing, explicit any/all observation behavior, OR/AND exact masks, current
 row-filter intersection, cursor acknowledgement on empty `All` observations,
 exception retry, ownership/capacity/alias/mode rejection, wrap, Native/Pinned
-parity, and 10,000 warmed allocation-free two-write/exact-read cycles.
+parity, and 10,000 warmed allocation-free two-write/exact-read cycles. Deferred
+structural tests lock record/handle/result layouts and reserved bytes; strict and
+`Try` capacity behavior; atomic batch recording; deterministic phase conflicts;
+stale, duplicate, foreign, default, and wrong-thread rejection; create-token
+composition and epoch expiry; capacity failures; execution-barrier recording
+versus playback rules; disposal/fault invalidation; and a 250,000-transition
+warmed zero-allocation gate.
 
 This is now a usable public single-owner component/archetype slice, not yet the
 public scheduler/host ECS. The current generators emit the core manifest, a
@@ -334,8 +363,8 @@ and the first 2R2C any/all changed family. Further access/watch arities should b
 added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
 refinement entirely. Public tracked-write scopes, structural
-creation/migration/removal events, optional filters, bounded deferred structural
-commands, generated public chunk jobs, scheduler worker tokens, and
+creation/migration/removal events, optional filters, per-worker structural arenas
+and bulk playback, generated public chunk jobs, scheduler worker tokens, and
 field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:

@@ -97,6 +97,12 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel), PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel);
         Run(nameof(PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary), PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary);
         Run(nameof(PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes), PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes);
+        Run(nameof(StructuralCommands_LayoutsOptionsAndCapacityAreExplicit), StructuralCommands_LayoutsOptionsAndCapacityAreExplicit);
+        Run(nameof(PublicEcsWorld_DeferredCommandsApplyDeterministicPhases), PublicEcsWorld_DeferredCommandsApplyDeterministicPhases);
+        Run(nameof(PublicEcsWorld_DeferredCreateTokensComposeAndExpire), PublicEcsWorld_DeferredCreateTokensComposeAndExpire);
+        Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
+        Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
+        Run(nameof(PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes);
         Run(nameof(ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit), ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit);
         Run(nameof(EcsWorld_BoundAccessReadsWritesAndInitializes), EcsWorld_BoundAccessReadsWritesAndInitializes);
         Run(nameof(EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings), EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings);
@@ -3105,6 +3111,338 @@ internal static class EcsPrimitiveTests
             rejectedInvalid = true;
         }
         Assert.True(rejectedInvalid);
+    }
+
+    private static void StructuralCommands_LayoutsOptionsAndCapacityAreExplicit()
+    {
+        Assert.Equal(16, Unsafe.SizeOf<ArchetypeTransition>());
+        Assert.Equal(16, Marshal.SizeOf<ArchetypeTransition>());
+        Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<ArchetypeTransition>());
+        Assert.Equal(16, Unsafe.SizeOf<DeferredEntity>());
+        Assert.Equal(16, Marshal.SizeOf<DeferredEntity>());
+        Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<DeferredEntity>());
+        Assert.Equal(24, Unsafe.SizeOf<StructuralCommandRecord>());
+        Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<StructuralCommandRecord>());
+        Assert.Equal(36, Unsafe.SizeOf<StructuralPlaybackResult>());
+        Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<StructuralPlaybackResult>());
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new EcsWorldOptions(
+            new EntityCapacity(1),
+            1,
+            0,
+            maximumPreparedTransitions: -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new EcsWorldOptions(
+            new EntityCapacity(1),
+            1,
+            0,
+            maximumPreparedTransitions: (1 << 20) + 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new EcsWorldOptions(
+            new EntityCapacity(1),
+            1,
+            0,
+            maximumStructuralCommands: -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new EcsWorldOptions(
+            new EntityCapacity(1),
+            1,
+            0,
+            maximumStructuralCommands: (1 << 24) + 1));
+
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        var world = new EcsWorld(
+            schema,
+            new EcsWorldOptions(
+                new EntityCapacity(2),
+                maximumArchetypes: 2,
+                maximumPreparedPlans: 0,
+                maximumPreparedTransitions: 1,
+                maximumStructuralCommands: 2));
+        ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ArchetypeHandle source = world.RegisterArchetype(
+            [enableId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeHandle destination = world.RegisterArchetype(
+            [enableId, intId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        ArchetypeTransition transition = world.PrepareTransition(source, destination);
+        Assert.True(transition.IsValid);
+        Assert.Equal(source, transition.Source);
+        Assert.Equal(destination, transition.Destination);
+        Assert.Equal(1, world.PreparedTransitionCount);
+        Assert.Throws<InvalidOperationException>(() =>
+            world.PrepareTransition(destination, source));
+
+        world.Seal();
+        world.Initialize();
+        world.BeginRun();
+        StructuralCommandBuffer commands = world.StructuralCommands;
+        Assert.Equal(2, commands.Capacity);
+        Assert.Equal(72L, commands.ReservedBytes);
+        Assert.True(world.TryCreate(source, out Entity entity));
+        commands.EnqueueDestroy(entity);
+        Assert.True(commands.TryEnqueueDestroy(entity));
+        Assert.False(commands.TryEnqueueDestroy(entity));
+        StructuralCommandCapacityExceededException exhausted =
+            Assert.Throws<StructuralCommandCapacityExceededException>(() =>
+                commands.EnqueueDestroy(entity));
+        Assert.Equal(2, exhausted.Capacity);
+        Assert.Equal(2, commands.Count);
+        commands.Clear();
+        Assert.Equal(0, commands.Count);
+
+        world.Dispose();
+        Assert.False(commands.IsValid);
+        Assert.Throws<ObjectDisposedException>(commands.Clear);
+    }
+
+    private static void PublicEcsWorld_DeferredCommandsApplyDeterministicPhases()
+    {
+        using var fixture = new PublicWorldFixture(
+            entityCapacity: 3,
+            structuralCommandCapacity: 7);
+        Assert.True(fixture.World.TryCreate(
+            fixture.Source,
+            fixture.EnableLookup,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 11 },
+            out Entity source));
+        Assert.True(fixture.World.TryCreate(
+            fixture.Destination,
+            fixture.EnableLookup,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 22 },
+            out Entity destination));
+        Assert.True(fixture.World.TryCreate(
+            fixture.Source,
+            fixture.EnableLookup,
+            new UltraSim.ECS.Tests.LayoutEnableLong { Value = 33 },
+            out Entity victim));
+
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        commands.EnqueueTransition(source, fixture.SourceToDestination);
+        commands.EnqueueTransition(source, fixture.SourceToDestination);
+        commands.EnqueueTransition(destination, fixture.SourceToDestination);
+        commands.EnqueueTransition(destination, fixture.DestinationToSource);
+        commands.EnqueueTransition(victim, fixture.SourceToDestination);
+        commands.EnqueueDestroy(victim);
+        commands.EnqueueDestroy(victim);
+
+        StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+
+        Assert.Equal(7, result.CommandCount);
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Equal(1, result.DestroyedCount);
+        Assert.Equal(1, result.RemovedCount);
+        Assert.Equal(2, result.AddedCount);
+        Assert.Equal(0, result.RejectedCreateCount);
+        Assert.Equal(1, result.RejectedDestroyCount);
+        Assert.Equal(2, result.RejectedTransitionCount);
+        Assert.Equal(4, result.AppliedCount);
+        Assert.Equal(3, result.RejectedCount);
+        Assert.Equal(0, commands.Count);
+        Assert.True(fixture.World.TryGetArchetype(source, out ArchetypeHandle sourceArchetype));
+        Assert.Equal(fixture.Destination, sourceArchetype);
+        Assert.True(fixture.World.TryGetArchetype(destination, out ArchetypeHandle destinationArchetype));
+        Assert.Equal(fixture.Destination, destinationArchetype);
+        Assert.False(fixture.World.IsAlive(victim));
+        Assert.True(fixture.World.TryRead(
+            source,
+            fixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong sourceValue));
+        Assert.Equal(11L, sourceValue.Value);
+        Assert.True(fixture.World.TryRead(
+            destination,
+            fixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong destinationValue));
+        Assert.Equal(22L, destinationValue.Value);
+    }
+
+    private static void PublicEcsWorld_DeferredCreateTokensComposeAndExpire()
+    {
+        using var fixture = new PublicWorldFixture(
+            entityCapacity: 2,
+            structuralCommandCapacity: 4);
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        DeferredEntity created = commands.EnqueueCreateDefault(fixture.Source);
+        commands.EnqueueTransition(created, fixture.SourceToDestination);
+
+        StructuralPlaybackResult first = fixture.World.PlaybackStructuralCommands();
+        Assert.Equal(1, first.CreatedCount);
+        Assert.Equal(1, first.AddedCount);
+        Assert.Equal(0, first.RejectedCount);
+        Assert.True(commands.TryResolve(created, out Entity entity));
+        Assert.True(fixture.World.TryGetArchetype(entity, out ArchetypeHandle destination));
+        Assert.Equal(fixture.Destination, destination);
+        Assert.True(fixture.World.TryRead(
+            entity,
+            fixture.IntLookup,
+            out UltraSim.ECS.Tests.LayoutInt addedDefault));
+        Assert.Equal(0, addedDefault.Value);
+        Assert.Throws<ArgumentException>(() =>
+            commands.EnqueueTransition(created, fixture.SourceToDestination));
+        Assert.True(commands.TryResolve(created, out Entity stillResolved));
+        Assert.Equal(entity, stillResolved);
+
+        commands.EnqueueDestroy(entity);
+        Assert.False(commands.TryResolve(created, out _));
+        StructuralPlaybackResult second = fixture.World.PlaybackStructuralCommands();
+        Assert.Equal(1, second.DestroyedCount);
+        Assert.False(fixture.World.IsAlive(entity));
+
+        DeferredEntity destroyedCreate = commands.EnqueueCreateDefault(fixture.Source);
+        commands.EnqueueDestroy(destroyedCreate);
+        commands.EnqueueTransition(destroyedCreate, fixture.SourceToDestination);
+        StructuralPlaybackResult third = fixture.World.PlaybackStructuralCommands();
+        Assert.Equal(1, third.CreatedCount);
+        Assert.Equal(1, third.DestroyedCount);
+        Assert.Equal(1, third.RejectedTransitionCount);
+        Assert.False(commands.TryResolve(destroyedCreate, out _));
+        Assert.Equal(0, fixture.World.AliveCount);
+
+        using var capacity = new PublicWorldFixture(
+            entityCapacity: 1,
+            structuralCommandCapacity: 2);
+        StructuralCommandBuffer capacityCommands = capacity.World.StructuralCommands;
+        DeferredEntity firstCreate = capacityCommands.EnqueueCreateDefault(capacity.Source);
+        DeferredEntity rejectedCreate = capacityCommands.EnqueueCreateDefault(capacity.Source);
+        StructuralPlaybackResult capacityResult = capacity.World.PlaybackStructuralCommands();
+        Assert.Equal(1, capacityResult.CreatedCount);
+        Assert.Equal(1, capacityResult.RejectedCreateCount);
+        Assert.True(capacityCommands.TryResolve(firstCreate, out _));
+        Assert.False(capacityCommands.TryResolve(rejectedCreate, out _));
+
+        using var batch = new PublicWorldFixture(
+            entityCapacity: 2,
+            structuralCommandCapacity: 4);
+        StructuralCommandBuffer batchCommands = batch.World.StructuralCommands;
+        Span<ArchetypeHandle> archetypes = stackalloc ArchetypeHandle[2]
+        {
+            batch.Source,
+            batch.Source,
+        };
+        Span<DeferredEntity> tokens = stackalloc DeferredEntity[2];
+        batchCommands.EnqueueCreateDefault(archetypes, tokens);
+        batchCommands.EnqueueTransition(tokens, batch.SourceToDestination);
+        StructuralPlaybackResult batchCreate = batch.World.PlaybackStructuralCommands();
+        Assert.Equal(2, batchCreate.CreatedCount);
+        Assert.Equal(2, batchCreate.AddedCount);
+        Span<Entity> createdEntities = stackalloc Entity[2];
+        Assert.True(batchCommands.TryResolve(tokens[0], out createdEntities[0]));
+        Assert.True(batchCommands.TryResolve(tokens[1], out createdEntities[1]));
+        batchCommands.EnqueueDestroy(createdEntities);
+        StructuralPlaybackResult batchDestroy = batch.World.PlaybackStructuralCommands();
+        Assert.Equal(2, batchDestroy.DestroyedCount);
+        Assert.Equal(0, batch.World.AliveCount);
+    }
+
+    private static void PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread()
+    {
+        using var fixture = new PublicWorldFixture(
+            entityCapacity: 1,
+            structuralCommandCapacity: 4);
+        using var foreign = new PublicWorldFixture(
+            entityCapacity: 1,
+            structuralCommandCapacity: 1);
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity stale));
+        Assert.True(fixture.World.TryDestroy(stale));
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        commands.EnqueueDestroy(stale);
+        StructuralPlaybackResult staleResult = fixture.World.PlaybackStructuralCommands();
+        Assert.Equal(1, staleResult.RejectedDestroyCount);
+
+        Assert.True(foreign.World.TryCreate(foreign.Source, out Entity foreignEntity));
+        Assert.Throws<ArgumentException>(() => commands.EnqueueDestroy(foreignEntity));
+        Assert.Throws<ArgumentException>(() =>
+            commands.EnqueueCreateDefault(foreign.Source));
+        Assert.Throws<ArgumentException>(() =>
+            commands.EnqueueTransition(stale, foreign.SourceToDestination));
+        Assert.Throws<ArgumentException>(() => commands.EnqueueDestroy(default(DeferredEntity)));
+
+        DeferredEntity foreignDeferred = foreign.World.StructuralCommands
+            .EnqueueCreateDefault(foreign.Source);
+        Assert.Throws<ArgumentException>(() => commands.EnqueueDestroy(foreignDeferred));
+
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity live));
+        Exception? wrongThread = null;
+        Task.Run(() =>
+        {
+            try
+            {
+                commands.EnqueueDestroy(live);
+            }
+            catch (Exception exception)
+            {
+                wrongThread = exception;
+            }
+        }).GetAwaiter().GetResult();
+        Assert.True(wrongThread is InvalidOperationException);
+        Assert.Equal(0, commands.Count);
+    }
+
+    private static void PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot()
+    {
+        using var fixture = new PublicWorldFixture(
+            entityCapacity: 1,
+            structuralCommandCapacity: 1);
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity entity));
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        var job = new DeferredRecordingAccessJob(
+            fixture.World,
+            commands,
+            fixture.SourceToDestination,
+            entity);
+
+        fixture.World.ExecuteAccess(fixture.EnableLookup, ref job);
+
+        Assert.Equal(1, job.PlaybackRejections);
+        Assert.Equal(1, commands.Count);
+        Assert.True(fixture.World.TryGetArchetype(entity, out ArchetypeHandle before));
+        Assert.Equal(fixture.Source, before);
+        StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+        Assert.Equal(1, result.AddedCount);
+        Assert.True(fixture.World.TryGetArchetype(entity, out ArchetypeHandle after));
+        Assert.Equal(fixture.Destination, after);
+    }
+
+    private static void PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes()
+    {
+        const int operations = 250_000;
+        using var fixture = new PublicWorldFixture(
+            entityCapacity: 1,
+            structuralCommandCapacity: 1);
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity entity));
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        for (int i = 0; i < 64; i++)
+        {
+            ArchetypeTransition transition = (i & 1) == 0
+                ? fixture.SourceToDestination
+                : fixture.DestinationToSource;
+            commands.EnqueueTransition(entity, transition);
+            Assert.Equal(1, fixture.World.PlaybackStructuralCommands().AppliedCount);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < operations; i++)
+        {
+            ArchetypeTransition transition = (i & 1) == 0
+                ? fixture.SourceToDestination
+                : fixture.DestinationToSource;
+            commands.EnqueueTransition(entity, transition);
+            StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+            checksum = unchecked(checksum + result.Epoch + result.AppliedCount);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(checksum != 0);
+        Assert.Equal(0, commands.Count);
+        Assert.True(fixture.World.IsAlive(entity));
     }
 
     private static void ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit()
@@ -9504,6 +9842,46 @@ internal static class EcsPrimitiveTests
             throw new ChunkVisitorSentinelException();
     }
 
+    private struct DeferredRecordingAccessJob :
+        IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly EcsWorld _world;
+        private readonly StructuralCommandBuffer _commands;
+        private readonly ArchetypeTransition _transition;
+        private readonly Entity _entity;
+
+        internal DeferredRecordingAccessJob(
+            EcsWorld world,
+            StructuralCommandBuffer commands,
+            ArchetypeTransition transition,
+            Entity entity)
+        {
+            _world = world;
+            _commands = commands;
+            _transition = transition;
+            _entity = entity;
+            PlaybackRejections = 0;
+        }
+
+        internal int PlaybackRejections;
+
+        public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access)
+        {
+            Assert.True(access.TryWrite(
+                _entity,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = 0x51A7 }));
+            _commands.EnqueueTransition(_entity, _transition);
+            try
+            {
+                _world.PlaybackStructuralCommands();
+            }
+            catch (InvalidOperationException)
+            {
+                PlaybackRejections++;
+            }
+        }
+    }
+
     private sealed class ChunkVisitorSentinelException : Exception;
 
     private struct ChunkModelAuditVisitor : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
@@ -10191,7 +10569,7 @@ internal static class EcsPrimitiveTests
 
     private sealed class PublicWorldFixture : IDisposable
     {
-        internal PublicWorldFixture(int entityCapacity)
+        internal PublicWorldFixture(int entityCapacity, int structuralCommandCapacity = 0)
         {
             ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
             World = new EcsWorld(
@@ -10199,9 +10577,9 @@ internal static class EcsPrimitiveTests
                 new EcsWorldOptions(
                     new EntityCapacity(entityCapacity),
                     maximumArchetypes: 2,
-                    maximumPreparedPlans: 4));
-            ComponentId byteId = UltraSim.ECS.Tests.LayoutTestSchema
-                .GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+                    maximumPreparedPlans: 4,
+                    maximumPreparedTransitions: 2,
+                    maximumStructuralCommands: structuralCommandCapacity));
             ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
                 .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
             ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
@@ -10212,7 +10590,7 @@ internal static class EcsPrimitiveTests
                 .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
 
             Source = World.RegisterArchetype(
-                [byteId, enableId, wideId],
+                [enableId, wideId],
                 ChunkLayoutOptions.KiB16,
                 maximumChunks: 1);
             Destination = World.RegisterArchetype(

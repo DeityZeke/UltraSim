@@ -12,7 +12,8 @@ internal sealed class PreparedArchetypeTransition
         WorldId worldId,
         ArchetypeId sourceId,
         ArchetypeId destinationId,
-        ArchetypeColumnTransfer[] transfers)
+        ArchetypeColumnTransfer[] transfers,
+        StructuralTransitionPhase phase)
     {
         if (!worldId.IsValid)
             throw new ArgumentException("A valid world ID is required.", nameof(worldId));
@@ -26,6 +27,7 @@ internal sealed class PreparedArchetypeTransition
         SourceId = sourceId;
         DestinationId = destinationId;
         _transfers = transfers;
+        Phase = phase;
     }
 
     internal WorldId WorldId { get; }
@@ -33,6 +35,8 @@ internal sealed class PreparedArchetypeTransition
     internal ArchetypeId SourceId { get; }
 
     internal ArchetypeId DestinationId { get; }
+
+    internal StructuralTransitionPhase Phase { get; }
 
     internal ReadOnlySpan<ArchetypeColumnTransfer> Transfers => _transfers;
 }

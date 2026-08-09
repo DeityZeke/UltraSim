@@ -42,7 +42,10 @@ internal sealed class ArchetypeTransitionPlan<TArena>
         worldId,
         Source.Id,
         Destination.Id,
-        _transfers);
+        _transfers,
+        AddedComponentCount == 0
+            ? StructuralTransitionPhase.Remove
+            : StructuralTransitionPhase.Add);
 
     internal static ArchetypeTransitionPlan<TArena> Create(
         ArchetypeStorage<TArena> source,
