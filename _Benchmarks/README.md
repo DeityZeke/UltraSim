@@ -18,7 +18,8 @@ or evidence that V3 currently wins most overlapping operations.
 The immutable accepted joined artifact lives at
 [`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
-mean/p95 ratios, allocation deltas, and cross-time canonical-state checks. The
+absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
+deltas, and cross-time canonical-state checks. The
 adapter records its pre-iteration full-collection policy and current-thread
 allocation scope; future scheduler cases must broaden allocation accounting.
 
@@ -494,6 +495,31 @@ tail as a latency property. All 103 scenarios reported zero managed bytes and
 zero Gen0/1/2 collections. Broader partial-overlap/removal-density, exact-history,
 component-width, route-entropy, conflict, and multi-chunk evacuation sweeps remain
 future characterization rather than implied generality.
+
+The v28 whole-destroy extension adds four scalar-oracle/production playback
+guards, bringing the suite to 107 scenarios. Exact whole-archetype live-destroy
+validates complete ordered coverage, resets occupied chunk/list plus dense/exact
+change metadata without eagerly clearing inaccessible payload, and retires the
+validated slots in record order. Every partial, duplicate, stale, mixed,
+unordered, or sparse set retains scalar semantics. An attempted partial planner
+was removed after the shared 10%-sparse case regressed from roughly `85` to `155
+ns/destroy` and a narrowed donor-tail-ten-percent guard also lost to scalar.
+
+Two focused processes measured 100,000-row exact-whole scalar/production
+playback in the ranges `50.27-63.92/11.63-12.03 ns/entity`. Their distinct
+partial cases kept 100,000 rows resident and destroyed the donor-tail 10,000
+(10%) in the ranges `50.69-63.41/44.04-58.91 ns/entity` through
+scalar/production fallback. These are equal-work executor guards inside each
+pair, not full-versus-partial comparisons; all four allocated zero managed bytes
+in both processes. In both process orders of the shared 50,000-row Current/Next
+adapter, full V3 playback improved from the immutable `72.50 ns/entity`
+baseline to `29.17/29.03`. The corresponding V2-control-normalized ratios were
+`0.397/0.392`, so the roughly 60% improvement is repeatable. Ten-percent sparse
+measured `89.36/86.91` versus `85.03`, with normalized ratios `1.014/0.978` in
+the noise/tolerated band rather than a demonstrated improvement. Canonical state
+matched and V3 remained allocation-free. V2 still leads full playback at
+`2.45/2.47 ns/entity`, so the next partial-destroy design must be
+benchmark-selected rather than assumed to follow transition compaction.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

@@ -355,6 +355,46 @@ first V3 implementation, and current V3 result. A full collection before each
 measured iteration is an isolation policy, not a production GC model; record it
 and supplement it with natural-GC/soak runs when whole-server paths exist.
 
+The executable regression report preserves absolute V2-baseline, V2-current,
+V3-baseline, and V3-current nanoseconds per operation. It also reports raw
+current/baseline ratios and a V2-control-normalized V3 ratio. Use the normalized
+signal as triage, not an automatic verdict: below `0.95x` is a likely
+improvement, `0.95-1.02x` is normally noise/tolerated, `1.02-1.05x` requires
+investigation, `1.05-1.10x` must be explained, and above `1.10x` is a rejection
+candidate unless the semantic contract intentionally became more expensive.
+Percentage labels are only triage: confirm both child-process orders and inspect
+absolute time before acting, because tiny and sub-nanosecond rows can cross a
+threshold on ordinary measurement noise.
+
+Accepted publication-quality results should eventually aggregate multiple fresh
+child-process captures per order and report median plus p05/p95 across processes.
+The existing `V2-then-V3`/`V3-then-V2` modes are the first order/thermal check.
+A same-process A/B mode is deliberately absent because Current and Next share
+assembly/type identities and cannot be loaded together without changing the
+thing being measured.
+
+### Cross-generation memory decomposition
+
+Add a cold and retained-memory companion to the CPU matrix when both adapters
+can expose equivalent accounting. Report at least:
+
+- configured entity/archetype/command/query capacity;
+- logical component payload bytes;
+- entity-slot and location metadata;
+- chunk/store/list metadata and arena alignment slack;
+- dense and exact-row change metadata;
+- structural-command/result/link capacity;
+- managed committed and retained bytes;
+- native committed bytes and reserved address space;
+- process working set after construction, after workload, and after disposal.
+
+Cross the report with few dense archetypes, many sparse archetypes, many empty
+registered archetypes, narrow/wide components, and exact change tracking off/on.
+Do not mix runtime/OS working-set observations with deterministic owned-byte
+accounting in one unexplained total. Tests must reconcile every deterministic
+subtotal and prove disposal/retention behavior before using memory deltas as a
+generational claim.
+
 ## Expected direction and evidence policy
 
 The expected direction is lower runtime, zero steady-state managed allocation,

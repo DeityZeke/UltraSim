@@ -126,7 +126,15 @@ allocation:
   affected chunk list once, and transactionally repairs migrated and donor
   locations. Nonoverlapping and low-density batches retain v26 scalar removal.
   Duplicate, stale, wrong-source, partial-capacity, donor-repair, enable-state,
-  and dense/exact change-history semantics remain scalar-equivalent. Per-worker
+  and dense/exact change-history semantics remain scalar-equivalent. V28 adds a
+  separate exact whole-archetype live-destroy path: the phase chain retains its
+  count, complete ordered entity coverage is validated before mutation, occupied
+  chunks reset occupancy plus dense/exact history without eagerly clearing
+  payload that creation always initializes, and the validated slots retire in
+  original command order. Any incomplete, duplicate, stale, unordered, mixed-
+  archetype, or sparse set retains scalar destruction. A measured attempt to
+  apply transition-style planned compaction to partial destroy sets regressed
+  both sparse and donor-tail cases and was removed. Per-worker
   arenas, deterministic worker merge, grouping across separated route runs,
   broader density/entropy-driven compaction, typed component payloads, prefab
   expansion, and lifecycle publication remain later structural work and must be measured
@@ -288,7 +296,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 190 passing tests, including
+The current runtime and primitive suite has 193 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -329,6 +337,9 @@ and acknowledgement without migration-generated replay. Planned-compaction tests
 cover the scalar crossover, donor-tail overlap, whole-chunk evacuation, survivor
 state/enable/exact-history relocation, backend parity, transactional batch
 location rejection, and warmed zero-allocation grouped playback.
+Whole-destroy tests add multi-chunk scalar-oracle parity, stale and duplicate
+sparse fallback, exact generation/free-list reuse ordering, initialized default
+state after lazy payload reuse, and 256,000 warmed zero-allocation operations.
 Chunk-visitor tests add empty and multi-chunk traversal, exact metadata and local
 indices, data/enable writes, tag/foreign/non-enableable rejection, synchronous
 mutation and nesting rejection, exception cleanup, randomized reference parity,

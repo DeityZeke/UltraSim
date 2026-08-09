@@ -1620,11 +1620,69 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     internal void ValidateStructuralPlayback() => EnsureRuntimeMutationAllowed();
 
+    internal bool IsWholeArchetypeDestroyCandidate(Entity entity, int commandCount)
+    {
+        if (commandCount <= 0 ||
+            !_entities.TryGetLocation(entity, out EntityLocation location) ||
+            !_archetypes.TryGetStorage(location.ArchetypeId, out ArchetypeStorage<TArena>? storage))
+        {
+            return false;
+        }
+        return storage!.Store.Count == commandCount;
+    }
+
+    /// <summary>
+    /// Destroys an exact, ordered complete archetype population after validating
+    /// the entire logical set. Slot retirement follows supplied command order.
+    /// </summary>
+    internal bool TryDestroyWholeArchetype(ReadOnlySpan<Entity> entities)
+    {
+        EnsureRuntimeMutationAllowed();
+        if (entities.IsEmpty ||
+            !_entities.TryGetLocation(entities[0], out EntityLocation firstLocation) ||
+            !_archetypes.TryGetStorage(
+                firstLocation.ArchetypeId,
+                out ArchetypeStorage<TArena>? storage) ||
+            storage!.Store.Count != entities.Length)
+        {
+            return false;
+        }
+
+        ArchetypeStorage<TArena> ownedStorage = storage!;
+        ChunkRow previous = ChunkRow.Invalid;
+        int chunkDirection = 0;
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            if (!_entities.TryGetLocation(entity, out EntityLocation location) ||
+                location.ArchetypeId != ownedStorage.Id ||
+                !ownedStorage.Store.Contains(location.ChunkRow, entity.Index) ||
+                !IsStrictOrderedDestroyRow(
+                    previous,
+                    location.ChunkRow,
+                    ref chunkDirection,
+                    index == 0))
+            {
+                return false;
+            }
+            previous = location.ChunkRow;
+        }
+
+        ownedStorage.Store.ClearAllOccupiedRows();
+        _entities.RetireValidatedLocated(entities);
+        return true;
+    }
+
     internal bool TryDestroy(Entity entity)
     {
         EnsureRuntimeMutationAllowed();
         if (!_entities.TryGetLocation(entity, out EntityLocation location))
             return false;
+        return TryDestroyLocated(entity, location);
+    }
+
+    private bool TryDestroyLocated(Entity entity, EntityLocation location)
+    {
         if (!_archetypes.TryGetStorage(location.ArchetypeId, out ArchetypeStorage<TArena>? storage))
             ThrowWorldInvariant("A live entity location refers to an unknown archetype.");
         ArchetypeStorage<TArena> ownedStorage = storage!;
@@ -1644,6 +1702,24 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (!_entities.TryFree(entity))
             ThrowWorldInvariant("An unlocated destroyed entity could not return to the entity pool.");
         return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsStrictOrderedDestroyRow(
+        ChunkRow previous,
+        ChunkRow current,
+        ref int chunkDirection,
+        bool first)
+    {
+        if (first)
+            return current.IsValid;
+        if (current.ChunkIndex == previous.ChunkIndex)
+            return current.Row > previous.Row;
+
+        int direction = current.ChunkIndex > previous.ChunkIndex ? 1 : -1;
+        if (chunkDirection == 0)
+            chunkDirection = direction;
+        return direction == chunkDirection;
     }
 
     public void Dispose()

@@ -14,6 +14,7 @@ namespace UltraSim.ECS;
 /// </remarks>
 public sealed class StructuralCommandBuffer
 {
+    private const int MinimumGroupedDestroyRun = 32;
     private const int MinimumGroupedTransitionRun = 8;
 
     private readonly StructuralCommandRecord[] _commands;
@@ -525,6 +526,16 @@ public sealed class StructuralCommandBuffer
         in PhaseChain chain,
         ref PlaybackCounts counts)
     {
+        if (chain.HeadLink == 0)
+            return;
+
+        StructuralCommandRecord first = _commands[chain.HeadLink - 1];
+        if (first.TargetKind == StructuralCommandTargetKind.Entity)
+        {
+            ExecuteGroupedLiveDestroyChain(world, chain, ref counts);
+            return;
+        }
+
         for (int link = chain.HeadLink; link != 0;)
         {
             int commandIndex = link - 1;
@@ -536,6 +547,51 @@ public sealed class StructuralCommandBuffer
                 world,
                 ref counts.Destroyed,
                 ref counts.RejectedDestroy);
+        }
+    }
+
+    private void ExecuteGroupedLiveDestroyChain(
+        EcsWorld<NativeChunkArena> world,
+        in PhaseChain chain,
+        ref PlaybackCounts counts)
+    {
+        bool detachedWhole = false;
+        Entity firstEntity = _commands[chain.HeadLink - 1].GetEntityTarget();
+        if (chain.Count >= MinimumGroupedDestroyRun &&
+            world.IsWholeArchetypeDestroyCandidate(firstEntity, chain.Count))
+        {
+            int candidateCount = 0;
+            for (int link = chain.HeadLink; link != 0;)
+            {
+                int commandIndex = link - 1;
+                link = _nextCommand[commandIndex];
+                StructuralCommandRecord command = _commands[commandIndex];
+                if (command.TargetKind != StructuralCommandTargetKind.Entity)
+                    ThrowCommandInvariant("A live-destroy chain contains a non-live target.");
+                System.Diagnostics.Debug.Assert(candidateCount < _createdEntities.Length);
+                _createdEntities[candidateCount++] = command.GetEntityTarget();
+            }
+            detachedWhole = world.TryDestroyWholeArchetype(
+                _createdEntities.AsSpan(0, candidateCount));
+        }
+
+        if (detachedWhole)
+        {
+            counts.Destroyed = checked(counts.Destroyed + chain.Count);
+            return;
+        }
+
+        // Every non-exact population retains scalar record-order behavior,
+        // including stale and duplicate rejection and donor relocation order.
+        for (int link = chain.HeadLink; link != 0;)
+        {
+            int commandIndex = link - 1;
+            link = _nextCommand[commandIndex];
+            Entity entity = _commands[commandIndex].GetEntityTarget();
+            if (world.TryDestroy(entity))
+                counts.Destroyed++;
+            else
+                counts.RejectedDestroy++;
         }
     }
 
@@ -786,6 +842,7 @@ public sealed class StructuralCommandBuffer
         else
             _nextCommand[chain.TailIndex] = link;
         chain.TailIndex = commandIndex;
+        chain.Count++;
     }
 
     private ref PhaseChain GetPhaseChain(StructuralPlaybackPhase phase)
@@ -962,6 +1019,7 @@ public sealed class StructuralCommandBuffer
     {
         internal int HeadLink;
         internal int TailIndex;
+        internal int Count;
     }
 
     private static class BufferIdSource

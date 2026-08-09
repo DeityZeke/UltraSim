@@ -150,6 +150,43 @@ internal sealed class EntityPool
         return freed;
     }
 
+    /// <summary>
+    /// Unbinds and retires a world-validated complete storage population in the
+    /// supplied order. The caller proves every handle is live, unique, and
+    /// located before clearing the owning store.
+    /// </summary>
+    internal void RetireValidatedLocated(ReadOnlySpan<Entity> entities)
+    {
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            int entityIndex = checked((int)entity.Index);
+            System.Diagnostics.Debug.Assert(
+                entity.World == _worldId &&
+                entityIndex < _nextUnusedIndex &&
+                _states[entityIndex] == SlotAlive &&
+                _generations[entityIndex] == entity.Generation &&
+                _locations[entityIndex].IsValid,
+                "A trusted whole-store retirement received an invalid entity.");
+
+            _locations[entityIndex] = EntityLocation.Invalid;
+            _locatedCount--;
+            _aliveCount--;
+            if (!EntityGeneration.TryAdvance(
+                    _generations[entityIndex],
+                    out uint nextGeneration))
+            {
+                _states[entityIndex] = SlotRetired;
+                _retiredCount++;
+                continue;
+            }
+
+            _generations[entityIndex] = nextGeneration;
+            _states[entityIndex] = SlotAvailable;
+            _freeIndices[_freeCount++] = entityIndex;
+        }
+    }
+
     internal bool TryBindLocation(Entity entity, EntityLocation location)
     {
         if (!location.IsValid)

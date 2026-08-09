@@ -107,7 +107,8 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
-The latter reports current/baseline mean and p95 ratios, allocation deltas, and
+The latter reports absolute V2/V3 baseline/current means, current/baseline mean
+and p95 ratios, a V2-control-normalized V3 signal, allocation deltas, and
 independent V2/V3 canonical-state checks. Frozen V2 is rerun as the control: when
 both generations move similarly, host noise is more likely; V3-only movement is
 more likely to be caused by the rewrite. Catalog additions remain visible,
@@ -180,27 +181,32 @@ isolated repetitions or hardware counters before becoming optimization claims.
 The adapter changes the optimization discussion from speculation to named
 regression targets:
 
-1. Deferred destroy needs phase-grouped source planning and bulk packed
-   compaction. Whole-source/chunk evacuation should bypass scalar donor discovery,
-   while sparse batches should group by source archetype/chunk and choose a
-   measured scalar/plan crossover. The scalar command executor remains the
-   differential oracle.
-2. Transition compaction currently works on fixed 256-entity prefixes and only
+1. Exact whole-archetype deferred destroy now has a post-baseline fast path. It
+   validates complete ordered coverage, resets occupied-store/change metadata
+   without clearing payload that creation must initialize anyway, and retires
+   the validated entity set in record order. The accepted baseline remains the
+   immutable pre-change point.
+2. Sparse destroy remains scalar. An attempted reuse of the v27 planned
+   compactor regressed the shared 10%-sparse playback from roughly `85` to `155
+   ns/destroy`; donor-tail gating reduced but did not justify the complexity, so
+   the partial path was removed. A future sparse algorithm must group by source
+   chunk and prove a crossover before landing.
+3. Transition compaction currently works on fixed 256-entity prefixes and only
    takes the donor-tail plan when that prefix contains the current tail. A large
    ascending homogeneous route therefore leaves most blocks on scalar source
    removal. Route-level planning across blocks is the natural continuation of
    v27, with exact history, conflict, capacity-prefix, and rollback differential
    tests before timing.
-3. Fixed command recording writes and validates much richer per-command state
+4. Fixed command recording writes and validates much richer per-command state
    than V2's block-copied lists. Consider bounded batch descriptors or a compact
    fixed target arena so span commands amortize validation and phase linkage
    without losing tokens, deterministic order, capacity failure, or the scalar
    oracle. Record-only benchmarks prevent this cost from hiding inside playback.
-4. Safe random access should not be the default system traversal. Generated chunk
+5. Safe random access should not be the default system traversal. Generated chunk
    jobs already win the representative write query. Keep random lookup for sparse
    relationships and quantify which remaining entity/location/route/change-stamp
    checks dominate bounded jobs before weakening safety.
-5. Add the missing generated 3R0W family naturally, then turn the three currently
+6. Add the missing generated 3R0W family naturally, then turn the three currently
    unsupported V2 rows into canonical comparisons. Continue the working-set and
    effective-byte ladder so small cache-resident query results are not mistaken
    for large-world bandwidth.
@@ -210,3 +216,24 @@ streams, stale/duplicate/conflict cases, partial capacity, exact/dense history,
 enable state, donor ownership, generation wrap, Native/Pinned parity, allocation
 gates, and canonical V2/V3 state. Tests may show that the expected next design is
 wrong; the implementation and this document should follow the evidence.
+
+## First post-baseline destroy result
+
+The v28 shared adapter at 50,000 entities retained zero allocation and canonical
+equality in both process orders. Full deferred-destroy playback fell from the
+accepted V3 `72.50 ns/entity` to `29.17/29.03 ns/entity`. After normalizing each
+run against its V2 control, the current/baseline ratios were `0.397/0.392`: a
+repeatable material improvement of roughly 60%, not an order artifact. The
+10%-sparse row measured `89.36/86.91` versus `85.03 ns/destroy`; its normalized
+ratios (`1.014/0.978`) remain in the noise/tolerated band and establish no sparse
+win. V2 still leads full playback at `2.45/2.47 ns/entity`; this is material V3
+progression, not parity.
+
+Two Next-only focused processes over 100,000 resident entities measured exact
+whole-population playback in the ranges `50.27-63.92/11.63-12.03 ns/entity`
+(scalar/production). Separate equal-work pairs destroyed the donor-tail 10,000
+(10%) while keeping the 100,000-row resident footprint, measuring
+`50.69-63.41/44.04-58.91 ns/entity`; all four allocated zero managed bytes in
+both processes. Repeated isolated processes remain required before
+treating the exact values as accepted; the shared adapter result is the
+longitudinal generational guard.

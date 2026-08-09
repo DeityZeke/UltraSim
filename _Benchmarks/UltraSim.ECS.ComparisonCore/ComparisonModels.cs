@@ -204,8 +204,14 @@ public sealed class BaselineRegressionResult
     public required ScenarioDescriptor Descriptor { get; init; }
     public required string Status { get; init; }
     public string? Note { get; init; }
+    public double V2BaselineMeanNanosecondsPerOperation { get; init; }
+    public double V2CurrentMeanNanosecondsPerOperation { get; init; }
+    public double V3BaselineMeanNanosecondsPerOperation { get; init; }
+    public double V3CurrentMeanNanosecondsPerOperation { get; init; }
     public double V2CurrentToBaselineMeanRatio { get; init; }
     public double V3CurrentToBaselineMeanRatio { get; init; }
+    public double ControlNormalizedV3MeanRatio { get; init; }
+    public string? V3Signal { get; init; }
     public double V2CurrentToBaselineP95Ratio { get; init; }
     public double V3CurrentToBaselineP95Ratio { get; init; }
     public long V2AllocationDeltaBytes { get; init; }

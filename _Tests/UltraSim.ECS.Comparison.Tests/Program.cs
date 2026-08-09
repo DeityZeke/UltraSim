@@ -126,9 +126,21 @@ static void SavedBaselineReportsBothGenerations()
     Equal("comparable", result.Status);
     Equal(1.1, result.V2CurrentToBaselineMeanRatio);
     Equal(0.8, result.V3CurrentToBaselineMeanRatio);
+    Equal(20d, result.V2BaselineMeanNanosecondsPerOperation);
+    Equal(22d, result.V2CurrentMeanNanosecondsPerOperation);
+    Equal(10d, result.V3BaselineMeanNanosecondsPerOperation);
+    Equal(8d, result.V3CurrentMeanNanosecondsPerOperation);
+    Equal(0.8 / 1.1, result.ControlNormalizedV3MeanRatio);
+    Equal("material improvement", result.V3Signal);
+    Equal(1.1, result.V2CurrentToBaselineP95Ratio);
+    Equal(0.8, result.V3CurrentToBaselineP95Ratio);
     Equal(20L, result.V2AllocationDeltaBytes);
     Equal(0L, result.V3AllocationDeltaBytes);
     True(result.V2CanonicalStateMatches && result.V3CanonicalStateMatches, "Stable states did not match.");
+    string markdown = ComparisonJoiner.BuildRegressionMarkdown(
+        ComparisonJoiner.CompareAgainstBaseline(baseline, current));
+    True(markdown.Contains("V2 p95/base", StringComparison.Ordinal), "Regression Markdown dropped p95 reporting.");
+    True(markdown.Contains("V2 alloc delta", StringComparison.Ordinal), "Regression Markdown dropped V2 allocation reporting.");
 }
 
 static void SavedBaselineDetectsStateDrift()

@@ -373,6 +373,31 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Evacuates a caller-validated complete population without copying or
+    /// clearing component payloads. Reoccupation initializes every published
+    /// row before use, so only occupancy and dense/exact change metadata must be
+    /// reset here. This is the whole-archetype destroy fast path.
+    /// </summary>
+    internal void ClearAllOccupiedRows()
+    {
+        ThrowIfDisposed();
+        if (_entityCount == 0)
+            return;
+
+        if (_partialHead != NoChunk)
+            ClearOccupiedChunk(_partialHead);
+
+        for (int chunkIndex = _fullHead; chunkIndex != NoChunk;)
+        {
+            int next = _chunks[chunkIndex].Next;
+            ClearOccupiedChunk(chunkIndex);
+            chunkIndex = next;
+        }
+
+        _entityCount = 0;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool ShouldUsePlannedRemoval(
         ReadOnlySpan<ChunkRow> locations,
@@ -1468,6 +1493,20 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         }
 
         _entityCount -= tailRows.Length;
+    }
+
+    private void ClearOccupiedChunk(int chunkIndex)
+    {
+        ref ChunkRecord chunk = ref _chunks[chunkIndex];
+        if (chunk.State is not (ChunkListState.Partial or ChunkListState.Full) ||
+            chunk.RowCount <= 0)
+        {
+            ThrowInvariant("A whole-store reset encountered a non-occupied chunk.");
+        }
+
+        chunk.RowCount = 0;
+        ClearChangeVersions(chunkIndex);
+        MoveChunk(chunkIndex, ChunkListState.Empty);
     }
 
     private static int FindContiguousLocation(

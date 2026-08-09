@@ -219,8 +219,19 @@ public static class ComparisonJoiner
             {
                 Descriptor = descriptor,
                 Status = "comparable",
+                V2BaselineMeanNanosecondsPerOperation = oldResult.V2.MeanNanosecondsPerOperation,
+                V2CurrentMeanNanosecondsPerOperation = newResult.V2.MeanNanosecondsPerOperation,
+                V3BaselineMeanNanosecondsPerOperation = oldResult.V3.MeanNanosecondsPerOperation,
+                V3CurrentMeanNanosecondsPerOperation = newResult.V3.MeanNanosecondsPerOperation,
                 V2CurrentToBaselineMeanRatio = Divide(newResult.V2.MeanNanoseconds, oldResult.V2.MeanNanoseconds),
                 V3CurrentToBaselineMeanRatio = Divide(newResult.V3.MeanNanoseconds, oldResult.V3.MeanNanoseconds),
+                ControlNormalizedV3MeanRatio = Divide(
+                    Divide(newResult.V3.MeanNanoseconds, oldResult.V3.MeanNanoseconds),
+                    Divide(newResult.V2.MeanNanoseconds, oldResult.V2.MeanNanoseconds)),
+                V3Signal = ClassifyRegressionSignal(
+                    Divide(
+                        Divide(newResult.V3.MeanNanoseconds, oldResult.V3.MeanNanoseconds),
+                        Divide(newResult.V2.MeanNanoseconds, oldResult.V2.MeanNanoseconds))),
                 V2CurrentToBaselineP95Ratio = Divide(newResult.V2.P95Nanoseconds, oldResult.V2.P95Nanoseconds),
                 V3CurrentToBaselineP95Ratio = Divide(newResult.V3.P95Nanoseconds, oldResult.V3.P95Nanoseconds),
                 V2AllocationDeltaBytes = newResult.V2.MeanAllocatedBytes - oldResult.V2.MeanAllocatedBytes,
@@ -262,12 +273,13 @@ public static class ComparisonJoiner
         builder.AppendLine($"Coverage: **{comparable} comparable**, **{stateMismatches} state mismatches**, **{contractMismatches} contract/catalog mismatches**, **{unsupported} unsupported**.");
         builder.AppendLine();
         builder.AppendLine("> Ratios are current/baseline; lower is faster. V2 is rerun as a frozen control. Similar V2 and V3 movement suggests host noise; V3-only movement suggests a rewrite change.");
+        builder.AppendLine("> Signals are triage labels, not automatic acceptance/rejection. Confirm both process orders and inspect absolute time; tiny or sub-nanosecond rows can cross a percentage threshold on noise alone.");
         builder.AppendLine();
-        builder.AppendLine("| Scenario | Scale | V2 mean | V3 mean | V2 p95 | V3 p95 | V2 alloc delta | V3 alloc delta | State |");
-        builder.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ");
+        builder.AppendLine("| Scenario | Scale | V2 baseline ns/op | V2 current ns/op | V3 baseline ns/op | V3 current ns/op | V2 current/base | V3 current/base | V2 p95/base | V3 p95/base | V3/control | Signal | V2 alloc delta | V3 alloc delta |");
+        builder.AppendLine("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ");
         foreach (BaselineRegressionResult result in report.Results.Where(static result => result.Status == "comparable"))
         {
-            builder.AppendLine($"| `{result.Descriptor.Id}` | {result.Descriptor.Scale} | {result.V2CurrentToBaselineMeanRatio:F3}x | {result.V3CurrentToBaselineMeanRatio:F3}x | {result.V2CurrentToBaselineP95Ratio:F3}x | {result.V3CurrentToBaselineP95Ratio:F3}x | {result.V2AllocationDeltaBytes:+#;-#;0} | {result.V3AllocationDeltaBytes:+#;-#;0} | match |");
+            builder.AppendLine($"| `{result.Descriptor.Id}` | {result.Descriptor.Scale} | {result.V2BaselineMeanNanosecondsPerOperation:F3} | {result.V2CurrentMeanNanosecondsPerOperation:F3} | {result.V3BaselineMeanNanosecondsPerOperation:F3} | {result.V3CurrentMeanNanosecondsPerOperation:F3} | {result.V2CurrentToBaselineMeanRatio:F3}x | {result.V3CurrentToBaselineMeanRatio:F3}x | {result.V2CurrentToBaselineP95Ratio:F3}x | {result.V3CurrentToBaselineP95Ratio:F3}x | {result.ControlNormalizedV3MeanRatio:F3}x | {result.V3Signal} | {result.V2AllocationDeltaBytes:+#;-#;0} | {result.V3AllocationDeltaBytes:+#;-#;0} |");
         }
         builder.AppendLine();
         builder.AppendLine("## Suppressed rows");
@@ -377,4 +389,21 @@ public static class ComparisonJoiner
     private static string Key(ScenarioDescriptor descriptor) => $"{descriptor.Id}|{descriptor.Scale}";
 
     private static double Divide(double numerator, double denominator) => denominator == 0 ? 0 : numerator / denominator;
+
+    private static string ClassifyRegressionSignal(double ratio)
+    {
+        if (ratio == 0)
+            return "unavailable";
+        if (ratio < 0.90)
+            return "material improvement";
+        if (ratio < 0.95)
+            return "improvement";
+        if (ratio <= 1.02)
+            return "noise/tolerated";
+        if (ratio <= 1.05)
+            return "investigate";
+        if (ratio <= 1.10)
+            return "must explain";
+        return "reject candidate";
+    }
 }

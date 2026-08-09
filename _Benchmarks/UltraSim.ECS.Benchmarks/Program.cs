@@ -106,6 +106,9 @@ internal static class PrimitiveBenchmarks
             timedCycleCount: 256);
         using var publicDeferredCreate = new PublicDeferredCreateFixture(100_000);
         using var publicDeferredDestroy = new PublicDeferredDestroyFixture(100_000);
+        using var publicDeferredDestroyTail10 = new PublicDeferredDestroyFixture(
+            100_000,
+            destroyTailTenPercent: true);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
         using var pinnedChunkVisit = new EcsWorldChunkVisitFixture<PinnedChunkArena>(100_000);
         using var nativeReadWriteQuery = new EcsWorldReadWriteQueryFixture<NativeChunkArena>(100_000);
@@ -188,6 +191,10 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_DeferredTransitionRoundTripGrouped_Tail256_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail256.ExecuteRoundTrips),
             new("PublicWorld_DeferredCreateDefaultBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredCreate.Execute, publicDeferredCreate.Prepare),
             new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Whole_100000", "PublicWorldStructuralDestroy", 100_000, publicDeferredDestroy.ExecuteRecordedScalarOracle, publicDeferredDestroy.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Whole_100000", "PublicWorldStructuralDestroy", 100_000, publicDeferredDestroy.ExecuteRecorded, publicDeferredDestroy.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Tail10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroyTail10.ExecuteRecordedScalarOracle, publicDeferredDestroyTail10.PrepareRecorded),
+            new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Tail10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroyTail10.ExecuteRecorded, publicDeferredDestroyTail10.PrepareRecorded),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
             new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
             new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
@@ -242,7 +249,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-planned-source-compaction-v27",
+            SemanticProfile = "ecs-next-phase1-whole-destroy-v28",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1779,9 +1786,13 @@ internal static class PrimitiveBenchmarks
         private readonly StructuralCommandBuffer _commands;
         private readonly ArchetypeHandle _archetype;
         private readonly Entity[] _entities;
-        private bool _hasLiveEntities;
+        private readonly Entity[] _targets;
+        private readonly int _targetOffset;
+        private bool _hasLiveTargets;
 
-        internal PublicDeferredDestroyFixture(int entityCount)
+        internal PublicDeferredDestroyFixture(
+            int entityCount,
+            bool destroyTailTenPercent = false)
         {
             ComponentSchema schema = BenchmarkSchema.CreateSchema();
             _world = new EcsWorld(
@@ -1791,7 +1802,9 @@ internal static class PrimitiveBenchmarks
                     maximumArchetypes: 1,
                     maximumPreparedPlans: 0,
                     maximumPreparedTransitions: 0,
-                    maximumStructuralCommands: entityCount));
+                    maximumStructuralCommands: destroyTailTenPercent
+                        ? entityCount / 10
+                        : entityCount));
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             _archetype = _world.RegisterArchetype(
                 [position],
@@ -1802,37 +1815,75 @@ internal static class PrimitiveBenchmarks
             _world.BeginRun();
             _commands = _world.StructuralCommands;
             _entities = new Entity[entityCount];
-            CreateEntities();
+            _targetOffset = destroyTailTenPercent
+                ? entityCount - (entityCount / 10)
+                : 0;
+            _targets = destroyTailTenPercent
+                ? new Entity[entityCount / 10]
+                : _entities;
+            CreateInitialEntities();
         }
 
         internal void Prepare()
         {
-            if (!_hasLiveEntities)
-                CreateEntities();
+            if (_hasLiveTargets)
+                return;
+
+            for (int index = 0; index < _targets.Length; index++)
+            {
+                if (!_world.TryCreate(_archetype, out Entity entity))
+                    throw new InvalidOperationException("Deferred-destroy fixture failed to restore a target.");
+                _targets[index] = entity;
+                _entities[_targetOffset + index] = entity;
+            }
+            _hasLiveTargets = true;
         }
 
         internal ScenarioMeasurement Execute()
         {
-            _commands.EnqueueDestroy(_entities);
+            _commands.EnqueueDestroy(_targets);
             StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
-            if (result.DestroyedCount != _entities.Length || result.RejectedCount != 0)
-                throw new InvalidOperationException("Deferred-destroy batch was not applied exactly once.");
-            _hasLiveEntities = false;
+            return Complete(result, "Grouped end-to-end");
+        }
+
+        internal void PrepareRecorded()
+        {
+            Prepare();
+            _commands.EnqueueDestroy(_targets);
+        }
+
+        internal ScenarioMeasurement ExecuteRecorded() =>
+            Complete(_world.PlaybackStructuralCommands(), "Grouped playback");
+
+        internal ScenarioMeasurement ExecuteRecordedScalarOracle() =>
+            Complete(
+                _world.PlaybackStructuralCommandsScalarOracle(),
+                "Scalar-oracle playback");
+
+        private ScenarioMeasurement Complete(
+            in StructuralPlaybackResult result,
+            string executor)
+        {
+            if (result.DestroyedCount != _targets.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException($"{executor} destroy batch was not applied exactly once.");
+            _hasLiveTargets = false;
             long checksum = unchecked(
                 (long)result.Epoch + result.CommandCount + result.DestroyedCount);
-            return new ScenarioMeasurement(_entities.Length, checksum);
+            return new ScenarioMeasurement(_targets.Length, checksum);
         }
 
         public void Dispose() => _world.Dispose();
 
-        private void CreateEntities()
+        private void CreateInitialEntities()
         {
             for (int index = 0; index < _entities.Length; index++)
             {
                 if (!_world.TryCreate(_archetype, out _entities[index]))
                     throw new InvalidOperationException("Deferred-destroy fixture exhausted its source.");
             }
-            _hasLiveEntities = true;
+            if (!ReferenceEquals(_targets, _entities))
+                _entities.AsSpan(_targetOffset, _targets.Length).CopyTo(_targets);
+            _hasLiveTargets = true;
         }
     }
 

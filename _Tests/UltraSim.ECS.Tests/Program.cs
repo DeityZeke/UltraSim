@@ -71,6 +71,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeChunkStore_BoundariesAndRetainedEmptyReuse), ArchetypeChunkStore_BoundariesAndRetainedEmptyReuse);
         Run(nameof(ArchetypeChunkStore_SwapRemovePreservesDataAndEnableBits), ArchetypeChunkStore_SwapRemovePreservesDataAndEnableBits);
         Run(nameof(ArchetypeChunkStore_BulkNativePinnedParityAndDefaultState), ArchetypeChunkStore_BulkNativePinnedParityAndDefaultState);
+        Run(nameof(ArchetypeChunkStore_ClearAllOccupiedRowsResetsNativePinnedState), ArchetypeChunkStore_ClearAllOccupiedRowsResetsNativePinnedState);
         Run(nameof(ArchetypeChunkStore_RandomizedNativeOperationsMatchReferenceModel), ArchetypeChunkStore_RandomizedNativeOperationsMatchReferenceModel);
         Run(nameof(ArchetypeChunkStore_RandomizedPinnedOperationsMatchReferenceModel), ArchetypeChunkStore_RandomizedPinnedOperationsMatchReferenceModel);
         Run(nameof(ArchetypeChunkStore_WarmedChurnAllocatesZero), ArchetypeChunkStore_WarmedChurnAllocatesZero);
@@ -108,11 +109,13 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_DeferredCommandsApplyDeterministicPhases), PublicEcsWorld_DeferredCommandsApplyDeterministicPhases);
         Run(nameof(PublicEcsWorld_DeferredCreateTokensComposeAndExpire), PublicEcsWorld_DeferredCreateTokensComposeAndExpire);
         Run(nameof(PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle), PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
         Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
         Run(nameof(PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes);
         Run(nameof(PublicEcsWorld_WarmedGroupedTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedGroupedTransitionAllocatesZeroManagedBytes);
+        Run(nameof(PublicEcsWorld_WarmedGroupedDestroyAllocatesZeroManagedBytes), PublicEcsWorld_WarmedGroupedDestroyAllocatesZeroManagedBytes);
         Run(nameof(ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit), ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit);
         Run(nameof(EcsWorld_BoundAccessReadsWritesAndInitializes), EcsWorld_BoundAccessReadsWritesAndInitializes);
         Run(nameof(EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings), EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings);
@@ -2019,6 +2022,102 @@ internal static class EcsPrimitiveTests
         Assert.True(pinned.IsEnabled(pinnedNew, pinnedEnable));
         native.ValidateInvariants();
         pinned.ValidateInvariants();
+    }
+
+    private static void ArchetypeChunkStore_ClearAllOccupiedRowsResetsNativePinnedState()
+    {
+        using ArchetypeChunkStore<NativeChunkArena> native = CreateArchetypeStore<NativeChunkArena>(
+            maximumChunks: 2,
+            out ChunkLayoutPlan layout,
+            out ComponentColumnLayout[] nativeColumns);
+        using ArchetypeChunkStore<PinnedChunkArena> pinned = CreateArchetypeStore<PinnedChunkArena>(
+            maximumChunks: 2,
+            out _,
+            out ComponentColumnLayout[] pinnedColumns);
+        int count = layout.RowCapacity + 17;
+        var entityIndices = new uint[count];
+        var nativeLocations = new ChunkRow[count];
+        var pinnedLocations = new ChunkRow[count];
+        for (int index = 0; index < count; index++)
+            entityIndices[index] = unchecked((uint)(index + 1));
+
+        Assert.Equal(count, native.Add(entityIndices, nativeLocations));
+        Assert.Equal(count, pinned.Add(entityIndices, pinnedLocations));
+        int nativeWide = FindColumnIndex(
+            nativeColumns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        int pinnedWide = FindColumnIndex(
+            pinnedColumns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        ComponentColumnLayout nativeEnable = FindColumn(
+            nativeColumns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        ComponentColumnLayout pinnedEnable = FindColumn(
+            pinnedColumns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        SparseRowChangeVersions nativeSparse = native.EnableSparseRowChangeTracking(nativeWide);
+        SparseRowChangeVersions pinnedSparse = pinned.EnableSparseRowChangeTracking(pinnedWide);
+
+        native.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(nativeLocations[0], nativeColumns[nativeWide]).A = 71;
+        pinned.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(pinnedLocations[0], pinnedColumns[pinnedWide]).A = 71;
+        native.SetEnabled(nativeLocations[^1], nativeEnable, enabled: false);
+        pinned.SetEnabled(pinnedLocations[^1], pinnedEnable, enabled: false);
+        native.StampSparseChangeVersion(nativeLocations[0].ChunkIndex, nativeWide, 0, 1, new ChangeVersion(7));
+        pinned.StampSparseChangeVersion(pinnedLocations[0].ChunkIndex, pinnedWide, 0, 1, new ChangeVersion(7));
+        native.StampDenseChangeVersion(nativeLocations[^1].ChunkIndex, nativeWide, new ChangeVersion(9));
+        pinned.StampDenseChangeVersion(pinnedLocations[^1].ChunkIndex, pinnedWide, new ChangeVersion(9));
+
+        native.ClearAllOccupiedRows();
+        pinned.ClearAllOccupiedRows();
+        AssertClearedStoreState(native, nativeSparse, nativeWide);
+        AssertClearedStoreState(pinned, pinnedSparse, pinnedWide);
+
+        Assert.Equal(count, native.Add(entityIndices, nativeLocations));
+        Assert.Equal(count, pinned.Add(entityIndices, pinnedLocations));
+        for (int index = 0; index < count; index++)
+        {
+            Assert.Equal(0L, native.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                nativeLocations[index], nativeColumns[nativeWide]).A);
+            Assert.Equal(0L, pinned.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                pinnedLocations[index], pinnedColumns[pinnedWide]).A);
+            Assert.True(native.IsEnabled(nativeLocations[index], nativeEnable));
+            Assert.True(pinned.IsEnabled(pinnedLocations[index], pinnedEnable));
+        }
+
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 128; iteration++)
+        {
+            native.ClearAllOccupiedRows();
+            pinned.ClearAllOccupiedRows();
+            checksum += native.Add(entityIndices, nativeLocations);
+            checksum += pinned.Add(entityIndices, pinnedLocations);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.True(checksum != 0);
+        Assert.Equal(0L, allocated);
+        native.ValidateInvariants();
+        pinned.ValidateInvariants();
+    }
+
+    private static void AssertClearedStoreState<TArena>(
+        ArchetypeChunkStore<TArena> store,
+        SparseRowChangeVersions sparse,
+        int columnIndex)
+        where TArena : class, IChunkArenaBackend
+    {
+        ArchetypeChunkSnapshot snapshot = store.GetSnapshot();
+        Assert.Equal(0, snapshot.EntityCount);
+        Assert.Equal(0, snapshot.FullChunkCount);
+        Assert.Equal(0, snapshot.PartialChunkCount);
+        Assert.Equal(snapshot.AcquiredChunkCount, snapshot.EmptyChunkCount);
+        for (uint chunkIndex = 0; chunkIndex < unchecked((uint)snapshot.AcquiredChunkCount); chunkIndex++)
+        {
+            Assert.Equal(ChangeVersion.None, store.GetChangeVersion(chunkIndex, columnIndex));
+            Assert.True(sparse.IsChunkClear(chunkIndex));
+        }
+        store.ValidateInvariants();
     }
 
     private static void ArchetypeChunkStore_RandomizedNativeOperationsMatchReferenceModel() =>
@@ -4308,6 +4407,241 @@ internal static class EcsPrimitiveTests
         }
     }
 
+    private static void PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle()
+    {
+        RunGroupedWholeDestroyDifferential();
+        RunGroupedSparseDestroyDifferential();
+        RunGroupedRejectedWholeCandidateDifferential();
+    }
+
+    private static void RunGroupedWholeDestroyDifferential()
+    {
+        const int entityCount = 1_024;
+        using var grouped = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 8);
+        using var scalar = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 8);
+        var groupedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 65_537L) + 19),
+            };
+            Assert.True(grouped.World.TryCreate(
+                grouped.Source,
+                grouped.EnableLookup,
+                value,
+                out groupedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Source,
+                scalar.EnableLookup,
+                value,
+                out scalarEntities[index]));
+            bool enabled = (index & 3) != 1;
+            Assert.True(grouped.World.TrySetEnabled(groupedEntities[index], grouped.EnableLookup, enabled));
+            Assert.True(scalar.World.TrySetEnabled(scalarEntities[index], scalar.EnableLookup, enabled));
+        }
+
+        grouped.World.StructuralCommands.EnqueueDestroy(groupedEntities);
+        scalar.World.StructuralCommands.EnqueueDestroy(scalarEntities);
+        StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(groupedResult, scalarResult);
+        Assert.Equal(entityCount, groupedResult.DestroyedCount);
+        Assert.Equal(0, grouped.World.AliveCount);
+        Assert.Equal(0, scalar.World.AliveCount);
+
+        // Exhausting both free lists proves that physical evacuation retained
+        // scalar command-order generation and reuse semantics.
+        for (int index = 0; index < entityCount; index++)
+        {
+            Assert.True(grouped.World.TryCreate(grouped.Source, out Entity groupedEntity));
+            Assert.True(scalar.World.TryCreate(scalar.Source, out Entity scalarEntity));
+            Assert.Equal(groupedEntity.Index, scalarEntity.Index);
+            Assert.Equal(groupedEntity.Generation, scalarEntity.Generation);
+            Assert.True(grouped.World.TryRead(
+                groupedEntity,
+                grouped.EnableLookup,
+                out UltraSim.ECS.Tests.LayoutEnableLong groupedDefault));
+            Assert.True(scalar.World.TryRead(
+                scalarEntity,
+                scalar.EnableLookup,
+                out UltraSim.ECS.Tests.LayoutEnableLong scalarDefault));
+            Assert.Equal(0L, groupedDefault.Value);
+            Assert.Equal(groupedDefault.Value, scalarDefault.Value);
+            Assert.True(grouped.World.TryGetEnabled(groupedEntity, grouped.EnableLookup, out bool groupedEnabled));
+            Assert.True(scalar.World.TryGetEnabled(scalarEntity, scalar.EnableLookup, out bool scalarEnabled));
+            Assert.True(groupedEnabled);
+            Assert.Equal(groupedEnabled, scalarEnabled);
+        }
+    }
+
+    private static void RunGroupedSparseDestroyDifferential()
+    {
+        const int entityCount = 2_048;
+        const int commandCapacity = 768;
+        using var grouped = new PublicWorldFixture(entityCount, commandCapacity, maximumChunks: 16);
+        using var scalar = new PublicWorldFixture(entityCount, commandCapacity, maximumChunks: 16);
+        Assert.True(grouped.World.TryCreate(grouped.Source, out Entity groupedStale));
+        Assert.True(scalar.World.TryCreate(scalar.Source, out Entity scalarStale));
+        Assert.True(grouped.World.TryDestroy(groupedStale));
+        Assert.True(scalar.World.TryDestroy(scalarStale));
+
+        var groupedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 1_009L) ^ 0x5A17_31C0L),
+            };
+            Assert.True(grouped.World.TryCreate(
+                grouped.Source,
+                grouped.EnableLookup,
+                value,
+                out groupedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Source,
+                scalar.EnableLookup,
+                value,
+                out scalarEntities[index]));
+            bool enabled = (index & 7) != 3;
+            Assert.True(grouped.World.TrySetEnabled(groupedEntities[index], grouped.EnableLookup, enabled));
+            Assert.True(scalar.World.TrySetEnabled(scalarEntities[index], scalar.EnableLookup, enabled));
+        }
+
+        StructuralCommandBuffer groupedCommands = grouped.World.StructuralCommands;
+        StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
+        groupedCommands.EnqueueDestroy(groupedStale);
+        scalarCommands.EnqueueDestroy(scalarStale);
+        for (int index = 0; index < entityCount; index += 4)
+        {
+            groupedCommands.EnqueueDestroy(groupedEntities[index]);
+            scalarCommands.EnqueueDestroy(scalarEntities[index]);
+            if (index % 124 != 0)
+                continue;
+            groupedCommands.EnqueueDestroy(groupedEntities[index]);
+            scalarCommands.EnqueueDestroy(scalarEntities[index]);
+        }
+
+        StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(groupedResult, scalarResult);
+        Assert.Equal(entityCount - (entityCount / 4), grouped.World.AliveCount);
+        Assert.Equal(grouped.World.AliveCount, scalar.World.AliveCount);
+        for (int index = 0; index < entityCount; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedEntities[index],
+                scalar,
+                scalarEntities[index]);
+        }
+
+        while (true)
+        {
+            bool groupedCreated = grouped.World.TryCreate(grouped.Source, out Entity groupedEntity);
+            bool scalarCreated = scalar.World.TryCreate(scalar.Source, out Entity scalarEntity);
+            Assert.Equal(groupedCreated, scalarCreated);
+            if (!groupedCreated)
+                break;
+            Assert.Equal(groupedEntity.Index, scalarEntity.Index);
+            Assert.Equal(groupedEntity.Generation, scalarEntity.Generation);
+        }
+    }
+
+    private static void RunGroupedRejectedWholeCandidateDifferential()
+    {
+        const int unorderedCount = 96;
+        using (var grouped = new PublicWorldFixture(unorderedCount, unorderedCount, maximumChunks: 4))
+        using (var scalar = new PublicWorldFixture(unorderedCount, unorderedCount, maximumChunks: 4))
+        {
+            var groupedEntities = new Entity[unorderedCount];
+            var scalarEntities = new Entity[unorderedCount];
+            for (int index = 0; index < unorderedCount; index++)
+            {
+                Assert.True(grouped.World.TryCreate(grouped.Source, out groupedEntities[index]));
+                Assert.True(scalar.World.TryCreate(scalar.Source, out scalarEntities[index]));
+            }
+            for (int index = unorderedCount - 1; index >= 0; index--)
+            {
+                grouped.World.StructuralCommands.EnqueueDestroy(groupedEntities[index]);
+                scalar.World.StructuralCommands.EnqueueDestroy(scalarEntities[index]);
+            }
+
+            StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+            StructuralPlaybackResult scalarResult = scalar.World.PlaybackStructuralCommandsScalarOracle();
+            AssertPlaybackResultsEqual(groupedResult, scalarResult);
+            Assert.Equal(unorderedCount, groupedResult.DestroyedCount);
+            Assert.Equal(0, grouped.World.AliveCount);
+            Assert.Equal(0, scalar.World.AliveCount);
+        }
+
+        const int mixedSourceCount = 64;
+        using (var grouped = new PublicWorldFixture(mixedSourceCount + 1, mixedSourceCount, maximumChunks: 4))
+        using (var scalar = new PublicWorldFixture(mixedSourceCount + 1, mixedSourceCount, maximumChunks: 4))
+        {
+            var groupedSource = new Entity[mixedSourceCount];
+            var scalarSource = new Entity[mixedSourceCount];
+            for (int index = 0; index < mixedSourceCount; index++)
+            {
+                Assert.True(grouped.World.TryCreate(grouped.Source, out groupedSource[index]));
+                Assert.True(scalar.World.TryCreate(scalar.Source, out scalarSource[index]));
+            }
+            Assert.True(grouped.World.TryCreate(grouped.Destination, out Entity groupedDestination));
+            Assert.True(scalar.World.TryCreate(scalar.Destination, out Entity scalarDestination));
+
+            grouped.World.StructuralCommands.EnqueueDestroy(groupedSource[0]);
+            scalar.World.StructuralCommands.EnqueueDestroy(scalarSource[0]);
+            grouped.World.StructuralCommands.EnqueueDestroy(groupedDestination);
+            scalar.World.StructuralCommands.EnqueueDestroy(scalarDestination);
+            for (int index = 1; index < mixedSourceCount - 1; index++)
+            {
+                grouped.World.StructuralCommands.EnqueueDestroy(groupedSource[index]);
+                scalar.World.StructuralCommands.EnqueueDestroy(scalarSource[index]);
+            }
+
+            StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+            StructuralPlaybackResult scalarResult = scalar.World.PlaybackStructuralCommandsScalarOracle();
+            AssertPlaybackResultsEqual(groupedResult, scalarResult);
+            Assert.Equal(mixedSourceCount, groupedResult.DestroyedCount);
+            Assert.Equal(1, grouped.World.AliveCount);
+            Assert.Equal(1, scalar.World.AliveCount);
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedSource[^1],
+                scalar,
+                scalarSource[^1]);
+        }
+
+        const int belowThresholdCount = 31;
+        using (var grouped = new PublicWorldFixture(belowThresholdCount, belowThresholdCount, maximumChunks: 2))
+        using (var scalar = new PublicWorldFixture(belowThresholdCount, belowThresholdCount, maximumChunks: 2))
+        {
+            var groupedEntities = new Entity[belowThresholdCount];
+            var scalarEntities = new Entity[belowThresholdCount];
+            for (int index = 0; index < belowThresholdCount; index++)
+            {
+                Assert.True(grouped.World.TryCreate(grouped.Source, out groupedEntities[index]));
+                Assert.True(scalar.World.TryCreate(scalar.Source, out scalarEntities[index]));
+            }
+            grouped.World.StructuralCommands.EnqueueDestroy(groupedEntities);
+            scalar.World.StructuralCommands.EnqueueDestroy(scalarEntities);
+            StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+            StructuralPlaybackResult scalarResult = scalar.World.PlaybackStructuralCommandsScalarOracle();
+            AssertPlaybackResultsEqual(groupedResult, scalarResult);
+            Assert.Equal(belowThresholdCount, groupedResult.DestroyedCount);
+        }
+    }
+
     private static void AssertPlaybackResultsEqual(
         in StructuralPlaybackResult expected,
         in StructuralPlaybackResult actual)
@@ -4477,6 +4811,49 @@ internal static class EcsPrimitiveTests
         Assert.Equal(entityCount, fixture.World.AliveCount);
         for (int index = 0; index < entities.Length; index++)
             Assert.True(fixture.World.IsAlive(entities[index]));
+    }
+
+    private static void PublicEcsWorld_WarmedGroupedDestroyAllocatesZeroManagedBytes()
+    {
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize;
+        const int rounds = 1_000;
+        using var fixture = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 4);
+        var entities = new Entity[entityCount];
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+
+        for (int warmup = 0; warmup < 16; warmup++)
+        {
+            for (int index = 0; index < entities.Length; index++)
+                Assert.True(fixture.World.TryCreate(fixture.Source, out entities[index]));
+            commands.EnqueueDestroy(entities);
+            Assert.Equal(entityCount, fixture.World.PlaybackStructuralCommands().DestroyedCount);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 0; round < rounds; round++)
+        {
+            for (int index = 0; index < entities.Length; index++)
+            {
+                if (!fixture.World.TryCreate(fixture.Source, out entities[index]))
+                    throw new InvalidOperationException("Grouped-destroy allocation fixture exhausted its source.");
+            }
+            commands.EnqueueDestroy(entities);
+            StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+            checksum = unchecked(checksum + result.Epoch + result.DestroyedCount);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(checksum != 0);
+        Assert.Equal(0, fixture.World.AliveCount);
+        Assert.Equal(0, commands.Count);
     }
 
     private static void ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit()
@@ -11603,7 +11980,10 @@ internal static class EcsPrimitiveTests
 
     private sealed class PublicWorldFixture : IDisposable
     {
-        internal PublicWorldFixture(int entityCapacity, int structuralCommandCapacity = 0)
+        internal PublicWorldFixture(
+            int entityCapacity,
+            int structuralCommandCapacity = 0,
+            int maximumChunks = 1)
         {
             ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
             World = new EcsWorld(
@@ -11626,11 +12006,11 @@ internal static class EcsPrimitiveTests
             Source = World.RegisterArchetype(
                 [enableId, wideId],
                 ChunkLayoutOptions.KiB16,
-                maximumChunks: 1);
+                maximumChunks);
             Destination = World.RegisterArchetype(
                 [enableId, intId, tagId, wideId],
                 ChunkLayoutOptions.KiB16,
-                maximumChunks: 1);
+                maximumChunks);
             SourceToDestination = World.PrepareTransition(Source, Destination);
             DestinationToSource = World.PrepareTransition(Destination, Source);
             EnableLookup = World.PrepareLookup<UltraSim.ECS.Tests.LayoutEnableLong>();
