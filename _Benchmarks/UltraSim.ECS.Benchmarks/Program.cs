@@ -82,6 +82,12 @@ internal static class PrimitiveBenchmarks
         using var publicLookupAccess = new PublicEcsWorldLookupFixture(1_000_000, includeTransition: false);
         using var publicLookupTransition = new PublicEcsWorldLookupFixture(250_000, includeTransition: true);
         using var publicDeferredTransition = new PublicDeferredTransitionFixture(100_000);
+        using var publicDeferredTransitionWide = new PublicDeferredTransitionFixture(
+            100_000,
+            retainWide: true);
+        using var publicDeferredTransitionScattered = new PublicDeferredTransitionFixture(
+            100_000,
+            scatteredSource: true);
         using var publicDeferredCreate = new PublicDeferredCreateFixture(100_000);
         using var publicDeferredDestroy = new PublicDeferredDestroyFixture(100_000);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
@@ -152,6 +158,10 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_DeferredTransitionBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.Execute, publicDeferredTransition.Prepare),
             new("PublicWorld_DeferredTransitionPlaybackOnlyScalarOracle_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecordedScalarOracle, publicDeferredTransition.PrepareRecorded),
             new("PublicWorld_DeferredTransitionPlaybackOnlyGrouped_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecorded, publicDeferredTransition.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyScalarOracle_WideRetained_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionWide.ExecuteRecordedScalarOracle, publicDeferredTransitionWide.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyGrouped_WideRetained_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionWide.ExecuteRecorded, publicDeferredTransitionWide.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyScalarOracle_ScatteredSource_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionScattered.ExecuteRecordedScalarOracle, publicDeferredTransitionScattered.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyGrouped_ScatteredSource_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionScattered.ExecuteRecorded, publicDeferredTransitionScattered.PrepareRecorded),
             new("PublicWorld_DeferredCreateDefaultBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredCreate.Execute, publicDeferredCreate.Prepare),
             new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
@@ -208,7 +218,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-grouped-structural-transitions-v25",
+            SemanticProfile = "ecs-next-phase1-contiguous-structural-copy-v26",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1470,9 +1480,13 @@ internal static class PrimitiveBenchmarks
         private readonly ArchetypeTransition _forward;
         private readonly ArchetypeTransition _backward;
         private readonly Entity[] _entities;
+        private readonly Entity[] _resetEntities;
         private bool _inDestination;
 
-        internal PublicDeferredTransitionFixture(int entityCount)
+        internal PublicDeferredTransitionFixture(
+            int entityCount,
+            bool retainWide = false,
+            bool scatteredSource = false)
         {
             ComponentSchema schema = BenchmarkSchema.CreateSchema();
             _world = new EcsWorld(
@@ -1486,14 +1500,25 @@ internal static class PrimitiveBenchmarks
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
             ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
             ComponentId wide = BenchmarkSchema.GetComponentId<BenchmarkWide>();
-            ArchetypeHandle source = _world.RegisterArchetype(
-                CreateSortedSignature(position, velocity),
-                ChunkLayoutOptions.KiB16,
-                maximumChunks: 640);
-            ArchetypeHandle destination = _world.RegisterArchetype(
-                CreateSortedSignature(position, velocity, wide),
-                ChunkLayoutOptions.KiB16,
-                maximumChunks: 640);
+            ComponentId scalar = BenchmarkSchema.GetComponentId<BenchmarkScalar>();
+            ArchetypeHandle source = retainWide
+                ? _world.RegisterArchetype(
+                    CreateSortedSignature(position, velocity, wide),
+                    ChunkLayoutOptions.KiB16,
+                    maximumChunks: 640)
+                : _world.RegisterArchetype(
+                    CreateSortedSignature(position, velocity),
+                    ChunkLayoutOptions.KiB16,
+                    maximumChunks: 640);
+            ArchetypeHandle destination = retainWide
+                ? _world.RegisterArchetype(
+                    CreateSortedSignature(position, velocity, wide, scalar),
+                    ChunkLayoutOptions.KiB16,
+                    maximumChunks: 640)
+                : _world.RegisterArchetype(
+                    CreateSortedSignature(position, velocity, wide),
+                    ChunkLayoutOptions.KiB16,
+                    maximumChunks: 640);
             _forward = _world.PrepareTransition(source, destination);
             _backward = _world.PrepareTransition(destination, source);
             _world.Seal();
@@ -1506,6 +1531,9 @@ internal static class PrimitiveBenchmarks
                 if (!_world.TryCreate(source, out _entities[index]))
                     throw new InvalidOperationException("Deferred-transition fixture exhausted its source.");
             }
+            _resetEntities = scatteredSource
+                ? CreateInterleavedOrder(_entities)
+                : _entities;
         }
 
         internal long CommandReservedBytes => _commands.ReservedBytes;
@@ -1514,7 +1542,7 @@ internal static class PrimitiveBenchmarks
         {
             if (!_inDestination)
                 return;
-            _commands.EnqueueTransition(_entities, _backward);
+            _commands.EnqueueTransition(_resetEntities, _backward);
             StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
             if (result.RemovedCount != _entities.Length || result.RejectedCount != 0)
                 throw new InvalidOperationException("Deferred-transition fixture failed to reset.");
@@ -1555,7 +1583,7 @@ internal static class PrimitiveBenchmarks
         internal ScenarioMeasurement ExecuteRecorded()
         {
             StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
-            return CompleteRecorded(result, "Phase-indexed");
+            return CompleteRecorded(result, "Grouped");
         }
 
         internal ScenarioMeasurement ExecuteRecordedScalarOracle()
@@ -1583,6 +1611,20 @@ internal static class PrimitiveBenchmarks
         {
             Array.Sort(signature, static (left, right) => left.Value.CompareTo(right.Value));
             return signature;
+        }
+
+        private static Entity[] CreateInterleavedOrder(Entity[] entities)
+        {
+            var interleaved = new Entity[entities.Length];
+            int lowerCount = (entities.Length + 1) >> 1;
+            for (int index = 0; index < interleaved.Length; index++)
+            {
+                int sourceIndex = (index & 1) == 0
+                    ? index >> 1
+                    : lowerCount + (index >> 1);
+                interleaved[index] = entities[sourceIndex];
+            }
+            return interleaved;
         }
     }
 

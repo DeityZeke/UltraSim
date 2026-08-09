@@ -44,6 +44,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(ChunkLayoutOptions_RejectInvalidAndMisalignedValues), ChunkLayoutOptions_RejectInvalidAndMisalignedValues);
         Run(nameof(ChunkLayoutPlanner_ProducesAlignedNonOverlappingLayout), ChunkLayoutPlanner_ProducesAlignedNonOverlappingLayout);
         Run(nameof(ChunkLayoutPlanner_EnableBitsetsRoundAtSixtyFourRows), ChunkLayoutPlanner_EnableBitsetsRoundAtSixtyFourRows);
+        Run(nameof(EnableBitOperations_CopyRangeMatchesScalarAtEveryWordBoundary), EnableBitOperations_CopyRangeMatchesScalarAtEveryWordBoundary);
         Run(nameof(ChunkLayoutPlanner_RejectsInvalidSignaturesAndInsufficientOutput), ChunkLayoutPlanner_RejectsInvalidSignaturesAndInsufficientOutput);
         Run(nameof(ChunkLayoutPlanner_CapacityIsMaximalAndOneRowFailureIsExplicit), ChunkLayoutPlanner_CapacityIsMaximalAndOneRowFailureIsExplicit);
         Run(nameof(ChunkLayoutPlanner_MatchesBruteForceRandomizedReference), ChunkLayoutPlanner_MatchesBruteForceRandomizedReference);
@@ -84,6 +85,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent), ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent);
         Run(nameof(ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity), ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity);
         Run(nameof(ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact), ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact);
+        Run(nameof(ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries), ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries);
         Run(nameof(ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes), ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes);
         Run(nameof(EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal), EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal);
         Run(nameof(EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations), EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations);
@@ -960,6 +962,79 @@ internal static class EcsPrimitiveTests
         Assert.Equal(32, ChunkLayoutPlanner.CalculateEnableBitsetBytes(65, 2));
         Assert.Throws<ArgumentOutOfRangeException>(() => ChunkLayoutPlanner.CalculateEnableBitsetBytes(-1, 1));
         Assert.Throws<ArgumentOutOfRangeException>(() => ChunkLayoutPlanner.CalculateEnableBitsetBytes(1, -1));
+    }
+
+    private static void EnableBitOperations_CopyRangeMatchesScalarAtEveryWordBoundary()
+    {
+        CreateLayoutStoragePlan(
+            ChunkLayoutOptions.KiB16,
+            out _,
+            out ChunkLayoutPlan layout,
+            out ComponentColumnLayout[] columns);
+        ComponentColumnLayout enable = FindColumn(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        int testedRows = Math.Min(layout.RowCapacity, 256);
+        var source = new byte[layout.Options.ChunkSizeBytes];
+        var destination = new byte[layout.Options.ChunkSizeBytes];
+        var expected = new bool[testedRows];
+        for (int row = 0; row < testedRows; row++)
+        {
+            EnableBitOperations.Set(
+                source,
+                enable,
+                row,
+                enabled: ((row * 37) & 7) is 1 or 2 or 5);
+        }
+
+        int[] offsets = [0, 1, 31, 62, 63, 64, 65, 127];
+        int[] counts = [1, 2, 31, 63, 64, 65, 127];
+        foreach (int sourceOffset in offsets)
+        {
+            foreach (int destinationOffset in offsets)
+            {
+                foreach (int requestedCount in counts)
+                {
+                    int count = Math.Min(
+                        requestedCount,
+                        Math.Min(
+                            testedRows - sourceOffset,
+                            testedRows - destinationOffset));
+                    if (count <= 0)
+                        continue;
+
+                    destination.AsSpan().Clear();
+                    for (int row = 0; row < testedRows; row++)
+                    {
+                        bool initial = ((row * 19) & 3) == 0;
+                        EnableBitOperations.Set(destination, enable, row, initial);
+                        expected[row] = initial;
+                    }
+                    for (int row = 0; row < count; row++)
+                    {
+                        expected[destinationOffset + row] = EnableBitOperations.Get(
+                            source,
+                            enable,
+                            sourceOffset + row);
+                    }
+
+                    EnableBitOperations.CopyRange(
+                        source,
+                        enable,
+                        sourceOffset,
+                        destination,
+                        enable,
+                        destinationOffset,
+                        count);
+                    for (int row = 0; row < testedRows; row++)
+                    {
+                        Assert.Equal(
+                            expected[row],
+                            EnableBitOperations.Get(destination, enable, row));
+                    }
+                }
+            }
+        }
     }
 
     private static void ChunkLayoutPlanner_RejectsInvalidSignaturesAndInsufficientOutput()
@@ -2432,6 +2507,104 @@ internal static class EcsPrimitiveTests
         Assert.Equal(native, pinned);
     }
 
+    private static void ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries()
+    {
+        long native = RunContiguousBatchAcrossChunkBoundaries<NativeChunkArena>();
+        long pinned = RunContiguousBatchAcrossChunkBoundaries<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static long RunContiguousBatchAcrossChunkBoundaries<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int batchCount = 160;
+        const int sourceTailRows = 80;
+        const int destinationTailRows = 73;
+        using var fixture = new MigrationFixture<TArena>(maximumChunks: 2, entityCapacity: 4_096);
+        int sourceFirstChunkRows = fixture.Source.Layout.RowCapacity;
+        int destinationFirstChunkRows = fixture.Destination.Layout.RowCapacity;
+        for (int index = 0; index < sourceFirstChunkRows - sourceTailRows; index++)
+            _ = fixture.AddToSource();
+        for (int index = 0; index < destinationFirstChunkRows - destinationTailRows; index++)
+            _ = fixture.AddToDestination();
+
+        Span<Entity> entities = stackalloc Entity[batchCount];
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = fixture.AddToSource();
+            Assert.True(fixture.Pool.TryGetLocation(entity, out EntityLocation location));
+            long value = unchecked((index * 1_048_583L) ^ 0x26C0_11A5L);
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                location.ChunkRow,
+                fixture.SourceWide).A = value;
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                location.ChunkRow,
+                fixture.SourceEnable).Value = ~value;
+            fixture.Source.Store.SetEnabled(
+                location.ChunkRow,
+                fixture.SourceEnable,
+                enabled: (index & 1) == 0);
+            entities[index] = entity;
+        }
+
+        Assert.True(fixture.Pool.TryGetLocation(entities[0], out EntityLocation firstSource));
+        Assert.True(fixture.Pool.TryGetLocation(
+            entities[sourceTailRows],
+            out EntityLocation secondSourceRun));
+        Assert.NotEqual(firstSource.ChunkRow.ChunkIndex, secondSourceRun.ChunkRow.ChunkIndex);
+
+        int migrated = ArchetypeMigrator.MigrateBatch(
+            fixture.Pool,
+            entities,
+            fixture.Source,
+            fixture.Destination,
+            fixture.SourceToDestination.Transfers,
+            out bool capacityExhausted);
+        Assert.Equal(batchCount, migrated);
+        Assert.False(capacityExhausted);
+        Assert.Equal(sourceFirstChunkRows - sourceTailRows, fixture.Source.Store.Count);
+        Assert.Equal(
+            destinationFirstChunkRows - destinationTailRows + batchCount,
+            fixture.Destination.Store.Count);
+
+        long checksum = 0;
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Assert.True(fixture.Pool.TryGetLocation(entities[index], out EntityLocation location));
+            long expected = unchecked((index * 1_048_583L) ^ 0x26C0_11A5L);
+            Assert.Equal(fixture.Destination.Id, location.ArchetypeId);
+            Assert.Equal(
+                expected,
+                fixture.Destination.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                    location.ChunkRow,
+                    fixture.DestinationWide).A);
+            Assert.Equal(
+                ~expected,
+                fixture.Destination.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                    location.ChunkRow,
+                    fixture.DestinationEnable).Value);
+            Assert.Equal(
+                (index & 1) == 0,
+                fixture.Destination.Store.IsEnabled(
+                    location.ChunkRow,
+                    fixture.DestinationEnable));
+            checksum = unchecked(
+                checksum + expected + location.ChunkRow.Row +
+                (location.ChunkRow.ChunkIndex * 101L));
+        }
+
+        Assert.True(fixture.Pool.TryGetLocation(
+            entities[destinationTailRows - 1],
+            out EntityLocation beforeBoundary));
+        Assert.True(fixture.Pool.TryGetLocation(
+            entities[destinationTailRows],
+            out EntityLocation afterBoundary));
+        Assert.NotEqual(beforeBoundary.ChunkRow.ChunkIndex, afterBoundary.ChunkRow.ChunkIndex);
+        fixture.Source.Store.ValidateInvariants();
+        fixture.Destination.Store.ValidateInvariants();
+        return checksum;
+    }
+
     private static long RunBatchCrossChunkRollbackAndCapacity<TArena>()
         where TArena : class, IChunkArenaBackend
     {
@@ -2519,9 +2692,17 @@ internal static class EcsPrimitiveTests
         int destinationWideColumn = FindColumnIndex(
             fixture.Destination.Columns,
             UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        int sourceEnableColumn = FindColumnIndex(
+            fixture.Source.Columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
+        int destinationEnableColumn = FindColumnIndex(
+            fixture.Destination.Columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>());
         _ = fixture.Source.Store.EnableSparseRowChangeTracking(sourceWideColumn);
         SparseRowChangeVersions destinationHistory =
             fixture.Destination.Store.EnableSparseRowChangeTracking(destinationWideColumn);
+        SparseRowChangeVersions destinationDenseHistory =
+            fixture.Destination.Store.EnableSparseRowChangeTracking(destinationEnableColumn);
         var entities = new Entity[entityCount];
         var versions = new ChangeVersion[entityCount];
         long checksum = 0;
@@ -2547,6 +2728,10 @@ internal static class EcsPrimitiveTests
                 version);
             entities[index] = entity;
             versions[index] = version;
+            fixture.Source.Store.StampDenseChangeVersion(
+                location.ChunkRow.ChunkIndex,
+                sourceEnableColumn,
+                new ChangeVersion(47));
         }
 
         int migrated = ArchetypeMigrator.MigrateBatch(
@@ -2583,6 +2768,11 @@ internal static class EcsPrimitiveTests
             Assert.Equal(
                 versions[index],
                 destinationHistory.GetEffectiveRowVersion(
+                    location.ChunkRow.ChunkIndex,
+                    location.ChunkRow.Row));
+            Assert.Equal(
+                new ChangeVersion(47),
+                destinationDenseHistory.GetEffectiveRowVersion(
                     location.ChunkRow.ChunkIndex,
                     location.ChunkRow.Row));
             Assert.Equal(

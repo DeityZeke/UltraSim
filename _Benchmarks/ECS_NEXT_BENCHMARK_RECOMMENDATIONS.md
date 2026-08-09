@@ -263,9 +263,10 @@ detect lost or spuriously broadened history.
 ## Structural command and barrier guards
 
 Treat the retained v23 scalar executor as the correctness oracle, the v24 stable
-phase chains as the indexed baseline, and the v25 same-route reservation path as
-the first grouped candidate. All must remain executable against identical
-streams while deeper copy and compaction paths are introduced.
+phase chains as the indexed baseline, the v25 same-route reservation path as the
+first grouped candidate, and the v26 locality-proven column-copy path as the
+first data-movement candidate. All must remain executable against identical
+streams while compaction paths are introduced.
 Split later scenarios into record-only, playback-only, and end-to-end variants so
 a faster recorder cannot conceal a slower serial barrier. Cross 1K, 10K, 100K,
 and 1M commands with homogeneous create/destroy/remove/add streams, realistic

@@ -114,12 +114,17 @@ allocation:
   fixed stack blocks of at most 256 entities. Each block reserves and
   default-initializes destination rows in ranges, validates and commits entities
   once in record order, and removes any anonymous unused tail in reverse order.
+  A valid, distinct, physically contiguous source prefix takes a locality path
+  before source rows move: retained data copies column-at-a-time across maximal
+  simultaneous source/destination runs, enable bits copy word ranges, dense
+  history merges once per run, and exact history remains row-precise. Fragmented
+  or conflicting prefixes fall back to the v25 ordered path.
   Duplicate, stale, wrong-source, partial-capacity, donor-repair, enable-state,
   and dense/exact change-history semantics remain scalar-equivalent. Per-worker
   arenas, deterministic worker merge, grouping across separated route runs,
-  contiguous retained-column copy, planned source compaction, typed component
-  payloads, prefab expansion, and lifecycle publication remain later structural
-  work and must be measured against this baseline rather than hidden behind it.
+  planned source compaction, typed component payloads, prefab expansion, and
+  lifecycle publication remain later structural work and must be measured
+  against this baseline rather than hidden behind it.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index
@@ -277,7 +282,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 186 passing tests, including
+The current runtime and primitive suite has 188 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -370,6 +375,10 @@ history through donor-heavy migration; cross-chunk anonymous-tail rollback;
 precise partial-capacity prefix behavior; a route run beyond the 256-entity
 block boundary with duplicates, stale generations, wrong-source targets, and
 capacity pressure; and a warmed 256-command zero-allocation barrier.
+The contiguous-transfer layer adds independent source/destination chunk-boundary
+splits over a 160-entity enable pattern, dense-to-exact and exact-to-exact history
+transfer, and scalar-reference enable-range copies across offsets and lengths
+around every 64-bit word boundary.
 
 This is now a usable public single-owner component/archetype slice, not yet the
 public scheduler/host ECS. The current generators emit the core manifest, a

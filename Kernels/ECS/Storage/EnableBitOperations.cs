@@ -54,6 +54,45 @@ internal static class EnableBitOperations
             ApplyMask(ref words[wordIndex], CreateMask(0, remaining), enabled);
     }
 
+    internal static void CopyRange(
+        Span<byte> sourceChunk,
+        in ComponentColumnLayout sourceColumn,
+        int sourceStartRow,
+        Span<byte> destinationChunk,
+        in ComponentColumnLayout destinationColumn,
+        int destinationStartRow,
+        int count)
+    {
+        if (count == 0)
+            return;
+
+        Span<ulong> sourceWords = GetWords(sourceChunk, sourceColumn);
+        Span<ulong> destinationWords = GetWords(destinationChunk, destinationColumn);
+        int sourceRow = sourceStartRow;
+        int destinationRow = destinationStartRow;
+        int remaining = count;
+        while (remaining != 0)
+        {
+            int sourceBit = sourceRow & 63;
+            int destinationBit = destinationRow & 63;
+            int copied = Math.Min(
+                remaining,
+                Math.Min(64 - sourceBit, 64 - destinationBit));
+            ulong lowMask = copied == 64
+                ? ulong.MaxValue
+                : (1UL << copied) - 1UL;
+            ulong bits = (sourceWords[sourceRow >> 6] >> sourceBit) & lowMask;
+            ulong destinationMask = lowMask << destinationBit;
+            ref ulong destinationWord = ref destinationWords[destinationRow >> 6];
+            destinationWord =
+                (destinationWord & ~destinationMask) |
+                (bits << destinationBit);
+            sourceRow += copied;
+            destinationRow += copied;
+            remaining -= copied;
+        }
+    }
+
     private static Span<ulong> GetWords(Span<byte> chunk, in ComponentColumnLayout column) =>
         MemoryMarshal.Cast<byte, ulong>(
             chunk.Slice(column.EnableBitsOffsetBytes, column.EnableBitsBytes));

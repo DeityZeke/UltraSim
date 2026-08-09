@@ -424,6 +424,31 @@ bytes and zero Gen0/1/2 collections. These are same-process, homogeneous-route
 guards, not V2/V3 parity evidence; route-entropy, fragmented-source, mixed-
 conflict, component-width, and true source-compaction sweeps remain required.
 
+The v26 profile, `ecs-next-phase1-contiguous-structural-copy-v26`, adds a strict
+locality fast path above v25. It proves that the accepted source prefix is valid,
+distinct, and physically contiguous without a hash table; copies retained data
+column-at-a-time across maximal simultaneous source/destination runs; copies
+enable bits in word-bounded ranges; merges dense history once per run; then
+performs the existing record-ordered source removals and donor repairs. Invalid,
+conflicting, or fragmented blocks retain the v25 path. Four new playback-only
+guards bring the suite to 95 scenarios: scalar/grouped wide-retained columns and
+scalar/grouped deliberately scattered source order.
+
+For 100,000 transitions, the focused v26 process measured scalar/grouped
+end-to-end at `113.755/80.228 ns/command` (`29.5%` faster), dense playback-only
+at `98.475/72.863 ns/command` (`26.0%`), wide-retained playback at
+`115.903/84.431 ns/command` (`27.2%`), and scattered-source playback at
+`110.830/106.895 ns/command` (`3.6%`). The complete 95-scenario process measured
+`143.200/103.458 ns/command` end-to-end (`27.8%`),
+`131.506/97.152 ns/command` dense playback (`26.1%`),
+`143.967/107.940 ns/command` wide-retained playback (`25.0%`), and
+`153.217/141.493 ns/command` scattered playback (`7.7%`). Full-process grouped
+dense p50/p95/p99 barriers were `9.705/9.790/9.995 ms`, versus
+`13.126/13.445/13.479 ms` for scalar playback. All 95 scenarios reported zero
+managed bytes and zero Gen0/1/2 collections. The scattered guard shows graceful
+fallback, not a general locality sweep; source-chunk density, route entropy,
+conflicts, exact-history cost, and source compaction remain explicit future axes.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

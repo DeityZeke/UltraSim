@@ -191,6 +191,25 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         GetEntityIndices(bytes)[row] = entityIndex;
     }
 
+    /// <summary>
+    /// Clears entity ownership for a reservation-ordered row range. The rows
+    /// remain occupied until the caller reverse-removes the anonymous tail.
+    /// </summary>
+    internal void ClearReservedEntityIndices(ReadOnlySpan<ChunkRow> locations)
+    {
+        int start = 0;
+        while (start < locations.Length)
+        {
+            ChunkRow first = locations[start];
+            int count = CountContiguousRows(locations, start);
+            ResolveOrThrow(first, out int chunkIndex, out int row);
+            ResolveOrThrow(locations[start + count - 1], out _, out _);
+            Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+            GetEntityIndices(bytes).Slice(row, count).Clear();
+            start += count;
+        }
+    }
+
     internal bool TryRemove(
         ChunkRow location,
         uint expectedEntityIndex,
@@ -332,6 +351,71 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             transfers);
     }
 
+    /// <summary>
+    /// Copies a locality-proven source prefix into reservation-ordered
+    /// destination rows. Component data moves column-at-a-time for each maximal
+    /// simultaneous source/destination row run; enable state and logical change
+    /// history retain row precision.
+    /// </summary>
+    internal void CopyColumnsToReservedRuns(
+        ReadOnlySpan<ChunkRow> sourceLocations,
+        ArchetypeChunkStore<TArena> destination,
+        ReadOnlySpan<ChunkRow> destinationLocations,
+        ReadOnlySpan<Entity> entities,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        if (destinationLocations.Length != sourceLocations.Length ||
+            entities.Length != sourceLocations.Length)
+        {
+            throw new ArgumentException(
+                "Source, destination, and entity batch lengths must match.");
+        }
+
+        int start = 0;
+        while (start < sourceLocations.Length)
+        {
+            int count = CountSimultaneousContiguousRows(
+                sourceLocations,
+                destinationLocations,
+                start);
+            ChunkRow firstSource = sourceLocations[start];
+            ChunkRow firstDestination = destinationLocations[start];
+            ResolveOrThrow(firstSource, out int sourceChunkIndex, out int sourceRow);
+            destination.ResolveOrThrow(
+                firstDestination,
+                out int destinationChunkIndex,
+                out int destinationRow);
+            ResolveOrThrow(sourceLocations[start + count - 1], out _, out _);
+            destination.ResolveOrThrow(destinationLocations[start + count - 1], out _, out _);
+            Span<byte> sourceBytes = _arena.GetChunkBytes(_chunks[sourceChunkIndex].Handle);
+            Span<byte> destinationBytes = destination._arena.GetChunkBytes(
+                destination._chunks[destinationChunkIndex].Handle);
+            Span<uint> destinationEntityIndices = destination.GetEntityIndices(destinationBytes)
+                .Slice(destinationRow, count);
+            Span<uint> sourceEntityIndices = GetEntityIndices(sourceBytes)
+                .Slice(sourceRow, count);
+            for (int rowOffset = 0; rowOffset < count; rowOffset++)
+            {
+                uint entityIndex = entities[start + rowOffset].Index;
+                System.Diagnostics.Debug.Assert(sourceEntityIndices[rowOffset] == entityIndex);
+                destinationEntityIndices[rowOffset] = entityIndex;
+            }
+
+            CopyResolvedColumnRunTo(
+                sourceChunkIndex,
+                sourceRow,
+                sourceBytes,
+                destination,
+                destinationChunkIndex,
+                destinationRow,
+                destinationBytes,
+                count,
+                transfers);
+            start += count;
+        }
+    }
+
     private void CopyResolvedColumnsTo(
         int sourceChunkIndex,
         int sourceRow,
@@ -380,6 +464,123 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 destinationRow,
                 sourceVersion);
         }
+    }
+
+    private void CopyResolvedColumnRunTo(
+        int sourceChunkIndex,
+        int sourceRow,
+        Span<byte> sourceBytes,
+        ArchetypeChunkStore<TArena> destination,
+        int destinationChunkIndex,
+        int destinationRow,
+        Span<byte> destinationBytes,
+        int rowCount,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+    {
+        for (int transferIndex = 0; transferIndex < transfers.Length; transferIndex++)
+        {
+            ArchetypeColumnTransfer transfer = transfers[transferIndex];
+            ref readonly ComponentColumnLayout sourceColumn =
+                ref _columns[transfer.SourceColumnIndex];
+            ref readonly ComponentColumnLayout destinationColumn =
+                ref destination._columns[transfer.DestinationColumnIndex];
+            System.Diagnostics.Debug.Assert(sourceColumn.ComponentId == transfer.ComponentId);
+            System.Diagnostics.Debug.Assert(destinationColumn.ComponentId == transfer.ComponentId);
+            System.Diagnostics.Debug.Assert(sourceColumn.ElementSizeBytes == destinationColumn.ElementSizeBytes);
+            System.Diagnostics.Debug.Assert(sourceColumn.HasEnableBits == destinationColumn.HasEnableBits);
+
+            if (sourceColumn.HasData)
+            {
+                int byteCount = checked(rowCount * sourceColumn.ElementSizeBytes);
+                int sourceOffset = checked(
+                    sourceColumn.DataOffsetBytes + (sourceRow * sourceColumn.ElementSizeBytes));
+                int destinationOffset = checked(
+                    destinationColumn.DataOffsetBytes + (destinationRow * destinationColumn.ElementSizeBytes));
+                sourceBytes.Slice(sourceOffset, byteCount)
+                    .CopyTo(destinationBytes.Slice(destinationOffset, byteCount));
+            }
+
+            if (sourceColumn.HasEnableBits)
+            {
+                EnableBitOperations.CopyRange(
+                    sourceBytes,
+                    sourceColumn,
+                    sourceRow,
+                    destinationBytes,
+                    destinationColumn,
+                    destinationRow,
+                    rowCount);
+            }
+
+            SparseRowChangeVersions? sourceSparse =
+                _sparseRowChangeVersions[transfer.SourceColumnIndex];
+            if (sourceSparse is null)
+            {
+                ChangeVersion sourceVersion = new(
+                    _changeVersions[
+                        (transfer.SourceColumnIndex * _chunks.Length) + sourceChunkIndex]);
+                destination.MergeTransferredReservedRowChangeVersionRange(
+                    destinationChunkIndex,
+                    transfer.DestinationColumnIndex,
+                    destinationRow,
+                    rowCount,
+                    sourceVersion);
+                continue;
+            }
+
+            for (int rowOffset = 0; rowOffset < rowCount; rowOffset++)
+            {
+                ChangeVersion sourceVersion = sourceSparse.GetEffectiveRowVersion(
+                    (uint)sourceChunkIndex,
+                    sourceRow + rowOffset);
+                destination.MergeTransferredRowChangeVersion(
+                    destinationChunkIndex,
+                    transfer.DestinationColumnIndex,
+                    destinationRow + rowOffset,
+                    sourceVersion);
+            }
+        }
+    }
+
+    private static int CountContiguousRows(ReadOnlySpan<ChunkRow> rows, int start)
+    {
+        ChunkRow first = rows[start];
+        int count = 1;
+        while (start + count < rows.Length)
+        {
+            ChunkRow candidate = rows[start + count];
+            if (candidate.ChunkIndex != first.ChunkIndex ||
+                candidate.Row != first.Row + count)
+            {
+                break;
+            }
+            count++;
+        }
+        return count;
+    }
+
+    private static int CountSimultaneousContiguousRows(
+        ReadOnlySpan<ChunkRow> sourceRows,
+        ReadOnlySpan<ChunkRow> destinationRows,
+        int start)
+    {
+        ChunkRow firstSource = sourceRows[start];
+        ChunkRow firstDestination = destinationRows[start];
+        int count = 1;
+        while (start + count < sourceRows.Length)
+        {
+            ChunkRow source = sourceRows[start + count];
+            ChunkRow destination = destinationRows[start + count];
+            if (source.ChunkIndex != firstSource.ChunkIndex ||
+                source.Row != firstSource.Row + count ||
+                destination.ChunkIndex != firstDestination.ChunkIndex ||
+                destination.Row != firstDestination.Row + count)
+            {
+                break;
+            }
+            count++;
+        }
+        return count;
     }
 
     internal int GetColumnIndex(ComponentId componentId)
@@ -1017,6 +1218,28 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         if (version.IsNewerThan(current))
             _changeVersions[versionIndex] = version.Value;
         _sparseRowChangeVersions[columnIndex]?.MergeRow((uint)chunkIndex, row, version);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void MergeTransferredReservedRowChangeVersionRange(
+        int chunkIndex,
+        int columnIndex,
+        int startRow,
+        int rowCount,
+        ChangeVersion version)
+    {
+        if (!version.IsValid)
+            return;
+
+        int versionIndex = (columnIndex * _chunks.Length) + chunkIndex;
+        ChangeVersion current = new(_changeVersions[versionIndex]);
+        if (version.IsNewerThan(current))
+            _changeVersions[versionIndex] = version.Value;
+        _sparseRowChangeVersions[columnIndex]?.StampRange(
+            (uint)chunkIndex,
+            startRow,
+            rowCount,
+            version);
     }
 
     private void ClearSparseRowChangeVersions(uint chunkIndex, int row)

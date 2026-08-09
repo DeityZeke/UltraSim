@@ -129,6 +129,24 @@ internal static class ArchetypeMigrator
             return 0;
         }
 
+        Span<ChunkRow> sourceRows = stackalloc ChunkRow[MaximumBatchSize];
+        if (TryPrepareContiguousSourcePrefix(
+                entityPool,
+                entities[..reserved],
+                source.Id,
+                sourceRows[..reserved]))
+        {
+            capacityExhausted = reserved < entities.Length;
+            return MigratePreparedContiguousPrefix(
+                entityPool,
+                entities[..reserved],
+                source,
+                destination,
+                sourceRows[..reserved],
+                destinationRows[..reserved],
+                transfers);
+        }
+
         capacityExhausted = false;
         int migrated = 0;
         for (int index = 0; index < entities.Length; index++)
@@ -210,6 +228,141 @@ internal static class ArchetypeMigrator
             migrated,
             reserved);
         return migrated;
+    }
+
+    private static bool TryPrepareContiguousSourcePrefix(
+        EntityPool entityPool,
+        ReadOnlySpan<Entity> entities,
+        ArchetypeId sourceArchetypeId,
+        Span<ChunkRow> sourceRows)
+    {
+        int chunkDirection = 0;
+        for (int index = 0; index < entities.Length; index++)
+        {
+            if (!entityPool.TryGetLocation(entities[index], out EntityLocation location) ||
+                location.ArchetypeId != sourceArchetypeId)
+            {
+                return false;
+            }
+
+            ChunkRow row = location.ChunkRow;
+            sourceRows[index] = row;
+            if (index == 0)
+                continue;
+
+            ChunkRow previous = sourceRows[index - 1];
+            if (row.ChunkIndex == previous.ChunkIndex)
+            {
+                if (row.Row != previous.Row + 1)
+                    return false;
+                continue;
+            }
+
+            // A new packed run begins at row zero. Requiring one strict chunk-
+            // index direction proves that a prior chunk cannot be revisited,
+            // without a per-block hash table or quadratic scan. Retained-empty
+            // reuse may produce either ascending or descending runs.
+            if (row.Row != 0)
+                return false;
+            int direction = row.ChunkIndex > previous.ChunkIndex ? 1 : -1;
+            if (chunkDirection == 0)
+            {
+                chunkDirection = direction;
+            }
+            else if (direction != chunkDirection)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static int MigratePreparedContiguousPrefix<TArena>(
+        EntityPool entityPool,
+        ReadOnlySpan<Entity> entities,
+        ArchetypeStorage<TArena> source,
+        ArchetypeStorage<TArena> destination,
+        ReadOnlySpan<ChunkRow> sourceRows,
+        ReadOnlySpan<ChunkRow> destinationRows,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+        where TArena : class, IChunkArenaBackend
+    {
+        try
+        {
+            source.Store.CopyColumnsToReservedRuns(
+                sourceRows,
+                destination.Store,
+                destinationRows,
+                entities,
+                transfers);
+        }
+        catch
+        {
+            ClearAndRollBackAnonymousDestinationTail(
+                destination.Store,
+                destinationRows,
+                first: 0);
+            throw;
+        }
+
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            if (!entityPool.TryGetLocation(entity, out EntityLocation sourceLocation) ||
+                sourceLocation.ArchetypeId != source.Id)
+            {
+                ClearAndRollBackAnonymousDestinationTail(
+                    destination.Store,
+                    destinationRows,
+                    index);
+                ThrowMigrationInvariant(
+                    "A prepared batch entity changed source before publication.");
+            }
+
+            var replacement = new EntityLocation(destination.Id, destinationRows[index]);
+            if (!entityPool.TryReplaceLocation(entity, sourceLocation, replacement))
+            {
+                ClearAndRollBackAnonymousDestinationTail(
+                    destination.Store,
+                    destinationRows,
+                    index);
+                ThrowMigrationInvariant(
+                    "A prepared batch entity rejected destination publication.");
+            }
+
+            if (!source.Store.TryRemove(
+                    sourceLocation.ChunkRow,
+                    entity.Index,
+                    out ChunkRowRelocation sourceRelocation))
+            {
+                if (!entityPool.TryReplaceLocation(entity, replacement, sourceLocation))
+                {
+                    ThrowMigrationInvariant(
+                        "A prepared batch entity location could not be restored after source removal rejection.");
+                }
+                ClearAndRollBackAnonymousDestinationTail(
+                    destination.Store,
+                    destinationRows,
+                    index);
+                ThrowMigrationInvariant(
+                    "A prepared batch source row rejected removal.");
+            }
+
+            entityPool.ApplyRelocation(source.Id, sourceRelocation);
+        }
+
+        return entities.Length;
+    }
+
+    private static void ClearAndRollBackAnonymousDestinationTail<TArena>(
+        ArchetypeChunkStore<TArena> destination,
+        ReadOnlySpan<ChunkRow> rows,
+        int first)
+        where TArena : class, IChunkArenaBackend
+    {
+        destination.ClearReservedEntityIndices(rows[first..]);
+        RollBackAnonymousDestinationTail(destination, rows, first, rows.Length);
     }
 
     private static void RollBackAnonymousDestinationTail<TArena>(
