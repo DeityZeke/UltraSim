@@ -11,6 +11,9 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
     where TArena : class, IChunkArenaBackend
 {
     private const int NoChunk = -1;
+    // Entity indices are bounded by Array.MaxLength and can never reach this
+    // value. The marker exists only while a structural barrier owns the store.
+    private const uint TemporaryHoleEntityIndex = uint.MaxValue;
 
     private readonly TArena _arena;
     private readonly ChunkLayoutPlan _layout;
@@ -194,6 +197,91 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
         GetEntityIndices(bytes)[row] = entityIndex;
     }
+
+    /// <summary>
+    /// Converts one validated occupied row into a barrier-local hole without
+    /// changing packed occupancy. No query may observe this transient marker.
+    /// </summary>
+    internal bool TryMarkTemporaryHole(
+        ChunkRow location,
+        uint expectedEntityIndex)
+    {
+        ThrowIfDisposed();
+        if (!TryResolve(location, out int chunkIndex, out int row))
+        {
+            return false;
+        }
+
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+        Span<uint> entityIndices = GetEntityIndices(bytes);
+        if (entityIndices[row] != expectedEntityIndex)
+        {
+            return false;
+        }
+
+        entityIndices[row] = TemporaryHoleEntityIndex;
+        return true;
+    }
+
+    /// <summary>
+    /// Default-initializes and publishes a new owner into a temporary hole.
+    /// Occupancy counters do not change because the physical row stayed packed.
+    /// </summary>
+    internal bool TryFillTemporaryHole(ChunkRow location, uint entityIndex)
+    {
+        ThrowIfDisposed();
+        if (!TryResolve(location, out int chunkIndex, out int row))
+            return false;
+
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+        Span<uint> entityIndices = GetEntityIndices(bytes);
+        if (entityIndices[row] != TemporaryHoleEntityIndex)
+            return false;
+
+        InitializeRows(chunkIndex, bytes, row, 1);
+        entityIndices[row] = entityIndex;
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool ContainsTemporaryHole(ChunkRow location)
+    {
+        ThrowIfDisposed();
+        if (!TryResolve(location, out int chunkIndex, out int row))
+            return false;
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+        return GetEntityIndices(bytes)[row] == TemporaryHoleEntityIndex;
+    }
+
+    /// <summary>
+    /// Removes the current packed tail only when it is a temporary hole. This
+    /// lets finalization discard hole donors before compacting arbitrary holes.
+    /// </summary>
+    internal bool TryRemoveTemporaryHoleTail()
+    {
+        ThrowIfDisposed();
+        int donorChunkIndex = _partialHead != NoChunk ? _partialHead : _fullHead;
+        if (donorChunkIndex == NoChunk)
+            return false;
+
+        int donorRow = _chunks[donorChunkIndex].RowCount - 1;
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[donorChunkIndex].Handle);
+        if (GetEntityIndices(bytes)[donorRow] != TemporaryHoleEntityIndex)
+            return false;
+
+        var location = new ChunkRow((uint)donorChunkIndex, donorRow);
+        if (!TryRemove(location, TemporaryHoleEntityIndex, out ChunkRowRelocation relocation) ||
+            relocation.HasValue)
+        {
+            ThrowInvariant("A temporary donor-tail hole did not shrink in place.");
+        }
+        return true;
+    }
+
+    internal bool TryRemoveTemporaryHole(
+        ChunkRow location,
+        out ChunkRowRelocation relocation) =>
+        TryRemove(location, TemporaryHoleEntityIndex, out relocation);
 
     /// <summary>
     /// Clears entity ownership for a reservation-ordered row range. The rows

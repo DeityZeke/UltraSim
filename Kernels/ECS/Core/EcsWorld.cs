@@ -531,6 +531,42 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return TryCreateDefaultCore(archetypeId, out entity, out _);
     }
 
+    /// <summary>Creates directly into a row reserved by this structural barrier.</summary>
+    internal bool TryCreateDefaultInTemporaryHole(
+        ArchetypeId archetypeId,
+        ChunkRow row,
+        out Entity entity)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
+        if (!_entities.TryAllocate(out entity))
+        {
+            entity = Entity.Null;
+            return false;
+        }
+
+        if (!storage.Store.TryFillTemporaryHole(row, entity.Index))
+        {
+            if (!_entities.TryFree(entity))
+                ThrowWorldInvariant("A failed temporary-hole entity could not be returned.");
+            entity = Entity.Null;
+            ThrowWorldInvariant("A validated temporary hole rejected publication.");
+        }
+
+        var location = new EntityLocation(archetypeId, row);
+        if (_entities.TryBindLocation(entity, location))
+            return true;
+
+        if (!storage.Store.TryMarkTemporaryHole(row, entity.Index) ||
+            !_entities.TryFree(entity))
+        {
+            ThrowWorldInvariant("Temporary-hole creation rollback failed.");
+        }
+        entity = Entity.Null;
+        ThrowWorldInvariant("A new temporary-hole entity rejected its first location.");
+        return false;
+    }
+
     internal bool TryCreateInitialized<T>(
         ArchetypeId archetypeId,
         in ArchetypeComponentBinding<T> binding,
@@ -1620,6 +1656,12 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     internal void ValidateStructuralPlayback() => EnsureRuntimeMutationAllowed();
 
+    internal int GetArchetypeFixedRowBytesForPlayback(ArchetypeId archetypeId)
+    {
+        EnsureRuntimeMutationAllowed();
+        return _archetypes.GetStorage(archetypeId).Layout.FixedRowBytes;
+    }
+
     internal bool IsWholeArchetypeDestroyCandidate(Entity entity, int commandCount)
     {
         if (commandCount <= 0 ||
@@ -1749,6 +1791,55 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (!_entities.TryGetLocation(entity, out EntityLocation location))
             return false;
         return TryDestroyLocated(entity, location);
+    }
+
+    /// <summary>
+    /// Retires the logical entity but leaves its row reserved for same-barrier
+    /// reuse. The caller owns mandatory dense finalization.
+    /// </summary>
+    internal bool TryDestroyIntoTemporaryHoleValidated(
+        Entity entity,
+        EntityLocation location,
+        out int fixedRowBytes)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(location.ArchetypeId);
+        if (!storage.Store.TryMarkTemporaryHole(
+                location.ChunkRow,
+                entity.Index))
+        {
+            fixedRowBytes = 0;
+            return false;
+        }
+
+        fixedRowBytes = storage.Layout.FixedRowBytes;
+        _entities.RetireLocatedIntoTemporaryHoleValidated(entity, location);
+        return true;
+    }
+
+    internal bool TryCompactTemporaryHoleTail(ArchetypeId archetypeId)
+    {
+        EnsureRuntimeMutationAllowed();
+        return _archetypes.GetStorage(archetypeId).Store.TryRemoveTemporaryHoleTail();
+    }
+
+    internal bool TryCompactTemporaryHole(
+        ArchetypeId archetypeId,
+        ChunkRow row,
+        out bool relocatedDonor)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
+        if (!storage.Store.ContainsTemporaryHole(row))
+        {
+            relocatedDonor = false;
+            return false;
+        }
+        if (!storage.Store.TryRemoveTemporaryHole(row, out ChunkRowRelocation relocation))
+            ThrowWorldInvariant("A validated temporary hole rejected dense finalization.");
+        _entities.ApplyRelocation(archetypeId, relocation);
+        relocatedDonor = relocation.HasValue;
+        return true;
     }
 
     private bool TryDestroyLocated(Entity entity, EntityLocation location)

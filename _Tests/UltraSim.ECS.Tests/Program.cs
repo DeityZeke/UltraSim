@@ -112,6 +112,11 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_DeferredCreateTokensComposeAndExpire), PublicEcsWorld_DeferredCreateTokensComposeAndExpire);
         Run(nameof(PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle), PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_BarrierLocalHolesReuseSparseWideRows), PublicEcsWorld_BarrierLocalHolesReuseSparseWideRows);
+        Run(nameof(PublicEcsWorld_BarrierLocalHoleFailureFinalizesDenseStorage), PublicEcsWorld_BarrierLocalHoleFailureFinalizesDenseStorage);
+        Run(nameof(PublicEcsWorld_BarrierLocalPartialReuseRepairsCompactionDonor), PublicEcsWorld_BarrierLocalPartialReuseRepairsCompactionDonor);
+        Run(nameof(PublicEcsWorld_UnbalancedWideChurnFallsBackWithoutMarkers), PublicEcsWorld_UnbalancedWideChurnFallsBackWithoutMarkers);
+        Run(nameof(PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes), PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes);
         Run(nameof(PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
         Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
@@ -3936,7 +3941,7 @@ internal static class EcsPrimitiveTests
         Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<DeferredEntity>());
         Assert.Equal(24, Unsafe.SizeOf<StructuralCommandRecord>());
         Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<StructuralCommandRecord>());
-        Assert.Equal(36, Unsafe.SizeOf<StructuralPlaybackResult>());
+        Assert.Equal(64, Unsafe.SizeOf<StructuralPlaybackResult>());
         Assert.False(RuntimeHelpers.IsReferenceOrContainsReferences<StructuralPlaybackResult>());
 
         Assert.Throws<ArgumentOutOfRangeException>(() => new EcsWorldOptions(
@@ -3994,7 +3999,7 @@ internal static class EcsPrimitiveTests
         world.BeginRun();
         StructuralCommandBuffer commands = world.StructuralCommands;
         Assert.Equal(2, commands.Capacity);
-        Assert.Equal(80L, commands.ReservedBytes);
+        Assert.Equal(124L, commands.ReservedBytes);
         Assert.True(world.TryCreate(source, out Entity entity));
         commands.EnqueueDestroy(entity);
         Assert.True(commands.TryEnqueueDestroy(entity));
@@ -4917,6 +4922,378 @@ internal static class EcsPrimitiveTests
             AssertPlaybackResultsEqual(groupedResult, scalarResult);
             Assert.Equal(belowThresholdCount, groupedResult.DestroyedCount);
         }
+    }
+
+    private static void PublicEcsWorld_BarrierLocalHolesReuseSparseWideRows()
+    {
+        const int entityCount = 1_024;
+        const int churnCount = entityCount / 4;
+        using var optimized = new PublicHoleReuseFixture(
+            entityCount,
+            structuralCommandCapacity: churnCount * 2,
+            maximumChunks: 16);
+        using var scalar = new PublicHoleReuseFixture(
+            entityCount,
+            structuralCommandCapacity: churnCount * 2,
+            maximumChunks: 16);
+        var optimizedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            var enable = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 65_537L) + 23),
+            };
+            Assert.True(optimized.World.TryCreate(
+                optimized.Archetype,
+                optimized.EnableLookup,
+                enable,
+                out optimizedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Archetype,
+                scalar.EnableLookup,
+                enable,
+                out scalarEntities[index]));
+            bool enabled = (index & 7) != 3;
+            Assert.True(optimized.World.TrySetEnabled(
+                optimizedEntities[index],
+                optimized.EnableLookup,
+                enabled));
+            Assert.True(scalar.World.TrySetEnabled(
+                scalarEntities[index],
+                scalar.EnableLookup,
+                enabled));
+        }
+
+        var optimizedArchetypes = new ArchetypeHandle[churnCount];
+        var scalarArchetypes = new ArchetypeHandle[churnCount];
+        Array.Fill(optimizedArchetypes, optimized.Archetype);
+        Array.Fill(scalarArchetypes, scalar.Archetype);
+        var optimizedTokens = new DeferredEntity[churnCount];
+        var scalarTokens = new DeferredEntity[churnCount];
+        int target = 0;
+        for (int index = 0; index < entityCount; index += 4)
+        {
+            optimized.World.StructuralCommands.EnqueueDestroy(optimizedEntities[index]);
+            scalar.World.StructuralCommands.EnqueueDestroy(scalarEntities[index]);
+            target++;
+        }
+        Assert.Equal(churnCount, target);
+        optimized.World.StructuralCommands.EnqueueCreateDefault(
+            optimizedArchetypes,
+            optimizedTokens);
+        scalar.World.StructuralCommands.EnqueueCreateDefault(
+            scalarArchetypes,
+            scalarTokens);
+
+        StructuralPlaybackResult optimizedResult =
+            optimized.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(optimizedResult, scalarResult);
+        Assert.Equal(churnCount, optimizedResult.TemporaryHoleCount);
+        Assert.Equal(churnCount, optimizedResult.ReusedTemporaryHoleCount);
+        Assert.Equal(0, optimizedResult.CompactedTemporaryHoleCount);
+        Assert.Equal(0, optimizedResult.TemporaryHoleDonorRelocationCount);
+        Assert.Equal(churnCount * 140L, optimizedResult.ReusedTemporaryHoleFixedRowBytes);
+        Assert.Equal(0, scalarResult.TemporaryHoleCount);
+        Assert.Equal(entityCount, optimized.World.AliveCount);
+
+        for (int index = 0; index < entityCount; index++)
+        {
+            Assert.Equal(
+                optimized.World.IsAlive(optimizedEntities[index]),
+                scalar.World.IsAlive(scalarEntities[index]));
+            if (optimized.World.IsAlive(optimizedEntities[index]))
+            {
+                Assert.True(optimized.World.TryRead(
+                    optimizedEntities[index],
+                    optimized.EnableLookup,
+                    out UltraSim.ECS.Tests.LayoutEnableLong optimizedValue));
+                Assert.True(scalar.World.TryRead(
+                    scalarEntities[index],
+                    scalar.EnableLookup,
+                    out UltraSim.ECS.Tests.LayoutEnableLong scalarValue));
+                Assert.Equal(optimizedValue.Value, scalarValue.Value);
+            }
+        }
+        for (int index = 0; index < churnCount; index++)
+        {
+            Assert.True(optimized.World.StructuralCommands.TryResolve(
+                optimizedTokens[index],
+                out Entity optimizedCreated));
+            Assert.True(scalar.World.StructuralCommands.TryResolve(
+                scalarTokens[index],
+                out Entity scalarCreated));
+            Assert.Equal(optimizedCreated.Index, scalarCreated.Index);
+            Assert.Equal(optimizedCreated.Generation, scalarCreated.Generation);
+            Assert.True(optimized.World.TryRead(
+                optimizedCreated,
+                optimized.EnableLookup,
+                out UltraSim.ECS.Tests.LayoutEnableLong optimizedDefault));
+            Assert.Equal(0L, optimizedDefault.Value);
+            Assert.True(optimized.World.TryGetEnabled(
+                optimizedCreated,
+                optimized.EnableLookup,
+                out bool optimizedEnabled));
+            Assert.True(optimizedEnabled);
+        }
+    }
+
+    private static void PublicEcsWorld_BarrierLocalHoleFailureFinalizesDenseStorage()
+    {
+        using var fixture = new PublicHoleReuseFixture(
+            entityCapacity: 1,
+            structuralCommandCapacity: 2,
+            maximumChunks: 1);
+        Assert.True(fixture.World.TryCreate(fixture.Archetype, out Entity first));
+
+        FieldInfo coreField = typeof(EcsWorld).GetField(
+            "_core",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Public world core field was not found.");
+        var core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(fixture.World)
+            ?? throw new InvalidOperationException("Public world core was null."));
+        FieldInfo poolField = typeof(EcsWorld<NativeChunkArena>).GetField(
+            "_entities",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("World entity pool field was not found.");
+        var pool = (EntityPool)(poolField.GetValue(core)
+            ?? throw new InvalidOperationException("World entity pool was null."));
+        FieldInfo generationsField = typeof(EntityPool).GetField(
+            "_generations",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Entity generation storage was not found.");
+        var generations = (uint[])(generationsField.GetValue(pool)
+            ?? throw new InvalidOperationException("Entity generation storage was null."));
+        generations[first.Index] = uint.MaxValue;
+        var terminal = new Entity(fixture.World.Id, first.Index, uint.MaxValue);
+
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        commands.EnqueueDestroy(terminal);
+        DeferredEntity token = commands.EnqueueCreateDefault(fixture.Archetype);
+        StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+
+        Assert.Equal(1, result.DestroyedCount);
+        Assert.Equal(0, result.CreatedCount);
+        Assert.Equal(1, result.RejectedCreateCount);
+        Assert.Equal(1, result.TemporaryHoleCount);
+        Assert.Equal(0, result.ReusedTemporaryHoleCount);
+        Assert.Equal(1, result.CompactedTemporaryHoleCount);
+        Assert.Equal(0, result.TemporaryHoleDonorRelocationCount);
+        Assert.False(commands.TryResolve(token, out _));
+        Assert.Equal(0, fixture.World.AliveCount);
+        ArchetypeStorage<NativeChunkArena> storage =
+            core.GetArchetypeStorage(fixture.Archetype.Id);
+        Assert.Equal(0, storage.Store.Count);
+        storage.Store.ValidateInvariants();
+    }
+
+    private static void PublicEcsWorld_BarrierLocalPartialReuseRepairsCompactionDonor()
+    {
+        using var fixture = new PublicHoleReuseFixture(
+            entityCapacity: 4,
+            structuralCommandCapacity: 4,
+            maximumChunks: 1);
+        var entities = new Entity[4];
+        for (int index = 0; index < entities.Length; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked(10_000L + index),
+            };
+            Assert.True(fixture.World.TryCreate(
+                fixture.Archetype,
+                fixture.EnableLookup,
+                value,
+                out entities[index]));
+        }
+
+        FieldInfo coreField = typeof(EcsWorld).GetField(
+            "_core",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Public world core field was not found.");
+        var core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(fixture.World)
+            ?? throw new InvalidOperationException("Public world core was null."));
+        FieldInfo poolField = typeof(EcsWorld<NativeChunkArena>).GetField(
+            "_entities",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("World entity pool field was not found.");
+        var pool = (EntityPool)(poolField.GetValue(core)
+            ?? throw new InvalidOperationException("World entity pool was null."));
+        FieldInfo generationsField = typeof(EntityPool).GetField(
+            "_generations",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Entity generation storage was not found.");
+        var generations = (uint[])(generationsField.GetValue(pool)
+            ?? throw new InvalidOperationException("Entity generation storage was null."));
+        generations[entities[1].Index] = uint.MaxValue;
+        Entity terminal = new(fixture.World.Id, entities[1].Index, uint.MaxValue);
+
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        commands.EnqueueDestroy(entities[0]);
+        commands.EnqueueDestroy(terminal);
+        DeferredEntity firstToken = commands.EnqueueCreateDefault(fixture.Archetype);
+        DeferredEntity failedToken = commands.EnqueueCreateDefault(fixture.Archetype);
+        StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+
+        Assert.Equal(2, result.DestroyedCount);
+        Assert.Equal(1, result.CreatedCount);
+        Assert.Equal(1, result.RejectedCreateCount);
+        Assert.Equal(2, result.TemporaryHoleCount);
+        Assert.Equal(1, result.ReusedTemporaryHoleCount);
+        Assert.Equal(1, result.CompactedTemporaryHoleCount);
+        Assert.Equal(1, result.TemporaryHoleDonorRelocationCount);
+        Assert.Equal(140L, result.ReusedTemporaryHoleFixedRowBytes);
+        Assert.True(commands.TryResolve(firstToken, out Entity replacement));
+        Assert.False(commands.TryResolve(failedToken, out _));
+        Assert.False(fixture.World.IsAlive(entities[0]));
+        Assert.False(fixture.World.IsAlive(terminal));
+        Assert.True(fixture.World.IsAlive(entities[2]));
+        Assert.True(fixture.World.IsAlive(entities[3]));
+        Assert.True(fixture.World.IsAlive(replacement));
+        Assert.Equal(3, fixture.World.AliveCount);
+        Assert.True(fixture.World.TryRead(
+            entities[3],
+            fixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong donorValue));
+        Assert.Equal(10_003L, donorValue.Value);
+        Assert.True(fixture.World.TryRead(
+            replacement,
+            fixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong replacementValue));
+        Assert.Equal(0L, replacementValue.Value);
+
+        ArchetypeStorage<NativeChunkArena> storage =
+            core.GetArchetypeStorage(fixture.Archetype.Id);
+        Assert.Equal(3, storage.Store.Count);
+        storage.Store.ValidateInvariants();
+    }
+
+    private static void PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes()
+    {
+        const int entityCount = 1_024;
+        const int churnCount = entityCount / 4;
+        const int iterations = 64;
+        using var fixture = new PublicHoleReuseFixture(
+            entityCount,
+            structuralCommandCapacity: churnCount * 2,
+            maximumChunks: 16);
+        var entities = new Entity[entityCount];
+        var archetypes = new ArchetypeHandle[churnCount];
+        var tokens = new DeferredEntity[churnCount];
+        Array.Fill(archetypes, fixture.Archetype);
+        for (int index = 0; index < entityCount; index++)
+            Assert.True(fixture.World.TryCreate(fixture.Archetype, out entities[index]));
+
+        void ExecuteOneBarrier()
+        {
+            int target = 0;
+            for (int index = 0; index < entityCount; index += 4)
+            {
+                fixture.World.StructuralCommands.EnqueueDestroy(entities[index]);
+                target++;
+            }
+            fixture.World.StructuralCommands.EnqueueCreateDefault(archetypes, tokens);
+            StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+            Assert.Equal(churnCount, result.TemporaryHoleCount);
+            Assert.Equal(churnCount, result.ReusedTemporaryHoleCount);
+            Assert.Equal(0, result.CompactedTemporaryHoleCount);
+            target = 0;
+            for (int index = 0; index < entityCount; index += 4)
+            {
+                Assert.True(fixture.World.StructuralCommands.TryResolve(
+                    tokens[target++],
+                    out entities[index]));
+            }
+        }
+
+        ExecuteOneBarrier();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < iterations; iteration++)
+            ExecuteOneBarrier();
+        long after = GC.GetAllocatedBytesForCurrentThread();
+        Assert.Equal(0L, after - before);
+        Assert.Equal(entityCount, fixture.World.AliveCount);
+    }
+
+    private static void PublicEcsWorld_UnbalancedWideChurnFallsBackWithoutMarkers()
+    {
+        const int entityCount = 1_024;
+        const int destroyCount = entityCount / 4;
+        const int createCount = destroyCount / 2;
+        using var optimized = new PublicHoleReuseFixture(
+            entityCount,
+            structuralCommandCapacity: destroyCount + createCount,
+            maximumChunks: 16);
+        using var scalar = new PublicHoleReuseFixture(
+            entityCount,
+            structuralCommandCapacity: destroyCount + createCount,
+            maximumChunks: 16);
+        var optimizedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            Assert.True(optimized.World.TryCreate(
+                optimized.Archetype,
+                out optimizedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Archetype,
+                out scalarEntities[index]));
+        }
+
+        var optimizedArchetypes = new ArchetypeHandle[createCount];
+        var scalarArchetypes = new ArchetypeHandle[createCount];
+        var optimizedTokens = new DeferredEntity[createCount];
+        var scalarTokens = new DeferredEntity[createCount];
+        Array.Fill(optimizedArchetypes, optimized.Archetype);
+        Array.Fill(scalarArchetypes, scalar.Archetype);
+        for (int index = 0; index < entityCount; index += 4)
+        {
+            optimized.World.StructuralCommands.EnqueueDestroy(optimizedEntities[index]);
+            scalar.World.StructuralCommands.EnqueueDestroy(scalarEntities[index]);
+        }
+        optimized.World.StructuralCommands.EnqueueCreateDefault(
+            optimizedArchetypes,
+            optimizedTokens);
+        scalar.World.StructuralCommands.EnqueueCreateDefault(
+            scalarArchetypes,
+            scalarTokens);
+
+        StructuralPlaybackResult optimizedResult =
+            optimized.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(optimizedResult, scalarResult);
+        Assert.Equal(0, optimizedResult.TemporaryHoleCount);
+        Assert.Equal(0, optimizedResult.ReusedTemporaryHoleCount);
+        Assert.Equal(0, optimizedResult.CompactedTemporaryHoleCount);
+        Assert.Equal(entityCount - destroyCount + createCount, optimized.World.AliveCount);
+        Assert.Equal(optimized.World.AliveCount, scalar.World.AliveCount);
+        for (int index = 0; index < createCount; index++)
+        {
+            Assert.True(optimized.World.StructuralCommands.TryResolve(
+                optimizedTokens[index],
+                out Entity optimizedCreated));
+            Assert.True(scalar.World.StructuralCommands.TryResolve(
+                scalarTokens[index],
+                out Entity scalarCreated));
+            Assert.Equal(optimizedCreated.Index, scalarCreated.Index);
+            Assert.Equal(optimizedCreated.Generation, scalarCreated.Generation);
+        }
+
+        FieldInfo coreField = typeof(EcsWorld).GetField(
+            "_core",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Public world core field was not found.");
+        var core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(optimized.World)
+            ?? throw new InvalidOperationException("Public world core was null."));
+        ArchetypeStorage<NativeChunkArena> storage =
+            core.GetArchetypeStorage(optimized.Archetype.Id);
+        storage.Store.ValidateInvariants();
     }
 
     private static void AssertPlaybackResultsEqual(
@@ -12308,6 +12685,46 @@ internal static class EcsPrimitiveTests
         internal ComponentLookup<UltraSim.ECS.Tests.LayoutInt> IntLookup { get; }
         internal ComponentLookup<UltraSim.ECS.Tests.LayoutTag> TagLookup { get; }
         internal ComponentLookup<UltraSim.ECS.Tests.LayoutWide> WideLookup { get; }
+
+        public void Dispose() => World.Dispose();
+    }
+
+    private sealed class PublicHoleReuseFixture : IDisposable
+    {
+        internal PublicHoleReuseFixture(
+            int entityCapacity,
+            int structuralCommandCapacity,
+            int maximumChunks)
+        {
+            ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+            World = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(entityCapacity),
+                    maximumArchetypes: 1,
+                    maximumPreparedPlans: 1,
+                    maximumPreparedTransitions: 0,
+                    maximumStructuralCommands: structuralCommandCapacity));
+            ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+            ComponentId blockId = UltraSim.ECS.Tests.LayoutTestSchema
+                .GetComponentId<UltraSim.ECS.Tests.LayoutBlock128>();
+            ComponentId[] signature = [enableId, blockId];
+            Array.Sort(signature, static (left, right) =>
+                left.Value.CompareTo(right.Value));
+            Archetype = World.RegisterArchetype(
+                signature,
+                ChunkLayoutOptions.KiB16,
+                maximumChunks);
+            EnableLookup = World.PrepareLookup<UltraSim.ECS.Tests.LayoutEnableLong>();
+            World.Seal();
+            World.Initialize();
+            World.BeginRun();
+        }
+
+        internal EcsWorld World { get; }
+        internal ArchetypeHandle Archetype { get; }
+        internal ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> EnableLookup { get; }
 
         public void Dispose() => World.Dispose();
     }

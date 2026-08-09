@@ -34,6 +34,19 @@ internal struct BenchmarkWide : IComponent<BenchmarkWide>
     public long H { get; set; }
 }
 
+[EcsComponent("benchmark.block512")]
+internal struct BenchmarkBlock512 : IComponent<BenchmarkBlock512>
+{
+    public BenchmarkWide A { get; set; }
+    public BenchmarkWide B { get; set; }
+    public BenchmarkWide C { get; set; }
+    public BenchmarkWide D { get; set; }
+    public BenchmarkWide E { get; set; }
+    public BenchmarkWide F { get; set; }
+    public BenchmarkWide G { get; set; }
+    public BenchmarkWide H { get; set; }
+}
+
 [EcsComponent("benchmark.scalar")]
 internal struct BenchmarkScalar : IComponent<BenchmarkScalar>
 {
@@ -44,6 +57,7 @@ internal struct BenchmarkScalar : IComponent<BenchmarkScalar>
     typeof(BenchmarkVelocity),
     typeof(BenchmarkDisabled),
     typeof(BenchmarkWide),
+    typeof(BenchmarkBlock512),
     typeof(BenchmarkScalar),
     typeof(BenchmarkPosition))]
 internal static partial class BenchmarkSchema

@@ -7,6 +7,7 @@ internal enum StructuralCommandKind : byte
     CreateDefault = 1,
     Destroy = 2,
     Transition = 3,
+    TemporaryHole = 4,
 }
 
 internal enum StructuralCommandTargetKind : byte
@@ -115,6 +116,23 @@ internal readonly struct StructuralCommandRecord
         entity.CommandIndex,
         0);
 
+    /// <summary>
+    /// Reuses a consumed live-destroy command slot as barrier-local hole metadata.
+    /// Create-token command records remain untouched after playback.
+    /// </summary>
+    internal static StructuralCommandRecord TemporaryHole(
+        ArchetypeId archetypeId,
+        ChunkRow row,
+        int fixedRowBytes) => new(
+        StructuralCommandKind.TemporaryHole,
+        StructuralCommandTargetKind.None,
+        default,
+        archetypeId.Value,
+        row.ChunkIndex,
+        checked((uint)row.Row),
+        checked((uint)fixedRowBytes),
+        0);
+
     internal Entity GetEntityTarget() => new(
         new WorldId(_target0),
         _target1,
@@ -124,4 +142,11 @@ internal readonly struct StructuralCommandRecord
         _target0 == bufferId && _target1 == epoch;
 
     internal uint DeferredCommandIndex => _target2;
+
+    internal ArchetypeId TemporaryHoleArchetypeId => new(_argument);
+
+    internal ChunkRow TemporaryHoleRow => new(_target0, checked((int)_target1));
+
+    internal int TemporaryHoleFixedRowBytes => checked((int)_target2);
+
 }

@@ -15,8 +15,12 @@ rows. The accepted 2026-08-09 V2-first and V3-first captures both produced zero
 state mismatches. They are an as-is regression baseline, not complete V2 parity
 or evidence that V3 currently wins most overlapping operations.
 
-The immutable accepted joined artifact lives at
+The original immutable accepted joined artifact lives at
 [`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
+The accepted V30 joined capture lives at
+[`Baselines/ecs-v2-v3-v30-2026-08-09.json`](Baselines/ecs-v2-v3-v30-2026-08-09.json),
+and its exact same-build barrier-local/V29-style packed control lives at
+[`Baselines/ecs-v30-barrier-hole-reuse-2026-08-09.json`](Baselines/ecs-v30-barrier-hole-reuse-2026-08-09.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -25,6 +29,14 @@ allocation scope; future scheduler cases must broaden allocation accounting.
 
 These projects measure the root Next implementation. Frozen V2 Current and
 Legacy runners remain beneath `_V2/_Benchmarks` and run in separate processes.
+
+The standalone bitmap block-pool experiment and its evidence are documented in
+[`BITMAP_BLOCK_POOL_EXPERIMENT.md`](BITMAP_BLOCK_POOL_EXPERIMENT.md). It compares
+five same-shell packed/hole/compaction policies across a 425-row reportable
+50,000-row matrix and a 1,195-row reduced-scale coverage matrix, then anchors the
+mechanism results against the existing V2, immutable V3, and V29 process-isolated
+controls. It does not modify production V3 storage or present the smaller
+prototype entity shell as a direct V2/V3 comparison.
 
 The original ECS primitive/schema suite remains intentionally marked non-comparable.
 It establishes allocation, validation, layout-candidate, generated component-ID,
@@ -549,6 +561,50 @@ V2-control-normalized ratios were `0.199/0.185`, `0.643/0.624`, and
 `0.644/0.623`. Add/remove transition playback also improved roughly 5-9% at
 50,000 rows in both orders, which is the required evidence that moving clearing
 to reservation did not buy destruction by making migration slower.
+
+V30 expands the complete suite to 129 scenarios and integrates the bitmap
+experiment's strongest narrow result without exposing sparse storage to queries.
+It temporarily retains eligible destroyed rows during one structural barrier,
+reuses them for balanced same-archetype default creates, and compulsorily packs
+any leftovers before later phases. The selector requires at least 64 fixed bytes
+per row and create demand covering every resolvable live destroy in the store;
+narrow and unbalanced churn use the V29 packed executor. Exact whole/suffix
+destroy paths remain ahead of hole reuse.
+
+The accepted focused capture holds 100,000 resident rows constant and compares
+the scalar oracle, an exact phase-indexed packed V29-style control, and production
+V30 at 10% and 50% churn. At 12-byte rows, packed/V30 was
+`52.444/52.273 ns/command` and `51.190/51.352`, within `0.3%`. At 524 fixed bytes
+per row, it was `77.957/58.821` and `74.270/56.666`, improvements of `24.5%` and
+`23.7%`. Every hole was reused, no final compaction or donor relocation occurred,
+the command results were validated, and all 12 rows allocated zero managed bytes.
+
+The complete 129-scenario run also reported zero managed allocation. Both
+four-warmup/fifteen-iteration V2/V3 process orders retained 87 comparable rows,
+zero canonical-state mismatches, and 15 explicit unsupported rows. Because the
+shared adapter does not yet define balanced deferred destroy/create churn, those
+captures protect existing behavior while the same-build packed control measures
+V30's new feature directly.
+
+Representative 50,000-row V3 longitudinal means are below. V28, V29, and V30
+show the range across V2-first and V3-first isolated captures; the immutable
+baseline has one accepted V2-first value. Host variation remains visible rather
+than being averaged away.
+
+| Scenario | V3 baseline | V28 | V29 | V30 |
+| --- | ---: | ---: | ---: | ---: |
+| 1R1W query | 1.166 | 1.132-1.149 | 1.130-1.144 | 1.118-1.134 ns/row |
+| immediate create | 43.86 | 44.83-46.92 | 43.63-45.45 | 43.69-44.24 ns/entity |
+| full deferred destroy playback | 72.50 | 29.03-29.17 | 14.36-14.63 | 13.40-14.26 ns/entity |
+| 10%-sparse destroy playback | 85.03 | 86.91-89.36 | 57.14-61.04 | 56.42-56.63 ns/destroy |
+| immediate destroy | 72.30 | 74.10-74.75 | 45.17-46.61 | 44.16-44.44 ns/entity |
+| add-default playback | 82.70 | 80.99-84.13 | 77.80-78.36 | 76.97-77.38 ns/entity |
+| remove playback | 85.99 | 86.39-89.28 | 79.36-80.43 | 78.57-78.75 ns/entity |
+
+V30's balanced hole-reuse scenario is absent from the older adapter catalogs, so
+baseline/V28 values for that feature would be fabricated. Its exact incremental
+comparison is the same-binary packed control above; future accepted adapter
+coverage should add the workload without rewriting historical artifacts.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

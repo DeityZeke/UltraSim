@@ -124,6 +124,22 @@ internal static class PrimitiveBenchmarks
         using var publicDeferredDestroySparse50 = new PublicDeferredDestroyFixture(
             100_000,
             DeferredDestroySelection.Sparse50Percent);
+        using var publicBarrierChurnNarrow10 = new PublicBarrierLocalChurnFixture(
+            100_000,
+            churnPercent: 10,
+            wide: false);
+        using var publicBarrierChurnWide10 = new PublicBarrierLocalChurnFixture(
+            100_000,
+            churnPercent: 10,
+            wide: true);
+        using var publicBarrierChurnNarrow50 = new PublicBarrierLocalChurnFixture(
+            100_000,
+            churnPercent: 50,
+            wide: false);
+        using var publicBarrierChurnWide50 = new PublicBarrierLocalChurnFixture(
+            100_000,
+            churnPercent: 50,
+            wide: true);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
         using var pinnedChunkVisit = new EcsWorldChunkVisitFixture<PinnedChunkArena>(100_000);
         using var nativeReadWriteQuery = new EcsWorldReadWriteQueryFixture<NativeChunkArena>(100_000);
@@ -220,6 +236,18 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Sparse10PctOf100000_10000Ops", "PublicWorldStructuralDestroy", 10_000, publicDeferredDestroySparse10.ExecuteRecorded, publicDeferredDestroySparse10.PrepareRecorded),
             new("PublicWorld_DeferredDestroyPlaybackOnlyScalarOracle_Sparse50PctOf100000_50000Ops", "PublicWorldStructuralDestroy", 50_000, publicDeferredDestroySparse50.ExecuteRecordedScalarOracle, publicDeferredDestroySparse50.PrepareRecorded),
             new("PublicWorld_DeferredDestroyPlaybackOnlyGrouped_Sparse50PctOf100000_50000Ops", "PublicWorldStructuralDestroy", 50_000, publicDeferredDestroySparse50.ExecuteRecorded, publicDeferredDestroySparse50.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyScalarOracle_Narrow_Sparse10PctOf100000_20000Commands", "PublicWorldStructuralHoleReuse", 20_000, publicBarrierChurnNarrow10.ExecuteRecordedScalarOracle, publicBarrierChurnNarrow10.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyPackedV29Control_Narrow_Sparse10PctOf100000_20000Commands", "PublicWorldStructuralHoleReuse", 20_000, publicBarrierChurnNarrow10.ExecuteRecordedPackedControl, publicBarrierChurnNarrow10.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyGrouped_Narrow_Sparse10PctOf100000_20000Commands", "PublicWorldStructuralHoleReuse", 20_000, publicBarrierChurnNarrow10.ExecuteRecorded, publicBarrierChurnNarrow10.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyScalarOracle_Wide512_Sparse10PctOf100000_20000Commands", "PublicWorldStructuralHoleReuse", 20_000, publicBarrierChurnWide10.ExecuteRecordedScalarOracle, publicBarrierChurnWide10.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyPackedV29Control_Wide512_Sparse10PctOf100000_20000Commands", "PublicWorldStructuralHoleReuse", 20_000, publicBarrierChurnWide10.ExecuteRecordedPackedControl, publicBarrierChurnWide10.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyGrouped_Wide512_Sparse10PctOf100000_20000Commands", "PublicWorldStructuralHoleReuse", 20_000, publicBarrierChurnWide10.ExecuteRecorded, publicBarrierChurnWide10.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyScalarOracle_Narrow_Sparse50PctOf100000_100000Commands", "PublicWorldStructuralHoleReuse", 100_000, publicBarrierChurnNarrow50.ExecuteRecordedScalarOracle, publicBarrierChurnNarrow50.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyPackedV29Control_Narrow_Sparse50PctOf100000_100000Commands", "PublicWorldStructuralHoleReuse", 100_000, publicBarrierChurnNarrow50.ExecuteRecordedPackedControl, publicBarrierChurnNarrow50.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyGrouped_Narrow_Sparse50PctOf100000_100000Commands", "PublicWorldStructuralHoleReuse", 100_000, publicBarrierChurnNarrow50.ExecuteRecorded, publicBarrierChurnNarrow50.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyScalarOracle_Wide512_Sparse50PctOf100000_100000Commands", "PublicWorldStructuralHoleReuse", 100_000, publicBarrierChurnWide50.ExecuteRecordedScalarOracle, publicBarrierChurnWide50.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyPackedV29Control_Wide512_Sparse50PctOf100000_100000Commands", "PublicWorldStructuralHoleReuse", 100_000, publicBarrierChurnWide50.ExecuteRecordedPackedControl, publicBarrierChurnWide50.PrepareRecorded),
+            new("PublicWorld_BarrierChurnPlaybackOnlyGrouped_Wide512_Sparse50PctOf100000_100000Commands", "PublicWorldStructuralHoleReuse", 100_000, publicBarrierChurnWide50.ExecuteRecorded, publicBarrierChurnWide50.PrepareRecorded),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
             new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
             new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
@@ -274,7 +302,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-trusted-tail-destroy-v29",
+            SemanticProfile = "ecs-next-phase1-barrier-local-hole-reuse-v30",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1992,6 +2020,159 @@ internal static class PrimitiveBenchmarks
                 DeferredDestroySelection.Sparse1Percent or
                 DeferredDestroySelection.Sparse10Percent or
                 DeferredDestroySelection.Sparse50Percent;
+    }
+
+    /// <summary>
+    /// Equal-work packed-oracle versus barrier-local destroy/create churn. Every
+    /// sample rebuilds creation-order-packed ownership outside the timed region.
+    /// </summary>
+    private sealed class PublicBarrierLocalChurnFixture : IDisposable
+    {
+        private readonly EcsWorld _world;
+        private readonly StructuralCommandBuffer _commands;
+        private readonly ArchetypeHandle _archetype;
+        private readonly Entity[] _entities;
+        private readonly ArchetypeHandle[] _createArchetypes;
+        private readonly DeferredEntity[] _tokens;
+        private readonly int _stride;
+        private readonly int _fixedRowBytes;
+        private readonly bool _expectHoleReuse;
+
+        internal PublicBarrierLocalChurnFixture(
+            int entityCount,
+            int churnPercent,
+            bool wide)
+        {
+            if (churnPercent is not (10 or 50))
+                throw new ArgumentOutOfRangeException(nameof(churnPercent));
+            _stride = 100 / churnPercent;
+            _expectHoleReuse = wide;
+            int targetCount = entityCount / _stride;
+            ComponentSchema schema = BenchmarkSchema.CreateSchema();
+            _world = new EcsWorld(
+                schema,
+                new EcsWorldOptions(
+                    new EntityCapacity(entityCount),
+                    maximumArchetypes: 1,
+                    maximumPreparedPlans: 0,
+                    maximumPreparedTransitions: 0,
+                    maximumStructuralCommands: targetCount * 2));
+            ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+            ComponentId[] signature;
+            if (wide)
+            {
+                signature =
+                [
+                    position,
+                    BenchmarkSchema.GetComponentId<BenchmarkBlock512>(),
+                ];
+                Array.Sort(signature, static (left, right) =>
+                    left.Value.CompareTo(right.Value));
+                _fixedRowBytes = 524;
+            }
+            else
+            {
+                signature = [position];
+                _fixedRowBytes = 12;
+            }
+
+            _archetype = _world.RegisterArchetype(
+                signature,
+                ChunkLayoutOptions.KiB16,
+                maximumChunks: wide ? 4_096 : 128);
+            _world.Seal();
+            _world.Initialize();
+            _world.BeginRun();
+            _commands = _world.StructuralCommands;
+            _entities = new Entity[entityCount];
+            _createArchetypes = new ArchetypeHandle[targetCount];
+            _tokens = new DeferredEntity[targetCount];
+            Array.Fill(_createArchetypes, _archetype);
+            CreatePackedPopulation();
+        }
+
+        internal void PrepareRecorded()
+        {
+            for (int index = 0; index < _entities.Length; index++)
+            {
+                if (!_world.TryDestroy(_entities[index]))
+                    throw new InvalidOperationException(
+                        "Barrier-churn fixture could not clear its prior population.");
+            }
+            CreatePackedPopulation();
+
+            for (int index = 0; index < _tokens.Length; index++)
+                _commands.EnqueueDestroy(_entities[index * _stride]);
+            _commands.EnqueueCreateDefault(_createArchetypes, _tokens);
+        }
+
+        internal ScenarioMeasurement ExecuteRecorded() =>
+            Complete(_world.PlaybackStructuralCommands(), _expectHoleReuse);
+
+        internal ScenarioMeasurement ExecuteRecordedScalarOracle() =>
+            Complete(
+                _world.PlaybackStructuralCommandsScalarOracle(),
+                expectHoleReuse: false);
+
+        internal ScenarioMeasurement ExecuteRecordedPackedControl() =>
+            Complete(
+                _world.PlaybackStructuralCommandsPhaseIndexedPackedOracle(),
+                expectHoleReuse: false);
+
+        private ScenarioMeasurement Complete(
+            in StructuralPlaybackResult result,
+            bool expectHoleReuse)
+        {
+            int targetCount = _tokens.Length;
+            if (result.DestroyedCount != targetCount ||
+                result.CreatedCount != targetCount ||
+                result.RejectedCount != 0)
+            {
+                throw new InvalidOperationException(
+                    "Barrier-churn playback did not apply its balanced command set.");
+            }
+            if (expectHoleReuse)
+            {
+                if (result.TemporaryHoleCount != targetCount ||
+                    result.ReusedTemporaryHoleCount != targetCount ||
+                    result.CompactedTemporaryHoleCount != 0 ||
+                    result.TemporaryHoleDonorRelocationCount != 0 ||
+                    result.ReusedTemporaryHoleFixedRowBytes !=
+                        checked((long)targetCount * _fixedRowBytes))
+                {
+                    throw new InvalidOperationException(
+                        "Barrier-churn playback did not reuse every eligible row.");
+                }
+            }
+            else if (result.TemporaryHoleCount != 0)
+            {
+                throw new InvalidOperationException(
+                    "The scalar structural oracle unexpectedly reported temporary holes.");
+            }
+
+            long checksum = unchecked((long)result.Epoch + result.CommandCount);
+            for (int index = 0; index < targetCount; index++)
+            {
+                if (!_commands.TryResolve(_tokens[index], out Entity created))
+                    throw new InvalidOperationException(
+                        "Barrier-churn create token did not resolve.");
+                _entities[index * _stride] = created;
+                checksum = unchecked(checksum + created.Index + created.Generation);
+            }
+            return new ScenarioMeasurement(targetCount * 2L, checksum);
+        }
+
+        private void CreatePackedPopulation()
+        {
+            for (int index = 0; index < _entities.Length; index++)
+            {
+                if (!_world.TryCreate(_archetype, out _entities[index]))
+                    throw new InvalidOperationException(
+                        "Barrier-churn fixture exhausted its packed population.");
+            }
+        }
+
+        public void Dispose() => _world.Dispose();
     }
 
     private sealed class EcsWorldChunkVisitFixture<TArena> : IDisposable

@@ -16,10 +16,17 @@ public sealed class StructuralCommandBuffer
 {
     private const int MinimumGroupedDestroyRun = 32;
     private const int MinimumGroupedTransitionRun = 8;
+    // The production benchmark shows narrow (12-byte) churn losing ~2-3% while
+    // 88+ byte rows win. Keep the crossover conservative and benchmark-owned.
+    private const int MinimumTemporaryHoleFixedRowBytes = 64;
 
     private readonly StructuralCommandRecord[] _commands;
     private readonly Entity[] _createdEntities;
     private readonly int[] _nextCommand;
+    private readonly int[] _temporaryHoleHeads;
+    private readonly int[] _createDemand;
+    private readonly int[] _destroySupply;
+    private readonly int[] _activeTemporaryArchetypes;
     private readonly WorldId _worldId;
     private uint _bufferId;
     private readonly int _ownerThreadId;
@@ -34,8 +41,14 @@ public sealed class StructuralCommandBuffer
     private PhaseChain _deferredDestroys;
     private PhaseChain _removes;
     private PhaseChain _adds;
+    private int _activeTemporaryArchetypeCount;
+    private bool _hasTemporaryHoleEligibleArchetype;
 
-    internal StructuralCommandBuffer(WorldId worldId, int ownerThreadId, int capacity)
+    internal StructuralCommandBuffer(
+        WorldId worldId,
+        int ownerThreadId,
+        int capacity,
+        int maximumArchetypes)
     {
         if (!worldId.IsValid)
             throw new ArgumentException("A valid world ID is required.", nameof(worldId));
@@ -43,6 +56,8 @@ public sealed class StructuralCommandBuffer
             throw new ArgumentOutOfRangeException(nameof(ownerThreadId));
         if (capacity < 0)
             throw new ArgumentOutOfRangeException(nameof(capacity));
+        if (maximumArchetypes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumArchetypes));
 
         _worldId = worldId;
         _bufferId = BufferIdSource.Allocate();
@@ -50,6 +65,10 @@ public sealed class StructuralCommandBuffer
         _commands = new StructuralCommandRecord[capacity];
         _createdEntities = new Entity[capacity];
         _nextCommand = new int[capacity];
+        _temporaryHoleHeads = new int[checked(maximumArchetypes + 1)];
+        _createDemand = new int[checked(maximumArchetypes + 1)];
+        _destroySupply = new int[checked(maximumArchetypes + 1)];
+        _activeTemporaryArchetypes = new int[maximumArchetypes];
         _epoch = 1;
         _isActive = true;
     }
@@ -75,7 +94,9 @@ public sealed class StructuralCommandBuffer
         (long)_commands.Length *
         (Unsafe.SizeOf<StructuralCommandRecord>() +
          Unsafe.SizeOf<Entity>() +
-         sizeof(int)));
+         sizeof(int)) +
+        (long)(_temporaryHoleHeads.Length + _createDemand.Length + _destroySupply.Length +
+            _activeTemporaryArchetypes.Length) * sizeof(int));
 
     public DeferredEntity EnqueueCreateDefault(ArchetypeHandle archetype)
     {
@@ -337,18 +358,27 @@ public sealed class StructuralCommandBuffer
     }
 
     internal StructuralPlaybackResult Playback(EcsWorld<NativeChunkArena> world) =>
-        PlaybackCore(world, usePhaseIndex: true);
+        PlaybackCore(world, usePhaseIndex: true, useTemporaryHoles: true);
+
+    /// <summary>
+    /// Phase-indexed packed reference retained to isolate the incremental V30
+    /// hole-reuse benefit from executor gains already present in V29.
+    /// </summary>
+    internal StructuralPlaybackResult PlaybackPhaseIndexedPackedOracle(
+        EcsWorld<NativeChunkArena> world) =>
+        PlaybackCore(world, usePhaseIndex: true, useTemporaryHoles: false);
 
     /// <summary>
     /// Retained reference executor for differential tests and same-process
     /// benchmarks. Production playback must use the phase-indexed path.
     /// </summary>
     internal StructuralPlaybackResult PlaybackScalarOracle(EcsWorld<NativeChunkArena> world) =>
-        PlaybackCore(world, usePhaseIndex: false);
+        PlaybackCore(world, usePhaseIndex: false, useTemporaryHoles: false);
 
     private StructuralPlaybackResult PlaybackCore(
         EcsWorld<NativeChunkArena> world,
-        bool usePhaseIndex)
+        bool usePhaseIndex,
+        bool useTemporaryHoles)
     {
         ArgumentNullException.ThrowIfNull(world);
         EnsureOwnerAndActive();
@@ -364,7 +394,11 @@ public sealed class StructuralCommandBuffer
         try
         {
             if (usePhaseIndex)
-                ExecutePhaseIndexed(world, commandCount, ref counts);
+                ExecutePhaseIndexed(
+                    world,
+                    commandCount,
+                    ref counts,
+                    useTemporaryHoles);
             else
                 ExecuteScalarOracle(world, commandCount, ref counts);
 
@@ -377,7 +411,12 @@ public sealed class StructuralCommandBuffer
                 counts.Added,
                 counts.RejectedCreate,
                 counts.RejectedDestroy,
-                counts.RejectedTransition);
+                counts.RejectedTransition,
+                counts.TemporaryHoles,
+                counts.ReusedTemporaryHoles,
+                counts.CompactedTemporaryHoles,
+                counts.TemporaryHoleDonorRelocations,
+                counts.ReusedTemporaryHoleFixedRowBytes);
             _lastPlaybackCommandCount = commandCount;
             _hasCompletedPlayback = true;
             completed = true;
@@ -387,6 +426,7 @@ public sealed class StructuralCommandBuffer
         {
             _count = 0;
             ResetPhaseChains();
+            ResetTemporaryHoleState();
             _isPlaying = false;
             if (!completed)
             {
@@ -400,17 +440,40 @@ public sealed class StructuralCommandBuffer
     private void ExecutePhaseIndexed(
         EcsWorld<NativeChunkArena> world,
         int commandCount,
-        ref PlaybackCounts counts)
+        ref PlaybackCounts counts,
+        bool useTemporaryHoles)
     {
+        if (useTemporaryHoles)
+            PrepareTemporaryHoleDemand(world);
         ExecuteIndexedDestroyChain(
             world,
             commandCount,
             _liveDestroys,
             ref counts);
-        ExecuteIndexedCreateChain(
-            world,
-            _creates,
-            ref counts);
+        bool hasTemporaryHoles = useTemporaryHoles && counts.TemporaryHoles != 0;
+        if (hasTemporaryHoles)
+        {
+            try
+            {
+                ExecuteIndexedCreateChain(
+                    world,
+                    _creates,
+                    ref counts,
+                    reuseTemporaryHoles: true);
+            }
+            finally
+            {
+                FinalizeTemporaryHoles(world, ref counts);
+            }
+        }
+        else
+        {
+            ExecuteIndexedCreateChain(
+                world,
+                _creates,
+                ref counts,
+                reuseTemporaryHoles: false);
+        }
         ExecuteIndexedDestroyChain(
             world,
             commandCount,
@@ -483,6 +546,7 @@ public sealed class StructuralCommandBuffer
         _createdEntities.AsSpan(0, clearCount).Clear();
         _count = 0;
         ResetPhaseChains();
+        ResetTemporaryHoleState();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
         _isPlaying = false;
@@ -492,13 +556,19 @@ public sealed class StructuralCommandBuffer
     private void ExecuteIndexedCreateChain(
         EcsWorld<NativeChunkArena> world,
         in PhaseChain chain,
-        ref PlaybackCounts counts)
+        ref PlaybackCounts counts,
+        bool reuseTemporaryHoles)
     {
         for (int link = chain.HeadLink; link != 0;)
         {
             int commandIndex = link - 1;
             link = _nextCommand[commandIndex];
-            ExecuteCreate(_commands[commandIndex], commandIndex, world, ref counts);
+            ExecuteCreate(
+                _commands[commandIndex],
+                commandIndex,
+                world,
+                ref counts,
+                reuseTemporaryHoles);
         }
     }
 
@@ -506,12 +576,52 @@ public sealed class StructuralCommandBuffer
         in StructuralCommandRecord command,
         int commandIndex,
         EcsWorld<NativeChunkArena> world,
-        ref PlaybackCounts counts)
+        ref PlaybackCounts counts,
+        bool reuseTemporaryHoles = false)
     {
-        if (world.TryCreateDefault(new ArchetypeId(command.Argument), out Entity entity))
+        var archetypeId = new ArchetypeId(command.Argument);
+        int archetypeIndex = checked((int)archetypeId.Value);
+        int holeLink = reuseTemporaryHoles
+            ? _temporaryHoleHeads[archetypeIndex]
+            : 0;
+        bool reusedHole = false;
+        StructuralCommandRecord hole = default;
+        bool created;
+        Entity entity;
+        if (holeLink != 0)
+        {
+            hole = _commands[holeLink - 1];
+            if (hole.Kind != StructuralCommandKind.TemporaryHole ||
+                hole.TemporaryHoleArchetypeId != archetypeId)
+            {
+                ThrowCommandInvariant("A temporary-hole chain contains invalid metadata.");
+            }
+            created = world.TryCreateDefaultInTemporaryHole(
+                archetypeId,
+                hole.TemporaryHoleRow,
+                out entity);
+            if (created)
+            {
+                _temporaryHoleHeads[archetypeIndex] = _nextCommand[holeLink - 1];
+                reusedHole = true;
+            }
+        }
+        else
+        {
+            created = world.TryCreateDefault(archetypeId, out entity);
+        }
+
+        if (created)
         {
             _createdEntities[commandIndex] = entity;
             counts.Created++;
+            if (reusedHole)
+            {
+                counts.ReusedTemporaryHoles++;
+                counts.ReusedTemporaryHoleFixedRowBytes = checked(
+                    counts.ReusedTemporaryHoleFixedRowBytes +
+                    hole.TemporaryHoleFixedRowBytes);
+            }
         }
         else
         {
@@ -592,17 +702,157 @@ public sealed class StructuralCommandBuffer
             return;
         }
 
+        if (!_hasTemporaryHoleEligibleArchetype)
+        {
+            for (int link = chain.HeadLink; link != 0;)
+            {
+                int commandIndex = link - 1;
+                link = _nextCommand[commandIndex];
+                Entity entity = _commands[commandIndex].GetEntityTarget();
+                if (world.TryDestroy(entity))
+                    counts.Destroyed++;
+                else
+                    counts.RejectedDestroy++;
+            }
+            return;
+        }
+
         // Every non-exact population retains scalar record-order behavior,
-        // including stale and duplicate rejection and donor relocation order.
+        // including stale and duplicate rejection. Only destroys with matched
+        // same-archetype create demand become temporary holes.
         for (int link = chain.HeadLink; link != 0;)
         {
             int commandIndex = link - 1;
             link = _nextCommand[commandIndex];
             Entity entity = _commands[commandIndex].GetEntityTarget();
+            if (!world.TryGetLocation(entity, out EntityLocation location))
+            {
+                counts.RejectedDestroy++;
+                continue;
+            }
+
+            int archetypeIndex = checked((int)location.ArchetypeId.Value);
+            if (_destroySupply[archetypeIndex] < 0)
+            {
+                if (!world.TryDestroyIntoTemporaryHoleValidated(
+                        entity,
+                        location,
+                        out int fixedRowBytes))
+                {
+                    counts.RejectedDestroy++;
+                    continue;
+                }
+
+                _commands[commandIndex] = StructuralCommandRecord.TemporaryHole(
+                    location.ArchetypeId,
+                    location.ChunkRow,
+                    fixedRowBytes);
+                _nextCommand[commandIndex] = _temporaryHoleHeads[archetypeIndex];
+                _temporaryHoleHeads[archetypeIndex] = commandIndex + 1;
+                counts.TemporaryHoles++;
+                counts.Destroyed++;
+                continue;
+            }
+
             if (world.TryDestroy(entity))
                 counts.Destroyed++;
             else
                 counts.RejectedDestroy++;
+        }
+    }
+
+    private void PrepareTemporaryHoleDemand(EcsWorld<NativeChunkArena> world)
+    {
+        // A packed store cannot safely execute ordinary swap-removes while it
+        // contains temporary markers. Enable the market only when recorded
+        // same-archetype creates cover every currently resolvable destroy in
+        // that store. This is deliberately conservative for unbalanced churn.
+        for (int index = 0; index < _activeTemporaryArchetypeCount; index++)
+        {
+            int archetypeIndex = _activeTemporaryArchetypes[index];
+            if (world.GetArchetypeFixedRowBytesForPlayback(
+                    new ArchetypeId(unchecked((uint)archetypeIndex))) <
+                MinimumTemporaryHoleFixedRowBytes)
+            {
+                continue;
+            }
+            _destroySupply[archetypeIndex] = -1;
+            _hasTemporaryHoleEligibleArchetype = true;
+        }
+        if (!_hasTemporaryHoleEligibleArchetype)
+            return;
+
+        for (int link = _liveDestroys.HeadLink; link != 0;)
+        {
+            int commandIndex = link - 1;
+            link = _nextCommand[commandIndex];
+            Entity entity = _commands[commandIndex].GetEntityTarget();
+            if (!world.TryGetLocation(entity, out EntityLocation location))
+                continue;
+            int archetypeIndex = checked((int)location.ArchetypeId.Value);
+            if (_destroySupply[archetypeIndex] < 0)
+                _destroySupply[archetypeIndex]--;
+        }
+        _hasTemporaryHoleEligibleArchetype = false;
+        for (int index = 0; index < _activeTemporaryArchetypeCount; index++)
+        {
+            int archetypeIndex = _activeTemporaryArchetypes[index];
+            int encodedSupply = _destroySupply[archetypeIndex];
+            if (encodedSupply >= 0)
+                continue;
+            int supply = checked(-encodedSupply - 1);
+            _destroySupply[archetypeIndex] = supply != 0 &&
+                _createDemand[archetypeIndex] >= supply
+                ? int.MinValue
+                : 0;
+            _hasTemporaryHoleEligibleArchetype |=
+                _destroySupply[archetypeIndex] == int.MinValue;
+        }
+    }
+
+    private void FinalizeTemporaryHoles(
+        EcsWorld<NativeChunkArena> world,
+        ref PlaybackCounts counts)
+    {
+        for (int activeIndex = 0;
+             activeIndex < _activeTemporaryArchetypeCount;
+             activeIndex++)
+        {
+            int archetypeIndex = _activeTemporaryArchetypes[activeIndex];
+            if (_temporaryHoleHeads[archetypeIndex] == 0)
+                continue;
+            var archetypeId = new ArchetypeId(unchecked((uint)archetypeIndex));
+            while (world.TryCompactTemporaryHoleTail(archetypeId))
+                counts.CompactedTemporaryHoles++;
+
+            for (int link = _temporaryHoleHeads[archetypeIndex]; link != 0;)
+            {
+                int holeIndex = link - 1;
+                link = _nextCommand[holeIndex];
+                StructuralCommandRecord hole = _commands[holeIndex];
+                if (hole.Kind != StructuralCommandKind.TemporaryHole ||
+                    hole.TemporaryHoleArchetypeId != archetypeId)
+                {
+                    ThrowCommandInvariant("Temporary-hole finalization metadata is invalid.");
+                }
+
+                while (world.TryCompactTemporaryHoleTail(archetypeId))
+                    counts.CompactedTemporaryHoles++;
+                if (!world.TryCompactTemporaryHole(
+                        archetypeId,
+                        hole.TemporaryHoleRow,
+                        out bool relocatedDonor))
+                {
+                    continue;
+                }
+
+                counts.CompactedTemporaryHoles++;
+                if (relocatedDonor)
+                    counts.TemporaryHoleDonorRelocations++;
+            }
+
+            while (world.TryCompactTemporaryHoleTail(archetypeId))
+                counts.CompactedTemporaryHoles++;
         }
     }
 
@@ -846,6 +1096,15 @@ public sealed class StructuralCommandBuffer
         int commandIndex = _count++;
         _commands[commandIndex] = command;
         _nextCommand[commandIndex] = 0;
+        if (command.Kind == StructuralCommandKind.CreateDefault)
+        {
+            int archetypeIndex = checked((int)command.Argument);
+            if (_createDemand[archetypeIndex]++ == 0)
+            {
+                _activeTemporaryArchetypes[_activeTemporaryArchetypeCount++] =
+                    archetypeIndex;
+            }
+        }
         ref PhaseChain chain = ref GetPhaseChain(GetPlaybackPhase(command));
         int link = commandIndex + 1;
         if (chain.HeadLink == 0)
@@ -885,6 +1144,20 @@ public sealed class StructuralCommandBuffer
         _adds = default;
     }
 
+    private void ResetTemporaryHoleState()
+    {
+        for (int index = 0; index < _activeTemporaryArchetypeCount; index++)
+        {
+            int archetypeIndex = _activeTemporaryArchetypes[index];
+            _temporaryHoleHeads[archetypeIndex] = 0;
+            _createDemand[archetypeIndex] = 0;
+            _destroySupply[archetypeIndex] = 0;
+            _activeTemporaryArchetypes[index] = 0;
+        }
+        _activeTemporaryArchetypeCount = 0;
+        _hasTemporaryHoleEligibleArchetype = false;
+    }
+
     private void BeginRecordingIfNeeded()
     {
         if (_isPlaying)
@@ -904,6 +1177,7 @@ public sealed class StructuralCommandBuffer
         _createdEntities.AsSpan(0, clearCount).Clear();
         _count = 0;
         ResetPhaseChains();
+        ResetTemporaryHoleState();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
         AdvanceEpoch();
@@ -1024,6 +1298,11 @@ public sealed class StructuralCommandBuffer
         internal int RejectedCreate;
         internal int RejectedDestroy;
         internal int RejectedTransition;
+        internal int TemporaryHoles;
+        internal int ReusedTemporaryHoles;
+        internal int CompactedTemporaryHoles;
+        internal int TemporaryHoleDonorRelocations;
+        internal long ReusedTemporaryHoleFixedRowBytes;
     }
 
     private struct PhaseChain

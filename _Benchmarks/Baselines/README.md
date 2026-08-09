@@ -19,3 +19,33 @@ The regression report reruns frozen V2 as a control. Similar V2 and V3 movement
 usually indicates host/runtime noise; V3-only movement is evidence of a rewrite
 change. Canonical-state, descriptor, methodology, and environment checks take
 precedence over timing ratios.
+
+`ecs-bitmap-block-pool-2026-08-09.json` is the first immutable standalone
+mechanism baseline for the five-policy bitmap block-pool experiment. It contains
+425 zero-allocation measured rows at a requested 50,000-row scale and requires
+canonical equality within each of 85 logical cases. It is directional against
+production ECS generations; exact V2/V3 claims continue to come only from the
+semantic comparison artifact above. Reproduction and interpretation live in
+`../BITMAP_BLOCK_POOL_EXPERIMENT.md`.
+
+`ecs-bitmap-block-pool-2026-08-09-alt-seed.json` repeats the complete matrix with
+a different deterministic scenario-order seed. Large structural conclusions
+must agree across both; observed ranges in the experiment document use both
+artifacts so small or order-sensitive differences are not presented as stable.
+
+`ecs-v30-barrier-hole-reuse-2026-08-09.json` is the accepted focused production
+V30 capture. Its 12 rows compare scalar, exact phase-indexed packed V29-style,
+and production V30 playback for balanced 10%/50% destroy-create churn over
+100,000 resident narrow/512-byte archetypes. All rows are zero-allocation and
+validate command outcomes; the production rows additionally require exact hole
+creation/reuse/finalization metrics.
+
+`ecs-v2-v3-v30-2026-08-09.json` is the accepted four-warmup/fifteen-iteration
+V30 joined semantic capture, V2 first. It retains 87 comparable rows, zero
+canonical-state mismatches, 15 explicit unsupported rows, and zero V3 timed
+managed allocation. Use it for post-V30 longitudinal regression. Keep the first
+artifact above as the immutable pre-V28 reference rather than overwriting it.
+The embedded V3 `KernelProfile` remains the comparison protocol's stable
+`ecs-next-phase1-planned-source-compaction-v27` identifier so the regression
+joiner can compare longitudinal timings; the artifact name and this manifest
+identify the V30 source milestone.

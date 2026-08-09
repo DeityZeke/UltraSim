@@ -36,7 +36,8 @@ public sealed class EcsWorld : IDisposable
         _structuralCommands = new StructuralCommandBuffer(
             _core.Id,
             _ownerThreadId,
-            options.MaximumStructuralCommands);
+            options.MaximumStructuralCommands,
+            options.MaximumArchetypes);
     }
 
     public WorldId Id => _core.Id;
@@ -308,17 +309,24 @@ public sealed class EcsWorld : IDisposable
     /// It is not part of the public runtime surface.
     /// </summary>
     internal StructuralPlaybackResult PlaybackStructuralCommandsScalarOracle() =>
-        PlaybackStructuralCommandsCore(usePhaseIndex: false);
+        PlaybackStructuralCommandsCore(usePhaseIndex: false, useTemporaryHoles: false);
 
-    private StructuralPlaybackResult PlaybackStructuralCommandsCore(bool usePhaseIndex)
+    internal StructuralPlaybackResult PlaybackStructuralCommandsPhaseIndexedPackedOracle() =>
+        PlaybackStructuralCommandsCore(usePhaseIndex: true, useTemporaryHoles: false);
+
+    private StructuralPlaybackResult PlaybackStructuralCommandsCore(
+        bool usePhaseIndex,
+        bool useTemporaryHoles = true)
     {
         EnsureRuntimeAccess();
         _core.ValidateStructuralPlayback();
         try
         {
-            return usePhaseIndex
+            if (!usePhaseIndex)
+                return _structuralCommands.PlaybackScalarOracle(_core);
+            return useTemporaryHoles
                 ? _structuralCommands.Playback(_core)
-                : _structuralCommands.PlaybackScalarOracle(_core);
+                : _structuralCommands.PlaybackPhaseIndexedPackedOracle(_core);
         }
         catch (Exception exception)
         {

@@ -120,10 +120,20 @@ internal struct LayoutWide : IComponent<LayoutWide>
     public long D { get; set; }
 }
 
+[EcsComponent("layout.block128")]
+internal struct LayoutBlock128 : IComponent<LayoutBlock128>
+{
+    public LayoutWide A { get; set; }
+    public LayoutWide B { get; set; }
+    public LayoutWide C { get; set; }
+    public LayoutWide D { get; set; }
+}
+
 [EcsSchema(
     typeof(LayoutTag),
     typeof(LayoutInt),
     typeof(LayoutWide),
+    typeof(LayoutBlock128),
     typeof(LayoutByte),
     typeof(LayoutEnableLong))]
 internal static partial class LayoutTestSchema

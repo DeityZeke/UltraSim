@@ -211,6 +211,26 @@ internal sealed class EntityPool
         RetireValidatedIndex(entityIndex);
     }
 
+    /// <summary>
+    /// Retires one validated entity while its physical row remains reserved as
+    /// a barrier-local hole. The structural barrier must fill or compact that
+    /// row before returning control to queries.
+    /// </summary>
+    internal void RetireLocatedIntoTemporaryHoleValidated(
+        Entity entity,
+        EntityLocation location)
+    {
+        int entityIndex = checked((int)entity.Index);
+        System.Diagnostics.Debug.Assert(
+            entity.World == _worldId &&
+            entityIndex < _nextUnusedIndex &&
+            _states[entityIndex] == SlotAlive &&
+            _generations[entityIndex] == entity.Generation &&
+            _locations[entityIndex] == location,
+            "A trusted temporary-hole retirement received an invalid entity.");
+        RetireValidatedIndex(entityIndex);
+    }
+
     internal bool TryBindLocation(Entity entity, EntityLocation location)
     {
         if (!location.IsValid)
