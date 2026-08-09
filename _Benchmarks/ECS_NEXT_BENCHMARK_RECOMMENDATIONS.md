@@ -264,9 +264,10 @@ detect lost or spuriously broadened history.
 
 Treat the retained v23 scalar executor as the correctness oracle, the v24 stable
 phase chains as the indexed baseline, the v25 same-route reservation path as the
-first grouped candidate, and the v26 locality-proven column-copy path as the
-first data-movement candidate. All must remain executable against identical
-streams while compaction paths are introduced.
+first grouped candidate, the v26 locality-proven column-copy path as the first
+data-movement candidate, and the v27 donor-tail-overlap plan as the first source-
+compaction candidate. All must remain executable against identical logical
+streams while the compaction policy is widened.
 Split later scenarios into record-only, playback-only, and end-to-end variants so
 a faster recorder cannot conceal a slower serial barrier. Cross 1K, 10K, 100K,
 and 1M commands with homogeneous create/destroy/remove/add streams, realistic
@@ -282,7 +283,8 @@ As grouped playback lands, compare the same canonical workload at each step:
 - record-time stable phase chains without store grouping;
 - grouping by source archetype and transition;
 - bulk destination reservation and component copy;
-- ordered whole-chunk and sparse source compaction;
+- adaptive tail-overlap source compaction (initial v27 path landed; partial
+  overlap, sparse holes, and multi-chunk evacuation still require sweeps);
 - one main producer versus 1, 2, 4, physical-core, and logical-core producer
   arenas plus deterministic merge.
 

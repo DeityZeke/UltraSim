@@ -118,12 +118,18 @@ allocation:
   before source rows move: retained data copies column-at-a-time across maximal
   simultaneous source/destination runs, enable bits copy word ranges, dense
   history merges once per run, and exact history remains row-precise. Fragmented
-  or conflicting prefixes fall back to the v25 ordered path.
+  or conflicting prefixes fall back to the v25 ordered path. A v27 compaction
+  path activates only when that contiguous set contains the current donor tail
+  and either contains at least 32 rows or evacuates the donor chunk. It plans the
+  exact tail once, skips donors that are also leaving, moves each surviving donor
+  at most once, clears tail columns/enable bits/history in ranges, changes each
+  affected chunk list once, and transactionally repairs migrated and donor
+  locations. Nonoverlapping and low-density batches retain v26 scalar removal.
   Duplicate, stale, wrong-source, partial-capacity, donor-repair, enable-state,
   and dense/exact change-history semantics remain scalar-equivalent. Per-worker
   arenas, deterministic worker merge, grouping across separated route runs,
-  planned source compaction, typed component payloads, prefab expansion, and
-  lifecycle publication remain later structural work and must be measured
+  broader density/entropy-driven compaction, typed component payloads, prefab
+  expansion, and lifecycle publication remain later structural work and must be measured
   against this baseline rather than hidden behind it.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
@@ -282,7 +288,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 188 passing tests, including
+The current runtime and primitive suite has 190 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -319,7 +325,10 @@ that out-of-scope scalar mutation, structural mutation, destruction, nested exec
 publication are rejected inside the callback and that exception exit releases
 the boundary. Relocation tests cover dense-only packed donors plus exact and dense
 history across Native/Pinned cross-archetype migration, including version wrap
-and acknowledgement without migration-generated replay.
+and acknowledgement without migration-generated replay. Planned-compaction tests
+cover the scalar crossover, donor-tail overlap, whole-chunk evacuation, survivor
+state/enable/exact-history relocation, backend parity, transactional batch
+location rejection, and warmed zero-allocation grouped playback.
 Chunk-visitor tests add empty and multi-chunk traversal, exact metadata and local
 indices, data/enable writes, tag/foreign/non-enableable rejection, synchronous
 mutation and nesting rejection, exception cleanup, randomized reference parity,

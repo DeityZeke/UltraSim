@@ -6,6 +6,7 @@ namespace UltraSim.ECS;
 internal static class ArchetypeMigrator
 {
     internal const int MaximumBatchSize = 256;
+    internal const int MinimumPlannedCompactionCount = 32;
 
     internal static bool TryMigrate<TArena>(
         EntityPool entityPool,
@@ -306,6 +307,19 @@ internal static class ArchetypeMigrator
             throw;
         }
 
+        if (source.Store.ShouldUsePlannedRemoval(
+                sourceRows,
+                MinimumPlannedCompactionCount))
+        {
+            return MigratePreparedCompactedPrefix(
+                entityPool,
+                entities,
+                source,
+                destination,
+                sourceRows,
+                destinationRows);
+        }
+
         for (int index = 0; index < entities.Length; index++)
         {
             Entity entity = entities[index];
@@ -352,6 +366,65 @@ internal static class ArchetypeMigrator
             entityPool.ApplyRelocation(source.Id, sourceRelocation);
         }
 
+        return entities.Length;
+    }
+
+    private static int MigratePreparedCompactedPrefix<TArena>(
+        EntityPool entityPool,
+        ReadOnlySpan<Entity> entities,
+        ArchetypeStorage<TArena> source,
+        ArchetypeStorage<TArena> destination,
+        ReadOnlySpan<ChunkRow> sourceRows,
+        ReadOnlySpan<ChunkRow> destinationRows)
+        where TArena : class, IChunkArenaBackend
+    {
+        if (!entityPool.TryReplaceLocations(
+                entities,
+                source.Id,
+                sourceRows,
+                destination.Id,
+                destinationRows))
+        {
+            ClearAndRollBackAnonymousDestinationTail(
+                destination.Store,
+                destinationRows,
+                first: 0);
+            ThrowMigrationInvariant(
+                "A planned batch entity changed source before destination publication.");
+        }
+
+        Span<ChunkRow> tailRows = stackalloc ChunkRow[MaximumBatchSize];
+        Span<byte> removedTail = stackalloc byte[MaximumBatchSize];
+        Span<byte> tailRemoved = stackalloc byte[MaximumBatchSize];
+        Span<ChunkRowRelocation> relocations =
+            stackalloc ChunkRowRelocation[MaximumBatchSize];
+        if (!source.Store.TryRemovePlanned(
+                sourceRows,
+                entities,
+                tailRows,
+                removedTail,
+                tailRemoved,
+                relocations,
+                out int relocationCount))
+        {
+            if (!entityPool.TryReplaceLocations(
+                    entities,
+                    destination.Id,
+                    destinationRows,
+                    source.Id,
+                    sourceRows))
+            {
+                ThrowMigrationInvariant(
+                    "A planned batch location could not be restored after compaction rejection.");
+            }
+            ClearAndRollBackAnonymousDestinationTail(
+                destination.Store,
+                destinationRows,
+                first: 0);
+            ThrowMigrationInvariant("A planned batch source rejected compaction.");
+        }
+
+        entityPool.ApplyRelocations(source.Id, relocations[..relocationCount]);
         return entities.Length;
     }
 

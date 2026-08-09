@@ -274,6 +274,127 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Removes a trusted contiguous source set through one tail-compaction plan.
+    /// Every input row is validated before storage changes. Tail rows that also
+    /// belong to the removal set disappear in place; surviving tail donors fill
+    /// persistent holes once, and each affected chunk changes list state once.
+    /// </summary>
+    internal bool TryRemovePlanned(
+        ReadOnlySpan<ChunkRow> locations,
+        ReadOnlySpan<Entity> entities,
+        Span<ChunkRow> tailScratch,
+        Span<byte> removedTailScratch,
+        Span<byte> tailRemovedScratch,
+        Span<ChunkRowRelocation> relocationScratch,
+        out int relocationCount)
+    {
+        ThrowIfDisposed();
+        if (locations.Length != entities.Length)
+            throw new ArgumentException("Location and entity batch lengths must match.");
+        if (tailScratch.Length < locations.Length ||
+            removedTailScratch.Length < locations.Length ||
+            tailRemovedScratch.Length < locations.Length ||
+            relocationScratch.Length < locations.Length)
+        {
+            throw new ArgumentException("Planned-removal scratch is smaller than the input batch.");
+        }
+
+        relocationCount = 0;
+        if (locations.IsEmpty)
+            return true;
+        if (locations.Length > _entityCount)
+            return false;
+
+        for (int index = 0; index < locations.Length; index++)
+        {
+            if (!TryResolve(locations[index], out int chunkIndex, out int row))
+                return false;
+            Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+            if (GetEntityIndices(bytes)[row] != entities[index].Index)
+                return false;
+        }
+
+        Span<ChunkRow> tailRows = tailScratch[..locations.Length];
+        BuildTailRows(tailRows);
+        Span<byte> removedIsTail = removedTailScratch[..locations.Length];
+        removedIsTail.Clear();
+        Span<byte> tailIsRemoved = tailRemovedScratch[..locations.Length];
+        tailIsRemoved.Clear();
+        for (int tailIndex = 0; tailIndex < tailRows.Length; tailIndex++)
+        {
+            int removedIndex = FindContiguousLocation(locations, tailRows[tailIndex]);
+            if (removedIndex >= 0)
+            {
+                removedIsTail[removedIndex] = 1;
+                tailIsRemoved[tailIndex] = 1;
+            }
+        }
+
+        int holeIndex = 0;
+        for (int tailIndex = 0; tailIndex < tailRows.Length; tailIndex++)
+        {
+            ChunkRow donorLocation = tailRows[tailIndex];
+            if (tailIsRemoved[tailIndex] != 0)
+                continue;
+
+            while (holeIndex < locations.Length && removedIsTail[holeIndex] != 0)
+                holeIndex++;
+            if (holeIndex == locations.Length)
+                ThrowInvariant("A planned removal produced more donors than persistent holes.");
+
+            ChunkRow holeLocation = locations[holeIndex++];
+            ResolveOrThrow(donorLocation, out int donorChunkIndex, out int donorRow);
+            ResolveOrThrow(holeLocation, out int holeChunkIndex, out int holeRow);
+            Span<byte> donorBytes = _arena.GetChunkBytes(_chunks[donorChunkIndex].Handle);
+            Span<byte> holeBytes = donorChunkIndex == holeChunkIndex
+                ? donorBytes
+                : _arena.GetChunkBytes(_chunks[holeChunkIndex].Handle);
+            uint donorEntityIndex = GetEntityIndices(donorBytes)[donorRow];
+            CopyRow(
+                donorChunkIndex,
+                donorBytes,
+                donorRow,
+                holeChunkIndex,
+                holeBytes,
+                holeRow);
+            relocationScratch[relocationCount++] = new ChunkRowRelocation(
+                donorEntityIndex,
+                donorLocation,
+                holeLocation);
+        }
+
+        while (holeIndex < locations.Length && removedIsTail[holeIndex] != 0)
+            holeIndex++;
+        if (holeIndex != locations.Length)
+            ThrowInvariant("A planned removal produced more persistent holes than donors.");
+
+        ShrinkTailRows(tailRows);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool ShouldUsePlannedRemoval(
+        ReadOnlySpan<ChunkRow> locations,
+        int minimumCount)
+    {
+        ThrowIfDisposed();
+        if (locations.IsEmpty || locations.Length > _entityCount || minimumCount <= 0)
+            return false;
+        int donorChunkIndex = _partialHead != NoChunk ? _partialHead : _fullHead;
+        if (donorChunkIndex == NoChunk)
+            return false;
+
+        var donorTail = new ChunkRow(
+            (uint)donorChunkIndex,
+            _chunks[donorChunkIndex].RowCount - 1);
+        if (FindContiguousLocation(locations, donorTail) < 0)
+            return false;
+
+        return locations.Length >= minimumCount ||
+            locations.Length >= _chunks[donorChunkIndex].RowCount;
+    }
+
     internal uint GetEntityIndex(ChunkRow location)
     {
         ResolveOrThrow(location, out int chunkIndex, out int row);
@@ -1262,6 +1383,128 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             if (column.HasEnableBits)
                 EnableBitOperations.Set(chunk, column, row, enabled: false);
         }
+    }
+
+    private void ClearRows(int chunkIndex, Span<byte> chunk, int startRow, int rowCount)
+    {
+        GetEntityIndices(chunk).Slice(startRow, rowCount).Clear();
+        for (int columnIndex = 0; columnIndex < _columns.Length; columnIndex++)
+        {
+            ComponentColumnLayout column = _columns[columnIndex];
+            if (column.HasData)
+            {
+                int offset = checked(column.DataOffsetBytes + (startRow * column.ElementSizeBytes));
+                int byteCount = checked(rowCount * column.ElementSizeBytes);
+                chunk.Slice(offset, byteCount).Clear();
+            }
+            if (column.HasEnableBits)
+                EnableBitOperations.SetRange(chunk, column, startRow, rowCount, enabled: false);
+            _sparseRowChangeVersions[columnIndex]?.ClearRange(
+                (uint)chunkIndex,
+                startRow,
+                rowCount);
+        }
+    }
+
+    private void BuildTailRows(Span<ChunkRow> destination)
+    {
+        int written = 0;
+        if (_partialHead != NoChunk)
+            written = AppendChunkTailRows(_partialHead, destination, written);
+
+        for (int chunkIndex = _fullHead;
+             written < destination.Length && chunkIndex != NoChunk;
+             chunkIndex = _chunks[chunkIndex].Next)
+        {
+            written = AppendChunkTailRows(chunkIndex, destination, written);
+        }
+
+        if (written != destination.Length)
+            ThrowInvariant("An occupied archetype could not provide its planned donor tail.");
+    }
+
+    private int AppendChunkTailRows(int chunkIndex, Span<ChunkRow> destination, int written)
+    {
+        int take = Math.Min(_chunks[chunkIndex].RowCount, destination.Length - written);
+        int firstRow = _chunks[chunkIndex].RowCount - 1;
+        for (int offset = 0; offset < take; offset++)
+            destination[written + offset] = new ChunkRow((uint)chunkIndex, firstRow - offset);
+        return written + take;
+    }
+
+    private void ShrinkTailRows(ReadOnlySpan<ChunkRow> tailRows)
+    {
+        int start = 0;
+        while (start < tailRows.Length)
+        {
+            int chunkIndex = checked((int)tailRows[start].ChunkIndex);
+            int count = 1;
+            while (start + count < tailRows.Length &&
+                   tailRows[start + count].ChunkIndex == (uint)chunkIndex)
+            {
+                count++;
+            }
+
+            ref ChunkRecord chunk = ref _chunks[chunkIndex];
+            int previousCount = chunk.RowCount;
+            int nextCount = previousCount - count;
+            if (nextCount < 0 || tailRows[start].Row != previousCount - 1)
+                ThrowInvariant("A planned removal tail no longer matches chunk occupancy.");
+
+            Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
+            ClearRows(chunkIndex, bytes, nextCount, count);
+            chunk.RowCount = nextCount;
+            if (nextCount == 0)
+            {
+                ClearChangeVersions(chunkIndex);
+                MoveChunk(chunkIndex, ChunkListState.Empty);
+            }
+            else if (previousCount == _layout.RowCapacity)
+            {
+                MoveChunk(chunkIndex, ChunkListState.Partial);
+            }
+
+            start += count;
+        }
+
+        _entityCount -= tailRows.Length;
+    }
+
+    private static int FindContiguousLocation(
+        ReadOnlySpan<ChunkRow> locations,
+        ChunkRow target)
+    {
+        bool chunkAscending = locations.Length == 1 ||
+            locations[^1].ChunkIndex >= locations[0].ChunkIndex;
+        int low = 0;
+        int high = locations.Length - 1;
+        while (low <= high)
+        {
+            int middle = (low + high) >>> 1;
+            ChunkRow candidate = locations[middle];
+            int comparison;
+            if (candidate.ChunkIndex == target.ChunkIndex)
+            {
+                comparison = candidate.Row.CompareTo(target.Row);
+            }
+            else if (chunkAscending)
+            {
+                comparison = candidate.ChunkIndex < target.ChunkIndex ? -1 : 1;
+            }
+            else
+            {
+                comparison = candidate.ChunkIndex > target.ChunkIndex ? -1 : 1;
+            }
+
+            if (comparison == 0)
+                return middle;
+            if (comparison < 0)
+                low = middle + 1;
+            else
+                high = middle - 1;
+        }
+
+        return -1;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

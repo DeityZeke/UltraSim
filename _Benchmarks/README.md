@@ -449,6 +449,35 @@ managed bytes and zero Gen0/1/2 collections. The scattered guard shows graceful
 fallback, not a general locality sweep; source-chunk density, route entropy,
 conflicts, exact-history cost, and source compaction remain explicit future axes.
 
+The v27 profile, `ecs-next-phase1-planned-source-compaction-v27`, adds adaptive
+source compaction above v26. It selects the plan only when a locality-proven
+source set contains the current donor tail and either reaches 32 rows or fully
+evacuates that donor chunk. The plan identifies the exact shrinking tail once,
+skips leaving rows as donors, moves each surviving donor at most once, bulk-clears
+tail storage and history, updates chunk-list state once per affected chunk, and
+transactionally publishes migrated/survivor locations. Other batches retain the
+measured v26 path.
+
+Eight equal-work round-trip guards hold a 100,000-row resident source and 131,072
+transitions per sample while sweeping tail-local batches of 8, 32, 128, and 256.
+A controlled focused build with only planned compaction disabled measured v26/v27
+grouped execution at `83.293/76.197`, `67.909/47.375`, `59.757/44.054`, and
+`61.074/44.781 ns/transition`: approximately `8.5%`, `30.2%`, `26.3%`, and
+`26.7%` faster. The 8-row case enters only when the reverse leg evacuates its
+whole source chunk; it does not weaken the normal 32-row threshold.
+
+The complete 103-scenario v27 process measured dense scalar/grouped end-to-end
+at `131.628/91.420 ns/command`, playback-only at `117.810/86.828`, wide playback
+at `135.582/97.454`, and scattered playback at `148.582/133.779`. Its equal-work
+tail grouped means were `86.974`, `45.703`, `43.017`, and `44.374
+ns/transition`. The tail-8 full-suite p95 contained a process-order outlier
+(`17.220 ms`) despite a `10.587 ms` median, while the focused process measured a
+`10.061 ms` p95; repeat isolated processes remain mandatory before treating that
+tail as a latency property. All 103 scenarios reported zero managed bytes and
+zero Gen0/1/2 collections. Broader partial-overlap/removal-density, exact-history,
+component-width, route-entropy, conflict, and multi-chunk evacuation sweeps remain
+future characterization rather than implied generality.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

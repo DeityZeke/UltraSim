@@ -88,6 +88,22 @@ internal static class PrimitiveBenchmarks
         using var publicDeferredTransitionScattered = new PublicDeferredTransitionFixture(
             100_000,
             scatteredSource: true);
+        using var publicDeferredTransitionTail8 = new PublicDeferredTransitionFixture(
+            8,
+            residentEntityCount: 100_000,
+            timedCycleCount: 8_192);
+        using var publicDeferredTransitionTail32 = new PublicDeferredTransitionFixture(
+            32,
+            residentEntityCount: 100_000,
+            timedCycleCount: 2_048);
+        using var publicDeferredTransitionTail128 = new PublicDeferredTransitionFixture(
+            128,
+            residentEntityCount: 100_000,
+            timedCycleCount: 512);
+        using var publicDeferredTransitionTail256 = new PublicDeferredTransitionFixture(
+            256,
+            residentEntityCount: 100_000,
+            timedCycleCount: 256);
         using var publicDeferredCreate = new PublicDeferredCreateFixture(100_000);
         using var publicDeferredDestroy = new PublicDeferredDestroyFixture(100_000);
         using var nativeChunkVisit = new EcsWorldChunkVisitFixture<NativeChunkArena>(100_000);
@@ -162,6 +178,14 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_DeferredTransitionPlaybackOnlyGrouped_WideRetained_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionWide.ExecuteRecorded, publicDeferredTransitionWide.PrepareRecorded),
             new("PublicWorld_DeferredTransitionPlaybackOnlyScalarOracle_ScatteredSource_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionScattered.ExecuteRecordedScalarOracle, publicDeferredTransitionScattered.PrepareRecorded),
             new("PublicWorld_DeferredTransitionPlaybackOnlyGrouped_ScatteredSource_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransitionScattered.ExecuteRecorded, publicDeferredTransitionScattered.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionRoundTripScalarOracle_Tail8_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail8.ExecuteRoundTripsScalarOracle),
+            new("PublicWorld_DeferredTransitionRoundTripGrouped_Tail8_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail8.ExecuteRoundTrips),
+            new("PublicWorld_DeferredTransitionRoundTripScalarOracle_Tail32_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail32.ExecuteRoundTripsScalarOracle),
+            new("PublicWorld_DeferredTransitionRoundTripGrouped_Tail32_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail32.ExecuteRoundTrips),
+            new("PublicWorld_DeferredTransitionRoundTripScalarOracle_Tail128_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail128.ExecuteRoundTripsScalarOracle),
+            new("PublicWorld_DeferredTransitionRoundTripGrouped_Tail128_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail128.ExecuteRoundTrips),
+            new("PublicWorld_DeferredTransitionRoundTripScalarOracle_Tail256_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail256.ExecuteRoundTripsScalarOracle),
+            new("PublicWorld_DeferredTransitionRoundTripGrouped_Tail256_Resident100000_131072Ops", "PublicWorldStructuralCompaction", 131_072, publicDeferredTransitionTail256.ExecuteRoundTrips),
             new("PublicWorld_DeferredCreateDefaultBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredCreate.Execute, publicDeferredCreate.Prepare),
             new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
@@ -218,7 +242,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-contiguous-structural-copy-v26",
+            SemanticProfile = "ecs-next-phase1-planned-source-compaction-v27",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1481,18 +1505,26 @@ internal static class PrimitiveBenchmarks
         private readonly ArchetypeTransition _backward;
         private readonly Entity[] _entities;
         private readonly Entity[] _resetEntities;
+        private readonly int _timedCycleCount;
         private bool _inDestination;
 
         internal PublicDeferredTransitionFixture(
             int entityCount,
             bool retainWide = false,
-            bool scatteredSource = false)
+            bool scatteredSource = false,
+            int residentEntityCount = 0,
+            int timedCycleCount = 0)
         {
+            residentEntityCount = residentEntityCount == 0 ? entityCount : residentEntityCount;
+            if (residentEntityCount < entityCount)
+                throw new ArgumentOutOfRangeException(nameof(residentEntityCount));
+            if (timedCycleCount < 0)
+                throw new ArgumentOutOfRangeException(nameof(timedCycleCount));
             ComponentSchema schema = BenchmarkSchema.CreateSchema();
             _world = new EcsWorld(
                 schema,
                 new EcsWorldOptions(
-                    new EntityCapacity(entityCount),
+                    new EntityCapacity(residentEntityCount),
                     maximumArchetypes: 2,
                     maximumPreparedPlans: 0,
                     maximumPreparedTransitions: 2,
@@ -1531,9 +1563,15 @@ internal static class PrimitiveBenchmarks
                 if (!_world.TryCreate(source, out _entities[index]))
                     throw new InvalidOperationException("Deferred-transition fixture exhausted its source.");
             }
+            for (int index = entityCount; index < residentEntityCount; index++)
+            {
+                if (!_world.TryCreate(source, out _))
+                    throw new InvalidOperationException("Deferred-transition fixture exhausted its resident source.");
+            }
             _resetEntities = scatteredSource
                 ? CreateInterleavedOrder(_entities)
                 : _entities;
+            _timedCycleCount = timedCycleCount;
         }
 
         internal long CommandReservedBytes => _commands.ReservedBytes;
@@ -1591,6 +1629,45 @@ internal static class PrimitiveBenchmarks
             StructuralPlaybackResult result =
                 _world.PlaybackStructuralCommandsScalarOracle();
             return CompleteRecorded(result, "Scalar-oracle");
+        }
+
+        internal ScenarioMeasurement ExecuteRoundTrips() =>
+            ExecuteRoundTripsCore(useScalarOracle: false);
+
+        internal ScenarioMeasurement ExecuteRoundTripsScalarOracle() =>
+            ExecuteRoundTripsCore(useScalarOracle: true);
+
+        private ScenarioMeasurement ExecuteRoundTripsCore(bool useScalarOracle)
+        {
+            if (_timedCycleCount <= 0 || _inDestination)
+                throw new InvalidOperationException("Deferred-transition round trips require a configured source state.");
+
+            long checksum = 0;
+            for (int cycle = 0; cycle < _timedCycleCount; cycle++)
+            {
+                _commands.EnqueueTransition(_entities, _forward);
+                StructuralPlaybackResult forward = useScalarOracle
+                    ? _world.PlaybackStructuralCommandsScalarOracle()
+                    : _world.PlaybackStructuralCommands();
+                if (forward.AddedCount != _entities.Length || forward.RejectedCount != 0)
+                    throw new InvalidOperationException("Deferred-transition round-trip forward phase failed.");
+                _inDestination = true;
+
+                _commands.EnqueueTransition(_resetEntities, _backward);
+                StructuralPlaybackResult backward = useScalarOracle
+                    ? _world.PlaybackStructuralCommandsScalarOracle()
+                    : _world.PlaybackStructuralCommands();
+                if (backward.RemovedCount != _entities.Length || backward.RejectedCount != 0)
+                    throw new InvalidOperationException("Deferred-transition round-trip backward phase failed.");
+                _inDestination = false;
+                checksum = unchecked(
+                    checksum + forward.Epoch + backward.Epoch +
+                    forward.AddedCount + backward.RemovedCount);
+            }
+
+            return new ScenarioMeasurement(
+                checked(_entities.Length * _timedCycleCount * 2),
+                checksum);
         }
 
         private ScenarioMeasurement CompleteRecorded(

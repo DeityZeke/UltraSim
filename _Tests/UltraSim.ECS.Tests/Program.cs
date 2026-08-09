@@ -30,6 +30,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(EntityPool_WarmedAllocateFreeCycle_AllocatesZeroManagedBytes), EntityPool_WarmedAllocateFreeCycle_AllocatesZeroManagedBytes);
         Run(nameof(EntityPool_LocationBindingRejectsStaleForeignAndOverwrite), EntityPool_LocationBindingRejectsStaleForeignAndOverwrite);
         Run(nameof(EntityPool_AppliesRowStoreSwapRelocation), EntityPool_AppliesRowStoreSwapRelocation);
+        Run(nameof(EntityPool_BatchLocationUpdatesAreTransactional), EntityPool_BatchLocationUpdatesAreTransactional);
         Run(nameof(EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent), EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent);
         Run(nameof(EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes), EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes);
         Run(nameof(GeneratedSchema_AssignsStableCanonicalIds), GeneratedSchema_AssignsStableCanonicalIds);
@@ -86,6 +87,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity), ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity);
         Run(nameof(ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact), ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact);
         Run(nameof(ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries), ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries);
+        Run(nameof(ArchetypeMigrator_PlannedCompactionPreservesSurvivorsAndEvacuatesTailChunks), ArchetypeMigrator_PlannedCompactionPreservesSurvivorsAndEvacuatesTailChunks);
         Run(nameof(ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes), ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes);
         Run(nameof(EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal), EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal);
         Run(nameof(EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations), EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations);
@@ -548,6 +550,73 @@ internal static class EcsPrimitiveTests
         Assert.Throws<InvalidOperationException>(() =>
             pool.ApplyRelocation(archetypeId, new ChunkRowRelocation(uint.MaxValue, donorLocation.ChunkRow, victimLocation.ChunkRow)));
         store.ValidateInvariants();
+    }
+
+    private static void EntityPool_BatchLocationUpdatesAreTransactional()
+    {
+        var pool = new EntityPool(WorldId.Create(), new EntityCapacity(3));
+        var sourceId = new ArchetypeId(1);
+        var destinationId = new ArchetypeId(2);
+        var entities = new Entity[3];
+        var sourceRows = new ChunkRow[3];
+        var destinationRows = new ChunkRow[3];
+        for (int index = 0; index < entities.Length; index++)
+        {
+            entities[index] = pool.Allocate();
+            sourceRows[index] = new ChunkRow(0, index);
+            destinationRows[index] = new ChunkRow(1, index);
+            Assert.True(pool.TryBindLocation(
+                entities[index],
+                new EntityLocation(sourceId, sourceRows[index])));
+        }
+
+        ChunkRow originalMiddle = sourceRows[1];
+        sourceRows[1] = new ChunkRow(0, 99);
+        Assert.False(pool.TryReplaceLocations(
+            entities,
+            sourceId,
+            sourceRows,
+            destinationId,
+            destinationRows));
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Assert.True(pool.TryGetLocation(entities[index], out EntityLocation unchanged));
+            Assert.Equal(new EntityLocation(sourceId, new ChunkRow(0, index)), unchanged);
+        }
+
+        sourceRows[1] = originalMiddle;
+        Assert.True(pool.TryReplaceLocations(
+            entities,
+            sourceId,
+            sourceRows,
+            destinationId,
+            destinationRows));
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Assert.True(pool.TryGetLocation(entities[index], out EntityLocation replaced));
+            Assert.Equal(new EntityLocation(destinationId, destinationRows[index]), replaced);
+        }
+
+        var invalidRelocations = new[]
+        {
+            new ChunkRowRelocation(entities[0].Index, destinationRows[0], new ChunkRow(2, 0)),
+            new ChunkRowRelocation(entities[1].Index, new ChunkRow(1, 99), new ChunkRow(2, 1)),
+        };
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyRelocations(destinationId, invalidRelocations));
+        Assert.True(pool.TryGetLocation(entities[0], out EntityLocation stillUnchanged));
+        Assert.Equal(new EntityLocation(destinationId, destinationRows[0]), stillUnchanged);
+
+        var validRelocations = new[]
+        {
+            new ChunkRowRelocation(entities[0].Index, destinationRows[0], new ChunkRow(2, 0)),
+            new ChunkRowRelocation(entities[1].Index, destinationRows[1], new ChunkRow(2, 1)),
+        };
+        pool.ApplyRelocations(destinationId, validRelocations);
+        Assert.True(pool.TryGetLocation(entities[0], out EntityLocation firstMoved));
+        Assert.True(pool.TryGetLocation(entities[1], out EntityLocation secondMoved));
+        Assert.Equal(new EntityLocation(destinationId, new ChunkRow(2, 0)), firstMoved);
+        Assert.Equal(new EntityLocation(destinationId, new ChunkRow(2, 1)), secondMoved);
     }
 
     private static void EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent()
@@ -2512,6 +2581,126 @@ internal static class EcsPrimitiveTests
         long native = RunContiguousBatchAcrossChunkBoundaries<NativeChunkArena>();
         long pinned = RunContiguousBatchAcrossChunkBoundaries<PinnedChunkArena>();
         Assert.Equal(native, pinned);
+    }
+
+    private static void ArchetypeMigrator_PlannedCompactionPreservesSurvivorsAndEvacuatesTailChunks()
+    {
+        long native = RunPlannedCompactionCases<NativeChunkArena>();
+        long pinned = RunPlannedCompactionCases<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static long RunPlannedCompactionCases<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        long checksum = 0;
+        checksum = unchecked(checksum + RunPlannedCompactionCase<TArena>(2, 17, 32, targetTail: true));
+        checksum = unchecked(checksum + RunPlannedCompactionCase<TArena>(1, 8, 8, targetTail: true));
+        checksum = unchecked(checksum + RunPlannedCompactionCase<TArena>(1, 64, 31, targetTail: false));
+        checksum = unchecked(checksum + RunPlannedCompactionCase<TArena>(0, 32, 32, targetTail: true));
+        return checksum;
+    }
+
+    private static long RunPlannedCompactionCase<TArena>(
+        int fullChunkCount,
+        int tailRows,
+        int removalCount,
+        bool targetTail)
+        where TArena : class, IChunkArenaBackend
+    {
+        using var fixture = new MigrationFixture<TArena>(
+            maximumChunks: 4,
+            entityCapacity: 4_096);
+        int sourceWideColumn = FindColumnIndex(
+            fixture.Source.Columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        int destinationWideColumn = FindColumnIndex(
+            fixture.Destination.Columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        SparseRowChangeVersions sourceHistory =
+            fixture.Source.Store.EnableSparseRowChangeTracking(sourceWideColumn);
+        SparseRowChangeVersions destinationHistory =
+            fixture.Destination.Store.EnableSparseRowChangeTracking(destinationWideColumn);
+        int population = checked((fixture.Source.Layout.RowCapacity * fullChunkCount) + tailRows);
+        Assert.True(removalCount <= population);
+        var entities = new Entity[population];
+        var values = new long[population];
+        var versions = new ChangeVersion[population];
+        for (int index = 0; index < population; index++)
+        {
+            Entity entity = fixture.AddToSource();
+            Assert.True(fixture.Pool.TryGetLocation(entity, out EntityLocation location));
+            long value = unchecked((index * 4_194_301L) ^ 0x27C0_5A11L);
+            ChangeVersion version = new(unchecked((ulong)(index % 251) + 1UL));
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                location.ChunkRow,
+                fixture.SourceWide).A = value;
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                location.ChunkRow,
+                fixture.SourceEnable).Value = ~value;
+            fixture.Source.Store.SetEnabled(
+                location.ChunkRow,
+                fixture.SourceEnable,
+                enabled: (index & 3) != 2);
+            fixture.Source.Store.StampSparseChangeVersion(
+                location.ChunkRow.ChunkIndex,
+                sourceWideColumn,
+                location.ChunkRow.Row,
+                rowCount: 1,
+                version);
+            entities[index] = entity;
+            values[index] = value;
+            versions[index] = version;
+        }
+
+        int firstRemoved = targetTail ? population - removalCount : 0;
+        int migrated = ArchetypeMigrator.MigrateBatch(
+            fixture.Pool,
+            entities.AsSpan(firstRemoved, removalCount),
+            fixture.Source,
+            fixture.Destination,
+            fixture.SourceToDestination.Transfers,
+            out bool capacityExhausted);
+        Assert.Equal(removalCount, migrated);
+        Assert.False(capacityExhausted);
+        Assert.Equal(population - removalCount, fixture.Source.Store.Count);
+        Assert.Equal(removalCount, fixture.Destination.Store.Count);
+
+        long checksum = unchecked(population * 17L + removalCount);
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Assert.True(fixture.Pool.TryGetLocation(entities[index], out EntityLocation location));
+            bool moved = index >= firstRemoved && index < firstRemoved + removalCount;
+            ArchetypeStorage<TArena> storage = moved ? fixture.Destination : fixture.Source;
+            ComponentColumnLayout wideColumn = moved ? fixture.DestinationWide : fixture.SourceWide;
+            ComponentColumnLayout enableColumn = moved ? fixture.DestinationEnable : fixture.SourceEnable;
+            SparseRowChangeVersions history = moved ? destinationHistory : sourceHistory;
+            Assert.Equal(storage.Id, location.ArchetypeId);
+            Assert.True(storage.Store.Contains(location.ChunkRow, entities[index].Index));
+            Assert.Equal(
+                values[index],
+                storage.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                    location.ChunkRow,
+                    wideColumn).A);
+            Assert.Equal(
+                ~values[index],
+                storage.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                    location.ChunkRow,
+                    enableColumn).Value);
+            Assert.Equal(
+                (index & 3) != 2,
+                storage.Store.IsEnabled(location.ChunkRow, enableColumn));
+            Assert.Equal(
+                versions[index],
+                history.GetEffectiveRowVersion(
+                    location.ChunkRow.ChunkIndex,
+                    location.ChunkRow.Row));
+            checksum = unchecked(checksum + values[index] + (long)versions[index].Value);
+        }
+
+        fixture.Source.Store.ValidateInvariants();
+        fixture.Destination.Store.ValidateInvariants();
+        return checksum;
     }
 
     private static long RunContiguousBatchAcrossChunkBoundaries<TArena>()

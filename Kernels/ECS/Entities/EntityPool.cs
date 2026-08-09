@@ -215,6 +215,41 @@ internal sealed class EntityPool
     }
 
     /// <summary>
+    /// Transactionally validates and replaces one structural batch. Validation
+    /// completes before any location changes, so rejection leaves the table intact.
+    /// </summary>
+    internal bool TryReplaceLocations(
+        ReadOnlySpan<Entity> entities,
+        ArchetypeId expectedArchetypeId,
+        ReadOnlySpan<ChunkRow> expectedRows,
+        ArchetypeId replacementArchetypeId,
+        ReadOnlySpan<ChunkRow> replacementRows)
+    {
+        if (entities.Length != expectedRows.Length || entities.Length != replacementRows.Length)
+            throw new ArgumentException("Entity and location batch lengths must match.");
+        if (!expectedArchetypeId.IsValid || !replacementArchetypeId.IsValid)
+            throw new ArgumentException("Batch location replacement requires valid archetype IDs.");
+
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            if (!IsAlive(entity) ||
+                _locations[entity.Index] != new EntityLocation(expectedArchetypeId, expectedRows[index]))
+            {
+                return false;
+            }
+        }
+
+        for (int index = 0; index < entities.Length; index++)
+        {
+            _locations[entities[index].Index] =
+                new EntityLocation(replacementArchetypeId, replacementRows[index]);
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Applies a trusted row-store swap relocation to the moved live entity.
     /// Any mismatch is an internal structural invariant failure, not a stale
     /// public-handle result.
@@ -237,6 +272,41 @@ internal sealed class EntityPool
             ThrowLocationInvariant("A row relocation source does not match the entity location table.");
 
         _locations[entityIndex] = new EntityLocation(archetypeId, relocation.Destination);
+    }
+
+    /// <summary>Applies a validated structural compaction's survivor moves.</summary>
+    internal void ApplyRelocations(
+        ArchetypeId archetypeId,
+        ReadOnlySpan<ChunkRowRelocation> relocations)
+    {
+        if (!archetypeId.IsValid)
+            throw new ArgumentException("A valid archetype ID is required.", nameof(archetypeId));
+
+        for (int index = 0; index < relocations.Length; index++)
+        {
+            ref readonly ChunkRowRelocation relocation = ref relocations[index];
+            if (!relocation.HasValue ||
+                !relocation.Source.IsValid ||
+                !relocation.Destination.IsValid)
+            {
+                ThrowLocationInvariant("A planned row relocation is invalid.");
+            }
+
+            uint entityIndex = relocation.EntityIndex;
+            if (entityIndex >= (uint)_nextUnusedIndex || _states[entityIndex] != SlotAlive)
+                ThrowLocationInvariant("A planned row relocation refers to an entity slot that is not alive.");
+
+            var expected = new EntityLocation(archetypeId, relocation.Source);
+            if (_locations[entityIndex] != expected)
+                ThrowLocationInvariant("A planned row relocation source does not match the entity location table.");
+        }
+
+        for (int index = 0; index < relocations.Length; index++)
+        {
+            ref readonly ChunkRowRelocation relocation = ref relocations[index];
+            _locations[relocation.EntityIndex] =
+                new EntityLocation(archetypeId, relocation.Destination);
+        }
     }
 
     internal SlotSnapshot GetSlotSnapshot(int index)
