@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <AssemblyName>UltraSim.ECS.Benchmarks</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UltraSim.ECS.ComparisonCore\UltraSim.ECS.ComparisonCore.csproj" />
+    <ProjectReference Include="..\..\Kernels\ECS\UltraSim.ECS.csproj" />
+    <ProjectReference Include="..\..\Kernels\ECS.Generators\UltraSim.ECS.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+</Project>

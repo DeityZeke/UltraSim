@@ -1,7 +1,7 @@
 # ECS Next Benchmark Recommendations
 
-Status: future benchmark contract; adopt incrementally as equivalent V2 and V3
-features become executable
+Status: active benchmark contract; first executable V2/V3 adapter implemented,
+extend incrementally as additional features become equivalent
 
 This document records benchmark work that should accompany the natural ECS Next
 implementation. It is not a reason to implement features out of dependency order
@@ -323,7 +323,14 @@ equivalent; until then, retain the `Comparable=false` label.
 
 ## V2-to-V3 comparison adapters
 
-Add exact cross-generation adapters as corresponding V3 features become real.
+The first exact cross-generation adapter is implemented under root `_Benchmarks`
+and documented in [`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). Its v1
+protocol covers 87 matched rows across 1K, 10K, and 50K entities, rejects state or
+descriptor mismatch, records effective logical bytes, and retains 15 explicit
+unsupported parity rows. The first immutable joined artifact is stored under
+`_Benchmarks/Baselines`; future captures compare current V2 and V3 independently
+against it so frozen V2 acts as a host/runtime-noise control. Add further adapters
+as corresponding V3 features become real.
 Run each generation in a clean process, join results by stable scenario ID, and
 record semantic-profile and canonical-hash versions. Initial parity candidates
 are one-component traversal, two-component read/write traversal, checked scalar
@@ -338,11 +345,15 @@ Equivalent adapters require the same:
 - component reads, writes, and enable operations;
 - setup/prepare/timed/validation boundaries;
 - warmup, iteration, process-isolation, and GC methodology;
+- allocation-counter scope, including every worker once scheduling exists;
 - checksum and canonical-state hash specification.
 
-Comparisons must label semantic mismatches instead of presenting their ratios as
-speedups or regressions. Preserve earlier V3 measurements in reports so each
-feature can show V2 baseline, first V3 implementation, and current V3 result.
+Comparisons must label semantic, state, catalog, methodology, and environment
+mismatches instead of presenting their ratios as speedups or regressions.
+Preserve earlier V3 measurements in reports so each feature can show V2 baseline,
+first V3 implementation, and current V3 result. A full collection before each
+measured iteration is an isolation policy, not a production GC model; record it
+and supplement it with natural-GC/soak runs when whole-server paths exist.
 
 ## Expected direction and evidence policy
 

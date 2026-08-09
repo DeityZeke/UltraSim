@@ -6,13 +6,30 @@ throughput, and scheduler-crossover requirements are recorded in
 They should be adopted feature by feature without pulling implementation out of
 dependency order.
 
+The first executable Current/Next semantic adapter is documented in
+[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 87 matched
+1K/10K/50K rows with a shared canonical logical-state hash, separate
+record/playback/end-to-end structural boundaries, allocation/GC accounting,
+process isolation, fixed steady-state JIT policy, and explicit unsupported parity
+rows. The accepted 2026-08-09 V2-first and V3-first captures both produced zero
+state mismatches. They are an as-is regression baseline, not complete V2 parity
+or evidence that V3 currently wins most overlapping operations.
+
+The immutable accepted joined artifact lives at
+[`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
+Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
+mean/p95 ratios, allocation deltas, and cross-time canonical-state checks. The
+adapter records its pre-iteration full-collection policy and current-thread
+allocation scope; future scheduler cases must broaden allocation accounting.
+
 These projects measure the root Next implementation. Frozen V2 Current and
 Legacy runners remain beneath `_V2/_Benchmarks` and run in separate processes.
 
-The initial ECS primitive/schema suite is intentionally marked non-comparable.
+The original ECS primitive/schema suite remains intentionally marked non-comparable.
 It establishes allocation, validation, layout-candidate, generated component-ID,
 runtime schema-lookup, and metadata-access measurements before a semantically
-equivalent Current/Next scenario adapter exists.
+equivalent primitive-level Current/Next contract exists. Cross-generation results
+live in the dedicated adapter rather than retroactively relabeling those guards.
 
 The handle-layout cases include both one-million and ten-million element scans.
 The 8-byte candidate uses `16` world bits, `24` index bits, and `24` generation
