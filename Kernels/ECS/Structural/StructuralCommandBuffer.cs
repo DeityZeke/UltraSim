@@ -14,6 +14,8 @@ namespace UltraSim.ECS;
 /// </remarks>
 public sealed class StructuralCommandBuffer
 {
+    private const int MinimumGroupedTransitionRun = 8;
+
     private readonly StructuralCommandRecord[] _commands;
     private readonly Entity[] _createdEntities;
     private readonly int[] _nextCommand;
@@ -581,15 +583,117 @@ public sealed class StructuralCommandBuffer
         ref int applied,
         ref int rejected)
     {
+        Span<Entity> batch = stackalloc Entity[ArchetypeMigrator.MaximumBatchSize];
         for (int link = chain.HeadLink; link != 0;)
         {
             int commandIndex = link - 1;
-            link = _nextCommand[commandIndex];
-            StructuralCommandRecord command = _commands[commandIndex];
-            if (command.TransitionPhase != expectedPhase)
+            StructuralCommandRecord first = _commands[commandIndex];
+            if (first.TransitionPhase != expectedPhase)
                 ThrowCommandInvariant("A phase-indexed transition was routed to the wrong phase.");
-            ExecuteTransition(command, commandCount, world, ref applied, ref rejected);
+            uint transitionId = first.Argument;
+            int prefixCount = CountSameTransitionPrefix(
+                link,
+                transitionId,
+                MinimumGroupedTransitionRun);
+            if (prefixCount < MinimumGroupedTransitionRun)
+            {
+                for (int index = 0; index < prefixCount; index++)
+                {
+                    commandIndex = link - 1;
+                    link = _nextCommand[commandIndex];
+                    StructuralCommandRecord command = _commands[commandIndex];
+                    ExecuteTransition(
+                        command,
+                        commandCount,
+                        world,
+                        ref applied,
+                        ref rejected);
+                }
+                continue;
+            }
+
+            PreparedArchetypeTransition transition =
+                world.GetPublicTransitionForPlayback(transitionId, expectedPhase);
+            int batchCount = 0;
+            bool destinationExhausted = false;
+            while (link != 0)
+            {
+                commandIndex = link - 1;
+                StructuralCommandRecord command = _commands[commandIndex];
+                if (command.Argument != transitionId)
+                    break;
+                link = _nextCommand[commandIndex];
+
+                if (destinationExhausted)
+                {
+                    rejected++;
+                    continue;
+                }
+                if (!TryResolveTarget(command, commandCount, out Entity entity, out _))
+                {
+                    rejected++;
+                    continue;
+                }
+
+                batch[batchCount++] = entity;
+                if (batchCount != batch.Length)
+                    continue;
+
+                ExecuteTransitionBatch(
+                    world,
+                    transition,
+                    batch,
+                    batchCount,
+                    ref destinationExhausted,
+                    ref applied,
+                    ref rejected);
+                batchCount = 0;
+            }
+
+            if (!destinationExhausted && batchCount != 0)
+            {
+                ExecuteTransitionBatch(
+                    world,
+                    transition,
+                    batch,
+                    batchCount,
+                    ref destinationExhausted,
+                    ref applied,
+                    ref rejected);
+            }
         }
+    }
+
+    private int CountSameTransitionPrefix(int link, uint transitionId, int limit)
+    {
+        int count = 0;
+        while (link != 0 && count < limit)
+        {
+            int commandIndex = link - 1;
+            if (_commands[commandIndex].Argument != transitionId)
+                break;
+            count++;
+            link = _nextCommand[commandIndex];
+        }
+        return count;
+    }
+
+    private static void ExecuteTransitionBatch(
+        EcsWorld<NativeChunkArena> world,
+        PreparedArchetypeTransition transition,
+        Span<Entity> batch,
+        int batchCount,
+        ref bool destinationExhausted,
+        ref int applied,
+        ref int rejected)
+    {
+        int migrated = world.TransitionBatch(
+            batch[..batchCount],
+            transition,
+            out bool batchCapacityExhausted);
+        applied = checked(applied + migrated);
+        rejected = checked(rejected + batchCount - migrated);
+        destinationExhausted = batchCapacityExhausted;
     }
 
     private void ExecuteScalarTransitionPass(

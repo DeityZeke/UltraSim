@@ -143,6 +143,54 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         return written;
     }
 
+    /// <summary>
+    /// Reserves and default-initializes an append-only row prefix without
+    /// publishing entity indices. Trusted structural playback must either commit
+    /// each row in order or remove the unused tail in reverse order.
+    /// </summary>
+    internal int ReserveDefault(int requestedCount, Span<ChunkRow> locations)
+    {
+        ThrowIfDisposed();
+        if (requestedCount < 0)
+            throw new ArgumentOutOfRangeException(nameof(requestedCount));
+        if (locations.Length < requestedCount)
+            throw new ArgumentException(
+                "The location output span is smaller than the requested reservation.",
+                nameof(locations));
+
+        int written = 0;
+        while (written < requestedCount)
+        {
+            int chunkIndex = AcquireDestinationChunk();
+            if (chunkIndex == NoChunk)
+                break;
+
+            ref ChunkRecord chunk = ref _chunks[chunkIndex];
+            int startRow = chunk.RowCount;
+            int count = Math.Min(_layout.RowCapacity - startRow, requestedCount - written);
+            Span<byte> bytes = _arena.GetChunkBytes(chunk.Handle);
+            InitializeRows(chunkIndex, bytes, startRow, count);
+            for (int index = 0; index < count; index++)
+                locations[written + index] = new ChunkRow((uint)chunkIndex, startRow + index);
+
+            chunk.RowCount += count;
+            _entityCount += count;
+            written += count;
+            if (chunk.RowCount == _layout.RowCapacity)
+                MoveChunk(chunkIndex, ChunkListState.Full);
+        }
+
+        return written;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetReservedEntityIndex(ChunkRow location, uint entityIndex)
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        Span<byte> bytes = _arena.GetChunkBytes(_chunks[chunkIndex].Handle);
+        GetEntityIndices(bytes)[row] = entityIndex;
+    }
+
     internal bool TryRemove(
         ChunkRow location,
         uint expectedEntityIndex,
@@ -239,6 +287,61 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         Span<byte> sourceBytes = _arena.GetChunkBytes(_chunks[sourceChunkIndex].Handle);
         Span<byte> destinationBytes = destination._arena.GetChunkBytes(
             destination._chunks[destinationChunkIndex].Handle);
+
+        CopyResolvedColumnsTo(
+            sourceChunkIndex,
+            sourceRow,
+            sourceBytes,
+            destination,
+            destinationChunkIndex,
+            destinationRow,
+            destinationBytes,
+            transfers);
+    }
+
+    /// <summary>
+    /// Publishes the entity index into an anonymously reserved destination row
+    /// while sharing the row resolution required by retained-column transfer.
+    /// </summary>
+    internal void CopyColumnsToReserved(
+        ChunkRow sourceLocation,
+        ArchetypeChunkStore<TArena> destination,
+        ChunkRow destinationLocation,
+        uint entityIndex,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+    {
+        ArgumentNullException.ThrowIfNull(destination);
+        ResolveOrThrow(sourceLocation, out int sourceChunkIndex, out int sourceRow);
+        destination.ResolveOrThrow(
+            destinationLocation,
+            out int destinationChunkIndex,
+            out int destinationRow);
+        Span<byte> sourceBytes = _arena.GetChunkBytes(_chunks[sourceChunkIndex].Handle);
+        Span<byte> destinationBytes = destination._arena.GetChunkBytes(
+            destination._chunks[destinationChunkIndex].Handle);
+        destination.GetEntityIndices(destinationBytes)[destinationRow] = entityIndex;
+
+        CopyResolvedColumnsTo(
+            sourceChunkIndex,
+            sourceRow,
+            sourceBytes,
+            destination,
+            destinationChunkIndex,
+            destinationRow,
+            destinationBytes,
+            transfers);
+    }
+
+    private void CopyResolvedColumnsTo(
+        int sourceChunkIndex,
+        int sourceRow,
+        Span<byte> sourceBytes,
+        ArchetypeChunkStore<TArena> destination,
+        int destinationChunkIndex,
+        int destinationRow,
+        Span<byte> destinationBytes,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+    {
 
         for (int i = 0; i < transfers.Length; i++)
         {

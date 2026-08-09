@@ -1554,6 +1554,45 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             out destinationLocation);
     }
 
+    internal PreparedArchetypeTransition GetPublicTransitionForPlayback(
+        uint transitionId,
+        StructuralTransitionPhase expectedPhase)
+    {
+        PreparedArchetypeTransition transition = GetPublicTransition(transitionId);
+        if (transition.Phase != expectedPhase)
+        {
+            throw new ArgumentException(
+                "The public transition was recorded in the wrong structural phase.",
+                nameof(transitionId));
+        }
+        return transition;
+    }
+
+    internal int TransitionBatch(
+        ReadOnlySpan<Entity> entities,
+        PreparedArchetypeTransition transition,
+        out bool capacityExhausted)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArgumentNullException.ThrowIfNull(transition);
+        if (transition.WorldId != Id)
+        {
+            throw new ArgumentException(
+                "The prepared transition belongs to a different world.",
+                nameof(transition));
+        }
+
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
+        return ArchetypeMigrator.MigrateBatch(
+            _entities,
+            entities,
+            source,
+            destination,
+            transition.Transfers,
+            out capacityExhausted);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private PreparedArchetypeTransition GetPublicTransition(uint transitionId)
     {

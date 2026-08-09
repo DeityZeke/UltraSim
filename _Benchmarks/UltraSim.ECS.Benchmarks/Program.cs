@@ -151,7 +151,7 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_DeferredTransitionScalarOracle_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteScalarOracle, publicDeferredTransition.Prepare),
             new("PublicWorld_DeferredTransitionBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.Execute, publicDeferredTransition.Prepare),
             new("PublicWorld_DeferredTransitionPlaybackOnlyScalarOracle_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecordedScalarOracle, publicDeferredTransition.PrepareRecorded),
-            new("PublicWorld_DeferredTransitionPlaybackOnlyPhaseIndexed_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecorded, publicDeferredTransition.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyGrouped_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecorded, publicDeferredTransition.PrepareRecorded),
             new("PublicWorld_DeferredCreateDefaultBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredCreate.Execute, publicDeferredCreate.Prepare),
             new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
@@ -208,7 +208,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-phase-indexed-structural-commands-v24",
+            SemanticProfile = "ecs-next-phase1-grouped-structural-transitions-v25",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),

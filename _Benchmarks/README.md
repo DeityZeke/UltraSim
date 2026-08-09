@@ -402,6 +402,28 @@ and process-sensitive: stable phase chains are useful infrastructure for later
 route grouping, but repeated isolated processes must justify their four-byte
 cost, and true bulk store mutation remains the dominant opportunity.
 
+The v25 profile, `ecs-next-phase1-grouped-structural-transitions-v25`, keeps the
+v24 phase chains and groups only maximal contiguous runs of the same prepared
+transition. Runs shorter than eight commands retain scalar playback. Longer runs
+use fixed 256-entity stack blocks, bulk-reserve/default destination row ranges,
+commit once in record order, and reverse-remove unused anonymous reservation
+tails. Source packed removal, donor repair, and retained-column transfer are
+still per entity; this is the first bulk-reservation layer, not final bulk source
+compaction. The scalar executor remains executable as the semantic oracle.
+
+For 100,000 homogeneous transitions, the focused v25 process measured
+scalar/grouped end-to-end at `113.837/100.478 ns/command` and playback-only at
+`101.412/95.830 ns/command`, improvements of about `11.7%` and `5.5%`. The full
+91-scenario process measured `134.116/114.753 ns/command` end-to-end and
+`120.296/110.077 ns/command` playback-only, improvements of about `14.4%` and
+`8.5%`. Full-process grouped p50/p95/p99 barriers were
+`11.458/11.621/11.636 ms`, versus `13.404/13.639/14.568 ms` for scalar
+end-to-end; grouped playback-only measured `11.012/11.050/11.074 ms`, versus
+`12.034/12.092/12.125 ms`. Every one of the 91 scenarios reported zero managed
+bytes and zero Gen0/1/2 collections. These are same-process, homogeneous-route
+guards, not V2/V3 parity evidence; route-entropy, fragmented-source, mixed-
+conflict, component-width, and true source-compaction sweeps remain required.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

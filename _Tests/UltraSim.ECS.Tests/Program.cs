@@ -82,6 +82,8 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeMigrator_RejectsInvalidPlansAndLeavesSourceOnCapacityFailure), ArchetypeMigrator_RejectsInvalidPlansAndLeavesSourceOnCapacityFailure);
         Run(nameof(ArchetypeMigrator_RandomizedBidirectionalModelRemainsConsistent), ArchetypeMigrator_RandomizedBidirectionalModelRemainsConsistent);
         Run(nameof(ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent), ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent);
+        Run(nameof(ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity), ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity);
+        Run(nameof(ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact), ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact);
         Run(nameof(ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes), ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes);
         Run(nameof(EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal), EcsWorld_LifecycleSealsRegistrationAndOwnsDisposal);
         Run(nameof(EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations), EcsWorld_CreateDestroyMaintainsRowsLocationsAndGenerations);
@@ -102,9 +104,11 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_DeferredCommandsApplyDeterministicPhases), PublicEcsWorld_DeferredCommandsApplyDeterministicPhases);
         Run(nameof(PublicEcsWorld_DeferredCreateTokensComposeAndExpire), PublicEcsWorld_DeferredCreateTokensComposeAndExpire);
         Run(nameof(PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle), PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
         Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
         Run(nameof(PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes);
+        Run(nameof(PublicEcsWorld_WarmedGroupedTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedGroupedTransitionAllocatesZeroManagedBytes);
         Run(nameof(ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit), ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit);
         Run(nameof(EcsWorld_BoundAccessReadsWritesAndInitializes), EcsWorld_BoundAccessReadsWritesAndInitializes);
         Run(nameof(EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings), EcsWorld_BoundAccessRejectsTagsNonEnableableAndInvalidBindings);
@@ -2414,6 +2418,194 @@ internal static class EcsPrimitiveTests
         Assert.Equal(native, pinned);
     }
 
+    private static void ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity()
+    {
+        long native = RunBatchMigrationParity<NativeChunkArena>();
+        long pinned = RunBatchMigrationParity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static void ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact()
+    {
+        long native = RunBatchCrossChunkRollbackAndCapacity<NativeChunkArena>();
+        long pinned = RunBatchCrossChunkRollbackAndCapacity<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static long RunBatchCrossChunkRollbackAndCapacity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        long checksum = 0;
+        using (var rollback = new MigrationFixture<TArena>(maximumChunks: 2, entityCapacity: 2_048))
+        {
+            int firstChunkCapacity = rollback.Destination.Layout.RowCapacity;
+            for (int index = 0; index < firstChunkCapacity - 4; index++)
+                _ = rollback.AddToDestination();
+            Entity first = rollback.AddToSource();
+            Entity second = rollback.AddToSource();
+            Span<Entity> duplicates = stackalloc Entity[16];
+            duplicates[..8].Fill(first);
+            duplicates[8..].Fill(second);
+
+            int migrated = ArchetypeMigrator.MigrateBatch(
+                rollback.Pool,
+                duplicates,
+                rollback.Source,
+                rollback.Destination,
+                rollback.SourceToDestination.Transfers,
+                out bool capacityExhausted);
+            Assert.Equal(2, migrated);
+            Assert.False(capacityExhausted);
+            Assert.Equal(0, rollback.Source.Store.Count);
+            Assert.Equal(firstChunkCapacity - 2, rollback.Destination.Store.Count);
+            Assert.True(rollback.Pool.TryGetLocation(first, out EntityLocation firstLocation));
+            Assert.True(rollback.Pool.TryGetLocation(second, out EntityLocation secondLocation));
+            Assert.Equal((uint)0, firstLocation.ChunkRow.ChunkIndex);
+            Assert.Equal((uint)0, secondLocation.ChunkRow.ChunkIndex);
+            rollback.Source.Store.ValidateInvariants();
+            rollback.Destination.Store.ValidateInvariants();
+            checksum = unchecked(
+                checksum +
+                rollback.Destination.Store.Count +
+                firstLocation.ChunkRow.Row +
+                secondLocation.ChunkRow.Row);
+        }
+
+        using (var capacity = new MigrationFixture<TArena>(maximumChunks: 1, entityCapacity: 2_048))
+        {
+            int destinationCapacity = capacity.Destination.Layout.RowCapacity;
+            for (int index = 0; index < destinationCapacity - 2; index++)
+                _ = capacity.AddToDestination();
+            Span<Entity> entities = stackalloc Entity[4];
+            for (int index = 0; index < entities.Length; index++)
+                entities[index] = capacity.AddToSource();
+
+            int migrated = ArchetypeMigrator.MigrateBatch(
+                capacity.Pool,
+                entities,
+                capacity.Source,
+                capacity.Destination,
+                capacity.SourceToDestination.Transfers,
+                out bool capacityExhausted);
+            Assert.Equal(2, migrated);
+            Assert.True(capacityExhausted);
+            Assert.Equal(2, capacity.Source.Store.Count);
+            Assert.Equal(destinationCapacity, capacity.Destination.Store.Count);
+            for (int index = 0; index < entities.Length; index++)
+            {
+                Assert.True(capacity.Pool.TryGetLocation(entities[index], out EntityLocation location));
+                Assert.Equal(
+                    index < 2 ? capacity.Destination.Id : capacity.Source.Id,
+                    location.ArchetypeId);
+                checksum = unchecked(checksum + location.ArchetypeId.Value + location.ChunkRow.Row);
+            }
+            capacity.Source.Store.ValidateInvariants();
+            capacity.Destination.Store.ValidateInvariants();
+        }
+
+        return checksum;
+    }
+
+    private static long RunBatchMigrationParity<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize;
+        using var fixture = new MigrationFixture<TArena>(
+            maximumChunks: 2,
+            entityCapacity: entityCount);
+        int sourceWideColumn = FindColumnIndex(
+            fixture.Source.Columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        int destinationWideColumn = FindColumnIndex(
+            fixture.Destination.Columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>());
+        _ = fixture.Source.Store.EnableSparseRowChangeTracking(sourceWideColumn);
+        SparseRowChangeVersions destinationHistory =
+            fixture.Destination.Store.EnableSparseRowChangeTracking(destinationWideColumn);
+        var entities = new Entity[entityCount];
+        var versions = new ChangeVersion[entityCount];
+        long checksum = 0;
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = fixture.AddToSource();
+            Assert.True(fixture.Pool.TryGetLocation(entity, out EntityLocation location));
+            long value = unchecked((index * 1_000_003L) ^ 0x51A7_C0DEL);
+            bool enabled = (index & 3) != 1;
+            ChangeVersion version = new(unchecked((ulong)(index % 29) + 1UL));
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                location.ChunkRow,
+                fixture.SourceWide).A = value;
+            fixture.Source.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                location.ChunkRow,
+                fixture.SourceEnable).Value = ~value;
+            fixture.Source.Store.SetEnabled(location.ChunkRow, fixture.SourceEnable, enabled);
+            fixture.Source.Store.StampSparseChangeVersion(
+                location.ChunkRow.ChunkIndex,
+                sourceWideColumn,
+                location.ChunkRow.Row,
+                rowCount: 1,
+                version);
+            entities[index] = entity;
+            versions[index] = version;
+        }
+
+        int migrated = ArchetypeMigrator.MigrateBatch(
+            fixture.Pool,
+            entities,
+            fixture.Source,
+            fixture.Destination,
+            fixture.SourceToDestination.Transfers,
+            out bool capacityExhausted);
+        Assert.Equal(entityCount, migrated);
+        Assert.False(capacityExhausted);
+        Assert.Equal(0, fixture.Source.Store.Count);
+        Assert.Equal(entityCount, fixture.Destination.Store.Count);
+
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            Assert.True(fixture.Pool.TryGetLocation(entity, out EntityLocation location));
+            Assert.Equal(fixture.Destination.Id, location.ArchetypeId);
+            long expected = unchecked((index * 1_000_003L) ^ 0x51A7_C0DEL);
+            Assert.Equal(
+                expected,
+                fixture.Destination.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutWide>(
+                    location.ChunkRow,
+                    fixture.DestinationWide).A);
+            Assert.Equal(
+                ~expected,
+                fixture.Destination.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutEnableLong>(
+                    location.ChunkRow,
+                    fixture.DestinationEnable).Value);
+            Assert.Equal(
+                (index & 3) != 1,
+                fixture.Destination.Store.IsEnabled(location.ChunkRow, fixture.DestinationEnable));
+            Assert.Equal(
+                versions[index],
+                destinationHistory.GetEffectiveRowVersion(
+                    location.ChunkRow.ChunkIndex,
+                    location.ChunkRow.Row));
+            Assert.Equal(
+                0,
+                fixture.Destination.Store.GetComponentRef<UltraSim.ECS.Tests.LayoutInt>(
+                    location.ChunkRow,
+                    fixture.DestinationInt).Value);
+            Assert.True(fixture.Destination.Store.IsEnabled(
+                location.ChunkRow,
+                fixture.DestinationTag));
+            checksum = unchecked(
+                checksum +
+                expected +
+                (long)versions[index].Value +
+                location.ChunkRow.Row +
+                (location.ChunkRow.ChunkIndex * 17L));
+        }
+
+        fixture.Source.Store.ValidateInvariants();
+        fixture.Destination.Store.ValidateInvariants();
+        return checksum;
+    }
+
     private static void ArchetypeMigrator_WarmedBidirectionalChurnAllocatesZeroManagedBytes()
     {
         const int operations = 100_000;
@@ -3604,6 +3796,139 @@ internal static class EcsPrimitiveTests
         }
     }
 
+    private static void PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle()
+    {
+        const int destinationPrefill = 64;
+        const int entityCapacity = 2_048;
+        const int commandCapacity = 2_048;
+        using var grouped = new PublicWorldFixture(entityCapacity, commandCapacity);
+        using var scalar = new PublicWorldFixture(entityCapacity, commandCapacity);
+        var groupedDestination = new List<Entity>(destinationPrefill);
+        var scalarDestination = new List<Entity>(destinationPrefill);
+        for (int index = 0; index < destinationPrefill; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 1_009L) + 17),
+            };
+            Assert.True(grouped.World.TryCreate(
+                grouped.Destination,
+                grouped.EnableLookup,
+                value,
+                out Entity groupedEntity));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Destination,
+                scalar.EnableLookup,
+                value,
+                out Entity scalarEntity));
+            bool enabled = (index & 1) == 0;
+            Assert.True(grouped.World.TrySetEnabled(groupedEntity, grouped.EnableLookup, enabled));
+            Assert.True(scalar.World.TrySetEnabled(scalarEntity, scalar.EnableLookup, enabled));
+            groupedDestination.Add(groupedEntity);
+            scalarDestination.Add(scalarEntity);
+        }
+
+        Assert.True(grouped.World.TryCreate(grouped.Source, out Entity groupedStale));
+        Assert.True(scalar.World.TryCreate(scalar.Source, out Entity scalarStale));
+        Assert.True(grouped.World.TryDestroy(groupedStale));
+        Assert.True(scalar.World.TryDestroy(scalarStale));
+
+        var groupedSource = new List<Entity>();
+        var scalarSource = new List<Entity>();
+        int seed = 0;
+        while (true)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((seed * 65_537L) ^ 0x31A7_C0DEL),
+            };
+            bool groupedCreated = grouped.World.TryCreate(
+                grouped.Source,
+                grouped.EnableLookup,
+                value,
+                out Entity groupedEntity);
+            bool scalarCreated = scalar.World.TryCreate(
+                scalar.Source,
+                scalar.EnableLookup,
+                value,
+                out Entity scalarEntity);
+            Assert.Equal(groupedCreated, scalarCreated);
+            if (!groupedCreated)
+                break;
+
+            bool enabled = (seed & 3) != 2;
+            Assert.True(grouped.World.TrySetEnabled(groupedEntity, grouped.EnableLookup, enabled));
+            Assert.True(scalar.World.TrySetEnabled(scalarEntity, scalar.EnableLookup, enabled));
+            groupedSource.Add(groupedEntity);
+            scalarSource.Add(scalarEntity);
+            seed++;
+        }
+
+        Assert.True(groupedSource.Count > ArchetypeMigrator.MaximumBatchSize);
+        Assert.Equal(groupedStale.Index, groupedSource[0].Index);
+        Assert.Equal(scalarStale.Index, scalarSource[0].Index);
+        Assert.NotEqual(groupedStale.Generation, groupedSource[0].Generation);
+        Assert.NotEqual(scalarStale.Generation, scalarSource[0].Generation);
+
+        StructuralCommandBuffer groupedCommands = grouped.World.StructuralCommands;
+        StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
+        groupedCommands.EnqueueTransition(groupedStale, grouped.SourceToDestination);
+        scalarCommands.EnqueueTransition(scalarStale, scalar.SourceToDestination);
+        groupedCommands.EnqueueTransition(
+            groupedDestination[0],
+            grouped.SourceToDestination);
+        scalarCommands.EnqueueTransition(
+            scalarDestination[0],
+            scalar.SourceToDestination);
+        for (int index = 0; index < groupedSource.Count; index++)
+        {
+            groupedCommands.EnqueueTransition(
+                groupedSource[index],
+                grouped.SourceToDestination);
+            scalarCommands.EnqueueTransition(
+                scalarSource[index],
+                scalar.SourceToDestination);
+            if (index % 29 != 0)
+                continue;
+
+            groupedCommands.EnqueueTransition(
+                groupedSource[index],
+                grouped.SourceToDestination);
+            scalarCommands.EnqueueTransition(
+                scalarSource[index],
+                scalar.SourceToDestination);
+        }
+
+        Assert.Equal(groupedCommands.Count, scalarCommands.Count);
+        Assert.True(groupedCommands.Count > ArchetypeMigrator.MaximumBatchSize);
+        StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(groupedResult, scalarResult);
+        Assert.True(groupedResult.AddedCount >= 8);
+        Assert.True(groupedResult.RejectedTransitionCount > 2);
+        Assert.Equal(grouped.World.AliveCount, scalar.World.AliveCount);
+        Assert.Equal(grouped.World.CurrentChangeVersion, scalar.World.CurrentChangeVersion);
+
+        AssertLogicalEntitiesEqual(grouped, groupedStale, scalar, scalarStale);
+        for (int index = 0; index < groupedSource.Count; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedSource[index],
+                scalar,
+                scalarSource[index]);
+        }
+        for (int index = 0; index < groupedDestination.Count; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedDestination[index],
+                scalar,
+                scalarDestination[index]);
+        }
+    }
+
     private static void AssertPlaybackResultsEqual(
         in StructuralPlaybackResult expected,
         in StructuralPlaybackResult actual)
@@ -3728,6 +4053,51 @@ internal static class EcsPrimitiveTests
         Assert.True(checksum != 0);
         Assert.Equal(0, commands.Count);
         Assert.True(fixture.World.IsAlive(entity));
+    }
+
+    private static void PublicEcsWorld_WarmedGroupedTransitionAllocatesZeroManagedBytes()
+    {
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize;
+        const int rounds = 1_000;
+        using var fixture = new PublicWorldFixture(
+            entityCapacity: entityCount,
+            structuralCommandCapacity: entityCount);
+        var entities = new Entity[entityCount];
+        for (int index = 0; index < entities.Length; index++)
+            Assert.True(fixture.World.TryCreate(fixture.Source, out entities[index]));
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+
+        for (int round = 0; round < 16; round++)
+        {
+            ArchetypeTransition forward = (round & 1) == 0
+                ? fixture.SourceToDestination
+                : fixture.DestinationToSource;
+            commands.EnqueueTransition(entities, forward);
+            Assert.Equal(entityCount, fixture.World.PlaybackStructuralCommands().AppliedCount);
+        }
+
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long checksum = 0;
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int round = 0; round < rounds; round++)
+        {
+            ArchetypeTransition transition = (round & 1) == 0
+                ? fixture.SourceToDestination
+                : fixture.DestinationToSource;
+            commands.EnqueueTransition(entities, transition);
+            StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+            checksum = unchecked(checksum + result.Epoch + result.AppliedCount);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.True(checksum != 0);
+        Assert.Equal(0, commands.Count);
+        Assert.Equal(entityCount, fixture.World.AliveCount);
+        for (int index = 0; index < entities.Length; index++)
+            Assert.True(fixture.World.IsAlive(entities[index]));
     }
 
     private static void ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit()

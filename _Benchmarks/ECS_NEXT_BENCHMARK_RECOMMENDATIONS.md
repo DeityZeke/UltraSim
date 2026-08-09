@@ -262,9 +262,10 @@ detect lost or spuriously broadened history.
 
 ## Structural command and barrier guards
 
-Treat the retained v23 scalar executor as the correctness oracle and the v24
-stable phase chains as the first indexed candidate. Both must remain executable
-against identical streams while grouping and bulk paths are introduced.
+Treat the retained v23 scalar executor as the correctness oracle, the v24 stable
+phase chains as the indexed baseline, and the v25 same-route reservation path as
+the first grouped candidate. All must remain executable against identical
+streams while deeper copy and compaction paths are introduced.
 Split later scenarios into record-only, playback-only, and end-to-end variants so
 a faster recorder cannot conceal a slower serial barrier. Cross 1K, 10K, 100K,
 and 1M commands with homogeneous create/destroy/remove/add streams, realistic
@@ -291,6 +292,22 @@ capacity at exactly full and one-over-full, empty barriers, sparse phase mixes,
 and repeated unchanged/empty polling. Failure and overflow cases must preserve a
 documented consumed-versus-retryable policy and produce the same canonical final
 state as the reference model.
+
+Sweep transition entropy explicitly while holding total command count, source
+population, component width, and final logical state as stable as possible: 1,
+4, 16, 64, and hundreds of routes where the schema permits them. Record both
+contiguous route runs and interleaved routes. Report the distribution of run
+lengths, the fraction of commands entering the grouped path, reservation fill
+ratio, unused-tail rollback rows, and destination/source chunks touched. This is
+the guard against presenting the homogeneous one-route best case as typical;
+the grouped executor should degrade toward the scalar oracle without pathological
+overhead as route entropy and archetype fragmentation rise.
+
+Treat the current eight-command grouping threshold as a measured-policy
+candidate, not a constant of nature. Sweep homogeneous run lengths of 1, 2, 4,
+8, 16, 32, 64, 128, and 256 for narrow, normal, and wide transitions, with and
+without exact-row history. Select the crossover from repeated isolated evidence;
+tests must keep both sides of the selected boundary scalar-equivalent.
 
 Every structural benchmark should validate a full canonical state hash outside
 the timed region in development runs. It must include living entities,

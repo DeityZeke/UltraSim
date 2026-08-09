@@ -109,14 +109,17 @@ allocation:
 - Recording appends each command to one stable live-destroy/create/deferred-
   destroy/remove/add chain. Playback therefore visits only commands in the active
   phase while preserving exact record order inside it; the retained scalar
-  five-scan executor remains an internal differential oracle. World mutations
-  underneath those chains are still scalar. This proves bounded storage,
-  composition, conflict semantics, lifecycle barriers, and zero warmed
-  allocation. Per-worker arenas,
-  deterministic worker merge, operation/source/transition grouping, bulk row
-  reservation/copy/compaction, typed component payloads, prefab expansion, and
-  lifecycle publication remain later structural work and must be measured
-  against this baseline rather than hidden behind it.
+  five-scan executor remains an internal differential oracle. Contiguous runs of
+  at least eight commands using the same prepared transition are executed in
+  fixed stack blocks of at most 256 entities. Each block reserves and
+  default-initializes destination rows in ranges, validates and commits entities
+  once in record order, and removes any anonymous unused tail in reverse order.
+  Duplicate, stale, wrong-source, partial-capacity, donor-repair, enable-state,
+  and dense/exact change-history semantics remain scalar-equivalent. Per-worker
+  arenas, deterministic worker merge, grouping across separated route runs,
+  contiguous retained-column copy, planned source compaction, typed component
+  payloads, prefab expansion, and lifecycle publication remain later structural
+  work and must be measured against this baseline rather than hidden behind it.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index
@@ -274,7 +277,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 182 passing tests, including
+The current runtime and primitive suite has 186 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -361,7 +364,12 @@ composition, epoch expiry, rollover identity rotation, and mixed-chain clear;
 capacity failures; execution-barrier recording versus playback rules;
 disposal/fault invalidation; a 64-seed randomized phase-index-versus-scalar
 differential model covering logical state and generation/free-list order; and a
-250,000-transition warmed zero-allocation gate.
+250,000-transition warmed zero-allocation gate. Grouped-transition tests add
+Native/Pinned parity for retained values, enable state, defaults, and exact row
+history through donor-heavy migration; cross-chunk anonymous-tail rollback;
+precise partial-capacity prefix behavior; a route run beyond the 256-entity
+block boundary with duplicates, stale generations, wrong-source targets, and
+capacity pressure; and a warmed 256-command zero-allocation barrier.
 
 This is now a usable public single-owner component/archetype slice, not yet the
 public scheduler/host ECS. The current generators emit the core manifest, a
@@ -371,8 +379,8 @@ added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
 refinement entirely. Public tracked-write scopes, structural
 creation/migration/removal events, optional filters, per-worker structural arenas
-and bulk playback, generated public chunk jobs, scheduler worker tokens, and
-field/serializer/prefab descriptors remain later work.
+and deeper grouped/compacted playback, generated public chunk jobs, scheduler
+worker tokens, and field/serializer/prefab descriptors remain later work.
 
 Run both executable test suites from the repository root:
 
