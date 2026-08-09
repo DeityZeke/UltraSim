@@ -150,7 +150,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     internal uint PreparePublicTransition(
         ArchetypeId sourceId,
-        ArchetypeId destinationId)
+        ArchetypeId destinationId,
+        out StructuralTransitionPhase phase)
     {
         EnsureCreated();
         if (_publicTransitionCount == _publicTransitions.Length)
@@ -160,8 +161,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
 
         ArchetypeTransitionPlan<TArena> plan = PrepareTransition(sourceId, destinationId);
-        _publicTransitions[_publicTransitionCount] = plan.ToPrepared(Id);
+        PreparedArchetypeTransition transition = plan.ToPrepared(Id);
+        _publicTransitions[_publicTransitionCount] = transition;
         _publicTransitionCount++;
+        phase = transition.Phase;
         return checked((uint)_publicTransitionCount);
     }
 
@@ -1511,9 +1514,6 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             plan,
             out destinationLocation);
     }
-
-    internal StructuralTransitionPhase GetPublicTransitionPhase(uint transitionId)
-        => GetPublicTransition(transitionId).Phase;
 
     internal bool TryTransition(
         Entity entity,

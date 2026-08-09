@@ -98,8 +98,10 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary), PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary);
         Run(nameof(PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes), PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes);
         Run(nameof(StructuralCommands_LayoutsOptionsAndCapacityAreExplicit), StructuralCommands_LayoutsOptionsAndCapacityAreExplicit);
+        Run(nameof(StructuralCommands_ClearAndEpochRolloverInvalidateEveryChainAndToken), StructuralCommands_ClearAndEpochRolloverInvalidateEveryChainAndToken);
         Run(nameof(PublicEcsWorld_DeferredCommandsApplyDeterministicPhases), PublicEcsWorld_DeferredCommandsApplyDeterministicPhases);
         Run(nameof(PublicEcsWorld_DeferredCreateTokensComposeAndExpire), PublicEcsWorld_DeferredCreateTokensComposeAndExpire);
+        Run(nameof(PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle), PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
         Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
         Run(nameof(PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes);
@@ -3181,7 +3183,7 @@ internal static class EcsPrimitiveTests
         world.BeginRun();
         StructuralCommandBuffer commands = world.StructuralCommands;
         Assert.Equal(2, commands.Capacity);
-        Assert.Equal(72L, commands.ReservedBytes);
+        Assert.Equal(80L, commands.ReservedBytes);
         Assert.True(world.TryCreate(source, out Entity entity));
         commands.EnqueueDestroy(entity);
         Assert.True(commands.TryEnqueueDestroy(entity));
@@ -3257,6 +3259,50 @@ internal static class EcsPrimitiveTests
             fixture.EnableLookup,
             out UltraSim.ECS.Tests.LayoutEnableLong destinationValue));
         Assert.Equal(22L, destinationValue.Value);
+    }
+
+    private static void StructuralCommands_ClearAndEpochRolloverInvalidateEveryChainAndToken()
+    {
+        using var cleared = new PublicWorldFixture(
+            entityCapacity: 3,
+            structuralCommandCapacity: 5);
+        Assert.True(cleared.World.TryCreate(cleared.Source, out Entity live));
+        StructuralCommandBuffer clearCommands = cleared.World.StructuralCommands;
+        DeferredEntity clearedToken = clearCommands.EnqueueCreateDefault(cleared.Source);
+        clearCommands.EnqueueDestroy(live);
+        clearCommands.EnqueueDestroy(clearedToken);
+        clearCommands.EnqueueTransition(live, cleared.SourceToDestination);
+        clearCommands.EnqueueTransition(live, cleared.DestinationToSource);
+        clearCommands.Clear();
+        Assert.Equal(0, clearCommands.Count);
+        Assert.False(clearCommands.TryResolve(clearedToken, out _));
+        clearCommands.EnqueueTransition(live, cleared.SourceToDestination);
+        StructuralPlaybackResult clearResult = cleared.World.PlaybackStructuralCommands();
+        Assert.Equal(1, clearResult.CommandCount);
+        Assert.Equal(1, clearResult.AddedCount);
+        Assert.Equal(0, clearResult.RejectedCount);
+
+        using var rollover = new PublicWorldFixture(
+            entityCapacity: 2,
+            structuralCommandCapacity: 1);
+        StructuralCommandBuffer rolloverCommands = rollover.World.StructuralCommands;
+        FieldInfo epoch = typeof(StructuralCommandBuffer).GetField(
+            "_epoch",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Structural epoch field was not found.");
+        epoch.SetValue(rolloverCommands, uint.MaxValue);
+        DeferredEntity oldToken = rolloverCommands.EnqueueCreateDefault(rollover.Source);
+        uint oldBufferId = oldToken.BufferId;
+        Assert.Equal(uint.MaxValue, oldToken.Epoch);
+        Assert.Equal(1, rollover.World.PlaybackStructuralCommands().CreatedCount);
+        Assert.True(rolloverCommands.TryResolve(oldToken, out _));
+
+        DeferredEntity newToken = rolloverCommands.EnqueueCreateDefault(rollover.Source);
+        Assert.Equal(1U, newToken.Epoch);
+        Assert.NotEqual(oldBufferId, newToken.BufferId);
+        Assert.False(rolloverCommands.TryResolve(oldToken, out _));
+        Assert.Equal(1, rollover.World.PlaybackStructuralCommands().CreatedCount);
+        Assert.True(rolloverCommands.TryResolve(newToken, out _));
     }
 
     private static void PublicEcsWorld_DeferredCreateTokensComposeAndExpire()
@@ -3379,6 +3425,245 @@ internal static class EcsPrimitiveTests
         }).GetAwaiter().GetResult();
         Assert.True(wrongThread is InvalidOperationException);
         Assert.Equal(0, commands.Count);
+    }
+
+    private static void PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle()
+    {
+        const int iterations = 64;
+        const int initialEntityCount = 16;
+        const int commandCapacity = 128;
+        var random = new Random(unchecked((int)0x51A7_C0DE));
+        for (int iteration = 0; iteration < iterations; iteration++)
+        {
+            using var indexed = new PublicWorldFixture(
+                entityCapacity: 20,
+                structuralCommandCapacity: commandCapacity);
+            using var scalar = new PublicWorldFixture(
+                entityCapacity: 20,
+                structuralCommandCapacity: commandCapacity);
+            var indexedEntities = new Entity[initialEntityCount];
+            var scalarEntities = new Entity[initialEntityCount];
+            for (int i = 0; i < initialEntityCount; i++)
+            {
+                ArchetypeHandle indexedArchetype = i < 12
+                    ? indexed.Source
+                    : indexed.Destination;
+                ArchetypeHandle scalarArchetype = i < 12
+                    ? scalar.Source
+                    : scalar.Destination;
+                var value = new UltraSim.ECS.Tests.LayoutEnableLong
+                {
+                    Value = unchecked((iteration * 1_009L) + (i * 37L) + 11),
+                };
+                Assert.True(indexed.World.TryCreate(
+                    indexedArchetype,
+                    indexed.EnableLookup,
+                    value,
+                    out indexedEntities[i]));
+                Assert.True(scalar.World.TryCreate(
+                    scalarArchetype,
+                    scalar.EnableLookup,
+                    value,
+                    out scalarEntities[i]));
+                bool enabled = (i & 1) == 0;
+                Assert.True(indexed.World.TrySetEnabled(
+                    indexedEntities[i],
+                    indexed.EnableLookup,
+                    enabled));
+                Assert.True(scalar.World.TrySetEnabled(
+                    scalarEntities[i],
+                    scalar.EnableLookup,
+                    enabled));
+            }
+
+            Assert.True(indexed.World.TryCreate(indexed.Source, out Entity indexedStale));
+            Assert.True(scalar.World.TryCreate(scalar.Source, out Entity scalarStale));
+            Assert.True(indexed.World.TryDestroy(indexedStale));
+            Assert.True(scalar.World.TryDestroy(scalarStale));
+
+            StructuralCommandBuffer indexedCommands = indexed.World.StructuralCommands;
+            StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
+            indexedCommands.EnqueueDestroy(indexedStale);
+            scalarCommands.EnqueueDestroy(scalarStale);
+            indexedCommands.EnqueueTransition(indexedStale, indexed.SourceToDestination);
+            scalarCommands.EnqueueTransition(scalarStale, scalar.SourceToDestination);
+
+            var indexedTokens = new DeferredEntity[64];
+            var scalarTokens = new DeferredEntity[64];
+            int tokenCount = 0;
+            for (int command = 0; command < 44; command++)
+            {
+                int target = random.Next(initialEntityCount);
+                switch (random.Next(6))
+                {
+                    case 0:
+                        indexedCommands.EnqueueDestroy(indexedEntities[target]);
+                        scalarCommands.EnqueueDestroy(scalarEntities[target]);
+                        break;
+                    case 1:
+                        indexedCommands.EnqueueTransition(
+                            indexedEntities[target],
+                            indexed.SourceToDestination);
+                        scalarCommands.EnqueueTransition(
+                            scalarEntities[target],
+                            scalar.SourceToDestination);
+                        break;
+                    case 2:
+                        indexedCommands.EnqueueTransition(
+                            indexedEntities[target],
+                            indexed.DestinationToSource);
+                        scalarCommands.EnqueueTransition(
+                            scalarEntities[target],
+                            scalar.DestinationToSource);
+                        break;
+                    case 3:
+                        indexedCommands.EnqueueDestroy(indexedEntities[target]);
+                        indexedCommands.EnqueueDestroy(indexedEntities[target]);
+                        scalarCommands.EnqueueDestroy(scalarEntities[target]);
+                        scalarCommands.EnqueueDestroy(scalarEntities[target]);
+                        break;
+                    case 4:
+                        indexedTokens[tokenCount] = indexedCommands.EnqueueCreateDefault(indexed.Source);
+                        scalarTokens[tokenCount] = scalarCommands.EnqueueCreateDefault(scalar.Source);
+                        indexedCommands.EnqueueTransition(
+                            indexedTokens[tokenCount],
+                            indexed.SourceToDestination);
+                        scalarCommands.EnqueueTransition(
+                            scalarTokens[tokenCount],
+                            scalar.SourceToDestination);
+                        tokenCount++;
+                        break;
+                    default:
+                        indexedTokens[tokenCount] = indexedCommands.EnqueueCreateDefault(indexed.Destination);
+                        scalarTokens[tokenCount] = scalarCommands.EnqueueCreateDefault(scalar.Destination);
+                        indexedCommands.EnqueueDestroy(indexedTokens[tokenCount]);
+                        scalarCommands.EnqueueDestroy(scalarTokens[tokenCount]);
+                        tokenCount++;
+                        break;
+                }
+            }
+
+            // Force entity-capacity pressure after live destroys have made a
+            // command-order-dependent number of slots available.
+            for (int i = 0; i < 16; i++)
+            {
+                indexedTokens[tokenCount] = indexedCommands.EnqueueCreateDefault(indexed.Source);
+                scalarTokens[tokenCount] = scalarCommands.EnqueueCreateDefault(scalar.Source);
+                tokenCount++;
+            }
+
+            Assert.Equal(indexedCommands.Count, scalarCommands.Count);
+            StructuralPlaybackResult indexedResult =
+                indexed.World.PlaybackStructuralCommands();
+            StructuralPlaybackResult scalarResult =
+                scalar.World.PlaybackStructuralCommandsScalarOracle();
+            AssertPlaybackResultsEqual(indexedResult, scalarResult);
+            Assert.Equal(indexed.World.AliveCount, scalar.World.AliveCount);
+            Assert.Equal(indexed.World.CurrentChangeVersion, scalar.World.CurrentChangeVersion);
+
+            for (int i = 0; i < initialEntityCount; i++)
+            {
+                AssertLogicalEntitiesEqual(
+                    indexed,
+                    indexedEntities[i],
+                    scalar,
+                    scalarEntities[i]);
+            }
+            for (int i = 0; i < tokenCount; i++)
+            {
+                bool indexedResolved = indexedCommands.TryResolve(
+                    indexedTokens[i],
+                    out Entity indexedEntity);
+                bool scalarResolved = scalarCommands.TryResolve(
+                    scalarTokens[i],
+                    out Entity scalarEntity);
+                Assert.Equal(indexedResolved, scalarResolved);
+                if (indexedResolved)
+                {
+                    AssertLogicalEntitiesEqual(
+                        indexed,
+                        indexedEntity,
+                        scalar,
+                        scalarEntity);
+                }
+            }
+
+            // Exhausting both pools compares free-list order and generation state,
+            // including entities destroyed through deferred tokens.
+            while (true)
+            {
+                bool indexedCreated = indexed.World.TryCreate(indexed.Source, out Entity indexedEntity);
+                bool scalarCreated = scalar.World.TryCreate(scalar.Source, out Entity scalarEntity);
+                Assert.Equal(indexedCreated, scalarCreated);
+                if (!indexedCreated)
+                    break;
+                Assert.Equal(indexedEntity.Index, scalarEntity.Index);
+                Assert.Equal(indexedEntity.Generation, scalarEntity.Generation);
+            }
+            Assert.Equal(indexed.World.AliveCount, scalar.World.AliveCount);
+        }
+    }
+
+    private static void AssertPlaybackResultsEqual(
+        in StructuralPlaybackResult expected,
+        in StructuralPlaybackResult actual)
+    {
+        Assert.Equal(expected.Epoch, actual.Epoch);
+        Assert.Equal(expected.CommandCount, actual.CommandCount);
+        Assert.Equal(expected.CreatedCount, actual.CreatedCount);
+        Assert.Equal(expected.DestroyedCount, actual.DestroyedCount);
+        Assert.Equal(expected.RemovedCount, actual.RemovedCount);
+        Assert.Equal(expected.AddedCount, actual.AddedCount);
+        Assert.Equal(expected.RejectedCreateCount, actual.RejectedCreateCount);
+        Assert.Equal(expected.RejectedDestroyCount, actual.RejectedDestroyCount);
+        Assert.Equal(expected.RejectedTransitionCount, actual.RejectedTransitionCount);
+    }
+
+    private static void AssertLogicalEntitiesEqual(
+        PublicWorldFixture expectedFixture,
+        Entity expectedEntity,
+        PublicWorldFixture actualFixture,
+        Entity actualEntity)
+    {
+        Assert.Equal(expectedEntity.Index, actualEntity.Index);
+        Assert.Equal(expectedEntity.Generation, actualEntity.Generation);
+        bool expectedAlive = expectedFixture.World.IsAlive(expectedEntity);
+        bool actualAlive = actualFixture.World.IsAlive(actualEntity);
+        Assert.Equal(expectedAlive, actualAlive);
+        if (!expectedAlive)
+            return;
+
+        Assert.True(expectedFixture.World.TryGetArchetype(
+            expectedEntity,
+            out ArchetypeHandle expectedArchetype));
+        Assert.True(actualFixture.World.TryGetArchetype(
+            actualEntity,
+            out ArchetypeHandle actualArchetype));
+        Assert.Equal(expectedArchetype.Id, actualArchetype.Id);
+        Assert.True(expectedFixture.World.TryRead(
+            expectedEntity,
+            expectedFixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong expectedValue));
+        Assert.True(actualFixture.World.TryRead(
+            actualEntity,
+            actualFixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong actualValue));
+        Assert.Equal(expectedValue.Value, actualValue.Value);
+        Assert.True(expectedFixture.World.TryGetEnabled(
+            expectedEntity,
+            expectedFixture.EnableLookup,
+            out bool expectedEnabled));
+        Assert.True(actualFixture.World.TryGetEnabled(
+            actualEntity,
+            actualFixture.EnableLookup,
+            out bool actualEnabled));
+        Assert.Equal(expectedEnabled, actualEnabled);
+        Assert.Equal(
+            expectedFixture.World.Has(expectedEntity, expectedFixture.IntLookup),
+            actualFixture.World.Has(actualEntity, actualFixture.IntLookup));
+        Assert.Equal(
+            expectedFixture.World.Has(expectedEntity, expectedFixture.TagLookup),
+            actualFixture.World.Has(actualEntity, actualFixture.TagLookup));
     }
 
     private static void PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot()

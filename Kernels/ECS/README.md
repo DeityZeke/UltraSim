@@ -94,9 +94,9 @@ allocation:
   entity pool, archetype stores, or arenas after world disposal; disposal
   releases the lookup route array.
 - `StructuralCommandBuffer` is the first bounded deferred-mutation foothold. It
-  preallocates a 24-byte unmanaged command plus a 12-byte entity-result slot for
-  every configured command, records scalar or atomic span batches without
-  managed allocation, and issues 16-byte barrier-local `DeferredEntity` tokens
+  preallocates a 24-byte unmanaged command, a 12-byte entity-result slot, and a
+  four-byte stable phase link for every configured command, records scalar or
+  atomic span batches without managed allocation, and issues 16-byte barrier-local `DeferredEntity` tokens
   so a create can be targeted by later transition/destroy commands in the same
   epoch. Playback is explicitly ordered as live destroy, create, deferred
   destroy, remove transition, then add/replacement transition, while preserving
@@ -104,10 +104,15 @@ allocation:
   and capacity failures are consumed and counted; unexpected failures fault the
   world and invalidate the buffer. Tokens expire when a new recording epoch
   begins, and resolution reports the creation result rather than promising that
-  the entity survived later commands.
-- This first command path is main-thread/single-owner and deliberately scalar
-  underneath its phase scans. It proves bounded storage, composition, conflict
-  semantics, lifecycle barriers, and zero warmed allocation. Per-worker arenas,
+  the entity survived later commands. Exhausting the 32-bit epoch rotates the
+  process-unique buffer identity instead of permitting token ABA.
+- Recording appends each command to one stable live-destroy/create/deferred-
+  destroy/remove/add chain. Playback therefore visits only commands in the active
+  phase while preserving exact record order inside it; the retained scalar
+  five-scan executor remains an internal differential oracle. World mutations
+  underneath those chains are still scalar. This proves bounded storage,
+  composition, conflict semantics, lifecycle barriers, and zero warmed
+  allocation. Per-worker arenas,
   deterministic worker merge, operation/source/transition grouping, bulk row
   reservation/copy/compaction, typed component payloads, prefab expansion, and
   lifecycle publication remain later structural work and must be measured
@@ -269,7 +274,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 180 passing tests, including
+The current runtime and primitive suite has 182 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -352,9 +357,11 @@ parity, and 10,000 warmed allocation-free two-write/exact-read cycles. Deferred
 structural tests lock record/handle/result layouts and reserved bytes; strict and
 `Try` capacity behavior; atomic batch recording; deterministic phase conflicts;
 stale, duplicate, foreign, default, and wrong-thread rejection; create-token
-composition and epoch expiry; capacity failures; execution-barrier recording
-versus playback rules; disposal/fault invalidation; and a 250,000-transition
-warmed zero-allocation gate.
+composition, epoch expiry, rollover identity rotation, and mixed-chain clear;
+capacity failures; execution-barrier recording versus playback rules;
+disposal/fault invalidation; a 64-seed randomized phase-index-versus-scalar
+differential model covering logical state and generation/free-list order; and a
+250,000-transition warmed zero-allocation gate.
 
 This is now a usable public single-owner component/archetype slice, not yet the
 public scheduler/host ECS. The current generators emit the core manifest, a

@@ -22,7 +22,8 @@ internal readonly struct StructuralCommandRecord
 {
     private readonly StructuralCommandKind _kind;
     private readonly StructuralCommandTargetKind _targetKind;
-    private readonly ushort _reserved;
+    private readonly StructuralTransitionPhase _transitionPhase;
+    private readonly byte _reserved;
     private readonly uint _argument;
     private readonly uint _target0;
     private readonly uint _target1;
@@ -32,6 +33,7 @@ internal readonly struct StructuralCommandRecord
     private StructuralCommandRecord(
         StructuralCommandKind kind,
         StructuralCommandTargetKind targetKind,
+        StructuralTransitionPhase transitionPhase,
         uint argument,
         uint target0,
         uint target1,
@@ -40,6 +42,7 @@ internal readonly struct StructuralCommandRecord
     {
         _kind = kind;
         _targetKind = targetKind;
+        _transitionPhase = transitionPhase;
         _reserved = 0;
         _argument = argument;
         _target0 = target0;
@@ -52,11 +55,14 @@ internal readonly struct StructuralCommandRecord
 
     internal StructuralCommandTargetKind TargetKind => _targetKind;
 
+    internal StructuralTransitionPhase TransitionPhase => _transitionPhase;
+
     internal uint Argument => _argument;
 
     internal static StructuralCommandRecord CreateDefault(ArchetypeId archetypeId) => new(
         StructuralCommandKind.CreateDefault,
         StructuralCommandTargetKind.None,
+        default,
         archetypeId.Value,
         0,
         0,
@@ -66,6 +72,7 @@ internal readonly struct StructuralCommandRecord
     internal static StructuralCommandRecord Destroy(Entity entity) => new(
         StructuralCommandKind.Destroy,
         StructuralCommandTargetKind.Entity,
+        default,
         0,
         entity.World.Value,
         entity.Index,
@@ -75,24 +82,33 @@ internal readonly struct StructuralCommandRecord
     internal static StructuralCommandRecord Destroy(DeferredEntity entity) => new(
         StructuralCommandKind.Destroy,
         StructuralCommandTargetKind.Deferred,
+        default,
         0,
         entity.BufferId,
         entity.Epoch,
         entity.CommandIndex,
         0);
 
-    internal static StructuralCommandRecord Transition(Entity entity, uint transitionId) => new(
+    internal static StructuralCommandRecord Transition(
+        Entity entity,
+        uint transitionId,
+        StructuralTransitionPhase phase) => new(
         StructuralCommandKind.Transition,
         StructuralCommandTargetKind.Entity,
+        phase,
         transitionId,
         entity.World.Value,
         entity.Index,
         entity.Generation,
         0);
 
-    internal static StructuralCommandRecord Transition(DeferredEntity entity, uint transitionId) => new(
+    internal static StructuralCommandRecord Transition(
+        DeferredEntity entity,
+        uint transitionId,
+        StructuralTransitionPhase phase) => new(
         StructuralCommandKind.Transition,
         StructuralCommandTargetKind.Deferred,
+        phase,
         transitionId,
         entity.BufferId,
         entity.Epoch,

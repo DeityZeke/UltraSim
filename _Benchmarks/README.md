@@ -381,6 +381,27 @@ playback result, and 3,600,000 fixed bytes for the 100,000-slot command fixture
 captures separate, then compare this scalar baseline against grouped/bulk playback
 using equivalent canonical final state.
 
+The v24 profile, `ecs-next-phase1-phase-indexed-structural-commands-v24`, adds a
+four-byte stable phase link per command. Recording appends directly to ordered
+live-destroy, create, deferred-destroy, remove, and add chains; production
+playback visits only the selected chain, while the v23 five-scan executor remains
+available internally as a differential and benchmark oracle. The arena grows
+from 36 to 40 payload bytes per slot, or from 3,600,000 to 4,000,000 bytes for
+the 100,000-command fixture. Epoch maximum now rotates the process-unique buffer
+ID rather than reusing an old token identity.
+
+Three comparison scenarios bring the suite to 91: scalar-oracle end-to-end,
+scalar-oracle playback-only, and phase-indexed playback-only, alongside the
+existing production end-to-end case. A focused same-process run measured
+100,000 transitions at `112.722/101.265 ns/command` for scalar/indexed
+end-to-end and `99.644/96.645 ns/command` for playback only. The complete
+91-scenario process measured `133.079/123.049 ns/command` end-to-end, but the
+playback-only pair tied at `117.953/118.144 ns/command`. All paths reported zero
+managed bytes and zero Gen0/1/2 collections. The result is intentionally modest
+and process-sensitive: stable phase chains are useful infrastructure for later
+route grouping, but repeated isolated processes must justify their four-byte
+cost, and true bulk store mutation remains the dominant opportunity.
+
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover
 the measured workload but are not production GC-pause distributions. Managed

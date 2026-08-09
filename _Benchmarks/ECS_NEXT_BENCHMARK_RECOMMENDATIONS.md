@@ -262,7 +262,9 @@ detect lost or spuriously broadened history.
 
 ## Structural command and barrier guards
 
-Treat the v23 main-thread command arena as a scalar correctness/memory baseline.
+Treat the retained v23 scalar executor as the correctness oracle and the v24
+stable phase chains as the first indexed candidate. Both must remain executable
+against identical streams while grouping and bulk paths are introduced.
 Split later scenarios into record-only, playback-only, and end-to-end variants so
 a faster recorder cannot conceal a slower serial barrier. Cross 1K, 10K, 100K,
 and 1M commands with homogeneous create/destroy/remove/add streams, realistic
@@ -274,8 +276,8 @@ bytes, scratch high-water, allocations, and collections.
 
 As grouped playback lands, compare the same canonical workload at each step:
 
-- current scalar phase scans and scalar world operations;
-- phase partitioning without store grouping;
+- retained scalar phase scans and scalar world operations;
+- record-time stable phase chains without store grouping;
 - grouping by source archetype and transition;
 - bulk destination reservation and component copy;
 - ordered whole-chunk and sparse source compaction;

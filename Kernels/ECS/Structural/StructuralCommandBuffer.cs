@@ -16,8 +16,9 @@ public sealed class StructuralCommandBuffer
 {
     private readonly StructuralCommandRecord[] _commands;
     private readonly Entity[] _createdEntities;
+    private readonly int[] _nextCommand;
     private readonly WorldId _worldId;
-    private readonly uint _bufferId;
+    private uint _bufferId;
     private readonly int _ownerThreadId;
     private int _count;
     private int _lastPlaybackCommandCount;
@@ -25,6 +26,11 @@ public sealed class StructuralCommandBuffer
     private bool _hasCompletedPlayback;
     private bool _isPlaying;
     private bool _isActive;
+    private PhaseChain _liveDestroys;
+    private PhaseChain _creates;
+    private PhaseChain _deferredDestroys;
+    private PhaseChain _removes;
+    private PhaseChain _adds;
 
     internal StructuralCommandBuffer(WorldId worldId, int ownerThreadId, int capacity)
     {
@@ -40,6 +46,7 @@ public sealed class StructuralCommandBuffer
         _ownerThreadId = ownerThreadId;
         _commands = new StructuralCommandRecord[capacity];
         _createdEntities = new Entity[capacity];
+        _nextCommand = new int[capacity];
         _epoch = 1;
         _isActive = true;
     }
@@ -58,12 +65,14 @@ public sealed class StructuralCommandBuffer
     }
 
     /// <summary>
-    /// Payload bytes reserved by command and create-result arrays. Managed array
-    /// headers and the buffer object are deliberately excluded.
+    /// Payload bytes reserved by command, create-result, and stable phase-link
+    /// arrays. Managed array headers and the buffer object are deliberately excluded.
     /// </summary>
     public long ReservedBytes => checked(
         (long)_commands.Length *
-        (Unsafe.SizeOf<StructuralCommandRecord>() + Unsafe.SizeOf<Entity>()));
+        (Unsafe.SizeOf<StructuralCommandRecord>() +
+         Unsafe.SizeOf<Entity>() +
+         sizeof(int)));
 
     public DeferredEntity EnqueueCreateDefault(ArchetypeHandle archetype)
     {
@@ -86,8 +95,7 @@ public sealed class StructuralCommandBuffer
         }
 
         int commandIndex = _count;
-        _commands[commandIndex] = StructuralCommandRecord.CreateDefault(archetype.Id);
-        _count++;
+        AppendTrusted(StructuralCommandRecord.CreateDefault(archetype.Id));
         entity = new DeferredEntity(
             _worldId,
             _bufferId,
@@ -128,8 +136,8 @@ public sealed class StructuralCommandBuffer
 
         for (int index = 0; index < archetypes.Length; index++)
         {
-            int commandIndex = _count++;
-            _commands[commandIndex] = StructuralCommandRecord.CreateDefault(archetypes[index].Id);
+            int commandIndex = _count;
+            AppendTrusted(StructuralCommandRecord.CreateDefault(archetypes[index].Id));
             entities[index] = new DeferredEntity(
                 _worldId,
                 _bufferId,
@@ -172,7 +180,7 @@ public sealed class StructuralCommandBuffer
         if (entities.Length > _commands.Length - _count)
             return false;
         for (int index = 0; index < entities.Length; index++)
-            _commands[_count++] = StructuralCommandRecord.Destroy(entities[index]);
+            AppendTrusted(StructuralCommandRecord.Destroy(entities[index]));
         return true;
     }
 
@@ -202,7 +210,10 @@ public sealed class StructuralCommandBuffer
         ValidateEntity(entity, nameof(entity));
         ValidateTransition(transition, nameof(transition));
         BeginRecordingIfNeeded();
-        return TryAppend(StructuralCommandRecord.Transition(entity, transition.TransitionId));
+        return TryAppend(StructuralCommandRecord.Transition(
+            entity,
+            transition.TransitionId,
+            transition.Phase));
     }
 
     public void EnqueueTransition(
@@ -230,9 +241,10 @@ public sealed class StructuralCommandBuffer
             return false;
         for (int index = 0; index < entities.Length; index++)
         {
-            _commands[_count++] = StructuralCommandRecord.Transition(
+            AppendTrusted(StructuralCommandRecord.Transition(
                 entities[index],
-                transition.TransitionId);
+                transition.TransitionId,
+                transition.Phase));
         }
         return true;
     }
@@ -251,7 +263,10 @@ public sealed class StructuralCommandBuffer
         ValidateDeferredEntity(entity, nameof(entity));
         ValidateTransition(transition, nameof(transition));
         BeginRecordingIfNeeded();
-        return TryAppend(StructuralCommandRecord.Transition(entity, transition.TransitionId));
+        return TryAppend(StructuralCommandRecord.Transition(
+            entity,
+            transition.TransitionId,
+            transition.Phase));
     }
 
     public void EnqueueTransition(
@@ -279,9 +294,10 @@ public sealed class StructuralCommandBuffer
             return false;
         for (int index = 0; index < entities.Length; index++)
         {
-            _commands[_count++] = StructuralCommandRecord.Transition(
+            AppendTrusted(StructuralCommandRecord.Transition(
                 entities[index],
-                transition.TransitionId);
+                transition.TransitionId,
+                transition.Phase));
         }
         return true;
     }
@@ -317,7 +333,19 @@ public sealed class StructuralCommandBuffer
         ResetForNewEpoch();
     }
 
-    internal StructuralPlaybackResult Playback(EcsWorld<NativeChunkArena> world)
+    internal StructuralPlaybackResult Playback(EcsWorld<NativeChunkArena> world) =>
+        PlaybackCore(world, usePhaseIndex: true);
+
+    /// <summary>
+    /// Retained reference executor for differential tests and same-process
+    /// benchmarks. Production playback must use the phase-indexed path.
+    /// </summary>
+    internal StructuralPlaybackResult PlaybackScalarOracle(EcsWorld<NativeChunkArena> world) =>
+        PlaybackCore(world, usePhaseIndex: false);
+
+    private StructuralPlaybackResult PlaybackCore(
+        EcsWorld<NativeChunkArena> world,
+        bool usePhaseIndex)
     {
         ArgumentNullException.ThrowIfNull(world);
         EnsureOwnerAndActive();
@@ -327,74 +355,26 @@ public sealed class StructuralCommandBuffer
             return default;
 
         int commandCount = _count;
-        int created = 0;
-        int destroyed = 0;
-        int removed = 0;
-        int added = 0;
-        int rejectedCreate = 0;
-        int rejectedDestroy = 0;
-        int rejectedTransition = 0;
+        var counts = new PlaybackCounts();
         bool completed = false;
         _isPlaying = true;
         try
         {
-            ExecuteDestroyPass(
-                world,
-                commandCount,
-                StructuralCommandTargetKind.Entity,
-                ref destroyed,
-                ref rejectedDestroy);
-
-            for (int index = 0; index < commandCount; index++)
-            {
-                StructuralCommandRecord command = _commands[index];
-                if (command.Kind != StructuralCommandKind.CreateDefault)
-                    continue;
-
-                if (world.TryCreateDefault(new ArchetypeId(command.Argument), out Entity entity))
-                {
-                    _createdEntities[index] = entity;
-                    created++;
-                }
-                else
-                {
-                    _createdEntities[index] = Entity.Null;
-                    rejectedCreate++;
-                }
-            }
-
-            // A deferred destroy cannot resolve before its create phase. It still
-            // precedes every remove/add transition and therefore wins conflicts.
-            ExecuteDestroyPass(
-                world,
-                commandCount,
-                StructuralCommandTargetKind.Deferred,
-                ref destroyed,
-                ref rejectedDestroy);
-
-            ExecuteTransitionPass(
-                world,
-                commandCount,
-                StructuralTransitionPhase.Remove,
-                ref removed,
-                ref rejectedTransition);
-            ExecuteTransitionPass(
-                world,
-                commandCount,
-                StructuralTransitionPhase.Add,
-                ref added,
-                ref rejectedTransition);
+            if (usePhaseIndex)
+                ExecutePhaseIndexed(world, commandCount, ref counts);
+            else
+                ExecuteScalarOracle(world, commandCount, ref counts);
 
             var result = new StructuralPlaybackResult(
                 _epoch,
                 commandCount,
-                created,
-                destroyed,
-                removed,
-                added,
-                rejectedCreate,
-                rejectedDestroy,
-                rejectedTransition);
+                counts.Created,
+                counts.Destroyed,
+                counts.Removed,
+                counts.Added,
+                counts.RejectedCreate,
+                counts.RejectedDestroy,
+                counts.RejectedTransition);
             _lastPlaybackCommandCount = commandCount;
             _hasCompletedPlayback = true;
             completed = true;
@@ -403,6 +383,7 @@ public sealed class StructuralCommandBuffer
         finally
         {
             _count = 0;
+            ResetPhaseChains();
             _isPlaying = false;
             if (!completed)
             {
@@ -413,6 +394,83 @@ public sealed class StructuralCommandBuffer
         }
     }
 
+    private void ExecutePhaseIndexed(
+        EcsWorld<NativeChunkArena> world,
+        int commandCount,
+        ref PlaybackCounts counts)
+    {
+        ExecuteIndexedDestroyChain(
+            world,
+            commandCount,
+            _liveDestroys,
+            ref counts);
+        ExecuteIndexedCreateChain(
+            world,
+            _creates,
+            ref counts);
+        ExecuteIndexedDestroyChain(
+            world,
+            commandCount,
+            _deferredDestroys,
+            ref counts);
+        ExecuteIndexedTransitionChain(
+            world,
+            commandCount,
+            _removes,
+            StructuralTransitionPhase.Remove,
+            ref counts.Removed,
+            ref counts.RejectedTransition);
+        ExecuteIndexedTransitionChain(
+            world,
+            commandCount,
+            _adds,
+            StructuralTransitionPhase.Add,
+            ref counts.Added,
+            ref counts.RejectedTransition);
+    }
+
+    private void ExecuteScalarOracle(
+        EcsWorld<NativeChunkArena> world,
+        int commandCount,
+        ref PlaybackCounts counts)
+    {
+        ExecuteScalarDestroyPass(
+            world,
+            commandCount,
+            StructuralCommandTargetKind.Entity,
+            ref counts.Destroyed,
+            ref counts.RejectedDestroy);
+
+        for (int index = 0; index < commandCount; index++)
+        {
+            StructuralCommandRecord command = _commands[index];
+            if (command.Kind == StructuralCommandKind.CreateDefault)
+                ExecuteCreate(command, index, world, ref counts);
+        }
+
+        // A deferred destroy cannot resolve before its create phase. It still
+        // precedes every remove/add transition and therefore wins conflicts.
+        ExecuteScalarDestroyPass(
+            world,
+            commandCount,
+            StructuralCommandTargetKind.Deferred,
+            ref counts.Destroyed,
+            ref counts.RejectedDestroy);
+
+        ExecuteScalarTransitionPass(
+            world,
+            commandCount,
+            StructuralTransitionPhase.Remove,
+            ref counts.Removed,
+            ref counts.RejectedTransition);
+        ExecuteScalarTransitionPass(
+            world,
+            commandCount,
+            StructuralTransitionPhase.Add,
+            ref counts.Added,
+            ref counts.RejectedTransition);
+    }
+
     internal void Invalidate()
     {
         if (!_isActive)
@@ -421,13 +479,65 @@ public sealed class StructuralCommandBuffer
         int clearCount = Math.Max(_count, _lastPlaybackCommandCount);
         _createdEntities.AsSpan(0, clearCount).Clear();
         _count = 0;
+        ResetPhaseChains();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
         _isPlaying = false;
         _isActive = false;
     }
 
-    private void ExecuteDestroyPass(
+    private void ExecuteIndexedCreateChain(
+        EcsWorld<NativeChunkArena> world,
+        in PhaseChain chain,
+        ref PlaybackCounts counts)
+    {
+        for (int link = chain.HeadLink; link != 0;)
+        {
+            int commandIndex = link - 1;
+            link = _nextCommand[commandIndex];
+            ExecuteCreate(_commands[commandIndex], commandIndex, world, ref counts);
+        }
+    }
+
+    private void ExecuteCreate(
+        in StructuralCommandRecord command,
+        int commandIndex,
+        EcsWorld<NativeChunkArena> world,
+        ref PlaybackCounts counts)
+    {
+        if (world.TryCreateDefault(new ArchetypeId(command.Argument), out Entity entity))
+        {
+            _createdEntities[commandIndex] = entity;
+            counts.Created++;
+        }
+        else
+        {
+            _createdEntities[commandIndex] = Entity.Null;
+            counts.RejectedCreate++;
+        }
+    }
+
+    private void ExecuteIndexedDestroyChain(
+        EcsWorld<NativeChunkArena> world,
+        int commandCount,
+        in PhaseChain chain,
+        ref PlaybackCounts counts)
+    {
+        for (int link = chain.HeadLink; link != 0;)
+        {
+            int commandIndex = link - 1;
+            link = _nextCommand[commandIndex];
+            StructuralCommandRecord command = _commands[commandIndex];
+            ExecuteDestroy(
+                command,
+                commandCount,
+                world,
+                ref counts.Destroyed,
+                ref counts.RejectedDestroy);
+        }
+    }
+
+    private void ExecuteScalarDestroyPass(
         EcsWorld<NativeChunkArena> world,
         int commandCount,
         StructuralCommandTargetKind targetKind,
@@ -440,20 +550,49 @@ public sealed class StructuralCommandBuffer
             if (command.Kind != StructuralCommandKind.Destroy || command.TargetKind != targetKind)
                 continue;
 
-            if (!TryResolveTarget(command, commandCount, out Entity entity, out int createIndex) ||
-                !world.TryDestroy(entity))
-            {
-                rejected++;
-                continue;
-            }
-
-            if (createIndex >= 0)
-                _createdEntities[createIndex] = Entity.Null;
-            destroyed++;
+            ExecuteDestroy(command, commandCount, world, ref destroyed, ref rejected);
         }
     }
 
-    private void ExecuteTransitionPass(
+    private void ExecuteDestroy(
+        in StructuralCommandRecord command,
+        int commandCount,
+        EcsWorld<NativeChunkArena> world,
+        ref int destroyed,
+        ref int rejected)
+    {
+        if (!TryResolveTarget(command, commandCount, out Entity entity, out int createIndex) ||
+            !world.TryDestroy(entity))
+        {
+            rejected++;
+            return;
+        }
+
+        if (createIndex >= 0)
+            _createdEntities[createIndex] = Entity.Null;
+        destroyed++;
+    }
+
+    private void ExecuteIndexedTransitionChain(
+        EcsWorld<NativeChunkArena> world,
+        int commandCount,
+        in PhaseChain chain,
+        StructuralTransitionPhase expectedPhase,
+        ref int applied,
+        ref int rejected)
+    {
+        for (int link = chain.HeadLink; link != 0;)
+        {
+            int commandIndex = link - 1;
+            link = _nextCommand[commandIndex];
+            StructuralCommandRecord command = _commands[commandIndex];
+            if (command.TransitionPhase != expectedPhase)
+                ThrowCommandInvariant("A phase-indexed transition was routed to the wrong phase.");
+            ExecuteTransition(command, commandCount, world, ref applied, ref rejected);
+        }
+    }
+
+    private void ExecuteScalarTransitionPass(
         EcsWorld<NativeChunkArena> world,
         int commandCount,
         StructuralTransitionPhase phase,
@@ -464,20 +603,30 @@ public sealed class StructuralCommandBuffer
         {
             StructuralCommandRecord command = _commands[index];
             if (command.Kind != StructuralCommandKind.Transition ||
-                world.GetPublicTransitionPhase(command.Argument) != phase)
+                command.TransitionPhase != phase)
             {
                 continue;
             }
 
-            if (!TryResolveTarget(command, commandCount, out Entity entity, out _) ||
-                !world.TryTransition(entity, command.Argument, out _))
-            {
-                rejected++;
-                continue;
-            }
-
-            applied++;
+            ExecuteTransition(command, commandCount, world, ref applied, ref rejected);
         }
+    }
+
+    private void ExecuteTransition(
+        in StructuralCommandRecord command,
+        int commandCount,
+        EcsWorld<NativeChunkArena> world,
+        ref int applied,
+        ref int rejected)
+    {
+        if (!TryResolveTarget(command, commandCount, out Entity entity, out _) ||
+            !world.TryTransition(entity, command.Argument, out _))
+        {
+            rejected++;
+            return;
+        }
+
+        applied++;
     }
 
     private bool TryResolveTarget(
@@ -516,8 +665,52 @@ public sealed class StructuralCommandBuffer
     {
         if (_count == _commands.Length)
             return false;
-        _commands[_count++] = command;
+        AppendTrusted(command);
         return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AppendTrusted(in StructuralCommandRecord command)
+    {
+        int commandIndex = _count++;
+        _commands[commandIndex] = command;
+        _nextCommand[commandIndex] = 0;
+        ref PhaseChain chain = ref GetPhaseChain(GetPlaybackPhase(command));
+        int link = commandIndex + 1;
+        if (chain.HeadLink == 0)
+            chain.HeadLink = link;
+        else
+            _nextCommand[chain.TailIndex] = link;
+        chain.TailIndex = commandIndex;
+    }
+
+    private ref PhaseChain GetPhaseChain(StructuralPlaybackPhase phase)
+    {
+        switch (phase)
+        {
+            case StructuralPlaybackPhase.LiveDestroy:
+                return ref _liveDestroys;
+            case StructuralPlaybackPhase.Create:
+                return ref _creates;
+            case StructuralPlaybackPhase.DeferredDestroy:
+                return ref _deferredDestroys;
+            case StructuralPlaybackPhase.Remove:
+                return ref _removes;
+            case StructuralPlaybackPhase.Add:
+                return ref _adds;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(phase));
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ResetPhaseChains()
+    {
+        _liveDestroys = default;
+        _creates = default;
+        _deferredDestroys = default;
+        _removes = default;
+        _adds = default;
     }
 
     private void BeginRecordingIfNeeded()
@@ -530,7 +723,7 @@ public sealed class StructuralCommandBuffer
         _createdEntities.AsSpan(0, _lastPlaybackCommandCount).Clear();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
-        _epoch = NextEpoch(_epoch);
+        AdvanceEpoch();
     }
 
     private void ResetForNewEpoch()
@@ -538,9 +731,10 @@ public sealed class StructuralCommandBuffer
         int clearCount = Math.Max(_count, _lastPlaybackCommandCount);
         _createdEntities.AsSpan(0, clearCount).Clear();
         _count = 0;
+        ResetPhaseChains();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
-        _epoch = NextEpoch(_epoch);
+        AdvanceEpoch();
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -581,6 +775,36 @@ public sealed class StructuralCommandBuffer
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static StructuralPlaybackPhase GetPlaybackPhase(
+        in StructuralCommandRecord command)
+    {
+        if (command.Kind == StructuralCommandKind.CreateDefault)
+            return StructuralPlaybackPhase.Create;
+        if (command.Kind == StructuralCommandKind.Destroy)
+        {
+            return command.TargetKind switch
+            {
+                StructuralCommandTargetKind.Entity => StructuralPlaybackPhase.LiveDestroy,
+                StructuralCommandTargetKind.Deferred => StructuralPlaybackPhase.DeferredDestroy,
+                _ => throw new InvalidOperationException(
+                    "A destroy command has an invalid target kind."),
+            };
+        }
+        if (command.Kind == StructuralCommandKind.Transition)
+        {
+            return command.TransitionPhase switch
+            {
+                StructuralTransitionPhase.Remove => StructuralPlaybackPhase.Remove,
+                StructuralTransitionPhase.Add => StructuralPlaybackPhase.Add,
+                _ => throw new InvalidOperationException(
+                    "A transition command has an invalid structural phase."),
+            };
+        }
+
+        throw new InvalidOperationException("The structural command kind is invalid.");
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureOwnerAndActive()
     {
         ObjectDisposedException.ThrowIf(!_isActive, this);
@@ -592,7 +816,49 @@ public sealed class StructuralCommandBuffer
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static uint NextEpoch(uint epoch) => epoch == uint.MaxValue ? 1U : epoch + 1U;
+    private void AdvanceEpoch()
+    {
+        if (_epoch != uint.MaxValue)
+        {
+            _epoch++;
+            return;
+        }
+
+        // Rotating the buffer identity prevents a token from becoming valid again
+        // after 2^32 recording epochs without widening its 16-byte layout.
+        _bufferId = BufferIdSource.Allocate();
+        _epoch = 1;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowCommandInvariant(string message) =>
+        throw new InvalidOperationException(message);
+
+    private enum StructuralPlaybackPhase : byte
+    {
+        LiveDestroy = 0,
+        Create = 1,
+        DeferredDestroy = 2,
+        Remove = 3,
+        Add = 4,
+    }
+
+    private struct PlaybackCounts
+    {
+        internal int Created;
+        internal int Destroyed;
+        internal int Removed;
+        internal int Added;
+        internal int RejectedCreate;
+        internal int RejectedDestroy;
+        internal int RejectedTransition;
+    }
+
+    private struct PhaseChain
+    {
+        internal int HeadLink;
+        internal int TailIndex;
+    }
 
     private static class BufferIdSource
     {

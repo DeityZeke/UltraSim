@@ -197,8 +197,11 @@ public sealed class EcsWorld : IDisposable
         EnsureOwnerThread();
         ArchetypeId sourceId = ValidateArchetype(source, nameof(source));
         ArchetypeId destinationId = ValidateArchetype(destination, nameof(destination));
-        uint transitionId = _core.PreparePublicTransition(sourceId, destinationId);
-        return new ArchetypeTransition(Id, transitionId, source, destination);
+        uint transitionId = _core.PreparePublicTransition(
+            sourceId,
+            destinationId,
+            out StructuralTransitionPhase phase);
+        return new ArchetypeTransition(Id, transitionId, source, destination, phase);
     }
 
     public ComponentLookup<T> PrepareLookup<T>()
@@ -297,13 +300,25 @@ public sealed class EcsWorld : IDisposable
     /// Expected stale/capacity failures are returned as rejection counts. An
     /// unexpected exception consumes the arena and terminally faults the world.
     /// </summary>
-    public StructuralPlaybackResult PlaybackStructuralCommands()
+    public StructuralPlaybackResult PlaybackStructuralCommands() =>
+        PlaybackStructuralCommandsCore(usePhaseIndex: true);
+
+    /// <summary>
+    /// Scalar reference implementation retained for differential verification.
+    /// It is not part of the public runtime surface.
+    /// </summary>
+    internal StructuralPlaybackResult PlaybackStructuralCommandsScalarOracle() =>
+        PlaybackStructuralCommandsCore(usePhaseIndex: false);
+
+    private StructuralPlaybackResult PlaybackStructuralCommandsCore(bool usePhaseIndex)
     {
         EnsureRuntimeAccess();
         _core.ValidateStructuralPlayback();
         try
         {
-            return _structuralCommands.Playback(_core);
+            return usePhaseIndex
+                ? _structuralCommands.Playback(_core)
+                : _structuralCommands.PlaybackScalarOracle(_core);
         }
         catch (Exception exception)
         {

@@ -10,8 +10,11 @@ namespace UltraSim.ECS;
 [StructLayout(LayoutKind.Sequential, Pack = 4, Size = 16)]
 public readonly struct ArchetypeTransition : IEquatable<ArchetypeTransition>
 {
+    private const uint AddPhaseMask = 1U << 31;
+    private const uint TransitionIdMask = ~AddPhaseMask;
+
     private readonly uint _worldId;
-    private readonly uint _transitionId;
+    private readonly uint _transitionIdAndPhase;
     private readonly uint _sourceArchetypeId;
     private readonly uint _destinationArchetypeId;
 
@@ -19,23 +22,28 @@ public readonly struct ArchetypeTransition : IEquatable<ArchetypeTransition>
         WorldId worldId,
         uint transitionId,
         ArchetypeHandle source,
-        ArchetypeHandle destination)
+        ArchetypeHandle destination,
+        StructuralTransitionPhase phase)
     {
-        if (!worldId.IsValid || transitionId == 0 ||
+        if (!worldId.IsValid || transitionId == 0 || transitionId > TransitionIdMask ||
             source.World != worldId || destination.World != worldId)
         {
             throw new ArgumentException("A valid world-owned prepared transition is required.");
         }
+        if (phase is not (StructuralTransitionPhase.Remove or StructuralTransitionPhase.Add))
+            throw new ArgumentOutOfRangeException(nameof(phase));
 
         _worldId = worldId.Value;
-        _transitionId = transitionId;
+        _transitionIdAndPhase = phase == StructuralTransitionPhase.Add
+            ? transitionId | AddPhaseMask
+            : transitionId;
         _sourceArchetypeId = source.Id.Value;
         _destinationArchetypeId = destination.Id.Value;
     }
 
     public bool IsValid =>
         _worldId != 0 &&
-        _transitionId != 0 &&
+        (_transitionIdAndPhase & TransitionIdMask) != 0 &&
         _sourceArchetypeId != 0 &&
         _destinationArchetypeId != 0;
 
@@ -49,7 +57,12 @@ public readonly struct ArchetypeTransition : IEquatable<ArchetypeTransition>
 
     internal WorldId WorldId => new(_worldId);
 
-    internal uint TransitionId => _transitionId;
+    internal uint TransitionId => _transitionIdAndPhase & TransitionIdMask;
+
+    internal StructuralTransitionPhase Phase =>
+        (_transitionIdAndPhase & AddPhaseMask) != 0
+            ? StructuralTransitionPhase.Add
+            : StructuralTransitionPhase.Remove;
 
     internal ArchetypeId SourceId => new(_sourceArchetypeId);
 
@@ -57,7 +70,7 @@ public readonly struct ArchetypeTransition : IEquatable<ArchetypeTransition>
 
     public bool Equals(ArchetypeTransition other) =>
         _worldId == other._worldId &&
-        _transitionId == other._transitionId &&
+        _transitionIdAndPhase == other._transitionIdAndPhase &&
         _sourceArchetypeId == other._sourceArchetypeId &&
         _destinationArchetypeId == other._destinationArchetypeId;
 
@@ -65,7 +78,7 @@ public readonly struct ArchetypeTransition : IEquatable<ArchetypeTransition>
 
     public override int GetHashCode() => HashCode.Combine(
         _worldId,
-        _transitionId,
+        _transitionIdAndPhase,
         _sourceArchetypeId,
         _destinationArchetypeId);
 

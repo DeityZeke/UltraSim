@@ -148,7 +148,10 @@ internal static class PrimitiveBenchmarks
             new("PublicWorld_PreparedLookupReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.Execute),
             new("PublicWorld_BoundedAccessJobReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.ExecutePrepared),
             new("PublicWorld_BoundedAccessJobReadWriteEnableTransition_250000", "PublicWorldComponentLookup", 250_000, publicLookupTransition.ExecutePrepared),
+            new("PublicWorld_DeferredTransitionScalarOracle_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteScalarOracle, publicDeferredTransition.Prepare),
             new("PublicWorld_DeferredTransitionBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.Execute, publicDeferredTransition.Prepare),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyScalarOracle_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecordedScalarOracle, publicDeferredTransition.PrepareRecorded),
+            new("PublicWorld_DeferredTransitionPlaybackOnlyPhaseIndexed_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredTransition.ExecuteRecorded, publicDeferredTransition.PrepareRecorded),
             new("PublicWorld_DeferredCreateDefaultBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredCreate.Execute, publicDeferredCreate.Prepare),
             new("PublicWorld_DeferredDestroyBatch_100000", "PublicWorldStructuralCommands", 100_000, publicDeferredDestroy.Execute, publicDeferredDestroy.Prepare),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
@@ -205,7 +208,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-structural-command-foothold-v23",
+            SemanticProfile = "ecs-next-phase1-phase-indexed-structural-commands-v24",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1524,6 +1527,50 @@ internal static class PrimitiveBenchmarks
             StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
             if (result.AddedCount != _entities.Length || result.RejectedCount != 0)
                 throw new InvalidOperationException("Deferred-transition batch was not applied exactly once.");
+            _inDestination = true;
+            long checksum = unchecked(
+                (long)result.Epoch + result.CommandCount + result.AddedCount);
+            return new ScenarioMeasurement(_entities.Length, checksum);
+        }
+
+        internal ScenarioMeasurement ExecuteScalarOracle()
+        {
+            _commands.EnqueueTransition(_entities, _forward);
+            StructuralPlaybackResult result =
+                _world.PlaybackStructuralCommandsScalarOracle();
+            if (result.AddedCount != _entities.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException("Scalar-oracle transition batch was not applied exactly once.");
+            _inDestination = true;
+            long checksum = unchecked(
+                (long)result.Epoch + result.CommandCount + result.AddedCount);
+            return new ScenarioMeasurement(_entities.Length, checksum);
+        }
+
+        internal void PrepareRecorded()
+        {
+            Prepare();
+            _commands.EnqueueTransition(_entities, _forward);
+        }
+
+        internal ScenarioMeasurement ExecuteRecorded()
+        {
+            StructuralPlaybackResult result = _world.PlaybackStructuralCommands();
+            return CompleteRecorded(result, "Phase-indexed");
+        }
+
+        internal ScenarioMeasurement ExecuteRecordedScalarOracle()
+        {
+            StructuralPlaybackResult result =
+                _world.PlaybackStructuralCommandsScalarOracle();
+            return CompleteRecorded(result, "Scalar-oracle");
+        }
+
+        private ScenarioMeasurement CompleteRecorded(
+            in StructuralPlaybackResult result,
+            string executor)
+        {
+            if (result.AddedCount != _entities.Length || result.RejectedCount != 0)
+                throw new InvalidOperationException($"{executor} recorded transition batch was not applied exactly once.");
             _inDestination = true;
             long checksum = unchecked(
                 (long)result.Epoch + result.CommandCount + result.AddedCount);
