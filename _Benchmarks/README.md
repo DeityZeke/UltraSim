@@ -317,15 +317,14 @@ now require an opt-in 1K through 10M working-set ladder, explicit retained-byte
 accounting, hardware-cache classification, and counters where available. The
 tracked accepted artifact remains unchanged.
 
-The v21 public-world extension adds three non-comparable native-backed scenarios
-and brings the executable suite to 85 cases. `ComponentLookup<T>` uses a
+The v21 public-world extension added three non-comparable native-backed scenarios
+and brought the executable suite to 85 cases. `ComponentLookup<T>` uses a
 seal-compiled two-byte route per registered archetype and follows the entity's
 current archetype, so random access does not require a signature scan and remains
-valid across migration. One scenario keeps the fully checked public route; a
-second acquires a stack-only `ComponentAccessor<T>` once before the timed loop;
-the third adds one alternating archetype migration per accessor round. Each round
-otherwise performs copied write/read plus enable write/read with scalar change
-stamping.
+valid across migration. Its second and third scenarios acquired a stack-only
+`ComponentAccessor<T>` before the timed loop. That accessor could outlive the
+validation/execution boundary, so those measurements are retained as historical
+evidence but the API and scenario semantics are intentionally superseded.
 
 One same-process focused comparison measured the internal native exact-archetype
 binding at `55.963 ns/round`, the safe public world-wide lookup at `75.333
@@ -340,11 +339,27 @@ The subsequent full 85-scenario process measured `64.746`, `43.705`, and
 managed allocation and zero Gen0/1/2 collections. The retained lookup-route fact
 was four bytes for the two-archetype fixture, and the public archetype handle was
 eight bytes.
-The result demonstrates why ownership/lifecycle checks should be amortized at a
-system boundary, but it is still directional: tiered JIT, scenario order, cache
+The result demonstrated why ownership/lifecycle checks should be amortized at a
+system boundary, but it was still directional: tiered JIT, scenario order, cache
 state, and the different exact versus world-wide route shapes prevent treating
-one capture as a stable ranking. Keep both safe and scoped guards, repeat them in
-isolated processes, and later compare the scoped API inside real generated jobs.
+one capture as a stable ranking.
+
+The v22 semantic profile, `ecs-next-phase1-bounded-access-v22`, replaces the
+escapable acquisition with `ExecuteAccess<T,TJob>`. A constrained struct job
+receives the stack-only accessor only during one exclusive callback. Structural
+mutation, mutation outside the supplied accessor, nested ECS execution, disposal,
+and fault publication are rejected until `finally` releases the scope. The non-migration scenario validates once for
+the complete one-million-operation job; the migration scenario executes one
+bounded operation, exits, then legally migrates, repeated 250,000 times. A focused
+public-only process measured `72.590 ns/round` for the fully checked route,
+`57.291 ns/round` for the bounded job, and `151.609 ns/round` for bounded job plus
+migration. All reported zero managed bytes and zero Gen0/1/2 collections. The
+migration figure includes per-round scope entry/exit and is intentionally not
+comparable with v21. The subsequent complete 85-scenario v22 process measured
+`62.493`, `56.723`, and `163.288 ns/round`; every scenario reported zero managed
+bytes and zero Gen0/1/2 collections. Keep both safe and bounded-job guards, repeat
+them in isolated processes, and later measure the bounded API inside real
+generated systems.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

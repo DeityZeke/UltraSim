@@ -236,6 +236,30 @@ world, and slow consumers remain independent. Compare sparse row masks only afte
 both paths produce an equivalent consumer result; lower scan time is irrelevant if
 one path silently serializes substantially more rows.
 
+## Bounded access and relocation guards
+
+The v22 public access profile must preserve both the fully checked scalar route
+and the callback-bounded prepared-job route. Sweep useful operations per callback
+at 1, 4, 16, 64, 256, 1,024, and a long system-sized loop. Report scope-entry
+nanoseconds, useful operations per scope, total nanoseconds per operation, route
+bytes, allocations, and collections. Cross the sweep with no structural work and
+with a legal transition after every callback. Never move a transition inside the
+callback merely to improve a number: tests require mutation outside the supplied
+accessor, structural mutation, nesting, disposal, and lifecycle publication to fail while the boundary is active and
+require exception exit to release it.
+
+Change-aware migration benchmarks must also distinguish useful migration cost
+from history preservation. Cover a retained component with dense-only history,
+exact-row history, both source and destination already stamped, version wrap,
+packed removal with a donor from another chunk, and repeated bidirectional moves.
+Validate before timing that every pre-migration write remains visible to an old
+cursor after movement, a newly acknowledged cursor does not replay solely because
+of migration, and unrelated destination rows do not become exact false positives.
+Report bytes copied for component data, enable bits, dense stamps, and exact-row
+stamps separately. The canonical final-state hash must include cursor-visible
+change state for these scenarios; an arithmetic component-value checksum cannot
+detect lost or spuriously broadened history.
+
 ## V2-to-V3 comparison adapters
 
 Add exact cross-generation adapters as corresponding V3 features become real.

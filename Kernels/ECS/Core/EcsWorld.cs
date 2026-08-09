@@ -27,7 +27,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private EcsWorldState _state;
     private Exception? _faultException;
     private bool _hasSealed;
-    private bool _isVisitingChunks;
+    private bool _isExecutingScope;
 
     internal EcsWorld(
         ComponentSchema schema,
@@ -474,6 +474,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         ArgumentNullException.ThrowIfNull(exception);
         ThrowIfDisposed();
+        if (_isExecutingScope)
+            throw new InvalidOperationException("The world cannot enter a faulted state during an ECS execution scope.");
         if (_state == EcsWorldState.Faulted)
             return;
         if (_state == EcsWorldState.Created)
@@ -833,7 +835,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ValidateChangeCursor(cursor);
         ChangeVersion observationVersion = _changeVersion;
         ChangeVersion baseline = cursor.Version;
-        EnterChunkVisit();
+        EnterExecutionScope();
         try
         {
             int visitedRows = 0;
@@ -887,7 +889,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
         finally
         {
-            ExitChunkVisit();
+            ExitExecutionScope();
         }
     }
 
@@ -914,7 +916,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ValidateChangeCursor(cursor);
         ChangeVersion observationVersion = _changeVersion;
         ChangeVersion baseline = cursor.Version;
-        EnterChunkVisit();
+        EnterExecutionScope();
         try
         {
             int visitedRows = 0;
@@ -955,7 +957,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
         finally
         {
-            ExitChunkVisit();
+            ExitExecutionScope();
         }
     }
 
@@ -1139,7 +1141,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         EnsureSealed();
         ValidateBinding(binding, requireData: true);
-        EnterChunkVisit();
+        EnterExecutionScope();
         try
         {
             ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(binding.ArchetypeId).Store;
@@ -1168,7 +1170,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
         finally
         {
-            ExitChunkVisit();
+            ExitExecutionScope();
         }
     }
 
@@ -1184,7 +1186,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         EnsureSealed();
         ValidateBinding(binding, requireData: true);
-        EnterChunkVisit();
+        EnterExecutionScope();
         try
         {
             ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(binding.ArchetypeId).Store;
@@ -1216,7 +1218,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
         finally
         {
-            ExitChunkVisit();
+            ExitExecutionScope();
         }
     }
 
@@ -1233,7 +1235,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         EnsureSealed();
         ValidateQueryPlan(plan);
-        EnterChunkVisit();
+        EnterExecutionScope();
         try
         {
             int visitedRows = 0;
@@ -1290,7 +1292,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
         finally
         {
-            ExitChunkVisit();
+            ExitExecutionScope();
         }
     }
 
@@ -1510,12 +1512,15 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             out destinationLocation);
     }
 
-    internal void ValidatePreparedComponentLookup<T>(ComponentLookupPlan<TArena, T> lookup)
+    internal void EnterPreparedComponentAccess<T>(ComponentLookupPlan<TArena, T> lookup)
         where T : unmanaged, IComponent<T>
     {
-        EnsureSealed();
+        EnsureRuntimeMutationAllowed();
         ValidateComponentLookupPlan(lookup, requireData: false, requireEnableable: false);
+        EnterExecutionScope();
     }
+
+    internal void ExitPreparedComponentAccess() => ExitExecutionScope();
 
     internal bool TryDestroy(Entity entity)
     {
@@ -1547,8 +1552,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         if (_state == EcsWorldState.Disposed)
             return;
-        if (_isVisitingChunks)
-            throw new InvalidOperationException("The world cannot be disposed during a chunk visitor.");
+        if (_isExecutingScope)
+            throw new InvalidOperationException("The world cannot be disposed during an ECS execution scope.");
 
         try
         {
@@ -1760,18 +1765,18 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private void EnsureRuntimeMutationAllowed()
     {
         EnsureSealed();
-        if (_isVisitingChunks)
+        if (_isExecutingScope)
         {
             throw new InvalidOperationException(
-                "World mutation is forbidden while a synchronous chunk visitor is active.");
+                "World mutation is forbidden while an ECS execution scope is active.");
         }
     }
 
-    private void EnterChunkVisit()
+    private void EnterExecutionScope()
     {
-        if (_isVisitingChunks)
-            throw new InvalidOperationException("Chunk visitors cannot be nested or re-entered.");
-        _isVisitingChunks = true;
+        if (_isExecutingScope)
+            throw new InvalidOperationException("ECS execution scopes cannot be nested or re-entered.");
+        _isExecutingScope = true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1782,7 +1787,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ExitChunkVisit() => _isVisitingChunks = false;
+    private void ExitExecutionScope() => _isExecutingScope = false;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(IsDisposed, this);

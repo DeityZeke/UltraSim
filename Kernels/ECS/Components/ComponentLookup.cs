@@ -8,7 +8,8 @@ namespace UltraSim.ECS;
 /// by <see cref="EcsWorld.Seal"/> and remain valid when entities migrate. Repeated
 /// access performs no managed allocation and never returns a mutable reference.
 /// The value deliberately does not retain its owning world; pass the world to a
-/// safe operation or acquire a stack-only accessor for one execution phase.
+/// safe scalar operation or execute a callback-bounded access job for one
+/// exclusive execution phase.
 /// </remarks>
 public readonly struct ComponentLookup<T> : IEquatable<ComponentLookup<T>>
     where T : unmanaged, IComponent<T>
@@ -33,13 +34,13 @@ public readonly struct ComponentLookup<T> : IEquatable<ComponentLookup<T>>
     public long RouteBytes => GetPlan().RouteBytes;
 
     /// <summary>
-    /// Validates this lookup once and opens a stack-only hot path for the current
-    /// single-owner ECS phase.
+    /// Executes one callback-bounded, stack-only random-access job.
     /// </summary>
-    public ComponentAccessor<T> OpenAccess(EcsWorld world)
+    public void Execute<TJob>(EcsWorld world, ref TJob job)
+        where TJob : struct, IComponentAccessJob<T>
     {
         ArgumentNullException.ThrowIfNull(world);
-        return world.OpenAccess(this);
+        world.ExecuteAccess(this, ref job);
     }
 
     public bool Has(EcsWorld world, Entity entity)

@@ -41,7 +41,9 @@ allocation:
   swap-donor relocation. Destination-capacity and stale-plan failures leave the
   source unchanged; guarded rollback paths protect later transaction failures. Added
   components retain store-defined zero/enabled defaults and removed components
-  are discarded.
+  are discarded. Retained components also carry their effective dense/exact
+  change history into the destination with wrap-aware ordering, so migration
+  cannot hide a write that an independent cursor has not yet observed.
 - `EcsWorld<TArena>` is the internal composition root over a process-unique
   world ID, fixed entity pool, owned archetype registry/stores, and prepared
   transitions. Its lifecycle now supports `Created`, `Sealed`, `Initialized`,
@@ -75,13 +77,18 @@ allocation:
   compiles one `ushort` physical-column route per archetype, using `0xFFFF` as the
   missing sentinel, so it remains valid as entities move between archetypes while
   consuming only two route bytes per registered archetype. Safe calls revalidate
-  lifecycle, owner thread, and lookup ownership. `ComponentAccessor<T>` is a
-  stack-only system-invocation path that pays those checks once and retains entity
-  generation/location, current-archetype routing, row bounds, enable semantics,
-  and exact scalar change stamping on every operation. Neither path allocates or
-  returns mutable refs. Retained lookup and public-transition values do not retain
-  the facade, entity pool, archetype stores, or arenas after world disposal;
-  disposal releases the lookup route array.
+  lifecycle, owner thread, and lookup ownership. `ExecuteAccess` invokes an
+  `IComponentAccessJob<T>` inside one exclusive callback boundary and constructs
+  a stack-only `ComponentAccessor<T>` that cannot escape through safe managed
+  code. The boundary pays facade/thread/plan validation once while each operation
+  retains entity generation/location, current-archetype routing, row bounds,
+  enable semantics, and exact scalar change stamping. Mutation outside the
+  supplied accessor, structural mutation, nested ECS execution, disposal, and
+  fault publication are rejected until a `finally` releases the scope. Neither
+  public path allocates or returns mutable refs. Retained lookup and
+  public-transition values do not retain the facade,
+  entity pool, archetype stores, or arenas after world disposal; disposal
+  releases the lookup route array.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index
@@ -164,8 +171,11 @@ allocation:
   consumers and arbitrarily delayed consumers retain the existing copied-cursor
   semantics without a destructive shared dirty mask. Exposed writable rows are
   conservatively considered written even if visitor code leaves their bytes
-  unchanged. Empty reuse and packed donor relocation clear or move the row
-  history with the physical row.
+  unchanged. Empty reuse clears old history. Packed donor relocation moves both
+  dense-only and exact effective history with the physical row, and
+  cross-archetype migration merges retained-component history into the new row
+  without falsely marking every destination row. All merges use half-range
+  wrap-aware ordering rather than numeric maximum.
 - The query-family generator now also emits an initial 2R2C changed family. It
   returns the existing two-read stack-only view while watching two distinct data
   or tag columns that may alias either read. `ChangedMatchMode.Any` ORs watched
@@ -236,7 +246,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 171 passing tests, including
+The current runtime and primitive suite has 174 passing tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -268,7 +278,12 @@ ordering, eight-byte world-checked archetype handles, fixed option/plan capacity
 single-owner rejection, terminal fault behavior, cross-world/default/stale route
 rejection, data/tag/enable semantics, lookup continuity across bidirectional
 migration, a 20,000-operation randomized reference model, and a 250,000-round
-allocation-free scoped-access/migration gate.
+allocation-free bounded-access-job/migration gate. Adversarial access tests prove
+that out-of-scope scalar mutation, structural mutation, destruction, nested execution, disposal, and fault
+publication are rejected inside the callback and that exception exit releases
+the boundary. Relocation tests cover dense-only packed donors plus exact and dense
+history across Native/Pinned cross-archetype migration, including version wrap
+and acknowledgement without migration-generated replay.
 Chunk-visitor tests add empty and multi-chunk traversal, exact metadata and local
 indices, data/enable writes, tag/foreign/non-enableable rejection, synchronous
 mutation and nesting rejection, exception cleanup, randomized reference parity,

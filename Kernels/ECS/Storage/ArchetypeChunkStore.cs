@@ -266,6 +266,16 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 bool enabled = EnableBitOperations.Get(sourceBytes, sourceColumn, sourceRow);
                 EnableBitOperations.Set(destinationBytes, destinationColumn, destinationRow, enabled);
             }
+
+            ChangeVersion sourceVersion = GetEffectiveRowChangeVersion(
+                sourceChunkIndex,
+                transfer.SourceColumnIndex,
+                sourceRow);
+            destination.MergeTransferredRowChangeVersion(
+                destinationChunkIndex,
+                transfer.DestinationColumnIndex,
+                destinationRow,
+                sourceVersion);
         }
     }
 
@@ -856,6 +866,7 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                 bool enabled = EnableBitOperations.Get(source, column, sourceRow);
                 EnableBitOperations.Set(destination, column, destinationRow, enabled);
             }
+
             SparseRowChangeVersions? sparse = _sparseRowChangeVersions[i];
             if (sparse is not null)
             {
@@ -864,15 +875,45 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
                     sourceRow,
                     (uint)destinationChunkIndex,
                     destinationRow);
-                int destinationVersionIndex =
-                    (i * _chunks.Length) + destinationChunkIndex;
-                ChangeVersion current = new(_changeVersions[destinationVersionIndex]);
-                ChangeVersion sourceVersion = new(
-                    _changeVersions[(i * _chunks.Length) + sourceChunkIndex]);
-                if (sourceVersion.IsNewerThan(current))
-                    _changeVersions[destinationVersionIndex] = sourceVersion.Value;
             }
+
+            int destinationVersionIndex =
+                (i * _chunks.Length) + destinationChunkIndex;
+            ChangeVersion current = new(_changeVersions[destinationVersionIndex]);
+            ChangeVersion sourceVersion = new(
+                _changeVersions[(i * _chunks.Length) + sourceChunkIndex]);
+            if (sourceVersion.IsNewerThan(current))
+                _changeVersions[destinationVersionIndex] = sourceVersion.Value;
         }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private ChangeVersion GetEffectiveRowChangeVersion(
+        int chunkIndex,
+        int columnIndex,
+        int row)
+    {
+        SparseRowChangeVersions? sparse = _sparseRowChangeVersions[columnIndex];
+        return sparse is not null
+            ? sparse.GetEffectiveRowVersion((uint)chunkIndex, row)
+            : new ChangeVersion(_changeVersions[(columnIndex * _chunks.Length) + chunkIndex]);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void MergeTransferredRowChangeVersion(
+        int chunkIndex,
+        int columnIndex,
+        int row,
+        ChangeVersion version)
+    {
+        if (!version.IsValid)
+            return;
+
+        int versionIndex = (columnIndex * _chunks.Length) + chunkIndex;
+        ChangeVersion current = new(_changeVersions[versionIndex]);
+        if (version.IsNewerThan(current))
+            _changeVersions[versionIndex] = version.Value;
+        _sparseRowChangeVersions[columnIndex]?.MergeRow((uint)chunkIndex, row, version);
     }
 
     private void ClearSparseRowChangeVersions(uint chunkIndex, int row)

@@ -261,16 +261,27 @@ public sealed class EcsWorld : IDisposable
     }
 
     /// <summary>
-    /// Pays facade lifecycle, thread, and ownership checks once for a stack-only
-    /// sequence of random component operations.
+    /// Executes one callback-bounded sequence of prepared random component
+    /// operations. The world rejects mutation outside the supplied accessor,
+    /// structural mutation, nested execution, disposal, and lifecycle changes
+    /// until the callback returns.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ComponentAccessor<T> OpenAccess<T>(ComponentLookup<T> lookup)
+    public void ExecuteAccess<T, TJob>(in ComponentLookup<T> lookup, ref TJob job)
         where T : unmanaged, IComponent<T>
+        where TJob : struct, IComponentAccessJob<T>
     {
         EnsureRuntimeAccess();
-        _core.ValidatePreparedComponentLookup(lookup.Plan);
-        return new ComponentAccessor<T>(_core, lookup.Plan);
+        ComponentLookupPlan<NativeChunkArena, T> plan = lookup.Plan;
+        _core.EnterPreparedComponentAccess(plan);
+        try
+        {
+            var access = new ComponentAccessor<T>(_core, plan);
+            job.Execute(in access);
+        }
+        finally
+        {
+            _core.ExitPreparedComponentAccess();
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

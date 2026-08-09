@@ -89,13 +89,38 @@ internal sealed class SparseRowChangeVersions
         uint destinationChunkIndex,
         int destinationRow)
     {
-        int sourceIndex = GetRowIndex(sourceChunkIndex, sourceRow);
         int destinationIndex = GetRowIndex(destinationChunkIndex, destinationRow);
-        ChangeVersion dense = new(_denseVersions[sourceChunkIndex]);
-        ChangeVersion sparse = new(_rowVersions[sourceIndex]);
-        _rowVersions[destinationIndex] = dense.IsNewerThan(sparse)
-            ? dense.Value
-            : sparse.Value;
+        _rowVersions[destinationIndex] = GetEffectiveRowVersion(sourceChunkIndex, sourceRow).Value;
+    }
+
+    /// <summary>
+    /// Returns the newest observation that applies to one row. A dense publication
+    /// applies to every row that was active in the source chunk; a sparse publication
+    /// applies only to this physical row.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ChangeVersion GetEffectiveRowVersion(uint chunkIndex, int row)
+    {
+        ChangeVersion dense = new(_denseVersions[chunkIndex]);
+        ChangeVersion sparse = new(_rowVersions[GetRowIndex(chunkIndex, row)]);
+        return dense.IsNewerThan(sparse) ? dense : sparse;
+    }
+
+    /// <summary>
+    /// Merges logical row history copied from another archetype. This deliberately
+    /// does not stamp the dense-full-chunk version: only the transferred row changed
+    /// ownership.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void MergeRow(uint chunkIndex, int row, ChangeVersion version)
+    {
+        if (!version.IsValid)
+            return;
+
+        int index = GetRowIndex(chunkIndex, row);
+        ChangeVersion current = new(_rowVersions[index]);
+        if (version.IsNewerThan(current))
+            _rowVersions[index] = version.Value;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

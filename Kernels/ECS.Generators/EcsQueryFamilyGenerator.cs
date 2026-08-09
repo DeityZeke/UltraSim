@@ -711,7 +711,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Open(string.Empty, emitHeader: false);
         writer.Line("EnsureSealed();");
         writer.Line($"Validate{family.Name}QueryPlan(plan);");
-        writer.Line("EnterChunkVisit();");
+        writer.Line("EnterExecutionScope();");
         writer.Open("try");
         writer.Line("int visitedRows = 0;");
         if (family.WriteCount != 0)
@@ -775,7 +775,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("return visitedRows;");
         writer.Close();
         writer.Open("finally");
-        writer.Line("ExitChunkVisit();");
+        writer.Line("ExitExecutionScope();");
         writer.Close();
         writer.Close();
     }
@@ -1504,7 +1504,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
                 ValidateChangeCursor(cursor);
                 ChangeVersion observationVersion = _changeVersion;
                 ChangeVersion baseline = cursor.Version;
-                EnterChunkVisit();
+                EnterExecutionScope();
                 try
                 {
                     int visitedRows = 0;
@@ -1563,7 +1563,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
                 }
                 finally
                 {
-                    ExitChunkVisit();
+                    ExitExecutionScope();
                 }
             }
 
@@ -1586,7 +1586,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
                 ValidateChangeCursor(cursor);
                 ChangeVersion observationVersion = _changeVersion;
                 ChangeVersion baseline = cursor.Version;
-                EnterChunkVisit();
+                EnterExecutionScope();
                 try
                 {
                     int visitedRows = 0;
@@ -1631,7 +1631,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
                 }
                 finally
                 {
-                    ExitChunkVisit();
+                    ExitExecutionScope();
                 }
             }
 

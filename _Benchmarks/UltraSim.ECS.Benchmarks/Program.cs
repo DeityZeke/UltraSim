@@ -142,8 +142,8 @@ internal static class PrimitiveBenchmarks
             new("NativeWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, nativeBoundAccess.Execute),
             new("PinnedWorld_BoundReadWriteEnable_1000000", "WorldComponentAccess", 1_000_000, pinnedBoundAccess.Execute),
             new("PublicWorld_PreparedLookupReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.Execute),
-            new("PublicWorld_ScopedAccessorReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.ExecutePrepared),
-            new("PublicWorld_ScopedAccessorReadWriteEnableTransition_250000", "PublicWorldComponentLookup", 250_000, publicLookupTransition.ExecutePrepared),
+            new("PublicWorld_BoundedAccessJobReadWriteEnable_1000000", "PublicWorldComponentLookup", 1_000_000, publicLookupAccess.ExecutePrepared),
+            new("PublicWorld_BoundedAccessJobReadWriteEnableTransition_250000", "PublicWorldComponentLookup", 250_000, publicLookupTransition.ExecutePrepared),
             new("NativeWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteRead),
             new("PinnedWorld_BoundChunkRead_100000", "WorldChunkQuery", 100_000, pinnedChunkVisit.ExecuteRead),
             new("NativeWorld_BoundChunkWrite_100000", "WorldChunkQuery", 100_000, nativeChunkVisit.ExecuteWrite),
@@ -198,7 +198,7 @@ internal static class PrimitiveBenchmarks
         {
             SuiteName = "UltraSim.ECS.Next.Phase1",
             Generation = "Next",
-            SemanticProfile = "ecs-next-phase1-public-lookup-v21",
+            SemanticProfile = "ecs-next-phase1-bounded-access-v22",
             ScenarioFilter = scenarioFilter,
             RuntimeVersion = Environment.Version.ToString(),
             Configuration = GetConfiguration(),
@@ -1346,31 +1346,28 @@ internal static class PrimitiveBenchmarks
 
         internal ScenarioMeasurement ExecutePrepared()
         {
-            ComponentAccessor<BenchmarkVelocity> access = _lookup.OpenAccess(_world);
-            long checksum = 0;
+            var job = new PreparedAccessJob(_entity);
+            if (!_includeTransition)
+            {
+                job.OperationCount = _operations;
+                _lookup.Execute(_world, ref job);
+                return new ScenarioMeasurement(_operations, job.Checksum);
+            }
+
             for (int i = 0; i < _operations; i++)
             {
-                var value = new BenchmarkVelocity { X = i, Y = -i };
-                if (!access.TryWrite(_entity, value) ||
-                    !access.TryRead(_entity, out BenchmarkVelocity read) ||
-                    !access.TrySetEnabled(_entity, (i & 1) == 0) ||
-                    !access.TryGetEnabled(_entity, out bool enabled))
-                {
-                    throw new InvalidOperationException("Public scoped component accessor lost its entity route.");
-                }
-
-                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.X));
-                checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.Y));
-                checksum += enabled ? 1 : 0;
-                if (_includeTransition && !_world.TryTransition(
+                job.FirstOperation = i;
+                job.OperationCount = 1;
+                _world.ExecuteAccess(_lookup, ref job);
+                if (!_world.TryTransition(
                     _entity,
                     (i & 1) == 0 ? _forward : _backward))
                 {
-                    throw new InvalidOperationException("Public scoped component accessor transition failed.");
+                    throw new InvalidOperationException("Public bounded access-job transition failed.");
                 }
             }
 
-            return new ScenarioMeasurement(_operations, checksum);
+            return new ScenarioMeasurement(_operations, job.Checksum);
         }
 
         internal ScenarioMeasurement Execute()
@@ -1402,6 +1399,46 @@ internal static class PrimitiveBenchmarks
         }
 
         public void Dispose() => _world.Dispose();
+
+        private struct PreparedAccessJob : IComponentAccessJob<BenchmarkVelocity>
+        {
+            private readonly Entity _entity;
+
+            internal PreparedAccessJob(Entity entity)
+            {
+                _entity = entity;
+                FirstOperation = 0;
+                OperationCount = 0;
+                Checksum = 0;
+            }
+
+            internal int FirstOperation;
+            internal int OperationCount;
+            internal long Checksum;
+
+            public void Execute(in ComponentAccessor<BenchmarkVelocity> access)
+            {
+                int end = checked(FirstOperation + OperationCount);
+                long checksum = Checksum;
+                for (int i = FirstOperation; i < end; i++)
+                {
+                    var value = new BenchmarkVelocity { X = i, Y = -i };
+                    if (!access.TryWrite(_entity, value) ||
+                        !access.TryRead(_entity, out BenchmarkVelocity read) ||
+                        !access.TrySetEnabled(_entity, (i & 1) == 0) ||
+                        !access.TryGetEnabled(_entity, out bool enabled))
+                    {
+                        throw new InvalidOperationException("Public bounded access job lost its entity route.");
+                    }
+
+                    checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.X));
+                    checksum = unchecked(checksum + BitConverter.SingleToInt32Bits(read.Y));
+                    checksum += enabled ? 1 : 0;
+                }
+
+                Checksum = checksum;
+            }
+        }
 
         private static ComponentId[] CreateSortedSignature(params ComponentId[] signature)
         {

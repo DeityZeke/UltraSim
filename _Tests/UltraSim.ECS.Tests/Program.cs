@@ -95,6 +95,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_RejectsForeignStaleAndInvalidPublicRoutes), PublicEcsWorld_RejectsForeignStaleAndInvalidPublicRoutes);
         Run(nameof(PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit), PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit);
         Run(nameof(PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel), PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel);
+        Run(nameof(PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary), PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary);
         Run(nameof(PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes), PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes);
         Run(nameof(ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit), ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit);
         Run(nameof(EcsWorld_BoundAccessReadsWritesAndInitializes), EcsWorld_BoundAccessReadsWritesAndInitializes);
@@ -164,6 +165,8 @@ internal static class EcsPrimitiveTests
         Run(nameof(EcsWorld_ChangeVersionNativePinnedParity), EcsWorld_ChangeVersionNativePinnedParity);
         Run(nameof(EcsWorld_WarmedTrackedWritesAndReadsAllocateZeroManagedBytes), EcsWorld_WarmedTrackedWritesAndReadsAllocateZeroManagedBytes);
         Run(nameof(ChangeCursor_LayoutFactoriesAndWrapAreExplicit), ChangeCursor_LayoutFactoriesAndWrapAreExplicit);
+        Run(nameof(ArchetypeChunkStore_DenseDonorHistorySurvivesPackedRelocation), ArchetypeChunkStore_DenseDonorHistorySurvivesPackedRelocation);
+        Run(nameof(EcsWorld_ChangedHistorySurvivesCrossArchetypeMigration), EcsWorld_ChangedHistorySurvivesCrossArchetypeMigration);
         Run(nameof(ArchetypeChangedReadQueryPlan_SealCompilesCompleteArchetypeSet), ArchetypeChangedReadQueryPlan_SealCompilesCompleteArchetypeSet);
         Run(nameof(EcsWorld_ChangedReadQueryConsumersAdvanceIndependently), EcsWorld_ChangedReadQueryConsumersAdvanceIndependently);
         Run(nameof(EcsWorld_ChangedReadQueryComposesWithRowFilters), EcsWorld_ChangedReadQueryComposesWithRowFilters);
@@ -3010,46 +3013,98 @@ internal static class EcsPrimitiveTests
         const int operations = 250_000;
         using var fixture = new PublicWorldFixture(entityCapacity: 1);
         Assert.True(fixture.World.TryCreate(fixture.Source, out Entity entity));
-        ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access =
-            fixture.EnableLookup.OpenAccess(fixture.World);
+        var job = new PublicLookupCycleJob(entity);
         for (int i = 0; i < 64; i++)
         {
-            Assert.True(access.TryWrite(
-                entity,
-                new UltraSim.ECS.Tests.LayoutEnableLong { Value = i }));
-            Assert.True(access.TryRead(entity, out _));
-            Assert.True(access.TrySetEnabled(entity, (i & 1) == 0));
-            Assert.True(access.TryGetEnabled(entity, out _));
+            job.Iteration = i;
+            fixture.EnableLookup.Execute(fixture.World, ref job);
             Assert.True(fixture.World.TryTransition(
                 entity,
                 (i & 1) == 0 ? fixture.SourceToDestination : fixture.DestinationToSource));
         }
 
+        job.Checksum = 0;
         GC.Collect();
         GC.WaitForPendingFinalizers();
         GC.Collect();
-        long checksum = 0;
         long before = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < operations; i++)
         {
-            var value = new UltraSim.ECS.Tests.LayoutEnableLong { Value = i * 17L };
-            if (!access.TryWrite(entity, value) ||
-                !access.TryRead(entity, out UltraSim.ECS.Tests.LayoutEnableLong read) ||
-                !access.TrySetEnabled(entity, (i & 1) == 0) ||
-                !access.TryGetEnabled(entity, out bool enabled) ||
-                !fixture.World.TryTransition(
-                    entity,
-                    (i & 1) == 0 ? fixture.SourceToDestination : fixture.DestinationToSource))
-            {
-                throw new InvalidOperationException("Warmed public lookup cycle unexpectedly failed.");
-            }
-            checksum = unchecked(checksum + read.Value + (enabled ? 1 : 0));
+            job.Iteration = i;
+            fixture.World.ExecuteAccess(fixture.EnableLookup, ref job);
+            if (!fixture.World.TryTransition(
+                entity,
+                (i & 1) == 0 ? fixture.SourceToDestination : fixture.DestinationToSource))
+                throw new InvalidOperationException("Warmed public lookup migration unexpectedly failed.");
         }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         Assert.Equal(0L, allocated);
-        Assert.True(checksum != 0);
-        Assert.True(access.TryRead(entity, out _));
+        Assert.True(job.Checksum != 0);
+        Assert.True(fixture.World.TryRead(entity, fixture.EnableLookup, out _));
+    }
+
+    private static void PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary()
+    {
+        using var fixture = new PublicWorldFixture(entityCapacity: 1);
+        Assert.True(fixture.World.TryCreate(fixture.Source, out Entity entity));
+        var boundary = new PublicAccessBoundaryJob(
+            fixture.World,
+            fixture.EnableLookup,
+            fixture.SourceToDestination,
+            entity);
+
+        fixture.World.ExecuteAccess(fixture.EnableLookup, ref boundary);
+
+        Assert.Equal(6, boundary.Rejections);
+        Assert.True(fixture.World.TryRead(
+            entity,
+            fixture.EnableLookup,
+            out UltraSim.ECS.Tests.LayoutEnableLong read));
+        Assert.Equal(0x61A5L, read.Value);
+        Assert.True(fixture.World.TryGetEnabled(entity, fixture.EnableLookup, out bool enabled));
+        Assert.False(enabled);
+        Assert.Equal(EcsWorldState.Running, fixture.World.State);
+
+        var throwing = new ThrowingPublicAccessJob();
+        bool observedSentinel = false;
+        try
+        {
+            fixture.EnableLookup.Execute(fixture.World, ref throwing);
+        }
+        catch (ChunkVisitorSentinelException)
+        {
+            observedSentinel = true;
+        }
+
+        Assert.True(observedSentinel);
+        Assert.True(fixture.World.TryTransition(entity, fixture.SourceToDestination));
+        Assert.True(fixture.World.TryDestroy(entity));
+
+        using var foreign = new PublicWorldFixture(entityCapacity: 1);
+        var noOp = new PublicNoOpAccessJob();
+        bool rejectedForeign = false;
+        try
+        {
+            fixture.World.ExecuteAccess(foreign.EnableLookup, ref noOp);
+        }
+        catch (ArgumentException)
+        {
+            rejectedForeign = true;
+        }
+        Assert.True(rejectedForeign);
+
+        ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> invalidLookup = default;
+        bool rejectedInvalid = false;
+        try
+        {
+            invalidLookup.Execute(fixture.World, ref noOp);
+        }
+        catch (InvalidOperationException)
+        {
+            rejectedInvalid = true;
+        }
+        Assert.True(rejectedInvalid);
     }
 
     private static void ArchetypeComponentBinding_LayoutAndGeneratedBindingAreExplicit()
@@ -6469,6 +6524,118 @@ internal static class EcsPrimitiveTests
         Assert.Equal(wrapping.World.CurrentChangeVersion, wrapped.Version);
     }
 
+    private static void ArchetypeChunkStore_DenseDonorHistorySurvivesPackedRelocation()
+    {
+        long native = RunDenseDonorHistoryRelocation<NativeChunkArena>();
+        long pinned = RunDenseDonorHistoryRelocation<PinnedChunkArena>();
+        Assert.Equal(native, pinned);
+    }
+
+    private static long RunDenseDonorHistoryRelocation<TArena>()
+        where TArena : class, IChunkArenaBackend
+    {
+        using ArchetypeChunkStore<TArena> store = CreateArchetypeStore<TArena>(
+            maximumChunks: 2,
+            out _,
+            out ComponentColumnLayout[] columns);
+        int intColumn = FindColumnIndex(
+            columns,
+            UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>());
+        int entityCount = store.Layout.RowCapacity + 1;
+        var entityIndices = new uint[entityCount];
+        var locations = new ChunkRow[entityCount];
+        for (int index = 0; index < entityIndices.Length; index++)
+            entityIndices[index] = (uint)index + 1;
+        Assert.Equal(entityCount, store.Add(entityIndices, locations));
+
+        ChunkRow target = locations[0];
+        ChunkRow donor = locations[^1];
+        Assert.NotEqual(target.ChunkIndex, donor.ChunkIndex);
+        store.StampChangeVersion(target.ChunkIndex, intColumn, new ChangeVersion(ulong.MaxValue));
+        store.StampChangeVersion(donor.ChunkIndex, intColumn, new ChangeVersion(1));
+
+        Assert.True(store.TryRemove(target, entityIndices[0], out ChunkRowRelocation relocation));
+        Assert.True(relocation.HasValue);
+        Assert.Equal(entityIndices[^1], relocation.EntityIndex);
+        Assert.Equal(donor, relocation.Source);
+        Assert.Equal(target, relocation.Destination);
+        Assert.Equal(new ChangeVersion(1), store.GetChangeVersion(target.ChunkIndex, intColumn));
+        Assert.Equal(ChangeVersion.None, store.GetChangeVersion(donor.ChunkIndex, intColumn));
+        store.ValidateInvariants();
+        return unchecked((long)relocation.EntityIndex + (long)store.GetChangeVersion(
+            target.ChunkIndex,
+            intColumn).Value);
+    }
+
+    private static void EcsWorld_ChangedHistorySurvivesCrossArchetypeMigration()
+    {
+        long native = RunCrossArchetypeChangedHistory<NativeChunkArena>(ChangeVersion.None);
+        long pinned = RunCrossArchetypeChangedHistory<PinnedChunkArena>(ChangeVersion.None);
+        Assert.Equal(native, pinned);
+
+        long wrapped = RunCrossArchetypeChangedHistory<NativeChunkArena>(
+            new ChangeVersion(ulong.MaxValue - 2UL));
+        Assert.True(wrapped != 0);
+    }
+
+    private static long RunCrossArchetypeChangedHistory<TArena>(ChangeVersion initialVersion)
+        where TArena : class, IChunkArenaBackend
+    {
+        using var fixture = new ChangedQueryFixture<TArena>(
+            maximumChunks: 2,
+            entityCapacity: 8,
+            initialChangeVersion: initialVersion);
+        _ = fixture.Create(first: false, seed: 23);
+        Entity entity = fixture.Create(first: true, seed: 17);
+        ChangeCursor denseCursor = fixture.World.CreateChangeCursorFromNow();
+        ChangeCursor exactCursor = denseCursor;
+        Assert.True(fixture.World.TrySetComponent(
+            entity,
+            fixture.FirstIntBinding,
+            new UltraSim.ECS.Tests.LayoutInt { Value = 9_917 }));
+        ChangeVersion written = fixture.World.CurrentChangeVersion;
+        Assert.True(fixture.World.TryTransition(entity, fixture.FirstToSecond, out EntityLocation moved));
+        Assert.Equal(fixture.Second.Id, moved.ArchetypeId);
+        Assert.Equal(written, fixture.World.CurrentChangeVersion);
+        Assert.True(fixture.World.HasChunkChangedSince(
+            fixture.SecondIntBinding,
+            moved.ChunkRow.ChunkIndex,
+            denseCursor.Version));
+
+        var denseVisitor = new ChangedWideVisitor();
+        Assert.Equal(2, fixture.World.VisitChangedReadChunks(
+            fixture.WideChangedByInt,
+            ref denseCursor,
+            ref denseVisitor));
+        Assert.Equal(2, denseVisitor.Rows);
+        Assert.Equal(written, denseCursor.Version);
+
+        var exactVisitor = new ChangedWideVisitor();
+        Assert.Equal(1, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref exactCursor,
+            ref exactVisitor));
+        Assert.Equal(1, exactVisitor.Rows);
+        Assert.Equal(written, exactCursor.Version);
+
+        Assert.True(fixture.World.TryTransition(entity, fixture.SecondToFirst, out _));
+        var noDenseReplay = new ChangedWideVisitor();
+        var noExactReplay = new ChangedWideVisitor();
+        Assert.Equal(0, fixture.World.VisitChangedReadChunks(
+            fixture.WideChangedByInt,
+            ref denseCursor,
+            ref noDenseReplay));
+        Assert.Equal(0, fixture.World.VisitChangedReadRows(
+            fixture.ExactWideChangedByInt,
+            ref exactCursor,
+            ref noExactReplay));
+        return unchecked(
+            (long)written.Value +
+            denseVisitor.Checksum +
+            exactVisitor.Checksum +
+            moved.ChunkRow.Row);
+    }
+
     private static void ArchetypeChangedReadQueryPlan_SealCompilesCompleteArchetypeSet()
     {
         using var fixture = new ChangedQueryFixture<NativeChunkArena>(2, 8);
@@ -9209,6 +9376,134 @@ internal static class EcsPrimitiveTests
             throw new ChunkVisitorSentinelException();
     }
 
+    private struct PublicLookupCycleJob : IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly Entity _entity;
+
+        internal PublicLookupCycleJob(Entity entity)
+        {
+            _entity = entity;
+            Iteration = 0;
+            Checksum = 0;
+        }
+
+        internal int Iteration;
+        internal long Checksum;
+
+        public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong { Value = Iteration * 17L };
+            if (!access.TryWrite(_entity, value) ||
+                !access.TryRead(_entity, out UltraSim.ECS.Tests.LayoutEnableLong read) ||
+                !access.TrySetEnabled(_entity, (Iteration & 1) == 0) ||
+                !access.TryGetEnabled(_entity, out bool enabled))
+            {
+                throw new InvalidOperationException("Prepared public access job unexpectedly lost its entity route.");
+            }
+
+            Checksum = unchecked(Checksum + read.Value + (enabled ? 1 : 0));
+        }
+    }
+
+    private struct PublicAccessBoundaryJob : IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        private readonly EcsWorld _world;
+        private readonly ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> _lookup;
+        private readonly ArchetypeTransition _transition;
+        private readonly Entity _entity;
+
+        internal PublicAccessBoundaryJob(
+            EcsWorld world,
+            ComponentLookup<UltraSim.ECS.Tests.LayoutEnableLong> lookup,
+            ArchetypeTransition transition,
+            Entity entity)
+        {
+            _world = world;
+            _lookup = lookup;
+            _transition = transition;
+            _entity = entity;
+            Rejections = 0;
+        }
+
+        internal int Rejections;
+
+        public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access)
+        {
+            Assert.True(access.TryWrite(
+                _entity,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = 0x61A5 }));
+            Assert.True(access.TrySetEnabled(_entity, enabled: false));
+
+            try
+            {
+                _world.TryWrite(
+                    _entity,
+                    _lookup,
+                    new UltraSim.ECS.Tests.LayoutEnableLong { Value = -1 });
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TryTransition(_entity, _transition);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.TryDestroy(_entity);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.Dispose();
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+            try
+            {
+                _world.MarkFaulted(new InvalidOperationException("nested fault"));
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+
+            var nested = new PublicNoOpAccessJob();
+            try
+            {
+                _lookup.Execute(_world, ref nested);
+            }
+            catch (InvalidOperationException)
+            {
+                Rejections++;
+            }
+        }
+
+    }
+
+    private struct PublicNoOpAccessJob : IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access)
+        {
+        }
+    }
+
+    private struct ThrowingPublicAccessJob : IComponentAccessJob<UltraSim.ECS.Tests.LayoutEnableLong>
+    {
+        public void Execute(in ComponentAccessor<UltraSim.ECS.Tests.LayoutEnableLong> access) =>
+            throw new ChunkVisitorSentinelException();
+    }
+
     private sealed class ChunkVisitorSentinelException : Exception;
 
     private struct ChunkModelAuditVisitor : IComponentChunkReadVisitor<UltraSim.ECS.Tests.LayoutEnableLong>
@@ -9418,6 +9713,8 @@ internal static class EcsPrimitiveTests
                 maximumChunks);
             First = World.GetArchetypeStorage(firstId);
             Second = World.GetArchetypeStorage(secondId);
+            FirstToSecond = World.PrepareTransition(firstId, secondId);
+            SecondToFirst = World.PrepareTransition(secondId, firstId);
             FirstEnableBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(firstId, EnableId);
             FirstIntBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutInt>(firstId, IntId);
             FirstWideBinding = World.BindComponent<UltraSim.ECS.Tests.LayoutWide>(firstId, WideId);
@@ -9487,6 +9784,8 @@ internal static class EcsPrimitiveTests
         internal EcsWorld<TArena> World { get; }
         internal ArchetypeStorage<TArena> First { get; }
         internal ArchetypeStorage<TArena> Second { get; }
+        internal ArchetypeTransitionPlan<TArena> FirstToSecond { get; }
+        internal ArchetypeTransitionPlan<TArena> SecondToFirst { get; }
         internal ComponentId EnableId { get; }
         internal ComponentId IntId { get; }
         internal ComponentId WideId { get; }

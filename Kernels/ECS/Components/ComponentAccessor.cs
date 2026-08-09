@@ -4,10 +4,11 @@ namespace UltraSim.ECS;
 /// Stack-only prepared hot-path access to one world-wide component lookup.
 /// </summary>
 /// <remarks>
-/// Acquisition validates world state, owner thread, and lookup ownership once.
+/// <see cref="EcsWorld.ExecuteAccess{T,TJob}"/> validates world state, owner thread,
+/// lookup ownership, and exclusive execution once before invoking the job.
 /// Individual operations retain entity generation, location, archetype route,
 /// row, and change-tracking checks but do not repeat facade/plan validation.
-/// Do not retain an accessor across an ECS barrier or world lifecycle change.
+/// The accessor cannot escape that callback through safe managed code.
 /// </remarks>
 public readonly ref struct ComponentAccessor<T>
     where T : unmanaged, IComponent<T>
