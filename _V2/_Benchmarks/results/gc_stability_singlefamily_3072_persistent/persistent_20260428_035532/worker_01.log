@@ -1,0 +1,7 @@
+Stages: 768,768,768  Mode: independent  TickHz: 62  ActiveRatio: 0.35  AoiRadii: 7.5,23.5,39.5  EventCap: 1024  ReplayCap: 256
+Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMaxC   GC(0/1/2)  TickSLO  PingSLO
+--------------------------------------------------------------------------------------------------------------------------------
+    0     768    768    768    2.616    4.235    7.296   48.410   17.705    24.157  153.917        9    10/ 8/ 4     FAIL     PASS
+    1     768    768    768    2.810    3.793    4.997   23.356   17.322    32.129   43.385      620     7/ 4/ 1     FAIL     PASS
+    2     768    768    768    3.001    4.021    7.163   31.477   17.492    32.329   47.615      620     8/ 5/ 1     FAIL     PASS
+Wrote harness report to /mnt/data/mega/Godot Projects/UltraSim/_Benchmarks/results/gc_stability_singlefamily_3072_persistent/persistent_20260428_035532/worker_01/network_bot_harness_20260428_035532.json

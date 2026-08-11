@@ -1,0 +1,54 @@
+<Project Sdk="Godot.NET.Sdk/4.6.2">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>UltraSim.Client.Godot</AssemblyName>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;obj/**;.godot\**;.godot/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UltraSim.Discovery">
+      <HintPath>..\..\Discovery\bin\$(Configuration)\net8.0\UltraSim.Discovery.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Core">
+      <HintPath>..\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.UI">
+      <HintPath>..\UI\bin\$(Configuration)\net8.0\UltraSim.Client.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Network">
+      <HintPath>..\Network\bin\$(Configuration)\net8.0\UltraSim.Client.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.UI">
+      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Network">
+      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="obj\**\*.cs" />
+    <Compile Remove="obj/**" />
+    <Compile Remove=".godot\**\*.cs" />
+    <Compile Remove=".godot/**" />
+  </ItemGroup>
+
+  <Target Name="BuildClientGodotDependencies" BeforeTargets="PrepareForBuild">
+    <MSBuild
+      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\Core\UltraSim.Client.Core.csproj;..\UI\UltraSim.Client.UI.csproj;..\Network\UltraSim.Client.Network.csproj"
+      Targets="Restore;Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
+
+</Project>

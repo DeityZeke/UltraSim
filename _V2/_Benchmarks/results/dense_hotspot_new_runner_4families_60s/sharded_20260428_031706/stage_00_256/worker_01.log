@@ -1,0 +1,5 @@
+Stages: 64  Mode: independent  TickHz: 62  ActiveRatio: 0.35  AoiRadii: 7.5,23.5,39.5  EventCap: 1024  ReplayCap: 256
+Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMaxC   GC(0/1/2)  TickSLO  PingSLO
+--------------------------------------------------------------------------------------------------------------------------------
+    0      64     64     64    1.283    2.522    3.853   41.131   17.296    32.246   84.335        3     8/ 1/ 0     PASS     PASS
+Wrote harness report to /mnt/data/mega/Godot Projects/UltraSim/_Benchmarks/results/dense_hotspot_new_runner_4families_60s/sharded_20260428_031706/stage_00_256/worker_01/network_bot_harness_20260428_031706.json

@@ -1,0 +1,73 @@
+{
+  "timestamp_utc": "2026-04-28T03:02:41.929685+00:00",
+  "harness": "udp-session-host-sharded-ramp",
+  "workers": 2,
+  "stages": [
+    {
+      "target_clients": 16,
+      "ready_clients": 16,
+      "server_ready_clients": 16,
+      "client_active_clients": 16,
+      "server_tick_avg_ms": 0.145,
+      "server_tick_p95_ms": 0.179,
+      "server_tick_p99_ms": 0.487,
+      "server_tick_max_ms": 16.109,
+      "server_pump_p95_ms": 0.09,
+      "server_poll_p95_ms": 0.047,
+      "server_publish_p95_ms": 0.021,
+      "server_dispatch_p95_ms": 0.041,
+      "server_dispatch_schedule_p95_ms": 0.011,
+      "server_dispatch_fanout_p95_ms": 0.011,
+      "server_dispatch_flush_p95_ms": 0.02,
+      "server_async_handoff_wait_p95_ms": 0.0,
+      "server_async_previous_send_p95_ms": 0.088,
+      "server_flush_wire_datagrams_p95": 16.0,
+      "server_replication_datagrams": 26945,
+      "server_replication_wire_datagrams": 4944,
+      "server_owner_correction_sent": 4960,
+      "server_alloc_bytes": 3923048,
+      "server_gc_gen0": 0,
+      "server_gc_gen1": 0,
+      "server_gc_gen2": 0,
+      "client_tick_p95_max": 0.114,
+      "client_poll_p95_max": 0.05,
+      "client_observer_state_p95_max": 0.012,
+      "client_observer_event_p95_max": 0.002,
+      "ping_avg_max_ms": 16.111,
+      "ping_p95_max_ms": 16.193,
+      "ping_p99_max_ms": 16.536,
+      "ping_max_ms": 16.758,
+      "pending_max_per_client_max": 1.0,
+      "observer_frames_received_sum": 25035,
+      "observer_frames_applied_sum": 25035,
+      "observer_events_received_sum": 1542,
+      "observer_events_applied_sum": 1542,
+      "chat_messages_submitted_sum": 0,
+      "chat_messages_received_sum": 0,
+      "chat_messages_applied_sum": 0,
+      "alloc_bytes_total": 6422528,
+      "client_alloc_bytes_sum": 2499480,
+      "client_gc_gen0_sum": 0,
+      "client_gc_gen1_sum": 0,
+      "client_gc_gen2_sum": 0,
+      "reports": {
+        "server": "_Benchmarks/results/sharded_smoke_linux/sharded_20260428_030236/stage_00_16/server/network_bot_harness_20260428_030236.json",
+        "workers": [
+          "_Benchmarks/results/sharded_smoke_linux/sharded_20260428_030236/stage_00_16/worker_00/network_bot_harness_20260428_030236.json",
+          "_Benchmarks/results/sharded_smoke_linux/sharded_20260428_030236/stage_00_16/worker_01/network_bot_harness_20260428_030236.json"
+        ]
+      }
+    }
+  ],
+  "harness_args": [
+    "--input-hz",
+    "20",
+    "--phase-input-sends",
+    "--phase-ping-probes",
+    "--observer-replication",
+    "--observer-visual-state",
+    "--observer-bulk-state",
+    "--observer-events",
+    "--enable-latest-state-recipient-phasing"
+  ]
+}

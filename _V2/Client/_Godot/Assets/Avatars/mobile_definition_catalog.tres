@@ -1,0 +1,21 @@
+[gd_resource type="Resource" script_class="MobileDefinitionCatalog" load_steps=6 format=3]
+
+[ext_resource type="Script" path="res://Scripts/Mobiles/MobileDefinitionCatalog.cs" id="1_catalog"]
+[ext_resource type="Script" path="res://Scripts/Mobiles/MobileCatalogEntry.cs" id="2_entry"]
+[ext_resource type="Resource" path="res://Assets/Avatars/y_bot/y_bot_definition.tres" id="3_ybot"]
+[ext_resource type="Resource" path="res://Assets/Avatars/x_bot/x_bot_definition.tres" id="4_xbot"]
+
+[sub_resource type="Resource" id="Entry_PlayerMale"]
+script = ExtResource("2_entry")
+DefinitionId = "mobile.y_bot"
+Definition = ExtResource("3_ybot")
+
+[sub_resource type="Resource" id="Entry_PlayerFemale"]
+script = ExtResource("2_entry")
+DefinitionId = "mobile.x_bot"
+Definition = ExtResource("4_xbot")
+
+[resource]
+script = ExtResource("1_catalog")
+Entries = Array[ExtResource("2_entry")]([SubResource("Entry_PlayerMale"), SubResource("Entry_PlayerFemale")])
+DefaultDefinition = ExtResource("3_ybot")

@@ -1,0 +1,5 @@
+Stages: 8  Mode: independent  TickHz: 62  ActiveRatio: 0.35  AoiRadii: 7.5  EventCap: 1024  ReplayCap: 256
+Stage  Target Active  Ready  TickAvg  TickP95  TickP99  TickMax  PingAvg  PingP95  PingMax  PendMaxC   GC(0/1/2)  TickSLO  PingSLO
+--------------------------------------------------------------------------------------------------------------------------------
+    0       8      8      8    0.138    0.185    1.621    3.997   16.116    16.495   16.728        1     0/ 0/ 0     PASS     PASS
+Wrote harness report to /mnt/data/mega/Godot Projects/UltraSim/_Benchmarks/results/sharded_smoke_linux/sharded_20260428_030630/stage_00_16/worker_01/network_bot_harness_20260428_030630.json

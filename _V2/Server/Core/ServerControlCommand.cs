@@ -1,0 +1,18 @@
+namespace UltraSim.Server;
+
+public readonly record struct ServerControlCommand(
+    ServerControlCommandKind Kind,
+    string? Argument = null)
+{
+    public static ServerControlCommand Start() => new(ServerControlCommandKind.Start);
+    public static ServerControlCommand Stop() => new(ServerControlCommandKind.Stop);
+    public static ServerControlCommand Restart() => new(ServerControlCommandKind.Restart);
+    public static ServerControlCommand RestartWithoutSave() => new(ServerControlCommandKind.Restart, "without-save");
+    public static ServerControlCommand Save() => new(ServerControlCommandKind.Save);
+    public static ServerControlCommand Status() => new(ServerControlCommandKind.Status);
+    public static ServerControlCommand Shutdown() => new(ServerControlCommandKind.Shutdown);
+    public static ServerControlCommand ShutdownWithoutSave() => new(ServerControlCommandKind.Shutdown, "without-save");
+    public static ServerControlCommand ListBackups() => new(ServerControlCommandKind.ListBackups);
+    public static ServerControlCommand RestoreBackup(string backupDirectoryName) =>
+        new(ServerControlCommandKind.RestoreBackup, backupDirectoryName);
+}

@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="UltraSim.Server.Core">
+      <HintPath>..\..\Server\Core\bin\$(Configuration)\net8.0\UltraSim.Server.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Network">
+      <HintPath>..\..\Server\Network\bin\$(Configuration)\net8.0\UltraSim.Server.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Admission">
+      <HintPath>..\..\Server\Admission\bin\$(Configuration)\net8.0\UltraSim.Server.Admission.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Accounting">
+      <HintPath>..\..\Server\Accounting\bin\$(Configuration)\net8.0\UltraSim.Server.Accounting.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Persistence">
+      <HintPath>..\..\Server\Persistence\bin\$(Configuration)\net8.0\UltraSim.Server.Persistence.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Hosting">
+      <HintPath>..\..\Server\Hosting\bin\$(Configuration)\net8.0\UltraSim.Server.Hosting.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Discovery">
+      <HintPath>..\..\Server\Discovery\bin\$(Configuration)\net8.0\UltraSim.Server.Discovery.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Headless">
+      <HintPath>..\..\Server\_Headless\bin\$(Configuration)\net8.0\UltraSim.Server.Headless.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Console">
+      <HintPath>..\..\Server\_Console\bin\$(Configuration)\net8.0\UltraSim.Server.Console.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Server.Godot">
+      <HintPath>..\..\Server\_Godot\.godot\mono\temp\bin\$(Configuration)\UltraSim.Server.Godot.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.ECS">
+      <HintPath>..\..\Kernels\ECS\bin\$(Configuration)\net8.0\UltraSim.ECS.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Network">
+      <HintPath>..\..\Kernels\Network\bin\$(Configuration)\net8.0\UltraSim.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.UI">
+      <HintPath>..\..\Kernels\UI\bin\$(Configuration)\net8.0\UltraSim.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Core">
+      <HintPath>..\..\Client\Core\bin\$(Configuration)\net8.0\UltraSim.Client.Core.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.UI">
+      <HintPath>..\..\Client\UI\bin\$(Configuration)\net8.0\UltraSim.Client.UI.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Client.Network">
+      <HintPath>..\..\Client\Network\bin\$(Configuration)\net8.0\UltraSim.Client.Network.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="UltraSim.Discovery">
+      <HintPath>..\..\Discovery\bin\$(Configuration)\net8.0\UltraSim.Discovery.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\Server\Scripting\UltraSim.Server.Scripting.csproj" />
+  </ItemGroup>
+
+  <Target Name="BuildServerDependencies" BeforeTargets="PrepareForBuild">
+    <MSBuild
+      Projects="..\..\Discovery\UltraSim.Discovery.csproj;..\..\Kernels\ECS\UltraSim.ECS.csproj;..\..\Kernels\Network\UltraSim.Network.csproj;..\..\Kernels\UI\UltraSim.UI.csproj;..\..\Client\Core\UltraSim.Client.Core.csproj;..\..\Client\UI\UltraSim.Client.UI.csproj;..\..\Client\Network\UltraSim.Client.Network.csproj;..\..\Server\Core\UltraSim.Server.Core.csproj;..\..\Server\Admission\UltraSim.Server.Admission.csproj;..\..\Server\Accounting\UltraSim.Server.Accounting.csproj;..\..\Server\Persistence\UltraSim.Server.Persistence.csproj;..\..\Server\Network\UltraSim.Server.Network.csproj;..\..\Server\Hosting\UltraSim.Server.Hosting.csproj;..\..\Server\Discovery\UltraSim.Server.Discovery.csproj;..\..\Server\Scripting\UltraSim.Server.Scripting.csproj;..\..\Server\_Headless\UltraSim.Server.Headless.csproj;..\..\Server\_Console\UltraSim.Server.Console.csproj;..\..\Server\_Godot\UltraSim.Server.Godot.csproj"
+      Targets="Build"
+      Properties="Configuration=$(Configuration)" />
+  </Target>
+
+</Project>

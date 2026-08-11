@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Admission\UltraSim.Server.Admission.csproj" />
+    <ProjectReference Include="..\Core\UltraSim.Server.Core.csproj" />
+    <ProjectReference Include="..\Gameplay\UltraSim.Server.Gameplay.csproj" />
+    <ProjectReference Include="..\Persistence\UltraSim.Server.Persistence.csproj" />
+    <ProjectReference Include="..\Scripting\UltraSim.Server.Scripting.csproj" />
+    <ProjectReference Include="..\..\Kernels\ECS\UltraSim.ECS.csproj" />
+    <ProjectReference Include="..\..\Kernels\Network\UltraSim.Network.csproj" />
+    <ProjectReference Include="..\..\Kernels\UI\UltraSim.UI.csproj" />
+  </ItemGroup>
+
+</Project>

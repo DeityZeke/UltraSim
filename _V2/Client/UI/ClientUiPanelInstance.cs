@@ -1,0 +1,15 @@
+using UltraSim.UI;
+
+namespace UltraSim.Client.UI;
+
+public sealed record ClientUiPanelInstance(
+    string PanelInstanceId,
+    UiSchemaDocument Schema,
+    UiSchemaIdentity SchemaIdentity,
+    UiCatalogIdentity? CatalogIdentity,
+    UiPanelMetadata Metadata,
+    UiModelDocument Model,
+    IReadOnlyDictionary<string, IReadOnlyDictionary<string, ClientUiRepeaterRowState>> RepeaterRows,
+    UiSchemaCompatibilityContext CompatibilityContext,
+    long LastModelUpdateSequence,
+    long OpenSequence);

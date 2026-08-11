@@ -1,0 +1,119 @@
+[gd_scene format=3 uid="uid://coyb7wpmmgwrt"]
+
+[ext_resource type="Script" uid="uid://dmf622gxgoq0a" path="res://Scripts/GodotClientRuntimeRoot.cs" id="1"]
+[ext_resource type="Script" uid="uid://c10ujxddqgnsq" path="res://Scripts/Controllers/LocalPlayerController.cs" id="2"]
+[ext_resource type="Script" uid="uid://cv0xpwnh26gsi" path="res://Scripts/World/ClientCharacterWorld.cs" id="3"]
+[ext_resource type="Script" uid="uid://cxe1hg45tdr8q" path="res://Scripts/Mobiles/MobileCatalogNode.cs" id="4"]
+[ext_resource type="Texture2D" uid="uid://b4x47t2t8o1wc" path="res://Assets/Textures/_tmp/kenney_prototype-textures/PNG/Dark/texture_09.png" id="4_ogrqh"]
+[ext_resource type="PackedScene" path="res://Scenes/CharacterRoot.tscn" id="6"]
+[ext_resource type="PackedScene" uid="uid://d3v603cuxptp4" path="res://Scenes/OrbitFollowCameraRig.tscn" id="7"]
+[ext_resource type="Script" uid="uid://b6s2mawrfula8" path="res://Scripts/UI/UiManager.cs" id="8"]
+[ext_resource type="Script" uid="uid://c27yhqueju88e" path="res://Scripts/UI/WorldCanvasManager.cs" id="9"]
+[ext_resource type="Script" uid="uid://dwmcas7uy1rso" path="res://Scripts/UI/HudCanvasManager.cs" id="10"]
+[ext_resource type="Script" uid="uid://dsu8jpey4ljao" path="res://Scripts/UI/MenuCanvasManager.cs" id="11"]
+[ext_resource type="Script" uid="uid://d2b6vh6p2xhlq" path="res://Scripts/UI/DebugCanvasManager.cs" id="12"]
+[ext_resource type="Resource" path="res://Assets/Avatars/mobile_definition_catalog.tres" id="13_mobile_catalog"]
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_6mrp5"]
+albedo_texture = ExtResource("4_ogrqh")
+uv1_scale = Vector3(32, 32, 32)
+
+[sub_resource type="PlaneMesh" id="6"]
+size = Vector2(32, 32)
+
+[sub_resource type="ProceduralSkyMaterial" id="2"]
+sky_horizon_color = Color(0.58, 0.64, 0.7, 1)
+ground_horizon_color = Color(0.5, 0.52, 0.48, 1)
+
+[sub_resource type="Sky" id="3"]
+sky_material = SubResource("2")
+
+[sub_resource type="Environment" id="4"]
+background_mode = 2
+sky = SubResource("3")
+tonemap_mode = 2
+
+[node name="ClientRoot" type="Node" unique_id=967991549]
+script = ExtResource("1")
+CharacterWorldPath = NodePath("World/DynamicEntities")
+LocalPlayerControllerPath = NodePath("Controller")
+CameraRigPath = NodePath("World/CameraRig")
+UiManagerPath = NodePath("UILayers")
+StartPreviewOnReady = false
+
+[node name="Controller" type="Node" parent="." unique_id=831969335]
+script = ExtResource("2")
+CameraRigPath = NodePath("../World/CameraRig")
+
+[node name="MobileCatalog" type="Node" parent="." unique_id=125282228]
+script = ExtResource("4")
+Catalog = ExtResource("13_mobile_catalog")
+
+[node name="World" type="Node3D" parent="." unique_id=536801843]
+
+[node name="Map" type="Node3D" parent="World" unique_id=1429953170]
+
+[node name="TerrainChunks" type="Node3D" parent="World/Map" unique_id=317927545]
+
+[node name="StaticChunks" type="Node3D" parent="World/Map" unique_id=1530589940]
+
+[node name="MapEnvironment" type="Node3D" parent="World/Map" unique_id=362728469]
+
+[node name="Ground" type="MeshInstance3D" parent="World/Map" unique_id=1077855872]
+material_override = SubResource("StandardMaterial3D_6mrp5")
+mesh = SubResource("6")
+
+[node name="DynamicEntities" type="Node3D" parent="World" unique_id=783335110]
+script = ExtResource("3")
+CharacterRootScene = ExtResource("6")
+MobileCatalogNodePath = NodePath("../../MobileCatalog")
+LocalPlayerControllerPath = NodePath("../../Controller")
+SpawnPreviewActorOnReady = false
+
+[node name="Effects" type="Node3D" parent="World" unique_id=933274708]
+
+[node name="CameraRig" parent="World" unique_id=1851965453 instance=ExtResource("7")]
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="World" unique_id=957436990]
+environment = SubResource("4")
+
+[node name="DirectionalLight3D" type="DirectionalLight3D" parent="World" unique_id=316307590]
+transform = Transform3D(-0.866025, -0.433013, 0.25, 0, 0.5, 0.866025, -0.5, 0.75, -0.433013, 0, 6, 0)
+shadow_enabled = true
+
+[node name="UILayers" type="Node" parent="." unique_id=2127180535]
+script = ExtResource("8")
+WorldCanvasPath = NodePath("World")
+HudCanvasPath = NodePath("HUD")
+MenuCanvasPath = NodePath("Menus")
+DebugCanvasPath = NodePath("Debug")
+
+[node name="World" type="CanvasLayer" parent="UILayers" unique_id=1750078983]
+script = ExtResource("9")
+CharacterWorldPath = NodePath("../../World/DynamicEntities")
+
+[node name="HUD" type="CanvasLayer" parent="UILayers" unique_id=1047970642]
+script = ExtResource("10")
+
+[node name="StatusLabel" type="Label" parent="UILayers/HUD" unique_id=1670989897]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "UltraSim"
+
+[node name="Menus" type="CanvasLayer" parent="UILayers" unique_id=236444034]
+script = ExtResource("11")
+
+[node name="Debug" type="CanvasLayer" parent="UILayers" unique_id=1468674422]
+script = ExtResource("12")
+
+[node name="DebugLabel" type="Label" parent="UILayers/Debug" unique_id=1062685013]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 22.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "Debug"

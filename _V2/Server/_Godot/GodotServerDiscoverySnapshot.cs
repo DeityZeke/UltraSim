@@ -1,0 +1,26 @@
+namespace UltraSim.Server.Godot;
+
+public sealed record GodotServerDiscoverySnapshot(
+	bool Enabled,
+	string RegistryUrl,
+	string PublishMode,
+	string AdvertisedHost,
+	int AdvertisedPort,
+	string ServerId,
+	string Description,
+	string Region,
+	string Language,
+	string Tags,
+	string StatusEndpointUrl,
+	bool LanEnabled,
+	int LanPort,
+	string LanBindAddress,
+	bool LanResponderCreated,
+	bool LanResponderRunning,
+	string LanResponderEndpoint,
+	bool PublisherCreated,
+	bool HasPublished,
+	DateTimeOffset? LastPublishUtc,
+	bool StatusEndpointCreated,
+	bool StatusEndpointRunning,
+	string LastMessage);

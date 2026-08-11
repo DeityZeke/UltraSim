@@ -1,0 +1,16 @@
+[gd_scene format=3 uid="uid://d3v603cuxptp4"]
+
+[ext_resource type="Script" uid="uid://0n8ffetuaa7y" path="res://Scripts/Camera/OrbitFollowCameraRig.cs" id="1"]
+
+[node name="CameraRig" type="Node3D" unique_id=1167226478]
+script = ExtResource("1")
+
+[node name="YawPivot" type="Node3D" parent="." unique_id=2097458153]
+
+[node name="PitchPivot" type="Node3D" parent="YawPivot" unique_id=1994533545]
+
+[node name="SpringArm3D" type="SpringArm3D" parent="YawPivot/PitchPivot" unique_id=1894827930]
+spring_length = 4.5
+
+[node name="Camera3D" type="Camera3D" parent="YawPivot/PitchPivot/SpringArm3D" unique_id=630145823]
+current = true
