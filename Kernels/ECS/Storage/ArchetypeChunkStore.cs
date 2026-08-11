@@ -548,10 +548,78 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             return false;
         }
 
+        AdvanceTailCursor(ref expectedChunkIndex, ref expectedRow);
+        return true;
+    }
+
+    /// <summary>
+    /// Positions a cursor at the first row of a suffix whose final row is the
+    /// real packed donor tail. The cursor advances in forward publication order
+    /// through <see cref="MatchAndAdvanceSuffixForward"/>. Both directions are
+    /// derived from the occupied intrusive lists; chunk indices carry no order.
+    /// </summary>
+    internal bool TryCreateForwardSuffixCursor(
+        int count,
+        out int chunkIndex,
+        out int row)
+    {
+        ThrowIfDisposed();
+        if (count <= 0 || count > _entityCount ||
+            !TryCreateTailCursor(out chunkIndex, out row))
+        {
+            chunkIndex = NoChunk;
+            row = -1;
+            return false;
+        }
+
+        for (int index = 1; index < count; index++)
+        {
+            AdvanceTailCursor(ref chunkIndex, ref row);
+            if (chunkIndex == NoChunk)
+                ThrowInvariant("A packed suffix cursor exhausted occupied rows early.");
+        }
+
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool MatchAndAdvanceSuffixForward(
+        ChunkRow location,
+        ref int expectedChunkIndex,
+        ref int expectedRow)
+    {
+        if (expectedChunkIndex == NoChunk ||
+            location.ChunkIndex != unchecked((uint)expectedChunkIndex) ||
+            location.Row != expectedRow)
+        {
+            return false;
+        }
+
+        ref readonly ChunkRecord chunk = ref _chunks[expectedChunkIndex];
+        if (expectedRow + 1 < chunk.RowCount)
+        {
+            expectedRow++;
+            return true;
+        }
+
+        expectedChunkIndex = chunk.State switch
+        {
+            ChunkListState.Partial => NoChunk,
+            ChunkListState.Full when chunk.Previous != NoChunk => chunk.Previous,
+            ChunkListState.Full => _partialHead,
+            _ => NoChunk,
+        };
+        expectedRow = expectedChunkIndex == NoChunk ? -1 : 0;
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void AdvanceTailCursor(ref int expectedChunkIndex, ref int expectedRow)
+    {
         if (expectedRow != 0)
         {
             expectedRow--;
-            return true;
+            return;
         }
 
         ref readonly ChunkRecord chunk = ref _chunks[expectedChunkIndex];
@@ -564,7 +632,6 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         expectedRow = expectedChunkIndex == NoChunk
             ? -1
             : _chunks[expectedChunkIndex].RowCount - 1;
-        return true;
     }
 
     /// <summary>

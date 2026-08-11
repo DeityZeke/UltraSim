@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.34 checkpoint captured 2026-08-10
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.35 checkpoint captured 2026-08-10
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -106,7 +106,7 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 Compare a future capture with the current accepted baseline:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.34-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.35-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
@@ -123,8 +123,10 @@ The 3.0.31 consolidation artifact is
 [`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
 The 3.0.32 exact-whole-source artifact is
 [`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
-The current 3.0.34 artifact is
+The previous 3.0.34 artifact is
 [`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
+The current 3.0.35 artifact is
+[`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -315,6 +317,35 @@ All state and measurement-policy comparisons against the immutable 3.0.33
 artifact passed. Exact packed-suffix transition planning remains the next
 structural experiment; it must not be conflated with this commit-only change.
 
+## 3.0.35 exact route-level packed-suffix transition checkpoint
+
+This checkpoint removes the 256-row source-planning horizon only for a complete
+homogeneous run that is exactly the source store's real packed suffix. Whole-
+source planning retains precedence. The coordinator resolves and validates every
+target, proves record-order membership through a store-owned donor-order cursor,
+and proves full destination capacity before mutation. It then streams the same
+trusted route blocks used by whole-source execution and shrinks the source tail
+once. Runs of 256 or fewer, scattered rows, conflicts, stale/wrong-source targets,
+and partial-capacity routes keep the 3.0.34 grouped semantics.
+
+The temporary same-binary 3.0.34 grouped control ran both A/B orders in two fresh
+processes. Across a 100K resident source, qualifying normal playback improved
+61.9% at 257 rows, 74.2% at 512, 70.6% at 1K, 58.9% at 10K, and 47.5-48.6% at
+25K-75K. Wide-retained playback improved 32.7% at 257 and approximately 49-51%
+from 512 through 75K. A 10K exact-history case improved 51.4% playback and about
+46% end-to-end. The 128/256, scattered, and full-source controls were flat within
+the expected noise boundary. All 172 measurement rows allocated zero bytes,
+matched normalized logical-state hashes, and every successful suffix reported
+zero surviving donor relocations.
+
+The accepted V2-first and reversed V3-first regression captures each report 96
+comparable rows, zero state/contract/catalog mismatches, 15 unsupported rows, and
+zero V3 timed allocation. No shared partial exact-suffix scenario exists, so
+these captures are regression gates rather than a V2 speed ratio for the new
+strategy. A suspected saved-capture whole-destroy regression was disproved by a
+same-host, same-JIT back-to-back build of committed 3.0.34 versus 3.0.35:
+`14.931/14.849 ns/entity`.
+
 ## What this baseline says to optimize next
 
 The adapter changes the optimization discussion from speculation to named
@@ -330,11 +361,11 @@ regression targets:
    ns/destroy`; donor-tail gating reduced but did not justify the complexity, so
    the partial path was removed. A future sparse algorithm must group by source
    chunk and prove a crossover before landing.
-3. ECS 3.0.34 also trusts commits for already-prepared contiguous prefixes, but
-   partial-source and exact packed-suffix routes still plan in 256-row blocks.
-   Exact packed-suffix transition planning is the next
-   structural experiment; it must preserve partial-capacity record order and
-   prove its crossover against scalar and grouped controls before landing.
+3. ECS 3.0.35 now plans exact packed suffixes beyond 256 rows without survivor
+   movement. General partial-source planning remains deliberately absent. Any
+   arbitrary sparse or source-chunk-aware planner must independently prove its
+   crossover against grouped execution without weakening partial-capacity record
+   order.
 4. Fixed command recording writes and validates much richer per-command state
    than V2's block-copied lists. Consider bounded batch descriptors or a compact
    fixed target arena so span commands amortize validation and phase linkage

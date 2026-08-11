@@ -30,6 +30,8 @@ The accepted `3.0.33` validate-once trusted-commit capture lives at
 [`Baselines/ecs-v2-v3-3.0.33-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.33-2026-08-10.json).
 The accepted `3.0.34` prepared-migration trusted-commit capture lives at
 [`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
+The accepted `3.0.35` exact route-level packed-suffix transition capture lives at
+[`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -754,6 +756,69 @@ shapes, making it a regression guard: at 50,000 rows add playback was
 `30.203/30.342`, remove playback `28.654/30.249`, and round trip
 `35.443/35.361 ns/entity` in primary/reverse order, versus 3.0.33 values near
 `30.217/31.095`, `29.968/30.869`, and `35.915/35.631`.
+
+ECS 3.0.35 adds exact route-level packed-suffix transition planning as one
+physical decision inside the existing production transition planner. Whole-
+source planning keeps precedence. A qualifying homogeneous run must contain
+more than 256 commands, cover less than the complete source population, match
+the store's real donor-order suffix exactly in record order, and fit completely
+in the destination. Complete proof precedes mutation. Execution reuses the
+trusted 256-row route block mover, leaves source occupancy unchanged while
+streaming destination publication, then calls `RemoveTailRows(total)` once.
+Failed proof or capacity returns to grouped execution before mutation.
+
+The temporary same-process control disabled only suffix recognition; it retained
+the 3.0.34 grouped executor, whole-source planning, and every other strategy.
+Two fresh-process matrices each ran both A/B orders with eight warmups and 31
+measured iterations over a 100,000-row resident source. The matrix covered
+128, 256, 257, 512, 1K, 10K, 25K, 50K, 75K, and the 100K whole-source control,
+normal and wide-retained routes, playback and end-to-end timing, a 10K exact-row-
+history case, and a scattered control. Every one of the 172 rows allocated zero
+managed bytes and produced the same normalized logical-state hash.
+
+Repeat-process means averaged across the two A/B orders were:
+
+| Shape | 3.0.35 suffix | 3.0.34 grouped | Improvement |
+| --- | ---: | ---: | ---: |
+| normal playback, 257 | 70.73 ns/entity | 185.44 | 61.9% |
+| normal playback, 512 | 65.18 | 252.38 | 74.2% |
+| normal playback, 1K | 71.41 | 242.92 | 70.6% |
+| normal playback, 10K | 39.94 | 97.07 | 58.9% |
+| normal playback, 25K / 50K / 75K | 38.69 / 39.04 / 39.14 | 74.45 / 74.37 / 76.17 | 47.5-48.6% |
+| wide playback, 257 | 40.12 | 59.66 | 32.7% |
+| wide playback, 512 / 1K | 40.31 / 40.79 | 82.36 / 81.62 | 50.0-51.1% |
+| wide playback, 10K / 50K / 75K | 40.55 / 40.99 / 41.50 | 81.03 / 81.64 / 81.88 | 49.3-50.0% |
+| wide exact-history playback, 10K | 42.58 | 87.63 | 51.4% |
+
+End-to-end results show the same crossover: normal qualifying cases improve
+44-72%, wide qualifying cases improve 20-48%, and the exact-history case improves
+about 46%. The 128/256 controls remain grouped and were effectively flat. The
+100K/full-population control remains the existing whole-source strategy and was
+also flat. Scattered production/control differed by roughly 1-2%, below the
+investigation threshold. Every successful suffix reported one bulk shrink, the
+expected `ceil(count/256)` streamed blocks, all suffix rows bulk-shrunk, and zero
+surviving donor relocations.
+
+At 75K, suffix playback costs about 39.1 ns/entity normal and 41.5 wide, versus
+25.6 and 28.0 for the 100K whole-source control. The residual roughly
+13.5 ns/entity is the partial-route proof and tail-shrink cost once neither path
+moves surviving donors; it is not hidden compaction work.
+
+The permanent suite adds twelve production guards at the 257 boundary, 10K, and
+50K, including normal, wide-retained, and exact-history cases. They are created
+and disposed one fixture at a time so benchmark coverage does not permanently
+inflate the eager suite's working set. The complete report now contains 141
+scenarios, 141/141 zero timed allocation, and explicit suffix block/shrink/
+failure diagnostics. Temporary control branches, facade hooks, and duplicated
+executors were removed after admission.
+
+The isolated V2-first and V3-first comparison orders against 3.0.34 each retain
+96 comparable rows, zero state or contract/catalog mismatches, 15 unsupported
+rows, and zero V3 timed allocation. The catalog has no honest partial packed-
+suffix equivalent, so it is a regression gate rather than causal evidence. A
+saved-capture whole-destroy row initially appeared 7% slower; a back-to-back
+build of committed 3.0.34 and current 3.0.35 under identical steady-state JIT
+settings measured `14.931/14.849 ns/entity`, clearing it as capture drift.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

@@ -1656,6 +1656,78 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             destination.Store.CanReserveDefault(population);
     }
 
+    /// <summary>
+    /// Creates the store-owned forward cursor for a route that may exactly
+    /// cover the current packed suffix. Eligibility and complete destination
+    /// capacity are proved without mutation; entity/row matching follows.
+    /// </summary>
+    internal bool TryCreateExactPackedSuffixTransitionCursor(
+        Entity firstEntity,
+        PreparedArchetypeTransition transition,
+        int runCount,
+        out int sourcePopulation,
+        out int expectedChunkIndex,
+        out int expectedRow)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArgumentNullException.ThrowIfNull(transition);
+        if (runCount <= ArchetypeMigrator.MaximumBatchSize ||
+            transition.WorldId != Id ||
+            !_entities.TryGetLocation(firstEntity, out EntityLocation firstLocation) ||
+            firstLocation.ArchetypeId != transition.SourceId)
+        {
+            sourcePopulation = 0;
+            expectedChunkIndex = -1;
+            expectedRow = -1;
+            return false;
+        }
+
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
+        sourcePopulation = source.Store.Count;
+        if (runCount >= sourcePopulation ||
+            !destination.Store.CanReserveDefault(runCount))
+        {
+            expectedChunkIndex = -1;
+            expectedRow = -1;
+            return false;
+        }
+
+        return source.Store.TryCreateForwardSuffixCursor(
+            runCount,
+            out expectedChunkIndex,
+            out expectedRow);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool MatchAndAdvanceExactPackedSuffixTransition(
+        Entity entity,
+        PreparedArchetypeTransition transition,
+        ref int expectedChunkIndex,
+        ref int expectedRow)
+    {
+        if (!_entities.TryGetLocation(entity, out EntityLocation location) ||
+            location.ArchetypeId != transition.SourceId)
+        {
+            return false;
+        }
+
+        ArchetypeChunkStore<TArena> store =
+            _archetypes.GetStorage(transition.SourceId).Store;
+        if (!store.MatchAndAdvanceSuffixForward(
+                location.ChunkRow,
+                ref expectedChunkIndex,
+                ref expectedRow))
+        {
+            return false;
+        }
+
+        System.Diagnostics.Debug.Assert(
+            store.Contains(location.ChunkRow, entity.Index),
+            "An exact packed-suffix transition row does not match its entity owner.");
+        return true;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool TryGetTransitionSourceRow(
         Entity entity,
@@ -1673,14 +1745,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return true;
     }
 
-    internal void TransitionPrevalidatedWholeSourceBlock(
+    internal void TransitionPrevalidatedRouteBlock(
         ReadOnlySpan<Entity> entities,
         PreparedArchetypeTransition transition)
     {
         EnsureRuntimeMutationAllowed();
         ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
         ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
-        ArchetypeMigrator.MigratePrevalidatedWholeSourceBlock(
+        ArchetypeMigrator.MigratePrevalidatedRouteBlock(
             _entities,
             entities,
             source,
@@ -1697,6 +1769,23 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (source.Store.Count != expectedPopulation)
             ThrowWorldInvariant("A whole-source transition changed occupancy before finalization.");
         source.Store.ClearAllOccupiedRows();
+    }
+
+    internal void CompleteExactPackedSuffixTransition(
+        PreparedArchetypeTransition transition,
+        int expectedSourcePopulation,
+        int suffixCount)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        if (suffixCount <= ArchetypeMigrator.MaximumBatchSize ||
+            suffixCount >= expectedSourcePopulation ||
+            source.Store.Count != expectedSourcePopulation)
+        {
+            ThrowWorldInvariant(
+                "An exact packed-suffix transition changed source occupancy before finalization.");
+        }
+        source.Store.RemoveTailRows(suffixCount);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

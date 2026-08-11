@@ -232,13 +232,13 @@ internal static class ArchetypeMigrator
     }
 
     /// <summary>
-    /// Streams one validated block of an exact whole-source route into its
-    /// destination without removing source rows. The route coordinator clears
-    /// the complete source store once every block has published in record
-    /// order. This keeps scratch bounded while removing the 256-row compaction
-    /// horizon from whole-archetype transitions.
+    /// Streams one prevalidated route block into its destination without
+    /// removing source rows. A route coordinator owns final whole-store reset
+    /// or packed-suffix shrink after every block publishes in record order.
+    /// This route-neutral primitive keeps scratch bounded while removing the
+    /// 256-row source-planning horizon.
     /// </summary>
-    internal static void MigratePrevalidatedWholeSourceBlock<TArena>(
+    internal static void MigratePrevalidatedRouteBlock<TArena>(
         EntityPool entityPool,
         ReadOnlySpan<Entity> entities,
         ArchetypeStorage<TArena> source,
@@ -270,7 +270,7 @@ internal static class ArchetypeMigrator
                 first: 0,
                 end: reserved);
             ThrowMigrationInvariant(
-                "A capacity-preflighted whole-source transition could not reserve its destination block.");
+                "A capacity-preflighted route transition could not reserve its destination block.");
         }
 
         try

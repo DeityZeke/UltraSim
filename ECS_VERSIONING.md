@@ -19,7 +19,8 @@ generation.milestone.revision
 The V31 consolidation checkpoint is therefore `3.0.31`. The exact whole-source
 transition work is `3.0.32`, and its validate-once trusted commit optimization is
 `3.0.33`. Prepared ordinary migration's measured trusted commit optimization is
-`3.0.34`. The next accepted checkpoint in the same milestone will be `3.0.35`;
+`3.0.34`. Exact route-level packed-suffix transition planning is `3.0.35`;
+the next accepted checkpoint in the same milestone will be `3.0.36`;
 a major capability/stability milestone advances the middle field and resets the
 revision, for example `3.1.0`.
 

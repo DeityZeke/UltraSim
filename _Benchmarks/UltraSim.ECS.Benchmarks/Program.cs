@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -295,6 +296,7 @@ internal static class PrimitiveBenchmarks
                 continue;
             results.Add(RunScenario(scenario));
         }
+        RunPermanentExactSuffixScenarios(results, scenarioFilter);
         if (results.Count == 0 && !string.IsNullOrWhiteSpace(scenarioFilter))
             throw new ArgumentException($"No benchmark scenario matched filter '{scenarioFilter}'.", nameof(scenarioFilter));
 
@@ -332,6 +334,107 @@ internal static class PrimitiveBenchmarks
         };
     }
 
+    private static void RunPermanentExactSuffixScenarios(
+        List<BenchmarkResult> results,
+        string? scenarioFilter)
+    {
+        RunPermanentExactSuffixScenarioPair(
+            results,
+            scenarioFilter,
+            suffixCount: 257,
+            label: "Normal_257Of100000",
+            retainWide: false,
+            trackExactRows: false);
+        RunPermanentExactSuffixScenarioPair(
+            results,
+            scenarioFilter,
+            suffixCount: 10_000,
+            label: "Normal_10000Of100000",
+            retainWide: false,
+            trackExactRows: false);
+        RunPermanentExactSuffixScenarioPair(
+            results,
+            scenarioFilter,
+            suffixCount: 50_000,
+            label: "Normal_50000Of100000",
+            retainWide: false,
+            trackExactRows: false);
+        RunPermanentExactSuffixScenarioPair(
+            results,
+            scenarioFilter,
+            suffixCount: 10_000,
+            label: "WideRetained_10000Of100000",
+            retainWide: true,
+            trackExactRows: false);
+        RunPermanentExactSuffixScenarioPair(
+            results,
+            scenarioFilter,
+            suffixCount: 50_000,
+            label: "WideRetained_50000Of100000",
+            retainWide: true,
+            trackExactRows: false);
+        RunPermanentExactSuffixScenarioPair(
+            results,
+            scenarioFilter,
+            suffixCount: 10_000,
+            label: "WideRetainedExactHistory_10000Of100000",
+            retainWide: true,
+            trackExactRows: true);
+    }
+
+    private static void RunPermanentExactSuffixScenarioPair(
+        List<BenchmarkResult> results,
+        string? scenarioFilter,
+        int suffixCount,
+        string label,
+        bool retainWide,
+        bool trackExactRows)
+    {
+        string endToEndName =
+            $"PublicWorld_ExactPackedSuffixTransition_EndToEnd_{label}";
+        string playbackName =
+            $"PublicWorld_ExactPackedSuffixTransition_Playback_{label}";
+        var endToEnd = new BenchmarkScenario(
+            endToEndName,
+            "PublicWorldStructuralSuffixTransition",
+            suffixCount,
+            static () => default);
+        var playback = new BenchmarkScenario(
+            playbackName,
+            "PublicWorldStructuralSuffixTransition",
+            suffixCount,
+            static () => default);
+        bool runEndToEnd = MatchesFilter(endToEnd, scenarioFilter);
+        bool runPlayback = MatchesFilter(playback, scenarioFilter);
+        if (!runEndToEnd && !runPlayback)
+            return;
+
+        using var fixture = new PublicDeferredTransitionFixture(
+            suffixCount,
+            retainWide,
+            residentEntityCount: 100_000,
+            packedSuffix: true,
+            trackExactRows: trackExactRows);
+        if (runEndToEnd)
+        {
+            results.Add(RunScenario(new BenchmarkScenario(
+                endToEndName,
+                endToEnd.Category,
+                suffixCount,
+                fixture.Execute,
+                fixture.Prepare)));
+        }
+        if (runPlayback)
+        {
+            results.Add(RunScenario(new BenchmarkScenario(
+                playbackName,
+                playback.Category,
+                suffixCount,
+                fixture.ExecuteRecorded,
+                fixture.PrepareRecorded)));
+        }
+    }
+
     private static bool MatchesFilter(in BenchmarkScenario scenario, string? filter) =>
         string.IsNullOrWhiteSpace(filter) ||
         scenario.Name.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
@@ -359,6 +462,7 @@ internal static class PrimitiveBenchmarks
         int gen2Before = GC.CollectionCount(2);
         long checksum = 0;
         long operations = 0;
+        StructuralPlaybackDiagnostics diagnostics = default;
 
         for (int iteration = 0; iteration < iterationCount; iteration++)
         {
@@ -371,6 +475,7 @@ internal static class PrimitiveBenchmarks
 
             operations = measurement.Operations;
             checksum ^= measurement.Checksum;
+            diagnostics = measurement.Diagnostics;
             elapsedMilliseconds[iteration] = Stopwatch.GetElapsedTime(started, stopped).TotalMilliseconds;
             allocatedBytes[iteration] = allocatedAfter - allocatedBefore;
         }
@@ -395,12 +500,21 @@ internal static class PrimitiveBenchmarks
             P99Milliseconds = Percentile(sorted, 0.99),
             MaxMilliseconds = sorted[^1],
             MeanNanosecondsPerOperation = meanMilliseconds * 1_000_000d / operations,
+            P95NanosecondsPerOperation =
+                Percentile(sorted, 0.95) * 1_000_000d / operations,
             OperationsPerSecond = operations / (meanMilliseconds / 1000d),
             MeanAllocatedBytes = (long)allocatedBytes.Average(),
             Gen0Collections = GC.CollectionCount(0) - gen0Before,
             Gen1Collections = GC.CollectionCount(1) - gen1Before,
             Gen2Collections = GC.CollectionCount(2) - gen2Before,
             Checksum = checksum,
+            ExactWholeSourceResets = diagnostics.ExactWholeSourceResets,
+            ExactSuffixShrinks = diagnostics.ExactSuffixShrinks,
+            ExactSuffixCommands = diagnostics.ExactSuffixCommands,
+            ExactSuffixBlocksStreamed = diagnostics.ExactSuffixBlocksStreamed,
+            ExactSuffixRowsBulkShrunk = diagnostics.ExactSuffixRowsBulkShrunk,
+            ExactSuffixDonorRelocations = diagnostics.ExactSuffixDonorRelocations,
+            FailedExactSuffixCandidates = diagnostics.FailedExactSuffixCandidates,
         };
     }
 
@@ -1573,7 +1687,9 @@ internal static class PrimitiveBenchmarks
             bool retainWide = false,
             bool scatteredSource = false,
             int residentEntityCount = 0,
-            int timedCycleCount = 0)
+            int timedCycleCount = 0,
+            bool packedSuffix = false,
+            bool trackExactRows = false)
         {
             residentEntityCount = residentEntityCount == 0 ? entityCount : residentEntityCount;
             if (residentEntityCount < entityCount)
@@ -1586,7 +1702,7 @@ internal static class PrimitiveBenchmarks
                 new EcsWorldOptions(
                     new EntityCapacity(residentEntityCount),
                     maximumArchetypes: 2,
-                    maximumPreparedPlans: 0,
+                    maximumPreparedPlans: trackExactRows ? 1 : 0,
                     maximumPreparedTransitions: 2,
                     maximumStructuralCommands: entityCount));
             ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
@@ -1613,20 +1729,36 @@ internal static class PrimitiveBenchmarks
                     maximumChunks: 640);
             _forward = _world.PrepareTransition(source, destination);
             _backward = _world.PrepareTransition(destination, source);
+            if (trackExactRows)
+            {
+                if (!retainWide)
+                {
+                    throw new ArgumentException(
+                        "Exact-row migration measurement requires a retained wide component.",
+                        nameof(trackExactRows));
+                }
+                FieldInfo coreField = typeof(EcsWorld).GetField(
+                    "_core",
+                    BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?? throw new InvalidOperationException(
+                        "Benchmark public-world core field was not found.");
+                var core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(_world)
+                    ?? throw new InvalidOperationException("Benchmark public-world core was null."));
+                _ = core.PrepareChangedRowsQuery<BenchmarkWide>(wide, wide);
+            }
             _world.Seal();
             _world.Initialize();
             _world.BeginRun();
             _commands = _world.StructuralCommands;
             _entities = new Entity[entityCount];
-            for (int index = 0; index < _entities.Length; index++)
+            int targetStart = packedSuffix ? residentEntityCount - entityCount : 0;
+            for (int index = 0; index < residentEntityCount; index++)
             {
-                if (!_world.TryCreate(source, out _entities[index]))
+                bool isTarget = index >= targetStart && index < targetStart + entityCount;
+                if (!_world.TryCreate(source, out Entity entity))
                     throw new InvalidOperationException("Deferred-transition fixture exhausted its source.");
-            }
-            for (int index = entityCount; index < residentEntityCount; index++)
-            {
-                if (!_world.TryCreate(source, out _))
-                    throw new InvalidOperationException("Deferred-transition fixture exhausted its resident source.");
+                if (isTarget)
+                    _entities[index - targetStart] = entity;
             }
             _resetEntities = scatteredSource
                 ? CreateInterleavedOrder(_entities)
@@ -1635,6 +1767,9 @@ internal static class PrimitiveBenchmarks
         }
 
         internal long CommandReservedBytes => _commands.ReservedBytes;
+
+        internal StructuralPlaybackDiagnostics LastDiagnostics =>
+            _commands.LastPlaybackDiagnostics;
 
         internal void Prepare()
         {
@@ -1656,7 +1791,10 @@ internal static class PrimitiveBenchmarks
             _inDestination = true;
             long checksum = unchecked(
                 (long)result.Epoch + result.CommandCount + result.AddedCount);
-            return new ScenarioMeasurement(_entities.Length, checksum);
+            return new ScenarioMeasurement(
+                _entities.Length,
+                checksum,
+                _commands.LastPlaybackDiagnostics);
         }
 
         internal ScenarioMeasurement ExecuteScalarOracle()
@@ -1669,7 +1807,10 @@ internal static class PrimitiveBenchmarks
             _inDestination = true;
             long checksum = unchecked(
                 (long)result.Epoch + result.CommandCount + result.AddedCount);
-            return new ScenarioMeasurement(_entities.Length, checksum);
+            return new ScenarioMeasurement(
+                _entities.Length,
+                checksum,
+                _commands.LastPlaybackDiagnostics);
         }
 
         internal void PrepareRecorded()
@@ -1739,7 +1880,10 @@ internal static class PrimitiveBenchmarks
             _inDestination = true;
             long checksum = unchecked(
                 (long)result.Epoch + result.CommandCount + result.AddedCount);
-            return new ScenarioMeasurement(_entities.Length, checksum);
+            return new ScenarioMeasurement(
+                _entities.Length,
+                checksum,
+                _commands.LastPlaybackDiagnostics);
         }
 
         public void Dispose() => _world.Dispose();
@@ -3652,7 +3796,10 @@ internal readonly record struct BenchmarkScenario(
     Func<ScenarioMeasurement> Execute,
     Action? Prepare = null);
 
-internal readonly record struct ScenarioMeasurement(long Operations, long Checksum);
+internal readonly record struct ScenarioMeasurement(
+    long Operations,
+    long Checksum,
+    StructuralPlaybackDiagnostics Diagnostics = default);
 
 internal sealed class BenchmarkReport
 {
@@ -3974,10 +4121,18 @@ internal sealed class BenchmarkResult
     public required double P99Milliseconds { get; init; }
     public required double MaxMilliseconds { get; init; }
     public required double MeanNanosecondsPerOperation { get; init; }
+    public double P95NanosecondsPerOperation { get; init; }
     public required double OperationsPerSecond { get; init; }
     public required long MeanAllocatedBytes { get; init; }
     public required int Gen0Collections { get; init; }
     public required int Gen1Collections { get; init; }
     public required int Gen2Collections { get; init; }
     public required long Checksum { get; init; }
+    public int ExactWholeSourceResets { get; init; }
+    public int ExactSuffixShrinks { get; init; }
+    public int ExactSuffixCommands { get; init; }
+    public int ExactSuffixBlocksStreamed { get; init; }
+    public int ExactSuffixRowsBulkShrunk { get; init; }
+    public int ExactSuffixDonorRelocations { get; init; }
+    public int FailedExactSuffixCandidates { get; init; }
 }

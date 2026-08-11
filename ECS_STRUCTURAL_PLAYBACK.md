@@ -1,6 +1,6 @@
 # ECS Next Structural Playback
 
-Status: authoritative ECS 3.0.34 structural-playback architecture as of 2026-08-10.
+Status: authoritative ECS 3.0.35 structural-playback architecture as of 2026-08-10.
 
 The project version convention is defined in
 [`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.
@@ -75,6 +75,7 @@ primitive.
 | Balanced same-archetype destroy/create, row width at least 64 bytes | Retire into barrier-local holes, initialize creates into those rows, finalize leftovers | Avoid wide donor relocation without exposing sparse queries |
 | Other live destroys | Scalar packed removal with trusted donor/location commit | Preserves record-order conflict behavior and avoids speculative planner cost |
 | Exact ordered transition evacuating a complete source, more than 256 commands, with full destination capacity | Validate the entire route once, stream trusted destination publication in 256-row blocks, reset the source once | Preserve bounded scratch and record order while eliminating per-block source removal/compaction and redundant liveness/location validation |
+| Exact homogeneous transition covering the source store's real packed suffix, more than 256 but less than the complete source population, with full destination capacity | Validate the complete route against a store-owned suffix cursor, stream trusted destination publication in record order, shrink the source tail once | Remove the 256-row planning horizon without moving a surviving donor or exposing sparse storage |
 | Same prepared transition run, at least 8 commands | 256-entity bounded grouped execution; contiguous prepared prefixes use trusted location publication and donor repair | Amortize route, destination, copy, compaction, and already-proven EntityPool validation work |
 | Short or high-entropy transition run | Scalar prepared transition | Grouping overhead is not justified |
 
@@ -86,8 +87,9 @@ historical benchmark milestones.
 
 ## Whole-source validate-once boundary
 
-The exact whole-source coordinator is the only caller of the trusted block
-migration primitive. Before the first destination row is reserved it proves the
+The exact whole-source and packed-suffix coordinators are the only callers of the
+route-neutral trusted block migration primitive. Before the first destination
+row is reserved, the whole-source coordinator proves the
 complete homogeneous route, every entity's live generation and source location,
 strict physical row order, exact source population, and capacity for the entire
 destination. Structural playback is single-owner, so those facts cannot change
@@ -103,6 +105,38 @@ After preflight, reservation, copying, and publication are commit work. Any
 unexpected failure is an invariant violation: destination reservation is rolled
 back where still possible, command playback is consumed, and the public world is
 terminally faulted. It never falls back after partial mutation.
+
+## Exact packed-suffix proof boundary
+
+ECS 3.0.35 extends route-level planning to one conservative partial-source
+topology: a homogeneous run that is exactly the source store's authoritative
+packed suffix. Whole-source planning retains precedence, and the initial
+production threshold is strictly more than the 256-row execution block. Runs at
+or below 256 remain with the existing grouped/planned-compaction strategy.
+
+Before mutation, the coordinator proves the complete contiguous route, resolves
+every live or same-barrier deferred target, rejects duplicates through exact row
+matching, requires less than the full source population, requires capacity for
+the complete destination, and advances a store-owned cursor through every suffix
+row in forward record order. The cursor is derived by retreating from the real
+donor tail and walking the store's intrusive occupied-chunk topology. Numeric
+chunk handles, adjacency, and direction are never treated as packed order; this
+remains correct when retained empty chunks are recycled in either handle
+direction.
+
+Successful execution reuses the same trusted, route-neutral block mover as the
+whole-source strategy. Each bounded 256-row block rereads its proved source rows,
+reserves/default-initializes destination rows, transfers retained data, enable
+state, dense history, and exact history, then publishes destination ownership and
+locations in command order. Source occupancy is unchanged until all blocks have
+committed. Finalization performs one `RemoveTailRows(total)` operation, so no
+surviving donor is relocated and query-visible stores remain packed.
+
+Any ordinary proof or capacity failure occurs before mutation and returns to the
+grouped executor, preserving its scalar-equivalent prefix acceptance. There is no
+partial-capacity suffix execution. Any impossible reservation, copy, publication,
+or occupancy failure after commit begins terminally faults the world; it cannot
+retry the already-published prefix.
 
 ## Prepared-prefix validate-once boundary
 
@@ -208,6 +242,10 @@ Every strategy change must frequently run:
 
 - scalar/production canonical differential command streams;
 - exact whole/tail candidate success and failed-candidate fallback;
+- exact whole-source precedence and the 256/257 packed-suffix boundary;
+- suffixes within one chunk, at a chunk boundary, and across many retained or
+  recycled chunks using the authoritative donor order;
+- exact-suffix one-row-short destination fallback and zero survivor relocation;
 - exact-plan precedence over the row market;
 - duplicate, stale, foreign, wrong-source, and same-entity conflicts;
 - same-barrier deferred token resolution;
@@ -235,7 +273,9 @@ them.
 Natural future work includes per-worker fixed command arenas, deterministic worker
 merge, separated-run route grouping, typed add payloads, prefab expansion,
 lifecycle publication, and tick budgets. Exact whole-source transition routes now
-plan beyond the 256-command execution block without enlarging scratch. General
-route-level source planning, exact suffix transitions, and source-chunk density
-strategies remain experiments until the shared comparison shows a stable win
-across entropy, locality, width, conflict, history, and evacuation sweeps.
+plan beyond the 256-command execution block without enlarging scratch, and exact
+packed suffixes now do the same through the narrowly proved 3.0.35 strategy.
+General partial-source planning, arbitrary sparse compaction, and source-chunk
+density strategies remain experiments until shared measurement proves a stable
+crossover across entropy, locality, width, conflict, history, and evacuation
+sweeps.

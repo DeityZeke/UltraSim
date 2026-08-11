@@ -142,7 +142,15 @@ allocation:
   unordered, mixed-archetype, and sparse sets retain scalar destruction. A
   measured attempt to apply transition-style planned compaction to arbitrary
   partial destroy sets regressed both sparse and donor-tail cases and was
-  removed. Per-worker
+  removed. ECS 3.0.35 adds exact route-level packed-suffix transition planning
+  above the 256-row grouped horizon. After whole-source precedence, it proves a
+  complete homogeneous run against a store-owned forward cursor derived from
+  the real donor tail, proves full destination capacity, streams trusted
+  destination publication in bounded blocks, and shrinks the source tail once.
+  Successful suffixes move no surviving donor; failed, scattered, stale,
+  conflicting, or partial-capacity candidates fall back before mutation. The
+  authoritative current strategy model lives in the root
+  `ECS_STRUCTURAL_PLAYBACK.md`. Per-worker
   arenas, deterministic worker merge, grouping across separated route runs,
   broader density/entropy-driven compaction, typed component payloads, prefab
   expansion, and lifecycle publication remain later structural work and must be measured

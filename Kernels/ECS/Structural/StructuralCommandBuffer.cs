@@ -46,6 +46,7 @@ public sealed class StructuralCommandBuffer
     private PhaseChain _adds;
     private int _activeTemporaryArchetypeCount;
     private bool _hasTemporaryHoleEligibleArchetype;
+    private StructuralPlaybackDiagnostics _lastPlaybackDiagnostics;
 
     internal StructuralCommandBuffer(
         WorldId worldId,
@@ -106,6 +107,15 @@ public sealed class StructuralCommandBuffer
         if (!TryEnqueueCreateDefault(archetype, out DeferredEntity entity))
             throw new StructuralCommandCapacityExceededException(Capacity);
         return entity;
+    }
+
+    internal StructuralPlaybackDiagnostics LastPlaybackDiagnostics
+    {
+        get
+        {
+            EnsureOwnerAndActive();
+            return _lastPlaybackDiagnostics;
+        }
     }
 
     public bool TryEnqueueCreateDefault(
@@ -386,11 +396,13 @@ public sealed class StructuralCommandBuffer
         EnsureOwnerAndActive();
         if (_isPlaying)
             throw new InvalidOperationException("Structural command playback cannot be nested or re-entered.");
+        _lastPlaybackDiagnostics = default;
         if (_count == 0)
             return default;
 
         int commandCount = _count;
         var counts = new PlaybackCounts();
+        var diagnostics = new PlaybackDiagnostics();
         bool completed = false;
         _isPlaying = true;
         try
@@ -400,6 +412,7 @@ public sealed class StructuralCommandBuffer
                     world,
                     commandCount,
                     ref counts,
+                    ref diagnostics,
                     useTemporaryHoles: executor == StructuralPlaybackExecutor.Production);
             else
                 ExecuteScalarOracle(world, commandCount, ref counts);
@@ -421,6 +434,14 @@ public sealed class StructuralCommandBuffer
                 counts.ReusedTemporaryHoleFixedRowBytes);
             _lastPlaybackCommandCount = commandCount;
             _hasCompletedPlayback = true;
+            _lastPlaybackDiagnostics = new StructuralPlaybackDiagnostics(
+                diagnostics.ExactWholeSourceResets,
+                diagnostics.ExactSuffixShrinks,
+                diagnostics.ExactSuffixCommands,
+                diagnostics.ExactSuffixBlocksStreamed,
+                diagnostics.ExactSuffixRowsBulkShrunk,
+                ExactSuffixDonorRelocations: 0,
+                FailedExactSuffixCandidates: diagnostics.FailedExactSuffixCandidates);
             completed = true;
             return result;
         }
@@ -435,6 +456,7 @@ public sealed class StructuralCommandBuffer
                 _createdEntities.AsSpan(0, commandCount).Clear();
                 _lastPlaybackCommandCount = 0;
                 _hasCompletedPlayback = false;
+                _lastPlaybackDiagnostics = default;
             }
         }
     }
@@ -443,6 +465,7 @@ public sealed class StructuralCommandBuffer
         EcsWorld<NativeChunkArena> world,
         int commandCount,
         ref PlaybackCounts counts,
+        ref PlaybackDiagnostics diagnostics,
         bool useTemporaryHoles)
     {
         LiveDestroyPlan liveDestroyPlan = AnalyzeLiveDestroyPlan(world, _liveDestroys);
@@ -492,14 +515,16 @@ public sealed class StructuralCommandBuffer
             _removes,
             StructuralTransitionPhase.Remove,
             ref counts.Removed,
-            ref counts.RejectedTransition);
+            ref counts.RejectedTransition,
+            ref diagnostics);
         ExecuteIndexedTransitionChain(
             world,
             commandCount,
             _adds,
             StructuralTransitionPhase.Add,
             ref counts.Added,
-            ref counts.RejectedTransition);
+            ref counts.RejectedTransition,
+            ref diagnostics);
     }
 
     private void ExecuteScalarOracle(
@@ -908,7 +933,8 @@ public sealed class StructuralCommandBuffer
         in PhaseChain chain,
         StructuralTransitionPhase expectedPhase,
         ref int applied,
-        ref int rejected)
+        ref int rejected,
+        ref PlaybackDiagnostics diagnostics)
     {
         Span<Entity> batch = stackalloc Entity[ArchetypeMigrator.MaximumBatchSize];
         for (int link = chain.HeadLink; link != 0;)
@@ -946,7 +972,19 @@ public sealed class StructuralCommandBuffer
                     transitionId,
                     transition,
                     ref link,
-                    ref applied))
+                    ref applied,
+                    ref diagnostics))
+            {
+                continue;
+            }
+            if (TryExecuteExactPackedSuffixTransitionRun(
+                    world,
+                    commandCount,
+                    transitionId,
+                    transition,
+                    ref link,
+                    ref applied,
+                    ref diagnostics))
             {
                 continue;
             }
@@ -1013,7 +1051,8 @@ public sealed class StructuralCommandBuffer
         uint transitionId,
         PreparedArchetypeTransition transition,
         ref int link,
-        ref int applied)
+        ref int applied,
+        ref PlaybackDiagnostics diagnostics)
     {
         int firstCommandIndex = link - 1;
         StructuralCommandRecord first = _commands[firstCommandIndex];
@@ -1074,7 +1113,7 @@ public sealed class StructuralCommandBuffer
                 executeLink = _nextCommand[commandIndex];
             }
 
-            world.TransitionPrevalidatedWholeSourceBlock(
+            world.TransitionPrevalidatedRouteBlock(
                 batch[..batchCount],
                 transition);
             remaining -= batchCount;
@@ -1083,6 +1122,110 @@ public sealed class StructuralCommandBuffer
         world.CompleteWholeSourceTransition(transition, population);
         link = scanLink;
         applied = checked(applied + population);
+        diagnostics.ExactWholeSourceResets++;
+        return true;
+    }
+
+    /// <summary>
+    /// Removes the fixed-block planning horizon when one homogeneous route is
+    /// exactly the source store's authoritative packed suffix. Validation and
+    /// whole-route destination capacity proof finish before mutation. Blocks
+    /// publish forward in command order without source removal; finalization
+    /// performs one bulk tail shrink and relocates no survivor.
+    /// </summary>
+    private bool TryExecuteExactPackedSuffixTransitionRun(
+        EcsWorld<NativeChunkArena> world,
+        int commandCount,
+        uint transitionId,
+        PreparedArchetypeTransition transition,
+        ref int link,
+        ref int applied,
+        ref PlaybackDiagnostics diagnostics)
+    {
+        int scanLink = link;
+        int runCount = 0;
+        while (scanLink != 0)
+        {
+            int commandIndex = scanLink - 1;
+            if (_commands[commandIndex].Argument != transitionId)
+                break;
+            runCount++;
+            scanLink = _nextCommand[commandIndex];
+        }
+        if (runCount <= ArchetypeMigrator.MaximumBatchSize)
+            return false;
+
+        StructuralCommandRecord first = _commands[link - 1];
+        if (!TryResolveTarget(first, commandCount, out Entity firstEntity, out _) ||
+            !world.TryCreateExactPackedSuffixTransitionCursor(
+                firstEntity,
+                transition,
+                runCount,
+                out int sourcePopulation,
+                out int expectedChunkIndex,
+                out int expectedRow))
+        {
+            diagnostics.FailedExactSuffixCandidates++;
+            return false;
+        }
+
+        int validateLink = link;
+        for (int index = 0; index < runCount; index++)
+        {
+            int commandIndex = validateLink - 1;
+            StructuralCommandRecord command = _commands[commandIndex];
+            if (command.Argument != transitionId ||
+                !TryResolveTarget(command, commandCount, out Entity entity, out _) ||
+                !world.MatchAndAdvanceExactPackedSuffixTransition(
+                    entity,
+                    transition,
+                    ref expectedChunkIndex,
+                    ref expectedRow))
+            {
+                diagnostics.FailedExactSuffixCandidates++;
+                return false;
+            }
+
+            // Create result slots and transition command slots are disjoint.
+            // Preserve command-index addressing so deferred target results in
+            // earlier phases remain available to later commands.
+            _createdEntities[commandIndex] = entity;
+            validateLink = _nextCommand[commandIndex];
+        }
+
+        if (expectedChunkIndex != -1 || expectedRow != -1)
+            ThrowCommandInvariant("An exact packed-suffix proof did not terminate at the donor tail.");
+
+        Span<Entity> batch = stackalloc Entity[ArchetypeMigrator.MaximumBatchSize];
+        int executeLink = link;
+        int remaining = runCount;
+        while (remaining != 0)
+        {
+            int batchCount = Math.Min(remaining, batch.Length);
+            for (int index = 0; index < batchCount; index++)
+            {
+                int commandIndex = executeLink - 1;
+                batch[index] = _createdEntities[commandIndex];
+                executeLink = _nextCommand[commandIndex];
+            }
+
+            world.TransitionPrevalidatedRouteBlock(
+                batch[..batchCount],
+                transition);
+            diagnostics.ExactSuffixBlocksStreamed++;
+            remaining -= batchCount;
+        }
+
+        world.CompleteExactPackedSuffixTransition(
+            transition,
+            sourcePopulation,
+            runCount);
+        diagnostics.ExactSuffixShrinks++;
+        diagnostics.ExactSuffixCommands = checked(diagnostics.ExactSuffixCommands + runCount);
+        diagnostics.ExactSuffixRowsBulkShrunk = checked(
+            diagnostics.ExactSuffixRowsBulkShrunk + runCount);
+        link = scanLink;
+        applied = checked(applied + runCount);
         return true;
     }
 
@@ -1459,6 +1602,16 @@ public sealed class StructuralCommandBuffer
         internal long ReusedTemporaryHoleFixedRowBytes;
     }
 
+    private struct PlaybackDiagnostics
+    {
+        internal int ExactWholeSourceResets;
+        internal int ExactSuffixShrinks;
+        internal int ExactSuffixCommands;
+        internal int ExactSuffixBlocksStreamed;
+        internal int ExactSuffixRowsBulkShrunk;
+        internal int FailedExactSuffixCandidates;
+    }
+
     private struct PhaseChain
     {
         internal int HeadLink;
@@ -1483,3 +1636,12 @@ public sealed class StructuralCommandBuffer
         }
     }
 }
+
+internal readonly record struct StructuralPlaybackDiagnostics(
+    int ExactWholeSourceResets,
+    int ExactSuffixShrinks,
+    int ExactSuffixCommands,
+    int ExactSuffixBlocksStreamed,
+    int ExactSuffixRowsBulkShrunk,
+    int ExactSuffixDonorRelocations,
+    int FailedExactSuffixCandidates);

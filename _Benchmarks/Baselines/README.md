@@ -82,3 +82,13 @@ this checkpoint because its transition rows select exact whole-source work; the
 causal partial-prefix A/B evidence is recorded in `_Benchmarks/README.md`. The
 reversed-order verification remains in
 `_Benchmarks/results/ecs-v2-v3-3.0.34-reverse`.
+
+`ecs-v2-v3-3.0.35-2026-08-10.json` is the accepted exact route-level packed-
+suffix transition capture, V2 first. Its V3 profile is
+`ecs-3.0.35-exact-route-packed-suffix-transition`. It retains 96 comparable
+rows, zero canonical or contract/catalog mismatches, 15 explicit unsupported
+rows, and zero V3 timed managed allocation. The shared catalog has no equivalent
+partial exact-suffix workload, so this artifact is a regression gate; causal
+same-binary grouped/suffix evidence is recorded in `_Benchmarks/README.md`. The
+reversed-order verification remains in
+`_Benchmarks/results/ecs-v2-v3-3.0.35-reverse`.
