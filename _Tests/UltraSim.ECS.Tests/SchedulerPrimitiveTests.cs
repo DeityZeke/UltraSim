@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Numerics;
 using UltraSim.ECS;
 using UltraSim.ECS.Tests;
 
@@ -11,6 +12,10 @@ internal static class SchedulerPrimitiveTests
         Run(nameof(SerialGeneratedSystem_HonorsLifecycleCadenceAndSnapshots), SerialGeneratedSystem_HonorsLifecycleCadenceAndSnapshots);
         Run(nameof(GeneratedMissingFamilies_ExecuteThroughPublicSurface), GeneratedMissingFamilies_ExecuteThroughPublicSurface);
         Run(nameof(ParallelAndSerialGeneratedExecution_AreCanonical), ParallelAndSerialGeneratedExecution_AreCanonical);
+        Run(nameof(GeneratedColumns_DoNotAuthorizeRandomLookups), GeneratedColumns_DoNotAuthorizeRandomLookups);
+        Run(nameof(DeclaredRandomLookups_RemainAuthorized), DeclaredRandomLookups_RemainAuthorized);
+        Run(nameof(RetainedWorld_IsUnavailableDuringGraphExecution), RetainedWorld_IsUnavailableDuringGraphExecution);
+        Run(nameof(ManyArchetypes_RespectGlobalPartitionMaximum), ManyArchetypes_RespectGlobalPartitionMaximum);
         Run(nameof(SerialMode_WithoutCallerUsesOneWorker), SerialMode_WithoutCallerUsesOneWorker);
         Run(nameof(RangeJobs_PartitionExactlyOnceAcrossPersistentWorkers), RangeJobs_PartitionExactlyOnceAcrossPersistentWorkers);
         Run(nameof(AutoPolicy_BelowCrossoverDoesNotWakeBackgroundWorkers), AutoPolicy_BelowCrossoverDoesNotWakeBackgroundWorkers);
@@ -18,6 +23,7 @@ internal static class SchedulerPrimitiveTests
         Run(nameof(GraphDependenciesAndStageValidation_AreExplicit), GraphDependenciesAndStageValidation_AreExplicit);
         Run(nameof(Cadence_DoesNotMakeDependenciesSameTickPrerequisites), Cadence_DoesNotMakeDependenciesSameTickPrerequisites);
         Run(nameof(ConflictsAndDependencies_CompileHardWaveBarriers), ConflictsAndDependencies_CompileHardWaveBarriers);
+        Run(nameof(StructuralCapabilities_DoNotCreateFalseGraphHazards), StructuralCapabilities_DoNotCreateFalseGraphHazards);
         Run(nameof(ParallelTrackedWrites_PublishOneVersionAndExactRows), ParallelTrackedWrites_PublishOneVersionAndExactRows);
         Run(nameof(TrackedNoWrite_DoesNotAdvancePublication), TrackedNoWrite_DoesNotAdvancePublication);
         Run(nameof(ScheduledChangedRows_AcknowledgeOnlySuccessfulExecution), ScheduledChangedRows_AcknowledgeOnlySuccessfulExecution);
@@ -26,6 +32,7 @@ internal static class SchedulerPrimitiveTests
         Run(nameof(StructuralLanes_MergeInLogicalOrderAndApplyAtPostBarrier), StructuralLanes_MergeInLogicalOrderAndApplyAtPostBarrier);
         Run(nameof(Tick_PreBarrierMakesExternalCommandsVisibleToSystems), Tick_PreBarrierMakesExternalCommandsVisibleToSystems);
         Run(nameof(TypedStructuralRoutes_HandleAddReplaceRemoveTagsAndPayloadExhaustion), TypedStructuralRoutes_HandleAddReplaceRemoveTagsAndPayloadExhaustion);
+        Run(nameof(TagAdd_ConsumesZeroPayloadCapacity), TagAdd_ConsumesZeroPayloadCapacity);
         Run(nameof(ManualSystems_LeaveStructuralOutputForNextExternalEpoch), ManualSystems_LeaveStructuralOutputForNextExternalEpoch);
         Run(nameof(WorkerFailure_FaultsWorldAndSkipsStructuralPublication), WorkerFailure_FaultsWorldAndSkipsStructuralPublication);
         Run(nameof(WorkerDisposal_JoinsEveryBackgroundThread), WorkerDisposal_JoinsEveryBackgroundThread);
@@ -120,6 +127,114 @@ internal static class SchedulerPrimitiveTests
         parallel.CopySystemRuntimeSnapshots(snapshot);
         Assert.True(snapshot[0].LastExecutionWasParallel);
         Assert.True(snapshot[0].LastWorkItems > 1);
+    }
+
+    private static void GeneratedColumns_DoNotAuthorizeRandomLookups()
+    {
+        using EcsWorld world = CreateWorld(Options(0), 1, out ArchetypeHandle archetype,
+            out ReadWriteJobPlan<LayoutWide, LayoutInt> plan, out ComponentLookup<LayoutInt> integers);
+        var runtime = new UndeclaredLookupRuntime(integers);
+        world.RegisterReadWriteSystem<LayoutWide, LayoutInt, UndeclaredLookupRuntime, UndeclaredLookupJob>(
+            new SystemDefinition("capability.generated-is-not-random", SystemStage.Movement,
+                executionPolicy: SystemExecutionPolicy.Serial), plan, runtime);
+        Start(world, archetype, 1);
+        Assert.True(world.TryGetEntity(0, out runtime.Entity));
+        world.Tick(0.1);
+        Assert.Equal(1, runtime.ReadRejections);
+        Assert.Equal(1, runtime.WriteRejections);
+        Assert.True(world.TryRead(runtime.Entity, integers, out LayoutInt unchanged));
+        Assert.Equal(0, unchanged.Value);
+    }
+
+    private static void DeclaredRandomLookups_RemainAuthorized()
+    {
+        using EcsWorld world = CreateBareWorld(Options(0), 1, out ArchetypeHandle archetype);
+        ComponentLookup<LayoutInt> integers = world.PrepareLookup<LayoutInt>();
+        ComponentId integer = LayoutTestSchema.GetComponentId<LayoutInt>();
+        var runtime = new DeclaredLookupRuntime(integers);
+        world.RegisterRangeSystem<DeclaredLookupRuntime, DeclaredLookupJob>(
+            new SystemDefinition("capability.declared-random", SystemStage.Movement,
+                executionPolicy: SystemExecutionPolicy.Serial,
+                additionalWrites: [integer], randomWriteTargetsAreDisjoint: true), runtime);
+        Start(world, archetype, 1);
+        Assert.True(world.TryGetEntity(0, out runtime.Entity));
+        world.Tick(0.1);
+        Assert.True(runtime.ReadAccepted);
+        Assert.True(runtime.WriteAccepted);
+        Assert.True(world.TryRead(runtime.Entity, integers, out LayoutInt value));
+        Assert.Equal(456, value.Value);
+    }
+
+    private static void RetainedWorld_IsUnavailableDuringGraphExecution()
+    {
+        using EcsWorld world = CreateWorld(Options(0), 1, out ArchetypeHandle archetype,
+            out ReadWriteJobPlan<LayoutWide, LayoutInt> plan, out ComponentLookup<LayoutInt> integers);
+        var runtime = new RetainedWorldRuntime(integers);
+        world.RegisterReadWriteSystem<LayoutWide, LayoutInt, RetainedWorldRuntime, RetainedWorldJob>(
+            new SystemDefinition("capability.retained-world", SystemStage.Movement,
+                executionPolicy: SystemExecutionPolicy.Serial), plan, runtime);
+        world.Seal();
+        world.Initialize();
+        Assert.True(runtime.InitializeAccessSucceeded);
+        Assert.True(world.TryCreate(archetype, out runtime.Entity));
+        world.BeginRun();
+        world.Tick(0.1);
+        Assert.Equal(3, runtime.PrepareRejections);
+        Assert.Equal(2, runtime.ExecuteRejections);
+        Assert.Equal(3, runtime.CompleteRejections);
+        world.Dispose();
+        Assert.True(runtime.ShutdownAccessSucceeded);
+    }
+
+    private static void ManyArchetypes_RespectGlobalPartitionMaximum()
+    {
+        const int archetypeCount = 16;
+        ComponentSchema schema = LayoutTestSchema.CreateSchema();
+        ComponentId wide = LayoutTestSchema.GetComponentId<LayoutWide>();
+        ComponentId[] optional =
+        [
+            LayoutTestSchema.GetComponentId<LayoutByte>(),
+            LayoutTestSchema.GetComponentId<LayoutInt>(),
+            LayoutTestSchema.GetComponentId<LayoutEnableLong>(),
+            LayoutTestSchema.GetComponentId<LayoutTag>(),
+        ];
+        var scheduler = new EcsSchedulerOptions(
+            maximumSystems: 1, maximumDependencies: 0, maximumWorkItems: 8,
+            maximumStructuralSegments: 8, backgroundWorkerCount: 3,
+            callerParticipates: true, structuralCommandsPerProducer: 0,
+            structuralPayloadBytesPerProducer: 0, maximumPartitionsPerSystem: 8,
+            profilingEnabled: true);
+        using EcsWorld world = new(schema, new EcsWorldOptions(
+            new EntityCapacity(archetypeCount), archetypeCount, 4,
+            maximumStructuralCommands: 0, scheduler: scheduler));
+        var archetypes = new ArchetypeHandle[archetypeCount];
+        for (int bits = 0; bits < archetypeCount; bits++)
+        {
+            var signature = new ComponentId[1 + BitOperations.PopCount(unchecked((uint)bits))];
+            signature[0] = wide;
+            int next = 1;
+            for (int bit = 0; bit < optional.Length; bit++)
+                if ((bits & (1 << bit)) != 0) signature[next++] = optional[bit];
+            Array.Sort(signature, static (left, right) => left.CompareTo(right));
+            archetypes[bits] = world.RegisterArchetype(signature, ChunkLayoutOptions.KiB16, 1);
+        }
+        ReadJobPlan<LayoutWide> plan = world.PrepareReadJob<LayoutWide>();
+        var runtime = new ReadOnlyRuntime();
+        world.RegisterReadSystem<LayoutWide, ReadOnlyRuntime, ReadOnlyJob>(
+            new SystemDefinition("partition.global-cap", SystemStage.Movement,
+                executionPolicy: SystemExecutionPolicy.Parallel,
+                parallelRowThreshold: 1, minimumRowsPerPartition: 1), plan, runtime);
+        world.Seal();
+        world.Initialize();
+        for (int index = 0; index < archetypes.Length; index++)
+            Assert.True(world.TryCreate(archetypes[index], out _));
+        world.BeginRun();
+        world.Tick(0.1);
+        Assert.Equal(archetypeCount, runtime.Rows);
+        var snapshots = new SystemRuntimeSnapshot[1];
+        Assert.Equal(1, world.CopySystemRuntimeSnapshots(snapshots));
+        Assert.True(snapshots[0].LastExecutionWasParallel);
+        Assert.Equal(8, snapshots[0].LastWorkItems);
     }
 
     private static void SerialMode_WithoutCallerUsesOneWorker()
@@ -402,6 +517,56 @@ internal static class SchedulerPrimitiveTests
         Assert.Equal(0, snapshots[0].CompiledWave);
         Assert.True(snapshots[1].CompiledWave > snapshots[0].CompiledWave);
         Assert.True(snapshots[2].CompiledWave > snapshots[1].CompiledWave);
+    }
+
+    private static void StructuralCapabilities_DoNotCreateFalseGraphHazards()
+    {
+        using EcsWorld world = CreateBareWorld(Options(0), 1, out ArchetypeHandle archetype);
+        ComponentId integer = LayoutTestSchema.GetComponentId<LayoutInt>();
+        world.RegisterRangeSystem<NoOpRangeRuntime, NoOpRangeJob>(
+            new SystemDefinition("structural.no-hazard.first", SystemStage.AI,
+                structuralComponents: [integer]), new NoOpRangeRuntime());
+        world.RegisterRangeSystem<NoOpRangeRuntime, NoOpRangeJob>(
+            new SystemDefinition("structural.no-hazard.second", SystemStage.AI,
+                structuralComponents: [integer]), new NoOpRangeRuntime());
+        Start(world, archetype, 0);
+        world.Tick(0.1);
+        var snapshots = new SystemRuntimeSnapshot[2];
+        Assert.Equal(2, world.CopySystemRuntimeSnapshots(snapshots));
+        Assert.Equal(0, snapshots[0].CompiledWave);
+        Assert.Equal(0, snapshots[1].CompiledWave);
+    }
+
+    private static void TagAdd_ConsumesZeroPayloadCapacity()
+    {
+        ComponentSchema schema = LayoutTestSchema.CreateSchema();
+        ComponentId wide = LayoutTestSchema.GetComponentId<LayoutWide>();
+        ComponentId tag = LayoutTestSchema.GetComponentId<LayoutTag>();
+        var scheduler = new EcsSchedulerOptions(
+            maximumSystems: 1, maximumDependencies: 0, maximumWorkItems: 1,
+            maximumStructuralSegments: 1, backgroundWorkerCount: 0,
+            structuralCommandsPerProducer: 1, structuralPayloadBytesPerProducer: 0,
+            maximumPartitionsPerSystem: 1);
+        using EcsWorld world = new(schema, new EcsWorldOptions(
+            new EntityCapacity(1), 2, 2, maximumPreparedTransitions: 2,
+            maximumStructuralCommands: 1, scheduler: scheduler));
+        ArchetypeHandle source = world.RegisterArchetype([wide], ChunkLayoutOptions.KiB16, 1);
+        ComponentId[] taggedSignature = [wide, tag];
+        Array.Sort(taggedSignature, static (left, right) => left.CompareTo(right));
+        _ = world.RegisterArchetype(taggedSignature, ChunkLayoutOptions.KiB16, 1);
+        ComponentLookup<LayoutTag> tags = world.PrepareLookup<LayoutTag>();
+        var runtime = new TagOnlyRuntime();
+        world.RegisterRangeSystem<TagOnlyRuntime, TagOnlyJob>(
+            new SystemDefinition("typed.zero-payload-tag", SystemStage.WorldSim,
+                structuralComponents: [tag]), runtime);
+        world.Seal();
+        world.Initialize();
+        Assert.True(world.TryCreate(source, out runtime.Entity));
+        world.BeginRun();
+        world.Tick(0.1);
+        Assert.True(runtime.Accepted);
+        Assert.True(world.Has(runtime.Entity, tags));
+        Assert.Equal(0L, world.GetSchedulerRuntimeSnapshot().MergedPayloadBytes);
     }
 
     private static void Cadence_DoesNotMakeDependenciesSameTickPrerequisites()
@@ -746,6 +911,142 @@ internal static class SchedulerPrimitiveTests
         }
     }
 
+    private sealed class UndeclaredLookupRuntime : ISystemRuntime<UndeclaredLookupJob>
+    {
+        private readonly ComponentLookup<LayoutInt> _lookup;
+        internal Entity Entity;
+        internal int ReadRejections;
+        internal int WriteRejections;
+        internal UndeclaredLookupRuntime(ComponentLookup<LayoutInt> lookup) => _lookup = lookup;
+        public UndeclaredLookupJob Prepare(in SystemPrepareContext context) => new(Entity, _lookup);
+        public void Complete(in SystemCompleteContext context, ReadOnlySpan<UndeclaredLookupJob> jobs)
+        {
+            for (int index = 0; index < jobs.Length; index++)
+            {
+                ReadRejections += jobs[index].ReadRejections;
+                WriteRejections += jobs[index].WriteRejections;
+            }
+        }
+    }
+
+    private struct UndeclaredLookupJob : IScheduledReadWriteChunkJob<LayoutWide, LayoutInt>
+    {
+        private readonly Entity _entity;
+        private readonly ComponentLookup<LayoutInt> _lookup;
+        internal int ReadRejections;
+        internal int WriteRejections;
+        internal UndeclaredLookupJob(Entity entity, ComponentLookup<LayoutInt> lookup) =>
+            (_entity, _lookup, ReadRejections, WriteRejections) = (entity, lookup, 0, 0);
+        public void Execute(in SystemJobContext context,
+            in ReadWriteComponentChunk<LayoutWide, LayoutInt> chunk)
+        {
+            try { _ = context.TryRead(_entity, _lookup, out LayoutInt _); }
+            catch (InvalidOperationException) { ReadRejections++; }
+            try { _ = context.TryWrite(_entity, _lookup, new LayoutInt { Value = 123 }); }
+            catch (InvalidOperationException) { WriteRejections++; }
+        }
+    }
+
+    private sealed class DeclaredLookupRuntime : IRangeSystemRuntime<DeclaredLookupJob>
+    {
+        private readonly ComponentLookup<LayoutInt> _lookup;
+        internal Entity Entity;
+        internal bool ReadAccepted;
+        internal bool WriteAccepted;
+        internal DeclaredLookupRuntime(ComponentLookup<LayoutInt> lookup) => _lookup = lookup;
+        public int GetRangeCount(in SystemPrepareContext context) => 1;
+        public DeclaredLookupJob Prepare(in SystemPrepareContext context) => new(Entity, _lookup);
+        public void Complete(in SystemCompleteContext context, ReadOnlySpan<DeclaredLookupJob> jobs)
+        {
+            ReadAccepted = jobs.Length == 1 && jobs[0].ReadAccepted;
+            WriteAccepted = jobs.Length == 1 && jobs[0].WriteAccepted;
+        }
+    }
+
+    private struct DeclaredLookupJob : IRangeJob
+    {
+        private readonly Entity _entity;
+        private readonly ComponentLookup<LayoutInt> _lookup;
+        internal bool ReadAccepted;
+        internal bool WriteAccepted;
+        internal DeclaredLookupJob(Entity entity, ComponentLookup<LayoutInt> lookup) =>
+            (_entity, _lookup, ReadAccepted, WriteAccepted) = (entity, lookup, false, false);
+        public void Execute(in SystemJobContext context, int start, int count)
+        {
+            ReadAccepted = context.TryRead(_entity, _lookup, out _);
+            WriteAccepted = context.TryWrite(_entity, _lookup, new LayoutInt { Value = 456 });
+        }
+    }
+
+    private sealed class RetainedWorldRuntime : ISystemRuntime<RetainedWorldJob>
+    {
+        private readonly ComponentLookup<LayoutInt> _lookup;
+        private EcsWorld? _world;
+        internal Entity Entity;
+        internal bool InitializeAccessSucceeded;
+        internal bool ShutdownAccessSucceeded;
+        internal int PrepareRejections;
+        internal int ExecuteRejections;
+        internal int CompleteRejections;
+        internal RetainedWorldRuntime(ComponentLookup<LayoutInt> lookup) => _lookup = lookup;
+        public void Initialize(in SystemInitializationContext context)
+        {
+            _world = context.World;
+            _ = context.World.StructuralCommands.Count;
+            InitializeAccessSucceeded = true;
+        }
+        public RetainedWorldJob Prepare(in SystemPrepareContext context)
+        {
+            EcsWorld world = _world ?? throw new InvalidOperationException();
+            PrepareRejections = ProbeDirectWorld(world, Entity, _lookup);
+            return new RetainedWorldJob(world, Entity, _lookup);
+        }
+        public void Complete(in SystemCompleteContext context, ReadOnlySpan<RetainedWorldJob> jobs)
+        {
+            for (int index = 0; index < jobs.Length; index++)
+                ExecuteRejections += jobs[index].Rejections;
+            CompleteRejections = ProbeDirectWorld(
+                _world ?? throw new InvalidOperationException(), Entity, _lookup);
+        }
+        public void Shutdown(in SystemShutdownContext context)
+        {
+            _ = context.World.AliveCount;
+            ShutdownAccessSucceeded = true;
+        }
+        internal static int ProbeDirectWorld(EcsWorld world, Entity entity,
+            ComponentLookup<LayoutInt> lookup)
+        {
+            int rejected = 0;
+            try { _ = world.TryRead(entity, lookup, out LayoutInt _); }
+            catch (InvalidOperationException) { rejected++; }
+            try { _ = world.TryWrite(entity, lookup, new LayoutInt { Value = 99 }); }
+            catch (InvalidOperationException) { rejected++; }
+            try { _ = world.StructuralCommands.Count; }
+            catch (InvalidOperationException) { rejected++; }
+            return rejected;
+        }
+    }
+
+    private struct RetainedWorldJob : IScheduledReadWriteChunkJob<LayoutWide, LayoutInt>
+    {
+        private readonly EcsWorld _world;
+        private readonly Entity _entity;
+        private readonly ComponentLookup<LayoutInt> _lookup;
+        internal int Rejections;
+        internal RetainedWorldJob(EcsWorld world, Entity entity, ComponentLookup<LayoutInt> lookup) =>
+            (_world, _entity, _lookup, Rejections) = (world, entity, lookup, 0);
+        public void Execute(in SystemJobContext context,
+            in ReadWriteComponentChunk<LayoutWide, LayoutInt> chunk)
+        {
+            int rejected = 0;
+            try { _ = _world.TryRead(_entity, _lookup, out LayoutInt _); }
+            catch (InvalidOperationException) { rejected++; }
+            try { _ = _world.StructuralCommands.Count; }
+            catch (InvalidOperationException) { rejected++; }
+            Rejections = rejected;
+        }
+    }
+
     private sealed class ReadOnlyRuntime : ISystemRuntime<ReadOnlyJob>
     {
         internal int Rows;
@@ -1072,6 +1373,25 @@ internal static class SchedulerPrimitiveTests
         internal PayloadExhaustionJob(Entity entity) => (_entity, Accepted) = (entity, false);
         public void Execute(in SystemJobContext context, int start, int count) =>
             Accepted = context.Commands.TryAdd(_entity, new LayoutInt { Value = 17 });
+    }
+
+    private sealed class TagOnlyRuntime : IRangeSystemRuntime<TagOnlyJob>
+    {
+        internal Entity Entity;
+        internal bool Accepted;
+        public int GetRangeCount(in SystemPrepareContext context) => 1;
+        public TagOnlyJob Prepare(in SystemPrepareContext context) => new(Entity);
+        public void Complete(in SystemCompleteContext context, ReadOnlySpan<TagOnlyJob> jobs) =>
+            Accepted = jobs.Length != 0 && jobs[0].Accepted;
+    }
+
+    private struct TagOnlyJob : IRangeJob
+    {
+        private readonly Entity _entity;
+        internal bool Accepted;
+        internal TagOnlyJob(Entity entity) => (_entity, Accepted) = (entity, false);
+        public void Execute(in SystemJobContext context, int start, int count) =>
+            Accepted = context.Commands.TryAdd(_entity, new LayoutTag());
     }
 }
 

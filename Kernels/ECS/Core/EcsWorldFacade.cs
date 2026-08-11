@@ -536,6 +536,12 @@ public sealed partial class EcsWorld : IDisposable
             throw new InvalidOperationException(
                 "This ECS facade is single-owner. Scheduler workers must use their issued SystemJobContext capability.");
         }
+        if (_scheduler?.IsExecuting == true)
+        {
+            throw new InvalidOperationException(
+                "Direct EcsWorld runtime access is unavailable while the system graph is executing. " +
+                "Systems must use scheduler-issued job and structural capabilities.");
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

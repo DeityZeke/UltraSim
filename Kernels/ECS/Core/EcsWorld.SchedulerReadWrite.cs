@@ -37,26 +37,40 @@ internal sealed partial class EcsWorld<TArena>
             return 0;
         int targetChunks = Math.Max(1, (shape.Chunks + desiredPartitions - 1) / desiredPartitions);
         int written = 0;
+        int firstRoute = -1;
+        int firstChunk = -1;
+        int partitionChunks = 0;
+        int partitionRows = 0;
         ReadOnlySpan<ArchetypeReadWriteQueryRoute<TArena>> routes = plan.Routes;
         for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
         {
             ArchetypeChunkStore<TArena> store = routes[routeIndex].Storage.Store;
-            int cursor = store.GetFirstOccupiedChunkIndex();
-            while (cursor >= 0)
+            for (int cursor = store.GetFirstOccupiedChunkIndex(); cursor >= 0;
+                 cursor = store.GetNextOccupiedChunkIndex(cursor))
             {
+                if (partitionChunks == 0)
+                {
+                    firstRoute = routeIndex;
+                    firstChunk = cursor;
+                }
+                partitionRows = checked(partitionRows + store.GetRowCount(unchecked((uint)cursor)));
+                partitionChunks++;
+                if (partitionChunks != targetChunks)
+                    continue;
                 if (written == destination.Length)
                     throw new InvalidOperationException("Scheduler work-item capacity is exhausted.");
-                int first = cursor;
-                int chunkCount = 0;
-                int rowCount = 0;
-                while (cursor >= 0 && chunkCount < targetChunks)
-                {
-                    rowCount = checked(rowCount + store.GetRowCount(unchecked((uint)cursor)));
-                    chunkCount++;
-                    cursor = store.GetNextOccupiedChunkIndex(cursor);
-                }
-                destination[written++] = new SchedulerChunkPartition(routeIndex, first, chunkCount, rowCount);
+                destination[written++] = new SchedulerChunkPartition(
+                    firstRoute, firstChunk, partitionChunks, partitionRows);
+                partitionChunks = 0;
+                partitionRows = 0;
             }
+        }
+        if (partitionChunks != 0)
+        {
+            if (written == destination.Length)
+                throw new InvalidOperationException("Scheduler work-item capacity is exhausted.");
+            destination[written++] = new SchedulerChunkPartition(
+                firstRoute, firstChunk, partitionChunks, partitionRows);
         }
         return written;
     }
@@ -75,28 +89,43 @@ internal sealed partial class EcsWorld<TArena>
         ReadOnlySpan<ArchetypeReadWriteQueryRoute<TArena>> routes = plan.Routes;
         if (!partition.IsValid || unchecked((uint)partition.RouteIndex) >= unchecked((uint)routes.Length))
             throw new ArgumentException("The scheduler chunk partition is invalid.", nameof(partition));
-        ref readonly ArchetypeReadWriteQueryRoute<TArena> route = ref routes[partition.RouteIndex];
-        if (route.HasRowFilters)
-            throw new InvalidOperationException("Scheduled public plans do not expose row-filter authoring.");
-        ArchetypeChunkStore<TArena> store = route.Storage.Store;
+        int routeIndex = partition.RouteIndex;
         int chunkIndex = partition.FirstChunkIndex;
         int visited = 0;
-        for (int ordinal = 0; ordinal < partition.ChunkCount; ordinal++)
+        int remaining = partition.ChunkCount;
+        while (remaining != 0)
         {
-            BoundReadWriteComponentChunk<TRead, TWrite> bound =
-                store.GetBoundReadWriteComponentChunk<TRead, TWrite>(
-                    chunkIndex,
-                    route.ReadColumnIndex,
-                    route.WriteColumnIndex,
-                    plan.ReadIsEnableable,
-                    plan.WriteIsEnableable);
-            store.StampDenseChangeVersion(bound.ChunkIndex, route.WriteColumnIndex, writeVersion);
-            var chunk = new ReadWriteComponentChunk<TRead, TWrite>(
-                Id, route.Storage.Id, bound.ChunkIndex, 0, bound.EntityIndices,
-                bound.ReadComponents, bound.WriteComponents, bound.ReadEnableWords, bound.WriteEnableWords);
-            job.Execute(context, chunk);
-            visited += chunk.Count;
-            chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex);
+            if (unchecked((uint)routeIndex) >= unchecked((uint)routes.Length))
+                throw new InvalidOperationException("A scheduler partition exceeded its matched routes.");
+            ref readonly ArchetypeReadWriteQueryRoute<TArena> route = ref routes[routeIndex];
+            if (route.HasRowFilters)
+                throw new InvalidOperationException("Scheduled public plans do not expose row-filter authoring.");
+            ArchetypeChunkStore<TArena> store = route.Storage.Store;
+            while (chunkIndex >= 0 && remaining != 0)
+            {
+                BoundReadWriteComponentChunk<TRead, TWrite> bound =
+                    store.GetBoundReadWriteComponentChunk<TRead, TWrite>(
+                        chunkIndex,
+                        route.ReadColumnIndex,
+                        route.WriteColumnIndex,
+                        plan.ReadIsEnableable,
+                        plan.WriteIsEnableable);
+                store.StampDenseChangeVersion(bound.ChunkIndex, route.WriteColumnIndex, writeVersion);
+                var chunk = new ReadWriteComponentChunk<TRead, TWrite>(
+                    Id, route.Storage.Id, bound.ChunkIndex, 0, bound.EntityIndices,
+                    bound.ReadComponents, bound.WriteComponents, bound.ReadEnableWords, bound.WriteEnableWords);
+                job.Execute(context, chunk);
+                visited += chunk.Count;
+                remaining--;
+                chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex);
+            }
+            if (remaining != 0)
+            {
+                routeIndex++;
+                chunkIndex = routeIndex < routes.Length
+                    ? routes[routeIndex].Storage.Store.GetFirstOccupiedChunkIndex()
+                    : -1;
+            }
         }
         return visited;
     }

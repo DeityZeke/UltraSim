@@ -54,7 +54,7 @@ allocation:
   prepared-plan, public-transition, and structural-command capacity up front;
   explicit sealing compiles routes and closes allocation, initialization opens
   bootstrap mutation, and `BeginRun` publishes the running state. The facade is
-  deliberately engine-neutral and single-owner. ECS 3.1.0's optional scheduler
+  deliberately engine-neutral and single-owner. ECS 3.1.1's optional scheduler
   grants persistent workers only expiring `SystemJobContext` capabilities rather
   than allowing non-owner access to the facade.
 - Public `ArchetypeHandle` values are eight-byte world/archetype pairs, preventing
@@ -215,6 +215,12 @@ allocation:
   worker runtime; and `Auto` avoids waking workers below declared crossover
   thresholds. New generated 1R0W, 0R1W, and 3R0W families complete the fundamental
   access catalog without inventing false reads.
+- ECS 3.1.1 hardens that scheduler without changing its execution architecture:
+  generated spans no longer authorize arbitrary same-component random lookups;
+  direct retained-facade access is rejected throughout `Prepare`/job/`Complete`;
+  fixed chunk partitions may span archetype routes so the per-system maximum is
+  real in fragmented worlds; and structural declarations are explicitly deferred
+  capabilities rather than false in-graph hazards.
 - Workers receive an expiring declaration-checked context for optional full
   `Entity` reconstruction, prepared random access, and one fixed structural lane.
   Per-work segments merge in stable graph/work order into the existing command
@@ -225,7 +231,9 @@ allocation:
   synchronous worker shutdown are specified in
   [`ECS_SYSTEM_SCHEDULER.md`](../../ECS_SYSTEM_SCHEDULER.md). The complete
   3.1.0 admission evidence and full V2/V3 table are in
-  [`ECS_3_1_0_ACCEPTANCE_REPORT.md`](../../ECS_3_1_0_ACCEPTANCE_REPORT.md).
+  [`ECS_3_1_0_ACCEPTANCE_REPORT.md`](../../ECS_3_1_0_ACCEPTANCE_REPORT.md); the
+  audit findings, parity repair, and 3.1.1 gates are in
+  [`ECS_3_1_1_HARDENING_REPORT.md`](../../ECS_3_1_1_HARDENING_REPORT.md).
 - Writable public generated families have an explicit dense/conditional split.
   `ExecuteJob` retains conservative pre-callback dense publication and its direct
   spans. `ExecuteTrackedJob` exposes `TrackedWritableComponentChunk<T>`:
@@ -325,8 +333,9 @@ allocation:
   fitting row count, and reports every padding/tail byte with checked arithmetic.
 - `ArchetypeCapacityPlan` projects a population onto that layout, while
   `WorldCapacityPlanner` combines archetype chunks with fixed entity metadata
-  and explicit command/change/scratch arena budgets. These planners allocate
-  no memory.
+  an explicit managed scheduler reservation, and command/change/scratch arena
+  budgets. Its totals separate managed entity/scheduler bytes from native bytes.
+  These planners allocate no memory.
 - `NativeChunkArena` and `PinnedChunkArena` are internal, fixed-capacity storage
   candidates over the same 12-byte generational `ChunkHandle` lifecycle. Both
   reserve one contiguous 64-byte-aligned slab, reject stale/foreign handles,
@@ -359,7 +368,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 218 passing tests, plus 23 focused
+The current runtime and primitive suite has 218 passing tests, plus 29 focused
 scheduler tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,

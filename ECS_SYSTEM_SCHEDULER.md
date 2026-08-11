@@ -1,10 +1,12 @@
 # ECS Bounded System Scheduler
 
-Status: authoritative ECS 3.1.0 system/scheduler contract as of 2026-08-11.
+Status: authoritative ECS 3.1.1 system/scheduler contract as of 2026-08-11.
 
-ECS 3.1.0 adds one bounded system graph above the existing 3.0.36 generated
+ECS 3.1.0 added one bounded system graph above the existing 3.0.36 generated
 chunk machine. It does not introduce another storage, query, task, or structural
-executor.
+executor. ECS 3.1.1 hardens its capability boundaries, makes the partition cap
+global across every matching archetype route, and repairs the longitudinal 100K
+benchmark evidence without changing the scheduler architecture.
 
 ```text
 register systems and fixed reservations
@@ -68,11 +70,14 @@ system arrays and integer wave numbers. Explicit `Requires` edges are hard order
 barriers. Missing references, cycles, reverse-stage dependencies, and duplicate
 system/persistence identity fail cold.
 
-Generated read/write masks and declared additional access create automatic
+Generated read/write masks and declared supplemental random access create automatic
 conflicts. Conflicting systems cannot occupy the same wave. Read/read systems may
 coexist; any overlapping write serializes unless the definition supplies the
 narrow explicit disjoint-random-write proof. Structural component declarations
-also participate in graph conflicts and compile source-independent routes.
+compile source-independent routes and authorize deferred command emission; they
+are not in-graph memory hazards because topology remains frozen until the barrier.
+Systems requiring semantic command-emission order declare `Requires`; otherwise
+stable logical merge and barrier phase order define the result.
 
 Cadence is `(enabled, periodTicks, startOffset)`. Dependencies mean ordering when
 both systems are due; they do not make a slow prerequisite run on a dependent's
@@ -104,6 +109,10 @@ participant-local job copies, a short bounded spin, and fixed kernel events.
 `Auto` stays serial below the declared row threshold and avoids waking background
 workers. Above it, partition count is bounded by reserved work items, execution
 concurrency, maximum partitions per system, and minimum rows per partition.
+That maximum is global across all matching archetype routes. A 16-route query
+with an eight-partition maximum produces at most eight work items. The unchanged
+16-byte partition stores a starting route/chunk and logical occupied-chunk span;
+execution advances across route boundaries without another work-item type.
 Independent nodes in one wave and partitions of one node use the same runtime;
 there is no nested scheduler. Work stealing was not retained because the measured
 uniform chunk/range matrix scales strongly with static partitioning, while a
@@ -122,6 +131,19 @@ through declaration checks. It provides optional paid `uint` index-to-`Entity`
 reconstruction, declared prepared random read/write/enable lookup, and one
 participant-owned structural writer. Default, stale-epoch, foreign-thread,
 undeclared, and post-callback use is rejected.
+
+Generated chunk-column access and supplemental random lookup are separate
+capabilities. A generated `Write<Position>` span does not authorize an arbitrary
+`context.TryRead/TryWrite(positionLookup, entity)`; only `AdditionalReads` and
+`AdditionalWrites` do. Combined masks still drive graph conflicts, and
+`RandomWriteTargetsAreDisjoint` governs only explicitly declared supplemental
+writes.
+
+Persistent runtimes may use the facade during `Initialize` and `Shutdown`, but
+direct public runtime access is rejected throughout graph execution, including
+owner-thread `Prepare` and `Complete`. A retained `EcsWorld` therefore cannot
+bypass declared lookups, structural lanes, logical segment order, or dependency
+metadata.
 
 Generated views retain the cheap world-local entity-index span. Reconstructing a
 full 12-byte generational `Entity` is explicit and measured separately. It is for
@@ -201,27 +223,47 @@ cumulative pre-barrier/graph/merge/post-barrier timings. Per-system snapshots
 include identity, stage, cadence, policy, wave, last/average/peak duration, last
 rows/chunks/work items, and serial/parallel choice.
 
+`WorldCapacityPlanner` accepts an explicit managed scheduler reservation and
+reports entity metadata, scheduler bytes, total managed bytes, total native
+bytes, and the combined bound. The exact input is the cold registered world's
+`SchedulerReservedBytes`; options alone cannot predict generic participant-job
+payload sizes before systems are registered.
+
 Profiling is fixed at construction. Disabled profiling avoids hot atomic identity
 accounting and timestamp reads. Snapshot collection is owner-only and copies into
 caller-provided spans.
 
 ## Admission evidence
 
-The accepted fixed-runtime-policy benchmark contains 143 canonical,
-allocation-free timing rows. Its 60,000-tick 100K workload measures serial
+The original 3.1.0 fixed-runtime-policy benchmark contains 143 canonical,
+allocation-free timing rows. Its 60,000-tick scheduler-shaped 100K workload measures serial
 mean/p95/p99 `981.229/1036.430/1105.880 us` and parallel
 `409.010/508.556/613.015 us`; both modes produce the same state hash, allocate
 zero caller/worker managed bytes, and collect no GC generation. Seven independent
 10,000-tick replays at concurrency 1/2/4/8/16 plus repeated 8-way runs converge
 to the same hash and changed-row count.
 
+That workload remains a scheduler stress profile, not a longitudinal replacement
+for the 3.0.35/3.0.36 soak: it scans 100K rows to choose 5K writes and uses a
+200-destroy/200-create structural mix. ECS 3.1.1 adds a separate parity profile
+that preserves the original deterministic 5K arbitrary writes, 500 RNG reads,
+and exact 100 destroy + 100 create + 200 transition mix. The public 3.0.36
+control, scheduled serial, and scheduled parallel variants must match one logical
+canonical hash and every workload counter. Observation-version hashes are
+reported separately and intentionally differ because scheduled tracked writes
+publish one shared version per logical invocation rather than one version per
+scalar public write.
+
 The isolated V2-first and V3-first comparison orders each contain 102 comparable
 contracts, zero state mismatches, and 10 explicit unsupported rows. V3 allocates
 zero timed bytes in 102/102 rows. The complete API, design, timing matrices,
-validation totals, and full 102-row V2/V3 table are in
-[`ECS_3_1_0_ACCEPTANCE_REPORT.md`](ECS_3_1_0_ACCEPTANCE_REPORT.md).
+validation totals, and original full 102-row V2/V3 table are in
+[`ECS_3_1_0_ACCEPTANCE_REPORT.md`](ECS_3_1_0_ACCEPTANCE_REPORT.md). The 3.1.1
+audit verdict, corrected longitudinal parity profile, typed structural evidence,
+and current regression links are in
+[`ECS_3_1_1_HARDENING_REPORT.md`](ECS_3_1_1_HARDENING_REPORT.md).
 
-## Deliberate boundary after 3.1.0
+## Deliberate boundary after 3.1.1
 
 This milestone does not include dynamic systems/schema/archetypes, work stealing,
 NUMA/affinity, fusion, a general reduction framework, arbitrary public query

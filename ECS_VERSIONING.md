@@ -23,7 +23,7 @@ transition work is `3.0.32`, and its validate-once trusted commit optimization i
 the public serial generated chunk-job execution surface is `3.0.36`. The bounded
 generated system/job scheduler is the first coherent major capability checkpoint,
 so it advances the middle field and resets the revision as `3.1.0`. The next
-ordinary accepted implementation or optimization checkpoint will be `3.1.1`.
+accepted revision is `3.1.1`, the scheduler capability/parity hardening pass.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -42,6 +42,14 @@ it compiles a staged dependency/conflict graph, runs the 3.0.36 chunk ABI and
 bounded range work on persistent workers, merges fixed structural lanes in stable
 logical order, owns cadence/manual/lifecycle/fault semantics, and retains zero
 warmed managed allocation.
+
+ECS 3.1.1 separates generated column access from supplemental random-lookup
+capabilities, rejects retained-facade access during graph execution, makes the
+partition maximum global across matching archetype routes, restores an honest
+3.0.36-equivalent scheduled mixed-soak profile, measures typed source-independent
+Add/Remove, and includes exact scheduler bytes in static capacity reports. It is
+a hardening revision, not a second scheduler milestone. The 3.1.0 immutable
+benchmark baselines remain historical controls; 3.1.1 adds new artifacts.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

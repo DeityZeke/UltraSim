@@ -8,8 +8,8 @@ internal static class EcsKernelVersion
 {
     internal const int Generation = 3;
     internal const int Milestone = 1;
-    internal const int Revision = 0;
-    internal const string Value = "3.1.0";
+    internal const int Revision = 1;
+    internal const string Value = "3.1.1";
     internal const string SemanticProfile =
-        "ecs-3.1.0-bounded-system-scheduler";
+        "ecs-3.1.1-scheduler-capability-parity-hardening";
 }

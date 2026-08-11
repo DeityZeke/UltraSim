@@ -11,8 +11,9 @@ The first executable Current/Next semantic adapter is documented in
 1K/10K/50K rows with a shared canonical logical-state hash, separate
 record/playback/end-to-end structural boundaries, allocation/GC accounting,
 process isolation, fixed steady-state JIT policy, and explicit unsupported parity
-rows. The accepted 3.1.0 V2-first and V3-first 2026-08-11 captures both produced
-zero state mismatches. The original 2026-08-09 artifacts remain immutable. These
+rows. The accepted 3.1.1 V2-first and V3-first 2026-08-11 captures both produced
+zero state mismatches and zero timed V3 allocation. The original 2026-08-09 and
+3.1.0 artifacts remain immutable. These
 are as-is regression baselines, not complete V2 parity or evidence that V3
 currently wins most overlapping operations.
 
@@ -41,6 +42,12 @@ The accepted `3.1.0` bounded system-scheduler comparison capture lives at
 Its 143-row scheduler matrix, 60,000-tick serial/parallel soak, and 10,000-tick
 cross-concurrency canonical replays live at
 [`Baselines/ecs-v3-3.1.0-bounded-system-scheduler-2026-08-11.json`](Baselines/ecs-v3-3.1.0-bounded-system-scheduler-2026-08-11.json).
+The accepted `3.1.1` scheduler-capability/parity hardening comparison capture
+lives at
+[`Baselines/ecs-v2-v3-3.1.1-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.1-2026-08-11.json).
+Its 145-row scheduler matrix, corrected longitudinal parity soak, and retained
+scheduler-shaped stress profile live at
+[`Baselines/ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json`](Baselines/ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json).
 The first accepted 100K deterministic mixed-operation soak lives at
 [`Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json`](Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json).
 The accepted ECS `3.0.36` public serial generated chunk-job admission matrix
@@ -898,7 +905,7 @@ single local run as an accepted baseline.
 Capture repeated isolated processes and environment/profile hashes before using
 results as a performance gate.
 
-## ECS 3.1.0 bounded scheduler admission
+## ECS 3.1.0 bounded scheduler admission and 3.1.1 hardening
 
 Run the complete scheduler matrix with the same steady-state runtime policy as
 the cross-generation adapter:
@@ -910,17 +917,19 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 dotnet run --project \
   _Benchmarks/results/ecs-v3-3.1.0-scheduler.json
 ```
 
-The admitted baseline contains 143 timed rows covering empty graph overhead,
+The immutable 3.1.0 baseline contains 143 timed rows covering empty graph overhead,
 every generated serial family, direct-versus-scheduled boundary cost, parallel
 crossover, worker scaling, independent systems, `RangeJob`, paid entity
 reconstruction, structural record/merge/playback, and phase staggering. Every
 row reports mean/p50/p95/p99, canonical state, and zero warmed managed
 allocation.
 
-The long profile keeps 100,000 entities resident for 60,000 measured serial and
-parallel ticks. Each tick executes 400,000 generated query rows, 5,000 tracked
-write targets, 500 random lookups, 400 structural commands, and exact changed-row
-consumption. The accepted serial mean/p50/p95/p99/max is
+The long 3.1.0 scheduler-shaped stress profile keeps 100,000 entities resident
+for 60,000 measured serial and parallel ticks. Each tick executes 400,000
+generated query rows, scans all 100,000 rows to select 5,000 tracked writes, uses
+fixed lookup targets, records 200 destroys plus 200 creates, and consumes exact
+changed rows. It is not equivalent to the older longitudinal 3.0.35/3.0.36 soak.
+The accepted serial mean/p50/p95/p99/max is
 `981.229/973.422/1036.430/1105.880/2131.291 us`; parallel is
 `409.010/377.986/508.556/613.015/2890.565 us`, a `2.40x` mean improvement.
 Both modes produce hash `8E25297D3A12A623`, allocate zero timed or worker-thread
@@ -938,3 +947,24 @@ canonical state. An early diagnostic discarded that checksum and allowed tiering
 and dead-code elimination to distort family results. Accepted captures disable
 tiered compilation and ReadyToRun, and the benchmark now hashes the accumulated
 read result.
+
+ECS 3.1.1 retains that stress profile under its honest name and adds the true
+longitudinal parity profile: the public control, scheduled serial, and scheduled
+parallel worlds use the original deterministic 5,000 arbitrary writes, 500 RNG
+reads, 100 destroys, 100 creates, and 200 transitions. At 2,000 warmups plus
+30,000 measured ticks the three logical hashes and every work counter match;
+all caller/worker timed allocation and GC counts are zero.
+
+| 3.1.1 longitudinal surface | Mean | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| public generated-job control | 1,188.522 us | 1,235.919 | 1,289.798 |
+| scheduled serial | 1,271.007 us | 1,322.398 | 1,376.587 |
+| scheduled parallel, 8 participants | 577.820 us | 656.644 | 744.593 |
+
+Scheduled parallel is `2.06x` faster than the public control and `2.20x` faster
+than scheduled serial. The serial scheduler adds about `6.9%` on this complete
+profile. The normalized logical hash is
+`55107F0D2B7B1F2F76BF7E710E9C6AD5`; scheduler serial and parallel also agree on
+their observation-version hash. Full capability, partition, structural-semantic,
+typed Add/Remove, and evidence details are in
+[`../ECS_3_1_1_HARDENING_REPORT.md`](../ECS_3_1_1_HARDENING_REPORT.md).

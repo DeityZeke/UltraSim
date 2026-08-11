@@ -6,10 +6,13 @@ public static class WorldCapacityPlanner
     public static WorldCapacityPlan Plan(
         EntityCapacity entityCapacity,
         ReadOnlySpan<ArchetypeCapacityPlan> archetypes,
-        WorldArenaReservations arenas = default)
+        WorldArenaReservations arenas = default,
+        long managedSchedulerBytes = 0)
     {
         if (entityCapacity.MaximumEntities <= 0)
             throw new ArgumentException("Entity capacity is invalid or default initialized.", nameof(entityCapacity));
+        if (managedSchedulerBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(managedSchedulerBytes));
 
         checked
         {
@@ -34,7 +37,8 @@ public static class WorldCapacityPlanner
                     nameof(archetypes));
             }
 
-            long managedBytes = entityCapacity.EstimatedMetadataBytes;
+            long managedEntityBytes = entityCapacity.EstimatedMetadataBytes;
+            long managedBytes = managedEntityBytes + managedSchedulerBytes;
             long nativeBytes = nativeChunkBytes + arenas.TotalBytes;
             return new WorldCapacityPlan(
                 entityCapacity,
@@ -42,6 +46,8 @@ public static class WorldCapacityPlanner
                 archetypes.Length,
                 expectedPopulation,
                 requiredChunkCount,
+                managedEntityBytes,
+                managedSchedulerBytes,
                 managedBytes,
                 nativeChunkBytes,
                 nativeBytes,

@@ -23,6 +23,12 @@ internal static class SchedulerBenchmarkProgram
         Console.WriteLine($"ECS {EcsKernelVersion.Value} bounded scheduler admission");
         foreach (SchedulerTiming result in report.Timings)
             Console.WriteLine($"{result.Category}/{result.Name}: mean={result.MeanMicroseconds:F3} us p50={result.P50Microseconds:F3} us p95={result.P95Microseconds:F3} us p99={result.P99Microseconds:F3} us alloc={result.AllocatedBytes} B hash={result.CanonicalHash:X16}");
+        Console.WriteLine(
+            $"Longitudinal parity soak control/serial/parallel mean=" +
+            $"{report.ParitySoak.ControlMeanMicroseconds:F3}/" +
+            $"{report.ParitySoak.SerialMeanMicroseconds:F3}/" +
+            $"{report.ParitySoak.ParallelMeanMicroseconds:F3} us; " +
+            $"logical-canonical={report.ParitySoak.CanonicalPassed}");
         Console.WriteLine($"allocation-free={report.AllocationFree} canonical={report.CanonicalChecksPassed} results={output}");
         return report.AllocationFree && report.CanonicalChecksPassed ? 0 : 1;
     }
@@ -42,13 +48,17 @@ internal static class SchedulerBenchmarkRunner
         RunRange(timings, quick);
         RunEntityIdentityCost(timings, quick);
         RunStructuralMerge(timings, quick);
+        RunTypedStructuralRoutes(timings, quick);
         RunPhaseStagger(timings, quick);
         SchedulerSoakResult soak = RunScheduledSoak(quick);
+        SchedulerParitySoakResult paritySoak = RunScheduledParitySoak(quick);
         List<SchedulerDeterminismResult> determinism = RunDeterminism(quick);
         bool canonical = timings.All(static value => value.CanonicalPassed) && soak.CanonicalPassed &&
+            paritySoak.CanonicalPassed &&
             determinism.All(static value => value.CanonicalPassed);
         bool allocationFree = timings.All(static value => value.AllocatedBytes == 0) &&
-            soak.AllocatedBytes == 0 && soak.WorkerManagedAllocationBytes == 0;
+            soak.AllocatedBytes == 0 && soak.WorkerManagedAllocationBytes == 0 &&
+            paritySoak.AllocatedBytes == 0 && paritySoak.WorkerManagedAllocationBytes == 0;
         return new SchedulerBenchmarkReport
         {
             SuiteName = "UltraSim ECS bounded system scheduler admission",
@@ -64,6 +74,7 @@ internal static class SchedulerBenchmarkRunner
             CanonicalChecksPassed = canonical,
             Timings = timings,
             Soak = soak,
+            ParitySoak = paritySoak,
             Determinism = determinism,
         };
     }
@@ -248,6 +259,37 @@ internal static class SchedulerBenchmarkRunner
         }
     }
 
+    private static void RunTypedStructuralRoutes(List<SchedulerTiming> results, bool quick)
+    {
+        int rows = quick ? 10_000 : 100_000;
+        using var fixture = new TypedStructuralRouteFixture(rows, backgroundWorkers: 3);
+        for (int index = 0; index < 8; index++) fixture.Tick();
+        int samples = quick ? 8 : 24;
+        var addTicks = new long[samples];
+        var removeTicks = new long[samples];
+        long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+        int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
+        for (int sample = 0; sample < samples; sample++)
+        {
+            long start = Stopwatch.GetTimestamp();
+            fixture.Tick();
+            addTicks[sample] = Stopwatch.GetTimestamp() - start;
+            start = Stopwatch.GetTimestamp();
+            fixture.Tick();
+            removeTicks[sample] = Stopwatch.GetTimestamp() - start;
+        }
+        long allocation = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+        int g0 = GC.CollectionCount(0) - gen0;
+        int g1 = GC.CollectionCount(1) - gen1;
+        int g2 = GC.CollectionCount(2) - gen2;
+        bool canonical = fixture.ValidateBasePopulation();
+        ulong hash = fixture.Hash();
+        results.Add(CreateMeasurement(addTicks, 1, allocation, g0, g1, g2, samples)
+            .ToTiming("TypedStructural", $"AddScalar_{rows}_C4", rows, 1, 4, hash, canonical));
+        results.Add(CreateMeasurement(removeTicks, 1, 0, 0, 0, 0, samples)
+            .ToTiming("TypedStructural", $"RemoveScalar_{rows}_C4", rows, 1, 4, hash, canonical));
+    }
+
     private static SchedulerSoakResult RunScheduledSoak(bool quick)
     {
         int measuredTicks = quick ? 300 : 60_000;
@@ -311,6 +353,129 @@ internal static class SchedulerBenchmarkRunner
             ChangedRowsDelivered = parallel.ChangedRowsDelivered,
             Systems = parallel.CopySnapshots(),
         };
+    }
+
+    private static SchedulerParitySoakResult RunScheduledParitySoak(bool quick)
+    {
+        int measuredTicks = quick ? 300 : 30_000;
+        int warmupTicks = quick ? 64 : 2_000;
+        MixedOperationSoakConfiguration Configuration(
+            bool scheduled,
+            SchedulerRunMode mode = SchedulerRunMode.Serial) => new()
+        {
+            EntityCount = 100_000,
+            WarmupTicks = 0,
+            MeasuredTicks = Math.Max(1_000, measuredTicks),
+            MeasuredRuns = 2,
+            ValidationTicks = 64,
+            ValidationCheckpointInterval = 64,
+            Seed = MixedOperationSoakConfiguration.DefaultSeed,
+            UsePublicJobs = true,
+            UseScheduler = scheduled,
+            SchedulerRunMode = mode,
+            SchedulerBackgroundWorkers = 7,
+        };
+
+        using var control = new MixedOperationSoakWorld(Configuration(scheduled: false));
+        using var serial = new MixedOperationSoakWorld(Configuration(scheduled: true, SchedulerRunMode.Serial));
+        using var parallel = new MixedOperationSoakWorld(Configuration(scheduled: true, SchedulerRunMode.Parallel));
+        for (int tick = 0; tick < warmupTicks; tick++)
+        {
+            control.ExecuteTick(null, -1);
+            serial.ExecuteTick(null, -1);
+            parallel.ExecuteTick(null, -1);
+        }
+
+        var controlTicks = new long[measuredTicks];
+        var serialTicks = new long[measuredTicks];
+        var parallelTicks = new long[measuredTicks];
+        SoakCounters controlBefore = control.CaptureCounters();
+        SoakCounters serialBefore = serial.CaptureCounters();
+        SoakCounters parallelBefore = parallel.CaptureCounters();
+        SchedulerRuntimeSnapshot serialSchedulerBefore = serial.GetSchedulerSnapshot();
+        SchedulerRuntimeSnapshot parallelSchedulerBefore = parallel.GetSchedulerSnapshot();
+        long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+        int gen0 = GC.CollectionCount(0), gen1 = GC.CollectionCount(1), gen2 = GC.CollectionCount(2);
+        for (int tick = 0; tick < measuredTicks; tick++)
+        {
+            if ((tick & 1) == 0)
+            {
+                MeasureTick(control, controlTicks, tick);
+                MeasureTick(serial, serialTicks, tick);
+                MeasureTick(parallel, parallelTicks, tick);
+            }
+            else
+            {
+                MeasureTick(parallel, parallelTicks, tick);
+                MeasureTick(serial, serialTicks, tick);
+                MeasureTick(control, controlTicks, tick);
+            }
+        }
+        long allocation = GC.GetAllocatedBytesForCurrentThread() - allocationBefore;
+        SchedulerRuntimeSnapshot serialSchedulerAfter = serial.GetSchedulerSnapshot();
+        SchedulerRuntimeSnapshot parallelSchedulerAfter = parallel.GetSchedulerSnapshot();
+        SoakCounters controlCounters = control.CaptureCounters() - controlBefore;
+        SoakCounters serialCounters = serial.CaptureCounters() - serialBefore;
+        SoakCounters parallelCounters = parallel.CaptureCounters() - parallelBefore;
+        string controlLogical = control.ComputeCanonicalLogicalHash();
+        string serialLogical = serial.ComputeCanonicalLogicalHash();
+        string parallelLogical = parallel.ComputeCanonicalLogicalHash();
+        bool canonical = controlLogical == serialLogical && serialLogical == parallelLogical &&
+            controlCounters == serialCounters && serialCounters == parallelCounters;
+        return new SchedulerParitySoakResult
+        {
+            Population = 100_000,
+            WarmupTicks = warmupTicks,
+            MeasuredTicks = measuredTicks,
+            WorkloadProfile = "ecs-v3-100k-mixed-operations-public-jobs-v1",
+            QueryRowsPerTick = 400_000,
+            TrackedWriteTargetsPerTick = 5_000,
+            RandomLookupsPerTick = 500,
+            DestroyedPerTick = 100,
+            CreatedPerTick = 100,
+            TransitionsPerTick = 200,
+            StructuralCommandsPerTick = 400,
+            ControlMeanMicroseconds = MeanMicroseconds(controlTicks),
+            ControlP95Microseconds = PercentileMicroseconds(controlTicks, 0.95),
+            ControlP99Microseconds = PercentileMicroseconds(controlTicks, 0.99),
+            SerialMeanMicroseconds = MeanMicroseconds(serialTicks),
+            SerialP95Microseconds = PercentileMicroseconds(serialTicks, 0.95),
+            SerialP99Microseconds = PercentileMicroseconds(serialTicks, 0.99),
+            ParallelMeanMicroseconds = MeanMicroseconds(parallelTicks),
+            ParallelP95Microseconds = PercentileMicroseconds(parallelTicks, 0.95),
+            ParallelP99Microseconds = PercentileMicroseconds(parallelTicks, 0.99),
+            PublicControlLogicalHash = controlLogical,
+            SerialSchedulerLogicalHash = serialLogical,
+            ParallelSchedulerLogicalHash = parallelLogical,
+            PublicControlObservationHash = control.ComputeCanonicalHash(),
+            SerialSchedulerObservationHash = serial.ComputeCanonicalHash(),
+            ParallelSchedulerObservationHash = parallel.ComputeCanonicalHash(),
+            CanonicalPassed = canonical,
+            CountersMatched = controlCounters == serialCounters && serialCounters == parallelCounters,
+            AllocatedBytes = allocation,
+            Gen0Collections = GC.CollectionCount(0) - gen0,
+            Gen1Collections = GC.CollectionCount(1) - gen1,
+            Gen2Collections = GC.CollectionCount(2) - gen2,
+            WorkerManagedAllocationBytes =
+                serialSchedulerAfter.WorkerManagedAllocationBytes -
+                    serialSchedulerBefore.WorkerManagedAllocationBytes +
+                parallelSchedulerAfter.WorkerManagedAllocationBytes -
+                    parallelSchedulerBefore.WorkerManagedAllocationBytes,
+            SerialSchedulerReservedBytes = serial.SchedulerReservedBytes,
+            ParallelSchedulerReservedBytes = parallel.SchedulerReservedBytes,
+            ObservationHashDifferenceExpected = true,
+            ObservationDifferenceReason =
+                "The scheduled tracked-write system intentionally publishes one shared change version per logical " +
+                "invocation; the 3.0.36 control publishes one version per checked scalar write. Logical component, " +
+                "enable, lifecycle, structural, changed-row, counter, and canonical ownership state must still match.",
+        };
+    }
+
+    private static void MeasureTick(MixedOperationSoakWorld world, long[] ticks, int index)
+    {
+        long start = Stopwatch.GetTimestamp();
+        world.ExecuteTick(null, -1);
+        ticks[index] = Stopwatch.GetTimestamp() - start;
     }
 
     private static void RunPhaseStagger(List<SchedulerTiming> results, bool quick)
@@ -1038,6 +1203,101 @@ internal struct StructuralChurnJob : IRangeJob
     }
 }
 
+internal sealed class TypedStructuralRouteFixture : IDisposable
+{
+    private readonly int _count;
+    private readonly ArchetypeHandle _baseArchetype;
+    private readonly ComponentLookup<BenchmarkScalar> _scalar;
+
+    internal TypedStructuralRouteFixture(int count, int backgroundWorkers)
+    {
+        _count = count;
+        ComponentSchema schema = BenchmarkSchema.CreateSchema();
+        ComponentId position = BenchmarkSchema.GetComponentId<BenchmarkPosition>();
+        ComponentId scalar = BenchmarkSchema.GetComponentId<BenchmarkScalar>();
+        int participants = backgroundWorkers + 1;
+        int perProducer = checked((count + participants - 1) / participants + 64);
+        var scheduler = new EcsSchedulerOptions(
+            maximumSystems: 1, maximumDependencies: 0, maximumWorkItems: participants,
+            maximumStructuralSegments: participants, backgroundWorkerCount: backgroundWorkers,
+            callerParticipates: true, structuralCommandsPerProducer: perProducer,
+            structuralPayloadBytesPerProducer: checked(perProducer * sizeof(int)),
+            maximumPartitionsPerSystem: participants, profilingEnabled: true);
+        World = new EcsWorld(schema, new EcsWorldOptions(
+            new EntityCapacity(count), 2, 4, maximumPreparedTransitions: 2,
+            maximumStructuralCommands: count, scheduler: scheduler));
+        _baseArchetype = World.RegisterArchetype(
+            [position], ChunkLayoutOptions.KiB16, Math.Max(1, count / 128 + 8));
+        ComponentId[] withScalar = [position, scalar];
+        Array.Sort(withScalar, static (left, right) => left.CompareTo(right));
+        _ = World.RegisterArchetype(
+            withScalar, ChunkLayoutOptions.KiB16, Math.Max(1, count / 128 + 8));
+        _scalar = World.PrepareLookup<BenchmarkScalar>();
+        World.RegisterRangeSystem<TypedStructuralRouteRuntime, TypedStructuralRouteJob>(
+            new SystemDefinition("benchmark.typed-structural", SystemStage.Cleanup,
+                executionPolicy: SystemExecutionPolicy.Parallel,
+                structuralComponents: [scalar], parallelRowThreshold: 1,
+                minimumRowsPerPartition: 2_048),
+            new TypedStructuralRouteRuntime(count));
+        World.Seal();
+        World.Initialize();
+        for (int index = 0; index < count; index++)
+            if (!World.TryCreate(_baseArchetype, out _)) throw new InvalidOperationException();
+        World.BeginRun();
+        World.SchedulerRunMode = SchedulerRunMode.Parallel;
+    }
+
+    internal EcsWorld World { get; }
+    internal void Tick() => World.Tick(1d / 60d);
+    internal bool ValidateBasePopulation()
+    {
+        if (World.GetArchetypeSnapshot(_baseArchetype).EntityCount != _count)
+            return false;
+        for (uint index = 0; index < _count; index++)
+            if (!World.TryGetEntity(index, out Entity entity) || World.Has(entity, _scalar)) return false;
+        return true;
+    }
+    internal ulong Hash()
+    {
+        ulong hash = 1469598103934665603UL;
+        for (uint index = 0; index < _count; index++)
+        {
+            if (!World.TryGetEntity(index, out Entity entity)) throw new InvalidOperationException();
+            hash = unchecked((hash ^ entity.Generation ^ index) * 1099511628211UL);
+        }
+        return hash;
+    }
+    public void Dispose() => World.Dispose();
+}
+
+internal sealed class TypedStructuralRouteRuntime : IRangeSystemRuntime<TypedStructuralRouteJob>
+{
+    private readonly int _count;
+    internal TypedStructuralRouteRuntime(int count) => _count = count;
+    public int GetRangeCount(in SystemPrepareContext context) => _count;
+    public TypedStructuralRouteJob Prepare(in SystemPrepareContext context) =>
+        new(add: (context.Tick & 1UL) == 0);
+}
+
+internal readonly struct TypedStructuralRouteJob : IRangeJob
+{
+    private readonly bool _add;
+    internal TypedStructuralRouteJob(bool add) => _add = add;
+    public void Execute(in SystemJobContext context, int start, int count)
+    {
+        for (int index = start; index < start + count; index++)
+        {
+            if (!context.TryGetEntity(unchecked((uint)index), out Entity entity))
+                throw new InvalidOperationException("Typed structural benchmark lost an entity.");
+            bool accepted = _add
+                ? context.Commands.TryAdd(entity, new BenchmarkScalar { Value = index + 1 })
+                : context.Commands.TryRemove<BenchmarkScalar>(entity);
+            if (!accepted)
+                throw new InvalidOperationException("Typed structural benchmark exhausted its bounded command lane.");
+        }
+    }
+}
+
 internal sealed class PhaseFixture : IDisposable
 {
     private readonly int[][] _values = new int[10][];
@@ -1217,6 +1477,7 @@ internal sealed class SchedulerBenchmarkReport
     public string Processor { get; set; } = string.Empty; public int ProcessorCount { get; set; } public bool Quick { get; set; }
     public bool AllocationFree { get; set; } public bool CanonicalChecksPassed { get; set; }
     public List<SchedulerTiming> Timings { get; set; } = []; public SchedulerSoakResult Soak { get; set; } = new();
+    public SchedulerParitySoakResult ParitySoak { get; set; } = new();
     public List<SchedulerDeterminismResult> Determinism { get; set; } = [];
 }
 internal sealed class SchedulerTiming
@@ -1250,6 +1511,46 @@ internal sealed class SchedulerSoakResult
     public long ChangedRowsDelivered { get; set; }
     public long WorkerManagedAllocationBytes { get; set; }
     public List<SystemRuntimeSnapshot> Systems { get; set; } = [];
+}
+internal sealed class SchedulerParitySoakResult
+{
+    public int Population { get; set; }
+    public int WarmupTicks { get; set; }
+    public int MeasuredTicks { get; set; }
+    public string WorkloadProfile { get; set; } = string.Empty;
+    public int QueryRowsPerTick { get; set; }
+    public int TrackedWriteTargetsPerTick { get; set; }
+    public int RandomLookupsPerTick { get; set; }
+    public int DestroyedPerTick { get; set; }
+    public int CreatedPerTick { get; set; }
+    public int TransitionsPerTick { get; set; }
+    public int StructuralCommandsPerTick { get; set; }
+    public double ControlMeanMicroseconds { get; set; }
+    public double ControlP95Microseconds { get; set; }
+    public double ControlP99Microseconds { get; set; }
+    public double SerialMeanMicroseconds { get; set; }
+    public double SerialP95Microseconds { get; set; }
+    public double SerialP99Microseconds { get; set; }
+    public double ParallelMeanMicroseconds { get; set; }
+    public double ParallelP95Microseconds { get; set; }
+    public double ParallelP99Microseconds { get; set; }
+    public string PublicControlLogicalHash { get; set; } = string.Empty;
+    public string SerialSchedulerLogicalHash { get; set; } = string.Empty;
+    public string ParallelSchedulerLogicalHash { get; set; } = string.Empty;
+    public string PublicControlObservationHash { get; set; } = string.Empty;
+    public string SerialSchedulerObservationHash { get; set; } = string.Empty;
+    public string ParallelSchedulerObservationHash { get; set; } = string.Empty;
+    public bool CanonicalPassed { get; set; }
+    public bool CountersMatched { get; set; }
+    public bool ObservationHashDifferenceExpected { get; set; }
+    public string ObservationDifferenceReason { get; set; } = string.Empty;
+    public long AllocatedBytes { get; set; }
+    public int Gen0Collections { get; set; }
+    public int Gen1Collections { get; set; }
+    public int Gen2Collections { get; set; }
+    public long WorkerManagedAllocationBytes { get; set; }
+    public long SerialSchedulerReservedBytes { get; set; }
+    public long ParallelSchedulerReservedBytes { get; set; }
 }
 internal sealed class SchedulerDeterminismResult
 {

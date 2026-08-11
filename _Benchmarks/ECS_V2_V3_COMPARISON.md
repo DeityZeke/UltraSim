@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.1.0 bounded scheduler checkpoint captured
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.1.1 scheduler-hardening checkpoint captured
 2026-08-11
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
@@ -72,12 +72,15 @@ accounting rather than reusing that claim.
 ## Current coverage
 
 The executable matrix uses 1,000, 10,000, and 50,000 entities and currently
-contains 96 cross-generation rows:
+contains 102 comparable cross-generation rows:
 
 - checked random Position read and tracked write;
 - V3 callback-bounded prepared read/write jobs against the closest V2 path;
 - warmed one- and two-column read traversal;
+- warmed three-column read traversal;
 - warmed Position-read/Velocity-write traversal;
+- serial and four-participant parallel scheduled Position-read/Velocity-write
+  ticks plus a four-participant `RangeJob`;
 - immediate default create and immediate destroy;
 - deferred create, full destroy, sparse ten-percent destroy, add-default, and
   remove, each split into record-only, playback-only, and end-to-end boundaries;
@@ -87,12 +90,13 @@ contains 96 cross-generation rows:
 - destroy/create slot reuse and stale-handle validation;
 - unchanged change polling;
 - ten-percent and all-row Scalar write/changed-entity collection.
+- typed Add payload publication.
 
-Fifteen parity rows remain explicitly unsupported in the joined report. They
-cover V3's missing generated 3R0W family, typed add payloads, scheduler, prefab,
-persistence, and lifecycle streams, plus semantics that V2 cannot reproduce such
-as independent change cursors, multi-watch any/all queries, enable-bit row
-filters, same-barrier deferred tokens, and fixed-capacity structural failure.
+Ten parity rows remain explicitly unsupported in the joined report. They cover
+prefab, persistence, and lifecycle streams, plus semantics that V2 cannot
+reproduce such as independent change cursors, multi-watch any/all queries,
+enable-bit row filters, same-barrier deferred tokens, and fixed-capacity
+structural failure.
 Unsupported rows must not disappear; they become measured only when a common
 state contract is executable.
 
@@ -107,7 +111,7 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 Compare a future capture with the current accepted baseline:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.35-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.1.1-2026-08-11.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
@@ -130,8 +134,10 @@ The previous 3.0.35 artifact is
 [`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
 The current 3.0.36 artifact is
 [`Baselines/ecs-v2-v3-3.0.36-2026-08-11.json`](Baselines/ecs-v2-v3-3.0.36-2026-08-11.json).
-The current 3.1.0 artifact is
+The previous 3.1.0 artifact is
 [`Baselines/ecs-v2-v3-3.1.0-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.0-2026-08-11.json).
+The current 3.1.1 artifact is
+[`Baselines/ecs-v2-v3-3.1.1-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.1-2026-08-11.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -487,3 +493,36 @@ The full primary 102-row metric table is
 [`results/ecs-v2-v3-3.1.0-final-v2-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.0-final-v2-first/ecs-v2-v3-comparison.md);
 the reverse-order table is
 [`results/ecs-v2-v3-3.1.0-final-v3-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.0-final-v3-first/ecs-v2-v3-comparison.md).
+
+## 3.1.1 scheduler hardening regression gate
+
+ECS 3.1.1 deliberately does not expand the cross-generation catalog. Both
+child-process orders retain 102 comparable contracts, zero canonical-state or
+catalog/contract mismatches, 10 explicit unsupported rows, and zero timed V3
+allocation. The accepted V2-first artifact is
+[`Baselines/ecs-v2-v3-3.1.1-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.1-2026-08-11.json).
+
+The scheduler-specific rows are:
+
+| Scenario | 3.1.0 V3 ns/op | 3.1.1 V2-first V3 ns/op | Delta | 3.1.1 V3-first V3 ns/op | Delta |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| serial generated tick, 10K | 1.331 | 1.326 | -0.4% | 1.339 | +0.6% |
+| parallel generated tick, 100K | 0.617 | 0.524 | -15.1% | 0.555 | -10.0% |
+| parallel range, 100K | 1.686 | 1.722 | +2.2% | 1.794 | +6.4% |
+
+Lower is faster. The serial row is a stable tie. Parallel generated traversal
+improves in both orders. Focused 9-warmup/31-sample RangeJob reruns reproduce a
+`+2.7%` to `+6.3%` range, so that modest regression remains a visible follow-up
+signal accepted with the required capability-safety repair. These three rows do
+not by themselves admit a performance
+claim for the safety fixes; their primary role is guarding the scheduler seam.
+The corrected same-process longitudinal parity soak is the stronger 3.1.1
+system-level result and is documented in
+[`../ECS_3_1_1_HARDENING_REPORT.md`](../ECS_3_1_1_HARDENING_REPORT.md).
+
+Full current tables and baseline regressions:
+
+- [`results/ecs-v2-v3-3.1.1-v2-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.1-v2-first/ecs-v2-v3-comparison.md)
+- [`results/ecs-v2-v3-3.1.1-v2-first/ecs-v2-v3-regression.md`](results/ecs-v2-v3-3.1.1-v2-first/ecs-v2-v3-regression.md)
+- [`results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-comparison.md)
+- [`results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-regression.md`](results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-regression.md)

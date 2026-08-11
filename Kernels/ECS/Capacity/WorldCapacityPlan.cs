@@ -2,7 +2,8 @@ namespace UltraSim.ECS;
 
 /// <summary>
 /// Aggregate bounded world reservation. Chunk and arena bytes are modeled as native;
-/// current entity-slot metadata is modeled as managed.
+/// current entity-slot metadata and the explicitly supplied scheduler reservation
+/// are modeled as managed.
 /// </summary>
 public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
 {
@@ -13,6 +14,8 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         long expectedPopulation,
         long requiredChunkCount,
         long managedEntityMetadataBytes,
+        long managedSchedulerBytes,
+        long totalManagedBytes,
         long nativeChunkBytes,
         long totalNativeBytes,
         long totalReservedBytes)
@@ -23,6 +26,8 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         ExpectedPopulation = expectedPopulation;
         RequiredChunkCount = requiredChunkCount;
         ManagedEntityMetadataBytes = managedEntityMetadataBytes;
+        ManagedSchedulerBytes = managedSchedulerBytes;
+        TotalManagedBytes = totalManagedBytes;
         NativeChunkBytes = nativeChunkBytes;
         TotalNativeBytes = totalNativeBytes;
         TotalReservedBytes = totalReservedBytes;
@@ -41,6 +46,14 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
     /// <summary>Current generation/state/free-index array payloads; array headers are excluded.</summary>
     public long ManagedEntityMetadataBytes { get; }
 
+    /// <summary>
+    /// Explicit scheduler reservation supplied by the caller. Use the exact
+    /// <c>EcsWorld.SchedulerReservedBytes</c> value after cold registration when available.
+    /// </summary>
+    public long ManagedSchedulerBytes { get; }
+
+    public long TotalManagedBytes { get; }
+
     public long NativeChunkBytes { get; }
 
     public long TotalNativeBytes { get; }
@@ -54,6 +67,8 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         ExpectedPopulation == other.ExpectedPopulation &&
         RequiredChunkCount == other.RequiredChunkCount &&
         ManagedEntityMetadataBytes == other.ManagedEntityMetadataBytes &&
+        ManagedSchedulerBytes == other.ManagedSchedulerBytes &&
+        TotalManagedBytes == other.TotalManagedBytes &&
         NativeChunkBytes == other.NativeChunkBytes &&
         TotalNativeBytes == other.TotalNativeBytes &&
         TotalReservedBytes == other.TotalReservedBytes;

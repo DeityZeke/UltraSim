@@ -67,6 +67,9 @@ internal sealed class MixedOperationSoakConfiguration
     public int ValidationCheckpointInterval { get; init; } = 64;
     public ulong Seed { get; init; } = DefaultSeed;
     public bool UsePublicJobs { get; init; }
+    public bool UseScheduler { get; init; }
+    public SchedulerRunMode SchedulerRunMode { get; init; } = SchedulerRunMode.Parallel;
+    public int SchedulerBackgroundWorkers { get; init; } = 7;
 
     [JsonIgnore]
     internal int TrackedWritesPerTick => Math.Max(1, EntityCount / 20);
@@ -100,6 +103,9 @@ internal sealed class MixedOperationSoakConfiguration
         int checkpointInterval = 64;
         ulong seed = DefaultSeed;
         bool usePublicJobs = false;
+        bool useScheduler = false;
+        SchedulerRunMode schedulerRunMode = SchedulerRunMode.Parallel;
+        int schedulerBackgroundWorkers = 7;
         string? explicitOutputPath = null;
 
         for (int index = 0; index < args.Length; index++)
@@ -121,6 +127,20 @@ internal sealed class MixedOperationSoakConfiguration
                 seed = ParseULong(args, ref index, argument);
             else if (argument.Equals("--soak-public-jobs", StringComparison.OrdinalIgnoreCase))
                 usePublicJobs = true;
+            else if (argument.Equals("--soak-scheduler", StringComparison.OrdinalIgnoreCase))
+            {
+                usePublicJobs = true;
+                useScheduler = true;
+                schedulerRunMode = SchedulerRunMode.Parallel;
+            }
+            else if (argument.Equals("--soak-scheduler-serial", StringComparison.OrdinalIgnoreCase))
+            {
+                usePublicJobs = true;
+                useScheduler = true;
+                schedulerRunMode = SchedulerRunMode.Serial;
+            }
+            else if (argument.Equals("--soak-scheduler-workers", StringComparison.OrdinalIgnoreCase))
+                schedulerBackgroundWorkers = ParseInt(args, ref index, argument);
             else if (argument.Equals("--soak-output", StringComparison.OrdinalIgnoreCase) ||
                      argument.Equals("--output", StringComparison.OrdinalIgnoreCase))
                 explicitOutputPath = Path.GetFullPath(ParseString(args, ref index, argument));
@@ -143,6 +163,9 @@ internal sealed class MixedOperationSoakConfiguration
             ValidationCheckpointInterval = checkpointInterval,
             Seed = seed,
             UsePublicJobs = usePublicJobs,
+            UseScheduler = useScheduler,
+            SchedulerRunMode = schedulerRunMode,
+            SchedulerBackgroundWorkers = schedulerBackgroundWorkers,
         };
         configuration.Validate();
         return configuration;
@@ -168,6 +191,10 @@ internal sealed class MixedOperationSoakConfiguration
         }
         if (DestroyedPerTick + TransitionsPerTick >= EntityCount / 2)
             throw new ArgumentOutOfRangeException(nameof(EntityCount), "Structural selection has insufficient population headroom.");
+        if (SchedulerBackgroundWorkers < 0)
+            throw new ArgumentOutOfRangeException(nameof(SchedulerBackgroundWorkers));
+        if (UseScheduler && !UsePublicJobs)
+            throw new ArgumentException("Scheduled soak execution requires public generated job plans.");
     }
 
     internal MixedOperationSoakConfigurationReport ToReport() => new()
@@ -179,7 +206,9 @@ internal sealed class MixedOperationSoakConfiguration
         ValidationTicks = ValidationTicks,
         ValidationCheckpointInterval = ValidationCheckpointInterval,
         Seed = Seed,
-        ExecutionSurface = UsePublicJobs ? "PublicGeneratedChunkJobs" : "InternalGeneratedControl",
+        ExecutionSurface = UseScheduler
+            ? $"ScheduledGeneratedSystems/{SchedulerRunMode}/C{SchedulerBackgroundWorkers + 1}"
+            : UsePublicJobs ? "PublicGeneratedChunkJobs" : "InternalGeneratedControl",
         QueryPassesPerTick = 4,
         QueryRowsPerTick = QueryRowsPerTick,
         LogicalQueryBytesPerTick = checked((long)EntityCount * (16 + 12 + 12 + 12)),
@@ -468,6 +497,8 @@ internal sealed class MixedOperationSoakWorld : IDisposable
     private readonly int[] _lifecycleRevisions;
     private readonly int[] _selectionMarks;
     private readonly int[] _writeMarks;
+    private readonly int[] _randomReadSlots;
+    private readonly int[] _trackedWriteSlots;
     private readonly int[] _canonicalSeen;
     private readonly Entity[] _destroyEntities;
     private readonly int[] _destroySlots;
@@ -509,7 +540,8 @@ internal sealed class MixedOperationSoakWorld : IDisposable
                 maximumArchetypes: 2,
                 maximumPreparedPlans: 16,
                 maximumPreparedTransitions: 2,
-                maximumStructuralCommands: configuration.StructuralCommandsPerTick));
+                maximumStructuralCommands: configuration.StructuralCommandsPerTick,
+                scheduler: CreateSchedulerOptions(configuration)));
 
         ComponentId identity = MixedOperationSoakSchema.GetComponentId<SoakIdentity>();
         ComponentId position = MixedOperationSoakSchema.GetComponentId<SoakPosition>();
@@ -535,6 +567,25 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         _activityLookup = _world.PrepareLookup<SoakActivity>();
         _wideLookup = _world.PrepareLookup<SoakWide>();
 
+        int entityCount = configuration.EntityCount;
+        _entities = new Entity[entityCount];
+        _isWide = new bool[entityCount];
+        _lifecycleRevisions = new int[entityCount];
+        _selectionMarks = new int[entityCount];
+        _writeMarks = new int[entityCount];
+        _randomReadSlots = new int[configuration.RandomReadsPerTick];
+        _trackedWriteSlots = new int[configuration.TrackedWritesPerTick];
+        _canonicalSeen = new int[entityCount];
+        _destroyEntities = new Entity[configuration.DestroyedPerTick];
+        _destroySlots = new int[configuration.DestroyedPerTick];
+        _createArchetypes = new ArchetypeHandle[configuration.CreatedPerTick];
+        _createTokens = new DeferredEntity[configuration.CreatedPerTick];
+        int halfTransitions = configuration.TransitionsPerTick / 2;
+        _addWideEntities = new Entity[halfTransitions];
+        _addWideSlots = new int[halfTransitions];
+        _removeWideEntities = new Entity[halfTransitions];
+        _removeWideSlots = new int[halfTransitions];
+
         if (configuration.UsePublicJobs)
         {
             _publicMovementPlan = _world.PrepareReadWriteJob<SoakVelocity, SoakPosition>();
@@ -543,6 +594,8 @@ internal sealed class MixedOperationSoakWorld : IDisposable
             _publicTelemetryPlan = _world.PrepareReadReadJob<SoakPosition, SoakHealth>();
             _publicChangedPlan = _world.PrepareChangedRowsJob<SoakIdentity, SoakActivity>();
             _publicOwnershipPlan = _world.PrepareReadReadJob<SoakIdentity, SoakPosition>();
+            if (configuration.UseScheduler)
+                RegisterScheduledSystems(health, activity);
         }
         else
         {
@@ -567,23 +620,6 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         _world.Initialize();
         _world.BeginRun();
         _commands = _world.StructuralCommands;
-
-        int entityCount = configuration.EntityCount;
-        _entities = new Entity[entityCount];
-        _isWide = new bool[entityCount];
-        _lifecycleRevisions = new int[entityCount];
-        _selectionMarks = new int[entityCount];
-        _writeMarks = new int[entityCount];
-        _canonicalSeen = new int[entityCount];
-        _destroyEntities = new Entity[configuration.DestroyedPerTick];
-        _destroySlots = new int[configuration.DestroyedPerTick];
-        _createArchetypes = new ArchetypeHandle[configuration.CreatedPerTick];
-        _createTokens = new DeferredEntity[configuration.CreatedPerTick];
-        int halfTransitions = configuration.TransitionsPerTick / 2;
-        _addWideEntities = new Entity[halfTransitions];
-        _addWideSlots = new int[halfTransitions];
-        _removeWideEntities = new Entity[halfTransitions];
-        _removeWideSlots = new int[halfTransitions];
 
         for (int slot = 0; slot < entityCount; slot++)
         {
@@ -622,6 +658,8 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         _changeCursor = configuration.UsePublicJobs
             ? _world.CreateChangeCursorFromNow()
             : _core!.CreateChangeCursorFromNow();
+        if (configuration.UseScheduler)
+            _world.SchedulerRunMode = configuration.SchedulerRunMode;
     }
 
     internal int AliveCount => _world.AliveCount;
@@ -659,12 +697,56 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 
     internal void ExecuteTick(PhaseSamples? samples, int sampleIndex)
     {
+        if (_configuration.UseScheduler)
+        {
+            ExecuteTickScheduled(samples, sampleIndex);
+            return;
+        }
         if (_configuration.UsePublicJobs)
         {
             ExecuteTickPublic(samples, sampleIndex);
             return;
         }
         ExecuteTickInternal(samples, sampleIndex);
+    }
+
+    private void ExecuteTickScheduled(PhaseSamples? samples, int sampleIndex)
+    {
+        long totalStarted = Stopwatch.GetTimestamp();
+        long phaseStarted = Stopwatch.GetTimestamp();
+        _world.Tick(1d / 64d);
+        Record(samples?.Query, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        SelectStructuralTargets();
+        Record(samples?.WorkloadSelection, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        RecordStructuralCommands();
+        Record(samples?.CommandRecord, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        StructuralPlaybackResult playback = _world.PlaybackStructuralCommands();
+        ValidateAndAccumulate(playback);
+        Record(samples?.StructuralPlayback, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        PublishStructuralResults();
+        Record(samples?.CreateInitialization, sampleIndex, phaseStarted);
+
+        _tick++;
+        if (_world.AliveCount != _configuration.EntityCount)
+            throw new InvalidOperationException("A scheduled parity soak tick did not preserve its live population.");
+        if (samples is not null)
+        {
+            long total = Stopwatch.GetTimestamp() - totalStarted;
+            samples.TotalTick[sampleIndex] = total;
+            samples.MeasuredEcsWork[sampleIndex] =
+                samples.Query[sampleIndex] +
+                samples.CommandRecord[sampleIndex] +
+                samples.StructuralPlayback[sampleIndex] +
+                samples.CreateInitialization[sampleIndex];
+        }
     }
 
     private void ExecuteTickInternal(PhaseSamples? samples, int sampleIndex)
@@ -824,7 +906,11 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         }
     }
 
-    internal string ComputeCanonicalHash()
+    internal string ComputeCanonicalHash() => ComputeCanonicalHash(includeObservationVersions: true);
+
+    internal string ComputeCanonicalLogicalHash() => ComputeCanonicalHash(includeObservationVersions: false);
+
+    private string ComputeCanonicalHash(bool includeObservationVersions)
     {
         Array.Clear(_canonicalSeen);
         int ownershipRows;
@@ -853,13 +939,18 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         }
 
         var hash = new CanonicalStateHasher();
-        hash.AddString("UltraSim.ECS.MixedOperationSoak.v1");
+        hash.AddString(includeObservationVersions
+            ? "UltraSim.ECS.MixedOperationSoak.v1"
+            : "UltraSim.ECS.MixedOperationSoak.Logical.v1");
         hash.AddUInt64(_configuration.Seed);
         hash.AddInt32(_configuration.EntityCount);
         hash.AddInt32(_tick);
         hash.AddInt32(_world.AliveCount);
-        hash.AddUInt64(_world.CurrentChangeVersion.Value);
-        hash.AddUInt64(_changeCursor.Version.Value);
+        if (includeObservationVersions)
+        {
+            hash.AddUInt64(_world.CurrentChangeVersion.Value);
+            hash.AddUInt64(_changeCursor.Version.Value);
+        }
         hash.AddInt64(_checksum);
         hash.AddInt64(_queryRowsVisited);
         hash.AddInt64(_randomReads);
@@ -884,7 +975,8 @@ internal sealed class MixedOperationSoakWorld : IDisposable
             throw new InvalidOperationException("Canonical pending-change observation is inconsistent.");
         hash.AddInt32(pendingChangedRows);
         hash.AddInt64(pendingChanged.Checksum);
-        hash.AddUInt64(pendingCursor.Version.Value);
+        if (includeObservationVersions)
+            hash.AddUInt64(pendingCursor.Version.Value);
 
         for (int slot = 0; slot < _configuration.EntityCount; slot++)
         {
@@ -967,12 +1059,339 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 
     public void Dispose() => _world.Dispose();
 
+    internal SchedulerRuntimeSnapshot GetSchedulerSnapshot() =>
+        _configuration.UseScheduler
+            ? _world.GetSchedulerRuntimeSnapshot()
+            : throw new InvalidOperationException("This soak world does not use the scheduler.");
+
+    internal long SchedulerReservedBytes => _configuration.UseScheduler
+        ? _world.SchedulerReservedBytes
+        : 0;
+
+    private static EcsSchedulerOptions CreateSchedulerOptions(
+        MixedOperationSoakConfiguration configuration) => configuration.UseScheduler
+        ? new EcsSchedulerOptions(
+            maximumSystems: 7,
+            maximumDependencies: 0,
+            maximumWorkItems: 256,
+            maximumStructuralSegments: 256,
+            backgroundWorkerCount: configuration.SchedulerBackgroundWorkers,
+            callerParticipates: true,
+            structuralCommandsPerProducer: 0,
+            structuralPayloadBytesPerProducer: 0,
+            maximumPartitionsPerSystem: 64,
+            profilingEnabled: true)
+        : EcsSchedulerOptions.Disabled;
+
+    private void RegisterScheduledSystems(ComponentId health, ComponentId activity)
+    {
+        _world.RegisterReadWriteSystem<SoakVelocity, SoakPosition,
+            ScheduledSoakQueryRuntime, ScheduledSoakQueryJob>(
+            ScheduledQueryDefinition("soak.parity.movement", SystemStage.Movement),
+            _publicMovementPlan,
+            new ScheduledSoakQueryRuntime(this, ScheduledSoakQueryKind.Movement));
+        _world.RegisterReadWriteSystem<SoakPosition, SoakHealth,
+            ScheduledSoakQueryRuntime, ScheduledSoakQueryJob>(
+            ScheduledQueryDefinition("soak.parity.health", SystemStage.SpatialIndex),
+            _publicHealthPlan,
+            new ScheduledSoakQueryRuntime(this, ScheduledSoakQueryKind.Health));
+        _world.RegisterReadWriteSystem<SoakHealth, SoakVelocity,
+            ScheduledSoakQueryRuntime, ScheduledSoakQueryJob>(
+            ScheduledQueryDefinition("soak.parity.response", SystemStage.Perception),
+            _publicResponsePlan,
+            new ScheduledSoakQueryRuntime(this, ScheduledSoakQueryKind.Response));
+        _world.RegisterReadReadSystem<SoakPosition, SoakHealth,
+            ScheduledSoakQueryRuntime, ScheduledSoakQueryJob>(
+            ScheduledQueryDefinition("soak.parity.telemetry", SystemStage.Combat),
+            _publicTelemetryPlan,
+            new ScheduledSoakQueryRuntime(this, ScheduledSoakQueryKind.Telemetry));
+        _world.RegisterRangeSystem<ScheduledSoakRandomReadRuntime, ScheduledSoakRandomReadJob>(
+            new SystemDefinition("soak.parity.random-read", SystemStage.AI,
+                executionPolicy: SystemExecutionPolicy.Parallel,
+                additionalReads: [health], parallelRowThreshold: 1,
+                minimumRowsPerPartition: 64),
+            new ScheduledSoakRandomReadRuntime(this));
+        _world.RegisterRangeSystem<ScheduledSoakTrackedWriteRuntime, ScheduledSoakTrackedWriteJob>(
+            new SystemDefinition("soak.parity.tracked-write", SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Parallel,
+                additionalWrites: [activity], parallelRowThreshold: 1,
+                minimumRowsPerPartition: 256,
+                randomWriteTargetsAreDisjoint: true),
+            new ScheduledSoakTrackedWriteRuntime(this));
+        _world.RegisterChangedRowsSystem<SoakIdentity, SoakActivity,
+            ScheduledSoakChangedRuntime, ScheduledSoakChangedJob>(
+            new SystemDefinition("soak.parity.changed", SystemStage.Networking,
+                executionPolicy: SystemExecutionPolicy.Serial),
+            _publicChangedPlan,
+            new ScheduledSoakChangedRuntime(this));
+    }
+
+    private static SystemDefinition ScheduledQueryDefinition(string key, SystemStage stage) =>
+        new(key, stage, executionPolicy: SystemExecutionPolicy.Auto,
+            parallelRowThreshold: 8_192, minimumRowsPerPartition: 2_048);
+
+    private void CompleteScheduledQuery(
+        ScheduledSoakQueryKind kind,
+        ReadOnlySpan<ScheduledSoakQueryJob> jobs)
+    {
+        int rows = 0;
+        long checksum = 0;
+        for (int index = 0; index < jobs.Length; index++)
+        {
+            rows += jobs[index].Rows;
+            checksum = unchecked(checksum + jobs[index].Checksum);
+        }
+        if (rows != _configuration.EntityCount)
+            throw new InvalidOperationException($"Scheduled parity query {kind} lost rows.");
+        _queryRowsVisited += rows;
+        _checksum = unchecked(_checksum + checksum);
+    }
+
+    private enum ScheduledSoakQueryKind : byte
+    {
+        Movement,
+        Health,
+        Response,
+        Telemetry,
+    }
+
+    private sealed class ScheduledSoakQueryRuntime : ISystemRuntime<ScheduledSoakQueryJob>
+    {
+        private readonly MixedOperationSoakWorld _owner;
+        private readonly ScheduledSoakQueryKind _kind;
+        internal ScheduledSoakQueryRuntime(
+            MixedOperationSoakWorld owner,
+            ScheduledSoakQueryKind kind) => (_owner, _kind) = (owner, kind);
+        public ScheduledSoakQueryJob Prepare(in SystemPrepareContext context) => new(_kind);
+        public void Complete(in SystemCompleteContext context,
+            ReadOnlySpan<ScheduledSoakQueryJob> jobs) => _owner.CompleteScheduledQuery(_kind, jobs);
+    }
+
+    private struct ScheduledSoakQueryJob :
+        IScheduledReadWriteChunkJob<SoakVelocity, SoakPosition>,
+        IScheduledReadWriteChunkJob<SoakPosition, SoakHealth>,
+        IScheduledReadWriteChunkJob<SoakHealth, SoakVelocity>,
+        IScheduledReadReadChunkJob<SoakPosition, SoakHealth>
+    {
+        private readonly ScheduledSoakQueryKind _kind;
+        internal int Rows;
+        internal long Checksum;
+        internal ScheduledSoakQueryJob(ScheduledSoakQueryKind kind) =>
+            (_kind, Rows, Checksum) = (kind, 0, 0);
+
+        public void Execute(in SystemJobContext context,
+            in ReadWriteComponentChunk<SoakVelocity, SoakPosition> chunk)
+        {
+            System.Diagnostics.Debug.Assert(_kind == ScheduledSoakQueryKind.Movement);
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                ref readonly SoakVelocity velocity = ref chunk.ReadComponents[row];
+                ref SoakPosition position = ref chunk.WriteComponents[row];
+                if (chunk.IsReadEnabled(row))
+                {
+                    position.X += velocity.X * (1f / 64f);
+                    position.Y += velocity.Y * (1f / 64f);
+                }
+                checksum = unchecked(checksum +
+                    BitConverter.SingleToInt32Bits(position.X) +
+                    BitConverter.SingleToInt32Bits(position.Y));
+            }
+            Rows += chunk.Count;
+            Checksum = checksum;
+        }
+
+        public void Execute(in SystemJobContext context,
+            in ReadWriteComponentChunk<SoakPosition, SoakHealth> chunk)
+        {
+            System.Diagnostics.Debug.Assert(_kind == ScheduledSoakQueryKind.Health);
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                ref readonly SoakPosition position = ref chunk.ReadComponents[row];
+                uint bits = unchecked((uint)BitConverter.SingleToInt32Bits(position.X));
+                int value = 512 + unchecked((int)((bits ^ (bits >> 11)) & 511));
+                chunk.WriteComponents[row] = new SoakHealth { Value = value };
+                checksum = unchecked(checksum + value);
+            }
+            Rows += chunk.Count;
+            Checksum = checksum;
+        }
+
+        public void Execute(in SystemJobContext context,
+            in ReadWriteComponentChunk<SoakHealth, SoakVelocity> chunk)
+        {
+            System.Diagnostics.Debug.Assert(_kind == ScheduledSoakQueryKind.Response);
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                int health = chunk.ReadComponents[row].Value;
+                chunk.WriteComponents[row] = new SoakVelocity
+                {
+                    X = (health & 255) * (1f / 1024f),
+                    Y = ((health >> 2) & 255) * (-1f / 2048f),
+                };
+                checksum = unchecked(checksum + health + (chunk.IsWriteEnabled(row) ? 1 : 0));
+            }
+            Rows += chunk.Count;
+            Checksum = checksum;
+        }
+
+        public void Execute(in SystemJobContext context,
+            in ReadReadComponentChunk<SoakPosition, SoakHealth> chunk)
+        {
+            System.Diagnostics.Debug.Assert(_kind == ScheduledSoakQueryKind.Telemetry);
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                checksum = unchecked(checksum +
+                    BitConverter.SingleToInt32Bits(chunk.ReadComponents1[row].X) +
+                    chunk.ReadComponents2[row].Value);
+            }
+            Rows += chunk.Count;
+            Checksum = checksum;
+        }
+    }
+
+    private sealed class ScheduledSoakRandomReadRuntime :
+        IRangeSystemRuntime<ScheduledSoakRandomReadJob>
+    {
+        private readonly MixedOperationSoakWorld _owner;
+        internal ScheduledSoakRandomReadRuntime(MixedOperationSoakWorld owner) => _owner = owner;
+        public int GetRangeCount(in SystemPrepareContext context) => _owner._randomReadSlots.Length;
+        public ScheduledSoakRandomReadJob Prepare(in SystemPrepareContext context)
+        {
+            _owner.SelectRandomReadTargets();
+            return new ScheduledSoakRandomReadJob(_owner);
+        }
+        public void Complete(in SystemCompleteContext context,
+            ReadOnlySpan<ScheduledSoakRandomReadJob> jobs)
+        {
+            long checksum = 0;
+            int rows = 0;
+            for (int index = 0; index < jobs.Length; index++)
+            {
+                checksum = unchecked(checksum + jobs[index].Checksum);
+                rows += jobs[index].Rows;
+            }
+            if (rows != _owner._randomReadSlots.Length)
+                throw new InvalidOperationException("Scheduled random reads lost targets.");
+            _owner._randomReads += rows;
+            _owner._checksum = unchecked(_owner._checksum + checksum);
+        }
+    }
+
+    private struct ScheduledSoakRandomReadJob : IRangeJob
+    {
+        private readonly MixedOperationSoakWorld _owner;
+        internal int Rows;
+        internal long Checksum;
+        internal ScheduledSoakRandomReadJob(MixedOperationSoakWorld owner) =>
+            (_owner, Rows, Checksum) = (owner, 0, 0);
+        public void Execute(in SystemJobContext context, int start, int count)
+        {
+            long checksum = Checksum;
+            for (int operation = start; operation < start + count; operation++)
+            {
+                int slot = _owner._randomReadSlots[operation];
+                if (!context.TryRead(_owner._entities[slot], _owner._healthLookup, out SoakHealth health))
+                    throw new InvalidOperationException("A scheduled random read lost a live entity.");
+                checksum = unchecked(checksum + health.Value + slot);
+            }
+            Rows += count;
+            Checksum = checksum;
+        }
+    }
+
+    private sealed class ScheduledSoakTrackedWriteRuntime :
+        IRangeSystemRuntime<ScheduledSoakTrackedWriteJob>
+    {
+        private readonly MixedOperationSoakWorld _owner;
+        internal ScheduledSoakTrackedWriteRuntime(MixedOperationSoakWorld owner) => _owner = owner;
+        public int GetRangeCount(in SystemPrepareContext context) => _owner._trackedWriteSlots.Length;
+        public ScheduledSoakTrackedWriteJob Prepare(in SystemPrepareContext context)
+        {
+            _owner.SelectTrackedWriteTargets();
+            return new ScheduledSoakTrackedWriteJob(_owner);
+        }
+        public void Complete(in SystemCompleteContext context,
+            ReadOnlySpan<ScheduledSoakTrackedWriteJob> jobs)
+        {
+            int rows = 0;
+            for (int index = 0; index < jobs.Length; index++) rows += jobs[index].Rows;
+            if (rows != _owner._trackedWriteSlots.Length)
+                throw new InvalidOperationException("Scheduled tracked writes lost targets.");
+            _owner._trackedWrites += rows;
+        }
+    }
+
+    private struct ScheduledSoakTrackedWriteJob : IRangeJob
+    {
+        private readonly MixedOperationSoakWorld _owner;
+        internal int Rows;
+        internal ScheduledSoakTrackedWriteJob(MixedOperationSoakWorld owner) =>
+            (_owner, Rows) = (owner, 0);
+        public void Execute(in SystemJobContext context, int start, int count)
+        {
+            for (int operation = start; operation < start + count; operation++)
+            {
+                int slot = _owner._trackedWriteSlots[operation];
+                var value = new SoakActivity { Value = _owner.GetTrackedWriteValue(slot) };
+                if (!context.TryWrite(_owner._entities[slot], _owner._activityLookup, value))
+                    throw new InvalidOperationException("A scheduled tracked write lost a live entity.");
+            }
+            Rows += count;
+        }
+    }
+
+    private sealed class ScheduledSoakChangedRuntime :
+        IChangedRowsSystemRuntime<ScheduledSoakChangedJob>
+    {
+        private readonly MixedOperationSoakWorld _owner;
+        internal ScheduledSoakChangedRuntime(MixedOperationSoakWorld owner) => _owner = owner;
+        public ChangeCursor Cursor
+        {
+            get => _owner._changeCursor;
+            set => _owner._changeCursor = value;
+        }
+        public ScheduledSoakChangedJob Prepare(in SystemPrepareContext context) => default;
+        public void Complete(in SystemCompleteContext context,
+            ReadOnlySpan<ScheduledSoakChangedJob> jobs)
+        {
+            int rows = 0;
+            long checksum = 0;
+            for (int index = 0; index < jobs.Length; index++)
+            {
+                rows += jobs[index].Rows;
+                checksum = unchecked(checksum + jobs[index].Checksum);
+            }
+            _owner._changedRowsDelivered += rows;
+            _owner._checksum = unchecked(_owner._checksum + checksum + rows);
+        }
+    }
+
+    private struct ScheduledSoakChangedJob : IScheduledChangedRowsChunkJob<SoakIdentity>
+    {
+        internal int Rows;
+        internal long Checksum;
+        public void Execute(in SystemJobContext context,
+            in ReadOnlyComponentChunk<SoakIdentity> chunk)
+        {
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+                checksum = unchecked(checksum + chunk.Components[row].Value);
+            Rows += chunk.Count;
+            Checksum = checksum;
+        }
+    }
+
     private void ExecuteRandomReads()
     {
+        SelectRandomReadTargets();
         long checksum = 0;
         for (int operation = 0; operation < _configuration.RandomReadsPerTick; operation++)
         {
-            int slot = _random.NextInt(_configuration.EntityCount);
+            int slot = _randomReadSlots[operation];
             if (!_world.TryRead(_entities[slot], _healthLookup, out SoakHealth health))
                 throw new InvalidOperationException("A checked random read lost a live entity.");
             checksum = unchecked(checksum + health.Value + slot);
@@ -983,6 +1402,25 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 
     private void ExecuteTrackedWrites()
     {
+        SelectTrackedWriteTargets();
+        for (int written = 0; written < _trackedWriteSlots.Length; written++)
+        {
+            int slot = _trackedWriteSlots[written];
+            int value = GetTrackedWriteValue(slot);
+            if (!_world.TryWrite(_entities[slot], _activityLookup, new SoakActivity { Value = value }))
+                throw new InvalidOperationException("A tracked scalar write lost a live entity.");
+        }
+        _trackedWrites += _trackedWriteSlots.Length;
+    }
+
+    private void SelectRandomReadTargets()
+    {
+        for (int operation = 0; operation < _randomReadSlots.Length; operation++)
+            _randomReadSlots[operation] = _random.NextInt(_configuration.EntityCount);
+    }
+
+    private void SelectTrackedWriteTargets()
+    {
         int epoch = NextEpoch(_writeMarks, ref _writeEpoch);
         int written = 0;
         while (written < _configuration.TrackedWritesPerTick)
@@ -991,14 +1429,12 @@ internal sealed class MixedOperationSoakWorld : IDisposable
             if (_writeMarks[slot] == epoch)
                 continue;
             _writeMarks[slot] = epoch;
-            int value = unchecked(
-                (_tick + 1) * 1_000_003 ^ slot * 65_537 ^ _lifecycleRevisions[slot] * 257);
-            if (!_world.TryWrite(_entities[slot], _activityLookup, new SoakActivity { Value = value }))
-                throw new InvalidOperationException("A tracked scalar write lost a live entity.");
-            written++;
+            _trackedWriteSlots[written++] = slot;
         }
-        _trackedWrites += written;
     }
+
+    private int GetTrackedWriteValue(int slot) => unchecked(
+        (_tick + 1) * 1_000_003 ^ slot * 65_537 ^ _lifecycleRevisions[slot] * 257);
 
     private void SelectStructuralTargets()
     {

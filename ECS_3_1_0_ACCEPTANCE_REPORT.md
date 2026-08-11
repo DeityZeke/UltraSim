@@ -3,6 +3,14 @@
 Status: accepted on 2026-08-11 under semantic profile
 `ecs-3.1.0-bounded-system-scheduler`.
 
+Post-acceptance note: this document preserves the 3.1.0 milestone and its
+immutable artifacts. The audit-driven 3.1.1 hardening pass corrected random
+lookup capability separation, retained-facade access during graph execution,
+multi-route partition caps, and the longitudinal soak comparison. See
+[`ECS_3_1_1_HARDENING_REPORT.md`](ECS_3_1_1_HARDENING_REPORT.md). The 3.1.0
+"scheduled soak" below is a valid scheduler-shaped stress workload, but is not
+semantically identical to the older mixed-operation soak.
+
 The answer to both admission questions is yes. A real UltraSim system can now
 own persistent state, run at a declared stage/cadence, express generated and
 supplemental access, execute the 3.0.36 chunk machine serially or across bounded
@@ -108,9 +116,10 @@ persistence identity, builds flat read/write/structural bit masks, validates
 dependencies, and assigns each node an integer compiled wave inside one of nine
 strict stages. Runtime execution is nested stage/wave scanning over dense arrays;
 there are no delegate nodes, tasks, dictionaries, or runtime topological sort.
-Read/read may share a wave. Overlapping write/read, write/write, declared random
-access, or structural access creates a hard wave separation unless an explicit
-disjoint random-write proof applies.
+Read/read may share a wave. Overlapping write/read, write/write, or declared
+random access creates a hard wave separation. Structural declarations authorize
+deferred routes rather than creating false in-graph memory hazards; explicit
+`Requires` edges express semantic command-emission order.
 
 ## 7. Dependency and cadence semantics
 
@@ -132,6 +141,10 @@ rows/partition. Participant jobs are copied into fixed slots. One scheduler
 dispatch handles independent nodes and intra-node partitions; nested scheduling
 is forbidden. `Auto` remains serial below the declared crossover and does not
 wake workers.
+
+3.1.1 corrected the original route-local interpretation of that maximum. Chunk
+partitions may now span matching archetype routes, so the configured maximum is
+a true global per-system cap even in highly fragmented worlds.
 
 ## 9. Work stealing decision
 
@@ -349,7 +362,7 @@ ordering-only dependency/cadence semantics; no work stealing, fusion, runtime
 schema/system mutation, or scheduler persistence serialization. Unsupported
 comparison rows remain visible rather than receiving fabricated ratios.
 
-## 31. Scheduled 100K soak
+## 31. Scheduler-shaped 100K soak
 
 The accepted run performs 60,000 measured ticks after 256 warmups in both modes.
 Each tick visits 400K generated query rows, targets 5K tracked writes, performs
@@ -364,6 +377,12 @@ Parallel mean is `2.40x` faster. Mean phases are
 pre/graph/merge/post `0.026/954.350/3.936/22.494 us` serial and
 `0.030/380.047/4.303/24.168 us` parallel. Both modes hash to
 `8E25297D3A12A623`, allocate 0 B on caller and workers, and collect 0/0/0.
+
+This workload scans every row to select 5K tracked writes and records 200
+destroy/create pairs. It is therefore not the scheduler rendition of the older
+RNG-selected 5K-write, 100 destroy, 100 create, 200 transition longitudinal
+profile. 3.1.1 retains these results under their honest stress-profile label and
+adds a separate canonical parity comparison.
 
 ## 32. Determinism
 

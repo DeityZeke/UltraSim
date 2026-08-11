@@ -1,8 +1,8 @@
 # ECS 100K Mixed-Operation Soak
 
-Status: accepted 3.0.35 internal-control baseline plus accepted 3.0.36 public
-serial generated chunk-job profile; not yet a scheduler, network, persistence,
-prefab, or full gameplay benchmark
+Status: accepted 3.0.35 internal control, accepted 3.0.36 public serial generated
+chunk-job control, and accepted 3.1.1 serial/parallel scheduled parity profile;
+not yet a network, persistence, prefab, or full gameplay benchmark
 
 ## Purpose
 
@@ -15,7 +15,8 @@ designed to answer a different question from the isolated primitive suite:
 
 It is not a V2/V3 comparison. The original 3.0.35 internal profile remains
 immutable. ECS 3.0.36 adds a separately named public-job profile with the same
-useful workload and canonical state; lifecycle streams, scheduler, prefab,
+useful workload and canonical state. ECS 3.1.1 adds scheduler serial/parallel
+execution while preserving the same logical work; lifecycle streams, prefab,
 persistence, and networking work should continue adding profiles rather than
 silently rewriting either control.
 
@@ -25,6 +26,10 @@ The stable machine-readable identities are report
 `ultrasim-ecs-mixed-soak-canonical-v1`. A future semantic change must use a new
 profile rather than silently joining incompatible captures. The public execution
 profile is `ecs-v3-100k-mixed-operations-public-jobs-v1`.
+The scheduled parity profile is
+`ecs-v3-100k-mixed-operations-scheduler-parity-v1`. The separate 3.1.0
+scheduler-shaped stress workload is intentionally not assigned either
+longitudinal identity because its target selection and structural mix differ.
 
 ## Workload contract
 
@@ -90,6 +95,15 @@ The two sustained measured worlds then run the same seed and must finish with th
 same canonical hash and checksum. Canonical scans are outside timed ticks. This is
 a same-implementation determinism proof, not an independent semantic reference
 model or cross-generation hash.
+
+The 3.1.1 parity runner additionally emits a normalized logical hash that omits
+observation-version numbering while retaining entity generations, ownership,
+membership, values, enable state, lifecycle revisions, change-visible rows,
+structural outcomes, checksums, and work counters. This is necessary because
+5,000 public scalar writes advance 5,000 versions while one scheduled logical
+system invocation intentionally shares one publication version. Public,
+scheduled-serial, and scheduled-parallel worlds must match the normalized hash;
+the two scheduled worlds must also match the full observation-version hash.
 
 ## Measurement policy
 
@@ -222,6 +236,37 @@ Representative public normalized costs are `1.779 ns/query row`, `47.84
 ns/random read`, `55.78 ns/tracked scalar write`, `37.49 ns/exact delivered
 row`, `7.22 ns/recorded command`, and `150.40 ns/playback command`.
 
+## Accepted 3.1.1 scheduled parity profile
+
+The accepted scheduler artifact is
+`Baselines/ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json`.
+Unlike the preserved 3.1.0 scheduler stress workload, this profile reuses the
+original deterministic target-selection and canonical-state machinery. Its
+public control and both scheduler modes execute the same four 100K query passes,
+5,000 arbitrary selected writes, 500 RNG-selected reads, exact change consumer,
+100 destroys, 100 default creates, 200 transitions, and replacement publication.
+
+Combined 30,000-tick distributions after 2,000 warmups:
+
+| Surface | Mean | p95 | p99 | Allocation |
+| --- | ---: | ---: | ---: | ---: |
+| public generated-job control | 1,188.522 us | 1,235.919 | 1,289.798 | 0 B |
+| scheduled serial | 1,271.007 us | 1,322.398 | 1,376.587 | 0 B |
+| scheduled parallel, 8 participants | 577.820 us | 656.644 | 744.593 | 0 B |
+
+All three produce normalized logical hash
+`55107F0D2B7B1F2F76BF7E710E9C6AD5`, identical work counters, no rejected
+commands, and zero caller/worker allocation or GC collection. Scheduled serial
+costs about `6.9%` more than the direct public control; scheduled parallel is
+`2.06x` faster than that control and `2.20x` faster than scheduled serial. The
+comparison exposes orchestration cost instead of using parallel speedup to hide
+it.
+
+This profile also validates an important semantic distinction: the public and
+scheduled full observation hashes differ only because their legitimate change-
+version publication schedules differ. Scheduled serial and parallel observation
+hashes match exactly.
+
 ## Running it
 
 From the repository root:
@@ -233,8 +278,11 @@ dotnet run --project \
   -c Release -- --soak
 ```
 
-Add `--soak-public-jobs` to run the public 3.0.36 profile. Default result names
-include the active kernel version and append `-public-jobs` for that profile.
+Add `--soak-public-jobs` to run the public 3.0.36 profile. Add
+`--soak-scheduler-serial` or `--soak-scheduler` for the 3.1.1 scheduled parity
+profile; `--soak-scheduler-workers <count>` controls background workers for the
+parallel form. Default result names include the active kernel version and append
+the selected profile.
 Supported controls are:
 
 - `--soak-output <path>`;
@@ -244,8 +292,11 @@ Supported controls are:
 - `--soak-runs <count>`;
 - `--soak-validation-ticks <ticks>`;
 - `--soak-checkpoint-interval <ticks>`;
-- `--soak-seed <decimal-or-0x-hex>`.
-- `--soak-public-jobs`.
+- `--soak-seed <decimal-or-0x-hex>`;
+- `--soak-public-jobs`;
+- `--soak-scheduler-serial`;
+- `--soak-scheduler`;
+- `--soak-scheduler-workers <count>`.
 
 At least 1,000 measured ticks and two measured replays are enforced. A useful
 development smoke is 4,096 entities, 100 warmups, 1,000 measured ticks, two runs,
@@ -262,7 +313,8 @@ profiles rather than silently changing its contract:
 - unbalanced create/destroy topology that leaves holes for final compaction;
 - many-archetype and fragmented-route variants;
 - a deliberately slow change consumer;
-- scheduler serial/parallel parity and crossover once public jobs exist;
+- scheduler crossover under changed entity count, system cost, route count, and
+  participant count, while retaining this accepted parity workload;
 - lifecycle-stream publication once implemented;
 - prefab spawn/despawn, persistence checkpoint, and network capture/apply phases;
 - one-hour and overnight native-retention runs;
@@ -279,8 +331,9 @@ It finds that version advancement itself is negligible; random checked access,
 chunk locality, resident rows in touched chunks, and fragmented exact-range
 dispatch dominate. ECS 3.0.36 then admitted the public serial generated chunk-job
 surface without changing this workload's canonical state or sustained timing.
-The next implementation should now follow production need: either assemble the
-3.1.0 scheduler/system contracts around this primitive, or first measure an
-end-to-end bounded batch-partition/mask-bearing change-consumer experiment if
-arbitrary entity-list writes or fragmented exact delivery remain dominant in a
-real migrated subsystem.
+ECS 3.1.0 subsequently assembled the bounded scheduler, and ECS 3.1.1 repaired
+its capability boundaries and longitudinal parity evidence. The next
+implementation should now follow production need. A bounded batch-partition or
+mask-bearing change-consumer remains a measured option if arbitrary entity-list
+writes or fragmented exact delivery dominate a migrated subsystem; it is not
+justified by this scheduler admission alone.

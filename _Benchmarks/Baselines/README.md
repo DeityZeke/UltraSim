@@ -116,3 +116,34 @@ collect no GC generation, and pass post-timing cursor/publication validation.
 They are diagnostic 3.0.35 evidence, not a new kernel checkpoint. Methodology,
 caveats, and the resulting implementation priority live in
 `../ECS_CHANGE_TRACKING_DECOMPOSITION.md`.
+
+`ecs-v2-v3-3.0.36-2026-08-11.json` is the accepted public serial generated
+chunk-job comparison capture. It retains 96 comparable rows, zero canonical or
+contract/catalog mismatches, 15 explicit unsupported rows, and zero timed V3
+allocation. Its causal same-process public/internal execution evidence lives in
+`../../ECS_JOB_EXECUTION.md`; the joined artifact is primarily the immutable
+longitudinal regression gate.
+
+`ecs-v2-v3-3.1.0-2026-08-11.json` is the accepted bounded-system-scheduler joined
+capture. It expands the catalog to 102 comparable rows with serial generated,
+parallel generated, and parallel RangeJob contracts; it retains zero canonical
+mismatches, 10 unsupported rows, and zero timed V3 allocation. The complete
+3.1.0 scheduler matrix and its originally admitted scheduler-shaped stress soak
+are preserved in
+`ecs-v3-3.1.0-bounded-system-scheduler-2026-08-11.json`. That stress soak is not
+the same workload as the older 3.0.35/3.0.36 longitudinal profile; 3.1.1 records
+the repaired evidence without rewriting either immutable artifact.
+
+`ecs-v2-v3-3.1.1-2026-08-11.json` is the accepted scheduler capability/parity
+hardening joined capture, taken V2 first after verification in both process
+orders. It retains all 102 comparable contracts, zero canonical or catalog
+mismatches, 10 unsupported rows, and zero timed V3 allocation. The corrected
+145-row scheduler matrix and exact longitudinal public/serial/parallel parity
+soak live in
+`ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json`. Timing
+triage remains process-order sensitive: the targeted serial scheduler row is
+effectively unchanged and parallel generated traversal improves in both orders.
+The RangeJob row is 2.2-6.4% slower; focused 31-sample reruns reproduce a
+2.7-6.3% range. Treat that modest regression as a follow-up signal accepted for
+the required safety repair, not a generalized scheduler result. Full
+interpretation is in `../../ECS_3_1_1_HARDENING_REPORT.md`.

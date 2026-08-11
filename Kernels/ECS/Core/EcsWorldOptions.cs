@@ -53,7 +53,7 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
 
     /// <summary>
     /// Fixed system/scheduler reservations. A default value leaves the direct
-    /// 3.1.0 world completely scheduler-free.
+    /// 3.1.1 world completely scheduler-free.
     /// </summary>
     public EcsSchedulerOptions Scheduler { get; }
 

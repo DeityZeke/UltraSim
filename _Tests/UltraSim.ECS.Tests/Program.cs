@@ -1375,14 +1375,17 @@ internal static class EcsPrimitiveTests
         WorldCapacityPlan world = WorldCapacityPlanner.Plan(
             new EntityCapacity(500),
             new[] { first, second },
-            arenas);
+            arenas,
+            managedSchedulerBytes: 8192);
 
         Assert.Equal(2, world.ArchetypeCount);
         Assert.Equal(300L, world.ExpectedPopulation);
         Assert.Equal((long)first.RequiredChunkCount + second.RequiredChunkCount, world.RequiredChunkCount);
         Assert.Equal(first.ReservedChunkBytes + second.ReservedChunkBytes, world.NativeChunkBytes);
         Assert.Equal(world.NativeChunkBytes + arenas.TotalBytes, world.TotalNativeBytes);
-        Assert.Equal(world.ManagedEntityMetadataBytes + world.TotalNativeBytes, world.TotalReservedBytes);
+        Assert.Equal(8192L, world.ManagedSchedulerBytes);
+        Assert.Equal(world.ManagedEntityMetadataBytes + world.ManagedSchedulerBytes, world.TotalManagedBytes);
+        Assert.Equal(world.TotalManagedBytes + world.TotalNativeBytes, world.TotalReservedBytes);
         Assert.Throws<ArgumentException>(() => WorldCapacityPlanner.Plan(
             new EntityCapacity(299),
             new[] { first, second },
@@ -1392,6 +1395,8 @@ internal static class EcsPrimitiveTests
             new[] { first },
             arenas));
         Assert.Throws<ArgumentOutOfRangeException>(() => new WorldArenaReservations(-1, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WorldCapacityPlanner.Plan(
+            new EntityCapacity(500), new[] { first }, arenas, managedSchedulerBytes: -1));
     }
 
     private static void CapacityPlanning_CheckedArithmeticRejectsOverflow()

@@ -15,6 +15,8 @@ internal sealed class SystemScheduler : IDisposable
     private readonly SystemNode?[] _nodes;
     private readonly ulong[] _readMasks;
     private readonly ulong[] _writeMasks;
+    private readonly ulong[] _lookupReadMasks;
+    private readonly ulong[] _lookupWriteMasks;
     private readonly ulong[] _structuralMasks;
     private readonly uint[] _structuralRouteByComponent;
     private readonly int _maskWords;
@@ -71,6 +73,8 @@ internal sealed class SystemScheduler : IDisposable
         _maskWords = (world.Schema.ComponentCount + 63) >> 6;
         _readMasks = new ulong[checked(options.MaximumSystems * _maskWords)];
         _writeMasks = new ulong[checked(options.MaximumSystems * _maskWords)];
+        _lookupReadMasks = new ulong[checked(options.MaximumSystems * _maskWords)];
+        _lookupWriteMasks = new ulong[checked(options.MaximumSystems * _maskWords)];
         _structuralMasks = new ulong[checked(options.MaximumSystems * _maskWords)];
         _structuralRouteByComponent = new uint[world.Schema.ComponentCount];
         _stageMaximumWave = new int[(int)SystemStage.Count];
@@ -115,7 +119,8 @@ internal sealed class SystemScheduler : IDisposable
     internal SchedulerRunMode RunMode => _runMode;
     internal long ReservedBytes => checked(
         (long)(_nodes.Length + _activeNodes.Length + _structuralLanes.Length) * IntPtr.Size +
-        (long)(_readMasks.Length + _writeMasks.Length + _structuralMasks.Length) * sizeof(ulong) +
+        (long)(_readMasks.Length + _writeMasks.Length + _lookupReadMasks.Length +
+            _lookupWriteMasks.Length + _structuralMasks.Length) * sizeof(ulong) +
         (long)_structuralRouteByComponent.Length * sizeof(uint) +
         (long)_stageMaximumWave.Length * sizeof(int) +
         (long)_workItems.Length * Unsafe.SizeOf<SchedulerWorkItem>() +
@@ -148,8 +153,14 @@ internal sealed class SystemScheduler : IDisposable
         ValidateDefinitionIdentity(node.Definition);
         Span<ulong> readMask = GetMask(_readMasks, node.Id.Value);
         Span<ulong> writeMask = GetMask(_writeMasks, node.Id.Value);
+        Span<ulong> lookupReadMask = GetMask(_lookupReadMasks, node.Id.Value);
+        Span<ulong> lookupWriteMask = GetMask(_lookupWriteMasks, node.Id.Value);
         AddComponents(readMask, reads, nameof(reads));
         AddComponents(writeMask, writes, nameof(writes));
+        AddComponents(lookupReadMask, node.Definition.AdditionalReads,
+            nameof(node.Definition.AdditionalReads));
+        AddComponents(lookupWriteMask, node.Definition.AdditionalWrites,
+            nameof(node.Definition.AdditionalWrites));
         AddComponents(readMask, node.Definition.AdditionalReads, nameof(node.Definition.AdditionalReads));
         AddComponents(writeMask, node.Definition.AdditionalWrites, nameof(node.Definition.AdditionalWrites));
         Span<ulong> structuralMask = GetMask(_structuralMasks, node.Id.Value);
@@ -873,13 +884,15 @@ internal sealed class SystemScheduler : IDisposable
         if (lookupWorld != _world.Id)
             throw new ArgumentException("The component lookup belongs to a different world.");
         SystemNode node = GetNode(context.SystemId);
-        ReadOnlySpan<ulong> mask = GetMask(write ? _writeMasks : _readMasks, node.Id.Value);
+        ReadOnlySpan<ulong> mask = GetMask(
+            write ? _lookupWriteMasks : _lookupReadMasks,
+            node.Id.Value);
         int word = component.Value >> 6;
         ulong bit = 1UL << (component.Value & 63);
         bool declared = word < mask.Length && (mask[word] & bit) != 0;
         if (!declared && !write)
         {
-            ReadOnlySpan<ulong> writes = GetMask(_writeMasks, node.Id.Value);
+            ReadOnlySpan<ulong> writes = GetMask(_lookupWriteMasks, node.Id.Value);
             declared = word < writes.Length && (writes[word] & bit) != 0;
         }
         if (!declared)
