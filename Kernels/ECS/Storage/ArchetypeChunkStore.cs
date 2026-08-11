@@ -1054,6 +1054,20 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         return ref Unsafe.As<byte, T>(ref MemoryMarshal.GetReference(valueBytes));
     }
 
+    internal void WriteBoundComponentBytes(
+        ChunkRow location,
+        int columnIndex,
+        ReadOnlySpan<byte> value)
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasData);
+        if (value.Length != column.ElementSizeBytes)
+            throw new ArgumentException("Component payload size does not match its bound column.", nameof(value));
+        int offset = checked(column.DataOffsetBytes + (row * column.ElementSizeBytes));
+        value.CopyTo(_arena.GetChunkBytes(_chunks[chunkIndex].Handle).Slice(offset, value.Length));
+    }
+
     internal bool IsEnabled(ChunkRow location, in ComponentColumnLayout column)
     {
         int columnIndex = GetOwnedColumnIndex(column);

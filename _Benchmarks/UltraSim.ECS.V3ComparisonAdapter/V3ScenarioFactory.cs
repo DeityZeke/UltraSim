@@ -14,14 +14,6 @@ internal static class V3ScenarioFactory
                 scenarios.Add(ComparisonCatalog.Unsupported(descriptor, descriptor.SemanticContract));
                 continue;
             }
-            if (descriptor.Id == "query.read.position-velocity-health")
-            {
-                scenarios.Add(ComparisonCatalog.Unsupported(
-                    descriptor,
-                    "V3 has no generated 3-read/0-write family yet; substituting lookup or 3R1W would change the timed work."));
-                continue;
-            }
-
             scenarios.Add(new ComparisonScenario
             {
                 Descriptor = descriptor,
@@ -42,6 +34,7 @@ internal static class V3WorkloadFactory
         "lookup.write.position.bounded" => new V3BoundedLookupWorkload(descriptor, write: true),
         "query.read.position" => new V3ReadQueryWorkload(descriptor, componentCount: 1),
         "query.read.position-velocity" => new V3ReadQueryWorkload(descriptor, componentCount: 2),
+        "query.read.position-velocity-health" => new V3ReadQueryWorkload(descriptor, componentCount: 3),
         "query.read-position.write-velocity" => new V3WriteQueryWorkload(descriptor),
         "structural.create.immediate" => new V3ImmediateCreateWorkload(descriptor),
         "structural.destroy.immediate" => new V3ImmediateDestroyWorkload(descriptor),
@@ -50,6 +43,9 @@ internal static class V3WorkloadFactory
         "changes.collect-unchanged" => new V3ChangeCollectWorkload(descriptor, stride: 0),
         "changes.write-collect-10pct" => new V3ChangeCollectWorkload(descriptor, stride: 10),
         "changes.write-collect-100pct" => new V3ChangeCollectWorkload(descriptor, stride: 1),
+        "scheduler.serial-tick" => new V3ScheduledChunkWorkload(descriptor, parallel: false),
+        "scheduler.parallel-tick" => new V3ScheduledChunkWorkload(descriptor, parallel: true),
+        "scheduler.range-parallel" => new V3ScheduledRangeWorkload(descriptor),
         _ when descriptor.Id.StartsWith("structural.churn.balanced-wide-10pct.", StringComparison.Ordinal) => new V3BalancedWideChurnWorkload(descriptor),
         _ when descriptor.Id.StartsWith("structural.create.deferred.", StringComparison.Ordinal) => new V3DeferredStructuralWorkload(descriptor, V3StructuralOperation.Create),
         _ when descriptor.Id.StartsWith("structural.destroy.deferred.", StringComparison.Ordinal) => new V3DeferredStructuralWorkload(descriptor, V3StructuralOperation.Destroy),

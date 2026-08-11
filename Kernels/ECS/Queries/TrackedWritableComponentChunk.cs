@@ -20,6 +20,7 @@ public readonly ref struct TrackedWritableComponentChunk<T>
     private readonly bool _wholeChunk;
     private readonly ref ChangeVersion _invocationVersion;
     private readonly ref bool _chunkStamped;
+    private readonly SchedulerChangePublication? _schedulerPublication;
 
     internal TrackedWritableComponentChunk(
         EcsWorld<NativeChunkArena> world,
@@ -46,6 +47,36 @@ public readonly ref struct TrackedWritableComponentChunk<T>
         _wholeChunk = wholeChunk;
         _invocationVersion = ref invocationVersion;
         _chunkStamped = ref chunkStamped;
+        _schedulerPublication = null;
+    }
+
+    internal TrackedWritableComponentChunk(
+        EcsWorld<NativeChunkArena> world,
+        ArchetypeChunkStore<NativeChunkArena> store,
+        uint chunkIndex,
+        int columnIndex,
+        int rowOffset,
+        Span<T> components,
+        Span<ulong> enableWords,
+        bool wholeChunk,
+        SchedulerChangePublication schedulerPublication,
+        ref bool chunkStamped)
+    {
+        System.Diagnostics.Debug.Assert(world is not null);
+        System.Diagnostics.Debug.Assert(store is not null);
+        System.Diagnostics.Debug.Assert(schedulerPublication is not null);
+        System.Diagnostics.Debug.Assert(rowOffset >= 0);
+        _world = world;
+        _store = store;
+        _chunkIndex = chunkIndex;
+        _columnIndex = columnIndex;
+        _rowOffset = rowOffset;
+        _components = components;
+        _enableWords = enableWords;
+        _wholeChunk = wholeChunk;
+        _invocationVersion = ref Unsafe.NullRef<ChangeVersion>();
+        _chunkStamped = ref chunkStamped;
+        _schedulerPublication = schedulerPublication;
     }
 
     public int Count => _components.Length;
@@ -110,7 +141,9 @@ public readonly ref struct TrackedWritableComponentChunk<T>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void PublishRange(int localRow, int rowCount, bool wholeChunk)
     {
-        ChangeVersion version = _world.AcquireTrackedJobChangeVersion(ref _invocationVersion);
+        ChangeVersion version = _schedulerPublication is null
+            ? _world.AcquireTrackedJobChangeVersion(ref _invocationVersion)
+            : _schedulerPublication.Acquire();
         _store.StampTrackedJobRange(
             _chunkIndex,
             _columnIndex,

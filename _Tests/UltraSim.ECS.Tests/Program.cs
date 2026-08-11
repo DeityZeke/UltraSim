@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using UltraSim.ECS;
 
 EcsPrimitiveTests.RunAll();
+SchedulerPrimitiveTests.RunAll();
 
 internal static class EcsPrimitiveTests
 {

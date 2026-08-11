@@ -12,16 +12,22 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
     private readonly int _componentCount;
     private readonly ArchetypeComponentBinding<Position> _positions;
     private readonly ArchetypeComponentBinding<Velocity> _velocities;
+    private readonly ArchetypeComponentBinding<Health> _healths;
     private readonly ArchetypeReadReadQueryPlan<NativeChunkArena, Position, Velocity>? _twoReadPlan;
+    private readonly ArchetypeReadReadReadQueryPlan<NativeChunkArena, Position, Velocity, Health>? _threeReadPlan;
 
     internal V3ReadQueryWorkload(ScenarioDescriptor descriptor, int componentCount)
     {
         _descriptor = descriptor;
         _componentCount = componentCount;
         ComponentSchema schema = V3WorldSupport.Schema;
-        LogicalComponents components = componentCount == 1
-            ? LogicalComponents.Position
-            : LogicalComponents.Position | LogicalComponents.Velocity;
+        LogicalComponents components = componentCount switch
+        {
+            1 => LogicalComponents.Position,
+            2 => LogicalComponents.Position | LogicalComponents.Velocity,
+            3 => LogicalComponents.Position | LogicalComponents.Velocity | LogicalComponents.Health,
+            _ => throw new ArgumentOutOfRangeException(nameof(componentCount)),
+        };
         ComponentId[] signature = V3WorldSupport.Signature(components);
         _world = new EcsWorld<NativeChunkArena>(
             schema,
@@ -41,6 +47,15 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
                 V3WorldSupport.PositionId,
                 V3WorldSupport.VelocityId);
         }
+        else if (componentCount == 3)
+        {
+            _velocities = _world.BindComponent<Velocity>(archetype, V3WorldSupport.VelocityId);
+            _healths = _world.BindComponent<Health>(archetype, V3WorldSupport.HealthId);
+            _threeReadPlan = _world.PrepareReadReadReadQuery<Position, Velocity, Health>(
+                V3WorldSupport.PositionId,
+                V3WorldSupport.VelocityId,
+                V3WorldSupport.HealthId);
+        }
         _world.Seal();
         _entities = new Entity[descriptor.Scale];
         for (int ordinal = 0; ordinal < _entities.Length; ordinal++)
@@ -53,12 +68,19 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
             {
                 throw new InvalidOperationException("V3 read query fixture exhausted its archetype.");
             }
-            if (componentCount == 2 && !_world.TrySetComponent(
+            if (componentCount >= 2 && !_world.TrySetComponent(
                 _entities[ordinal],
                 _velocities,
                 new Velocity { X = ordinal + 2, Y = ordinal + 3 }))
             {
                 throw new InvalidOperationException("V3 read query could not initialize Velocity.");
+            }
+            if (componentCount == 3 && !_world.TrySetComponent(
+                _entities[ordinal],
+                _healths,
+                new Health { Value = ordinal + 4 }))
+            {
+                throw new InvalidOperationException("V3 read query could not initialize Health.");
             }
         }
         _ = ExecuteCore();
@@ -77,11 +99,20 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
             return visitor.Checksum;
         }
 
-        var twoVisitor = new PositionVelocityVisitor();
-        int twoVisited = _world.VisitReadReadChunks(_twoReadPlan!, ref twoVisitor);
-        if (twoVisited != _entities.Length)
-            throw new InvalidOperationException("V3 two-column query lost rows.");
-        return twoVisitor.Checksum;
+        if (_componentCount == 2)
+        {
+            var twoVisitor = new PositionVelocityVisitor();
+            int twoVisited = _world.VisitReadReadChunks(_twoReadPlan!, ref twoVisitor);
+            if (twoVisited != _entities.Length)
+                throw new InvalidOperationException("V3 two-column query lost rows.");
+            return twoVisitor.Checksum;
+        }
+
+        var threeVisitor = new PositionVelocityHealthVisitor();
+        int threeVisited = _world.VisitReadReadReadChunks(_threeReadPlan!, ref threeVisitor);
+        if (threeVisited != _entities.Length)
+            throw new InvalidOperationException("V3 three-column query lost rows.");
+        return threeVisitor.Checksum;
     }
 
     public CanonicalState CaptureCanonicalState()
@@ -91,16 +122,22 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
             _descriptor.Scale,
             _entities.Length,
             logicalArchetypes: 1);
-        LogicalComponents components = _componentCount == 1
-            ? LogicalComponents.Position
-            : LogicalComponents.Position | LogicalComponents.Velocity;
+        LogicalComponents components = _componentCount switch
+        {
+            1 => LogicalComponents.Position,
+            2 => LogicalComponents.Position | LogicalComponents.Velocity,
+            _ => LogicalComponents.Position | LogicalComponents.Velocity | LogicalComponents.Health,
+        };
         for (int ordinal = 0; ordinal < _entities.Length; ordinal++)
         {
             if (!_world.TryGetComponent(_entities[ordinal], _positions, out Position position))
                 throw new InvalidOperationException("V3 state capture lost Position.");
             Velocity velocity = default;
-            if (_componentCount == 2 && !_world.TryGetComponent(_entities[ordinal], _velocities, out velocity))
+            if (_componentCount >= 2 && !_world.TryGetComponent(_entities[ordinal], _velocities, out velocity))
                 throw new InvalidOperationException("V3 state capture lost Velocity.");
+            Health health = default;
+            if (_componentCount == 3 && !_world.TryGetComponent(_entities[ordinal], _healths, out health))
+                throw new InvalidOperationException("V3 state capture lost Health.");
             builder.AddEntity(
                 ordinal,
                 alive: true,
@@ -109,7 +146,8 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
                 position.X,
                 position.Y,
                 velocity.X,
-                velocity.Y);
+                velocity.Y,
+                health.Value);
         }
         builder.AddArchetype(components, _entities.Length);
         return builder.Finish();
@@ -145,6 +183,27 @@ internal sealed class V3ReadQueryWorkload : IComparisonWorkload
                     checksum +
                     chunk.ReadComponents1[row].X + chunk.ReadComponents1[row].Y +
                     chunk.ReadComponents2[row].X + chunk.ReadComponents2[row].Y);
+            }
+            Checksum = checksum;
+        }
+    }
+
+    private struct PositionVelocityHealthVisitor :
+        IComponentChunkReadReadReadVisitor<Position, Velocity, Health>
+    {
+        internal long Checksum;
+
+        [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+        public void Execute(in ReadReadReadComponentChunk<Position, Velocity, Health> chunk)
+        {
+            long checksum = Checksum;
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                checksum = unchecked(
+                    checksum +
+                    chunk.ReadComponents1[row].X + chunk.ReadComponents1[row].Y +
+                    chunk.ReadComponents2[row].X + chunk.ReadComponents2[row].Y +
+                    chunk.ReadComponents3[row].Value);
             }
             Checksum = checksum;
         }

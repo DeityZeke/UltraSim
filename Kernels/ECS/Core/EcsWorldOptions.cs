@@ -11,7 +11,8 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         int maximumArchetypes,
         int maximumPreparedPlans,
         int maximumPreparedTransitions = 0,
-        int maximumStructuralCommands = 0)
+        int maximumStructuralCommands = 0,
+        EcsSchedulerOptions scheduler = default)
     {
         if (entityCapacity.MaximumEntities <= 0)
             throw new ArgumentException("Entity capacity is invalid or default initialized.", nameof(entityCapacity));
@@ -31,6 +32,7 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         MaximumPreparedPlans = maximumPreparedPlans;
         MaximumPreparedTransitions = maximumPreparedTransitions;
         MaximumStructuralCommands = maximumStructuralCommands;
+        Scheduler = scheduler;
     }
 
     public EntityCapacity EntityCapacity { get; }
@@ -49,19 +51,27 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
     /// <summary>Capacity of the fixed main-thread deferred structural arena.</summary>
     public int MaximumStructuralCommands { get; }
 
+    /// <summary>
+    /// Fixed system/scheduler reservations. A default value leaves the direct
+    /// 3.1.0 world completely scheduler-free.
+    /// </summary>
+    public EcsSchedulerOptions Scheduler { get; }
+
     public bool IsValid =>
         EntityCapacity.MaximumEntities > 0 &&
         MaximumArchetypes > 0 &&
         MaximumPreparedPlans >= 0 &&
         MaximumPreparedTransitions is >= 0 and <= MaximumSupportedPreparedTransitions &&
-        MaximumStructuralCommands is >= 0 and <= MaximumSupportedStructuralCommands;
+        MaximumStructuralCommands is >= 0 and <= MaximumSupportedStructuralCommands &&
+        (!Scheduler.IsEnabled || Scheduler.ExecutionConcurrency > 0);
 
     public bool Equals(EcsWorldOptions other) =>
         EntityCapacity == other.EntityCapacity &&
         MaximumArchetypes == other.MaximumArchetypes &&
         MaximumPreparedPlans == other.MaximumPreparedPlans &&
         MaximumPreparedTransitions == other.MaximumPreparedTransitions &&
-        MaximumStructuralCommands == other.MaximumStructuralCommands;
+        MaximumStructuralCommands == other.MaximumStructuralCommands &&
+        Scheduler == other.Scheduler;
 
     public override bool Equals(object? obj) => obj is EcsWorldOptions other && Equals(other);
 
@@ -70,7 +80,8 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         MaximumArchetypes,
         MaximumPreparedPlans,
         MaximumPreparedTransitions,
-        MaximumStructuralCommands);
+        MaximumStructuralCommands,
+        Scheduler);
 
     public static bool operator ==(EcsWorldOptions left, EcsWorldOptions right) => left.Equals(right);
 

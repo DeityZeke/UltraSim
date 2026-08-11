@@ -70,6 +70,7 @@ internal static class GeneratorTests
         Run(nameof(QueryFamilyCatalog_EmitsTrackedWriteStampsOnlyForWritableFamilies), QueryFamilyCatalog_EmitsTrackedWriteStampsOnlyForWritableFamilies);
         Run(nameof(QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily), QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily);
         Run(nameof(QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec), QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec);
+        Run(nameof(QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies), QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
         Console.WriteLine($"All {_passed} ECS generator tests passed.");
@@ -136,8 +137,8 @@ internal static class GeneratorTests
         Generation second = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(first);
         AssertNoGeneratorErrors(second);
-        TestAssert.Equal(6, first.GeneratedSourceCount);
-        TestAssert.Equal(6, second.GeneratedSourceCount);
+        TestAssert.Equal(9, first.GeneratedSourceCount);
+        TestAssert.Equal(9, second.GeneratedSourceCount);
         TestAssert.Equal(first.GeneratedSource, second.GeneratedSource);
         TestAssert.True(first.GeneratedSource.Contains(
             "IComponentChunkReadReadWriteVisitor<TRead1, TRead2, TWrite>",
@@ -158,7 +159,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(6, generation.GeneratedSourceCount);
+        TestAssert.Equal(9, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadReadVisitor<TRead1, TRead2>",
             StringComparison.Ordinal));
@@ -203,7 +204,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(6, generation.GeneratedSourceCount);
+        TestAssert.Equal(9, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadWriteWriteVisitor<TRead, TWrite1, TWrite2>",
             StringComparison.Ordinal));
@@ -223,7 +224,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(6, generation.GeneratedSourceCount);
+        TestAssert.Equal(9, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "global::System.ReadOnlySpan<TRead> ReadComponents { get; }",
             StringComparison.Ordinal));
@@ -249,7 +250,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(6, generation.GeneratedSourceCount);
+        TestAssert.Equal(9, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "IComponentChunkReadReadReadWriteVisitor<TRead1, TRead2, TRead3, TWrite>",
             StringComparison.Ordinal));
@@ -323,7 +324,7 @@ internal static class GeneratorTests
         const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
         Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
         AssertNoGeneratorErrors(generation);
-        TestAssert.Equal(6, generation.GeneratedSourceCount);
+        TestAssert.Equal(9, generation.GeneratedSourceCount);
         TestAssert.True(generation.GeneratedSource.Contains(
             "ArchetypeReadReadChangedQueryPlan<TArena, TRead1, TRead2>",
             StringComparison.Ordinal));
@@ -400,6 +401,31 @@ internal static class GeneratorTests
         TestAssert.False(generation.GeneratedSource.Contains(
             "public ChunkRow",
             StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.Equal(9, generation.GeneratedSourceCount);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "IScheduledReadChunkJob<TRead>", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "IScheduledWriteChunkJob<TWrite>", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "IScheduledReadReadReadChunkJob<TRead1, TRead2, TRead3>", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "RegisterReadSystem<TRead, TSystem, TJob>", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "RegisterWriteSystem<TWrite, TSystem, TJob>", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "RegisterReadReadReadSystem<TRead1, TRead2, TRead3, TSystem, TJob>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "SchedulerChunkPartition", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "SchedulerChangePublication", StringComparison.Ordinal));
     }
 
     private static void DuplicateCanonicalKey_ReportsECSGEN003()

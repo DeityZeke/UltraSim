@@ -7,13 +7,14 @@ They should be adopted feature by feature without pulling implementation out of
 dependency order.
 
 The first executable Current/Next semantic adapter is documented in
-[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 96 matched
+[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 102 matched
 1K/10K/50K rows with a shared canonical logical-state hash, separate
 record/playback/end-to-end structural boundaries, allocation/GC accounting,
 process isolation, fixed steady-state JIT policy, and explicit unsupported parity
-rows. The accepted 2026-08-09 V2-first and V3-first captures both produced zero
-state mismatches. They are an as-is regression baseline, not complete V2 parity
-or evidence that V3 currently wins most overlapping operations.
+rows. The accepted 3.1.0 V2-first and V3-first 2026-08-11 captures both produced
+zero state mismatches. The original 2026-08-09 artifacts remain immutable. These
+are as-is regression baselines, not complete V2 parity or evidence that V3
+currently wins most overlapping operations.
 
 The original immutable accepted joined artifact lives at
 [`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
@@ -35,6 +36,11 @@ The accepted `3.0.35` exact route-level packed-suffix transition capture lives a
 The accepted `3.0.36` public serial generated chunk-job regression capture lives
 at
 [`Baselines/ecs-v2-v3-3.0.36-2026-08-11.json`](Baselines/ecs-v2-v3-3.0.36-2026-08-11.json).
+The accepted `3.1.0` bounded system-scheduler comparison capture lives at
+[`Baselines/ecs-v2-v3-3.1.0-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.0-2026-08-11.json).
+Its 143-row scheduler matrix, 60,000-tick serial/parallel soak, and 10,000-tick
+cross-concurrency canonical replays live at
+[`Baselines/ecs-v3-3.1.0-bounded-system-scheduler-2026-08-11.json`](Baselines/ecs-v3-3.1.0-bounded-system-scheduler-2026-08-11.json).
 The first accepted 100K deterministic mixed-operation soak lives at
 [`Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json`](Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json).
 The accepted ECS `3.0.36` public serial generated chunk-job admission matrix
@@ -45,6 +51,9 @@ Its full public-surface 100K soak profile lives at
 The API, change-publication contract, fixed serial dispatch controls, and focused
 interpretation are documented in
 [`../ECS_JOB_EXECUTION.md`](../ECS_JOB_EXECUTION.md).
+The system graph, worker, barrier, deterministic merge, fault, and scheduler
+benchmark contracts are documented in
+[`../ECS_SYSTEM_SCHEDULER.md`](../ECS_SYSTEM_SCHEDULER.md).
 Its tracked-write/exact-consumer follow-up is documented in
 [`ECS_CHANGE_TRACKING_DECOMPOSITION.md`](ECS_CHANGE_TRACKING_DECOMPOSITION.md).
 Two accepted opposite-pass-order captures decompose checked access, dense/exact
@@ -888,3 +897,44 @@ repeated-process runs; the selected filter is recorded in JSON. Do not treat a
 single local run as an accepted baseline.
 Capture repeated isolated processes and environment/profile hashes before using
 results as a performance gate.
+
+## ECS 3.1.0 bounded scheduler admission
+
+Run the complete scheduler matrix with the same steady-state runtime policy as
+the cross-generation adapter:
+
+```bash
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 dotnet run --project \
+  _Benchmarks/UltraSim.ECS.Benchmarks/UltraSim.ECS.Benchmarks.csproj \
+  -c Release -- --scheduler --output \
+  _Benchmarks/results/ecs-v3-3.1.0-scheduler.json
+```
+
+The admitted baseline contains 143 timed rows covering empty graph overhead,
+every generated serial family, direct-versus-scheduled boundary cost, parallel
+crossover, worker scaling, independent systems, `RangeJob`, paid entity
+reconstruction, structural record/merge/playback, and phase staggering. Every
+row reports mean/p50/p95/p99, canonical state, and zero warmed managed
+allocation.
+
+The long profile keeps 100,000 entities resident for 60,000 measured serial and
+parallel ticks. Each tick executes 400,000 generated query rows, 5,000 tracked
+write targets, 500 random lookups, 400 structural commands, and exact changed-row
+consumption. The accepted serial mean/p50/p95/p99/max is
+`981.229/973.422/1036.430/1105.880/2131.291 us`; parallel is
+`409.010/377.986/508.556/613.015/2890.565 us`, a `2.40x` mean improvement.
+Both modes produce hash `8E25297D3A12A623`, allocate zero timed or worker-thread
+managed bytes, and collect no GC generation. Fixed scheduler payload is 502,464
+bytes for this configured fixture.
+
+The canonical replay separately runs 10,000 ticks at execution concurrency
+1/2/4/8/16 and repeats concurrency 8 three times. All seven executions produce
+hash `29A337A61592C2E3` and deliver 50,000,000 changed rows. This is evidence for
+the admitted static partition and stable merge policy; it is not a proof that
+arbitrary user job arithmetic is deterministic.
+
+Generated read-only family controls must retain an observable checksum in their
+canonical state. An early diagnostic discarded that checksum and allowed tiering
+and dead-code elimination to distort family results. Accepted captures disable
+tiered compilation and ReadyToRun, and the benchmark now hashes the accumulated
+read result.

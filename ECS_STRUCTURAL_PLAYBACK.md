@@ -1,7 +1,9 @@
 # ECS Next Structural Playback
 
-Status: authoritative structural-playback architecture through ECS 3.0.36 as of
-2026-08-11; 3.0.36 changes public serial job execution, not structural strategy.
+Status: authoritative structural-playback architecture through ECS 3.1.0 as of
+2026-08-11. ECS 3.1.0 retains the packed production strategies and adds bounded
+per-participant recording plus deterministic segment merge as another input to
+the same command arena and playback engine.
 
 The project version convention is defined in
 [`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.
@@ -269,10 +271,18 @@ true default initialization. Tests-as-we-go may continue to reveal contract
 differences and should narrow or redirect optimization work rather than hiding
 them.
 
-## Remaining structural work
+## Scheduler input and remaining structural work
 
-Natural future work includes per-worker fixed command arenas, deterministic worker
-merge, separated-run route grouping, typed add payloads, prefab expansion,
+ECS 3.1.0 adds one fixed structural arena and typed byte-payload arena per
+scheduler participant. Every logical work item records a segment; the owner
+coordinator copies nonempty segments into the existing main arena in stable
+system/wave/work order and remaps worker-local deferred targets. Source-independent
+typed `Add<T>`/replacement and `Remove<T>` use seal-compiled component/archetype
+routes over the same transition machine. The command record remains 24 bytes and
+the complete command slot remains 40 bytes. No worker mutates entity topology,
+the pool, or stores directly.
+
+Natural future work includes separated-run route grouping, prefab expansion,
 lifecycle publication, and tick budgets. Exact whole-source transition routes now
 plan beyond the 256-command execution block without enlarging scratch, and exact
 packed suffixes now do the same through the narrowly proved 3.0.35 strategy.

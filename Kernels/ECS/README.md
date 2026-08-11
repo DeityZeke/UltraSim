@@ -53,9 +53,10 @@ allocation:
   exposing arenas or raw storage. `EcsWorldOptions` fixes entity, archetype, and
   prepared-plan, public-transition, and structural-command capacity up front;
   explicit sealing compiles routes and closes allocation, initialization opens
-  bootstrap mutation, and `BeginRun` publishes the running state. The current
-  facade is deliberately engine-neutral and single-owner, rejecting access from
-  other threads until scheduler-issued worker tokens exist.
+  bootstrap mutation, and `BeginRun` publishes the running state. The facade is
+  deliberately engine-neutral and single-owner. ECS 3.1.0's optional scheduler
+  grants persistent workers only expiring `SystemJobContext` capabilities rather
+  than allowing non-owner access to the facade.
 - Public `ArchetypeHandle` values are eight-byte world/archetype pairs, preventing
   dense archetype IDs from colliding across worlds. Public immediate creation,
   initialized creation, transition, destruction, liveness, and current-archetype
@@ -150,11 +151,11 @@ allocation:
   Successful suffixes move no surviving donor; failed, scattered, stale,
   conflicting, or partial-capacity candidates fall back before mutation. The
   authoritative current strategy model lives in the root
-  `ECS_STRUCTURAL_PLAYBACK.md`. Per-worker
-  arenas, deterministic worker merge, grouping across separated route runs,
-  broader density/entropy-driven compaction, typed component payloads, prefab
-  expansion, and lifecycle publication remain later structural work and must be measured
-  against this baseline rather than hidden behind it.
+  `ECS_STRUCTURAL_PLAYBACK.md`. ECS 3.1.0 adds per-participant arenas,
+  deterministic work-segment merge, and typed component payloads without changing
+  those packed strategies. Grouping across separated route runs, broader density/
+  entropy-driven compaction, prefab expansion, and lifecycle publication remain
+  later structural work and must be measured against this baseline.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index
@@ -162,8 +163,8 @@ allocation:
 - The synchronous chunk barrier rejects nested visits, structural operations,
   scalar writes, enable writes, and world disposal until the visitor returns.
   A `finally` releases it on exceptions. Safe managed code cannot retain the
-  view or its spans beyond the callback; this is not yet the parallel scheduler
-  or the final generated multi-component query surface.
+  view or its spans beyond the callback. ECS 3.1.0 reuses this binding/view ABI
+  for parallel scheduled jobs rather than adding another view type.
 - `ArchetypeReadWriteQueryPlan<TArena,TRead,TWrite>` is the first multi-archetype
   typed plan. Its descriptor occupies an explicitly bounded world-owned slot,
   and `Seal` compiles all matching archetypes—including registrations made after
@@ -207,6 +208,24 @@ allocation:
   declared typed spans, enable operations, count, and the existing world-local
   entity-index span; no arena, store, column, enable-word, or `ChunkRow`
   capability escapes.
+- ECS 3.1.0 compiles cold `SystemDefinition` registrations into a staged
+  dependency/read-write-conflict graph over that same chunk ABI. Persistent
+  system runtimes prepare struct jobs; static bounded partitions execute serially
+  or on dedicated workers; the caller may participate; `RangeJob` shares the
+  worker runtime; and `Auto` avoids waking workers below declared crossover
+  thresholds. New generated 1R0W, 0R1W, and 3R0W families complete the fundamental
+  access catalog without inventing false reads.
+- Workers receive an expiring declaration-checked context for optional full
+  `Entity` reconstruction, prepared random access, and one fixed structural lane.
+  Per-work segments merge in stable graph/work order into the existing command
+  executor. Seal-compiled source-independent `Add<T>`/replacement and `Remove<T>`
+  routes use fixed unboxed payload arenas; worker-local deferred tokens cannot
+  cross work segments. Pre/post barriers, cadence, manual execution, lifecycle,
+  terminal fault transactions, parallel change publication, snapshots, and
+  synchronous worker shutdown are specified in
+  [`ECS_SYSTEM_SCHEDULER.md`](../../ECS_SYSTEM_SCHEDULER.md). The complete
+  3.1.0 admission evidence and full V2/V3 table are in
+  [`ECS_3_1_0_ACCEPTANCE_REPORT.md`](../../ECS_3_1_0_ACCEPTANCE_REPORT.md).
 - Writable public generated families have an explicit dense/conditional split.
   `ExecuteJob` retains conservative pre-callback dense publication and its direct
   spans. `ExecuteTrackedJob` exposes `TrackedWritableComponentChunk<T>`:
@@ -340,7 +359,8 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 195 passing tests, including
+The current runtime and primitive suite has 218 passing tests, plus 23 focused
+scheduler tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
 disposal/accounting, terminal generation retirement, and warmed zero-allocation
@@ -358,7 +378,7 @@ lookups. Migration tests cover retained data and enable state, added-component
 defaults, removed components, source donor relocation, stale-plan and bounded
 destination rejection, 30,000 randomized bidirectional moves, native/pinned byte
 equivalence, and 100,000 warmed allocation-free migration cycles. The generator
-suite has 21 passing tests. Composed-world tests cover lifecycle ordering,
+suite has 23 passing tests. Composed-world tests cover lifecycle ordering,
 owned disposal, runtime-before-seal rejection, row/entity capacity atomicity,
 generation reuse, donor repair, cross-world plan and entity isolation, 30,000
 randomized create/transition/destroy operations, native/pinned parity, and 100,000
@@ -446,16 +466,16 @@ splits over a 160-entity enable pattern, dense-to-exact and exact-to-exact histo
 transfer, and scalar-reference enable-range copies across offsets and lengths
 around every 64-bit word boundary.
 
-This is now a usable public single-owner component/archetype and serial generated
-chunk-job slice, not yet the public scheduler/host ECS. The current generators emit the core manifest, a
-systematic catalog containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W access families,
+This is now a usable public single-owner component/archetype ECS with an optional
+bounded system scheduler. The current generators emit the core manifest, a
+systematic catalog containing 1R0W, 0R1W, 1R1W, 2R0W, 3R0W, 2R1W, 1R2W, 3R1W,
+and 2R2W access families,
 and the first 2R2C any/all changed family. Further access/watch arities should be
 added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
 refinement entirely. Structural creation/migration/removal events, optional
-public filters, per-worker structural arenas and deterministic merge, scheduler
-worker tokens/range jobs/system state, and field/serializer/prefab descriptors
-remain later work.
+public filters, persistence serialization, field/prefab descriptors, lifecycle
+streams, system fusion, and networking integration remain later work.
 
 Run both executable test suites from the repository root:
 

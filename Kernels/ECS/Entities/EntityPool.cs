@@ -116,6 +116,20 @@ internal sealed class EntityPool
             && _generations[index] == entity.Generation;
     }
 
+    /// <summary>Paid reconstruction used only by an explicit scheduler identity capability.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryGetEntity(uint index, out Entity entity)
+    {
+        if (index >= unchecked((uint)_nextUnusedIndex) || _states[index] != SlotAlive)
+        {
+            entity = Entity.Null;
+            return false;
+        }
+
+        entity = new Entity(_worldId, index, _generations[index]);
+        return true;
+    }
+
     internal bool TryFree(Entity entity)
     {
         if (!IsAlive(entity))

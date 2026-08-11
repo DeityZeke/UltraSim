@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: active implementation specification; Phase 1 in progress, executable archetype/query prototype, Current/Next semantic comparison, standalone bitmap block-pool experiment, structural planning through 3.0.35, and the 3.0.36 public serial generated chunk-job execution surface implemented through 2026-08-11
+Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, and the ECS 3.1.0 bounded system scheduler implemented through 2026-08-11
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -88,6 +88,13 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   dense-range or exact-row tracked access without temporary dirty storage; and
   the public exact one-watch changed job preserves independent cursor
   acknowledgement/retry semantics;
+- an optional ECS 3.1.0 bounded system runtime with cold stable registration,
+  persistent runtime state/lifecycle, stages/cadence/manual invocation,
+  seal-compiled dependency and access-conflict waves, static generated chunk and
+  range partitioning over persistent workers, restricted expiring worker
+  capabilities, deterministic fixed structural lanes with typed payloads,
+  source-independent add/remove routes, correct shared parallel change
+  publication, terminal fault transactions, and bounded snapshots;
 - an initial dense change-tracking substrate: an eight-byte world-local `ChangeVersion` reserves zero for never-written state, explicitly wraps maximum to one, and uses half-range changed-since ordering; every archetype store preallocates a column-major 64-bit stamp for each physical component column and possible chunk, reports its exact metadata bytes, and clears stamps when an emptied chunk is recycled;
 - conservative stamping for successful scalar value/enable writes, single-component writable visitors, and every generated writable family; one lazily acquired version is shared across one visit's chunks and writable columns, filtered visits stamp only chunks with matching rows, stamps precede visitor dispatch so partial writes followed by exceptions remain visible, and read-only families perform no version work;
 - a 16-byte world-bound `ChangeCursor` value with beginning/now factories and copy-to-fork independent-consumer semantics, plus a bounded seal-compiled changed-read plan that prebinds one data column and one same-or-different tracked column across all matching archetypes, rejects unchanged chunks before component binding, composes with existing structural/enable-state filters, and acknowledges the captured observation boundary only after successful visitor completion;
@@ -102,8 +109,17 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
 - cold executable-layout validation covering range overlap, reserved-header intrusion, alignment, tag/data disagreement, duplicate IDs, and exact data/enable accounting before any raw storage path is accepted;
 - compile-time diagnostics for malformed schema/component declarations, invalid keys/versions, field-bearing tags, duplicate types/keys/nonzero persistence IDs, and exhaustion of the reserved `ushort` ID space;
 - `218` executable runtime/primitive tests, including warmed zero-allocation assertions, indexed-schema tests, defensive construction tests, planner boundary/invariant/overflow tests, randomized brute-force layout parity, randomized chunk-slot lifecycle parity, native/pinned randomized archetype reference-model parity, scalar/bulk and byte parity, within/cross-chunk relocation, entity-location binding and donor updates, transactional batch-location rejection, an integrated randomized pool/store model, canonical registry collision/capacity/ownership/concurrent-read tests, transactional bidirectional migration and donor relocation, destination-capacity rollback, retained/default/removed state, dense-only and exact change-history relocation across packed removal and cross-archetype migration with Native/Pinned/wrap coverage, composed-world lifecycle/capacity/generation/disposal/foreign-plan tests, public facade lifecycle/thread/fault/handle/lookup tests, randomized migration-safe public lookup parity and bounded-access-job allocation/barrier/exception-release gates, deterministic deferred-command phase/token/capacity/foreign/stale/thread/barrier tests, epoch-rollover and mixed-chain-clear coverage, a 64-seed indexed-versus-scalar canonical differential model, grouped whole/tail/sparse destroy parity with generation/free-list/default-state and warmed allocation gates, exact-plan precedence over hole-market preparation, 3.0.30 balanced wide-row hole reuse, mandatory failure finalization, partial-reuse donor repair, conservative unbalanced fallback, and warmed zero-allocation reuse, skipped-chunk false-tail rejection, direct Native/Pinned whole-store/tail reset parity covering survivor dense/exact history and lazy payload reinitialization, grouped transition parity across 256-command blocks, exact whole-source and exact packed-suffix route parity across multiple blocks and retained-empty reuse, whole/suffix partial-capacity fallback parity, the 256/257 suffix boundary, deferred suffix targets, suffix/whole terminal-fault injection, cross-chunk anonymous-reservation rollback, exact partial-capacity prefixes, Native/Pinned retained-state/change-history parity, a 160-entity locality path crossing independent source/destination chunk boundaries, dense-to-exact run history, exhaustive enable-bit range parity around 64-bit boundaries, adaptive planned compaction across scalar/threshold/whole-chunk cases with survivor state/enable/exact-history/backend parity, and scalar/grouped/exact-route warmed allocation gates, randomized world/bound-access/chunk/query-plan/filter/generated-family models, 16-byte binding layout and misuse tests, generated-ID/type/membership validation, exact-archetype/stale/foreign component and chunk access, initialized creation, seal-complete multi-archetype matching, normalized filter contradiction/ownership checks, required/excluded signature selection, enabled/disabled data/tag row selection, noncontiguous row slices, query alias/tag/capacity/ownership rejection, generated distinct-access/capacity/ownership/non-enableable-write/row-boundary rejection, synchronous barrier/reentrancy/exception-release checks, multi-chunk metadata and enable-state views, enabled-default/state preservation, retained-empty reuse, dense change-version wrap/reset/exact-column/filter/exception semantics, independent cursor acknowledgement/retry/ownership/wrap semantics, exact-row scalar/filter/dense refinement and memory accounting, one/two-watched any/all observation and exact-mask semantics, changed-read plan routing/filtering/backend parity, alignment/range/type rejection, disposal/accounting, terminal retirement, capacity accounting, backend equivalence, and concurrency/isolation checks;
-- an isolated-process Current/Next comparison protocol with 12 direct comparison-core tests, stable scenario descriptors, normalized 128-bit canonical logical-state hashing including wide component payloads, strict runtime/descriptor/state joining, record/playback/end-to-end boundaries, effective-byte/allocation/GC reporting, immutable accepted joined artifacts, truthful cross-version V3 profile labels, and current/baseline V2-control plus V3 regression reports. The accepted 3.0.36 primary and reversed-order verification contain 96 comparable 1K/10K/50K rows with zero canonical mismatches; 15 unsupported rows remain visible rather than acquiring fabricated ratios;
-- `22` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 2R0W/2R1W/1R2W/3R1W/2R2W catalog surfaces, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
+- `23` focused scheduler tests covering fixed layouts and disabled worlds,
+  lifecycle/cadence/manual semantics, every generated access family, serial/
+  parallel canonical parity, range partition coverage, `Auto` crossover behavior,
+  registration/persistence identity, lifecycle and stage order, graph/conflict
+  validation, slow-prerequisite/fast-dependent cadence, shared
+  tracked publication, changed cursors, phase staggering, context expiry,
+  pre-barrier visibility, deterministic structural merge, typed add/remove
+  payloads, terminal worker faults, worker joining, caller-free serial execution,
+  and warmed allocation-free ticks;
+- an isolated-process Current/Next comparison protocol with 12 direct comparison-core tests, stable scenario descriptors, normalized 128-bit canonical logical-state hashing including wide component payloads, strict runtime/descriptor/state joining, record/playback/end-to-end boundaries, effective-byte/allocation/GC reporting, immutable accepted joined artifacts, truthful cross-version V3 profile labels, and current/baseline V2-control plus V3 regression reports. The accepted 3.1.0 primary and reversed-order verification contain 102 comparable rows with zero canonical mismatches; 10 unsupported rows remain visible rather than acquiring fabricated ratios;
+- `23` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 1R0W/0R1W/1R1W/2R0W/3R0W/2R1W/1R2W/3R1W/2R2W scheduled catalog surfaces, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
 - `141` Next-only primitive/layout/schema/capacity/arena/archetype-row/registry/migration/world-lifecycle/bound-access/public-lookup/structural-command/chunk-query/query-plan/query-filter/generated-query/change-version/change-cursor/exact-row/multi-change benchmark scenarios with JSON output, exact handle/version/cursor/lookup-route/command-arena facts, end-to-end and playback-only scalar-oracle/grouped structural comparisons, dense versus scattered locality, narrow versus wide retained-copy guards, equal-work 8/32/128/256-row donor-tail transition-compaction guards, whole/tail/sparse deferred-destroy density guards at 1/10/50 percent over a fixed 100,000-row resident population, same-build scalar/V29-style-packed/V30 barrier-local churn controls at 10/50 percent and narrow/512-byte widths, twelve permanent exact packed-suffix transition guards, dense/sparse-version metadata facts, focused scenario filtering, and explicit non-comparable status until equivalent Current adapters exist;
 - a separate deterministic 100K mixed-operation soak with a stable report/workload/canonical profile, four full-world generated passes, sparse tracked writes and exact consumption, checked reads, balanced destroy/create/transition churn, interval and measured-world canonical replay, natural-GC allocation/collection gates, phase p50/p95/p99/p99.9/max, memory/store snapshots, and a first immutable 60,000-tick baseline.
 - a 3.0.36 public-job admission runner with 60 paired traversal rows across all
@@ -112,6 +128,12 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   component state, zero-allocation/collection gates, plus a separate 60,000-tick
   public mixed-soak profile that removes private-core/reflection access and
   retains the original canonical hash;
+- a 3.1.0 bounded-scheduler admission runner with 143 mean/p50/p95/p99 timing
+  rows across graph overhead, all generated serial families, crossover, worker
+  scaling, independent systems, range jobs, paid identity, structural phases,
+  and cadence staggering; its 60,000-tick 100K serial/parallel soak and seven
+  10,000-tick cross-concurrency replays retain canonical state, zero warmed
+  caller/worker allocation, and zero collections;
 - a 3.0.35 change-tracking decomposition with two opposite-pass-order accepted
   captures, 628 total measured rows, checked/prebound/no-tracking/dense/exact
   write controls, shared-version and pre-grouped experimental ceilings, 100
@@ -131,18 +153,30 @@ The first row-store measurements also allocated zero managed bytes and caused no
 
 The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for bounded adversarial architecture, patch, and benchmark reviews; its output remains untrusted until verified by source, tests, or measurements. Early reviews usefully exposed the need to make world-ID allocation process-unique, to test slot retirement through the pool, to reserve `ComponentId` value `0xFFFF`, and to remove quadratic large-schema validation. They also demonstrated why model suggestions must be filtered: proposals such as dynamically growing the fixed free list, reclaiming retired generations, or unconditionally replacing tiny-schema scans with managed dictionaries contradict measured or bounded-memory goals.
 
-The generated manifest, registry, arenas, row stores, transition executor, public single-owner world, migration-safe random lookup/bounded access jobs, numeric public transition catalog, main-thread structural command arena and exact route planners, archetype-specific bindings, seal-compiled multi-archetype plans, generated access-family catalog, public serial dense/conditional chunk jobs, public exact changed-row jobs, dense versions, independent cursors, relocation-stable exact changed-row refinement, and two-watched internal any/all family now form a usable single-threaded ECS slice, but not yet a scheduler/host ECS. Field IDs/descriptors, serializers/schema migrations, prefab writers, additional workload-driven access/watch arities, public filters, complete structural change/lifecycle streams, persistent system state/metadata, scheduler worker tokens, range jobs, pre/post simulation barriers, per-worker command arenas, deterministic merge, and scheduler fault/cadence/dependency policy are not implemented yet. The entity pool validates a runtime `Entity` generation before exposing its 12-byte archetype/chunk/row route; the location intentionally does not duplicate entity generation.
+The generated manifest, registry, arenas, row stores, transition executor, public
+single-owner world, migration-safe lookups, bounded structural planner, generated
+job catalog, exact change tracking, and ECS 3.1.0 bounded system graph now form a
+usable engine-neutral ECS/system runtime. The scheduler owns persistent system
+state, stages/cadence/manual execution, dependencies/conflicts, static chunk and
+range work on persistent workers, pre/post barriers, deterministic per-worker
+command merge, typed source-independent add/remove payloads, restricted worker
+capabilities, profiling snapshots, and terminal fault semantics. Field
+descriptors, serializers/schema migrations, prefab writers, public optional
+filters, complete lifecycle streams, persistence serialization, replication,
+networking, and tooling integration remain incomplete. The entity pool validates
+a runtime `Entity` generation before exposing its 12-byte archetype/chunk/row
+route; the location intentionally does not duplicate entity generation.
 
 ### 1.2 Current risk posture
 
 Next has retired much of the technical risk around whether generated schema,
-bounded chunk storage, safe entity identity, transactional migration, generated
-query execution, and dense/exact change tracking can form an allocation-free
-kernel. It has not yet retired the product and integration risk around public
-ownership, deferred mutation, scheduler semantics, prefab compilation,
-persistence, replication, tooling, and migration of real systems. A stronger
-kernel is not a replacement until those interactions preserve its correctness,
-bounded-memory, determinism, and hot-path constraints.
+bounded chunk storage, safe identity, transactional mutation, generated queries,
+change tracking, and deterministic bounded scheduling can form an allocation-free
+kernel. Product and integration risk remains around prefab compilation,
+persistence, replication, networking, tooling, lifecycle publication, and
+migration of real gameplay systems. A stronger kernel/scheduler is not a
+replacement until those interactions preserve its correctness, bounded memory,
+determinism, and hot-path constraints.
 
 Integration must occur through explicit generated, compiled, or bounded bridges.
 Server, client, scripting, persistence, networking, inspection, and wrapper code
@@ -1224,7 +1258,10 @@ Current features:
 
 ECS 3.0.36 now supplies the public serial generated `ChunkJob` primitive
 described in [`ECS_JOB_EXECUTION.md`](ECS_JOB_EXECUTION.md). It is intentionally
-not called the complete system surface. The scheduler layer must distinguish:
+not called the complete system surface. ECS 3.1.0 now supplies the bounded
+scheduler layer described in
+[`ECS_SYSTEM_SCHEDULER.md`](ECS_SYSTEM_SCHEDULER.md), while retaining this
+distinction:
 
 ```text
 SystemDefinition   cold stable identity, access, stage, cadence, dependencies
@@ -1239,7 +1276,7 @@ slots may be preferable for some systems. Tests and persistence requirements,
 not a blanket object ban, should choose the representation. Hot chunk execution
 still uses value jobs and constrained calls.
 
-Next requirements:
+ECS 3.1.0 accepted requirements and measured boundaries:
 
 - generated, validated system graph;
 - dependency edges treated as hard execution barriers;
@@ -1262,17 +1299,19 @@ Next requirements:
   implying a tick increment or structural barrier;
 - struct jobs/function pointers with no captured delegates;
 - static range partitioning for uniform jobs;
-- work stealing only for measured imbalance;
+- static partitioning in production; work stealing remains deferred until a
+  measured imbalanced workload justifies it;
 - persistent workers using sequence dispatch with spin-then-park behavior;
 - cache-line-padded worker state;
 - per-worker reductions followed by one merge, rather than atomics inside hot loops;
-- adaptive serial/parallel thresholds based on measured workload cost;
+- fixed per-system serial/parallel thresholds selected from measured workload
+  cost; online adaptation remains deferred;
 - configurable worker budget that leaves resources for networking/runtime services;
 - define `BackgroundWorkerCount`, total `ExecutionConcurrency`, caller
   participation, and `HostReservedCores` unambiguously so V2/V3 comparisons do
   not accidentally differ by one execution participant;
-- optional thread affinity and NUMA partitioning for known deployments;
-- system fusion for local dependency pipelines that walk the same chunks;
+- future thread affinity and NUMA partitioning only for known deployments;
+- future system fusion only for measured local dependency pipelines;
 - retained manual systems and cadence scheduling;
 - retained phase staggering, but every default remains benchmark-driven; V2's
   ten-offset cap and Movement/Combat exclusions are one reproducible baseline,
@@ -1286,7 +1325,8 @@ Next requirements:
   later optimization;
 - the explicit PreSimulation/PostSimulation structural sinks and cutoff semantics
   defined in Section 4.6;
-- deterministic mode and high-throughput mode if their tradeoffs diverge;
+- one deterministic production mode; a nondeterministic throughput mode remains
+  deferred unless evidence justifies a second semantic contract;
 - explicit fault propagation with system/job/chunk or range context. A worker
   failure stops admission, joins/cancels the current dispatch safely, skips the
   post-simulation barrier, invalidates the worker-command epoch, retains
@@ -2448,7 +2488,7 @@ Implementation status through 2026-08-11:
   admitted. Exact consumption should separately test mask-bearing chunk/word
   dispatch against range-per-run dispatch before row-history representation
   changes;
-- the Current/Next comparison is now an executable longitudinal baseline rather than a projection. The accepted 3.0.36 checkpoint contains 96 matched rows, 0 canonical mismatches, 15 explicit unsupported rows, and zero timed allocation/GC in every V3 row across both process orders; the public-job capability deliberately adds no fabricated V2-system ratio. The original 87-row and 3.0.31 baselines remain immutable. The 3.0.31 catalog added provisional balanced 72-byte destroy/create churn, where V3 playback is roughly 3.1-3.2x faster at 50K while exposing a V2 stale-default-row defect. At 3.0.32, 50K exact add/remove playback and round-trip costs improve roughly 41-45% from 3.0.31, but remain approximately 2.2-2.7x slower than V2. Most remaining overlapping scalar/structural cases still favor V2. These results are regression evidence, not a passed cutover gate. Native-versus-pinned and small percentage differences remain directional until repeated isolated processes, large footprints, and hardware counters justify them.
+- the Current/Next comparison is now an executable longitudinal baseline rather than a projection. The accepted 3.1.0 checkpoint contains 102 matched rows, 0 canonical mismatches, 10 explicit unsupported rows, and zero timed allocation/GC in every V3 row across both process orders. It adds honest scheduler serial, parallel generated-query, and range contracts instead of relabeling 3.0.36 public dispatch as a complete system. The original 87-row, 3.0.31, and 3.0.36 baselines remain immutable. The 3.0.31 catalog added provisional balanced 72-byte destroy/create churn, where V3 playback is roughly 3.1-3.2x faster at 50K while exposing a V2 stale-default-row defect. At 3.0.32, 50K exact add/remove playback and round-trip costs improve roughly 41-45% from 3.0.31, but remain approximately 2.2-2.7x slower than V2. Most remaining overlapping scalar/structural cases still favor V2. These results are regression evidence, not a passed cutover gate. Native-versus-pinned and small percentage differences remain directional until repeated isolated processes, large footprints, and hardware counters justify them.
 
 Deliverables:
 
@@ -2590,9 +2630,10 @@ Gate:
 ### Phase 5: scheduler and worker runtime
 
 The accepted 3.0.36 public serial generated chunk job is the execution primitive
-for this phase, not a disposable prototype. Phase 5 becomes a coherent `3.1.0`
-milestone only when the system, worker, barrier, and failure contracts fit
-together.
+for this phase, not a disposable prototype. Phase 5 is accepted as ECS 3.1.0:
+the system, worker, barrier, structural-merge, state, and failure contracts now
+form one bounded capability. The authoritative contract and deliberate future
+boundary are in [`ECS_SYSTEM_SCHEDULER.md`](ECS_SYSTEM_SCHEDULER.md).
 
 Deliverables:
 
@@ -2606,20 +2647,21 @@ Deliverables:
 - static chunk partitioning plus bounded non-query `RangeJob` nodes on the same
   runtime, with optional work stealing only after measurement;
 - explicit manual invocation/barrier behavior;
-- adaptive thresholds;
-- per-worker reductions;
+- measured fixed thresholds with a serial/parallel override;
+- stable participant-local job results merged by persistent runtime state;
 - restricted system-run context with tick/delta, declared lookups, deterministic
   RNG, reductions, state, range dispatch, and a worker structural writer;
 - per-worker bounded command arenas, local deferred identities, deterministic
   merge, and worker-wide allocation accounting;
 - optional paid full-entity access and source-independent generated add/remove
   routes;
-- unambiguous background-worker/execution-concurrency/host-reserved-core policy;
-- fusion prototype;
+- unambiguous background-worker and total execution-concurrency policy; host core
+  reservation remains a deployment choice rather than hidden arithmetic;
+- no fusion prototype retained in 3.1.0;
 - lifecycle/disposal/fault handling, including no post barrier after worker fault
   and terminal context-rich world failure;
-- generated inspection/control metadata and persistence hooks for opt-in system
-  runtime state.
+- bounded inspection/control snapshots and stable persistence identity/schema
+  metadata for opt-in system runtime state; serialization remains later work.
 
 Tests:
 
@@ -2632,7 +2674,7 @@ Tests:
 - worker fault/disposal tests;
 - persistent system state lifecycle and save/load identity tests;
 - chunk-job and range-job parity on the same worker runtime;
-- fused/unfused equivalence.
+- context expiry and stale worker epoch rejection.
 
 Benchmarks:
 
@@ -2838,10 +2880,10 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 - [x] Enableable component/tag row semantics and internal word access
 - [x] Archetype lookup and transitions
 - [x] Immediate create/destroy
-- [ ] Deferred bulk structural commands (bounded main-thread create/destroy/
+- [x] Deferred bulk structural commands (bounded main-thread create/destroy/
   prepared-transition arena, same-route reservation, and locality-proven
-  contiguous column transfer plus adaptive donor-tail compaction have landed;
-  per-worker merge, broader grouping/compaction, and typed/prefab payloads remain)
+  contiguous column transfer, adaptive donor-tail compaction, per-worker merge,
+  and typed add/remove payloads have landed; prefab expansion remains)
 - [x] Explicit lifecycle and disposal
 - [x] Capacity planning and primitive diagnostics
 - [x] Initial terminal faulted-world behavior
@@ -2857,33 +2899,33 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 - [x] Changed-since chunk filters (one-watch plus generated two-watch any/all)
 - [x] Exact changed-row refinement (one-watch plus generated two-watch any/all)
 - [x] World-local entity-index-bearing public jobs
-- [ ] Entity-free variants and optional paid full-`Entity` materialization
+- [x] Optional paid full-`Entity` materialization from world-local indices
 - [x] Public serial generated chunk jobs over seal-compiled typed plans
 - [x] Public exact one-watch changed-row job and independent cursors
 - [x] Dense tracked writes (internal paths plus public dense job contract)
 - [x] Sparse tracked writes (scalar/filtered ranges plus public row-tracked jobs)
-- [ ] Parallel chunk jobs
+- [x] Parallel chunk jobs
 - [x] No public component mutation without dense/range/row change publication
 
 ### Scheduling
 
-- [ ] All current stages
-- [ ] Cadence and offsets
-- [ ] Phase staggering
-- [ ] Manual systems
-- [ ] Read/write conflict graph
-- [ ] Required dependencies
-- [ ] Cycle/missing dependency validation
-- [ ] Serial scheduled system graph (the reusable public serial chunk primitive is complete)
-- [ ] Parallel execution
-- [ ] Bounded non-query range jobs on the shared worker runtime
-- [ ] PreSimulation/PostSimulation structural sinks and cutoff semantics
-- [ ] Persistent system runtime state and stable persistence identity
-- [ ] Adaptive granularity
+- [x] All current stages
+- [x] Cadence and offsets
+- [x] Phase staggering (explicit opt-in)
+- [x] Manual systems
+- [x] Read/write conflict graph
+- [x] Required dependencies
+- [x] Cycle/missing/reverse-stage dependency validation
+- [x] Serial scheduled system graph over the reusable public chunk primitive
+- [x] Parallel execution
+- [x] Bounded non-query range jobs on the shared worker runtime
+- [x] PreSimulation/PostSimulation structural sinks and cutoff semantics
+- [x] Persistent system runtime state and stable persistence identity metadata
+- [x] Measured fixed automatic granularity thresholds
 - [ ] System fusion
-- [ ] Per-worker reductions
-- [ ] Profiling/runtime snapshots
-- [ ] Control metadata
+- [x] Participant-local result merge through `Complete`
+- [x] Profiling/runtime snapshots
+- [x] Control metadata
 
 ### Change tracking
 

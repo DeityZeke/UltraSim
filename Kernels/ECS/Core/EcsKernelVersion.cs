@@ -7,9 +7,9 @@ namespace UltraSim.ECS;
 internal static class EcsKernelVersion
 {
     internal const int Generation = 3;
-    internal const int Milestone = 0;
-    internal const int Revision = 36;
-    internal const string Value = "3.0.36";
+    internal const int Milestone = 1;
+    internal const int Revision = 0;
+    internal const string Value = "3.1.0";
     internal const string SemanticProfile =
-        "ecs-3.0.36-public-generated-chunk-jobs";
+        "ecs-3.1.0-bounded-system-scheduler";
 }

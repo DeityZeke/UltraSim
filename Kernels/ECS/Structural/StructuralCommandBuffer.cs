@@ -30,10 +30,13 @@ public sealed class StructuralCommandBuffer
     private readonly int[] _createDemand;
     private readonly int[] _temporaryHoleState;
     private readonly int[] _activeTemporaryArchetypes;
+    private readonly byte[] _payload;
     private readonly WorldId _worldId;
     private uint _bufferId;
     private readonly int _ownerThreadId;
+    private readonly bool _schedulerLane;
     private int _count;
+    private int _payloadCount;
     private int _lastPlaybackCommandCount;
     private uint _epoch;
     private bool _hasCompletedPlayback;
@@ -52,20 +55,25 @@ public sealed class StructuralCommandBuffer
         WorldId worldId,
         int ownerThreadId,
         int capacity,
-        int maximumArchetypes)
+        int maximumArchetypes,
+        bool schedulerLane = false,
+        int payloadCapacityBytes = 0)
     {
         if (!worldId.IsValid)
             throw new ArgumentException("A valid world ID is required.", nameof(worldId));
-        if (ownerThreadId <= 0)
+        if (ownerThreadId <= 0 && !schedulerLane)
             throw new ArgumentOutOfRangeException(nameof(ownerThreadId));
         if (capacity < 0)
             throw new ArgumentOutOfRangeException(nameof(capacity));
         if (maximumArchetypes <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumArchetypes));
+        if (payloadCapacityBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(payloadCapacityBytes));
 
         _worldId = worldId;
         _bufferId = BufferIdSource.Allocate();
         _ownerThreadId = ownerThreadId;
+        _schedulerLane = schedulerLane;
         _commands = new StructuralCommandRecord[capacity];
         _createdEntities = new Entity[capacity];
         _nextCommand = new int[capacity];
@@ -73,6 +81,7 @@ public sealed class StructuralCommandBuffer
         _createDemand = new int[checked(maximumArchetypes + 1)];
         _temporaryHoleState = new int[checked(maximumArchetypes + 1)];
         _activeTemporaryArchetypes = new int[maximumArchetypes];
+        _payload = new byte[payloadCapacityBytes];
         _epoch = 1;
         _isActive = true;
     }
@@ -100,7 +109,11 @@ public sealed class StructuralCommandBuffer
          Unsafe.SizeOf<Entity>() +
          sizeof(int)) +
         (long)(_temporaryHoleHeads.Length + _createDemand.Length + _temporaryHoleState.Length +
-            _activeTemporaryArchetypes.Length) * sizeof(int));
+            _activeTemporaryArchetypes.Length) * sizeof(int) +
+        _payload.Length);
+
+    internal int PayloadCapacityBytes => _payload.Length;
+    internal int SchedulerPayloadCount => _payloadCount;
 
     public DeferredEntity EnqueueCreateDefault(ArchetypeHandle archetype)
     {
@@ -116,6 +129,194 @@ public sealed class StructuralCommandBuffer
             EnsureOwnerAndActive();
             return _lastPlaybackDiagnostics;
         }
+    }
+
+    internal int SchedulerCount
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            System.Diagnostics.Debug.Assert(_schedulerLane);
+            return _count;
+        }
+    }
+
+    internal bool OwnsSchedulerDeferredInSegment(DeferredEntity entity, int segmentStart)
+    {
+        System.Diagnostics.Debug.Assert(_schedulerLane);
+        return entity.IsValid && entity.World == _worldId &&
+            entity.BufferId == _bufferId && entity.Epoch == _epoch &&
+            entity.CommandIndex >= unchecked((uint)segmentStart) &&
+            entity.CommandIndex < unchecked((uint)_count);
+    }
+
+    internal void ClearSchedulerLane()
+    {
+        System.Diagnostics.Debug.Assert(_schedulerLane);
+        if (_isPlaying)
+            throw new InvalidOperationException("A scheduler structural lane cannot clear during playback.");
+        ResetForNewEpoch();
+    }
+
+    internal bool CanAppendSchedulerCommands(int count)
+    {
+        if (_schedulerLane)
+            throw new InvalidOperationException("A scheduler lane cannot be the canonical merge destination.");
+        EnsureOwnerAndActive();
+        return count >= 0 && count <= _commands.Length - _count;
+    }
+
+    internal int GetSchedulerMergedPayloadEnd(
+        EcsWorld<NativeChunkArena> world,
+        int start,
+        int count,
+        int destinationOffset)
+    {
+        System.Diagnostics.Debug.Assert(_schedulerLane);
+        if (start < 0 || count < 0 || start > _count - count)
+            throw new ArgumentOutOfRangeException(nameof(start));
+        int offset = destinationOffset;
+        for (int index = start; index < start + count; index++)
+        {
+            StructuralCommandRecord command = _commands[index];
+            if (command.Kind != StructuralCommandKind.AddComponent)
+                continue;
+            world.GetStructuralComponentPayloadLayout(
+                command.Argument,
+                out int size,
+                out int alignment);
+            offset = AlignUp(offset, alignment);
+            offset = checked(offset + size);
+        }
+        return offset;
+    }
+
+    internal bool CanAppendSchedulerPayloadEnd(int finalOffset)
+    {
+        if (_schedulerLane)
+            throw new InvalidOperationException("A scheduler lane cannot be the canonical merge destination.");
+        EnsureOwnerAndActive();
+        return finalOffset >= _payloadCount && finalOffset <= _payload.Length;
+    }
+
+    /// <summary>
+    /// Appends one producer segment into the canonical owner arena. Existing
+    /// phase chains are rebuilt by AppendTrusted; producer-local deferred targets
+    /// are remapped through the source lane's already-reserved link array.
+    /// </summary>
+    internal int CopySchedulerSegmentTo(
+        StructuralCommandBuffer destination,
+        EcsWorld<NativeChunkArena> world,
+        int start,
+        int count)
+    {
+        System.Diagnostics.Debug.Assert(_schedulerLane);
+        ArgumentNullException.ThrowIfNull(destination);
+        destination.EnsureOwnerAndActive();
+        if (destination._schedulerLane)
+            throw new InvalidOperationException("Scheduler segments require the canonical owner arena.");
+        if (start < 0 || count < 0 || start > _count - count)
+            throw new ArgumentOutOfRangeException(nameof(start));
+        if (!destination.CanAppendSchedulerCommands(count))
+            throw new StructuralCommandCapacityExceededException(destination.Capacity);
+
+        int destinationStart = destination._count;
+        for (int offset = 0; offset < count; offset++)
+        {
+            int sourceIndex = start + offset;
+            StructuralCommandRecord command = _commands[sourceIndex];
+            if (command.Kind == StructuralCommandKind.AddComponent)
+            {
+                world.GetStructuralComponentPayloadLayout(
+                    command.Argument,
+                    out int payloadSize,
+                    out int payloadAlignment);
+                int destinationPayloadOffset = AlignUp(destination._payloadCount, payloadAlignment);
+                if (destinationPayloadOffset > destination._payload.Length - payloadSize)
+                    throw new InvalidOperationException("Preflighted scheduler structural payload capacity changed during merge.");
+                _payload.AsSpan(unchecked((int)command.PayloadOffset), payloadSize).CopyTo(
+                    destination._payload.AsSpan(destinationPayloadOffset, payloadSize));
+                destination._payloadCount = destinationPayloadOffset + payloadSize;
+                command = command.WithPayloadOffset(unchecked((uint)destinationPayloadOffset));
+            }
+            if (command.TargetKind == StructuralCommandTargetKind.Deferred)
+            {
+                uint sourceTarget = command.DeferredCommandIndex;
+                if (sourceTarget >= unchecked((uint)sourceIndex))
+                    ThrowCommandInvariant("A scheduler deferred target must refer to an earlier producer command.");
+                int mappedLink = _nextCommand[sourceTarget];
+                if (mappedLink == 0)
+                    ThrowCommandInvariant("A scheduler deferred target crossed producer or merge order.");
+                command = command.RemapDeferredTarget(
+                    destination._bufferId,
+                    destination._epoch,
+                    unchecked((uint)(mappedLink - 1)));
+            }
+
+            int destinationIndex = destination._count;
+            destination.BeginRecordingIfNeeded();
+            destination.AppendTrusted(command);
+            _nextCommand[sourceIndex] = destinationIndex + 1;
+        }
+        return destination._count - destinationStart;
+    }
+
+    internal bool TryEnqueueAddComponent(
+        Entity entity,
+        uint componentRouteId,
+        ReadOnlySpan<byte> payload,
+        int alignment)
+    {
+        EnsureOwnerAndActive();
+        ValidateEntity(entity, nameof(entity));
+        BeginRecordingIfNeeded();
+        if (_count == _commands.Length)
+            return false;
+        int offset = ReservePayload(payload, alignment);
+        if (offset < 0)
+            return false;
+        AppendTrusted(StructuralCommandRecord.AddComponent(
+            entity,
+            componentRouteId,
+            unchecked((uint)offset)));
+        return true;
+    }
+
+    internal bool TryEnqueueAddComponent(
+        DeferredEntity entity,
+        uint componentRouteId,
+        ReadOnlySpan<byte> payload,
+        int alignment)
+    {
+        EnsureOwnerAndActive();
+        ValidateDeferredEntity(entity, nameof(entity));
+        BeginRecordingIfNeeded();
+        if (_count == _commands.Length)
+            return false;
+        int offset = ReservePayload(payload, alignment);
+        if (offset < 0)
+            return false;
+        AppendTrusted(StructuralCommandRecord.AddComponent(
+            entity,
+            componentRouteId,
+            unchecked((uint)offset)));
+        return true;
+    }
+
+    internal bool TryEnqueueRemoveComponent(Entity entity, uint componentRouteId)
+    {
+        EnsureOwnerAndActive();
+        ValidateEntity(entity, nameof(entity));
+        BeginRecordingIfNeeded();
+        return TryAppend(StructuralCommandRecord.RemoveComponent(entity, componentRouteId));
+    }
+
+    internal bool TryEnqueueRemoveComponent(DeferredEntity entity, uint componentRouteId)
+    {
+        EnsureOwnerAndActive();
+        ValidateDeferredEntity(entity, nameof(entity));
+        BeginRecordingIfNeeded();
+        return TryAppend(StructuralCommandRecord.RemoveComponent(entity, componentRouteId));
     }
 
     public bool TryEnqueueCreateDefault(
@@ -448,6 +649,7 @@ public sealed class StructuralCommandBuffer
         finally
         {
             _count = 0;
+            _payloadCount = 0;
             ResetPhaseChains();
             ResetTemporaryHoleState();
             _isPlaying = false;
@@ -577,6 +779,7 @@ public sealed class StructuralCommandBuffer
         int clearCount = Math.Max(_count, _lastPlaybackCommandCount);
         _createdEntities.AsSpan(0, clearCount).Clear();
         _count = 0;
+        _payloadCount = 0;
         ResetPhaseChains();
         ResetTemporaryHoleState();
         _lastPlaybackCommandCount = 0;
@@ -943,6 +1146,14 @@ public sealed class StructuralCommandBuffer
             StructuralCommandRecord first = _commands[commandIndex];
             if (first.TransitionPhase != expectedPhase)
                 ThrowCommandInvariant("A phase-indexed transition was routed to the wrong phase.");
+            if (first.Kind is StructuralCommandKind.AddComponent or StructuralCommandKind.RemoveComponent)
+            {
+                link = _nextCommand[commandIndex];
+                ExecuteComponentCommand(first, commandCount, world, ref applied, ref rejected);
+                continue;
+            }
+            if (first.Kind != StructuralCommandKind.Transition)
+                ThrowCommandInvariant("A transition phase chain contains an invalid command kind.");
             uint transitionId = first.Argument;
             TransitionRunPlan runPlan = AnalyzeTransitionRun(
                 link,
@@ -1147,7 +1358,8 @@ public sealed class StructuralCommandBuffer
         while (scanLink != 0)
         {
             int commandIndex = scanLink - 1;
-            if (_commands[commandIndex].Argument != transitionId)
+            if (_commands[commandIndex].Kind != StructuralCommandKind.Transition ||
+                _commands[commandIndex].Argument != transitionId)
                 break;
             runCount++;
             scanLink = _nextCommand[commandIndex];
@@ -1291,13 +1503,17 @@ public sealed class StructuralCommandBuffer
         for (int index = 0; index < commandCount; index++)
         {
             StructuralCommandRecord command = _commands[index];
-            if (command.Kind != StructuralCommandKind.Transition ||
-                command.TransitionPhase != phase)
+            if (command.TransitionPhase != phase ||
+                command.Kind is not (StructuralCommandKind.Transition or
+                    StructuralCommandKind.AddComponent or
+                    StructuralCommandKind.RemoveComponent))
             {
                 continue;
             }
-
-            ExecuteTransition(command, commandCount, world, ref applied, ref rejected);
+            if (command.Kind == StructuralCommandKind.Transition)
+                ExecuteTransition(command, commandCount, world, ref applied, ref rejected);
+            else
+                ExecuteComponentCommand(command, commandCount, world, ref applied, ref rejected);
         }
     }
 
@@ -1316,6 +1532,47 @@ public sealed class StructuralCommandBuffer
         }
 
         applied++;
+    }
+
+    private void ExecuteComponentCommand(
+        in StructuralCommandRecord command,
+        int commandCount,
+        EcsWorld<NativeChunkArena> world,
+        ref int applied,
+        ref int rejected)
+    {
+        if (!TryResolveTarget(command, commandCount, out Entity entity, out _))
+        {
+            rejected++;
+            return;
+        }
+
+        bool success;
+        if (command.Kind == StructuralCommandKind.AddComponent)
+        {
+            world.GetStructuralComponentPayloadLayout(command.Argument, out int size, out _);
+            int payloadOffset = unchecked((int)command.PayloadOffset);
+            if (payloadOffset < 0 || payloadOffset > _payloadCount - size)
+                ThrowCommandInvariant("A typed structural command references payload outside its arena.");
+            success = world.TryApplyStructuralAdd(
+                entity,
+                command.Argument,
+                _payload.AsSpan(payloadOffset, size));
+        }
+        else if (command.Kind == StructuralCommandKind.RemoveComponent)
+        {
+            success = world.TryApplyStructuralRemove(entity, command.Argument);
+        }
+        else
+        {
+            ThrowCommandInvariant("A typed structural phase contains an invalid command kind.");
+            return;
+        }
+
+        if (success)
+            applied++;
+        else
+            rejected++;
     }
 
     private bool TryResolveTarget(
@@ -1436,6 +1693,7 @@ public sealed class StructuralCommandBuffer
         _createdEntities.AsSpan(0, _lastPlaybackCommandCount).Clear();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
+        _payloadCount = 0;
         AdvanceEpoch();
     }
 
@@ -1448,6 +1706,7 @@ public sealed class StructuralCommandBuffer
         ResetTemporaryHoleState();
         _lastPlaybackCommandCount = 0;
         _hasCompletedPlayback = false;
+        _payloadCount = 0;
         AdvanceEpoch();
     }
 
@@ -1504,7 +1763,9 @@ public sealed class StructuralCommandBuffer
                     "A destroy command has an invalid target kind."),
             };
         }
-        if (command.Kind == StructuralCommandKind.Transition)
+        if (command.Kind is StructuralCommandKind.Transition or
+            StructuralCommandKind.AddComponent or
+            StructuralCommandKind.RemoveComponent)
         {
             return command.TransitionPhase switch
             {
@@ -1518,11 +1779,31 @@ public sealed class StructuralCommandBuffer
         throw new InvalidOperationException("The structural command kind is invalid.");
     }
 
+    private int ReservePayload(ReadOnlySpan<byte> payload, int alignment)
+    {
+        if (_count == _commands.Length)
+            return -1;
+        if (alignment <= 0 || (alignment & (alignment - 1)) != 0)
+            throw new ArgumentOutOfRangeException(nameof(alignment));
+        int offset = AlignUp(_payloadCount, alignment);
+        if (payload.IsEmpty)
+            return offset;
+        if (offset > _payload.Length - payload.Length)
+            return -1;
+        payload.CopyTo(_payload.AsSpan(offset, payload.Length));
+        _payloadCount = offset + payload.Length;
+        return offset;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int AlignUp(int value, int alignment) =>
+        checked((value + alignment - 1) & -alignment);
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void EnsureOwnerAndActive()
     {
         ObjectDisposedException.ThrowIf(!_isActive, this);
-        if (Environment.CurrentManagedThreadId != _ownerThreadId)
+        if (!_schedulerLane && Environment.CurrentManagedThreadId != _ownerThreadId)
         {
             throw new InvalidOperationException(
                 "This structural command arena has one recording owner.");

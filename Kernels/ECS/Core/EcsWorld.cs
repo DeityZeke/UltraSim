@@ -24,6 +24,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private readonly ArchetypeRegistry<TArena> _archetypes;
     private readonly IArchetypeQueryPlan<TArena>?[] _queryPlans;
     private readonly PreparedArchetypeTransition?[] _publicTransitions;
+    private PreparedStructuralComponentRoute<TArena>[] _structuralComponentRoutes = [];
     private int _queryPlanCount;
     private int _publicTransitionCount;
     private ChangeVersion _changeVersion;
@@ -131,6 +132,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
     }
 
+    internal bool IsSystemGraphExecuting => _isExecutingScope;
+
     internal ArchetypeId RegisterArchetype(
         ReadOnlySpan<ComponentId> canonicalSignature,
         ChunkLayoutOptions layoutOptions,
@@ -166,6 +169,182 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         _publicTransitionCount++;
         phase = transition.Phase;
         return checked((uint)_publicTransitionCount);
+    }
+
+    internal void PrepareStructuralComponentRoutes(
+        ReadOnlySpan<ComponentId> components,
+        Span<uint> routeIds)
+    {
+        EnsureCreated();
+        if (routeIds.Length < components.Length)
+            throw new ArgumentException("The structural route output is too short.", nameof(routeIds));
+        var routes = new PreparedStructuralComponentRoute<TArena>[components.Length];
+        for (int componentIndex = 0; componentIndex < components.Length; componentIndex++)
+        {
+            ComponentId component = components[componentIndex];
+            ref readonly ComponentMetadata metadata = ref _schema.GetMetadata(component);
+            var archetypeRoutes = new StructuralComponentArchetypeRoute<TArena>[_archetypes.Count];
+            for (int sourceIndex = 0; sourceIndex < _archetypes.Count; sourceIndex++)
+            {
+                ArchetypeStorage<TArena> source = _archetypes.GetStorage(
+                    new ArchetypeId(unchecked((uint)sourceIndex + 1)));
+                int sourceColumn = source.Store.GetColumnIndex(component);
+                // Tags are members of the archetype signature but intentionally
+                // own no physical column.  Presence must therefore come from the
+                // canonical signature, not the column lookup.
+                bool has = ContainsComponent(source.Signature, component);
+                ArchetypeTransitionPlan<TArena>? add = null;
+                ArchetypeTransitionPlan<TArena>? remove = null;
+                int destinationColumn = sourceColumn;
+                if (has)
+                {
+                    ComponentId[] destinationSignature = RemoveComponent(source.Signature, component);
+                    if (_archetypes.TryGetId(destinationSignature, out ArchetypeId destinationId))
+                        remove = _archetypes.PrepareTransition(source.Id, destinationId);
+                }
+                else
+                {
+                    ComponentId[] destinationSignature = AddComponent(source.Signature, component);
+                    if (_archetypes.TryGetId(destinationSignature, out ArchetypeId destinationId))
+                    {
+                        add = _archetypes.PrepareTransition(source.Id, destinationId);
+                        destinationColumn = add.Destination.Store.GetColumnIndex(component);
+                    }
+                }
+
+                archetypeRoutes[sourceIndex] = new StructuralComponentArchetypeRoute<TArena>(
+                    has,
+                    sourceColumn,
+                    destinationColumn,
+                    add,
+                    remove);
+            }
+
+            uint id = unchecked((uint)componentIndex + 1);
+            routes[componentIndex] = new PreparedStructuralComponentRoute<TArena>(
+                id,
+                component,
+                metadata.Size,
+                metadata.Alignment,
+                archetypeRoutes);
+            routeIds[componentIndex] = id;
+        }
+        _structuralComponentRoutes = routes;
+    }
+
+    internal void GetStructuralComponentPayloadLayout(uint routeId, out int size, out int alignment)
+    {
+        PreparedStructuralComponentRoute<TArena> route = GetStructuralComponentRoute(routeId);
+        size = route.PayloadSize;
+        alignment = route.PayloadAlignment;
+    }
+
+    internal bool TryApplyStructuralAdd(Entity entity, uint routeId, ReadOnlySpan<byte> payload)
+    {
+        EnsureRuntimeMutationAllowed();
+        PreparedStructuralComponentRoute<TArena> route = GetStructuralComponentRoute(routeId);
+        if (payload.Length != route.PayloadSize)
+            throw new ArgumentException("Typed structural payload size does not match schema metadata.", nameof(payload));
+        if (!_entities.TryGetLocation(entity, out EntityLocation sourceLocation))
+            return false;
+        ref readonly StructuralComponentArchetypeRoute<TArena> physical = ref GetStructuralArchetypeRoute(
+            route,
+            sourceLocation.ArchetypeId);
+        EntityLocation destinationLocation = sourceLocation;
+        int columnIndex;
+        if (physical.SourceHasComponent)
+        {
+            columnIndex = physical.SourceColumnIndex;
+        }
+        else
+        {
+            ArchetypeTransitionPlan<TArena>? transition = physical.AddTransition;
+            if (transition is null || !TryTransition(entity, transition, out destinationLocation))
+                return false;
+            columnIndex = physical.DestinationColumnIndex;
+        }
+
+        ArchetypeStorage<TArena> destination = _archetypes.GetStorage(destinationLocation.ArchetypeId);
+        if (route.PayloadSize != 0)
+            destination.Store.WriteBoundComponentBytes(destinationLocation.ChunkRow, columnIndex, payload);
+        if (columnIndex >= 0)
+        {
+            destination.Store.StampSparseChangeVersion(
+                destinationLocation.ChunkRow.ChunkIndex,
+                columnIndex,
+                destinationLocation.ChunkRow.Row,
+                rowCount: 1,
+                AdvanceChangeVersion());
+        }
+        return true;
+    }
+
+    internal bool TryApplyStructuralRemove(Entity entity, uint routeId)
+    {
+        EnsureRuntimeMutationAllowed();
+        PreparedStructuralComponentRoute<TArena> route = GetStructuralComponentRoute(routeId);
+        if (!_entities.TryGetLocation(entity, out EntityLocation sourceLocation))
+            return false;
+        ref readonly StructuralComponentArchetypeRoute<TArena> physical = ref GetStructuralArchetypeRoute(
+            route,
+            sourceLocation.ArchetypeId);
+        return physical.SourceHasComponent &&
+            physical.RemoveTransition is { } transition &&
+            TryTransition(entity, transition, out _);
+    }
+
+    private PreparedStructuralComponentRoute<TArena> GetStructuralComponentRoute(uint routeId)
+    {
+        uint index = routeId - 1;
+        if (index >= unchecked((uint)_structuralComponentRoutes.Length))
+            throw new ArgumentOutOfRangeException(nameof(routeId));
+        return _structuralComponentRoutes[index];
+    }
+
+    private static ref readonly StructuralComponentArchetypeRoute<TArena> GetStructuralArchetypeRoute(
+        PreparedStructuralComponentRoute<TArena> route,
+        ArchetypeId archetypeId)
+    {
+        uint index = archetypeId.Value - 1;
+        if (index >= unchecked((uint)route.Routes.Length))
+            throw new InvalidOperationException("A structural component route does not cover the current archetype.");
+        return ref route.Routes[index];
+    }
+
+    private static ComponentId[] RemoveComponent(ReadOnlySpan<ComponentId> signature, ComponentId component)
+    {
+        var result = new ComponentId[signature.Length - 1];
+        int destination = 0;
+        for (int index = 0; index < signature.Length; index++)
+            if (signature[index] != component)
+                result[destination++] = signature[index];
+        return result;
+    }
+
+    private static ComponentId[] AddComponent(ReadOnlySpan<ComponentId> signature, ComponentId component)
+    {
+        var result = new ComponentId[signature.Length + 1];
+        int source = 0;
+        int destination = 0;
+        while (source < signature.Length && signature[source].CompareTo(component) < 0)
+            result[destination++] = signature[source++];
+        result[destination++] = component;
+        while (source < signature.Length)
+            result[destination++] = signature[source++];
+        return result;
+    }
+
+    private static bool ContainsComponent(ReadOnlySpan<ComponentId> signature, ComponentId component)
+    {
+        for (int index = 0; index < signature.Length; index++)
+        {
+            int comparison = signature[index].CompareTo(component);
+            if (comparison == 0)
+                return true;
+            if (comparison > 0)
+                return false;
+        }
+        return false;
     }
 
     internal ArchetypeComponentBinding<T> BindComponent<T>(
@@ -523,6 +702,79 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         EnsureSealed();
         return _entities.TryGetLocation(entity, out location);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryGetEntity(uint localIndex, out Entity entity) =>
+        _entities.TryGetEntity(localIndex, out entity);
+
+    internal void BeginSystemGraphExecution()
+    {
+        EnsureSealed();
+        EnterExecutionScope();
+    }
+
+    internal void EndSystemGraphExecution()
+    {
+        if (!_isExecutingScope)
+            ThrowWorldInvariant("A scheduler graph execution scope was not active.");
+        ExitExecutionScope();
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ChangeVersion GetNextSchedulerChangeVersion(ChangeVersion after) => after.Next();
+
+    internal void PublishSchedulerChangeVersion(ChangeVersion version)
+    {
+        System.Diagnostics.Debug.Assert(_isExecutingScope);
+        if (version.IsValid && version.IsNewerThan(_changeVersion))
+            _changeVersion = version;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TrySetComponentScheduled<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        in T value,
+        ChangeVersion version)
+        where T : unmanaged, IComponent<T>
+    {
+        System.Diagnostics.Debug.Assert(_isExecutingScope && version.IsValid);
+        if (!lookup.HasData)
+            ThrowComponentLookupHasNoData();
+        if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
+            return false;
+        storage.Store.GetBoundComponentRef<T>(row, columnIndex) = value;
+        storage.Store.StampSparseChangeVersion(
+            row.ChunkIndex,
+            columnIndex,
+            row.Row,
+            rowCount: 1,
+            version);
+        return true;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TrySetComponentEnabledScheduled<T>(
+        Entity entity,
+        ComponentLookupPlan<TArena, T> lookup,
+        bool enabled,
+        ChangeVersion version)
+        where T : unmanaged, IComponent<T>
+    {
+        System.Diagnostics.Debug.Assert(_isExecutingScope && version.IsValid);
+        if (!lookup.IsEnableable)
+            ThrowComponentLookupIsNotEnableable();
+        if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
+            return false;
+        storage.Store.SetBoundEnabled(row, columnIndex, enabled);
+        storage.Store.StampSparseChangeVersion(
+            row.ChunkIndex,
+            columnIndex,
+            row.Row,
+            rowCount: 1,
+            version);
+        return true;
     }
 
     internal bool TryCreateDefault(ArchetypeId archetypeId, out Entity entity)
@@ -970,6 +1222,55 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         where TVisitor : struct, IReadOnlyChunkJob<TRead>
     {
         EnsureSealed();
+        EnterExecutionScope();
+        try
+        {
+            return VisitChangedReadRowsCore(plan, ref cursor, ref visitor);
+        }
+        finally
+        {
+            ExitExecutionScope();
+        }
+    }
+
+    internal int VisitChangedReadRowsScheduled<TRead, TVisitor>(
+        ArchetypeChangedReadQueryPlan<TArena, TRead> plan,
+        ref ChangeCursor cursor,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
+    {
+        System.Diagnostics.Debug.Assert(_isExecutingScope);
+        return VisitChangedReadRowsCore(plan, ref cursor, ref visitor);
+    }
+
+    internal SchedulerQueryShape GetChangedRowsSchedulerShape<TRead>(
+        ArchetypeChangedReadQueryPlan<TArena, TRead> plan)
+        where TRead : unmanaged, IComponent<TRead>
+    {
+        ValidateChangedReadQueryPlan(plan);
+        int rows = 0;
+        int chunks = 0;
+        foreach (ref readonly ArchetypeChangedReadQueryRoute<TArena> route in plan.Routes)
+        {
+            ArchetypeChunkStore<TArena> store = route.Storage.Store;
+            for (int chunk = store.GetFirstOccupiedChunkIndex(); chunk >= 0;
+                 chunk = store.GetNextOccupiedChunkIndex(chunk))
+            {
+                chunks++;
+                rows = checked(rows + store.GetRowCount(unchecked((uint)chunk)));
+            }
+        }
+        return new SchedulerQueryShape(rows, chunks);
+    }
+
+    private int VisitChangedReadRowsCore<TRead, TVisitor>(
+        ArchetypeChangedReadQueryPlan<TArena, TRead> plan,
+        ref ChangeCursor cursor,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
+    {
         ValidateChangedReadQueryPlan(plan);
         if (!plan.TracksExactRows)
         {
@@ -980,10 +1281,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ValidateChangeCursor(cursor);
         ChangeVersion observationVersion = _changeVersion;
         ChangeVersion baseline = cursor.Version;
-        EnterExecutionScope();
-        try
-        {
-            int visitedRows = 0;
+        int visitedRows = 0;
             ReadOnlySpan<ArchetypeChangedReadQueryRoute<TArena>> routes = plan.Routes;
             for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
             {
@@ -1016,13 +1314,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                 }
             }
 
-            cursor = cursor.AdvanceTo(observationVersion);
-            return visitedRows;
-        }
-        finally
-        {
-            ExitExecutionScope();
-        }
+        cursor = cursor.AdvanceTo(observationVersion);
+        return visitedRows;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveOptimization)]

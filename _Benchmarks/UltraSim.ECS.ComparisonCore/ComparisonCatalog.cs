@@ -36,11 +36,21 @@ public static class ComparisonCatalog
         AddUnsupported(descriptors, "changes.independent-cursors", "Independent delayed change consumers", "ChangeTracking", 50_000, "V2 dirty drain is destructive and cannot model independent cursors.");
         AddUnsupported(descriptors, "changes.multi-any-all", "Multi-column any/all changed semantics", "ChangeTracking", 50_000, "V2 has no equivalent multi-watch cursor semantics.");
         AddUnsupported(descriptors, "structural.deferred-token-chain", "Create/transition/destroy deferred token chain", "Structural", 10_000, "V2 deferred creates do not return same-barrier tokens.");
-        AddUnsupported(descriptors, "structural.typed-add-payload", "Typed add payload playback", "Structural", 10_000, "V3 transition commands currently add store defaults only.");
+        AddUnsupported(descriptors, "structural.typed-add-payload", "Typed add payload playback", "Structural", 10_000, "V3 supports bounded typed add/replacement payloads, but no equivalent canonical V2 workload has been admitted.");
         AddUnsupported(descriptors, "structural.capacity-failure", "Bounded structural capacity failure", "Structural", 10_000, "V2 structural storage grows dynamically and has no equivalent fixed-capacity result.");
         AddUnsupported(descriptors, "lifecycle.streams", "Created/added/removed/destroyed lifecycle streams", "Lifecycle", 50_000, "V3 lifecycle publication is not implemented yet.");
-        AddUnsupported(descriptors, "scheduler.serial-tick", "Serial scheduled systems", "Scheduler", 10_000, "V3 scheduler is not implemented yet.");
-        AddUnsupported(descriptors, "scheduler.parallel-tick", "Parallel scheduled systems", "Scheduler", 100_000, "V3 scheduler is not implemented yet.");
+        Add(descriptors, "scheduler.serial-tick", "Serial scheduled 1R1W tick", "Scheduler",
+            MeasurementBoundary.EndToEnd, ComparisonStrength.Direct, 10_000, 10_000, 16,
+            "Run one warmed scheduled Position-read/Velocity-write system serially for one measured tick.",
+            "Every entity remains alive and Velocity becomes a deterministic function of Position.");
+        Add(descriptors, "scheduler.parallel-tick", "Four-participant scheduled 1R1W tick", "Scheduler",
+            MeasurementBoundary.EndToEnd, ComparisonStrength.Provisional, 100_000, 100_000, 16,
+            "Run one warmed Position-read/Velocity-write system over four total execution participants; V2 uses its intra-system ParallelFor chunk path and V3 uses seal-compiled static chunk partitions.",
+            "Every entity remains alive and Velocity becomes a deterministic function of Position.");
+        Add(descriptors, "scheduler.range-parallel", "Four-participant arbitrary range job", "Scheduler",
+            MeasurementBoundary.EndToEnd, ComparisonStrength.Provisional, 100_000, 100_000, 8,
+            "Apply one measured warmed arithmetic pass to a 100K integer array over four total execution participants; V2 uses SystemContext.ParallelFor and V3 uses RangeJob.",
+            "The complete integer array has identical deterministic final contents.");
         AddUnsupported(descriptors, "prefab.spawn", "Compiled prefab spawn", "Prefab", 10_000, "V3 prefab compiler/runtime is not implemented yet.");
         AddUnsupported(descriptors, "persistence.filtered-view", "Filtered persistence view", "Persistence", 50_000, "V3 persistence view is not implemented yet.");
         AddUnsupported(descriptors, "persistence.round-trip-remap", "Persistence round trip with transient-ID remap", "Persistence", 50_000, "V3 persistence and load-remap pipeline are not implemented yet.");

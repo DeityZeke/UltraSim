@@ -20,10 +20,10 @@ The V31 consolidation checkpoint is therefore `3.0.31`. The exact whole-source
 transition work is `3.0.32`, and its validate-once trusted commit optimization is
 `3.0.33`. Prepared ordinary migration's measured trusted commit optimization is
 `3.0.34`. Exact route-level packed-suffix transition planning is `3.0.35`;
-the public serial generated chunk-job execution surface is `3.0.36`;
-the next accepted checkpoint in the same milestone will be `3.0.37`;
-a major capability/stability milestone advances the middle field and resets the
-revision, for example `3.1.0`.
+the public serial generated chunk-job execution surface is `3.0.36`. The bounded
+generated system/job scheduler is the first coherent major capability checkpoint,
+so it advances the middle field and resets the revision as `3.1.0`. The next
+ordinary accepted implementation or optimization checkpoint will be `3.1.1`.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -37,9 +37,11 @@ longitudinal evidence while leaving that production kernel behavior unchanged.
 ECS 3.0.36 is a production API/capability checkpoint: it exposes the existing
 seal-compiled generated chunk machine through the public facade, including dense
 and conditional tracked writes plus the first public exact changed-row job. It is
-not the scheduler or a complete system-runtime milestone; those remain candidates
-for `3.1.0` once graph, worker, structural-merge, tick-barrier, state, and fault
-semantics form one coherent capability.
+not itself a scheduler. ECS 3.1.0 is the accepted bounded system-runtime milestone:
+it compiles a staged dependency/conflict graph, runs the 3.0.36 chunk ABI and
+bounded range work on persistent workers, merges fixed structural lanes in stable
+logical order, owns cadence/manual/lifecycle/fault semantics, and retains zero
+warmed managed allocation.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

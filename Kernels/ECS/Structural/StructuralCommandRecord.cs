@@ -8,6 +8,8 @@ internal enum StructuralCommandKind : byte
     Destroy = 2,
     Transition = 3,
     TemporaryHole = 4,
+    AddComponent = 5,
+    RemoveComponent = 6,
 }
 
 internal enum StructuralCommandTargetKind : byte
@@ -116,6 +118,56 @@ internal readonly struct StructuralCommandRecord
         entity.CommandIndex,
         0);
 
+    internal static StructuralCommandRecord AddComponent(
+        Entity entity,
+        uint componentRouteId,
+        uint payloadOffset) => new(
+        StructuralCommandKind.AddComponent,
+        StructuralCommandTargetKind.Entity,
+        StructuralTransitionPhase.Add,
+        componentRouteId,
+        entity.World.Value,
+        entity.Index,
+        entity.Generation,
+        payloadOffset);
+
+    internal static StructuralCommandRecord AddComponent(
+        DeferredEntity entity,
+        uint componentRouteId,
+        uint payloadOffset) => new(
+        StructuralCommandKind.AddComponent,
+        StructuralCommandTargetKind.Deferred,
+        StructuralTransitionPhase.Add,
+        componentRouteId,
+        entity.BufferId,
+        entity.Epoch,
+        entity.CommandIndex,
+        payloadOffset);
+
+    internal static StructuralCommandRecord RemoveComponent(
+        Entity entity,
+        uint componentRouteId) => new(
+        StructuralCommandKind.RemoveComponent,
+        StructuralCommandTargetKind.Entity,
+        StructuralTransitionPhase.Remove,
+        componentRouteId,
+        entity.World.Value,
+        entity.Index,
+        entity.Generation,
+        0);
+
+    internal static StructuralCommandRecord RemoveComponent(
+        DeferredEntity entity,
+        uint componentRouteId) => new(
+        StructuralCommandKind.RemoveComponent,
+        StructuralCommandTargetKind.Deferred,
+        StructuralTransitionPhase.Remove,
+        componentRouteId,
+        entity.BufferId,
+        entity.Epoch,
+        entity.CommandIndex,
+        0);
+
     /// <summary>
     /// Reuses a consumed live-destroy command slot as barrier-local hole metadata.
     /// Create-token command records remain untouched after playback.
@@ -142,6 +194,36 @@ internal readonly struct StructuralCommandRecord
         _target0 == bufferId && _target1 == epoch;
 
     internal uint DeferredCommandIndex => _target2;
+
+    internal uint PayloadOffset => _target3;
+
+    internal StructuralCommandRecord WithPayloadOffset(uint payloadOffset) => new(
+        _kind,
+        _targetKind,
+        _transitionPhase,
+        _argument,
+        _target0,
+        _target1,
+        _target2,
+        payloadOffset);
+
+    internal StructuralCommandRecord RemapDeferredTarget(
+        uint bufferId,
+        uint epoch,
+        uint commandIndex)
+    {
+        if (_targetKind != StructuralCommandTargetKind.Deferred)
+            throw new InvalidOperationException("Only a deferred structural target can be remapped.");
+        return new StructuralCommandRecord(
+            _kind,
+            _targetKind,
+            _transitionPhase,
+            _argument,
+            bufferId,
+            epoch,
+            commandIndex,
+            _target3);
+    }
 
     internal ArchetypeId TemporaryHoleArchetypeId => new(_argument);
 

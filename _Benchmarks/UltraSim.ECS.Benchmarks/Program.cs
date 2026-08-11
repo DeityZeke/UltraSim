@@ -24,6 +24,12 @@ if (args.Contains("--public-jobs", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--scheduler", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = SchedulerBenchmarkProgram.Run(args);
+    return;
+}
+
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",

@@ -2,6 +2,32 @@ namespace UltraSim.ECS;
 
 public sealed partial class EcsWorld
 {
+    public SystemId RegisterChangedRowsSystem<TRead, TChanged, TSystem, TJob>(
+        SystemDefinition definition,
+        in ChangedRowsJobPlan<TRead, TChanged> plan,
+        TSystem runtime)
+        where TRead : unmanaged, IComponent<TRead>
+        where TChanged : unmanaged, IComponent<TChanged>
+        where TSystem : class, IChangedRowsSystemRuntime<TJob>
+        where TJob : struct, IScheduledChangedRowsChunkJob<TRead>
+    {
+        EnsureOwnerThread();
+        SystemScheduler scheduler = GetSchedulerForRegistration();
+        ArchetypeChangedReadQueryPlan<NativeChunkArena, TRead> prepared = plan.GetPlan();
+        if (prepared.WorldId != Id)
+            throw new ArgumentException("The changed-row plan belongs to a different world.", nameof(plan));
+        SystemId id = scheduler.GetNextRegistrationId();
+        var node = new ChangedRowsSystemNode<TSystem, TRead, TChanged, TJob>(
+            id, definition, runtime, scheduler.ExecutionConcurrency, _core, prepared);
+        Span<ComponentId> reads = stackalloc ComponentId[2]
+        {
+            prepared.ReadComponentId,
+            prepared.ChangedComponentId,
+        };
+        scheduler.RegisterNode(node, reads, ReadOnlySpan<ComponentId>.Empty);
+        return id;
+    }
+
     /// <summary>
     /// Prepares an exact-row independent-consumer plan during world construction.
     /// Routes and bounded row-history storage are compiled by <see cref="Seal"/>.

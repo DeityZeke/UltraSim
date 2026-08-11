@@ -8,14 +8,16 @@ namespace UltraSim.ECS;
 /// <remarks>
 /// Construction and registration are cold. <see cref="Seal"/> is the explicit
 /// allocation/plan-compilation boundary, <see cref="Initialize"/> opens bootstrap
-/// mutation, and <see cref="BeginRun"/> publishes the running state. This first
-/// public slice is deliberately single-threaded; the future scheduler will issue
-/// bounded worker access tokens rather than weakening this ownership boundary.
+/// mutation, and <see cref="BeginRun"/> publishes the running state. Public world
+/// control remains single-owner. An optional bounded scheduler issues expiring,
+/// declaration-checked job capabilities to its persistent workers without
+/// weakening that ownership boundary.
 /// </remarks>
 public sealed partial class EcsWorld : IDisposable
 {
     private readonly EcsWorld<NativeChunkArena> _core;
     private readonly StructuralCommandBuffer _structuralCommands;
+    private readonly SystemScheduler? _scheduler;
     private readonly int _ownerThreadId;
 
     public EcsWorld(ComponentSchema schema, EcsWorldOptions options)
@@ -37,7 +39,20 @@ public sealed partial class EcsWorld : IDisposable
             _core.Id,
             _ownerThreadId,
             options.MaximumStructuralCommands,
-            options.MaximumArchetypes);
+            options.MaximumArchetypes,
+            payloadCapacityBytes: options.Scheduler.IsEnabled
+                ? checked(options.Scheduler.StructuralPayloadBytesPerProducer *
+                    options.Scheduler.ExecutionConcurrency)
+                : 0);
+        if (options.Scheduler.IsEnabled)
+        {
+            _scheduler = new SystemScheduler(
+                this,
+                _core,
+                _structuralCommands,
+                options.Scheduler,
+                options.MaximumArchetypes);
+        }
     }
 
     public WorldId Id => _core.Id;
@@ -231,14 +246,35 @@ public sealed partial class EcsWorld : IDisposable
     public void Seal()
     {
         EnsureOwnerThread();
-        _core.Seal();
+        try
+        {
+            _scheduler?.PrepareForWorldSeal();
+            _core.Seal();
+            _scheduler?.Seal();
+        }
+        catch (Exception exception)
+        {
+            if (_core.State is not (EcsWorldState.Created or EcsWorldState.Faulted))
+                _core.MarkFaulted(exception);
+            throw;
+        }
     }
 
     /// <summary>Opens single-owner bootstrap entity mutation after explicit sealing.</summary>
     public void Initialize()
     {
         EnsureOwnerThread();
-        _core.Initialize();
+        try
+        {
+            _core.Initialize();
+            _scheduler?.Initialize();
+        }
+        catch (Exception exception)
+        {
+            if (_core.State != EcsWorldState.Faulted)
+                _core.MarkFaulted(exception);
+            throw;
+        }
     }
 
     /// <summary>Publishes the initialized world as running. This call is idempotent.</summary>
@@ -252,6 +288,17 @@ public sealed partial class EcsWorld : IDisposable
     {
         EnsureRuntimeAccess();
         return _core.IsAlive(entity);
+    }
+
+    /// <summary>
+    /// Reconstructs the current generational identity for a live local slot.
+    /// This is an explicit random lookup; chunk jobs should only pay for it when
+    /// a full <see cref="Entity"/> is actually required.
+    /// </summary>
+    public bool TryGetEntity(uint localEntityIndex, out Entity entity)
+    {
+        EnsureRuntimeAccess();
+        return _core.TryGetEntity(localEntityIndex, out entity);
     }
 
     public bool TryGetArchetype(Entity entity, out ArchetypeHandle archetype)
@@ -446,8 +493,16 @@ public sealed partial class EcsWorld : IDisposable
             return;
 
         EnsureOwnerThread();
-        _core.Dispose();
-        _structuralCommands.Invalidate();
+        Exception? schedulerFault = null;
+        try { _scheduler?.Dispose(); }
+        catch (Exception exception) { schedulerFault = exception; }
+        finally
+        {
+            _core.Dispose();
+            _structuralCommands.Invalidate();
+        }
+        if (schedulerFault is not null)
+            throw schedulerFault;
     }
 
     internal void MarkFaulted(Exception exception)
@@ -479,7 +534,7 @@ public sealed partial class EcsWorld : IDisposable
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
         {
             throw new InvalidOperationException(
-                "This ECS facade is single-owner. Access from a non-owner thread requires a future scheduler token.");
+                "This ECS facade is single-owner. Scheduler workers must use their issued SystemJobContext capability.");
         }
     }
 
@@ -491,6 +546,15 @@ public sealed partial class EcsWorld : IDisposable
 
         _ = _core.GetArchetypeStorage(archetype.Id);
         return archetype.Id;
+    }
+
+    internal SystemScheduler GetSchedulerForRegistration()
+    {
+        EnsureOwnerThread();
+        if (_core.State != EcsWorldState.Created)
+            throw new InvalidOperationException("System registration is closed after Seal.");
+        return _scheduler ?? throw new InvalidOperationException(
+            "This world was constructed with scheduler reservations disabled.");
     }
 
 }

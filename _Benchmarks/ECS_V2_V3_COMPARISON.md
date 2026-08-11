@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.36 regression checkpoint captured
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.1.0 bounded scheduler checkpoint captured
 2026-08-11
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
@@ -130,6 +130,8 @@ The previous 3.0.35 artifact is
 [`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
 The current 3.0.36 artifact is
 [`Baselines/ecs-v2-v3-3.0.36-2026-08-11.json`](Baselines/ecs-v2-v3-3.0.36-2026-08-11.json).
+The current 3.1.0 artifact is
+[`Baselines/ecs-v2-v3-3.1.0-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.0-2026-08-11.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -454,3 +456,34 @@ admitted. Direct public-versus-internal evidence lives in
 [`../ECS_JOB_EXECUTION.md`](../ECS_JOB_EXECUTION.md), where identical generated
 job arithmetic and paired canonical component state provide the meaningful
 3.0.36 comparison.
+
+## 3.1.0 bounded scheduler checkpoint
+
+ECS 3.1.0 admits three honest scheduler-shaped contracts: a serial generated
+tick at 10K rows, a four-participant parallel generated tick at 100K rows, and a
+four-participant 100K `RangeJob`. These compare observable work and canonical
+state; they do not claim identical internal scheduling policy.
+
+Both four-warmup/fifteen-iteration isolated child-process orders report 102
+comparable rows, zero canonical-state mismatches, and 10 explicit unsupported
+rows. V3 allocates zero timed managed bytes in 102/102 rows; V2 does so in
+42/102. At a 5% mean band, V2-first classifies 14 V3 wins, 86 V2 wins, and 2
+near; V3-first classifies 15/86/1. This remains a mixed longitudinal baseline,
+not a single winner score.
+
+| Scheduler scenario | V2-first V2 / V3 ns/op | Ratio | V3-first V2 / V3 ns/op | Ratio | Timed allocation V2 / V3 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| serial generated tick, 10K | 4.635 / 1.331 | 0.287x | 4.392 / 1.439 | 0.328x | 524,336 / 0 B |
+| parallel generated tick, 100K | 5.623 / 0.617 | 0.110x | 5.553 / 0.479 | 0.086x | 216 / 0 B |
+| parallel range, 100K | 1.640 / 1.686 | 1.028x | 1.655 / 1.681 | 1.015x | 64 / 0 B |
+
+The range result is a practical tie and is retained because it prevents the
+parallel query wins from being generalized to every work shape. The new 3R
+direct-query rows are also honest rather than hero results: V3 is roughly
+3-12% slower across 1K/10K/50K. The representative 1R1W query remains a strong
+V3 path at about 0.33-0.36x V2 in the primary order.
+
+The full primary 102-row metric table is
+[`results/ecs-v2-v3-3.1.0-final-v2-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.0-final-v2-first/ecs-v2-v3-comparison.md);
+the reverse-order table is
+[`results/ecs-v2-v3-3.1.0-final-v3-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.0-final-v3-first/ecs-v2-v3-comparison.md).

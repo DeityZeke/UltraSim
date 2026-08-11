@@ -18,7 +18,10 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
     private static readonly QueryFamilySpec[] Families =
     {
+        new QueryFamilySpec(readCount: 1, writeCount: 0),
+        new QueryFamilySpec(readCount: 0, writeCount: 1),
         new QueryFamilySpec(readCount: 2, writeCount: 0),
+        new QueryFamilySpec(readCount: 3, writeCount: 0),
         new QueryFamilySpec(readCount: 2, writeCount: 1),
         new QueryFamilySpec(readCount: 1, writeCount: 2),
         new QueryFamilySpec(readCount: 3, writeCount: 1),
@@ -81,8 +84,103 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line();
         AppendWorldMethods(writer, family);
         writer.Line();
+        AppendScheduledSystemNodes(writer, family);
+        writer.Line();
         AppendFacadeMethods(writer, family);
         return writer.ToString();
+    }
+
+    private static void AppendScheduledSystemNodes(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line($"internal sealed class {family.Name}SystemNode<TSystem, {family.TypeParameters}, TJob> :");
+        writer.Indent();
+        writer.Line("ScheduledSystemNode<TSystem, TJob>");
+        writer.Unindent();
+        writer.Line($"where TSystem : class, ISystemRuntime<TJob>");
+        AppendComponentConstraints(writer, family);
+        writer.Line($"where TJob : struct, {family.ScheduledJobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("private readonly EcsWorld<NativeChunkArena> _world;");
+        writer.Line($"private readonly {family.PlanType}<NativeChunkArena, {family.TypeParameters}> _plan;");
+        writer.Line();
+        writer.Line($"internal {family.Name}SystemNode(SystemId id, SystemDefinition definition, TSystem runtime,");
+        writer.Indent();
+        writer.Line("int participants, EcsWorld<NativeChunkArena> world,");
+        writer.Line($"{family.PlanType}<NativeChunkArena, {family.TypeParameters}> plan)");
+        writer.Unindent();
+        writer.Line(": base(id, definition, runtime, participants)");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("_world = world;");
+        writer.Line("_plan = plan;");
+        writer.Close();
+        writer.Line();
+        writer.Line($"internal override SchedulerQueryShape GetShape() => _world.Get{family.Name}SchedulerShape(_plan);");
+        writer.Line($"internal override int BuildPartitions(in SchedulerQueryShape shape,");
+        writer.Indent();
+        writer.Line("global::System.Span<SchedulerChunkPartition> destination, int desiredPartitions) =>");
+        writer.Unindent();
+        writer.Indent();
+        writer.Line($"_world.Build{family.Name}SchedulerPartitions(_plan, shape, desiredPartitions, destination);");
+        writer.Unindent();
+        writer.Line();
+        writer.Line("internal override int ExecutePartition(int participant, in SchedulerChunkPartition partition,");
+        writer.Indent();
+        writer.Line("in SystemJobContext context)");
+        writer.Unindent();
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("ref TJob participantJob = ref GetParticipantJob(participant);");
+        if (family.WriteCount != 0)
+            writer.Line("ChangeVersion version = Publication.Acquire();");
+        writer.Line($"int rows = _world.Execute{family.Name}SchedulerPartition(");
+        writer.Indent();
+        writer.Line("_plan,");
+        writer.Line("partition,");
+        if (family.WriteCount != 0)
+            writer.Line("version,");
+        writer.Line("context,");
+        writer.Line("ref participantJob);");
+        writer.Unindent();
+        writer.Line("return rows;");
+        writer.Close();
+        writer.Close();
+
+        if (family.WriteCount == 0)
+            return;
+
+        writer.Line();
+        writer.Line($"internal sealed class Tracked{family.Name}SystemNode<TSystem, {family.TypeParameters}, TJob> :");
+        writer.Indent();
+        writer.Line("ScheduledSystemNode<TSystem, TJob>");
+        writer.Unindent();
+        writer.Line("where TSystem : class, ISystemRuntime<TJob>");
+        AppendComponentConstraints(writer, family);
+        writer.Line($"where TJob : struct, {family.ScheduledTrackedJobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("private readonly EcsWorld<NativeChunkArena> _world;");
+        writer.Line($"private readonly {family.PlanType}<NativeChunkArena, {family.TypeParameters}> _plan;");
+        writer.Line($"internal Tracked{family.Name}SystemNode(SystemId id, SystemDefinition definition, TSystem runtime,");
+        writer.Indent();
+        writer.Line("int participants, EcsWorld<NativeChunkArena> world,");
+        writer.Line($"{family.PlanType}<NativeChunkArena, {family.TypeParameters}> plan)");
+        writer.Unindent();
+        writer.Line(": base(id, definition, runtime, participants) { _world = world; _plan = plan; }");
+        writer.Line($"internal override SchedulerQueryShape GetShape() => _world.Get{family.Name}SchedulerShape(_plan);");
+        writer.Line($"internal override int BuildPartitions(in SchedulerQueryShape shape,");
+        writer.Indent();
+        writer.Line("global::System.Span<SchedulerChunkPartition> destination, int desiredPartitions) =>");
+        writer.Unindent();
+        writer.Indent();
+        writer.Line($"_world.Build{family.Name}SchedulerPartitions(_plan, shape, desiredPartitions, destination);");
+        writer.Unindent();
+        writer.Line("internal override int ExecutePartition(int participant, in SchedulerChunkPartition partition,");
+        writer.Indent();
+        writer.Line("in SystemJobContext context)");
+        writer.Unindent();
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("ref TJob job = ref GetParticipantJob(participant);");
+        writer.Line($"return _world.ExecuteTracked{family.Name}SchedulerPartition(_plan, partition, Publication, context, ref job);");
+        writer.Close();
+        writer.Close();
     }
 
     private static void AppendPublicJobContract(CodeWriter writer, QueryFamilySpec family)
@@ -94,6 +192,14 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line($"void Execute(in {family.ChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
 
+        writer.Line();
+        writer.Line($"/// <summary>Scheduler-aware generated chunk job with {family.Summary}.</summary>");
+        writer.Line($"public interface {family.ScheduledJobType}<{family.TypeParameters}>");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"void Execute(in SystemJobContext context, in {family.ChunkType}<{family.TypeParameters}> chunk);");
+        writer.Close();
+
         if (family.WriteCount == 0)
             return;
 
@@ -103,6 +209,14 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
         writer.Line($"void Execute(in {family.TrackedChunkType}<{family.TypeParameters}> chunk);");
+        writer.Close();
+
+        writer.Line();
+        writer.Line($"/// <summary>Scheduler-aware conditional-write chunk job with {family.Summary}.</summary>");
+        writer.Line($"public interface {family.ScheduledTrackedJobType}<{family.TypeParameters}>");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"void Execute(in SystemJobContext context, in {family.TrackedChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
     }
 
@@ -321,9 +435,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("global::System.ReadOnlySpan<uint> entityIndices,");
         foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
             writer.Line($"global::System.ReadOnlySpan<{slot.TypeName}> {slot.ComponentsParameter},");
-        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
-            writer.Line($"TrackedWritableComponentChunk<{slot.TypeName}> {slot.CamelName},");
+        AccessSlot[] writes = family.Slots.Where(static slot => slot.IsWrite).ToArray();
         AccessSlot[] reads = family.Slots.Where(static slot => !slot.IsWrite).ToArray();
+        for (int index = 0; index < writes.Length; index++)
+        {
+            bool isLast = reads.Length == 0 && index == writes.Length - 1;
+            writer.Line($"TrackedWritableComponentChunk<{writes[index].TypeName}> {writes[index].CamelName}{(isLast ? ")" : ",")}");
+        }
         for (int index = 0; index < reads.Length; index++)
         {
             string suffix = index == reads.Length - 1 ? ")" : ",";
@@ -431,10 +549,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             writer.Line($"throw new global::System.ArgumentOutOfRangeException(nameof({slot.ColumnParameter}));");
             writer.Unindent();
         }
-        writer.Line($"if ({BuildDistinctCondition(family, static slot => slot.ColumnParameter)})");
-        writer.Open(string.Empty, emitHeader: false);
-        writer.Line("throw new global::System.ArgumentException(\"Generated query columns must not alias.\");");
-        writer.Close();
+        if (family.Slots.Length > 1)
+        {
+            writer.Line($"if ({BuildDistinctCondition(family, static slot => slot.ColumnParameter)})");
+            writer.Open(string.Empty, emitHeader: false);
+            writer.Line("throw new global::System.ArgumentException(\"Generated query columns must not alias.\");");
+            writer.Close();
+        }
         writer.Line("Storage = storage;");
         for (int index = 0; index < family.Slots.Length; index++)
         {
@@ -505,10 +626,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Indent();
         writer.Line("throw new global::System.ArgumentException(\"Valid generated component IDs are required.\");");
         writer.Unindent();
-        writer.Line($"if ({BuildDistinctCondition(family, static slot => slot.ComponentIdParameter)})");
-        writer.Open(string.Empty, emitHeader: false);
-        writer.Line("throw new global::System.ArgumentException(\"Generated query access components must be distinct.\");");
-        writer.Close();
+        if (family.Slots.Length > 1)
+        {
+            writer.Line($"if ({BuildDistinctCondition(family, static slot => slot.ComponentIdParameter)})");
+            writer.Open(string.Empty, emitHeader: false);
+            writer.Line("throw new global::System.ArgumentException(\"Generated query access components must be distinct.\");");
+            writer.Close();
+        }
         writer.Line($"if ((({string.Join(" | ", family.Slots.Select(static slot => slot.FlagsParameter))}) & ComponentFlags.Tag) != 0)");
         writer.Indent();
         writer.Line("throw new global::System.ArgumentException(\"Data query columns cannot be storage-free tags.\");");
@@ -767,11 +891,248 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         AppendExecuteRangeMethod(writer, family);
         writer.Line();
         AppendPlanValidation(writer, family);
+        writer.Line();
+        AppendSchedulerExecutionMethods(writer, family);
         if (family.WriteCount != 0)
         {
             writer.Line();
             AppendTrackedExecutionBoundary(writer, family);
         }
+        writer.Close();
+    }
+
+    private static void AppendSchedulerExecutionMethods(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line($"internal SchedulerQueryShape Get{family.Name}SchedulerShape<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line($"{family.PlanType}<TArena, {family.TypeParameters}> plan)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"Validate{family.Name}QueryPlan(plan);");
+        writer.Line("int rows = 0;");
+        writer.Line("int chunks = 0;");
+        writer.Line($"global::System.ReadOnlySpan<{family.RouteType}<TArena>> routes = plan.Routes;");
+        writer.Open("for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)");
+        writer.Line("ArchetypeChunkStore<TArena> store = routes[routeIndex].Storage.Store;");
+        writer.Line("for (int chunkIndex = store.GetFirstOccupiedChunkIndex();");
+        writer.Indent();
+        writer.Line("chunkIndex >= 0;");
+        writer.Line("chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))");
+        writer.Unindent();
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("chunks++;");
+        writer.Line("rows = checked(rows + store.GetRowCount(unchecked((uint)chunkIndex)));");
+        writer.Close();
+        writer.Close();
+        writer.Line("return new SchedulerQueryShape(rows, chunks);");
+        writer.Close();
+        writer.Line();
+
+        writer.Line($"internal int Build{family.Name}SchedulerPartitions<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line($"{family.PlanType}<TArena, {family.TypeParameters}> plan,");
+        writer.Line("in SchedulerQueryShape shape,");
+        writer.Line("int desiredPartitions,");
+        writer.Line("global::System.Span<SchedulerChunkPartition> destination)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("if (desiredPartitions <= 0)");
+        writer.Indent();
+        writer.Line("throw new global::System.ArgumentOutOfRangeException(nameof(desiredPartitions));");
+        writer.Unindent();
+        writer.Line("if (shape.Chunks == 0)");
+        writer.Indent();
+        writer.Line("return 0;");
+        writer.Unindent();
+        writer.Line("int targetChunks = global::System.Math.Max(1, (shape.Chunks + desiredPartitions - 1) / desiredPartitions);");
+        writer.Line("int written = 0;");
+        writer.Line($"global::System.ReadOnlySpan<{family.RouteType}<TArena>> routes = plan.Routes;");
+        writer.Open("for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)");
+        writer.Line("ArchetypeChunkStore<TArena> store = routes[routeIndex].Storage.Store;");
+        writer.Line("int cursor = store.GetFirstOccupiedChunkIndex();");
+        writer.Open("while (cursor >= 0)");
+        writer.Line("if (written == destination.Length)");
+        writer.Indent();
+        writer.Line("throw new global::System.InvalidOperationException(\"Scheduler work-item capacity is exhausted.\");");
+        writer.Unindent();
+        writer.Line("int first = cursor;");
+        writer.Line("int chunkCount = 0;");
+        writer.Line("int rowCount = 0;");
+        writer.Open("while (cursor >= 0 && chunkCount < targetChunks)");
+        writer.Line("rowCount = checked(rowCount + store.GetRowCount(unchecked((uint)cursor)));");
+        writer.Line("chunkCount++;");
+        writer.Line("cursor = store.GetNextOccupiedChunkIndex(cursor);");
+        writer.Close();
+        writer.Line("destination[written++] = new SchedulerChunkPartition(routeIndex, first, chunkCount, rowCount);");
+        writer.Close();
+        writer.Close();
+        writer.Line("return written;");
+        writer.Close();
+        writer.Line();
+
+        writer.Line($"internal int Execute{family.Name}SchedulerPartition<{family.TypeParameters}, TJob>(");
+        writer.Indent();
+        writer.Line($"{family.PlanType}<TArena, {family.TypeParameters}> plan,");
+        writer.Line("in SchedulerChunkPartition partition,");
+        if (family.WriteCount != 0)
+            writer.Line("ChangeVersion writeVersion,");
+        writer.Line("in SystemJobContext context,");
+        writer.Line("ref TJob job)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Line($"where TJob : struct, {family.ScheduledJobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("global::System.Diagnostics.Debug.Assert(_isExecutingScope);");
+        writer.Line($"global::System.ReadOnlySpan<{family.RouteType}<TArena>> routes = plan.Routes;");
+        writer.Line("if (!partition.IsValid || unchecked((uint)partition.RouteIndex) >= unchecked((uint)routes.Length))");
+        writer.Indent();
+        writer.Line("throw new global::System.ArgumentException(\"The scheduler chunk partition is invalid.\", nameof(partition));");
+        writer.Unindent();
+        writer.Line($"ref readonly {family.RouteType}<TArena> route = ref routes[partition.RouteIndex];");
+        writer.Line("if (route.HasRowFilters)");
+        writer.Indent();
+        writer.Line("throw new global::System.InvalidOperationException(\"Scheduled public plans do not expose row-filter authoring.\");");
+        writer.Unindent();
+        writer.Line("ArchetypeChunkStore<TArena> store = route.Storage.Store;");
+        writer.Line("int chunkIndex = partition.FirstChunkIndex;");
+        writer.Line("int visitedRows = 0;");
+        writer.Open("for (int ordinal = 0; ordinal < partition.ChunkCount; ordinal++)");
+        writer.Line("if (chunkIndex < 0)");
+        writer.Indent();
+        writer.Line("throw new global::System.InvalidOperationException(\"A scheduler partition exceeded its occupied-chunk route.\");");
+        writer.Unindent();
+        writer.Line($"{family.BoundChunkType}<{family.TypeParameters}> bound =");
+        writer.Indent();
+        writer.Line($"store.GetBound{family.Name}ComponentChunk<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line("chunkIndex,");
+        foreach (AccessSlot slot in family.Slots)
+            writer.Line($"route.{slot.ColumnProperty},");
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            string suffix = index == family.Slots.Length - 1 ? ");" : ",";
+            writer.Line($"plan.{family.Slots[index].PlanIsEnableableProperty}{suffix}");
+        }
+        writer.Unindent();
+        writer.Unindent();
+        if (family.WriteCount != 0)
+        {
+            writer.Line("global::System.Diagnostics.Debug.Assert(writeVersion.IsValid);");
+            foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+                writer.Line($"store.StampDenseChangeVersion(bound.ChunkIndex, route.{slot.ColumnProperty}, writeVersion);");
+        }
+        writer.Line($"var chunk = new {family.ChunkType}<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line("Id,");
+        writer.Line("route.Storage.Id,");
+        writer.Line("bound.ChunkIndex,");
+        writer.Line("rowOffset: 0,");
+        writer.Line("bound.EntityIndices,");
+        foreach (AccessSlot slot in family.Slots)
+            writer.Line($"bound.{slot.ComponentsProperty},");
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            string suffix = index == family.Slots.Length - 1 ? ");" : ",";
+            writer.Line($"bound.{family.Slots[index].EnableProperty}{suffix}");
+        }
+        writer.Unindent();
+        writer.Line("job.Execute(in context, in chunk);");
+        writer.Line("visitedRows += chunk.Count;");
+        writer.Line("chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex);");
+        writer.Close();
+        writer.Line("return visitedRows;");
+        writer.Close();
+
+        if (family.WriteCount == 0)
+            return;
+
+        writer.Line();
+        writer.Line($"internal int ExecuteTracked{family.Name}SchedulerPartition<{family.TypeParameters}, TJob>(");
+        writer.Indent();
+        writer.Line($"{family.PlanType}<TArena, {family.TypeParameters}> plan,");
+        writer.Line("in SchedulerChunkPartition partition,");
+        writer.Line("SchedulerChangePublication publication,");
+        writer.Line("in SystemJobContext context,");
+        writer.Line("ref TJob job)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Line($"where TJob : struct, {family.ScheduledTrackedJobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("global::System.Diagnostics.Debug.Assert(_isExecutingScope);");
+        writer.Line($"global::System.ReadOnlySpan<{family.RouteType}<TArena>> routes = plan.Routes;");
+        writer.Line("if (!partition.IsValid || unchecked((uint)partition.RouteIndex) >= unchecked((uint)routes.Length))");
+        writer.Indent();
+        writer.Line("throw new global::System.ArgumentException(\"The scheduler chunk partition is invalid.\", nameof(partition));");
+        writer.Unindent();
+        writer.Line($"ref readonly {family.RouteType}<TArena> route = ref routes[partition.RouteIndex];");
+        writer.Line("if (route.HasRowFilters)");
+        writer.Indent();
+        writer.Line("throw new global::System.InvalidOperationException(\"Scheduled tracked plans do not expose row-filter authoring.\");");
+        writer.Unindent();
+        writer.Line("ArchetypeChunkStore<TArena> store = route.Storage.Store;");
+        writer.Line("int chunkIndex = partition.FirstChunkIndex;");
+        writer.Line("int visitedRows = 0;");
+        writer.Open("for (int ordinal = 0; ordinal < partition.ChunkCount; ordinal++)");
+        writer.Line($"{family.BoundChunkType}<{family.TypeParameters}> bound =");
+        writer.Indent();
+        writer.Line($"store.GetBound{family.Name}ComponentChunk<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line("chunkIndex,");
+        foreach (AccessSlot slot in family.Slots)
+            writer.Line($"route.{slot.ColumnProperty},");
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            string suffix = index == family.Slots.Length - 1 ? ");" : ",";
+            writer.Line($"plan.{family.Slots[index].PlanIsEnableableProperty}{suffix}");
+        }
+        writer.Unindent();
+        writer.Unindent();
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+        {
+            writer.Line($"bool {slot.CamelName}Stamped = false;");
+            writer.Line($"var tracked{slot.Name} = new TrackedWritableComponentChunk<{slot.TypeName}>(");
+            writer.Indent();
+            writer.Line("(EcsWorld<NativeChunkArena>)(object)this,");
+            writer.Line("(ArchetypeChunkStore<NativeChunkArena>)(object)store,");
+            writer.Line("bound.ChunkIndex,");
+            writer.Line($"route.{slot.ColumnProperty},");
+            writer.Line("rowOffset: 0,");
+            writer.Line($"bound.{slot.ComponentsProperty},");
+            writer.Line($"bound.{slot.EnableProperty},");
+            writer.Line("wholeChunk: true,");
+            writer.Line("publication,");
+            writer.Line($"ref {slot.CamelName}Stamped);");
+            writer.Unindent();
+        }
+        writer.Line($"var chunk = new {family.TrackedChunkType}<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line("Id,");
+        writer.Line("route.Storage.Id,");
+        writer.Line("bound.ChunkIndex,");
+        writer.Line("rowOffset: 0,");
+        writer.Line("bound.EntityIndices,");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+            writer.Line($"bound.{slot.ComponentsProperty},");
+        AccessSlot[] trackedWrites = family.Slots.Where(static slot => slot.IsWrite).ToArray();
+        AccessSlot[] readSlots = family.Slots.Where(static slot => !slot.IsWrite).ToArray();
+        for (int index = 0; index < trackedWrites.Length; index++)
+        {
+            string suffix = readSlots.Length == 0 && index == trackedWrites.Length - 1 ? ");" : ",";
+            writer.Line($"tracked{trackedWrites[index].Name}{suffix}");
+        }
+        for (int index = 0; index < readSlots.Length; index++)
+        {
+            string suffix = index == readSlots.Length - 1 ? ");" : ",";
+            writer.Line($"bound.{readSlots[index].EnableProperty}{suffix}");
+        }
+        writer.Unindent();
+        writer.Line("job.Execute(in context, in chunk);");
+        writer.Line("visitedRows += chunk.Count;");
+        writer.Line("chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex);");
+        writer.Close();
+        writer.Line("return visitedRows;");
         writer.Close();
     }
 
@@ -847,10 +1208,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             writer.Line($"nameof({slot.GeneratedComponentIdParameter}));");
             writer.Unindent();
         }
-        writer.Line($"if ({BuildDistinctCondition(family, static slot => slot.GeneratedComponentIdParameter)})");
-        writer.Open(string.Empty, emitHeader: false);
-        writer.Line("throw new global::System.ArgumentException(\"Generated query access components must be distinct.\");");
-        writer.Close();
+        if (family.Slots.Length > 1)
+        {
+            writer.Line($"if ({BuildDistinctCondition(family, static slot => slot.GeneratedComponentIdParameter)})");
+            writer.Open(string.Empty, emitHeader: false);
+            writer.Line("throw new global::System.ArgumentException(\"Generated query access components must be distinct.\");");
+            writer.Close();
+        }
         writer.Line($"if ({string.Join(" ||\n            ", family.Slots.Select(static slot => "filter.Excludes(" + slot.GeneratedComponentIdParameter + ")"))})");
         writer.Open(string.Empty, emitHeader: false);
         writer.Line("throw new global::System.ArgumentException(");
@@ -1216,6 +1580,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Unindent();
         writer.Close();
         writer.Line();
+        AppendScheduledRegistration(writer, family, tracked: false);
+        if (family.WriteCount != 0)
+        {
+            writer.Line();
+            AppendScheduledRegistration(writer, family, tracked: true);
+        }
+        writer.Line();
         AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
         writer.Line($"public int ExecuteJob<{family.TypeParameters}, TJob>(");
         writer.Indent();
@@ -1233,6 +1604,49 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             writer.Line();
             AppendTrackedFacadeExecution(writer, family);
         }
+        writer.Close();
+    }
+
+    private static void AppendScheduledRegistration(
+        CodeWriter writer,
+        QueryFamilySpec family,
+        bool tracked)
+    {
+        string prefix = tracked ? "Tracked" : string.Empty;
+        string methodPrefix = tracked ? "RegisterTracked" : "Register";
+        string jobType = tracked ? family.ScheduledTrackedJobType : family.ScheduledJobType;
+        writer.Line($"public SystemId {methodPrefix}{family.Name}System<{family.TypeParameters}, TSystem, TJob>(");
+        writer.Indent();
+        writer.Line("SystemDefinition definition,");
+        writer.Line($"in {family.JobPlanType}<{family.TypeParameters}> plan,");
+        writer.Line("TSystem runtime)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Line("where TSystem : class, ISystemRuntime<TJob>");
+        writer.Line($"where TJob : struct, {jobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("EnsureOwnerThread();");
+        writer.Line("SystemScheduler scheduler = GetSchedulerForRegistration();");
+        writer.Line($"{family.PlanType}<NativeChunkArena, {family.TypeParameters}> prepared = plan.GetPlan();");
+        writer.Line("if (prepared.WorldId != Id)");
+        writer.Indent();
+        writer.Line("throw new global::System.ArgumentException(\"The job plan belongs to a different world.\", nameof(plan));");
+        writer.Unindent();
+        writer.Line("SystemId id = scheduler.GetNextRegistrationId();");
+        writer.Line($"var node = new {prefix}{family.Name}SystemNode<TSystem, {family.TypeParameters}, TJob>(");
+        writer.Indent();
+        writer.Line("id, definition, runtime, scheduler.ExecutionConcurrency, _core, prepared);");
+        writer.Unindent();
+        AccessSlot[] reads = family.Slots.Where(static slot => !slot.IsWrite).ToArray();
+        AccessSlot[] writes = family.Slots.Where(static slot => slot.IsWrite).ToArray();
+        writer.Line($"global::System.Span<ComponentId> reads = stackalloc ComponentId[{reads.Length}];");
+        for (int index = 0; index < reads.Length; index++)
+            writer.Line($"reads[{index}] = prepared.{reads[index].ComponentIdProperty};");
+        writer.Line($"global::System.Span<ComponentId> writes = stackalloc ComponentId[{writes.Length}];");
+        for (int index = 0; index < writes.Length; index++)
+            writer.Line($"writes[{index}] = prepared.{writes[index].ComponentIdProperty};");
+        writer.Line("scheduler.RegisterNode(node, reads, writes);");
+        writer.Line("return id;");
         writer.Close();
     }
 
@@ -1307,9 +1721,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("bound.EntityIndices,");
         foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
             writer.Line($"bound.{slot.ComponentsProperty},");
-        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
-            writer.Line($"tracked{slot.Name},");
+        AccessSlot[] trackedWrites = family.Slots.Where(static slot => slot.IsWrite).ToArray();
         AccessSlot[] reads = family.Slots.Where(static slot => !slot.IsWrite).ToArray();
+        for (int index = 0; index < trackedWrites.Length; index++)
+        {
+            string suffix = reads.Length == 0 && index == trackedWrites.Length - 1 ? ");" : ",";
+            writer.Line($"tracked{trackedWrites[index].Name}{suffix}");
+        }
         for (int index = 0; index < reads.Length; index++)
         {
             string suffix = index == reads.Length - 1 ? ");" : ",";
@@ -2214,10 +2632,12 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
     {
         internal QueryFamilySpec(int readCount, int writeCount)
         {
-            if (readCount <= 0)
+            if (readCount < 0)
                 throw new ArgumentOutOfRangeException(nameof(readCount));
             if (writeCount < 0)
                 throw new ArgumentOutOfRangeException(nameof(writeCount));
+            if (readCount + writeCount == 0)
+                throw new ArgumentException("A generated family requires at least one access slot.");
 
             ReadCount = readCount;
             WriteCount = writeCount;
@@ -2243,13 +2663,20 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             {
                 if (WriteCount == 0)
                     return $"{ReadCount} read-only column{(ReadCount == 1 ? string.Empty : "s")}";
+                if (ReadCount == 0)
+                    return $"{WriteCount} write-only column{(WriteCount == 1 ? string.Empty : "s")}";
                 return $"{ReadCount} read column{(ReadCount == 1 ? string.Empty : "s")} and {WriteCount} write column{(WriteCount == 1 ? string.Empty : "s")}";
             }
         }
         internal string HintName => $"UltraSim.ECS.QueryFamilies.{ReadCount}R{WriteCount}W.g.cs";
         internal string JobType => "I" + Name + "ChunkJob";
         internal string TrackedJobType => "ITracked" + Name + "ChunkJob";
-        internal string VisitorType => "IComponentChunk" + Name + "Visitor";
+        internal string ScheduledJobType => "IScheduled" + Name + "ChunkJob";
+        internal string ScheduledTrackedJobType => "IScheduledTracked" + Name + "ChunkJob";
+        internal string VisitorType =>
+            (ReadCount == 1 && WriteCount == 0) || (ReadCount == 0 && WriteCount == 1)
+                ? "IGeneratedComponentChunk" + Name + "Visitor"
+                : "IComponentChunk" + Name + "Visitor";
         internal string ChunkType => Name + "ComponentChunk";
         internal string TrackedChunkType => "Tracked" + Name + "ComponentChunk";
         internal string BoundChunkType => "Bound" + Name + "ComponentChunk";

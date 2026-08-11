@@ -2,6 +2,11 @@
 
 Status: authoritative ECS 3.0.36 execution contract as of 2026-08-11.
 
+ECS 3.1.0 retains this direct serial contract unchanged and uses the same generated
+plan, route, stack-only chunk view, and constrained struct call as its scheduled
+chunk execution ABI. Scheduler orchestration is specified in
+[`ECS_SYSTEM_SCHEDULER.md`](ECS_SYSTEM_SCHEDULER.md).
+
 ECS 3.0.36 exposes the existing generated query machine through the public,
 engine-neutral `EcsWorld` facade. It is a serial owner-thread execution primitive,
 not a scheduler or a complete V2-equivalent system runtime.
@@ -184,7 +189,7 @@ Accepted artifacts are
 and
 `_Benchmarks/Baselines/ecs-v3-3.0.36-100k-mixed-soak-public-jobs-2026-08-11.json`.
 
-## Deliberately deferred system capabilities
+## Historical 3.0.36 boundary
 
 3.0.36 is not called a complete system surface. A V2-equivalent system still
 requires persistent runtime state, tick/delta context, optional full identity,
@@ -192,5 +197,7 @@ source-independent structural commands, manual invocation, cadence, stages,
 dependencies, range jobs, parallel workers, reductions, fault semantics,
 pre/post simulation barriers, persistence identity, controls, and profiling.
 
-Phase 5/3.1.0 should orchestrate this same chunk primitive rather than wrap it in
-a second hot execution framework.
+ECS 3.1.0 subsequently supplied those orchestration capabilities without wrapping
+this primitive in a second hot execution framework. Persistence serialization,
+public arbitrary filters, lifecycle event streams, system fusion, work stealing,
+and general reduction APIs remain later measured extensions.
