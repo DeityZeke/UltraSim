@@ -1629,6 +1629,76 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             out capacityExhausted);
     }
 
+    /// <summary>
+    /// Performs the cheap eligibility check for a route that may evacuate its
+    /// complete source population. Exact destination capacity is required so a
+    /// partial-prefix result retains the established grouped fallback semantics.
+    /// </summary>
+    internal bool TryGetWholeSourceTransitionPopulation(
+        Entity firstEntity,
+        PreparedArchetypeTransition transition,
+        out int population)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArgumentNullException.ThrowIfNull(transition);
+        if (transition.WorldId != Id ||
+            !_entities.TryGetLocation(firstEntity, out EntityLocation firstLocation) ||
+            firstLocation.ArchetypeId != transition.SourceId)
+        {
+            population = 0;
+            return false;
+        }
+
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
+        population = source.Store.Count;
+        return population > ArchetypeMigrator.MaximumBatchSize &&
+            destination.Store.CanReserveDefault(population);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool TryGetTransitionSourceRow(
+        Entity entity,
+        PreparedArchetypeTransition transition,
+        out ChunkRow row)
+    {
+        if (!_entities.TryGetLocation(entity, out EntityLocation location) ||
+            location.ArchetypeId != transition.SourceId)
+        {
+            row = ChunkRow.Invalid;
+            return false;
+        }
+
+        row = location.ChunkRow;
+        return true;
+    }
+
+    internal void TransitionWholeSourceBlock(
+        ReadOnlySpan<Entity> entities,
+        PreparedArchetypeTransition transition)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
+        ArchetypeMigrator.MigrateWholeSourceBlock(
+            _entities,
+            entities,
+            source,
+            destination,
+            transition.Transfers);
+    }
+
+    internal void CompleteWholeSourceTransition(
+        PreparedArchetypeTransition transition,
+        int expectedPopulation)
+    {
+        EnsureRuntimeMutationAllowed();
+        ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
+        if (source.Store.Count != expectedPopulation)
+            ThrowWorldInvariant("A whole-source transition changed occupancy before finalization.");
+        source.Store.ClearAllOccupiedRows();
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private PreparedArchetypeTransition GetPublicTransition(uint transitionId)
     {

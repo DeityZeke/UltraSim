@@ -23,6 +23,9 @@ and its exact same-build barrier-local/V29-style packed control lives at
 [`Baselines/ecs-v30-barrier-hole-reuse-2026-08-09.json`](Baselines/ecs-v30-barrier-hole-reuse-2026-08-09.json).
 The accepted V31 consolidation and expanded-catalog capture lives at
 [`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
+Under the three-field convention this is ECS `3.0.31`. The accepted `3.0.32`
+exact whole-source transition capture lives at
+[`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -639,6 +642,32 @@ production-to-packed penalty is therefore smaller than V30's same-host penalty,
 not a consolidation regression. Narrow 50% remained tied; wide 50% retained a
 material production win. Saved two-day-old absolute values are not substituted
 for same-build controls.
+
+ECS 3.0.32 is the first checkpoint under the three-field version convention.
+It validates an ordered homogeneous transition run that exactly covers its
+source, requires capacity for the entire destination, streams publication in the
+existing 256-row stack blocks, and clears source occupancy once. It adds no
+command-slot bytes and preserves record-order destination placement. Stale,
+duplicate, scattered, mixed-source, and partial-capacity candidates fall back
+before mutation.
+
+Against the same full-suite 3.0.31 control, the 100,000-row grouped playback case
+fell from `90.906` to `26.522 ns/entity` (70.8%), wide retained playback from
+`99.997` to `28.223` (71.8%), and end-to-end transition from `94.586` to
+`30.998` (67.2%). The scattered-source grouped/scalar pair remained effectively
+tied within its process, as required for a conservative fallback. All 129 rows
+continued to report zero timed managed allocation.
+
+The isolated accepted V2/V3 capture and reversed-order verification each contain
+96 comparable rows, zero canonical mismatches, and 15 explicit unsupported rows.
+At 50,000 entities, accepted/reversed V3 add playback measured
+`43.063/45.183 ns/entity`, remove playback `43.252/44.358`, and add/remove
+round trip `50.403/50.435`. Their 3.0.31 baselines were `77.478`, `78.865`, and
+`85.650`, so the V3 improvements are approximately 44%, 44%, and 41%. Frozen V2
+still measured about `19.9`, `16.2`, and `19.6 ns/entity`; 3.0.32 closes a large
+part of the transition gap but does not claim parity. V3 allocates zero timed
+bytes in these rows while V2 allocates roughly 2.43 MB, 0.81 MB, and 6.78 MB per
+50,000-entity iteration respectively.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

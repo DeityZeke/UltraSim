@@ -4,7 +4,7 @@ using UltraSim.ECS.V3ComparisonAdapter;
 AdapterOptions options = AdapterOptions.Parse(args, "v3-ecs-comparison.json");
 ComparisonRunReport report = ComparisonRunner.Run(
     generation: "V3",
-    kernelProfile: "ecs-next-phase1-structural-consolidation-v31",
+    kernelProfile: EcsKernelVersion.SemanticProfile,
     scenarios: V3ScenarioFactory.CreateAll(),
     options: options.RunOptions);
 ComparisonRunner.WriteJson(report, options.OutputPath);

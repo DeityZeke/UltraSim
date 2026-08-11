@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, current checkpoint captured 2026-08-10
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.32 checkpoint captured 2026-08-10
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -103,10 +103,10 @@ Build and run the primary order:
 dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --output-dir=_Benchmarks/results/ecs-v2-v3
 ```
 
-Compare a future capture with the accepted baseline:
+Compare a future capture with the current accepted baseline:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-v31-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.32-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
@@ -119,8 +119,10 @@ while state, descriptor, and measurement-policy mismatches suppress ratios.
 
 The original accepted artifact is
 [`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
-The current V31 checkpoint artifact is
+The 3.0.31 consolidation artifact is
 [`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
+The current 3.0.32 artifact is
+[`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -181,7 +183,7 @@ The reversed-order ratios were materially consistent for the large gaps. Small
 differences under roughly ten percent remain noise candidates and require more
 isolated repetitions or hardware counters before becoming optimization claims.
 
-## V31 consolidation checkpoint
+## 3.0.31 consolidation checkpoint (historical V31)
 
 The V31 primary and reversed-order captures each produced 96 comparable rows,
 zero state mismatches, 15 explicit unsupported rows, and zero V3 timed managed
@@ -208,6 +210,30 @@ while requiring the frozen V2 profile and all runtime/measurement settings to
 remain equal. Baseline and current V2/V3 profile names are printed in every
 regression report, eliminating the previous misleading retention of a v27 label.
 
+## 3.0.32 exact whole-source transition checkpoint
+
+The production transition planner now recognizes an ordered homogeneous route
+that contains the complete source population, exceeds the 256-row execution
+block, and has enough destination capacity for an all-or-fallback decision. It
+validates the complete route before mutation, publishes destination rows in
+record order through bounded blocks, then resets source occupancy once. All
+conflict, scattered-order, and partial-capacity cases retain the existing grouped
+path.
+
+Both process orders produced 96 comparable rows, zero canonical mismatches, 15
+unsupported rows, and zero V3 timed managed allocation. At 50,000 entities:
+
+| Scenario | 3.0.31 V3 ns/op | 3.0.32 V3 accepted/reverse | V2 accepted/reverse | Result |
+| --- | ---: | ---: | ---: | --- |
+| Add-default playback | 77.478 | 43.063 / 45.183 | 19.969 / 19.884 | V3 about 42-44% faster than 3.0.31; still 2.2-2.3x V2 |
+| Remove playback | 78.865 | 43.252 / 44.358 | 16.279 / 16.156 | V3 about 44-45% faster; still 2.7x V2 |
+| Add/remove round trip | 85.650 | 50.403 / 50.435 | 19.694 / 19.563 | V3 about 41% faster; still 2.6x V2 |
+
+The gap reduction is attributable to removing repeated source removal and donor
+repair for exact evacuation routes. It does not generalize to partial-source,
+scattered, conflicting, or insufficient-capacity transitions, and the report
+does not present it as a universal structural speedup.
+
 ## What this baseline says to optimize next
 
 The adapter changes the optimization discussion from speculation to named
@@ -223,12 +249,12 @@ regression targets:
    ns/destroy`; donor-tail gating reduced but did not justify the complexity, so
    the partial path was removed. A future sparse algorithm must group by source
    chunk and prove a crossover before landing.
-3. Transition compaction currently works on fixed 256-entity prefixes and only
-   takes the donor-tail plan when that prefix contains the current tail. A large
-   ascending homogeneous route therefore leaves most blocks on scalar source
-   removal. Route-level planning across blocks is the natural continuation of
-   v27, with exact history, conflict, capacity-prefix, and rollback differential
-   tests before timing.
+3. ECS 3.0.32 removes the fixed-block source-removal horizon only for an exact
+   complete-source transition with fully preflighted destination capacity.
+   Partial-source and exact packed-suffix routes still plan in 256-row prefixes.
+   The next structural optimizer must be genuinely source-chunk-aware, preserve
+   partial-capacity record-order semantics, and prove its crossover against the
+   scalar and grouped controls before increasing the strategy set.
 4. Fixed command recording writes and validates much richer per-command state
    than V2's block-copied lists. Consider bounded batch descriptors or a compact
    fixed target arena so span commands amortize validation and phase linkage

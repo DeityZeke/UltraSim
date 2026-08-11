@@ -57,3 +57,11 @@ unsupported rows, reports the truthful
 `ecs-next-phase1-structural-consolidation-v31` profile, and allocates zero timed
 managed bytes in every V3 row. A reversed-order verification remains in
 `_Benchmarks/results/ecs-v2-v3-v31-consolidation-reverse`.
+
+`ecs-v2-v3-3.0.32-2026-08-10.json` is the first accepted artifact using the
+three-field ECS version convention. Its V3 profile is
+`ecs-3.0.32-exact-whole-source-transitions`. It retains the 96 comparable rows,
+zero canonical mismatches, 15 explicit unsupported rows, and zero V3 timed
+managed allocation while materially reducing exact complete-source add/remove
+transition cost. The reversed-order verification remains in
+`_Benchmarks/results/ecs-v2-v3-3.0.32-reverse`.

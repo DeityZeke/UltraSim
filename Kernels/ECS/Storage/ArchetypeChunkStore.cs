@@ -75,6 +75,19 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
 
     internal long MaximumRows => (long)_chunks.Length * _layout.RowCapacity;
 
+    /// <summary>
+    /// Reports whether an append-only reservation can complete without a
+    /// partial prefix. Stores own their arenas exclusively and retain acquired
+    /// empty chunks, so steady-state row capacity is exact and immutable.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool CanReserveDefault(int requestedCount)
+    {
+        ThrowIfDisposed();
+        return requestedCount >= 0 &&
+            requestedCount <= MaximumRows - _entityCount;
+    }
+
     internal bool IsDisposed => _disposed;
 
     internal long ChangeVersionMetadataBytes => checked((long)_changeVersions.Length * sizeof(ulong));

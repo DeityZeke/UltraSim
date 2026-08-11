@@ -308,9 +308,14 @@ overhead as route entropy and archetype fragmentation rise.
 
 Treat the current eight-command grouping threshold as a measured-policy
 candidate, not a constant of nature. Sweep homogeneous run lengths of 1, 2, 4,
-8, 16, 32, 64, 128, and 256 for narrow, normal, and wide transitions, with and
-without exact-row history. Select the crossover from repeated isolated evidence;
-tests must keep both sides of the selected boundary scalar-equivalent.
+8, 16, 32, 64, 128, 256, 257, 512, 1K, 10K, and 100K for narrow, normal, and
+wide transitions, with and without exact-row history. Cross the post-256 cases
+with exact whole-source, exact packed suffix, dense partial-source, scattered
+source, destination-full, and destination-partial-capacity shapes. Report the
+fraction of source rows covered, blocks streamed, scalar donor removals avoided,
+source resets, and failed exact-plan candidates. Select each crossover from
+repeated isolated evidence; tests must keep both sides of the selected boundary
+scalar-equivalent.
 
 Every structural benchmark should validate a full canonical state hash outside
 the timed region in development runs. It must include living entities,

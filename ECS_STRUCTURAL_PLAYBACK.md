@@ -1,6 +1,9 @@
 # ECS Next Structural Playback
 
-Status: authoritative V31 structural-playback architecture after the 2026-08-10 consolidation checkpoint.
+Status: authoritative ECS 3.0.32 structural-playback architecture as of 2026-08-10.
+
+The project version convention is defined in
+[`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.
 
 This document describes the current runtime. Version-by-version measurements and
 failed experiments belong in [`_Benchmarks/README.md`](_Benchmarks/README.md),
@@ -55,7 +58,7 @@ There are exactly three modes:
 | Mode | Purpose | May use temporary holes |
 | --- | --- | --- |
 | Production | Shipping phase-indexed executor and adaptive physical strategies | Yes |
-| Packed oracle | Same phase-indexed executor with V30 row reuse disabled | No |
+| Packed oracle | Same phase-indexed executor with barrier-local row reuse disabled | No |
 | Scalar oracle | Five-pass semantic reference used by tests and benchmarks | No |
 
 The oracles are controls, not alternative public APIs. Adding another production
@@ -71,6 +74,7 @@ primitive.
 | Exact ordered packed suffix destroy, at least 32 commands | Validate/shrink the physical tail and retire slots in record order | No surviving donor must move |
 | Balanced same-archetype destroy/create, row width at least 64 bytes | Retire into barrier-local holes, initialize creates into those rows, finalize leftovers | Avoid wide donor relocation without exposing sparse queries |
 | Other live destroys | Scalar packed removal with trusted donor/location commit | Preserves record-order conflict behavior and avoids speculative planner cost |
+| Exact ordered transition evacuating a complete source, more than 256 commands, with full destination capacity | Validate the entire route, stream destination publication in 256-row blocks, reset the source once | Preserve bounded scratch and record order while eliminating per-block source removal/compaction |
 | Same prepared transition run, at least 8 commands | 256-entity bounded grouped execution | Amortize route, destination, copy, and compaction work |
 | Short or high-entropy transition run | Scalar prepared transition | Grouping overhead is not justified |
 
@@ -132,7 +136,7 @@ does not allocate managed memory after warmup.
 
 ## Consolidation rules
 
-The V31 checkpoint intentionally did not redesign the cold capacity planner,
+The 3.0.31 consolidation checkpoint intentionally did not redesign the cold capacity planner,
 change-tracking representation, generated query families, or public facade API. The
 audit found no evidence that those changes would simplify the hot structural
 machine today.
@@ -166,7 +170,7 @@ Every strategy change must frequently run:
 - warmed zero-managed-allocation loops;
 - canonical V2/V3 final-state comparison wherever contracts overlap.
 
-The balanced-wide comparison added at V31 found that V2 deferred default creation
+The balanced-wide comparison added at 3.0.31 found that V2 deferred default creation
 can expose stale donor-row payload after sparse batch destruction. Its performance
 row is therefore explicitly provisional: survivor bytes, liveness, component
 presence, and replacement lifecycle are canonical; replacement payload is
@@ -179,7 +183,8 @@ them.
 
 Natural future work includes per-worker fixed command arenas, deterministic worker
 merge, separated-run route grouping, typed add payloads, prefab expansion,
-lifecycle publication, and tick budgets. Route-level planning beyond 256-command
-execution blocks and source-chunk density strategies remain experiments until the
-shared comparison shows a stable win across entropy, locality, width, conflict,
-history, and evacuation sweeps.
+lifecycle publication, and tick budgets. Exact whole-source transition routes now
+plan beyond the 256-command execution block without enlarging scratch. General
+route-level source planning, exact suffix transitions, and source-chunk density
+strategies remain experiments until the shared comparison shows a stable win
+across entropy, locality, width, conflict, history, and evacuation sweeps.

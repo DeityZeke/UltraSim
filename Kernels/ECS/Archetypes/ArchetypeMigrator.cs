@@ -231,6 +231,87 @@ internal static class ArchetypeMigrator
         return migrated;
     }
 
+    /// <summary>
+    /// Streams one validated block of an exact whole-source route into its
+    /// destination without removing source rows. The route coordinator clears
+    /// the complete source store once every block has published in record
+    /// order. This keeps scratch bounded while removing the 256-row compaction
+    /// horizon from whole-archetype transitions.
+    /// </summary>
+    internal static void MigrateWholeSourceBlock<TArena>(
+        EntityPool entityPool,
+        ReadOnlySpan<Entity> entities,
+        ArchetypeStorage<TArena> source,
+        ArchetypeStorage<TArena> destination,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers)
+        where TArena : class, IChunkArenaBackend
+    {
+        ArgumentNullException.ThrowIfNull(entityPool);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(destination);
+        if (entities.IsEmpty || entities.Length > MaximumBatchSize)
+            throw new ArgumentOutOfRangeException(nameof(entities));
+
+        Span<ChunkRow> sourceRows = stackalloc ChunkRow[MaximumBatchSize];
+        if (!TryPrepareContiguousSourcePrefix(
+                entityPool,
+                entities,
+                source.Id,
+                sourceRows[..entities.Length]))
+        {
+            ThrowMigrationInvariant(
+                "A validated whole-source transition block lost its contiguous source order.");
+        }
+
+        Span<ChunkRow> destinationRows = stackalloc ChunkRow[MaximumBatchSize];
+        int reserved = destination.Store.ReserveDefault(
+            entities.Length,
+            destinationRows[..entities.Length]);
+        if (reserved != entities.Length)
+        {
+            RollBackAnonymousDestinationTail(
+                destination.Store,
+                destinationRows,
+                first: 0,
+                end: reserved);
+            ThrowMigrationInvariant(
+                "A capacity-preflighted whole-source transition could not reserve its destination block.");
+        }
+
+        try
+        {
+            source.Store.CopyColumnsToReservedRuns(
+                sourceRows[..entities.Length],
+                destination.Store,
+                destinationRows[..entities.Length],
+                entities,
+                transfers);
+        }
+        catch
+        {
+            ClearAndRollBackAnonymousDestinationTail(
+                destination.Store,
+                destinationRows[..entities.Length],
+                first: 0);
+            throw;
+        }
+
+        if (!entityPool.TryReplaceLocations(
+                entities,
+                source.Id,
+                sourceRows[..entities.Length],
+                destination.Id,
+                destinationRows[..entities.Length]))
+        {
+            ClearAndRollBackAnonymousDestinationTail(
+                destination.Store,
+                destinationRows[..entities.Length],
+                first: 0);
+            ThrowMigrationInvariant(
+                "A validated whole-source transition block rejected destination publication.");
+        }
+    }
+
     private static bool TryPrepareContiguousSourcePrefix(
         EntityPool entityPool,
         ReadOnlySpan<Entity> entities,

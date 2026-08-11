@@ -119,6 +119,8 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_UnbalancedWideChurnFallsBackWithoutMarkers), PublicEcsWorld_UnbalancedWideChurnFallsBackWithoutMarkers);
         Run(nameof(PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes), PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes);
         Run(nameof(PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_ExactWholeSourceTransitionMatchesScalarOracle), PublicEcsWorld_ExactWholeSourceTransitionMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_WholeSourceTransitionCapacityFallbackMatchesScalarOracle), PublicEcsWorld_WholeSourceTransitionCapacityFallbackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
         Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
         Run(nameof(PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes);
@@ -4554,6 +4556,163 @@ internal static class EcsPrimitiveTests
         }
     }
 
+    private static void PublicEcsWorld_ExactWholeSourceTransitionMatchesScalarOracle()
+    {
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize * 4 + 17;
+        using var planned = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 8);
+        using var scalar = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 8);
+        var plannedEntities = new Entity[entityCount];
+        var scalarEntities = new Entity[entityCount];
+        for (int index = 0; index < entityCount; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutEnableLong
+            {
+                Value = unchecked((index * 1_000_003L) ^ 0x5A17_31L),
+            };
+            Assert.True(planned.World.TryCreate(
+                planned.Source,
+                planned.EnableLookup,
+                value,
+                out plannedEntities[index]));
+            Assert.True(scalar.World.TryCreate(
+                scalar.Source,
+                scalar.EnableLookup,
+                value,
+                out scalarEntities[index]));
+            bool enabled = (index & 3) != 1;
+            Assert.True(planned.World.TrySetEnabled(
+                plannedEntities[index],
+                planned.EnableLookup,
+                enabled));
+            Assert.True(scalar.World.TrySetEnabled(
+                scalarEntities[index],
+                scalar.EnableLookup,
+                enabled));
+        }
+
+        StructuralCommandBuffer plannedCommands = planned.World.StructuralCommands;
+        StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
+        plannedCommands.EnqueueTransition(plannedEntities, planned.SourceToDestination);
+        scalarCommands.EnqueueTransition(scalarEntities, scalar.SourceToDestination);
+        StructuralPlaybackResult plannedForward = planned.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarForward =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(plannedForward, scalarForward);
+
+        for (int index = 0; index < entityCount; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                planned,
+                plannedEntities[index],
+                scalar,
+                scalarEntities[index]);
+        }
+
+        // Run back through retained empty chunks as a separate ordering proof.
+        plannedCommands.EnqueueTransition(plannedEntities, planned.DestinationToSource);
+        scalarCommands.EnqueueTransition(scalarEntities, scalar.DestinationToSource);
+        StructuralPlaybackResult plannedBackward = planned.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarBackward =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(plannedBackward, scalarBackward);
+        for (int index = 0; index < entityCount; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                planned,
+                plannedEntities[index],
+                scalar,
+                scalarEntities[index]);
+        }
+    }
+
+    private static void PublicEcsWorld_WholeSourceTransitionCapacityFallbackMatchesScalarOracle()
+    {
+        const int releasedDestinationRows = 73;
+        const int entityCapacity = 10_000;
+        const int commandCapacity = 4_096;
+        using var grouped = new PublicWorldFixture(
+            entityCapacity,
+            commandCapacity,
+            maximumChunks: 4);
+        using var scalar = new PublicWorldFixture(
+            entityCapacity,
+            commandCapacity,
+            maximumChunks: 4);
+        var groupedSource = new List<Entity>();
+        var scalarSource = new List<Entity>();
+        while (true)
+        {
+            bool groupedCreated = grouped.World.TryCreate(
+                grouped.Source,
+                out Entity groupedEntity);
+            bool scalarCreated = scalar.World.TryCreate(
+                scalar.Source,
+                out Entity scalarEntity);
+            Assert.Equal(groupedCreated, scalarCreated);
+            if (!groupedCreated)
+                break;
+            groupedSource.Add(groupedEntity);
+            scalarSource.Add(scalarEntity);
+        }
+        Assert.True(groupedSource.Count > ArchetypeMigrator.MaximumBatchSize);
+
+        var groupedDestination = new List<Entity>();
+        var scalarDestination = new List<Entity>();
+        while (true)
+        {
+            bool groupedCreated = grouped.World.TryCreate(
+                grouped.Destination,
+                out Entity groupedEntity);
+            bool scalarCreated = scalar.World.TryCreate(
+                scalar.Destination,
+                out Entity scalarEntity);
+            Assert.Equal(groupedCreated, scalarCreated);
+            if (!groupedCreated)
+                break;
+            groupedDestination.Add(groupedEntity);
+            scalarDestination.Add(scalarEntity);
+        }
+        Assert.True(groupedDestination.Count > releasedDestinationRows);
+        for (int index = 0; index < releasedDestinationRows; index++)
+        {
+            int destinationIndex = groupedDestination.Count - 1 - index;
+            Assert.True(grouped.World.TryDestroy(groupedDestination[destinationIndex]));
+            Assert.True(scalar.World.TryDestroy(scalarDestination[destinationIndex]));
+        }
+
+        StructuralCommandBuffer groupedCommands = grouped.World.StructuralCommands;
+        StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
+        groupedCommands.EnqueueTransition(
+            CollectionsMarshal.AsSpan(groupedSource),
+            grouped.SourceToDestination);
+        scalarCommands.EnqueueTransition(
+            CollectionsMarshal.AsSpan(scalarSource),
+            scalar.SourceToDestination);
+        StructuralPlaybackResult groupedResult = grouped.World.PlaybackStructuralCommands();
+        StructuralPlaybackResult scalarResult =
+            scalar.World.PlaybackStructuralCommandsScalarOracle();
+        AssertPlaybackResultsEqual(groupedResult, scalarResult);
+        Assert.Equal(releasedDestinationRows, groupedResult.AddedCount);
+        Assert.Equal(
+            groupedSource.Count - releasedDestinationRows,
+            groupedResult.RejectedTransitionCount);
+        Assert.Equal(grouped.World.AliveCount, scalar.World.AliveCount);
+        for (int index = 0; index < groupedSource.Count; index++)
+        {
+            AssertLogicalEntitiesEqual(
+                grouped,
+                groupedSource[index],
+                scalar,
+                scalarSource[index]);
+        }
+    }
+
     private static void PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle()
     {
         RunGroupedWholeDestroyDifferential();
@@ -5467,11 +5626,12 @@ internal static class EcsPrimitiveTests
 
     private static void PublicEcsWorld_WarmedGroupedTransitionAllocatesZeroManagedBytes()
     {
-        const int entityCount = ArchetypeMigrator.MaximumBatchSize;
-        const int rounds = 1_000;
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize * 4;
+        const int rounds = 250;
         using var fixture = new PublicWorldFixture(
             entityCapacity: entityCount,
-            structuralCommandCapacity: entityCount);
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 8);
         var entities = new Entity[entityCount];
         for (int index = 0; index < entities.Length; index++)
             Assert.True(fixture.World.TryCreate(fixture.Source, out entities[index]));

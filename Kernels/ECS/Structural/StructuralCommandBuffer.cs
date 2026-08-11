@@ -364,8 +364,8 @@ public sealed class StructuralCommandBuffer
         PlaybackCore(world, StructuralPlaybackExecutor.Production);
 
     /// <summary>
-    /// Phase-indexed packed reference retained to isolate the incremental V30
-    /// hole-reuse benefit from executor gains already present in V29.
+    /// Phase-indexed packed reference retained to isolate barrier-local row
+    /// reuse from the otherwise identical production executor.
     /// </summary>
     internal StructuralPlaybackResult PlaybackPhaseIndexedPackedOracle(
         EcsWorld<NativeChunkArena> world) =>
@@ -940,6 +940,17 @@ public sealed class StructuralCommandBuffer
 
             PreparedArchetypeTransition transition =
                 world.GetPublicTransitionForPlayback(transitionId, expectedPhase);
+            if (TryExecuteExactWholeSourceTransitionRun(
+                    world,
+                    commandCount,
+                    transitionId,
+                    transition,
+                    ref link,
+                    ref applied))
+            {
+                continue;
+            }
+
             int batchCount = 0;
             bool destinationExhausted = false;
             while (link != 0)
@@ -990,6 +1001,89 @@ public sealed class StructuralCommandBuffer
         }
     }
 
+    /// <summary>
+    /// Removes the fixed-block planning horizon when one homogeneous route is
+    /// the complete, ordered source population. Validation and capacity proof
+    /// finish before mutation; destination publication remains record ordered
+    /// in bounded blocks and source occupancy is reset exactly once.
+    /// </summary>
+    private bool TryExecuteExactWholeSourceTransitionRun(
+        EcsWorld<NativeChunkArena> world,
+        int commandCount,
+        uint transitionId,
+        PreparedArchetypeTransition transition,
+        ref int link,
+        ref int applied)
+    {
+        int firstCommandIndex = link - 1;
+        StructuralCommandRecord first = _commands[firstCommandIndex];
+        if (!TryResolveTarget(first, commandCount, out Entity firstEntity, out _) ||
+            !world.TryGetWholeSourceTransitionPopulation(
+                firstEntity,
+                transition,
+                out int population))
+        {
+            return false;
+        }
+
+        int scanLink = link;
+        ChunkRow previous = ChunkRow.Invalid;
+        int chunkDirection = 0;
+        for (int index = 0; index < population; index++)
+        {
+            if (scanLink == 0)
+                return false;
+            int commandIndex = scanLink - 1;
+            StructuralCommandRecord command = _commands[commandIndex];
+            if (command.Argument != transitionId ||
+                !TryResolveTarget(command, commandCount, out Entity entity, out _) ||
+                !world.TryGetTransitionSourceRow(entity, transition, out ChunkRow row) ||
+                !IsStrictOrderedTransitionRow(
+                    previous,
+                    row,
+                    ref chunkDirection,
+                    index == 0))
+            {
+                return false;
+            }
+
+            // Create results and transition commands occupy disjoint record
+            // slots, so the existing per-command entity array doubles as
+            // allocation-free route scratch without widening the arena.
+            _createdEntities[commandIndex] = entity;
+            previous = row;
+            scanLink = _nextCommand[commandIndex];
+        }
+
+        if (scanLink != 0 &&
+            _commands[scanLink - 1].Argument == transitionId)
+        {
+            return false;
+        }
+
+        Span<Entity> batch = stackalloc Entity[ArchetypeMigrator.MaximumBatchSize];
+        int executeLink = link;
+        int remaining = population;
+        while (remaining != 0)
+        {
+            int batchCount = Math.Min(remaining, batch.Length);
+            for (int index = 0; index < batchCount; index++)
+            {
+                int commandIndex = executeLink - 1;
+                batch[index] = _createdEntities[commandIndex];
+                executeLink = _nextCommand[commandIndex];
+            }
+
+            world.TransitionWholeSourceBlock(batch[..batchCount], transition);
+            remaining -= batchCount;
+        }
+
+        world.CompleteWholeSourceTransition(transition, population);
+        link = scanLink;
+        applied = checked(applied + population);
+        return true;
+    }
+
     private TransitionRunPlan AnalyzeTransitionRun(int link, uint transitionId)
     {
         int count = 0;
@@ -1020,6 +1114,26 @@ public sealed class StructuralCommandBuffer
         applied = checked(applied + migrated);
         rejected = checked(rejected + batchCount - migrated);
         destinationExhausted = batchCapacityExhausted;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsStrictOrderedTransitionRow(
+        ChunkRow previous,
+        ChunkRow current,
+        ref int chunkDirection,
+        bool first)
+    {
+        if (first)
+            return current.IsValid;
+        if (current.ChunkIndex == previous.ChunkIndex)
+            return current.Row == previous.Row + 1;
+        if (current.Row != 0)
+            return false;
+
+        int direction = current.ChunkIndex > previous.ChunkIndex ? 1 : -1;
+        if (chunkDirection == 0)
+            chunkDirection = direction;
+        return direction == chunkDirection;
     }
 
     private void ExecuteScalarTransitionPass(
