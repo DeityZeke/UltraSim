@@ -1,3 +1,4 @@
+using UltraSim.ECS;
 using UltraSim.ECS.Comparison;
 using UltraSim.ECS.V3ComparisonAdapter;
 

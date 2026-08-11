@@ -331,6 +331,74 @@ internal sealed class EntityPool
     }
 
     /// <summary>
+    /// Copies physical rows for a route whose complete entity/location set was
+    /// validated by the single-owner structural coordinator before mutation.
+    /// Release execution performs only the location-table read needed by the
+    /// storage copy; debug builds retain the full liveness and source proof.
+    /// </summary>
+    internal void CopyValidatedLocatedRows(
+        ReadOnlySpan<Entity> entities,
+        ArchetypeId expectedArchetypeId,
+        Span<ChunkRow> rows)
+    {
+        if (rows.Length != entities.Length)
+            throw new ArgumentException("Entity and row batch lengths must match.");
+        if (!expectedArchetypeId.IsValid)
+            throw new ArgumentException("A validated location read requires a valid archetype ID.");
+
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            int entityIndex = unchecked((int)entity.Index);
+            System.Diagnostics.Debug.Assert(
+                entity.World == _worldId &&
+                entityIndex >= 0 &&
+                entityIndex < _nextUnusedIndex,
+                "A trusted structural source-row read received an invalid entity identity.");
+            EntityLocation location = _locations[entityIndex];
+            System.Diagnostics.Debug.Assert(
+                _states[entityIndex] == SlotAlive &&
+                _generations[entityIndex] == entity.Generation &&
+                location.ArchetypeId == expectedArchetypeId &&
+                location.ChunkRow.IsValid,
+                "A trusted structural source-row read received an invalid entity.");
+            rows[index] = location.ChunkRow;
+        }
+    }
+
+    /// <summary>
+    /// Publishes replacement locations for a complete route already validated
+    /// before mutation. This is intentionally narrower than
+    /// <see cref="TryReplaceLocations"/>: rejection is no longer possible after
+    /// destination data has been copied, and any violated proof is a terminal
+    /// structural invariant rather than an expected public failure.
+    /// </summary>
+    internal void PublishValidatedLocationReplacements(
+        ReadOnlySpan<Entity> entities,
+        ArchetypeId expectedArchetypeId,
+        ReadOnlySpan<ChunkRow> expectedRows,
+        ArchetypeId replacementArchetypeId,
+        ReadOnlySpan<ChunkRow> replacementRows)
+    {
+        if (entities.Length != expectedRows.Length || entities.Length != replacementRows.Length)
+            throw new ArgumentException("Entity and location batch lengths must match.");
+        if (!expectedArchetypeId.IsValid || !replacementArchetypeId.IsValid)
+            throw new ArgumentException("Validated location replacement requires valid archetype IDs.");
+
+        AssertValidatedLocationReplacements(
+            entities,
+            expectedArchetypeId,
+            expectedRows,
+            replacementArchetypeId,
+            replacementRows);
+        for (int index = 0; index < entities.Length; index++)
+        {
+            _locations[entities[index].Index] =
+                new EntityLocation(replacementArchetypeId, replacementRows[index]);
+        }
+    }
+
+    /// <summary>
     /// Applies a trusted row-store swap relocation to the moved live entity.
     /// Any mismatch is an internal structural invariant failure, not a stale
     /// public-handle result.
@@ -408,6 +476,34 @@ internal sealed class EntityPool
         _generations[entityIndex] = nextGeneration;
         _states[entityIndex] = SlotAvailable;
         _freeIndices[_freeCount++] = entityIndex;
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertValidatedLocationReplacements(
+        ReadOnlySpan<Entity> entities,
+        ArchetypeId expectedArchetypeId,
+        ReadOnlySpan<ChunkRow> expectedRows,
+        ArchetypeId replacementArchetypeId,
+        ReadOnlySpan<ChunkRow> replacementRows)
+    {
+        System.Diagnostics.Debug.Assert(
+            expectedArchetypeId != replacementArchetypeId,
+            "A trusted structural location replacement must change archetypes.");
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Entity entity = entities[index];
+            int entityIndex = unchecked((int)entity.Index);
+            System.Diagnostics.Debug.Assert(
+                entity.World == _worldId &&
+                entityIndex >= 0 &&
+                entityIndex < _nextUnusedIndex &&
+                _states[entityIndex] == SlotAlive &&
+                _generations[entityIndex] == entity.Generation &&
+                _locations[entityIndex] ==
+                    new EntityLocation(expectedArchetypeId, expectedRows[index]) &&
+                replacementRows[index].IsValid,
+                "A trusted structural location publication received an invalid source entity.");
+        }
     }
 
     internal SlotSnapshot GetSlotSnapshot(int index)

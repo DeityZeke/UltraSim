@@ -1,6 +1,6 @@
 # ECS Next Structural Playback
 
-Status: authoritative ECS 3.0.32 structural-playback architecture as of 2026-08-10.
+Status: authoritative ECS 3.0.33 structural-playback architecture as of 2026-08-10.
 
 The project version convention is defined in
 [`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.
@@ -74,7 +74,7 @@ primitive.
 | Exact ordered packed suffix destroy, at least 32 commands | Validate/shrink the physical tail and retire slots in record order | No surviving donor must move |
 | Balanced same-archetype destroy/create, row width at least 64 bytes | Retire into barrier-local holes, initialize creates into those rows, finalize leftovers | Avoid wide donor relocation without exposing sparse queries |
 | Other live destroys | Scalar packed removal with trusted donor/location commit | Preserves record-order conflict behavior and avoids speculative planner cost |
-| Exact ordered transition evacuating a complete source, more than 256 commands, with full destination capacity | Validate the entire route, stream destination publication in 256-row blocks, reset the source once | Preserve bounded scratch and record order while eliminating per-block source removal/compaction |
+| Exact ordered transition evacuating a complete source, more than 256 commands, with full destination capacity | Validate the entire route once, stream trusted destination publication in 256-row blocks, reset the source once | Preserve bounded scratch and record order while eliminating per-block source removal/compaction and redundant liveness/location validation |
 | Same prepared transition run, at least 8 commands | 256-entity bounded grouped execution | Amortize route, destination, copy, and compaction work |
 | Short or high-entropy transition run | Scalar prepared transition | Grouping overhead is not justified |
 
@@ -83,6 +83,27 @@ demand is prepared. If exact validation fails without mutation, execution falls
 back to the general path and may then select row reuse. There is no independent
 “V28 path,” “V29 path,” or “V30 path” in the conceptual model; those names remain
 historical benchmark milestones.
+
+## Whole-source validate-once boundary
+
+The exact whole-source coordinator is the only caller of the trusted block
+migration primitive. Before the first destination row is reserved it proves the
+complete homogeneous route, every entity's live generation and source location,
+strict physical row order, exact source population, and capacity for the entire
+destination. Structural playback is single-owner, so those facts cannot change
+between preflight and commit.
+
+Each bounded block therefore performs only the source-location table read needed
+to assemble copy rows, then publishes replacement locations without repeating
+public stale-handle, generation, and expected-location rejection passes. Debug
+builds assert the full source and publication proof. Release builds trust the
+coordinator. Ordinary scalar and grouped migration continue to use transactional
+checked publication and preserve expected per-command rejection behavior.
+
+After preflight, reservation, copying, and publication are commit work. Any
+unexpected failure is an invariant violation: destination reservation is rolled
+back where still possible, command playback is consumed, and the public world is
+terminally faulted. It never falls back after partial mutation.
 
 ## Barrier-local row market
 

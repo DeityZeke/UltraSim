@@ -1673,14 +1673,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return true;
     }
 
-    internal void TransitionWholeSourceBlock(
+    internal void TransitionPrevalidatedWholeSourceBlock(
         ReadOnlySpan<Entity> entities,
         PreparedArchetypeTransition transition)
     {
         EnsureRuntimeMutationAllowed();
         ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
         ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
-        ArchetypeMigrator.MigrateWholeSourceBlock(
+        ArchetypeMigrator.MigratePrevalidatedWholeSourceBlock(
             _entities,
             entities,
             source,

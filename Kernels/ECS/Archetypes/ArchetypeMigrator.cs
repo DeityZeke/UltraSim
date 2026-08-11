@@ -238,7 +238,7 @@ internal static class ArchetypeMigrator
     /// order. This keeps scratch bounded while removing the 256-row compaction
     /// horizon from whole-archetype transitions.
     /// </summary>
-    internal static void MigrateWholeSourceBlock<TArena>(
+    internal static void MigratePrevalidatedWholeSourceBlock<TArena>(
         EntityPool entityPool,
         ReadOnlySpan<Entity> entities,
         ArchetypeStorage<TArena> source,
@@ -253,15 +253,10 @@ internal static class ArchetypeMigrator
             throw new ArgumentOutOfRangeException(nameof(entities));
 
         Span<ChunkRow> sourceRows = stackalloc ChunkRow[MaximumBatchSize];
-        if (!TryPrepareContiguousSourcePrefix(
-                entityPool,
-                entities,
-                source.Id,
-                sourceRows[..entities.Length]))
-        {
-            ThrowMigrationInvariant(
-                "A validated whole-source transition block lost its contiguous source order.");
-        }
+        entityPool.CopyValidatedLocatedRows(
+            entities,
+            source.Id,
+            sourceRows[..entities.Length]);
 
         Span<ChunkRow> destinationRows = stackalloc ChunkRow[MaximumBatchSize];
         int reserved = destination.Store.ReserveDefault(
@@ -296,20 +291,12 @@ internal static class ArchetypeMigrator
             throw;
         }
 
-        if (!entityPool.TryReplaceLocations(
-                entities,
-                source.Id,
-                sourceRows[..entities.Length],
-                destination.Id,
-                destinationRows[..entities.Length]))
-        {
-            ClearAndRollBackAnonymousDestinationTail(
-                destination.Store,
-                destinationRows[..entities.Length],
-                first: 0);
-            ThrowMigrationInvariant(
-                "A validated whole-source transition block rejected destination publication.");
-        }
+        entityPool.PublishValidatedLocationReplacements(
+            entities,
+            source.Id,
+            sourceRows[..entities.Length],
+            destination.Id,
+            destinationRows[..entities.Length]);
     }
 
     private static bool TryPrepareContiguousSourcePrefix(

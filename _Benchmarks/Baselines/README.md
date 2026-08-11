@@ -65,3 +65,10 @@ zero canonical mismatches, 15 explicit unsupported rows, and zero V3 timed
 managed allocation while materially reducing exact complete-source add/remove
 transition cost. The reversed-order verification remains in
 `_Benchmarks/results/ecs-v2-v3-3.0.32-reverse`.
+
+`ecs-v2-v3-3.0.33-2026-08-10.json` is the accepted validate-once whole-source
+commit capture, V2 first. Its V3 profile is
+`ecs-3.0.33-whole-source-trusted-commit`. It retains 96 comparable rows, zero
+canonical or contract mismatches, 15 explicit unsupported rows, and zero V3
+timed managed allocation. The reversed-order verification remains in
+`_Benchmarks/results/ecs-v2-v3-3.0.33-reverse`.

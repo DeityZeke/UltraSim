@@ -1074,7 +1074,9 @@ public sealed class StructuralCommandBuffer
                 executeLink = _nextCommand[commandIndex];
             }
 
-            world.TransitionWholeSourceBlock(batch[..batchCount], transition);
+            world.TransitionPrevalidatedWholeSourceBlock(
+                batch[..batchCount],
+                transition);
             remaining -= batchCount;
         }
 

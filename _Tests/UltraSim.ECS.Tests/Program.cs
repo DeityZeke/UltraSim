@@ -88,6 +88,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(ArchetypeMigrator_RandomizedBidirectionalModelRemainsConsistent), ArchetypeMigrator_RandomizedBidirectionalModelRemainsConsistent);
         Run(nameof(ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent), ArchetypeMigrator_NativeAndPinnedExecutionRemainEquivalent);
         Run(nameof(ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity), ArchetypeMigrator_BatchPreservesStateHistoryAndBackendParity);
+        Run(nameof(ArchetypeMigrator_PrevalidatedWholeSourcePreservesStateHistoryAndBackendParity), ArchetypeMigrator_PrevalidatedWholeSourcePreservesStateHistoryAndBackendParity);
         Run(nameof(ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact), ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact);
         Run(nameof(ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries), ArchetypeMigrator_ContiguousBatchCrossesIndependentChunkBoundaries);
         Run(nameof(ArchetypeMigrator_PlannedCompactionPreservesSurvivorsAndEvacuatesTailChunks), ArchetypeMigrator_PlannedCompactionPreservesSurvivorsAndEvacuatesTailChunks);
@@ -120,7 +121,9 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes), PublicEcsWorld_WarmedBarrierLocalHoleReuseAllocatesZeroManagedBytes);
         Run(nameof(PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedTransitionPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_ExactWholeSourceTransitionMatchesScalarOracle), PublicEcsWorld_ExactWholeSourceTransitionMatchesScalarOracle);
+        Run(nameof(EcsWorld_ExactWholeSourceTransitionPreservesDenseAndExactHistory), EcsWorld_ExactWholeSourceTransitionPreservesDenseAndExactHistory);
         Run(nameof(PublicEcsWorld_WholeSourceTransitionCapacityFallbackMatchesScalarOracle), PublicEcsWorld_WholeSourceTransitionCapacityFallbackMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_WholeSourcePostPreflightFailureFaultsWorld), PublicEcsWorld_WholeSourcePostPreflightFailureFaultsWorld);
         Run(nameof(PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread), PublicEcsWorld_DeferredCommandsRejectStaleForeignAndWrongThread);
         Run(nameof(PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot), PublicEcsWorld_DeferredRecordingIsAllowedInsideAccessScopeButPlaybackIsNot);
         Run(nameof(PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes), PublicEcsWorld_WarmedDeferredTransitionAllocatesZeroManagedBytes);
@@ -2817,6 +2820,13 @@ internal static class EcsPrimitiveTests
         Assert.Equal(native, pinned);
     }
 
+    private static void ArchetypeMigrator_PrevalidatedWholeSourcePreservesStateHistoryAndBackendParity()
+    {
+        long native = RunBatchMigrationParity<NativeChunkArena>(prevalidatedWholeSource: true);
+        long pinned = RunBatchMigrationParity<PinnedChunkArena>(prevalidatedWholeSource: true);
+        Assert.Equal(native, pinned);
+    }
+
     private static void ArchetypeMigrator_BatchCrossChunkRollbackAndCapacityAreExact()
     {
         long native = RunBatchCrossChunkRollbackAndCapacity<NativeChunkArena>();
@@ -3116,12 +3126,15 @@ internal static class EcsPrimitiveTests
         return checksum;
     }
 
-    private static long RunBatchMigrationParity<TArena>()
+    private static long RunBatchMigrationParity<TArena>(
+        bool prevalidatedWholeSource = false)
         where TArena : class, IChunkArenaBackend
     {
-        const int entityCount = ArchetypeMigrator.MaximumBatchSize;
+        int entityCount = prevalidatedWholeSource
+            ? ArchetypeMigrator.MaximumBatchSize * 3 + 29
+            : ArchetypeMigrator.MaximumBatchSize;
         using var fixture = new MigrationFixture<TArena>(
-            maximumChunks: 2,
+            maximumChunks: prevalidatedWholeSource ? 8 : 2,
             entityCapacity: entityCount);
         int sourceWideColumn = FindColumnIndex(
             fixture.Source.Columns,
@@ -3171,13 +3184,37 @@ internal static class EcsPrimitiveTests
                 new ChangeVersion(47));
         }
 
-        int migrated = ArchetypeMigrator.MigrateBatch(
-            fixture.Pool,
-            entities,
-            fixture.Source,
-            fixture.Destination,
-            fixture.SourceToDestination.Transfers,
-            out bool capacityExhausted);
+        int migrated;
+        bool capacityExhausted;
+        if (prevalidatedWholeSource)
+        {
+            migrated = 0;
+            while (migrated < entities.Length)
+            {
+                int blockCount = Math.Min(
+                    ArchetypeMigrator.MaximumBatchSize,
+                    entities.Length - migrated);
+                ArchetypeMigrator.MigratePrevalidatedWholeSourceBlock(
+                    fixture.Pool,
+                    entities.AsSpan(migrated, blockCount),
+                    fixture.Source,
+                    fixture.Destination,
+                    fixture.SourceToDestination.Transfers);
+                migrated += blockCount;
+            }
+            fixture.Source.Store.ClearAllOccupiedRows();
+            capacityExhausted = false;
+        }
+        else
+        {
+            migrated = ArchetypeMigrator.MigrateBatch(
+                fixture.Pool,
+                entities,
+                fixture.Source,
+                fixture.Destination,
+                fixture.SourceToDestination.Transfers,
+                out capacityExhausted);
+        }
         Assert.Equal(entityCount, migrated);
         Assert.False(capacityExhausted);
         Assert.Equal(0, fixture.Source.Store.Count);
@@ -4631,6 +4668,142 @@ internal static class EcsPrimitiveTests
         }
     }
 
+    private static void EcsWorld_ExactWholeSourceTransitionPreservesDenseAndExactHistory()
+    {
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize * 3 + 29;
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        using var world = new EcsWorld<NativeChunkArena>(
+            schema,
+            new EntityCapacity(entityCount),
+            maximumArchetypes: 2,
+            static capacity => new NativeChunkArena(capacity),
+            maximumQueryPlans: 2,
+            maximumPublicTransitions: 1);
+        ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ComponentId wideId = UltraSim.ECS.Tests.LayoutTestSchema
+            .GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        ArchetypeId source = world.RegisterArchetype(
+            [enableId, wideId],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 8);
+        ComponentId[] destinationSignature = [enableId, intId, wideId];
+        Array.Sort(destinationSignature, static (left, right) =>
+            left.Value.CompareTo(right.Value));
+        ArchetypeId destination = world.RegisterArchetype(
+            destinationSignature,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 8);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> sourceWide =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutWide>(source, wideId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutWide> destinationWide =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutWide>(destination, wideId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> sourceEnable =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(source, enableId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutEnableLong> destinationEnable =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutEnableLong>(destination, enableId);
+        ArchetypeComponentBinding<UltraSim.ECS.Tests.LayoutInt> destinationInt =
+            world.BindComponent<UltraSim.ECS.Tests.LayoutInt>(destination, intId);
+        ArchetypeChangedReadQueryPlan<NativeChunkArena, UltraSim.ECS.Tests.LayoutWide>
+            denseChanges = world.PrepareChangedReadQuery<UltraSim.ECS.Tests.LayoutWide>(
+                wideId,
+                wideId);
+        ArchetypeChangedReadQueryPlan<NativeChunkArena, UltraSim.ECS.Tests.LayoutWide>
+            exactChanges = world.PrepareChangedRowsQuery<UltraSim.ECS.Tests.LayoutWide>(
+                wideId,
+                wideId);
+        uint transitionId = world.PreparePublicTransition(
+            source,
+            destination,
+            out StructuralTransitionPhase phase);
+        var transition = new ArchetypeTransition(
+            world.Id,
+            transitionId,
+            new ArchetypeHandle(world.Id, source),
+            new ArchetypeHandle(world.Id, destination),
+            phase);
+        world.Seal();
+        ChangeCursor denseCursor = world.CreateChangeCursorFromBeginning();
+        ChangeCursor exactCursor = denseCursor;
+
+        var entities = new Entity[entityCount];
+        long expectedChecksum = 0;
+        for (int index = 0; index < entities.Length; index++)
+        {
+            var value = new UltraSim.ECS.Tests.LayoutWide
+            {
+                A = index * 4L + 1,
+                B = index * 4L + 2,
+                C = index * 4L + 3,
+                D = index * 4L + 4,
+            };
+            Assert.True(world.TryCreateInitialized(
+                source,
+                sourceWide,
+                value,
+                out entities[index]));
+            bool enabled = (index & 3) != 2;
+            Assert.True(world.TrySetComponentEnabled(
+                entities[index],
+                sourceEnable,
+                enabled));
+            Assert.True(world.TryGetLocation(entities[index], out EntityLocation before));
+            Assert.Equal(source, before.ArchetypeId);
+            expectedChecksum = unchecked(
+                expectedChecksum + value.A + value.B + value.C + value.D + entities[index].Index);
+        }
+
+        var commands = new StructuralCommandBuffer(
+            world.Id,
+            Environment.CurrentManagedThreadId,
+            entityCount,
+            maximumArchetypes: 2);
+        commands.EnqueueTransition(entities, transition);
+        StructuralPlaybackResult result = commands.Playback(world);
+        Assert.Equal(entityCount, result.AddedCount);
+        Assert.Equal(0, result.RejectedCount);
+
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Assert.True(world.TryGetLocation(entities[index], out EntityLocation after));
+            Assert.Equal(destination, after.ArchetypeId);
+            Assert.True(world.TryGetComponent(
+                entities[index],
+                destinationWide,
+                out UltraSim.ECS.Tests.LayoutWide value));
+            Assert.Equal(index * 4L + 1, value.A);
+            Assert.Equal(index * 4L + 4, value.D);
+            Assert.True(world.TryGetComponentEnabled(
+                entities[index],
+                destinationEnable,
+                out bool enabled));
+            Assert.Equal((index & 3) != 2, enabled);
+            Assert.True(world.TryGetComponent(
+                entities[index],
+                destinationInt,
+                out UltraSim.ECS.Tests.LayoutInt added));
+            Assert.Equal(0, added.Value);
+        }
+
+        var denseVisitor = new ChangedWideVisitor();
+        Assert.Equal(entityCount, world.VisitChangedReadChunks(
+            denseChanges,
+            ref denseCursor,
+            ref denseVisitor));
+        Assert.Equal(entityCount, denseVisitor.Rows);
+        Assert.Equal(expectedChecksum, denseVisitor.Checksum);
+
+        var exactVisitor = new ChangedWideVisitor();
+        Assert.Equal(entityCount, world.VisitChangedReadRows(
+            exactChanges,
+            ref exactCursor,
+            ref exactVisitor));
+        Assert.Equal(entityCount, exactVisitor.Rows);
+        Assert.Equal(expectedChecksum, exactVisitor.Checksum);
+    }
+
     private static void PublicEcsWorld_WholeSourceTransitionCapacityFallbackMatchesScalarOracle()
     {
         const int releasedDestinationRows = 73;
@@ -4711,6 +4884,47 @@ internal static class EcsPrimitiveTests
                 scalar,
                 scalarSource[index]);
         }
+    }
+
+    private static void PublicEcsWorld_WholeSourcePostPreflightFailureFaultsWorld()
+    {
+        const int entityCount = ArchetypeMigrator.MaximumBatchSize * 2 + 1;
+        var fixture = new PublicWorldFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount,
+            maximumChunks: 4);
+        var entities = new Entity[entityCount];
+        for (int index = 0; index < entities.Length; index++)
+            Assert.True(fixture.World.TryCreate(fixture.Source, out entities[index]));
+        StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        commands.EnqueueTransition(
+            entities,
+            fixture.SourceToDestination);
+
+        FieldInfo coreField = typeof(EcsWorld).GetField(
+            "_core",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Public world core field was not found.");
+        var core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(fixture.World)
+            ?? throw new InvalidOperationException("Public world core was null."));
+        ArchetypeChunkStore<NativeChunkArena> destinationStore =
+            core.GetArchetypeStorage(fixture.Destination.Id).Store;
+        FieldInfo partialHead = destinationStore.GetType().GetField(
+            "_partialHead",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Destination partial-head field was not found.");
+
+        // Capacity preflight reads immutable capacity/count state. Corrupting the
+        // internal destination cursor after recording forces an otherwise
+        // impossible reserve failure after complete logical route validation.
+        // The public boundary must consume the arena and terminally fault.
+        partialHead.SetValue(destinationStore, 0);
+        Assert.Throws<Exception>(() => fixture.World.PlaybackStructuralCommands());
+        Assert.True(fixture.World.IsFaulted);
+        Assert.Equal(EcsWorldState.Faulted, fixture.World.State);
+        Assert.False(commands.IsValid);
+        Assert.Throws<InvalidOperationException>(() => fixture.World.IsAlive(entities[0]));
+        fixture.Dispose();
     }
 
     private static void PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle()

@@ -26,6 +26,8 @@ The accepted V31 consolidation and expanded-catalog capture lives at
 Under the three-field convention this is ECS `3.0.31`. The accepted `3.0.32`
 exact whole-source transition capture lives at
 [`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
+The accepted `3.0.33` validate-once trusted-commit capture lives at
+[`Baselines/ecs-v2-v3-3.0.33-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.33-2026-08-10.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -668,6 +670,37 @@ still measured about `19.9`, `16.2`, and `19.6 ns/entity`; 3.0.32 closes a large
 part of the transition gap but does not claim parity. V3 allocates zero timed
 bytes in these rows while V2 allocates roughly 2.43 MB, 0.81 MB, and 6.78 MB per
 50,000-entity iteration respectively.
+
+ECS 3.0.33 keeps the exact whole-source strategy introduced by 3.0.32 and
+amortizes validation inside its commit. Complete route, entity generation,
+source location/order, population, and destination capacity are still proved
+before mutation. The 256-row migrator then performs only the location-table read
+needed to assemble source rows and publishes destination locations through a
+trusted EntityPool commit. Debug builds retain full proof assertions; ordinary
+scalar/grouped migration remains checked. The temporary same-process 3.0.32
+oracle used for the decision was removed after measurement, so the permanent
+executor model remains production, packed oracle, and scalar oracle.
+
+Two same-binary A/B orders over 100,000 entities measured checked/trusted means
+at `49.081/34.802` and `49.083/34.978 ns/entity` end-to-end,
+`44.178/29.834` and `44.028/30.223` for playback, and
+`45.817/31.734` and `45.850/31.894` for wide-retained playback. Mean improvement
+was therefore about 29%, 31-32%, and 30-31%. Checked/trusted p95 barriers were
+`4.938/3.509` and `5.086/3.525 ms`, `4.444/3.006` and
+`4.427/3.088 ms`, and `4.631/3.264` and `4.624/3.219 ms`. Every row allocated
+zero managed bytes, and the checked control reproduced the separately captured
+3.0.32 process.
+
+The isolated comparison against the accepted 3.0.32 artifact passed in both
+child-process orders with 96 comparable rows, zero canonical or contract
+mismatches, 15 unsupported rows, and zero V3 timed allocation. At 50,000 rows,
+add playback moved from `43.063` to `30.217/31.095 ns/entity`, remove playback
+from `43.252` to `29.968/30.869`, and add/remove round trip from `50.403` to
+`35.915/35.631`. Their V3 p95 ratios were `0.717/0.751`, `0.717/0.753`, and
+`0.701/0.686`; frozen V2 controls remained near `20.0`, `16.3`, and
+`19.7 ns/entity`. The complete 129-scenario V3 suite also remained zero-allocation;
+its focused production means were `35.169` end-to-end, `30.125` playback, and
+`32.667 ns/entity` wide-retained playback.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

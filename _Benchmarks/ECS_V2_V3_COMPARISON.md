@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.32 checkpoint captured 2026-08-10
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.33 checkpoint captured 2026-08-10
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -106,7 +106,7 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 Compare a future capture with the current accepted baseline:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.32-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.33-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
@@ -121,8 +121,10 @@ The original accepted artifact is
 [`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
 The 3.0.31 consolidation artifact is
 [`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
-The current 3.0.32 artifact is
+The 3.0.32 exact-whole-source artifact is
 [`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
+The current 3.0.33 artifact is
+[`Baselines/ecs-v2-v3-3.0.33-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.33-2026-08-10.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -234,6 +236,43 @@ repair for exact evacuation routes. It does not generalize to partial-source,
 scattered, conflicting, or insufficient-capacity transitions, and the report
 does not present it as a universal structural speedup.
 
+## 3.0.33 whole-source validation amortization checkpoint
+
+The exact strategy and its selection rules are unchanged. Once the coordinator
+has validated the entire route and destination capacity, block execution now
+reads source rows without repeating public liveness/generation rejection and
+publishes replacement locations through a trusted EntityPool commit. Debug
+builds assert the complete proof. Scalar and ordinary grouped migration remain
+checked, and unexpected post-preflight failure remains a terminal world fault.
+
+A temporary checked 3.0.32 executor was retained only for two same-binary A/B
+orders, then removed. At 100,000 entities:
+
+| Scenario | Checked 3.0.32-style mean | Trusted 3.0.33 mean | Checked p95 | Trusted p95 | Mean result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| End-to-end whole-source | 49.081 / 49.083 ns/entity | 34.802 / 34.978 | 4.938 / 5.086 ms | 3.509 / 3.525 ms | 28.7-29.1% faster |
+| Whole-source playback | 44.178 / 44.028 ns/entity | 29.834 / 30.223 | 4.444 / 4.427 ms | 3.006 / 3.088 ms | 31.4-32.5% faster |
+| Wide-retained playback | 45.817 / 45.850 ns/entity | 31.734 / 31.894 | 4.631 / 4.624 ms | 3.264 / 3.219 ms | 30.4-30.7% faster |
+
+Every A/B row allocated zero managed bytes. The separately captured 3.0.32
+production control measured `49.212`, `44.240`, and `46.034 ns/entity`, closely
+matching the temporary checked path rather than the trusted result.
+
+Both isolated child-process orders retained 96 comparable rows, zero canonical
+or contract mismatches, 15 unsupported rows, and zero V3 timed allocation. At
+50,000 entities:
+
+| Scenario | 3.0.32 V3 | 3.0.33 V3 primary/reverse | 3.0.33 V3 p95/base | V2 primary/reverse |
+| --- | ---: | ---: | ---: | ---: |
+| Add-default playback | 43.063 ns/entity | 30.217 / 31.095 | 0.717x / 0.751x | 20.055 / 20.009 |
+| Remove playback | 43.252 ns/entity | 29.968 / 30.869 | 0.717x / 0.753x | 16.237 / 16.380 |
+| Add/remove round trip | 50.403 ns/entity | 35.915 / 35.631 | 0.701x / 0.686x | 19.887 / 19.446 |
+
+The frozen V2 controls did not share the 28-31% V3 movement. The complete
+129-scenario V3 suite remained zero-allocation, and focused production p95
+barriers stayed near `3.55`, `3.08`, and `3.27 ms` for end-to-end, ordinary
+playback, and wide-retained playback.
+
 ## What this baseline says to optimize next
 
 The adapter changes the optimization discussion from speculation to named
@@ -249,12 +288,11 @@ regression targets:
    ns/destroy`; donor-tail gating reduced but did not justify the complexity, so
    the partial path was removed. A future sparse algorithm must group by source
    chunk and prove a crossover before landing.
-3. ECS 3.0.32 removes the fixed-block source-removal horizon only for an exact
-   complete-source transition with fully preflighted destination capacity.
-   Partial-source and exact packed-suffix routes still plan in 256-row prefixes.
-   The next structural optimizer must be genuinely source-chunk-aware, preserve
-   partial-capacity record-order semantics, and prove its crossover against the
-   scalar and grouped controls before increasing the strategy set.
+3. ECS 3.0.33 validates an exact complete-source transition once and uses a
+   trusted bounded commit. Partial-source and exact packed-suffix routes still
+   plan in 256-row prefixes. Exact packed-suffix transition planning is the next
+   structural experiment; it must preserve partial-capacity record order and
+   prove its crossover against scalar and grouped controls before landing.
 4. Fixed command recording writes and validates much richer per-command state
    than V2's block-copied lists. Consider bounded batch descriptors or a compact
    fixed target arena so span commands amortize validation and phase linkage

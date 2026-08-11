@@ -17,9 +17,10 @@ generation.milestone.revision
   consolidation, or benchmark checkpoint inside the current milestone.
 
 The V31 consolidation checkpoint is therefore `3.0.31`. The exact whole-source
-transition work is `3.0.32`. The next accepted checkpoint in the same milestone
-will be `3.0.33`; a major capability/stability milestone advances the middle
-field and resets the revision, for example `3.1.0`.
+transition work is `3.0.32`, and its validate-once trusted commit optimization is
+`3.0.33`. The next accepted checkpoint in the same milestone will be `3.0.34`;
+a major capability/stability milestone advances the middle field and resets the
+revision, for example `3.1.0`.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
