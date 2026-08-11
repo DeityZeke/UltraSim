@@ -6,7 +6,7 @@ namespace UltraSim.ECS;
 /// Stack-only read view over the occupied rows of one component column.
 /// The view is valid only for the duration of its synchronous visitor call.
 /// </summary>
-internal readonly ref struct ReadOnlyComponentChunk<T>
+public readonly ref struct ReadOnlyComponentChunk<T>
     where T : unmanaged, IComponent<T>
 {
     private readonly ReadOnlySpan<ulong> _enableWords;
@@ -41,16 +41,16 @@ internal readonly ref struct ReadOnlyComponentChunk<T>
 
     internal int RowOffset { get; }
 
-    internal ReadOnlySpan<uint> EntityIndices { get; }
+    public ReadOnlySpan<uint> EntityIndices { get; }
 
-    internal ReadOnlySpan<T> Components { get; }
+    public ReadOnlySpan<T> Components { get; }
 
-    internal int Count => Components.Length;
+    public int Count => Components.Length;
 
-    internal bool IsEnableable => !_enableWords.IsEmpty;
+    public bool IsEnableable => !_enableWords.IsEmpty;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool IsEnabled(int row)
+    public bool IsEnabled(int row)
     {
         if (unchecked((uint)row) >= unchecked((uint)Count))
             throw new ArgumentOutOfRangeException(nameof(row));

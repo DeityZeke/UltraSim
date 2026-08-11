@@ -18,6 +18,12 @@ if (args.Contains("--change-decomposition", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--public-jobs", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = PublicJobBenchmarkProgram.Run(args);
+    return;
+}
+
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",

@@ -108,6 +108,9 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit), PublicEcsWorld_FaultAndSingleOwnerPoliciesAreTerminalAndExplicit);
         Run(nameof(PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel), PublicEcsWorld_RandomLookupAndMigrationMatchReferenceModel);
         Run(nameof(PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary), PublicEcsWorld_AccessJobsEnforceAndReleaseExecutionBoundary);
+        Run(nameof(PublicGeneratedChunkJobs_PrepareSealExecuteAndValidateOwnership), PublicGeneratedChunkJobs_PrepareSealExecuteAndValidateOwnership);
+        Run(nameof(PublicGeneratedTrackedJobs_PublishExactRowsAndReleaseExceptions), PublicGeneratedTrackedJobs_PublishExactRowsAndReleaseExceptions);
+        Run(nameof(PublicGeneratedChunkJobs_WarmedExecutionAllocatesZeroManagedBytes), PublicGeneratedChunkJobs_WarmedExecutionAllocatesZeroManagedBytes);
         Run(nameof(PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes), PublicEcsWorld_WarmedLookupMigrationAllocatesZeroManagedBytes);
         Run(nameof(StructuralCommands_LayoutsOptionsAndCapacityAreExplicit), StructuralCommands_LayoutsOptionsAndCapacityAreExplicit);
         Run(nameof(StructuralCommands_ClearAndEpochRolloverInvalidateEveryChainAndToken), StructuralCommands_ClearAndEpochRolloverInvalidateEveryChainAndToken);
@@ -4109,6 +4112,287 @@ internal static class EcsPrimitiveTests
             rejectedInvalid = true;
         }
         Assert.True(rejectedInvalid);
+    }
+
+    private static void PublicGeneratedChunkJobs_PrepareSealExecuteAndValidateOwnership()
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId wide = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        ComponentId integer = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ComponentId enable = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId extra = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutByte>();
+        ComponentId[] firstSignature = [wide, integer, enable];
+        ComponentId[] secondSignature = [wide, integer, enable, extra];
+        Array.Sort(firstSignature, static (left, right) => left.CompareTo(right));
+        Array.Sort(secondSignature, static (left, right) => left.CompareTo(right));
+
+        using var world = new EcsWorld(
+            schema,
+            new EcsWorldOptions(new EntityCapacity(256), 2, maximumPreparedPlans: 3));
+        ArchetypeHandle first = world.RegisterArchetype(firstSignature, ChunkLayoutOptions.KiB16, 2);
+        ReadReadWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> plan =
+            world.PrepareReadReadWriteJob<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong>();
+        ReadReadJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt> readOnlyPlan =
+            world.PrepareReadReadJob<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt>();
+        ComponentLookup<UltraSim.ECS.Tests.LayoutInt> integerLookup =
+            world.PrepareLookup<UltraSim.ECS.Tests.LayoutInt>();
+        ArchetypeHandle second = world.RegisterArchetype(secondSignature, ChunkLayoutOptions.KiB16, 2);
+
+        Assert.Equal(8, Unsafe.SizeOf<ReadReadWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>>());
+        Assert.True(plan.IsValid);
+        Assert.Equal(world.Id, plan.WorldId);
+        Assert.Equal(0, plan.MatchedArchetypeCount);
+
+        var beforeLifecycle = new PublicDenseGeneratedJob();
+        Assert.Throws<InvalidOperationException>(() => world.ExecuteJob(plan, ref beforeLifecycle));
+
+        world.Seal();
+        Assert.Equal(2, plan.MatchedArchetypeCount);
+        world.Initialize();
+        world.BeginRun();
+        Entity firstEntity = Entity.Null;
+        for (int index = 0; index < 128; index++)
+        {
+            Assert.True(world.TryCreate((index & 1) == 0 ? first : second, out Entity entity));
+            if (index == 0)
+                firstEntity = entity;
+        }
+
+        var job = new PublicDenseGeneratedJob();
+        Assert.Equal(128, world.ExecuteJob(plan, ref job));
+        Assert.Equal(128, job.Rows);
+        Assert.Equal(128, job.EntityIndices);
+
+        ChangeVersion beforeReadOnly = world.CurrentChangeVersion;
+        var readOnly = new PublicReadOnlyGeneratedJob();
+        Assert.Equal(128, world.ExecuteJob(readOnlyPlan, ref readOnly));
+        Assert.Equal(128, readOnly.Rows);
+        Assert.Equal(beforeReadOnly, world.CurrentChangeVersion);
+
+        var boundary = new PublicBoundaryProbeJob(
+            world,
+            plan,
+            integerLookup,
+            first,
+            firstEntity);
+        Assert.Equal(128, world.ExecuteJob(plan, ref boundary));
+        Assert.True(boundary.NestedJobRejected);
+        Assert.True(boundary.RandomAccessReadSucceeded);
+        Assert.True(boundary.ImmediateStructuralMutationRejected);
+
+        ReadReadWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> invalid = default;
+        bool invalidRejected = false;
+        try
+        {
+            world.ExecuteJob(invalid, ref job);
+        }
+        catch (ArgumentException)
+        {
+            invalidRejected = true;
+        }
+        Assert.True(invalidRejected);
+
+        using var foreign = new EcsWorld(
+            schema,
+            new EcsWorldOptions(new EntityCapacity(1), 1, maximumPreparedPlans: 1));
+        foreign.RegisterArchetype(firstSignature, ChunkLayoutOptions.KiB16, 1);
+        foreign.Seal();
+        foreign.Initialize();
+        bool foreignRejected = false;
+        try
+        {
+            foreign.ExecuteJob(plan, ref job);
+        }
+        catch (ArgumentException)
+        {
+            foreignRejected = true;
+        }
+        Assert.True(foreignRejected);
+
+        Exception? wrongThread = null;
+        Task.Run(() =>
+        {
+            try
+            {
+                var threadedJob = new PublicDenseGeneratedJob();
+                world.ExecuteJob(plan, ref threadedJob);
+            }
+            catch (Exception exception)
+            {
+                wrongThread = exception;
+            }
+        }).GetAwaiter().GetResult();
+        Assert.True(wrongThread is InvalidOperationException);
+
+        using var bounded = new EcsWorld(
+            schema,
+            new EcsWorldOptions(new EntityCapacity(1), 1, maximumPreparedPlans: 1));
+        bounded.RegisterArchetype(firstSignature, ChunkLayoutOptions.KiB16, 1);
+        _ = bounded.PrepareReadReadWriteJob<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong>();
+        Assert.Throws<InvalidOperationException>(() => bounded.PrepareReadReadJob<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt>());
+
+        var disposed = new EcsWorld(
+            schema,
+            new EcsWorldOptions(new EntityCapacity(1), 1, maximumPreparedPlans: 1));
+        disposed.RegisterArchetype(firstSignature, ChunkLayoutOptions.KiB16, 1);
+        ReadReadJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt> disposedPlan =
+            disposed.PrepareReadReadJob<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt>();
+        disposed.Seal();
+        disposed.Initialize();
+        disposed.Dispose();
+        var disposedJob = new PublicReadOnlyGeneratedJob();
+        Assert.Throws<ObjectDisposedException>(() => disposed.ExecuteJob(disposedPlan, ref disposedJob));
+    }
+
+    private static void PublicGeneratedTrackedJobs_PublishExactRowsAndReleaseExceptions()
+    {
+        using PublicGeneratedJobFixture fixture = PublicGeneratedJobFixture.Create(entityCount: 128);
+        ChangeCursor cursor = fixture.World.CreateChangeCursorFromNow();
+
+        var dense = new PublicDenseGeneratedJob();
+        Assert.Equal(128, fixture.World.ExecuteJob(fixture.DensePlan, ref dense));
+        var changed = new PublicChangedRowsAuditJob();
+        Assert.Equal(128, fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref cursor,
+            ref changed));
+        Assert.Equal(128, changed.Rows);
+
+        ChangeVersion beforeNoWrite = fixture.World.CurrentChangeVersion;
+        var noWrite = new PublicNoWriteTrackedGeneratedJob();
+        Assert.Equal(128, fixture.World.ExecuteTrackedJob(fixture.DensePlan, ref noWrite));
+        Assert.Equal(beforeNoWrite, fixture.World.CurrentChangeVersion);
+
+        var sparse = new PublicSparseTrackedGeneratedJob(divisor: 8);
+        ChangeVersion beforeSparse = fixture.World.CurrentChangeVersion;
+        Assert.Equal(128, fixture.World.ExecuteTrackedJob(fixture.DensePlan, ref sparse));
+        Assert.Equal(16, sparse.Writes);
+        Assert.Equal(beforeSparse.Next(), fixture.World.CurrentChangeVersion);
+
+        changed = default;
+        int delivered = fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref cursor,
+            ref changed);
+        Assert.Equal(16, delivered);
+        Assert.Equal(16, changed.Rows);
+        Assert.Equal(0, fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref cursor,
+            ref changed));
+
+        ChangeVersion beforeTwoColumns = fixture.World.CurrentChangeVersion;
+        var twoColumns = new PublicTwoWriteTrackedGeneratedJob();
+        Assert.Equal(128, fixture.World.ExecuteTrackedJob(fixture.TwoWritePlan, ref twoColumns));
+        Assert.True(twoColumns.Writes > 0);
+        Assert.Equal(beforeTwoColumns.Next(), fixture.World.CurrentChangeVersion);
+
+        ChangeVersion beforeBounds = fixture.World.CurrentChangeVersion;
+        var bounds = new PublicBoundsTrackedGeneratedJob();
+        Assert.Equal(128, fixture.World.ExecuteTrackedJob(fixture.DensePlan, ref bounds));
+        Assert.True(bounds.MutableRowBoundsRejected);
+        Assert.True(bounds.EnableRowBoundsRejected);
+        Assert.Equal(beforeBounds, fixture.World.CurrentChangeVersion);
+
+        ChangeCursor throwingCursor = fixture.World.CreateChangeCursorFromNow();
+        ChangeCursor independentCursor = fixture.World.CreateChangeCursorFromNow();
+        var throwing = new PublicThrowingTrackedGeneratedJob();
+        bool threw = false;
+        try
+        {
+            fixture.World.ExecuteTrackedJob(fixture.DensePlan, ref throwing);
+        }
+        catch (PublicJobSentinelException)
+        {
+            threw = true;
+        }
+        Assert.True(threw);
+        Assert.True(throwing.PublishedBeforeThrow);
+        var throwingChanged = new PublicThrowingChangedRowsJob();
+        Assert.Throws<PublicJobSentinelException>(() => fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref throwingCursor,
+            ref throwingChanged));
+        changed = default;
+        Assert.Equal(1, fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref throwingCursor,
+            ref changed));
+        Assert.Equal(1, changed.Rows);
+        changed = default;
+        Assert.Equal(1, fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref independentCursor,
+            ref changed));
+
+        ChangeCursor denseThrowCursor = fixture.World.CreateChangeCursorFromNow();
+        var denseThrow = new PublicThrowingDenseGeneratedJob();
+        Assert.Throws<PublicJobSentinelException>(() =>
+            fixture.World.ExecuteJob(fixture.DensePlan, ref denseThrow));
+        changed = default;
+        Assert.Equal(128, fixture.World.ExecuteChangedRowsJob(
+            fixture.ChangedPlan,
+            ref denseThrowCursor,
+            ref changed));
+
+        var recovered = new PublicDenseGeneratedJob();
+        Assert.Equal(128, fixture.World.ExecuteJob(fixture.DensePlan, ref recovered));
+        Assert.Equal(128, recovered.Rows);
+    }
+
+    private static void PublicGeneratedChunkJobs_WarmedExecutionAllocatesZeroManagedBytes()
+    {
+        const int iterations = 10_000;
+        using PublicGeneratedJobFixture fixture = PublicGeneratedJobFixture.Create(entityCount: 256);
+        var dense = new PublicDenseGeneratedJob();
+        var tracked = new PublicSparseTrackedGeneratedJob(divisor: 16);
+        for (int iteration = 0; iteration < 64; iteration++)
+        {
+            fixture.World.ExecuteJob(fixture.DensePlan, ref dense);
+            fixture.World.ExecuteTrackedJob(fixture.DensePlan, ref tracked);
+        }
+
+        dense = default;
+        tracked = new PublicSparseTrackedGeneratedJob(divisor: 16);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < iterations; iteration++)
+        {
+            fixture.World.ExecuteJob(fixture.DensePlan, ref dense);
+            fixture.World.ExecuteTrackedJob(fixture.DensePlan, ref tracked);
+        }
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        Assert.Equal(0L, allocated);
+        Assert.Equal(iterations * 256, dense.Rows);
+        Assert.Equal(iterations * 16, tracked.Writes);
     }
 
     private static void StructuralCommands_LayoutsOptionsAndCapacityAreExplicit()
@@ -14186,6 +14470,377 @@ internal static class EcsPrimitiveTests
         _passed++;
         Console.WriteLine($"PASS {name}");
     }
+}
+
+internal sealed class PublicGeneratedJobFixture : IDisposable
+{
+    private PublicGeneratedJobFixture(
+        EcsWorld world,
+        ReadReadWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> densePlan,
+        ReadWriteWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> twoWritePlan,
+        ChangedRowsJobPlan<
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> changedPlan)
+    {
+        World = world;
+        DensePlan = densePlan;
+        TwoWritePlan = twoWritePlan;
+        ChangedPlan = changedPlan;
+    }
+
+    internal EcsWorld World { get; }
+
+    internal ReadReadWriteJobPlan<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> DensePlan { get; }
+
+    internal ReadWriteWriteJobPlan<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> TwoWritePlan { get; }
+
+    internal ChangedRowsJobPlan<
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> ChangedPlan { get; }
+
+    internal static PublicGeneratedJobFixture Create(int entityCount)
+    {
+        ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
+        ComponentId wide = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutWide>();
+        ComponentId integer = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutInt>();
+        ComponentId enable = UltraSim.ECS.Tests.LayoutTestSchema.GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
+        ComponentId[] signature = [wide, integer, enable];
+        Array.Sort(signature, static (left, right) => left.CompareTo(right));
+
+        var world = new EcsWorld(
+            schema,
+            new EcsWorldOptions(
+                new EntityCapacity(entityCount),
+                maximumArchetypes: 1,
+                maximumPreparedPlans: 3));
+        ArchetypeHandle archetype = world.RegisterArchetype(
+            signature,
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: Math.Max(1, entityCount / 128 + 2));
+        ReadReadWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> densePlan =
+            world.PrepareReadReadWriteJob<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong>();
+        ReadWriteWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> twoWritePlan =
+            world.PrepareReadWriteWriteJob<
+                UltraSim.ECS.Tests.LayoutWide,
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong>();
+        ChangedRowsJobPlan<
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> changedPlan =
+            world.PrepareChangedRowsJob<
+                UltraSim.ECS.Tests.LayoutInt,
+                UltraSim.ECS.Tests.LayoutEnableLong>();
+        world.Seal();
+        world.Initialize();
+        world.BeginRun();
+        for (int index = 0; index < entityCount; index++)
+        {
+            if (!world.TryCreate(archetype, out _))
+                throw new InvalidOperationException("Public generated job fixture exhausted capacity.");
+        }
+        return new PublicGeneratedJobFixture(world, densePlan, twoWritePlan, changedPlan);
+    }
+
+    public void Dispose() => World.Dispose();
+}
+
+internal struct PublicDenseGeneratedJob :
+    IReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    internal int Rows;
+    internal int EntityIndices;
+
+    public void Execute(in ReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        Span<UltraSim.ECS.Tests.LayoutEnableLong> write = chunk.WriteComponents;
+        for (int row = 0; row < chunk.Count; row++)
+        {
+            write[row].Value = unchecked(write[row].Value + chunk.EntityIndices[row] + 1);
+            EntityIndices++;
+        }
+        Rows += chunk.Count;
+    }
+}
+
+internal struct PublicReadOnlyGeneratedJob :
+    IReadReadChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt>
+{
+    internal int Rows;
+
+    public void Execute(in ReadReadComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt> chunk)
+    {
+        Rows += chunk.Count;
+    }
+}
+
+internal struct PublicBoundaryProbeJob :
+    IReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    private readonly EcsWorld _world;
+    private readonly ReadReadWriteJobPlan<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> _plan;
+    private readonly ComponentLookup<UltraSim.ECS.Tests.LayoutInt> _lookup;
+    private readonly ArchetypeHandle _archetype;
+    private readonly Entity _entity;
+
+    internal PublicBoundaryProbeJob(
+        EcsWorld world,
+        ReadReadWriteJobPlan<
+            UltraSim.ECS.Tests.LayoutWide,
+            UltraSim.ECS.Tests.LayoutInt,
+            UltraSim.ECS.Tests.LayoutEnableLong> plan,
+        ComponentLookup<UltraSim.ECS.Tests.LayoutInt> lookup,
+        ArchetypeHandle archetype,
+        Entity entity)
+    {
+        _world = world;
+        _plan = plan;
+        _lookup = lookup;
+        _archetype = archetype;
+        _entity = entity;
+        NestedJobRejected = false;
+        RandomAccessReadSucceeded = false;
+        ImmediateStructuralMutationRejected = false;
+    }
+
+    internal bool NestedJobRejected;
+    internal bool RandomAccessReadSucceeded;
+    internal bool ImmediateStructuralMutationRejected;
+
+    public void Execute(in ReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        if (!NestedJobRejected)
+        {
+            var nested = new PublicDenseGeneratedJob();
+            try
+            {
+                _world.ExecuteJob(_plan, ref nested);
+            }
+            catch (InvalidOperationException)
+            {
+                NestedJobRejected = true;
+            }
+        }
+
+        if (!RandomAccessReadSucceeded)
+        {
+            RandomAccessReadSucceeded = _world.TryRead(_entity, _lookup, out _);
+        }
+
+        if (!ImmediateStructuralMutationRejected)
+        {
+            try
+            {
+                _world.TryCreate(_archetype, out _);
+            }
+            catch (InvalidOperationException)
+            {
+                ImmediateStructuralMutationRejected = true;
+            }
+        }
+    }
+}
+
+internal readonly struct PublicNoWriteTrackedGeneratedJob :
+    ITrackedReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    public void Execute(in TrackedReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        _ = chunk.Count;
+    }
+}
+
+internal struct PublicSparseTrackedGeneratedJob :
+    ITrackedReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    private readonly int _divisor;
+
+    internal PublicSparseTrackedGeneratedJob(int divisor)
+    {
+        _divisor = divisor;
+        Writes = 0;
+    }
+
+    internal int Writes;
+
+    public void Execute(in TrackedReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        for (int row = 0; row < chunk.Count; row++)
+        {
+            if (chunk.EntityIndices[row] % unchecked((uint)_divisor) != 0)
+                continue;
+            ref UltraSim.ECS.Tests.LayoutEnableLong value = ref chunk.Write.GetTracked(row);
+            value.Value = unchecked(value.Value + 17);
+            chunk.SetWriteEnabled(row, (value.Value & 1) == 0);
+            Writes++;
+        }
+    }
+}
+
+internal struct PublicTwoWriteTrackedGeneratedJob :
+    ITrackedReadWriteWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    internal int Writes;
+
+    public void Execute(in TrackedReadWriteWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        if (chunk.Count == 0)
+            return;
+        ref UltraSim.ECS.Tests.LayoutInt integer = ref chunk.Write1.GetTracked(0);
+        ref UltraSim.ECS.Tests.LayoutEnableLong enable = ref chunk.Write2.GetTracked(0);
+        integer.Value++;
+        enable.Value++;
+        Writes += 2;
+    }
+}
+
+internal struct PublicBoundsTrackedGeneratedJob :
+    ITrackedReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    internal bool MutableRowBoundsRejected;
+    internal bool EnableRowBoundsRejected;
+
+    public void Execute(in TrackedReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        if (!MutableRowBoundsRejected)
+        {
+            try
+            {
+                _ = chunk.Write.GetTracked(chunk.Count);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                MutableRowBoundsRejected = true;
+            }
+        }
+        if (!EnableRowBoundsRejected)
+        {
+            try
+            {
+                _ = chunk.IsWriteEnabled(chunk.Count);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                EnableRowBoundsRejected = true;
+            }
+        }
+    }
+}
+
+internal struct PublicChangedRowsAuditJob : IReadOnlyChunkJob<UltraSim.ECS.Tests.LayoutInt>
+{
+    internal int Rows;
+
+    public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutInt> chunk)
+    {
+        Rows += chunk.Count;
+    }
+}
+
+internal struct PublicThrowingChangedRowsJob : IReadOnlyChunkJob<UltraSim.ECS.Tests.LayoutInt>
+{
+    public void Execute(in ReadOnlyComponentChunk<UltraSim.ECS.Tests.LayoutInt> chunk) =>
+        throw new PublicJobSentinelException();
+}
+
+internal struct PublicThrowingDenseGeneratedJob :
+    IReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    public void Execute(in ReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk) =>
+        throw new PublicJobSentinelException();
+}
+
+internal struct PublicThrowingTrackedGeneratedJob :
+    ITrackedReadReadWriteChunkJob<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong>
+{
+    internal bool PublishedBeforeThrow;
+
+    public void Execute(in TrackedReadReadWriteComponentChunk<
+        UltraSim.ECS.Tests.LayoutWide,
+        UltraSim.ECS.Tests.LayoutInt,
+        UltraSim.ECS.Tests.LayoutEnableLong> chunk)
+    {
+        ref UltraSim.ECS.Tests.LayoutEnableLong value = ref chunk.Write.GetTracked(0);
+        value.Value++;
+        PublishedBeforeThrow = true;
+        throw new PublicJobSentinelException();
+    }
+}
+
+internal sealed class PublicJobSentinelException : Exception
+{
 }
 
 internal static class Assert

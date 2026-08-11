@@ -892,7 +892,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ref ChangeCursor cursor,
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
-        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
     {
         EnsureSealed();
         ValidateChangedReadQueryPlan(plan);
@@ -967,7 +967,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ref ChangeCursor cursor,
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
-        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
     {
         EnsureSealed();
         ValidateChangedReadQueryPlan(plan);
@@ -1032,7 +1032,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ChangeVersion baseline,
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
-        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
     {
         int rowCount = bound.EntityIndices.Length;
         int pendingStart = -1;
@@ -1106,7 +1106,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         in BoundComponentChunk<TRead> bound,
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
-        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
     {
         int rowCount = bound.EntityIndices.Length;
         int pendingStart = -1;
@@ -1180,7 +1180,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         int rowCount,
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
-        where TVisitor : struct, IComponentChunkReadVisitor<TRead>
+        where TVisitor : struct, IReadOnlyChunkJob<TRead>
     {
         var chunk = new ReadOnlyComponentChunk<TRead>(
             Id,
@@ -1201,7 +1201,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         in ArchetypeComponentBinding<T> binding,
         ref TVisitor visitor)
         where T : unmanaged, IComponent<T>
-        where TVisitor : struct, IComponentChunkReadVisitor<T>
+        where TVisitor : struct, IReadOnlyChunkJob<T>
     {
         EnsureSealed();
         ValidateBinding(binding, requireData: true);
@@ -1295,7 +1295,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
-        where TVisitor : struct, IComponentChunkReadWriteVisitor<TRead, TWrite>
+        where TVisitor : struct, IReadWriteChunkJob<TRead, TWrite>
     {
         EnsureSealed();
         ValidateQueryPlan(plan);
@@ -1368,7 +1368,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
-        where TVisitor : struct, IComponentChunkReadWriteVisitor<TRead, TWrite>
+        where TVisitor : struct, IReadWriteChunkJob<TRead, TWrite>
     {
         int rowCount = bound.EntityIndices.Length;
         int pendingStart = -1;
@@ -1476,7 +1476,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ref TVisitor visitor)
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
-        where TVisitor : struct, IComponentChunkReadWriteVisitor<TRead, TWrite>
+        where TVisitor : struct, IReadWriteChunkJob<TRead, TWrite>
     {
         var chunk = new ReadWriteComponentChunk<TRead, TWrite>(
             Id,
@@ -1812,6 +1812,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     internal void ExitPreparedComponentAccess() => ExitExecutionScope();
+
+    internal void ExitPublicJobExecution() => ExitExecutionScope();
 
     internal void ValidateStructuralPlayback() => EnsureRuntimeMutationAllowed();
 
@@ -2279,6 +2281,20 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         _changeVersion = _changeVersion.Next();
         return _changeVersion;
+    }
+
+    /// <summary>
+    /// Lazily acquires the one shared publication version owned by a tracked
+    /// public chunk-job invocation. Callers must already hold this world's
+    /// synchronous execution scope.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ChangeVersion AcquireTrackedJobChangeVersion(ref ChangeVersion invocationVersion)
+    {
+        System.Diagnostics.Debug.Assert(_isExecutingScope);
+        if (!invocationVersion.IsValid)
+            invocationVersion = AdvanceChangeVersion();
+        return invocationVersion;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

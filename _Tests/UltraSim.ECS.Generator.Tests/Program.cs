@@ -69,6 +69,7 @@ internal static class GeneratorTests
         Run(nameof(QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans), QueryFamilyCatalog_EncodesReadOnlyAndWritableSpans);
         Run(nameof(QueryFamilyCatalog_EmitsTrackedWriteStampsOnlyForWritableFamilies), QueryFamilyCatalog_EmitsTrackedWriteStampsOnlyForWritableFamilies);
         Run(nameof(QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily), QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily);
+        Run(nameof(QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec), QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
         Console.WriteLine($"All {_passed} ECS generator tests passed.");
@@ -355,6 +356,49 @@ internal static class GeneratorTests
             StringComparison.Ordinal));
         TestAssert.True(generation.GeneratedSource.Contains(
             "EnableSparseRowChangeTracking(changed2ColumnIndex)",
+            StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public interface IReadReadWriteChunkJob<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public interface ITrackedReadReadWriteChunkJob<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public readonly struct ReadReadWriteJobPlan<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public readonly ref struct ReadReadWriteComponentChunk<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public readonly ref struct TrackedReadReadWriteComponentChunk<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public int ExecuteJob<TRead1, TRead2, TWrite, TJob>(",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "public int ExecuteTrackedJob<TRead1, TRead2, TWrite, TJob>(",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "where TJob : struct, IReadReadWriteChunkJob<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "where TJob : struct, ITrackedReadReadWriteChunkJob<TRead1, TRead2, TWrite>",
+            StringComparison.Ordinal));
+        TestAssert.False(generation.GeneratedSource.Contains(
+            "public NativeChunkArena",
+            StringComparison.Ordinal));
+        TestAssert.False(generation.GeneratedSource.Contains(
+            "public ArchetypeChunkStore",
+            StringComparison.Ordinal));
+        TestAssert.False(generation.GeneratedSource.Contains(
+            "public ChunkRow",
             StringComparison.Ordinal));
     }
 

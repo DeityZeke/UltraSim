@@ -198,11 +198,13 @@ chunk-local execution.
 
 Recommended order:
 
-1. Build the public generated chunk-job/system surface as the next natural ECS
-   capability. Its prepared chunk order already provides locality, one version
-   per invocation, and once-per-chunk dense publication without an extra sort.
-   Rerun the stable soak with its 5K activity writes expressed through the new
-   surface before optimizing scalar random writes.
+1. **Completed in ECS 3.0.36:** build the public serial generated chunk-job
+   surface. Its prepared chunk order provides locality, one version per
+   invocation, dense-range or exact-row publication, and no external sort. The
+   public soak moved its four system-like passes and changed consumer onto this
+   surface while deliberately leaving the 5K arbitrary entity-list writes
+   unchanged; rewriting them as a 100K selection scan would be a different
+   workload. See [`../ECS_JOB_EXECUTION.md`](../ECS_JOB_EXECUTION.md).
 2. If arbitrary entity-list writes remain production-important, prototype a
    bounded batch writer that includes target resolution, conflict/duplicate
    policy, partitioning cost, chunk-local execution, one observation version,

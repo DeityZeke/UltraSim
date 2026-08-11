@@ -1,7 +1,8 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.35 checkpoint captured 2026-08-10
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.36 regression checkpoint captured
+2026-08-11
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -125,8 +126,10 @@ The 3.0.32 exact-whole-source artifact is
 [`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
 The previous 3.0.34 artifact is
 [`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
-The current 3.0.35 artifact is
+The previous 3.0.35 artifact is
 [`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
+The current 3.0.36 artifact is
+[`Baselines/ecs-v2-v3-3.0.36-2026-08-11.json`](Baselines/ecs-v2-v3-3.0.36-2026-08-11.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -433,3 +436,21 @@ not regress. It is not parity: V2 remains about `5.6x` faster for complete
 deferred evacuation and about `3.8x` for sparse 10% playback. The next sparse
 algorithm must therefore be selected with source-chunk locality and density
 sweeps; it must not infer that the exact-suffix result generalizes to holes.
+
+## 3.0.36 public serial job regression checkpoint
+
+The public job capability does not add an honest V2-equivalent scenario to this
+adapter: V2's complete system execution includes scheduler/state/cadence/context
+semantics that 3.0.36 deliberately does not claim. The existing 96 matched rows
+therefore remain a regression gate rather than being relabeled as public-system
+parity.
+
+Both 2026-08-11 child-process orders completed with 96 comparable rows, zero
+canonical-state/descriptor/measurement mismatches, 15 explicit unsupported rows,
+zero catalog changes, and zero timed V3 allocation/GC. The accepted primary
+artifact is `Baselines/ecs-v2-v3-3.0.36-2026-08-11.json`. Order-sensitive timing
+signals remain noise controls; no structural/query semantic regression was
+admitted. Direct public-versus-internal evidence lives in
+[`../ECS_JOB_EXECUTION.md`](../ECS_JOB_EXECUTION.md), where identical generated
+job arithmetic and paired canonical component state provide the meaningful
+3.0.36 comparison.

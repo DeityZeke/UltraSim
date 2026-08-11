@@ -1359,6 +1359,48 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         _sparseRowChangeVersions[columnIndex]?.StampDense(chunkIndex, version);
     }
 
+    /// <summary>
+    /// Trusted chunk-job publication after seal-compiled route binding. The
+    /// caller owns occupied-chunk, column, and exposed-range proof. Dense chunk
+    /// metadata is stamped once while exact history retains every exposed row.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void StampTrackedJobRange(
+        uint occupiedChunkIndex,
+        int boundColumnIndex,
+        int rowOffset,
+        int rowCount,
+        ChangeVersion version,
+        bool wholeChunk,
+        ref bool chunkStamped)
+    {
+        System.Diagnostics.Debug.Assert(version.IsValid);
+        System.Diagnostics.Debug.Assert(occupiedChunkIndex < unchecked((uint)_chunks.Length));
+        System.Diagnostics.Debug.Assert(
+            unchecked((uint)boundColumnIndex) < unchecked((uint)_columns.Length));
+        System.Diagnostics.Debug.Assert(
+            _chunks[occupiedChunkIndex].State is ChunkListState.Partial or ChunkListState.Full);
+        System.Diagnostics.Debug.Assert(rowOffset >= 0);
+        System.Diagnostics.Debug.Assert(rowCount > 0);
+        System.Diagnostics.Debug.Assert(rowOffset <= _chunks[occupiedChunkIndex].RowCount - rowCount);
+
+        SparseRowChangeVersions? sparse = _sparseRowChangeVersions[boundColumnIndex];
+        if (!chunkStamped)
+        {
+            int versionIndex = unchecked(
+                (boundColumnIndex * _chunks.Length) + (int)occupiedChunkIndex);
+            _changeVersions[versionIndex] = version.Value;
+            chunkStamped = true;
+        }
+
+        if (sparse is null)
+            return;
+        if (wholeChunk)
+            sparse.StampDense(occupiedChunkIndex, version);
+        else
+            sparse.StampRange(occupiedChunkIndex, rowOffset, rowCount, version);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ulong GetBoundChangedRowMask(
         SparseRowChangeVersions sparseVersions,

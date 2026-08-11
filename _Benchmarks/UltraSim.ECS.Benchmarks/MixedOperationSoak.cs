@@ -66,6 +66,7 @@ internal sealed class MixedOperationSoakConfiguration
     public int ValidationTicks { get; init; } = 256;
     public int ValidationCheckpointInterval { get; init; } = 64;
     public ulong Seed { get; init; } = DefaultSeed;
+    public bool UsePublicJobs { get; init; }
 
     [JsonIgnore]
     internal int TrackedWritesPerTick => Math.Max(1, EntityCount / 20);
@@ -98,11 +99,8 @@ internal sealed class MixedOperationSoakConfiguration
         int validationTicks = 256;
         int checkpointInterval = 64;
         ulong seed = DefaultSeed;
-        outputPath = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..", "..", "..", "..",
-            "results",
-            "ecs-3.0.35-100k-mixed-soak.json"));
+        bool usePublicJobs = false;
+        string? explicitOutputPath = null;
 
         for (int index = 0; index < args.Length; index++)
         {
@@ -121,10 +119,19 @@ internal sealed class MixedOperationSoakConfiguration
                 checkpointInterval = ParseInt(args, ref index, argument);
             else if (argument.Equals("--soak-seed", StringComparison.OrdinalIgnoreCase))
                 seed = ParseULong(args, ref index, argument);
+            else if (argument.Equals("--soak-public-jobs", StringComparison.OrdinalIgnoreCase))
+                usePublicJobs = true;
             else if (argument.Equals("--soak-output", StringComparison.OrdinalIgnoreCase) ||
                      argument.Equals("--output", StringComparison.OrdinalIgnoreCase))
-                outputPath = Path.GetFullPath(ParseString(args, ref index, argument));
+                explicitOutputPath = Path.GetFullPath(ParseString(args, ref index, argument));
         }
+
+        outputPath = explicitOutputPath ?? Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..", "..", "..", "..",
+            "results",
+            $"ecs-{EcsKernelVersion.Value}-100k-mixed-soak" +
+            (usePublicJobs ? "-public-jobs.json" : ".json")));
 
         var configuration = new MixedOperationSoakConfiguration
         {
@@ -135,6 +142,7 @@ internal sealed class MixedOperationSoakConfiguration
             ValidationTicks = validationTicks,
             ValidationCheckpointInterval = checkpointInterval,
             Seed = seed,
+            UsePublicJobs = usePublicJobs,
         };
         configuration.Validate();
         return configuration;
@@ -171,6 +179,7 @@ internal sealed class MixedOperationSoakConfiguration
         ValidationTicks = ValidationTicks,
         ValidationCheckpointInterval = ValidationCheckpointInterval,
         Seed = Seed,
+        ExecutionSurface = UsePublicJobs ? "PublicGeneratedChunkJobs" : "InternalGeneratedControl",
         QueryPassesPerTick = 4,
         QueryRowsPerTick = QueryRowsPerTick,
         LogicalQueryBytesPerTick = checked((long)EntityCount * (16 + 12 + 12 + 12)),
@@ -234,7 +243,9 @@ internal static class MixedOperationSoakRunner
         {
             SuiteName = "UltraSim ECS deterministic 100K mixed-operation soak",
             ReportFormat = "ultrasim-ecs-mixed-soak-report-v1",
-            WorkloadProfile = "ecs-v3-100k-mixed-operations-v1",
+            WorkloadProfile = configuration.UsePublicJobs
+                ? "ecs-v3-100k-mixed-operations-public-jobs-v1"
+                : "ecs-v3-100k-mixed-operations-v1",
             CanonicalStateProfile = "ultrasim-ecs-mixed-soak-canonical-v1",
             KernelVersion = EcsKernelVersion.Value,
             SemanticProfile = EcsKernelVersion.SemanticProfile,
@@ -258,11 +269,16 @@ internal static class MixedOperationSoakRunner
                 SelectionTimingExcludedFromMeasuredEcsWork = true,
                 CanonicalHashTimingExcludedFromTicks = true,
                 NaturalGc = true,
-                Notes =
-                    "This is a single-owner kernel/facade soak. Generated chunk queries use the internal " +
-                    "seal-compiled surface because the public system/job facade and scheduler are not implemented. " +
-                    "MeasuredEcsWork excludes deterministic target selection but includes useful visitor arithmetic, " +
-                    "checked lookups, tracked writes, change consumption, command recording/playback, and create initialization.",
+                Notes = configuration.UsePublicJobs
+                    ? "This single-owner profile executes all four ordinary system-like passes, exact changed-row " +
+                      "consumption, canonical ownership traversal, cursors, and store inspection through public ECS APIs. " +
+                      "The 5K arbitrary entity-list activity writes intentionally remain checked random writes. " +
+                      "MeasuredEcsWork excludes deterministic target selection but includes useful job arithmetic, " +
+                      "checked lookups, tracked writes, change consumption, command recording/playback, and create initialization."
+                    : "This is the immutable longitudinal 3.0.35 control profile. Generated chunk queries use the " +
+                      "internal seal-compiled surface. MeasuredEcsWork excludes deterministic target selection but " +
+                      "includes useful visitor arithmetic, checked lookups, tracked writes, change consumption, " +
+                      "command recording/playback, and create initialization.",
             },
         };
     }
@@ -420,7 +436,7 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 {
     private readonly MixedOperationSoakConfiguration _configuration;
     private readonly EcsWorld _world;
-    private readonly EcsWorld<NativeChunkArena> _core;
+    private readonly EcsWorld<NativeChunkArena>? _core;
     private readonly ArchetypeHandle _baseArchetype;
     private readonly ArchetypeHandle _wideArchetype;
     private readonly ArchetypeTransition _addWide;
@@ -431,15 +447,21 @@ internal sealed class MixedOperationSoakWorld : IDisposable
     private readonly ComponentLookup<SoakHealth> _healthLookup;
     private readonly ComponentLookup<SoakActivity> _activityLookup;
     private readonly ComponentLookup<SoakWide> _wideLookup;
-    private readonly ArchetypeReadWriteQueryPlan<NativeChunkArena, SoakVelocity, SoakPosition> _movementPlan;
-    private readonly ArchetypeReadWriteQueryPlan<NativeChunkArena, SoakPosition, SoakHealth> _healthPlan;
-    private readonly ArchetypeReadWriteQueryPlan<NativeChunkArena, SoakHealth, SoakVelocity> _responsePlan;
-    private readonly ArchetypeReadReadQueryPlan<NativeChunkArena, SoakPosition, SoakHealth> _telemetryPlan;
-    private readonly ArchetypeChangedReadQueryPlan<NativeChunkArena, SoakIdentity> _changedPlan;
+    private readonly ArchetypeReadWriteQueryPlan<NativeChunkArena, SoakVelocity, SoakPosition>? _movementPlan;
+    private readonly ArchetypeReadWriteQueryPlan<NativeChunkArena, SoakPosition, SoakHealth>? _healthPlan;
+    private readonly ArchetypeReadWriteQueryPlan<NativeChunkArena, SoakHealth, SoakVelocity>? _responsePlan;
+    private readonly ArchetypeReadReadQueryPlan<NativeChunkArena, SoakPosition, SoakHealth>? _telemetryPlan;
+    private readonly ArchetypeChangedReadQueryPlan<NativeChunkArena, SoakIdentity>? _changedPlan;
+    private readonly ReadWriteJobPlan<SoakVelocity, SoakPosition> _publicMovementPlan;
+    private readonly ReadWriteJobPlan<SoakPosition, SoakHealth> _publicHealthPlan;
+    private readonly ReadWriteJobPlan<SoakHealth, SoakVelocity> _publicResponsePlan;
+    private readonly ReadReadJobPlan<SoakPosition, SoakHealth> _publicTelemetryPlan;
+    private readonly ChangedRowsJobPlan<SoakIdentity, SoakActivity> _publicChangedPlan;
+    private readonly ReadReadJobPlan<SoakIdentity, SoakPosition> _publicOwnershipPlan;
     private readonly ArchetypeComponentBinding<SoakIdentity> _baseIdentityBinding;
     private readonly ArchetypeComponentBinding<SoakIdentity> _wideIdentityBinding;
-    private readonly ArchetypeStorage<NativeChunkArena> _baseStorage;
-    private readonly ArchetypeStorage<NativeChunkArena> _wideStorage;
+    private readonly ArchetypeStorage<NativeChunkArena>? _baseStorage;
+    private readonly ArchetypeStorage<NativeChunkArena>? _wideStorage;
     private readonly StructuralCommandBuffer _commands;
     private readonly Entity[] _entities;
     private readonly bool[] _isWide;
@@ -513,21 +535,33 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         _activityLookup = _world.PrepareLookup<SoakActivity>();
         _wideLookup = _world.PrepareLookup<SoakWide>();
 
-        FieldInfo coreField = typeof(EcsWorld).GetField(
-            "_core",
-            BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("The ECS facade core field was not found.");
-        _core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(_world)
-            ?? throw new InvalidOperationException("The ECS facade core is null."));
-        _movementPlan = _core.PrepareReadWriteQuery<SoakVelocity, SoakPosition>(velocity, position);
-        _healthPlan = _core.PrepareReadWriteQuery<SoakPosition, SoakHealth>(position, health);
-        _responsePlan = _core.PrepareReadWriteQuery<SoakHealth, SoakVelocity>(health, velocity);
-        _telemetryPlan = _core.PrepareReadReadQuery<SoakPosition, SoakHealth>(position, health);
-        _changedPlan = _core.PrepareChangedRowsQuery<SoakIdentity>(identity, activity);
-        _baseIdentityBinding = _core.BindComponent<SoakIdentity>(_baseArchetype.Id, identity);
-        _wideIdentityBinding = _core.BindComponent<SoakIdentity>(_wideArchetype.Id, identity);
-        _baseStorage = _core.GetArchetypeStorage(_baseArchetype.Id);
-        _wideStorage = _core.GetArchetypeStorage(_wideArchetype.Id);
+        if (configuration.UsePublicJobs)
+        {
+            _publicMovementPlan = _world.PrepareReadWriteJob<SoakVelocity, SoakPosition>();
+            _publicHealthPlan = _world.PrepareReadWriteJob<SoakPosition, SoakHealth>();
+            _publicResponsePlan = _world.PrepareReadWriteJob<SoakHealth, SoakVelocity>();
+            _publicTelemetryPlan = _world.PrepareReadReadJob<SoakPosition, SoakHealth>();
+            _publicChangedPlan = _world.PrepareChangedRowsJob<SoakIdentity, SoakActivity>();
+            _publicOwnershipPlan = _world.PrepareReadReadJob<SoakIdentity, SoakPosition>();
+        }
+        else
+        {
+            FieldInfo coreField = typeof(EcsWorld).GetField(
+                "_core",
+                BindingFlags.Instance | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("The ECS facade core field was not found.");
+            _core = (EcsWorld<NativeChunkArena>)(coreField.GetValue(_world)
+                ?? throw new InvalidOperationException("The ECS facade core is null."));
+            _movementPlan = _core.PrepareReadWriteQuery<SoakVelocity, SoakPosition>(velocity, position);
+            _healthPlan = _core.PrepareReadWriteQuery<SoakPosition, SoakHealth>(position, health);
+            _responsePlan = _core.PrepareReadWriteQuery<SoakHealth, SoakVelocity>(health, velocity);
+            _telemetryPlan = _core.PrepareReadReadQuery<SoakPosition, SoakHealth>(position, health);
+            _changedPlan = _core.PrepareChangedRowsQuery<SoakIdentity>(identity, activity);
+            _baseIdentityBinding = _core.BindComponent<SoakIdentity>(_baseArchetype.Id, identity);
+            _wideIdentityBinding = _core.BindComponent<SoakIdentity>(_wideArchetype.Id, identity);
+            _baseStorage = _core.GetArchetypeStorage(_baseArchetype.Id);
+            _wideStorage = _core.GetArchetypeStorage(_wideArchetype.Id);
+        }
 
         _world.Seal();
         _world.Initialize();
@@ -569,15 +603,25 @@ internal sealed class MixedOperationSoakWorld : IDisposable
             InitializeEntity(slot, entity, tick: 0, lifecycleRevision: 1, useWide);
         }
 
-        if (_movementPlan.MatchedArchetypeCount != 2 ||
-            _healthPlan.MatchedArchetypeCount != 2 ||
-            _responsePlan.MatchedArchetypeCount != 2 ||
-            _telemetryPlan.MatchedArchetypeCount != 2 ||
-            _changedPlan.MatchedArchetypeCount != 2)
+        bool plansMatched = configuration.UsePublicJobs
+            ? _publicMovementPlan.MatchedArchetypeCount == 2 &&
+              _publicHealthPlan.MatchedArchetypeCount == 2 &&
+              _publicResponsePlan.MatchedArchetypeCount == 2 &&
+              _publicTelemetryPlan.MatchedArchetypeCount == 2 &&
+              _publicChangedPlan.MatchedArchetypeCount == 2 &&
+              _publicOwnershipPlan.MatchedArchetypeCount == 2
+            : _movementPlan!.MatchedArchetypeCount == 2 &&
+              _healthPlan!.MatchedArchetypeCount == 2 &&
+              _responsePlan!.MatchedArchetypeCount == 2 &&
+              _telemetryPlan!.MatchedArchetypeCount == 2 &&
+              _changedPlan!.MatchedArchetypeCount == 2;
+        if (!plansMatched)
         {
             throw new InvalidOperationException("The soak query catalog did not bind both archetypes.");
         }
-        _changeCursor = _core.CreateChangeCursorFromNow();
+        _changeCursor = configuration.UsePublicJobs
+            ? _world.CreateChangeCursorFromNow()
+            : _core!.CreateChangeCursorFromNow();
     }
 
     internal int AliveCount => _world.AliveCount;
@@ -615,17 +659,27 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 
     internal void ExecuteTick(PhaseSamples? samples, int sampleIndex)
     {
+        if (_configuration.UsePublicJobs)
+        {
+            ExecuteTickPublic(samples, sampleIndex);
+            return;
+        }
+        ExecuteTickInternal(samples, sampleIndex);
+    }
+
+    private void ExecuteTickInternal(PhaseSamples? samples, int sampleIndex)
+    {
         long totalStarted = Stopwatch.GetTimestamp();
 
         long phaseStarted = Stopwatch.GetTimestamp();
         var movement = new MovementVisitor();
-        int moved = _core.VisitReadWriteChunks(_movementPlan, ref movement);
+        int moved = _core!.VisitReadWriteChunks(_movementPlan!, ref movement);
         var health = new HealthVisitor();
-        int healthRows = _core.VisitReadWriteChunks(_healthPlan, ref health);
+        int healthRows = _core.VisitReadWriteChunks(_healthPlan!, ref health);
         var response = new ResponseVisitor();
-        int responseRows = _core.VisitReadWriteChunks(_responsePlan, ref response);
+        int responseRows = _core.VisitReadWriteChunks(_responsePlan!, ref response);
         var telemetry = new TelemetryVisitor();
-        int telemetryRows = _core.VisitReadReadChunks(_telemetryPlan, ref telemetry);
+        int telemetryRows = _core.VisitReadReadChunks(_telemetryPlan!, ref telemetry);
         if (moved != _configuration.EntityCount ||
             healthRows != _configuration.EntityCount ||
             responseRows != _configuration.EntityCount ||
@@ -648,7 +702,7 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 
         phaseStarted = Stopwatch.GetTimestamp();
         var changed = new ChangedIdentityVisitor();
-        int changedRows = _core.VisitChangedReadRows(_changedPlan, ref _changeCursor, ref changed);
+        int changedRows = _core.VisitChangedReadRows(_changedPlan!, ref _changeCursor, ref changed);
         if (changedRows != changed.Rows)
             throw new InvalidOperationException("The exact changed-row consumer count is inconsistent.");
         _changedRowsDelivered += changedRows;
@@ -690,13 +744,107 @@ internal sealed class MixedOperationSoakWorld : IDisposable
         }
     }
 
+    private void ExecuteTickPublic(PhaseSamples? samples, int sampleIndex)
+    {
+        long totalStarted = Stopwatch.GetTimestamp();
+
+        long phaseStarted = Stopwatch.GetTimestamp();
+        var movement = new MovementVisitor();
+        int moved = _world.ExecuteJob(_publicMovementPlan, ref movement);
+        var health = new HealthVisitor();
+        int healthRows = _world.ExecuteJob(_publicHealthPlan, ref health);
+        var response = new ResponseVisitor();
+        int responseRows = _world.ExecuteJob(_publicResponsePlan, ref response);
+        var telemetry = new TelemetryVisitor();
+        int telemetryRows = _world.ExecuteJob(_publicTelemetryPlan, ref telemetry);
+        if (moved != _configuration.EntityCount ||
+            healthRows != _configuration.EntityCount ||
+            responseRows != _configuration.EntityCount ||
+            telemetryRows != _configuration.EntityCount)
+        {
+            throw new InvalidOperationException("A public full-world soak job lost rows.");
+        }
+        _queryRowsVisited += moved + healthRows + responseRows + telemetryRows;
+        _checksum = unchecked(_checksum + movement.Checksum + health.Checksum +
+            response.Checksum + telemetry.Checksum);
+        Record(samples?.Query, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        ExecuteRandomReads();
+        Record(samples?.RandomLookup, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        ExecuteTrackedWrites();
+        Record(samples?.TrackedWrite, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        var changed = new ChangedIdentityVisitor();
+        int changedRows = _world.ExecuteChangedRowsJob(
+            _publicChangedPlan,
+            ref _changeCursor,
+            ref changed);
+        if (changedRows != changed.Rows)
+            throw new InvalidOperationException("The public exact changed-row consumer count is inconsistent.");
+        _changedRowsDelivered += changedRows;
+        _checksum = unchecked(_checksum + changed.Checksum + changedRows);
+        Record(samples?.ChangeConsume, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        SelectStructuralTargets();
+        Record(samples?.WorkloadSelection, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        RecordStructuralCommands();
+        Record(samples?.CommandRecord, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        StructuralPlaybackResult playback = _world.PlaybackStructuralCommands();
+        ValidateAndAccumulate(playback);
+        Record(samples?.StructuralPlayback, sampleIndex, phaseStarted);
+
+        phaseStarted = Stopwatch.GetTimestamp();
+        PublishStructuralResults();
+        Record(samples?.CreateInitialization, sampleIndex, phaseStarted);
+
+        _tick++;
+        if (_world.AliveCount != _configuration.EntityCount)
+            throw new InvalidOperationException("A public soak tick did not preserve its live population.");
+        if (samples is not null)
+        {
+            long total = Stopwatch.GetTimestamp() - totalStarted;
+            samples.TotalTick[sampleIndex] = total;
+            samples.MeasuredEcsWork[sampleIndex] =
+                samples.Query[sampleIndex] +
+                samples.RandomLookup[sampleIndex] +
+                samples.TrackedWrite[sampleIndex] +
+                samples.ChangeConsume[sampleIndex] +
+                samples.CommandRecord[sampleIndex] +
+                samples.StructuralPlayback[sampleIndex] +
+                samples.CreateInitialization[sampleIndex];
+        }
+    }
+
     internal string ComputeCanonicalHash()
     {
         Array.Clear(_canonicalSeen);
-        var ownership = new IdentityOwnershipVisitor(_entities, _canonicalSeen);
-        int baseRows = _core.VisitReadChunks(_baseIdentityBinding, ref ownership);
-        int wideRows = _core.VisitReadChunks(_wideIdentityBinding, ref ownership);
-        if (baseRows + wideRows != _configuration.EntityCount || ownership.Rows != _configuration.EntityCount)
+        int ownershipRows;
+        if (_configuration.UsePublicJobs)
+        {
+            var ownership = new PublicIdentityOwnershipJob(_entities, _canonicalSeen);
+            ownershipRows = _world.ExecuteJob(_publicOwnershipPlan, ref ownership);
+            if (ownership.Rows != _configuration.EntityCount)
+                throw new InvalidOperationException("Canonical public ownership traversal lost rows.");
+        }
+        else
+        {
+            var ownership = new IdentityOwnershipVisitor(_entities, _canonicalSeen);
+            int baseRows = _core!.VisitReadChunks(_baseIdentityBinding, ref ownership);
+            int wideRows = _core.VisitReadChunks(_wideIdentityBinding, ref ownership);
+            ownershipRows = baseRows + wideRows;
+            if (ownership.Rows != _configuration.EntityCount)
+                throw new InvalidOperationException("Canonical internal ownership traversal lost rows.");
+        }
+        if (ownershipRows != _configuration.EntityCount)
             throw new InvalidOperationException("Canonical ownership traversal lost rows.");
         for (int slot = 0; slot < _canonicalSeen.Length; slot++)
         {
@@ -723,10 +871,15 @@ internal sealed class MixedOperationSoakWorld : IDisposable
 
         ChangeCursor pendingCursor = _changeCursor;
         var pendingChanged = new ChangedIdentityVisitor();
-        int pendingChangedRows = _core.VisitChangedReadRows(
-            _changedPlan,
-            ref pendingCursor,
-            ref pendingChanged);
+        int pendingChangedRows = _configuration.UsePublicJobs
+            ? _world.ExecuteChangedRowsJob(
+                _publicChangedPlan,
+                ref pendingCursor,
+                ref pendingChanged)
+            : _core!.VisitChangedReadRows(
+                _changedPlan!,
+                ref pendingCursor,
+                ref pendingChanged);
         if (pendingChangedRows != pendingChanged.Rows)
             throw new InvalidOperationException("Canonical pending-change observation is inconsistent.");
         hash.AddInt32(pendingChangedRows);
@@ -782,19 +935,35 @@ internal sealed class MixedOperationSoakWorld : IDisposable
             }
         }
 
-        ArchetypeChunkSnapshot baseSnapshot = _baseStorage.Store.GetSnapshot();
-        ArchetypeChunkSnapshot wideSnapshot = _wideStorage.Store.GetSnapshot();
+        ArchetypeChunkSnapshot baseSnapshot = _configuration.UsePublicJobs
+            ? _world.GetArchetypeSnapshot(_baseArchetype)
+            : _baseStorage!.Store.GetSnapshot();
+        ArchetypeChunkSnapshot wideSnapshot = _configuration.UsePublicJobs
+            ? _world.GetArchetypeSnapshot(_wideArchetype)
+            : _wideStorage!.Store.GetSnapshot();
         hash.AddByte(0xA7);
         hash.AddInt32(baseSnapshot.EntityCount);
         hash.AddInt32(wideSnapshot.EntityCount);
         return hash.Finish();
     }
 
-    internal SoakStoreReport[] CaptureStores() =>
-    [
-        CaptureStore("Base", _baseStorage),
-        CaptureStore("Wide", _wideStorage),
-    ];
+    internal SoakStoreReport[] CaptureStores() => _configuration.UsePublicJobs
+        ?
+        [
+            CaptureStore(
+                "Base",
+                _world.GetArchetypeSnapshot(_baseArchetype),
+                _world.GetArchetypeArenaSnapshot(_baseArchetype)),
+            CaptureStore(
+                "Wide",
+                _world.GetArchetypeSnapshot(_wideArchetype),
+                _world.GetArchetypeArenaSnapshot(_wideArchetype)),
+        ]
+        :
+        [
+            CaptureStore("Base", _baseStorage!),
+            CaptureStore("Wide", _wideStorage!),
+        ];
 
     public void Dispose() => _world.Dispose();
 
@@ -1031,6 +1200,14 @@ internal sealed class MixedOperationSoakWorld : IDisposable
     {
         ArchetypeChunkSnapshot store = storage.Store.GetSnapshot();
         ChunkArenaSnapshot arena = storage.Store.Arena.GetSnapshot();
+        return CaptureStore(name, store, arena);
+    }
+
+    private static SoakStoreReport CaptureStore(
+        string name,
+        ArchetypeChunkSnapshot store,
+        ChunkArenaSnapshot arena)
+    {
         return new SoakStoreReport
         {
             Name = name,
@@ -1175,6 +1352,37 @@ internal sealed class MixedOperationSoakWorld : IDisposable
                     _entities[logical].Index != chunk.EntityIndices[row])
                 {
                     throw new InvalidOperationException("Canonical ownership does not match the entity location table.");
+                }
+                _seen[logical]++;
+            }
+            Rows += chunk.Count;
+        }
+    }
+
+    private struct PublicIdentityOwnershipJob : IReadReadChunkJob<SoakIdentity, SoakPosition>
+    {
+        private readonly Entity[] _entities;
+        private readonly int[] _seen;
+
+        internal PublicIdentityOwnershipJob(Entity[] entities, int[] seen)
+        {
+            _entities = entities;
+            _seen = seen;
+            Rows = 0;
+        }
+
+        internal int Rows;
+
+        public void Execute(in ReadReadComponentChunk<SoakIdentity, SoakPosition> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                int logical = chunk.ReadComponents1[row].Value;
+                if (unchecked((uint)logical) >= unchecked((uint)_entities.Length) ||
+                    _entities[logical].Index != chunk.EntityIndices[row])
+                {
+                    throw new InvalidOperationException(
+                        "Canonical public ownership does not match the entity location table.");
                 }
                 _seen[logical]++;
             }
@@ -1361,6 +1569,7 @@ internal sealed class MixedOperationSoakReport
 
 internal sealed class MixedOperationSoakConfigurationReport
 {
+    public required string ExecutionSurface { get; init; }
     public required int EntityCount { get; init; }
     public required int WarmupTicks { get; init; }
     public required int MeasuredTicks { get; init; }

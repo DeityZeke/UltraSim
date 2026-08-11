@@ -6,7 +6,7 @@ namespace UltraSim.ECS;
 /// Stack-only two-column view with one read-only component and one writable
 /// component. The view is valid only during its synchronous visitor call.
 /// </summary>
-internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
+public readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     where TRead : unmanaged, IComponent<TRead>
     where TWrite : unmanaged, IComponent<TWrite>
 {
@@ -49,20 +49,20 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     /// <summary>Physical row represented by local row zero in this sliced view.</summary>
     internal int RowOffset { get; }
 
-    internal ReadOnlySpan<uint> EntityIndices { get; }
+    public ReadOnlySpan<uint> EntityIndices { get; }
 
-    internal ReadOnlySpan<TRead> ReadComponents { get; }
+    public ReadOnlySpan<TRead> ReadComponents { get; }
 
-    internal Span<TWrite> WriteComponents { get; }
+    public Span<TWrite> WriteComponents { get; }
 
-    internal int Count => EntityIndices.Length;
+    public int Count => EntityIndices.Length;
 
-    internal bool IsReadEnableable => !_readEnableWords.IsEmpty;
+    public bool IsReadEnableable => !_readEnableWords.IsEmpty;
 
-    internal bool IsWriteEnableable => !_writeEnableWords.IsEmpty;
+    public bool IsWriteEnableable => !_writeEnableWords.IsEmpty;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool IsReadEnabled(int row)
+    public bool IsReadEnabled(int row)
     {
         ValidateRow(row);
         int absoluteRow = RowOffset + row;
@@ -71,7 +71,7 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal bool IsWriteEnabled(int row)
+    public bool IsWriteEnabled(int row)
     {
         ValidateRow(row);
         int absoluteRow = RowOffset + row;
@@ -80,7 +80,7 @@ internal readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void SetWriteEnabled(int row, bool enabled)
+    public void SetWriteEnabled(int row, bool enabled)
     {
         if (_writeEnableWords.IsEmpty)
             throw new InvalidOperationException("The writable component is not enableable.");

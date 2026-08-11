@@ -1,6 +1,7 @@
 # ECS Next Structural Playback
 
-Status: authoritative ECS 3.0.35 structural-playback architecture as of 2026-08-10.
+Status: authoritative structural-playback architecture through ECS 3.0.36 as of
+2026-08-11; 3.0.36 changes public serial job execution, not structural strategy.
 
 The project version convention is defined in
 [`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.

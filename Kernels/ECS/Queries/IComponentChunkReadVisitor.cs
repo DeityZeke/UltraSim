@@ -1,10 +1,17 @@
 namespace UltraSim.ECS;
 
 /// <summary>
-/// Allocation-free synchronous visitor for one exact-archetype component column.
+/// Allocation-free synchronous public job over one read-only component column
+/// in each prepared chunk.
 /// </summary>
-internal interface IComponentChunkReadVisitor<T>
+public interface IReadOnlyChunkJob<T>
     where T : unmanaged, IComponent<T>
 {
     void Execute(in ReadOnlyComponentChunk<T> chunk);
+}
+
+/// <summary>Compatibility name for the pre-3.0.36 internal query fixtures.</summary>
+internal interface IComponentChunkReadVisitor<T> : IReadOnlyChunkJob<T>
+    where T : unmanaged, IComponent<T>
+{
 }

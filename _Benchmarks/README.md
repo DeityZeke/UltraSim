@@ -32,8 +32,19 @@ The accepted `3.0.34` prepared-migration trusted-commit capture lives at
 [`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
 The accepted `3.0.35` exact route-level packed-suffix transition capture lives at
 [`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
+The accepted `3.0.36` public serial generated chunk-job regression capture lives
+at
+[`Baselines/ecs-v2-v3-3.0.36-2026-08-11.json`](Baselines/ecs-v2-v3-3.0.36-2026-08-11.json).
 The first accepted 100K deterministic mixed-operation soak lives at
 [`Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json`](Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json).
+The accepted ECS `3.0.36` public serial generated chunk-job admission matrix
+lives at
+[`Baselines/ecs-v3-3.0.36-public-generated-chunk-jobs-2026-08-11.json`](Baselines/ecs-v3-3.0.36-public-generated-chunk-jobs-2026-08-11.json).
+Its full public-surface 100K soak profile lives at
+[`Baselines/ecs-v3-3.0.36-100k-mixed-soak-public-jobs-2026-08-11.json`](Baselines/ecs-v3-3.0.36-100k-mixed-soak-public-jobs-2026-08-11.json).
+The API, change-publication contract, fixed serial dispatch controls, and focused
+interpretation are documented in
+[`../ECS_JOB_EXECUTION.md`](../ECS_JOB_EXECUTION.md).
 Its tracked-write/exact-consumer follow-up is documented in
 [`ECS_CHANGE_TRACKING_DECOMPOSITION.md`](ECS_CHANGE_TRACKING_DECOMPOSITION.md).
 Two accepted opposite-pass-order captures decompose checked access, dense/exact

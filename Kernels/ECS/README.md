@@ -197,6 +197,32 @@ allocation:
   execution for all five access shapes. The 2R0W view exposes only read-only
   component spans and enable-state reads; it has no generated writable span or
   enable setter.
+- ECS 3.0.36 exposes those same generated route/chunk loops through the public
+  single-owner facade as serial chunk jobs. Opaque eight-byte typed job plans
+  reuse the existing bounded prepared-plan table and are compiled at `Seal`;
+  default, foreign, pre-runtime, disposed, and wrong-thread use is rejected once
+  per invocation. Public struct-job interfaces and the internal visitor controls
+  converge on the same constrained `Execute(in Chunk)` contract rather than
+  adding a parallel callback framework. Stack-only public views expose only
+  declared typed spans, enable operations, count, and the existing world-local
+  entity-index span; no arena, store, column, enable-word, or `ChunkRow`
+  capability escapes.
+- Writable public generated families have an explicit dense/conditional split.
+  `ExecuteJob` retains conservative pre-callback dense publication and its direct
+  spans. `ExecuteTrackedJob` exposes `TrackedWritableComponentChunk<T>`:
+  `DenseSpan` publishes one exposed range, while `GetTracked`, `SetTracked`, and
+  enable mutation publish exactly touched rows. The first actual tracked write
+  lazily acquires one version shared across the invocation and stamps the dense
+  chunk gate at most once per writable column/chunk; a no-write conditional job
+  does not advance the version. No temporary bitmap, dirty-index list, sort,
+  plan slot, or persistent reservation was added.
+- `ChangedRowsJobPlan<TRead,TChanged>` and `ExecuteChangedRowsJob` are the first
+  public exact changed-row consumer surface. They preserve independent cursors,
+  success-only acknowledgement, exception retry, and the existing contiguous
+  range-per-run delivery. Public filters, public two-watch any/all authoring,
+  mask-bearing delivery, additional access arities, and full entity
+  materialization remain measured follow-ons. The concise contract and admission
+  evidence live in [`ECS_JOB_EXECUTION.md`](../../ECS_JOB_EXECUTION.md).
 - `ChangeVersion` is an eight-byte world-local sequence with zero reserved for
   "never changed," explicit maximum-to-one wrap behavior, and half-range
   changed-since comparison. Every archetype store preallocates one 64-bit stamp
@@ -420,16 +446,16 @@ splits over a 160-entity enable pattern, dense-to-exact and exact-to-exact histo
 transfer, and scalar-reference enable-range copies across offsets and lengths
 around every 64-bit word boundary.
 
-This is now a usable public single-owner component/archetype slice, not yet the
-public scheduler/host ECS. The current generators emit the core manifest, a
+This is now a usable public single-owner component/archetype and serial generated
+chunk-job slice, not yet the public scheduler/host ECS. The current generators emit the core manifest, a
 systematic catalog containing 2R0W, 2R1W, 1R2W, 3R1W, and 2R2W access families,
 and the first 2R2C any/all changed family. Further access/watch arities should be
 added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
-refinement entirely. Public tracked-write scopes, structural
-creation/migration/removal events, optional filters, per-worker structural arenas
-and deeper grouped/compacted playback, generated public chunk jobs, scheduler
-worker tokens, and field/serializer/prefab descriptors remain later work.
+refinement entirely. Structural creation/migration/removal events, optional
+public filters, per-worker structural arenas and deterministic merge, scheduler
+worker tokens/range jobs/system state, and field/serializer/prefab descriptors
+remain later work.
 
 Run both executable test suites from the repository root:
 

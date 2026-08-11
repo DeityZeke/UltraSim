@@ -12,7 +12,7 @@ namespace UltraSim.ECS;
 /// public slice is deliberately single-threaded; the future scheduler will issue
 /// bounded worker access tokens rather than weakening this ownership boundary.
 /// </remarks>
-public sealed class EcsWorld : IDisposable
+public sealed partial class EcsWorld : IDisposable
 {
     private readonly EcsWorld<NativeChunkArena> _core;
     private readonly StructuralCommandBuffer _structuralCommands;
@@ -213,6 +213,20 @@ public sealed class EcsWorld : IDisposable
         return new ComponentLookup<T>(plan);
     }
 
+    /// <summary>Creates an independent change cursor that observes all published changes.</summary>
+    public ChangeCursor CreateChangeCursorFromBeginning()
+    {
+        EnsureOwnerThread();
+        return _core.CreateChangeCursorFromBeginning();
+    }
+
+    /// <summary>Creates an independent change cursor that observes only later changes.</summary>
+    public ChangeCursor CreateChangeCursorFromNow()
+    {
+        EnsureOwnerThread();
+        return _core.CreateChangeCursorFromNow();
+    }
+
     /// <summary>Compiles every prepared plan and permanently closes registration.</summary>
     public void Seal()
     {
@@ -251,6 +265,22 @@ public sealed class EcsWorld : IDisposable
 
         archetype = ArchetypeHandle.Invalid;
         return false;
+    }
+
+    /// <summary>Returns cold occupancy/change-metadata facts without exposing storage.</summary>
+    public ArchetypeChunkSnapshot GetArchetypeSnapshot(ArchetypeHandle archetype)
+    {
+        EnsureRuntimeAccess();
+        return _core.GetArchetypeStorage(ValidateArchetype(archetype, nameof(archetype)))
+            .Store.GetSnapshot();
+    }
+
+    /// <summary>Returns cold arena accounting for one archetype without exposing its arena.</summary>
+    public ChunkArenaSnapshot GetArchetypeArenaSnapshot(ArchetypeHandle archetype)
+    {
+        EnsureRuntimeAccess();
+        return _core.GetArchetypeStorage(ValidateArchetype(archetype, nameof(archetype)))
+            .Store.Arena.GetSnapshot();
     }
 
     public bool TryCreate(ArchetypeHandle archetype, out Entity entity)

@@ -20,7 +20,8 @@ The V31 consolidation checkpoint is therefore `3.0.31`. The exact whole-source
 transition work is `3.0.32`, and its validate-once trusted commit optimization is
 `3.0.33`. Prepared ordinary migration's measured trusted commit optimization is
 `3.0.34`. Exact route-level packed-suffix transition planning is `3.0.35`;
-the next accepted checkpoint in the same milestone will be `3.0.36`;
+the public serial generated chunk-job execution surface is `3.0.36`;
+the next accepted checkpoint in the same milestone will be `3.0.37`;
 a major capability/stability milestone advances the middle field and resets the
 revision, for example `3.1.0`.
 
@@ -32,7 +33,13 @@ change.
 
 Diagnostic benchmark additions do not advance the revision by themselves. The
 3.0.35 100K mixed soak and its change-tracking cost decomposition establish
-longitudinal evidence while leaving production kernel behavior unchanged.
+longitudinal evidence while leaving that production kernel behavior unchanged.
+ECS 3.0.36 is a production API/capability checkpoint: it exposes the existing
+seal-compiled generated chunk machine through the public facade, including dense
+and conditional tracked writes plus the first public exact changed-row job. It is
+not the scheduler or a complete system-runtime milestone; those remain candidates
+for `3.1.0` once graph, worker, structural-merge, tick-barrier, state, and fault
+semantics form one coherent capability.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

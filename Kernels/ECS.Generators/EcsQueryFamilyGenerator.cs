@@ -58,36 +58,70 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("#nullable enable");
         writer.Line("namespace UltraSim.ECS;");
         writer.Line();
+        AppendPublicJobContract(writer, family);
+        writer.Line();
         AppendVisitor(writer, family);
         writer.Line();
         AppendPublicChunk(writer, family);
         writer.Line();
+        if (family.WriteCount != 0)
+        {
+            AppendTrackedPublicChunk(writer, family);
+            writer.Line();
+        }
         AppendBoundChunk(writer, family);
         writer.Line();
         AppendRoute(writer, family);
         writer.Line();
         AppendPlan(writer, family);
         writer.Line();
+        AppendPublicJobPlan(writer, family);
+        writer.Line();
         AppendStoreProjection(writer, family);
         writer.Line();
         AppendWorldMethods(writer, family);
+        writer.Line();
+        AppendFacadeMethods(writer, family);
         return writer.ToString();
+    }
+
+    private static void AppendPublicJobContract(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line($"/// <summary>Public serial generated chunk job with {family.Summary}.</summary>");
+        writer.Line($"public interface {family.JobType}<{family.TypeParameters}>");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"void Execute(in {family.ChunkType}<{family.TypeParameters}> chunk);");
+        writer.Close();
+
+        if (family.WriteCount == 0)
+            return;
+
+        writer.Line();
+        writer.Line($"/// <summary>Public serial conditional-write chunk job with {family.Summary}.</summary>");
+        writer.Line($"public interface {family.TrackedJobType}<{family.TypeParameters}>");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"void Execute(in {family.TrackedChunkType}<{family.TypeParameters}> chunk);");
+        writer.Close();
     }
 
     private static void AppendVisitor(CodeWriter writer, QueryFamilySpec family)
     {
         writer.Line($"/// <summary>Generated allocation-free visitor with {family.Summary}.</summary>");
-        writer.Line($"internal interface {family.VisitorType}<{family.TypeParameters}>");
+        writer.Line($"internal interface {family.VisitorType}<{family.TypeParameters}> :");
+        writer.Indent();
+        writer.Line($"{family.JobType}<{family.TypeParameters}>");
+        writer.Unindent();
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
-        writer.Line($"void Execute(in {family.ChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
     }
 
     private static void AppendPublicChunk(CodeWriter writer, QueryFamilySpec family)
     {
         writer.Line($"/// <summary>Generated stack-only view with {family.Summary}.</summary>");
-        writer.Line($"internal readonly ref struct {family.ChunkType}<{family.TypeParameters}>");
+        writer.Line($"public readonly ref struct {family.ChunkType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
         for (int index = 0; index < family.Slots.Length; index++)
@@ -141,24 +175,24 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("internal ArchetypeId ArchetypeId { get; }");
         writer.Line("internal uint ChunkIndex { get; }");
         writer.Line("internal int RowOffset { get; }");
-        writer.Line("internal global::System.ReadOnlySpan<uint> EntityIndices { get; }");
+        writer.Line("public global::System.ReadOnlySpan<uint> EntityIndices { get; }");
         for (int index = 0; index < family.Slots.Length; index++)
         {
             AccessSlot slot = family.Slots[index];
-            writer.Line($"internal {slot.ComponentSpanType}<{slot.TypeName}> {slot.ComponentsProperty} {{ get; }}");
+            writer.Line($"public {slot.ComponentSpanType}<{slot.TypeName}> {slot.ComponentsProperty} {{ get; }}");
         }
-        writer.Line("internal int Count => EntityIndices.Length;");
+        writer.Line("public int Count => EntityIndices.Length;");
         for (int index = 0; index < family.Slots.Length; index++)
         {
             AccessSlot slot = family.Slots[index];
-            writer.Line($"internal bool {slot.IsEnableableProperty} => !{slot.EnableField}.IsEmpty;");
+            writer.Line($"public bool {slot.IsEnableableProperty} => !{slot.EnableField}.IsEmpty;");
         }
         for (int index = 0; index < family.Slots.Length; index++)
         {
             AccessSlot slot = family.Slots[index];
             writer.Line();
             AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
-            writer.Open($"internal bool {slot.IsEnabledMethod}(int row)");
+            writer.Open($"public bool {slot.IsEnabledMethod}(int row)");
             writer.Line("ValidateRow(row);");
             writer.Line("int absoluteRow = RowOffset + row;");
             writer.Line($"return {slot.EnableField}.IsEmpty ||");
@@ -171,7 +205,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
             writer.Line();
             AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
-            writer.Open($"internal void {slot.SetEnabledMethod}(int row, bool enabled)");
+            writer.Open($"public void {slot.SetEnabledMethod}(int row, bool enabled)");
             writer.Line($"if ({slot.EnableField}.IsEmpty)");
             writer.Indent();
             writer.Line($"throw new global::System.InvalidOperationException(\"Writable component {slot.AccessOrdinal} is not enableable.\");");
@@ -191,6 +225,34 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("throw new global::System.ArgumentOutOfRangeException(nameof(row));");
         writer.Unindent();
         writer.Close();
+        writer.Close();
+    }
+
+    private static void AppendPublicJobPlan(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line($"/// <summary>Opaque world-owned prepared plan for {family.Summary}.</summary>");
+        writer.Line($"public readonly struct {family.JobPlanType}<{family.TypeParameters}>");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"private readonly {family.PlanType}<NativeChunkArena, {family.TypeParameters}>? _plan;");
+        writer.Line();
+        writer.Line($"internal {family.JobPlanType}({family.PlanType}<NativeChunkArena, {family.TypeParameters}> plan)");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("_plan = plan ?? throw new global::System.ArgumentNullException(nameof(plan));");
+        writer.Close();
+        writer.Line();
+        writer.Line("public bool IsValid => _plan is not null;");
+        writer.Line("public WorldId WorldId => _plan?.WorldId ?? default;");
+        writer.Line("public int MatchedArchetypeCount => _plan?.MatchedArchetypeCount ?? 0;");
+        writer.Line();
+        AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
+        writer.Line($"internal {family.PlanType}<NativeChunkArena, {family.TypeParameters}> GetPlan() =>");
+        writer.Indent();
+        writer.Line("_plan ?? throw new global::System.ArgumentException(");
+        writer.Indent();
+        writer.Line("\"The generated job plan is invalid or default initialized.\", \"plan\");");
+        writer.Unindent();
+        writer.Unindent();
         writer.Close();
     }
 
@@ -238,6 +300,110 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             writer.Line($"internal {slot.ComponentSpanType}<{slot.TypeName}> {slot.ComponentsProperty} {{ get; }}");
             writer.Line($"internal {slot.EnableSpanType} {slot.EnableProperty} {{ get; }}");
         }
+        writer.Close();
+    }
+
+    private static void AppendTrackedPublicChunk(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line($"/// <summary>Generated stack-only conditional-write view with {family.Summary}.</summary>");
+        writer.Line($"public readonly ref struct {family.TrackedChunkType}<{family.TypeParameters}>");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+            writer.Line($"private readonly global::System.ReadOnlySpan<ulong> {slot.EnableField};");
+        writer.Line();
+        writer.Line($"internal {family.TrackedChunkType}(");
+        writer.Indent();
+        writer.Line("WorldId worldId,");
+        writer.Line("ArchetypeId archetypeId,");
+        writer.Line("uint chunkIndex,");
+        writer.Line("int rowOffset,");
+        writer.Line("global::System.ReadOnlySpan<uint> entityIndices,");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+            writer.Line($"global::System.ReadOnlySpan<{slot.TypeName}> {slot.ComponentsParameter},");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+            writer.Line($"TrackedWritableComponentChunk<{slot.TypeName}> {slot.CamelName},");
+        AccessSlot[] reads = family.Slots.Where(static slot => !slot.IsWrite).ToArray();
+        for (int index = 0; index < reads.Length; index++)
+        {
+            string suffix = index == reads.Length - 1 ? ")" : ",";
+            writer.Line($"global::System.ReadOnlySpan<ulong> {reads[index].EnableParameter}{suffix}");
+        }
+        writer.Unindent();
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("global::System.Diagnostics.Debug.Assert(worldId.IsValid);");
+        writer.Line("global::System.Diagnostics.Debug.Assert(archetypeId.IsValid);");
+        writer.Line("global::System.Diagnostics.Debug.Assert(rowOffset >= 0);");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+            writer.Line($"global::System.Diagnostics.Debug.Assert(entityIndices.Length == {slot.ComponentsParameter}.Length);");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+            writer.Line($"global::System.Diagnostics.Debug.Assert(entityIndices.Length == {slot.CamelName}.Count);");
+        writer.Line("WorldId = worldId;");
+        writer.Line("ArchetypeId = archetypeId;");
+        writer.Line("ChunkIndex = chunkIndex;");
+        writer.Line("RowOffset = rowOffset;");
+        writer.Line("EntityIndices = entityIndices;");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+        {
+            writer.Line($"{slot.ComponentsProperty} = {slot.ComponentsParameter};");
+            writer.Line($"{slot.EnableField} = {slot.EnableParameter};");
+        }
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+            writer.Line($"{slot.Name} = {slot.CamelName};");
+        writer.Close();
+        writer.Line();
+        writer.Line("internal WorldId WorldId { get; }");
+        writer.Line("internal ArchetypeId ArchetypeId { get; }");
+        writer.Line("internal uint ChunkIndex { get; }");
+        writer.Line("internal int RowOffset { get; }");
+        writer.Line("public global::System.ReadOnlySpan<uint> EntityIndices { get; }");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+            writer.Line($"public global::System.ReadOnlySpan<{slot.TypeName}> {slot.ComponentsProperty} {{ get; }}");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+            writer.Line($"public TrackedWritableComponentChunk<{slot.TypeName}> {slot.Name} {{ get; }}");
+        writer.Line("public int Count => EntityIndices.Length;");
+        foreach (AccessSlot slot in family.Slots)
+        {
+            string expression = slot.IsWrite
+                ? slot.Name + ".IsEnableable"
+                : "!" + slot.EnableField + ".IsEmpty";
+            writer.Line($"public bool {slot.IsEnableableProperty} => {expression};");
+        }
+        foreach (AccessSlot slot in family.Slots)
+        {
+            writer.Line();
+            AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
+            writer.Open($"public bool {slot.IsEnabledMethod}(int row)");
+            if (slot.IsWrite)
+            {
+                writer.Line($"return {slot.Name}.IsEnabled(row);");
+            }
+            else
+            {
+                writer.Line("ValidateRow(row);");
+                writer.Line("int absoluteRow = RowOffset + row;");
+                writer.Line($"return {slot.EnableField}.IsEmpty ||");
+                writer.Indent();
+                writer.Line($"({slot.EnableField}[absoluteRow >> 6] & (1UL << (absoluteRow & 63))) != 0;");
+                writer.Unindent();
+            }
+            writer.Close();
+            if (!slot.IsWrite)
+                continue;
+            writer.Line();
+            AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
+            writer.Open($"public void {slot.SetEnabledMethod}(int row, bool enabled)");
+            writer.Line($"{slot.Name}.SetEnabledTracked(row, enabled);");
+            writer.Close();
+        }
+        writer.Line();
+        AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
+        writer.Open("private void ValidateRow(int row)");
+        writer.Line("if (unchecked((uint)row) >= unchecked((uint)Count))");
+        writer.Indent();
+        writer.Line("throw new global::System.ArgumentOutOfRangeException(nameof(row));");
+        writer.Unindent();
+        writer.Close();
         writer.Close();
     }
 
@@ -601,6 +767,25 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         AppendExecuteRangeMethod(writer, family);
         writer.Line();
         AppendPlanValidation(writer, family);
+        if (family.WriteCount != 0)
+        {
+            writer.Line();
+            AppendTrackedExecutionBoundary(writer, family);
+        }
+        writer.Close();
+    }
+
+    private static void AppendTrackedExecutionBoundary(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line($"internal void EnterTracked{family.Name}Job<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line($"{family.PlanType}<TArena, {family.TypeParameters}> plan)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("EnsureSealed();");
+        writer.Line($"Validate{family.Name}QueryPlan(plan);");
+        writer.Line("EnterExecutionScope();");
         writer.Close();
     }
 
@@ -707,7 +892,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("ref TVisitor visitor)");
         writer.Unindent();
         AppendComponentConstraints(writer, family);
-        writer.Line($"where TVisitor : struct, {family.VisitorType}<{family.TypeParameters}>");
+        writer.Line($"where TVisitor : struct, {family.JobType}<{family.TypeParameters}>");
         writer.Open(string.Empty, emitHeader: false);
         writer.Line("EnsureSealed();");
         writer.Line($"Validate{family.Name}QueryPlan(plan);");
@@ -792,7 +977,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("ref TVisitor visitor)");
         writer.Unindent();
         AppendComponentConstraints(writer, family);
-        writer.Line($"where TVisitor : struct, {family.VisitorType}<{family.TypeParameters}>");
+        writer.Line($"where TVisitor : struct, {family.JobType}<{family.TypeParameters}>");
         writer.Open(string.Empty, emitHeader: false);
         writer.Line("int rowCount = bound.EntityIndices.Length;");
         writer.Line("int pendingStart = -1;");
@@ -900,7 +1085,7 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Line("ref TVisitor visitor)");
         writer.Unindent();
         AppendComponentConstraints(writer, family);
-        writer.Line($"where TVisitor : struct, {family.VisitorType}<{family.TypeParameters}>");
+        writer.Line($"where TVisitor : struct, {family.JobType}<{family.TypeParameters}>");
         writer.Open(string.Empty, emitHeader: false);
         writer.Line($"var chunk = new {family.ChunkType}<{family.TypeParameters}>(");
         writer.Indent();
@@ -999,6 +1184,147 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Indent();
         writer.Line("ArchetypeQueryPlanUtilities.ThrowQueryInvariant(\"A sealed world owns an uncompiled generated query plan.\");");
         writer.Unindent();
+        writer.Close();
+    }
+
+    private static void AppendFacadeMethods(CodeWriter writer, QueryFamilySpec family)
+    {
+        writer.Line("public sealed partial class EcsWorld");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"public {family.JobPlanType}<{family.TypeParameters}> Prepare{family.Name}Job<{family.TypeParameters}>()");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("EnsureOwnerThread();");
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            AccessSlot slot = family.Slots[index];
+            writer.Line($"if (!Schema.TryGetComponentId<{slot.TypeName}>(out ComponentId {slot.GeneratedComponentIdParameter}))");
+            writer.Indent();
+            writer.Line($"throw new global::System.ArgumentException(\"Component type {slot.TypeName} is not registered in this world schema.\");");
+            writer.Unindent();
+        }
+        writer.Line($"return new {family.JobPlanType}<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line($"_core.Prepare{family.Name}Query<{family.TypeParameters}>(");
+        writer.Indent();
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            string suffix = index == family.Slots.Length - 1 ? "));" : ",";
+            writer.Line($"{family.Slots[index].GeneratedComponentIdParameter}{suffix}");
+        }
+        writer.Unindent();
+        writer.Unindent();
+        writer.Close();
+        writer.Line();
+        AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
+        writer.Line($"public int ExecuteJob<{family.TypeParameters}, TJob>(");
+        writer.Indent();
+        writer.Line($"in {family.JobPlanType}<{family.TypeParameters}> plan,");
+        writer.Line("ref TJob job)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Line($"where TJob : struct, {family.JobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("EnsureRuntimeAccess();");
+        writer.Line($"return _core.Visit{family.Name}Chunks(plan.GetPlan(), ref job);");
+        writer.Close();
+        if (family.WriteCount != 0)
+        {
+            writer.Line();
+            AppendTrackedFacadeExecution(writer, family);
+        }
+        writer.Close();
+    }
+
+    private static void AppendTrackedFacadeExecution(CodeWriter writer, QueryFamilySpec family)
+    {
+        AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization");
+        writer.Line($"public int ExecuteTrackedJob<{family.TypeParameters}, TJob>(");
+        writer.Indent();
+        writer.Line($"in {family.JobPlanType}<{family.TypeParameters}> plan,");
+        writer.Line("ref TJob job)");
+        writer.Unindent();
+        AppendComponentConstraints(writer, family);
+        writer.Line($"where TJob : struct, {family.TrackedJobType}<{family.TypeParameters}>");
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("EnsureRuntimeAccess();");
+        writer.Line($"{family.PlanType}<NativeChunkArena, {family.TypeParameters}> prepared = plan.GetPlan();");
+        writer.Line($"_core.EnterTracked{family.Name}Job(prepared);");
+        writer.Open("try");
+        writer.Line("int visitedRows = 0;");
+        writer.Line("ChangeVersion writeVersion = default;");
+        writer.Line($"global::System.ReadOnlySpan<{family.RouteType}<NativeChunkArena>> routes = prepared.Routes;");
+        writer.Open("for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)");
+        writer.Line($"ref readonly {family.RouteType}<NativeChunkArena> route = ref routes[routeIndex];");
+        writer.Line("ArchetypeChunkStore<NativeChunkArena> store = route.Storage.Store;");
+        writer.Line("if (route.HasRowFilters)");
+        writer.Indent();
+        writer.Line("throw new global::System.InvalidOperationException(\"Public tracked jobs do not yet expose filtered plan authoring.\");");
+        writer.Unindent();
+        writer.Line("for (int chunkIndex = store.GetFirstOccupiedChunkIndex();");
+        writer.Indent();
+        writer.Line("chunkIndex >= 0;");
+        writer.Line("chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))");
+        writer.Unindent();
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"{family.BoundChunkType}<{family.TypeParameters}> bound =");
+        writer.Indent();
+        writer.Line($"store.GetBound{family.Name}ComponentChunk<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line("chunkIndex,");
+        foreach (AccessSlot slot in family.Slots)
+            writer.Line($"route.{slot.ColumnProperty},");
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            string suffix = index == family.Slots.Length - 1 ? ");" : ",";
+            writer.Line($"prepared.{family.Slots[index].PlanIsEnableableProperty}{suffix}");
+        }
+        writer.Unindent();
+        writer.Unindent();
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+        {
+            writer.Line($"bool {slot.CamelName}Stamped = false;");
+            writer.Line($"var tracked{slot.Name} = new TrackedWritableComponentChunk<{slot.TypeName}>(");
+            writer.Indent();
+            writer.Line("_core,");
+            writer.Line("store,");
+            writer.Line("bound.ChunkIndex,");
+            writer.Line($"route.{slot.ColumnProperty},");
+            writer.Line("rowOffset: 0,");
+            writer.Line($"bound.{slot.ComponentsProperty},");
+            writer.Line($"bound.{slot.EnableProperty},");
+            writer.Line("wholeChunk: true,");
+            writer.Line("ref writeVersion,");
+            writer.Line($"ref {slot.CamelName}Stamped);");
+            writer.Unindent();
+        }
+        writer.Line($"var chunk = new {family.TrackedChunkType}<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line("Id,");
+        writer.Line("route.Storage.Id,");
+        writer.Line("bound.ChunkIndex,");
+        writer.Line("rowOffset: 0,");
+        writer.Line("bound.EntityIndices,");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => !slot.IsWrite))
+            writer.Line($"bound.{slot.ComponentsProperty},");
+        foreach (AccessSlot slot in family.Slots.Where(static slot => slot.IsWrite))
+            writer.Line($"tracked{slot.Name},");
+        AccessSlot[] reads = family.Slots.Where(static slot => !slot.IsWrite).ToArray();
+        for (int index = 0; index < reads.Length; index++)
+        {
+            string suffix = index == reads.Length - 1 ? ");" : ",";
+            writer.Line($"bound.{reads[index].EnableProperty}{suffix}");
+        }
+        writer.Unindent();
+        writer.Line("job.Execute(in chunk);");
+        writer.Line("visitedRows += chunk.Count;");
+        writer.Close();
+        writer.Close();
+        writer.Line("return visitedRows;");
+        writer.Close();
+        writer.Open("finally");
+        writer.Line("_core.ExitPublicJobExecution();");
+        writer.Close();
         writer.Close();
     }
 
@@ -1921,11 +2247,15 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             }
         }
         internal string HintName => $"UltraSim.ECS.QueryFamilies.{ReadCount}R{WriteCount}W.g.cs";
+        internal string JobType => "I" + Name + "ChunkJob";
+        internal string TrackedJobType => "ITracked" + Name + "ChunkJob";
         internal string VisitorType => "IComponentChunk" + Name + "Visitor";
         internal string ChunkType => Name + "ComponentChunk";
+        internal string TrackedChunkType => "Tracked" + Name + "ComponentChunk";
         internal string BoundChunkType => "Bound" + Name + "ComponentChunk";
         internal string RouteType => "Archetype" + Name + "QueryRoute";
         internal string PlanType => "Archetype" + Name + "QueryPlan";
+        internal string JobPlanType => Name + "JobPlan";
     }
 
     private sealed class AccessSlot

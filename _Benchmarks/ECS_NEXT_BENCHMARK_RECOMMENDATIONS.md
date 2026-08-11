@@ -433,9 +433,10 @@ per tick over a fixed 100,000-entity population. Two independently constructed
 canonically. The accepted run allocated zero bytes and collected no generations.
 
 Treat this as the longitudinal single-owner control, not the completed soak
-matrix. It does not yet exercise public jobs/scheduling, lifecycle streams,
-prefabs, networking, persistence, parallel consumers, slow consumers, many
-archetypes, or maximum configured population. Its first result points toward a
+matrix. ECS 3.0.36 now adds a separately named public serial job profile with the
+same canonical workload; it still does not exercise scheduling, lifecycle
+streams, prefabs, networking, persistence, parallel consumers, slow consumers,
+many archetypes, or maximum configured population. Its first result points toward a
 tracked-write/change-density matrix: the four query passes cost about 722 us/tick,
 5,000 tracked writes about 280 us, exact delivery of approximately 5,095 rows
 about 191 us, and structural recording/playback/create publication about 92 us.
@@ -451,6 +452,16 @@ larger. The 5K-random exact consumer examines 100K resident row versions and
 dispatches 4,776 exact ranges to deliver 5K rows. Future change benchmarks must
 therefore report touched-chunk resident rows and changed-run/range count, not only
 changed or delivered rows.
+
+The next capability checkpoint is also executable and documented in
+[`../ECS_JOB_EXECUTION.md`](../ECS_JOB_EXECUTION.md). Its accepted public/internal
+matrix covers every generated family at 1K/10K/100K in both orders. At 100K the
+public mean delta is between approximately `-0.14%` and `+0.33%` in the accepted
+capture, with zero allocation and canonical state agreement. Fixed public serial
+controls measure about `37.9 ns` for a no-match plan, `49.6 ns` for one tiny
+matching invocation, and roughly `24.3-29.7 ns/invocation` for warmed 4-64-job
+sequences. Phase 5 scheduler reports must use these direct serial controls when
+calculating graph, wake, dependency, partition, and barrier overhead.
 
 The next candidate benchmark should include the cost of resolving and boundedly
 partitioning an arbitrary entity-list write into chunk-local work; the current

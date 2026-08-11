@@ -1,7 +1,8 @@
 # ECS 100K Mixed-Operation Soak
 
-Status: executable 3.0.35 baseline; single-owner kernel/facade workload, not yet a
-scheduler, network, persistence, prefab, or full gameplay benchmark
+Status: accepted 3.0.35 internal-control baseline plus accepted 3.0.36 public
+serial generated chunk-job profile; not yet a scheduler, network, persistence,
+prefab, or full gameplay benchmark
 
 ## Purpose
 
@@ -12,16 +13,18 @@ designed to answer a different question from the isolated primitive suite:
 > tracking, and structural churn over a stable 100,000-entity world without
 > allocation, state drift, fragmentation growth, or pathological tail latency?
 
-It is not a V2/V3 comparison and does not change the ECS kernel version. ECS
-3.0.35 remains the active checkpoint. Future public jobs, lifecycle streams,
-scheduler, prefab, persistence, and networking work should rerun this stable
-scenario to show when and how previously established costs change.
+It is not a V2/V3 comparison. The original 3.0.35 internal profile remains
+immutable. ECS 3.0.36 adds a separately named public-job profile with the same
+useful workload and canonical state; lifecycle streams, scheduler, prefab,
+persistence, and networking work should continue adding profiles rather than
+silently rewriting either control.
 
 The stable machine-readable identities are report
 `ultrasim-ecs-mixed-soak-report-v1`, workload
 `ecs-v3-100k-mixed-operations-v1`, and canonical state
 `ultrasim-ecs-mixed-soak-canonical-v1`. A future semantic change must use a new
-profile rather than silently joining incompatible captures.
+profile rather than silently joining incompatible captures. The public execution
+profile is `ecs-v3-100k-mixed-operations-public-jobs-v1`.
 
 ## Workload contract
 
@@ -179,6 +182,46 @@ The p99.9 total was 1.505 ms and the observed maximum was 2.144 ms, both far bel
 the 16 ms server-tick budget on this machine. These are local single-owner results,
 not a cross-machine latency guarantee.
 
+## Accepted 3.0.36 public-job profile
+
+The accepted public capture is
+`Baselines/ecs-v3-3.0.36-100k-mixed-soak-public-jobs-2026-08-11.json` on the same
+host/runtime policy. It moves the four system-like query passes, exact changed-row
+consumer, change cursors, canonical ownership traversal, and store/arena
+inspection through public APIs. It removes reflection/private `_core` access from
+that profile. The 5,000 arbitrary entity-list activity writes remain checked
+random access, so the useful workload has not been disguised as a 100K scan.
+
+Both 30,000-tick runs passed with the same canonical hash as the original
+3.0.35 control, `4450A5AC6A7A1296151BFC6C084C3C6B`, zero timed allocation,
+zero Gen0/1/2 collections, zero structural rejection, stable 50K/50K population,
+and complete reuse of all 1.5 million eligible temporary holes per run.
+
+Combined 60,000-tick public distribution:
+
+| Phase | Mean | p95 | p99 | p99.9 | Max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| public generated queries | 711.610 us | 755.063 | 791.613 | 855.602 | 1,289.428 |
+| checked random reads | 23.917 us | 26.810 | 31.540 | 77.359 | 299.208 |
+| exact tracked writes | 278.893 us | 295.117 | 332.307 | 399.136 | 686.994 |
+| public exact change consume | 190.984 us | 203.008 | 242.328 | 278.048 | 424.607 |
+| command record | 2.887 us | 2.900 | 4.270 | 6.900 | 65.489 |
+| structural playback | 60.158 us | 65.580 | 79.549 | 119.429 | 312.457 |
+| create initialization | 25.797 us | 28.859 | 34.579 | 82.919 | 334.957 |
+| measured ECS work | 1,294.247 us | 1,341.828 | 1,404.268 | 1,503.947 | 2,181.111 |
+| total tick | 1,300.487 us | 1,348.068 | 1,411.027 | 1,510.956 | 2,198.000 |
+
+The original and public captures were separate processes, so small deltas are
+directional. The public total mean is about `1.15%` lower than the original,
+query mean about `1.42%` lower, and total p95 about `0.68%` lower; p99/p99.9/max
+are within approximately `0.4%/0.4%/2.5%` in the opposite direction. This is an
+effective tie, not a speedup claim. It demonstrates that the public lifecycle/
+plan boundary adds no measurable per-row tax to this sustained workload.
+
+Representative public normalized costs are `1.779 ns/query row`, `47.84
+ns/random read`, `55.78 ns/tracked scalar write`, `37.49 ns/exact delivered
+row`, `7.22 ns/recorded command`, and `150.40 ns/playback command`.
+
 ## Running it
 
 From the repository root:
@@ -190,7 +233,8 @@ dotnet run --project \
   -c Release -- --soak
 ```
 
-The default output is `_Benchmarks/results/ecs-3.0.35-100k-mixed-soak.json`.
+Add `--soak-public-jobs` to run the public 3.0.36 profile. Default result names
+include the active kernel version and append `-public-jobs` for that profile.
 Supported controls are:
 
 - `--soak-output <path>`;
@@ -201,6 +245,7 @@ Supported controls are:
 - `--soak-validation-ticks <ticks>`;
 - `--soak-checkpoint-interval <ticks>`;
 - `--soak-seed <decimal-or-0x-hex>`.
+- `--soak-public-jobs`.
 
 At least 1,000 measured ticks and two measured replays are enforced. A useful
 development smoke is 4,096 entities, 100 warmups, 1,000 measured ticks, two runs,
@@ -228,10 +273,14 @@ profile says the next useful question is the cost surface of sparse tracked writ
 plus exact changed-row consumption, while preserving this accepted scenario as
 the control.
 
-That investigation is now complete at
+That investigation is complete at
 [`ECS_CHANGE_TRACKING_DECOMPOSITION.md`](ECS_CHANGE_TRACKING_DECOMPOSITION.md).
 It finds that version advancement itself is negligible; random checked access,
 chunk locality, resident rows in touched chunks, and fragmented exact-range
-dispatch dominate. ECS remains 3.0.35. The next natural capability is the public
-generated chunk-job/system surface, followed by an end-to-end bounded batch-
-partition experiment only if arbitrary entity-list writes remain important.
+dispatch dominate. ECS 3.0.36 then admitted the public serial generated chunk-job
+surface without changing this workload's canonical state or sustained timing.
+The next implementation should now follow production need: either assemble the
+3.1.0 scheduler/system contracts around this primitive, or first measure an
+end-to-end bounded batch-partition/mask-bearing change-consumer experiment if
+arbitrary entity-list writes or fragmented exact delivery remain dominant in a
+real migrated subsystem.
