@@ -28,6 +28,8 @@ exact whole-source transition capture lives at
 [`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
 The accepted `3.0.33` validate-once trusted-commit capture lives at
 [`Baselines/ecs-v2-v3-3.0.33-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.33-2026-08-10.json).
+The accepted `3.0.34` prepared-migration trusted-commit capture lives at
+[`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -701,6 +703,57 @@ from `43.252` to `29.968/30.869`, and add/remove round trip from `50.403` to
 `19.7 ns/entity`. The complete 129-scenario V3 suite also remained zero-allocation;
 its focused production means were `35.169` end-to-end, `30.125` playback, and
 `32.667 ns/entity` wide-retained playback.
+
+ECS 3.0.34 experimentally extended validate-once commit to every migration
+shape, then retained only the prepared contiguous cases that cleared the
+measurement threshold. The existing contiguous-prefix preflight proves entity
+identity, generation, source membership, and row order. The non-planned path
+still rereads a target's current row after earlier donor moves, but directly
+publishes the proved replacement and store-authored donor relocation. Planned
+compaction directly publishes its prepared replacement batch and successful
+relocation set. `Store.TryRemove` and `TryRemovePlanned` remain authoritative.
+
+The temporary interleaved A/B runner used eight warmups and 32 measured samples,
+alternated checked/trusted execution inside every sample, and ran both pair and
+process orders. At 131,072 operations:
+
+| Round-trip shape | Checked 3.0.33-style mean | Trusted 3.0.34 mean | Checked p95 | Trusted p95 | Mean result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Tail 8 | 89.353 / 86.650 ns/op | 81.084 / 81.226 | 11.885 / 11.450 ms | 10.669 / 10.780 ms | 9.25% / 6.26% faster |
+| Tail 32 | 52.184 / 53.718 | 49.835 / 51.892 | 6.952 / 7.084 | 6.679 / 6.853 | 4.50% / 3.40% faster |
+| Tail 128 | 47.792 / 49.042 | 45.674 / 46.880 | 6.292 / 6.513 | 6.031 / 6.227 | 4.43% / 4.41% faster |
+| Tail 256 | 48.265 / 49.566 | 46.096 / 47.329 | 6.392 / 6.536 | 6.081 / 6.252 | 4.49% / 4.51% faster |
+| Tail 128, 64-byte retained component | 49.738 / 50.739 | 47.525 / 48.716 | 6.554 / 6.766 | 6.262 / 6.495 | 4.45% / 3.99% faster |
+
+Each round trip performs the named number of donor repairs on its partial-source
+forward leg and zero survivor relocations on the complete target-population
+planned leg. Thus the 8-row case exercises scalar trusted reread/publication and
+donor commit, while 32/128/256 also exercise trusted planned publication. Every
+A/B row allocated zero managed bytes and produced the same checksum. Canonical
+state is established separately by the scalar-oracle differential suite,
+Native/Pinned value/enable/history tests, and the isolated comparison adapter.
+
+Immediate trusted migration was rejected: isolated checked/trusted means were
+`78.926/77.416` and `79.921/76.876 ns/op` (1.9% and 3.8%), while one p95 order
+regressed from `8.166` to `8.463 ms`. Scattered playback was also rejected at
+`97.790/99.650` and `96.550/96.818 ns/entity`. Both paths therefore retain the
+ordinary checked EntityPool APIs. Exact whole-source checked/trusted controls
+were flat, confirming the 3.0.33 path was not changed. All temporary controls,
+executor branches, facade hooks, and benchmark pairs were removed after the
+decision.
+
+The permanent 129-scenario report at
+`results/ecs-3.0.34-full.json` remains 129/129 zero-allocation. Its unrelated
+same-implementation controls moved substantially between process captures, so
+the paired data above is the causal acceptance evidence rather than a claim that
+every full-suite delta came from 3.0.34. The accepted isolated V2/V3 capture and
+its reversed order each retain 96 comparable rows, zero canonical/contract
+mismatches, 15 unsupported rows, and zero timed V3 allocation. The comparison
+catalog currently exercises exact whole-source rather than these partial-prefix
+shapes, making it a regression guard: at 50,000 rows add playback was
+`30.203/30.342`, remove playback `28.654/30.249`, and round trip
+`35.443/35.361 ns/entity` in primary/reverse order, versus 3.0.33 values near
+`30.217/31.095`, `29.968/30.869`, and `35.915/35.631`.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

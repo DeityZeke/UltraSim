@@ -72,3 +72,13 @@ commit capture, V2 first. Its V3 profile is
 canonical or contract mismatches, 15 explicit unsupported rows, and zero V3
 timed managed allocation. The reversed-order verification remains in
 `_Benchmarks/results/ecs-v2-v3-3.0.33-reverse`.
+
+`ecs-v2-v3-3.0.34-2026-08-10.json` is the accepted prepared-migration trusted
+commit capture, V2 first. Its V3 profile is
+`ecs-3.0.34-prepared-migration-trusted-commit`. It retains 96 comparable rows,
+zero canonical or contract mismatches, 15 explicit unsupported rows, and zero
+V3 timed managed allocation. The shared catalog is a regression control for
+this checkpoint because its transition rows select exact whole-source work; the
+causal partial-prefix A/B evidence is recorded in `_Benchmarks/README.md`. The
+reversed-order verification remains in
+`_Benchmarks/results/ecs-v2-v3-3.0.34-reverse`.

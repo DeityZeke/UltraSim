@@ -357,6 +357,10 @@ internal static class ArchetypeMigrator
         ReadOnlySpan<ArchetypeColumnTransfer> transfers)
         where TArena : class, IChunkArenaBackend
     {
+        // TryPrepareContiguousSourcePrefix is the trusted-commit proof boundary.
+        // A prior removal may move a later target as its packed donor, so the
+        // non-planned path must reread the current row while retaining the
+        // already-proven identity, generation, and source-membership facts.
         try
         {
             source.Store.CopyColumnsToReservedRuns(
@@ -391,38 +395,24 @@ internal static class ArchetypeMigrator
         for (int index = 0; index < entities.Length; index++)
         {
             Entity entity = entities[index];
-            if (!entityPool.TryGetLocation(entity, out EntityLocation sourceLocation) ||
-                sourceLocation.ArchetypeId != source.Id)
-            {
-                ClearAndRollBackAnonymousDestinationTail(
-                    destination.Store,
-                    destinationRows,
-                    index);
-                ThrowMigrationInvariant(
-                    "A prepared batch entity changed source before publication.");
-            }
+            EntityLocation sourceLocation =
+                entityPool.GetValidatedLocation(entity, source.Id);
 
             var replacement = new EntityLocation(destination.Id, destinationRows[index]);
-            if (!entityPool.TryReplaceLocation(entity, sourceLocation, replacement))
-            {
-                ClearAndRollBackAnonymousDestinationTail(
-                    destination.Store,
-                    destinationRows,
-                    index);
-                ThrowMigrationInvariant(
-                    "A prepared batch entity rejected destination publication.");
-            }
+            entityPool.PublishValidatedLocationReplacement(
+                entity,
+                sourceLocation,
+                replacement);
 
             if (!source.Store.TryRemove(
                     sourceLocation.ChunkRow,
                     entity.Index,
                     out ChunkRowRelocation sourceRelocation))
             {
-                if (!entityPool.TryReplaceLocation(entity, replacement, sourceLocation))
-                {
-                    ThrowMigrationInvariant(
-                        "A prepared batch entity location could not be restored after source removal rejection.");
-                }
+                entityPool.PublishValidatedLocationReplacement(
+                    entity,
+                    replacement,
+                    sourceLocation);
                 ClearAndRollBackAnonymousDestinationTail(
                     destination.Store,
                     destinationRows,
@@ -431,7 +421,7 @@ internal static class ArchetypeMigrator
                     "A prepared batch source row rejected removal.");
             }
 
-            entityPool.ApplyRelocation(source.Id, sourceRelocation);
+            entityPool.ApplyValidatedRelocation(source.Id, sourceRelocation);
         }
 
         return entities.Length;
@@ -446,20 +436,15 @@ internal static class ArchetypeMigrator
         ReadOnlySpan<ChunkRow> destinationRows)
         where TArena : class, IChunkArenaBackend
     {
-        if (!entityPool.TryReplaceLocations(
-                entities,
-                source.Id,
-                sourceRows,
-                destination.Id,
-                destinationRows))
-        {
-            ClearAndRollBackAnonymousDestinationTail(
-                destination.Store,
-                destinationRows,
-                first: 0);
-            ThrowMigrationInvariant(
-                "A planned batch entity changed source before destination publication.");
-        }
+        // The prepared prefix is unchanged until the authoritative planned
+        // removal commits, so publication and donor repair need no second
+        // release-mode EntityPool validation pass.
+        entityPool.PublishValidatedLocationReplacements(
+            entities,
+            source.Id,
+            sourceRows,
+            destination.Id,
+            destinationRows);
 
         Span<ChunkRow> tailRows = stackalloc ChunkRow[MaximumBatchSize];
         Span<byte> removedTail = stackalloc byte[MaximumBatchSize];
@@ -475,16 +460,12 @@ internal static class ArchetypeMigrator
                 relocations,
                 out int relocationCount))
         {
-            if (!entityPool.TryReplaceLocations(
-                    entities,
-                    destination.Id,
-                    destinationRows,
-                    source.Id,
-                    sourceRows))
-            {
-                ThrowMigrationInvariant(
-                    "A planned batch location could not be restored after compaction rejection.");
-            }
+            entityPool.PublishValidatedLocationReplacements(
+                entities,
+                destination.Id,
+                destinationRows,
+                source.Id,
+                sourceRows);
             ClearAndRollBackAnonymousDestinationTail(
                 destination.Store,
                 destinationRows,
@@ -492,7 +473,9 @@ internal static class ArchetypeMigrator
             ThrowMigrationInvariant("A planned batch source rejected compaction.");
         }
 
-        entityPool.ApplyRelocations(source.Id, relocations[..relocationCount]);
+        entityPool.ApplyValidatedRelocations(
+            source.Id,
+            relocations[..relocationCount]);
         return entities.Length;
     }
 

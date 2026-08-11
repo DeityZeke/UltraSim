@@ -31,6 +31,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(EntityPool_LocationBindingRejectsStaleForeignAndOverwrite), EntityPool_LocationBindingRejectsStaleForeignAndOverwrite);
         Run(nameof(EntityPool_AppliesRowStoreSwapRelocation), EntityPool_AppliesRowStoreSwapRelocation);
         Run(nameof(EntityPool_BatchLocationUpdatesAreTransactional), EntityPool_BatchLocationUpdatesAreTransactional);
+        Run(nameof(EntityPool_TrustedMigrationProofsRejectInvalidStateInDebug), EntityPool_TrustedMigrationProofsRejectInvalidStateInDebug);
         Run(nameof(EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent), EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent);
         Run(nameof(EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes), EntityPool_WarmedLocatedChurnAllocatesZeroManagedBytes);
         Run(nameof(GeneratedSchema_AssignsStableCanonicalIds), GeneratedSchema_AssignsStableCanonicalIds);
@@ -633,6 +634,78 @@ internal static class EcsPrimitiveTests
         Assert.True(pool.TryGetLocation(entities[1], out EntityLocation secondMoved));
         Assert.Equal(new EntityLocation(destinationId, new ChunkRow(2, 0)), firstMoved);
         Assert.Equal(new EntityLocation(destinationId, new ChunkRow(2, 1)), secondMoved);
+    }
+
+    private static void EntityPool_TrustedMigrationProofsRejectInvalidStateInDebug()
+    {
+#if DEBUG
+        WorldId worldId = WorldId.Create();
+        var pool = new EntityPool(worldId, new EntityCapacity(2));
+        var sourceId = new ArchetypeId(1);
+        var destinationId = new ArchetypeId(2);
+        var sourceRow = new ChunkRow(0, 0);
+        var sourceLocation = new EntityLocation(sourceId, sourceRow);
+        var destinationLocation = new EntityLocation(destinationId, new ChunkRow(1, 0));
+        Entity entity = pool.Allocate();
+        Assert.True(pool.TryBindLocation(entity, sourceLocation));
+
+        var foreign = new Entity(WorldId.Create(), entity.Index, entity.Generation);
+        var wrongGeneration = new Entity(worldId, entity.Index, entity.Generation + 1);
+        var malformedIndex = new Entity(worldId, uint.MaxValue, entity.Generation);
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.GetValidatedLocation(foreign, sourceId));
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.GetValidatedLocation(wrongGeneration, sourceId));
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.GetValidatedLocation(malformedIndex, sourceId));
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.GetValidatedLocation(entity, destinationId));
+
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.PublishValidatedLocationReplacement(
+                entity,
+                new EntityLocation(sourceId, new ChunkRow(0, 1)),
+                destinationLocation));
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.PublishValidatedLocationReplacement(
+                entity,
+                sourceLocation,
+                EntityLocation.Invalid));
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.PublishValidatedLocationReplacement(
+                malformedIndex,
+                sourceLocation,
+                destinationLocation));
+
+        Entity donor = pool.Allocate();
+        var donorLocation = new EntityLocation(sourceId, new ChunkRow(0, 1));
+        Assert.True(pool.TryBindLocation(donor, donorLocation));
+        var wrongDonorSource = new ChunkRowRelocation(
+            donor.Index,
+            new ChunkRow(0, 2),
+            sourceRow);
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyValidatedRelocation(sourceId, wrongDonorSource));
+        var wrongDonorArchetype = new ChunkRowRelocation(
+            donor.Index,
+            donorLocation.ChunkRow,
+            sourceRow);
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyValidatedRelocation(destinationId, wrongDonorArchetype));
+        var malformedDonor = new ChunkRowRelocation(
+            uint.MaxValue,
+            donorLocation.ChunkRow,
+            sourceRow);
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyValidatedRelocation(sourceId, malformedDonor));
+        Assert.Throws<InvalidOperationException>(() =>
+            pool.ApplyValidatedRelocations(sourceId, [wrongDonorSource]));
+
+        Assert.True(pool.TryGetLocation(entity, out EntityLocation unchanged));
+        Assert.Equal(sourceLocation, unchanged);
+        Assert.True(pool.TryGetLocation(donor, out EntityLocation donorUnchanged));
+        Assert.Equal(donorLocation, donorUnchanged);
+#endif
     }
 
     private static void EntityPool_RandomizedLocationAndRowStoreModelRemainsConsistent()

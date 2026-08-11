@@ -1,6 +1,6 @@
 # ECS Next Structural Playback
 
-Status: authoritative ECS 3.0.33 structural-playback architecture as of 2026-08-10.
+Status: authoritative ECS 3.0.34 structural-playback architecture as of 2026-08-10.
 
 The project version convention is defined in
 [`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.
@@ -75,7 +75,7 @@ primitive.
 | Balanced same-archetype destroy/create, row width at least 64 bytes | Retire into barrier-local holes, initialize creates into those rows, finalize leftovers | Avoid wide donor relocation without exposing sparse queries |
 | Other live destroys | Scalar packed removal with trusted donor/location commit | Preserves record-order conflict behavior and avoids speculative planner cost |
 | Exact ordered transition evacuating a complete source, more than 256 commands, with full destination capacity | Validate the entire route once, stream trusted destination publication in 256-row blocks, reset the source once | Preserve bounded scratch and record order while eliminating per-block source removal/compaction and redundant liveness/location validation |
-| Same prepared transition run, at least 8 commands | 256-entity bounded grouped execution | Amortize route, destination, copy, and compaction work |
+| Same prepared transition run, at least 8 commands | 256-entity bounded grouped execution; contiguous prepared prefixes use trusted location publication and donor repair | Amortize route, destination, copy, compaction, and already-proven EntityPool validation work |
 | Short or high-entropy transition run | Scalar prepared transition | Grouping overhead is not justified |
 
 Exact whole/tail destruction is analyzed and attempted before temporary-hole
@@ -97,13 +97,41 @@ Each bounded block therefore performs only the source-location table read needed
 to assemble copy rows, then publishes replacement locations without repeating
 public stale-handle, generation, and expected-location rejection passes. Debug
 builds assert the full source and publication proof. Release builds trust the
-coordinator. Ordinary scalar and grouped migration continue to use transactional
-checked publication and preserve expected per-command rejection behavior.
+coordinator.
 
 After preflight, reservation, copying, and publication are commit work. Any
 unexpected failure is an invariant violation: destination reservation is rolled
 back where still possible, command playback is consumed, and the public world is
 terminally faulted. It never falls back after partial mutation.
+
+## Prepared-prefix validate-once boundary
+
+ECS 3.0.34 extends the same commit rule inside the existing ordinary grouped
+strategy, without adding a fourth executor mode or another structural strategy.
+`TryPrepareContiguousSourcePrefix` remains the proof boundary: it validates every
+entity's current identity, generation, source archetype, and ordered physical
+row before prepared execution begins.
+
+The non-planned prepared path must still reread each current row. An earlier
+authoritative packed removal can relocate a later target into its donor hole, so
+the preflight row may legitimately be stale. The reread trusts the already-proven
+identity and source membership, Debug reasserts those facts, publication commits
+the replacement directly, `Store.TryRemove` remains authoritative, and successful
+donor repair commits the store-authored relocation directly.
+
+The planned-compaction path retains its original preflight rows until the store
+commits. It therefore publishes the prepared replacement batch and subsequent
+store-authored donor relocations without repeating the complete EntityPool
+liveness/generation/expected-location scans in Release. Debug validates the
+entire publication and relocation set before writing it.
+
+Immediate scalar migration and noncontiguous grouped fallback still use the
+ordinary checked `Try*` EntityPool APIs. Temporary same-process controls found
+only a borderline, inconsistent scalar movement and no scattered-path benefit,
+so those experimental trusted calls were removed. Expected stale, duplicate,
+wrong-source, and capacity rejection is consequently unchanged everywhere; the
+trusted helpers are commit-only operations reachable from prepared coordinators
+after complete proof.
 
 ## Barrier-local row market
 
@@ -186,6 +214,8 @@ Every strategy change must frequently run:
 - destination and entity-capacity exhaustion;
 - partial row reuse and mandatory finalization;
 - donor location, component bytes, enable state, dense history, and exact history;
+- Debug proof-boundary rejection for trusted identity, generation, source row,
+  replacement row, and donor-location violations;
 - Native/Pinned parity where the store primitive supports both;
 - generation wrap, retired slots, epoch wrap, and token ABA protection;
 - warmed zero-managed-allocation loops;

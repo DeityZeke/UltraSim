@@ -296,6 +296,37 @@ internal sealed class EntityPool
     }
 
     /// <summary>
+    /// Reads the current physical location after a single-owner coordinator has
+    /// already proved the entity identity, liveness, and source membership.
+    /// The row may have changed because an authoritative store removal moved
+    /// this entity as a donor. Debug builds reassert the complete proof; release
+    /// performs only the required location-table read.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal EntityLocation GetValidatedLocation(
+        Entity entity,
+        ArchetypeId expectedArchetypeId)
+    {
+        AssertValidatedLocatedEntity(entity, expectedArchetypeId);
+        return _locations[entity.Index];
+    }
+
+    /// <summary>
+    /// Publishes one replacement after the caller has already established the
+    /// entity and expected-location proof. Expected public rejection must use
+    /// <see cref="TryReplaceLocation"/> instead.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void PublishValidatedLocationReplacement(
+        Entity entity,
+        EntityLocation expected,
+        EntityLocation replacement)
+    {
+        AssertValidatedLocationReplacement(entity, expected, replacement);
+        _locations[entity.Index] = replacement;
+    }
+
+    /// <summary>
     /// Transactionally validates and replaces one structural batch. Validation
     /// completes before any location changes, so rejection leaves the table intact.
     /// </summary>
@@ -458,6 +489,42 @@ internal sealed class EntityPool
         }
     }
 
+    /// <summary>
+    /// Publishes a donor relocation authored by a successful authoritative
+    /// store removal. Debug builds reassert the donor location; release performs
+    /// only the location-table commit.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void ApplyValidatedRelocation(
+        ArchetypeId archetypeId,
+        in ChunkRowRelocation relocation)
+    {
+        if (!relocation.HasValue)
+            return;
+
+        AssertValidatedRelocation(archetypeId, relocation);
+        _locations[relocation.EntityIndex] =
+            new EntityLocation(archetypeId, relocation.Destination);
+    }
+
+    /// <summary>
+    /// Publishes donor relocations authored by one successful authoritative
+    /// planned compaction. Debug validates the entire set before publication;
+    /// release commits the already-proven replacements directly.
+    /// </summary>
+    internal void ApplyValidatedRelocations(
+        ArchetypeId archetypeId,
+        ReadOnlySpan<ChunkRowRelocation> relocations)
+    {
+        AssertValidatedRelocations(archetypeId, relocations);
+        for (int index = 0; index < relocations.Length; index++)
+        {
+            ref readonly ChunkRowRelocation relocation = ref relocations[index];
+            _locations[relocation.EntityIndex] =
+                new EntityLocation(archetypeId, relocation.Destination);
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void RetireValidatedIndex(int entityIndex)
     {
@@ -486,14 +553,13 @@ internal sealed class EntityPool
         ArchetypeId replacementArchetypeId,
         ReadOnlySpan<ChunkRow> replacementRows)
     {
-        System.Diagnostics.Debug.Assert(
-            expectedArchetypeId != replacementArchetypeId,
-            "A trusted structural location replacement must change archetypes.");
+        if (expectedArchetypeId == replacementArchetypeId)
+            ThrowLocationInvariant("A trusted structural location replacement must change archetypes.");
         for (int index = 0; index < entities.Length; index++)
         {
             Entity entity = entities[index];
             int entityIndex = unchecked((int)entity.Index);
-            System.Diagnostics.Debug.Assert(
+            if (
                 entity.World == _worldId &&
                 entityIndex >= 0 &&
                 entityIndex < _nextUnusedIndex &&
@@ -501,9 +567,90 @@ internal sealed class EntityPool
                 _generations[entityIndex] == entity.Generation &&
                 _locations[entityIndex] ==
                     new EntityLocation(expectedArchetypeId, expectedRows[index]) &&
-                replacementRows[index].IsValid,
+                replacementRows[index].IsValid)
+            {
+                continue;
+            }
+
+            ThrowLocationInvariant(
                 "A trusted structural location publication received an invalid source entity.");
         }
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertValidatedLocatedEntity(
+        Entity entity,
+        ArchetypeId expectedArchetypeId)
+    {
+        int entityIndex = unchecked((int)entity.Index);
+        if (expectedArchetypeId.IsValid &&
+            entity.World == _worldId &&
+            entityIndex >= 0 &&
+            entityIndex < _nextUnusedIndex &&
+            _states[entityIndex] == SlotAlive &&
+            _generations[entityIndex] == entity.Generation &&
+            _locations[entityIndex].ArchetypeId == expectedArchetypeId &&
+            _locations[entityIndex].ChunkRow.IsValid)
+        {
+            return;
+        }
+
+        ThrowLocationInvariant(
+            "A trusted structural location read received an invalid entity proof.");
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertValidatedLocationReplacement(
+        Entity entity,
+        EntityLocation expected,
+        EntityLocation replacement)
+    {
+        int entityIndex = unchecked((int)entity.Index);
+        if (expected.IsValid &&
+            replacement.IsValid &&
+            expected.ArchetypeId != replacement.ArchetypeId &&
+            entity.World == _worldId &&
+            entityIndex >= 0 &&
+            entityIndex < _nextUnusedIndex &&
+            _states[entityIndex] == SlotAlive &&
+            _generations[entityIndex] == entity.Generation &&
+            _locations[entityIndex] == expected)
+        {
+            return;
+        }
+
+        ThrowLocationInvariant(
+            "A trusted structural location replacement received an invalid proof.");
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertValidatedRelocation(
+        ArchetypeId archetypeId,
+        in ChunkRowRelocation relocation)
+    {
+        uint entityIndex = relocation.EntityIndex;
+        if (archetypeId.IsValid &&
+            relocation.HasValue &&
+            relocation.Source.IsValid &&
+            relocation.Destination.IsValid &&
+            entityIndex < unchecked((uint)_nextUnusedIndex) &&
+            _states[entityIndex] == SlotAlive &&
+            _locations[entityIndex] == new EntityLocation(archetypeId, relocation.Source))
+        {
+            return;
+        }
+
+        ThrowLocationInvariant(
+            "A trusted structural donor relocation received an invalid proof.");
+    }
+
+    [System.Diagnostics.Conditional("DEBUG")]
+    private void AssertValidatedRelocations(
+        ArchetypeId archetypeId,
+        ReadOnlySpan<ChunkRowRelocation> relocations)
+    {
+        for (int index = 0; index < relocations.Length; index++)
+            AssertValidatedRelocation(archetypeId, relocations[index]);
     }
 
     internal SlotSnapshot GetSlotSnapshot(int index)

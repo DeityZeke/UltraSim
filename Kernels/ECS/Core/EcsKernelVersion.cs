@@ -8,8 +8,8 @@ internal static class EcsKernelVersion
 {
     internal const int Generation = 3;
     internal const int Milestone = 0;
-    internal const int Revision = 33;
-    internal const string Value = "3.0.33";
+    internal const int Revision = 34;
+    internal const string Value = "3.0.34";
     internal const string SemanticProfile =
-        "ecs-3.0.33-whole-source-trusted-commit";
+        "ecs-3.0.34-prepared-migration-trusted-commit";
 }

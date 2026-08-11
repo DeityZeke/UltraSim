@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.33 checkpoint captured 2026-08-10
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.0.34 checkpoint captured 2026-08-10
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -106,7 +106,7 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 Compare a future capture with the current accepted baseline:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.33-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.0.34-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
@@ -123,8 +123,8 @@ The 3.0.31 consolidation artifact is
 [`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
 The 3.0.32 exact-whole-source artifact is
 [`Baselines/ecs-v2-v3-3.0.32-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.32-2026-08-10.json).
-The current 3.0.33 artifact is
-[`Baselines/ecs-v2-v3-3.0.33-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.33-2026-08-10.json).
+The current 3.0.34 artifact is
+[`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -273,6 +273,48 @@ The frozen V2 controls did not share the 28-31% V3 movement. The complete
 barriers stayed near `3.55`, `3.08`, and `3.27 ms` for end-to-end, ordinary
 playback, and wide-retained playback.
 
+## 3.0.34 prepared-migration trusted commit checkpoint
+
+This checkpoint does not add a structural strategy. It removes repeated
+release-mode EntityPool validation only after the existing contiguous-prefix
+preflight has proved identity, generation, source membership, and physical row
+order. The non-planned path rereads a current row because earlier packed removal
+may move a later target as donor; planned compaction keeps the preflight rows.
+Both commit replacement locations and successful store-authored donor
+relocations through narrow trusted helpers with full Debug proof assertions.
+
+Temporary same-process controls ran eight warmups and 32 interleaved samples in
+both A/B orders. Tail 8 improved `89.353→81.084` and `86.650→81.226 ns/op`
+(9.25%/6.26%). Tail 32, 128, and 256 improved 3.40-4.51%; the 128-row
+64-byte-retained case improved 3.99-4.45%. Their p95 barriers improved in every
+order and every measured row allocated zero bytes. These round trips repair
+8/32/128/256 donors on the partial-source leg and zero survivors on the complete
+planned leg.
+
+The broader hypothesis was narrowed by evidence. Immediate migration's isolated
+mean movement was only 1.9%/3.8% with an inconsistent p95, and scattered
+playback was flat to slower. Their trusted calls were removed, leaving expected
+per-entity rejection on the ordinary checked APIs. Exact whole-source controls
+were flat and remain the unchanged 3.0.33 implementation. The temporary executor
+mode, command-buffer branch, world/facade hooks, duplicate migrator controls, and
+benchmark-pair framework were all removed.
+
+The accepted and reverse isolated captures each report 96 comparable rows, zero
+canonical/contract mismatches, 15 unsupported rows, and zero timed V3 allocation.
+The current shared catalog uses exact whole-source routes rather than partial
+prepared prefixes, so it is a regression control rather than the causal speedup
+measurement. At 50,000 entities, primary/reverse V3 means are:
+
+| Scenario | 3.0.33 primary/reverse | 3.0.34 primary/reverse | V2 3.0.34 primary/reverse |
+| --- | ---: | ---: | ---: |
+| Add-default playback | 30.217 / 31.095 | 30.203 / 30.342 | 20.104 / 20.037 |
+| Remove playback | 29.968 / 30.869 | 28.654 / 30.249 | 16.370 / 16.134 |
+| Add/remove round trip | 35.915 / 35.631 | 35.443 / 35.361 | 19.720 / 19.451 |
+
+All state and measurement-policy comparisons against the immutable 3.0.33
+artifact passed. Exact packed-suffix transition planning remains the next
+structural experiment; it must not be conflated with this commit-only change.
+
 ## What this baseline says to optimize next
 
 The adapter changes the optimization discussion from speculation to named
@@ -288,9 +330,9 @@ regression targets:
    ns/destroy`; donor-tail gating reduced but did not justify the complexity, so
    the partial path was removed. A future sparse algorithm must group by source
    chunk and prove a crossover before landing.
-3. ECS 3.0.33 validates an exact complete-source transition once and uses a
-   trusted bounded commit. Partial-source and exact packed-suffix routes still
-   plan in 256-row prefixes. Exact packed-suffix transition planning is the next
+3. ECS 3.0.34 also trusts commits for already-prepared contiguous prefixes, but
+   partial-source and exact packed-suffix routes still plan in 256-row blocks.
+   Exact packed-suffix transition planning is the next
    structural experiment; it must preserve partial-capacity record order and
    prove its crossover against scalar and grouped controls before landing.
 4. Fixed command recording writes and validates much richer per-command state
