@@ -49,3 +49,11 @@ The embedded V3 `KernelProfile` remains the comparison protocol's stable
 `ecs-next-phase1-planned-source-compaction-v27` identifier so the regression
 joiner can compare longitudinal timings; the artifact name and this manifest
 identify the V30 source milestone.
+
+`ecs-v2-v3-v31-2026-08-10.json` is the accepted V31 structural-consolidation
+capture, V2 first. It expands the catalog to 96 comparable rows with nine
+provisional balanced-wide churn rows, retains zero canonical mismatches and 15
+unsupported rows, reports the truthful
+`ecs-next-phase1-structural-consolidation-v31` profile, and allocates zero timed
+managed bytes in every V3 row. A reversed-order verification remains in
+`_Benchmarks/results/ecs-v2-v3-v31-consolidation-reverse`.

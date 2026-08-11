@@ -7,7 +7,7 @@ They should be adopted feature by feature without pulling implementation out of
 dependency order.
 
 The first executable Current/Next semantic adapter is documented in
-[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 87 matched
+[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 96 matched
 1K/10K/50K rows with a shared canonical logical-state hash, separate
 record/playback/end-to-end structural boundaries, allocation/GC accounting,
 process isolation, fixed steady-state JIT policy, and explicit unsupported parity
@@ -21,6 +21,8 @@ The accepted V30 joined capture lives at
 [`Baselines/ecs-v2-v3-v30-2026-08-09.json`](Baselines/ecs-v2-v3-v30-2026-08-09.json),
 and its exact same-build barrier-local/V29-style packed control lives at
 [`Baselines/ecs-v30-barrier-hole-reuse-2026-08-09.json`](Baselines/ecs-v30-barrier-hole-reuse-2026-08-09.json).
+The accepted V31 consolidation and expanded-catalog capture lives at
+[`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -605,6 +607,38 @@ V30's balanced hole-reuse scenario is absent from the older adapter catalogs, so
 baseline/V28 values for that feature would be fabricated. Its exact incremental
 comparison is the same-binary packed control above; future accepted adapter
 coverage should add the workload without rewriting historical artifacts.
+
+V31 is a consolidation checkpoint, not a new structural algorithm. It replaces
+boolean executor combinations and interleaved selection with explicit production,
+packed-oracle, and scalar-oracle modes; named live-destroy and transition-run
+plans; exact whole/tail selection before hole-demand scanning; and named temporary-
+hole state constants. All 201 ECS tests and all 12 comparison-core tests pass, and
+the complete 129-row Next suite remains zero-allocation.
+
+The shared adapter now adds nine provisional balanced-wide rows across the three
+scales and three timing boundaries. Each barrier destroys ten percent of one
+72-byte archetype and creates the same count back into it. Both process orders
+produced 96 comparable rows, zero state mismatches, and 15 unsupported rows. At
+50,000 residents, V2/V3 playback measured `169.854/52.697` and
+`166.281/53.343 ns/operation`, so V3 was about `3.22x/3.12x` faster. End-to-end
+measured `168.730/61.752` and `167.588/62.455`, about `2.73x/2.68x` faster. V3
+allocated zero timed bytes; V2 allocated roughly 604,160 bytes in playback and
+684,208 bytes end-to-end per iteration.
+
+Canonical capture discovered that V2's deferred default-create path can publish
+stale donor-row payload after sparse batch destruction. The new comparison is
+therefore explicitly provisional: it hashes every survivor byte plus replacement
+liveness, component presence, and lifecycle, but normalizes replacement payload
+between generations; V3 independently asserts true default initialization. This
+is a contract difference found by the harness, not an accepted V2 behavior.
+
+On the same host, the clean V30 commit's exact focused control measured narrow
+10% packed/production at `32.600/36.468 ns/command`; V31 measured
+`32.920/34.132` and `33.290/34.782` in two processes. The apparent 4% V31
+production-to-packed penalty is therefore smaller than V30's same-host penalty,
+not a consolidation regression. Narrow 50% remained tied; wide 50% retained a
+material production win. Saved two-day-old absolute values are not substituted
+for same-build controls.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

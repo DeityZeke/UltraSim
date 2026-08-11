@@ -44,6 +44,7 @@ internal static class V2WorkloadFactory
         "changes.collect-unchanged" => new V2ChangeCollectWorkload(descriptor, stride: 0),
         "changes.write-collect-10pct" => new V2ChangeCollectWorkload(descriptor, stride: 10),
         "changes.write-collect-100pct" => new V2ChangeCollectWorkload(descriptor, stride: 1),
+        _ when descriptor.Id.StartsWith("structural.churn.balanced-wide-10pct.", StringComparison.Ordinal) => new V2BalancedWideChurnWorkload(descriptor),
         _ when descriptor.Id.StartsWith("structural.create.deferred.", StringComparison.Ordinal) => new V2DeferredStructuralWorkload(descriptor, V2StructuralOperation.Create),
         _ when descriptor.Id.StartsWith("structural.destroy.deferred.", StringComparison.Ordinal) => new V2DeferredStructuralWorkload(descriptor, V2StructuralOperation.Destroy),
         _ when descriptor.Id.StartsWith("structural.destroy.deferred-sparse-10pct.", StringComparison.Ordinal) => new V2DeferredStructuralWorkload(descriptor, V2StructuralOperation.Destroy, sparse: true),

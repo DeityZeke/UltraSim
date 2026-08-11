@@ -22,6 +22,7 @@ public static class ComparisonCatalog
             AddStructuralTriplet(descriptors, "structural.create.deferred", "Deferred default create", scale, scale, "Record and/or play one default Position create per command.", "Exactly scale living Position entities with zero values.");
             AddStructuralTriplet(descriptors, "structural.destroy.deferred", "Deferred destroy", scale, scale, "Record and/or play one destroy per living Position entity.", "No living entities remain and every captured handle is stale.");
             AddStructuralTriplet(descriptors, "structural.destroy.deferred-sparse-10pct", "Deferred sparse destroy", scale, scale / 10L, "Record and/or play one destroy for every tenth Position entity.", "Exactly ten percent of captured handles are stale and survivors retain values.");
+            AddStructuralTriplet(descriptors, "structural.churn.balanced-wide-10pct", "Deferred balanced wide churn", scale, scale / 5L, "Destroy every tenth Position+WideBlock64 entity and create the same count in that archetype during one barrier. V2 does not clear reused default rows, so replacement payload is excluded from the normalized comparison.", "Survivors retain all 72 component bytes; replacements are alive in the same archetype and occupy the destroyed logical ordinals; V3 separately validates default initialization.", ComparisonStrength.Provisional);
             AddStructuralTriplet(descriptors, "structural.transition.add-default", "Deferred add-default transition", scale, scale, "Record and/or play one Position to Position+Velocity transition with default Velocity.", "All entities retain Position and gain zero Velocity.");
             AddStructuralTriplet(descriptors, "structural.transition.remove", "Deferred remove transition", scale, scale, "Record and/or play one Position+Velocity to Position transition.", "All entities retain Position and have no Velocity.");
             Add(descriptors, "structural.migration.add-remove", "Deferred add/remove round trip", "Structural", MeasurementBoundary.EndToEnd, ComparisonStrength.Direct, scale, scale * 2L, 0, "Add default Velocity at one barrier and remove it at the next.", "All entities finish in Position-only state with retained values.");
@@ -59,11 +60,12 @@ public static class ComparisonCatalog
         int scale,
         long operations,
         string semanticContract,
-        string stateContract)
+        string stateContract,
+        ComparisonStrength strength = ComparisonStrength.Direct)
     {
-        Add(descriptors, id + ".record", name + " record", "Structural", MeasurementBoundary.RecordOnly, ComparisonStrength.Direct, scale, operations, 0, semanticContract, stateContract);
-        Add(descriptors, id + ".playback", name + " playback", "Structural", MeasurementBoundary.PlaybackOnly, ComparisonStrength.Direct, scale, operations, 0, semanticContract, stateContract);
-        Add(descriptors, id + ".end-to-end", name + " end-to-end", "Structural", MeasurementBoundary.EndToEnd, ComparisonStrength.Direct, scale, operations, 0, semanticContract, stateContract);
+        Add(descriptors, id + ".record", name + " record", "Structural", MeasurementBoundary.RecordOnly, strength, scale, operations, 0, semanticContract, stateContract);
+        Add(descriptors, id + ".playback", name + " playback", "Structural", MeasurementBoundary.PlaybackOnly, strength, scale, operations, 0, semanticContract, stateContract);
+        Add(descriptors, id + ".end-to-end", name + " end-to-end", "Structural", MeasurementBoundary.EndToEnd, strength, scale, operations, 0, semanticContract, stateContract);
     }
 
     private static void Add(

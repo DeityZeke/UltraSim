@@ -12,12 +12,13 @@ internal static class V2WorldSupport
         builder.RegisterComponent<Velocity>();
         builder.RegisterComponent<Health>();
         builder.RegisterComponent<Scalar>();
+        builder.RegisterComponent<WideBlock64>();
         return new World(builder.Build());
     }
 
     internal static ArchetypeSignature Signature(World world, LogicalComponents components)
     {
-        var ids = new List<ComponentId>(4);
+        var ids = new List<ComponentId>(5);
         if ((components & LogicalComponents.Position) != 0)
             ids.Add(world.GetComponentId<Position>());
         if ((components & LogicalComponents.Velocity) != 0)
@@ -26,6 +27,8 @@ internal static class V2WorldSupport
             ids.Add(world.GetComponentId<Health>());
         if ((components & LogicalComponents.Scalar) != 0)
             ids.Add(world.GetComponentId<Scalar>());
+        if ((components & LogicalComponents.Wide) != 0)
+            ids.Add(world.GetComponentId<WideBlock64>());
         ids.Sort(static (left, right) => left.Value.CompareTo(right.Value));
         return new ArchetypeSignature(ids.ToArray());
     }
@@ -46,6 +49,8 @@ internal static class V2WorldSupport
                 world.SetComponent(entity, new Health(ordinal + 4));
             if ((components & LogicalComponents.Scalar) != 0)
                 world.SetComponent(entity, new Scalar(ordinal + 5));
+            if ((components & LogicalComponents.Wide) != 0)
+                world.SetComponent(entity, CreateWide(ordinal));
         }
         DrainAllDirty(world, count);
         return entities;
@@ -141,5 +146,16 @@ internal static class V2WorldSupport
         _ = world.DrainDirtyTo<Velocity>(scratch);
         _ = world.DrainDirtyTo<Health>(scratch);
         _ = world.DrainDirtyTo<Scalar>(scratch);
+        _ = world.DrainDirtyTo<WideBlock64>(scratch);
     }
+
+    internal static WideBlock64 CreateWide(int ordinal) => new(
+        ordinal + 101L,
+        ordinal * 3L + 103L,
+        ordinal * 5L + 107L,
+        ordinal * 7L + 109L,
+        ordinal * 11L + 113L,
+        ordinal * 13L + 127L,
+        ordinal * 17L + 131L,
+        ordinal * 19L + 137L);
 }

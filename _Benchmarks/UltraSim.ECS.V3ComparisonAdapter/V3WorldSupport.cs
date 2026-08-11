@@ -15,9 +15,11 @@ internal static class V3WorldSupport
 
     internal static ComponentId ScalarId => ComparisonSchema.GetComponentId<Scalar>();
 
+    internal static ComponentId WideId => ComparisonSchema.GetComponentId<WideBlock64>();
+
     internal static ComponentId[] Signature(LogicalComponents components)
     {
-        var ids = new List<ComponentId>(4);
+        var ids = new List<ComponentId>(5);
         if ((components & LogicalComponents.Position) != 0)
             ids.Add(PositionId);
         if ((components & LogicalComponents.Velocity) != 0)
@@ -26,6 +28,8 @@ internal static class V3WorldSupport
             ids.Add(HealthId);
         if ((components & LogicalComponents.Scalar) != 0)
             ids.Add(ScalarId);
+        if ((components & LogicalComponents.Wide) != 0)
+            ids.Add(WideId);
         ids.Sort(static (left, right) => left.Value.CompareTo(right.Value));
         return ids.ToArray();
     }
@@ -36,6 +40,18 @@ internal static class V3WorldSupport
         ChunkLayoutPlan plan = ChunkLayoutPlanner.Plan(schema, signature, ChunkLayoutOptions.KiB16, columns);
         return Math.Max(1, (population + plan.RowCapacity - 1) / plan.RowCapacity);
     }
+
+    internal static WideBlock64 CreateWide(int ordinal) => new()
+    {
+        Value0 = ordinal + 101L,
+        Value1 = ordinal * 3L + 103L,
+        Value2 = ordinal * 5L + 107L,
+        Value3 = ordinal * 7L + 109L,
+        Value4 = ordinal * 11L + 113L,
+        Value5 = ordinal * 13L + 127L,
+        Value6 = ordinal * 17L + 131L,
+        Value7 = ordinal * 19L + 137L,
+    };
 
     internal static CanonicalState CaptureFacadeState(
         EcsWorld world,

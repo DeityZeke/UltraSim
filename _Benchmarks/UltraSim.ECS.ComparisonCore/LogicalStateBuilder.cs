@@ -8,6 +8,7 @@ public enum LogicalComponents : uint
     Velocity = 1 << 1,
     Health = 1 << 2,
     Scalar = 1 << 3,
+    Wide = 1 << 4,
 }
 
 public struct LogicalStateBuilder
@@ -55,7 +56,15 @@ public struct LogicalStateBuilder
         int velocityY = 0,
         int health = 0,
         int scalar = 0,
-        uint enabledComponents = uint.MaxValue)
+        uint enabledComponents = uint.MaxValue,
+        long wide0 = 0,
+        long wide1 = 0,
+        long wide2 = 0,
+        long wide3 = 0,
+        long wide4 = 0,
+        long wide5 = 0,
+        long wide6 = 0,
+        long wide7 = 0)
     {
         if (ordinal != _nextEntityOrdinal++)
             throw new InvalidOperationException("Canonical entities must be written in ascending logical order.");
@@ -79,6 +88,17 @@ public struct LogicalStateBuilder
             _hash.AddInt32(health);
         if ((components & LogicalComponents.Scalar) != 0)
             _hash.AddInt32(scalar);
+        if ((components & LogicalComponents.Wide) != 0)
+        {
+            _hash.AddInt64(wide0);
+            _hash.AddInt64(wide1);
+            _hash.AddInt64(wide2);
+            _hash.AddInt64(wide3);
+            _hash.AddInt64(wide4);
+            _hash.AddInt64(wide5);
+            _hash.AddInt64(wide6);
+            _hash.AddInt64(wide7);
+        }
     }
 
     public void AddArchetype(LogicalComponents signature, int population)

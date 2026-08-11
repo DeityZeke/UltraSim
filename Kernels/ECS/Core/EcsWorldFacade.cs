@@ -302,31 +302,35 @@ public sealed class EcsWorld : IDisposable
     /// unexpected exception consumes the arena and terminally faults the world.
     /// </summary>
     public StructuralPlaybackResult PlaybackStructuralCommands() =>
-        PlaybackStructuralCommandsCore(usePhaseIndex: true);
+        PlaybackStructuralCommandsCore(StructuralPlaybackExecutor.Production);
 
     /// <summary>
     /// Scalar reference implementation retained for differential verification.
     /// It is not part of the public runtime surface.
     /// </summary>
     internal StructuralPlaybackResult PlaybackStructuralCommandsScalarOracle() =>
-        PlaybackStructuralCommandsCore(usePhaseIndex: false, useTemporaryHoles: false);
+        PlaybackStructuralCommandsCore(StructuralPlaybackExecutor.ScalarOracle);
 
     internal StructuralPlaybackResult PlaybackStructuralCommandsPhaseIndexedPackedOracle() =>
-        PlaybackStructuralCommandsCore(usePhaseIndex: true, useTemporaryHoles: false);
+        PlaybackStructuralCommandsCore(StructuralPlaybackExecutor.PackedOracle);
 
     private StructuralPlaybackResult PlaybackStructuralCommandsCore(
-        bool usePhaseIndex,
-        bool useTemporaryHoles = true)
+        StructuralPlaybackExecutor executor)
     {
         EnsureRuntimeAccess();
         _core.ValidateStructuralPlayback();
         try
         {
-            if (!usePhaseIndex)
-                return _structuralCommands.PlaybackScalarOracle(_core);
-            return useTemporaryHoles
-                ? _structuralCommands.Playback(_core)
-                : _structuralCommands.PlaybackPhaseIndexedPackedOracle(_core);
+            return executor switch
+            {
+                StructuralPlaybackExecutor.Production =>
+                    _structuralCommands.Playback(_core),
+                StructuralPlaybackExecutor.PackedOracle =>
+                    _structuralCommands.PlaybackPhaseIndexedPackedOracle(_core),
+                StructuralPlaybackExecutor.ScalarOracle =>
+                    _structuralCommands.PlaybackScalarOracle(_core),
+                _ => throw new ArgumentOutOfRangeException(nameof(executor)),
+            };
         }
         catch (Exception exception)
         {

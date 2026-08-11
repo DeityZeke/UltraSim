@@ -112,6 +112,7 @@ internal static class EcsPrimitiveTests
         Run(nameof(PublicEcsWorld_DeferredCreateTokensComposeAndExpire), PublicEcsWorld_DeferredCreateTokensComposeAndExpire);
         Run(nameof(PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle), PublicEcsWorld_PhaseIndexedPlaybackMatchesScalarOracle);
         Run(nameof(PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle), PublicEcsWorld_GroupedDestroyPlaybackMatchesScalarOracle);
+        Run(nameof(PublicEcsWorld_ExactWideDestroyPlanPrecedesHoleMarket), PublicEcsWorld_ExactWideDestroyPlanPrecedesHoleMarket);
         Run(nameof(PublicEcsWorld_BarrierLocalHolesReuseSparseWideRows), PublicEcsWorld_BarrierLocalHolesReuseSparseWideRows);
         Run(nameof(PublicEcsWorld_BarrierLocalHoleFailureFinalizesDenseStorage), PublicEcsWorld_BarrierLocalHoleFailureFinalizesDenseStorage);
         Run(nameof(PublicEcsWorld_BarrierLocalPartialReuseRepairsCompactionDonor), PublicEcsWorld_BarrierLocalPartialReuseRepairsCompactionDonor);
@@ -5037,6 +5038,48 @@ internal static class EcsPrimitiveTests
                 optimized.EnableLookup,
                 out bool optimizedEnabled));
             Assert.True(optimizedEnabled);
+        }
+    }
+
+    private static void PublicEcsWorld_ExactWideDestroyPlanPrecedesHoleMarket()
+    {
+        const int entityCount = 64;
+        using var fixture = new PublicHoleReuseFixture(
+            entityCount,
+            structuralCommandCapacity: entityCount * 2,
+            maximumChunks: 2);
+        var entities = new Entity[entityCount];
+        var archetypes = new ArchetypeHandle[entityCount];
+        var tokens = new DeferredEntity[entityCount];
+        Array.Fill(archetypes, fixture.Archetype);
+        for (int index = 0; index < entities.Length; index++)
+        {
+            Assert.True(fixture.World.TryCreate(
+                fixture.Archetype,
+                fixture.EnableLookup,
+                new UltraSim.ECS.Tests.LayoutEnableLong { Value = index + 1L },
+                out entities[index]));
+        }
+
+        fixture.World.StructuralCommands.EnqueueDestroy(entities);
+        fixture.World.StructuralCommands.EnqueueCreateDefault(archetypes, tokens);
+        StructuralPlaybackResult result = fixture.World.PlaybackStructuralCommands();
+
+        Assert.Equal(entityCount, result.DestroyedCount);
+        Assert.Equal(entityCount, result.CreatedCount);
+        Assert.Equal(0, result.RejectedCount);
+        Assert.Equal(0, result.TemporaryHoleCount);
+        Assert.Equal(0, result.ReusedTemporaryHoleCount);
+        Assert.Equal(0, result.CompactedTemporaryHoleCount);
+        for (int index = 0; index < entityCount; index++)
+        {
+            Assert.False(fixture.World.IsAlive(entities[index]));
+            Assert.True(fixture.World.StructuralCommands.TryResolve(tokens[index], out Entity replacement));
+            Assert.True(fixture.World.TryRead(
+                replacement,
+                fixture.EnableLookup,
+                out UltraSim.ECS.Tests.LayoutEnableLong value));
+            Assert.Equal(0L, value.Value);
         }
     }
 

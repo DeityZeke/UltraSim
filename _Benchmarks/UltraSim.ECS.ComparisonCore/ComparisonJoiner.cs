@@ -132,8 +132,16 @@ public static class ComparisonJoiner
             throw new InvalidOperationException("Baseline and current reports use incompatible protocol versions.");
         }
 
-        ValidateEnvironmentPair(baseline.V2, current.V2, "V2 baseline/current");
-        ValidateEnvironmentPair(baseline.V3, current.V3, "V3 baseline/current");
+        ValidateEnvironmentPair(
+            baseline.V2,
+            current.V2,
+            "V2 baseline/current",
+            requireSameKernelProfile: true);
+        ValidateEnvironmentPair(
+            baseline.V3,
+            current.V3,
+            "V3 baseline/current",
+            requireSameKernelProfile: false);
 
         Dictionary<string, CrossGenerationResult> baselineByKey = IndexJoined(baseline);
         Dictionary<string, CrossGenerationResult> currentByKey = IndexJoined(current);
@@ -247,6 +255,10 @@ public static class ComparisonJoiner
             TimestampUtc = DateTimeOffset.UtcNow,
             BaselineTimestampUtc = baseline.TimestampUtc,
             CurrentTimestampUtc = current.TimestampUtc,
+            V2BaselineProfile = baseline.V2.KernelProfile,
+            V2CurrentProfile = current.V2.KernelProfile,
+            V3BaselineProfile = baseline.V3.KernelProfile,
+            V3CurrentProfile = current.V3.KernelProfile,
             Results = results,
         };
     }
@@ -270,6 +282,8 @@ public static class ComparisonJoiner
         builder.AppendLine($"Generated: {report.TimestampUtc:O}");
         builder.AppendLine($"Baseline capture: {report.BaselineTimestampUtc:O}");
         builder.AppendLine($"Current capture: {report.CurrentTimestampUtc:O}");
+        builder.AppendLine($"V2 profiles: baseline `{report.V2BaselineProfile}`; current `{report.V2CurrentProfile}`");
+        builder.AppendLine($"V3 profiles: baseline `{report.V3BaselineProfile}`; current `{report.V3CurrentProfile}`");
         builder.AppendLine($"Coverage: **{comparable} comparable**, **{stateMismatches} state mismatches**, **{contractMismatches} contract/catalog mismatches**, **{unsupported} unsupported**.");
         builder.AppendLine();
         builder.AppendLine("> Ratios are current/baseline; lower is faster. V2 is rerun as a frozen control. Similar V2 and V3 movement suggests host noise; V3-only movement suggests a rewrite change.");
@@ -360,10 +374,12 @@ public static class ComparisonJoiner
     private static void ValidateEnvironmentPair(
         ComparisonRunReport baseline,
         ComparisonRunReport current,
-        string label)
+        string label,
+        bool requireSameKernelProfile)
     {
         if (!string.Equals(baseline.Generation, current.Generation, StringComparison.Ordinal) ||
-            !string.Equals(baseline.KernelProfile, current.KernelProfile, StringComparison.Ordinal) ||
+            (requireSameKernelProfile &&
+                !string.Equals(baseline.KernelProfile, current.KernelProfile, StringComparison.Ordinal)) ||
             !string.Equals(baseline.RuntimeVersion, current.RuntimeVersion, StringComparison.Ordinal) ||
             !string.Equals(baseline.FrameworkDescription, current.FrameworkDescription, StringComparison.Ordinal) ||
             !string.Equals(baseline.OSDescription, current.OSDescription, StringComparison.Ordinal) ||

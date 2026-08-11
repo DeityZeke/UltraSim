@@ -196,6 +196,10 @@ public sealed class BaselineRegressionReport
     public required DateTimeOffset TimestampUtc { get; init; }
     public required DateTimeOffset BaselineTimestampUtc { get; init; }
     public required DateTimeOffset CurrentTimestampUtc { get; init; }
+    public required string V2BaselineProfile { get; init; }
+    public required string V2CurrentProfile { get; init; }
+    public required string V3BaselineProfile { get; init; }
+    public required string V3CurrentProfile { get; init; }
     public required IReadOnlyList<BaselineRegressionResult> Results { get; init; }
 }
 

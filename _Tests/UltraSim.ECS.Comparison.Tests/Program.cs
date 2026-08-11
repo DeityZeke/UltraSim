@@ -4,6 +4,7 @@ var tests = new (string Name, Action Execute)[]
 {
     ("Canonical hash is deterministic", CanonicalHashIsDeterministic),
     ("Canonical hash detects value changes", CanonicalHashDetectsValueChanges),
+    ("Canonical hash detects wide value changes", CanonicalHashDetectsWideValueChanges),
     ("Logical entity order is enforced", LogicalEntityOrderIsEnforced),
     ("Matching reports become comparable", MatchingReportsBecomeComparable),
     ("State mismatch suppresses trustworthy comparison", StateMismatchIsVisible),
@@ -11,6 +12,7 @@ var tests = new (string Name, Action Execute)[]
     ("Descriptor mismatch is rejected", DescriptorMismatchIsRejected),
     ("Runtime mismatch is rejected", RuntimeMismatchIsRejected),
     ("Saved baseline reports V2 control and V3 movement", SavedBaselineReportsBothGenerations),
+    ("Saved baseline permits an explicit V3 profile change", SavedBaselinePermitsV3ProfileChange),
     ("Saved baseline detects cross-time state drift", SavedBaselineDetectsStateDrift),
 };
 
@@ -44,6 +46,30 @@ static void CanonicalHashDetectsValueChanges()
     CanonicalState first = MakeState(value: 10);
     CanonicalState second = MakeState(value: 11);
     True(first.Hash != second.Hash, "A component-value change did not change the canonical hash.");
+}
+
+static void CanonicalHashDetectsWideValueChanges()
+{
+    var first = new LogicalStateBuilder("wide", 1, 1, 1);
+    first.AddEntity(
+        0,
+        true,
+        0,
+        LogicalComponents.Position | LogicalComponents.Wide,
+        wide7: 41);
+    first.AddArchetype(LogicalComponents.Position | LogicalComponents.Wide, 1);
+
+    var second = new LogicalStateBuilder("wide", 1, 1, 1);
+    second.AddEntity(
+        0,
+        true,
+        0,
+        LogicalComponents.Position | LogicalComponents.Wide,
+        wide7: 42);
+    second.AddArchetype(LogicalComponents.Position | LogicalComponents.Wide, 1);
+
+    True(first.Finish().Hash != second.Finish().Hash,
+        "A wide-component value change did not change the canonical hash.");
 }
 
 static void LogicalEntityOrderIsEnforced()
@@ -161,6 +187,23 @@ static void SavedBaselineDetectsStateDrift()
     Equal(0d, result.V3CurrentToBaselineMeanRatio);
 }
 
+static void SavedBaselinePermitsV3ProfileChange()
+{
+    ScenarioDescriptor descriptor = MakeDescriptor();
+    CanonicalState state = MakeState(10);
+    CrossGenerationReport baseline = ComparisonJoiner.Join(
+        MakeReport("V2", MakeMeasured(descriptor, state, 20, 0), kernelProfile: "frozen-v2"),
+        MakeReport("V3", MakeMeasured(descriptor, state, 10, 0), kernelProfile: "v30"));
+    CrossGenerationReport current = ComparisonJoiner.Join(
+        MakeReport("V2", MakeMeasured(descriptor, state, 20, 0), kernelProfile: "frozen-v2"),
+        MakeReport("V3", MakeMeasured(descriptor, state, 9, 0), kernelProfile: "v31"));
+
+    BaselineRegressionReport report = ComparisonJoiner.CompareAgainstBaseline(baseline, current);
+    Equal("comparable", Single(report.Results).Status);
+    Equal("v30", report.V3BaselineProfile);
+    Equal("v31", report.V3CurrentProfile);
+}
+
 static CanonicalState MakeState(int value)
 {
     var builder = new LogicalStateBuilder("test", 1, 1, 1);
@@ -201,11 +244,12 @@ static ComparisonScenarioResult MakeMeasured(
 static ComparisonRunReport MakeReport(
     string generation,
     ComparisonScenarioResult result,
-    string? runtime = null) => new()
+    string? runtime = null,
+    string? kernelProfile = null) => new()
 {
     ProtocolVersion = ComparisonRunner.ProtocolVersion,
     Generation = generation,
-    KernelProfile = generation,
+    KernelProfile = kernelProfile ?? generation,
     RuntimeVersion = runtime ?? Environment.Version.ToString(),
     FrameworkDescription = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
     OSDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription,

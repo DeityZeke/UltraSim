@@ -338,7 +338,7 @@ end scenario if real workload maintenance cost is the question.
 
 The first exact cross-generation adapter is implemented under root `_Benchmarks`
 and documented in [`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). Its v1
-protocol covers 87 matched rows across 1K, 10K, and 50K entities, rejects state or
+protocol covers 96 matched rows across 1K, 10K, and 50K entities, rejects state or
 descriptor mismatch, records effective logical bytes, and retains 15 explicit
 unsupported parity rows. The first immutable joined artifact is stored under
 `_Benchmarks/Baselines`; future captures compare current V2 and V3 independently

@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, captured 2026-08-09
+`ecs-v2-v3-semantic-comparison-v1`, current checkpoint captured 2026-08-10
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -20,7 +20,7 @@ V3 is already a complete V2 replacement.
   generated query surface without making benchmark-only APIs public.
 - `UltraSim.ECS.Comparison` runs each generation in a separate process and joins
   results by stable scenario ID plus scale.
-- `UltraSim.ECS.Comparison.Tests` contains ten direct tests for hash sensitivity,
+- `UltraSim.ECS.Comparison.Tests` contains twelve direct tests for hash sensitivity,
   ordering, mismatch suppression, unsupported-row retention, descriptor
   identity, environment rejection, saved-baseline ratios, and cross-time state
   drift.
@@ -46,7 +46,8 @@ logical stream containing:
 - normalized changed-entity ordinals;
 - verified slot-reuse count.
 
-The hash deliberately excludes world IDs, physical entity indices, raw generation
+WideBlock64 values are hashed as eight independent 64-bit fields. The hash
+deliberately excludes world IDs, physical entity indices, raw generation
 starting values, internal archetype IDs, chunks, packed rows, allocator addresses,
 and backend identity. Those differ by implementation and are validated by each
 kernel's own tests. Lifecycle workloads separately prove that all old handles are
@@ -70,7 +71,7 @@ accounting rather than reusing that claim.
 ## Current coverage
 
 The executable matrix uses 1,000, 10,000, and 50,000 entities and currently
-contains 87 cross-generation rows:
+contains 96 cross-generation rows:
 
 - checked random Position read and tracked write;
 - V3 callback-bounded prepared read/write jobs against the closest V2 path;
@@ -79,6 +80,8 @@ contains 87 cross-generation rows:
 - immediate default create and immediate destroy;
 - deferred create, full destroy, sparse ten-percent destroy, add-default, and
   remove, each split into record-only, playback-only, and end-to-end boundaries;
+- provisional balanced ten-percent destroy/create churn in one 72-byte archetype,
+  also split into record, playback, and end-to-end boundaries;
 - add/remove migration round trips;
 - destroy/create slot reuse and stale-handle validation;
 - unchanged change polling;
@@ -103,7 +106,7 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 Compare a future capture with the accepted baseline:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-2026-08-09.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-v31-2026-08-10.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 This emits both the cross-generation report and `ecs-v2-v3-regression.{json,md}`.
@@ -114,8 +117,10 @@ both generations move similarly, host noise is more likely; V3-only movement is
 more likely to be caused by the rewrite. Catalog additions remain visible,
 while state, descriptor, and measurement-policy mismatches suppress ratios.
 
-The accepted primary artifact is
+The original accepted artifact is
 [`Baselines/ecs-v2-v3-2026-08-09.json`](Baselines/ecs-v2-v3-2026-08-09.json).
+The current V31 checkpoint artifact is
+[`Baselines/ecs-v2-v3-v31-2026-08-10.json`](Baselines/ecs-v2-v3-v31-2026-08-10.json).
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 
@@ -132,7 +137,7 @@ diagnostic 2-warmup/9-iteration pass. Both settings are embedded in every report
 Use `--filter=...` and `--scale=...` for focused development checks, but do not
 replace the complete two-order gate with a focused result.
 
-## Accepted as-is baseline
+## Original accepted as-is baseline
 
 The accepted V2-first capture and its V3-first verification on the
 16-logical-processor .NET 8.0.29 host produced:
@@ -175,6 +180,33 @@ The most repeatable 50,000-entity results were:
 The reversed-order ratios were materially consistent for the large gaps. Small
 differences under roughly ten percent remain noise candidates and require more
 isolated repetitions or hardware counters before becoming optimization claims.
+
+## V31 consolidation checkpoint
+
+The V31 primary and reversed-order captures each produced 96 comparable rows,
+zero state mismatches, 15 explicit unsupported rows, and zero V3 timed managed
+allocation. The original 87 rows also retained zero cross-time state mismatches;
+the nine catalog additions are the expected three scales by three timing
+boundaries for balanced wide churn.
+
+At 50,000 residents, balanced-wide playback measured V2/V3 at
+`169.854/52.697` and `166.281/53.343 ns/operation`, about `3.22x/3.12x` in
+V3's favor. End-to-end measured `168.730/61.752` and `167.588/62.455`, about
+`2.73x/2.68x` faster for V3. V3 allocated zero; V2 allocated about 604,160 bytes
+for playback and 684,208 bytes end-to-end per iteration. V3 command recording
+remains much slower in isolation, but bounded and allocation-free.
+
+This comparison is provisional because canonical validation exposed a V2 defect:
+after sparse batch destroy, deferred default creation may publish stale donor-row
+component bytes. Survivor payload, component presence, liveness, and replacement
+lifecycle are compared exactly; replacement values are normalized only for the
+cross-generation hash, while V3 separately requires actual zero defaults. The
+adapter does not redefine stale bytes as valid default-create semantics.
+
+Regression reports now allow the V3 profile label to change across checkpoints
+while requiring the frozen V2 profile and all runtime/measurement settings to
+remain equal. Baseline and current V2/V3 profile names are printed in every
+regression report, eliminating the previous misleading retention of a v27 label.
 
 ## What this baseline says to optimize next
 

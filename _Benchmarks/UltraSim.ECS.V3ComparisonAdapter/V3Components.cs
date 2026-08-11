@@ -28,7 +28,22 @@ internal struct Scalar : IComponent<Scalar>
     public int Value;
 }
 
-[EcsSchema(typeof(Position), typeof(Velocity), typeof(Health), typeof(Scalar))]
+// A deliberately wide, blittable component used to measure bytes avoided by
+// barrier-local row reuse rather than a narrow-row metadata microbenchmark.
+[EcsComponent("comparison.wide-block-64")]
+internal struct WideBlock64 : IComponent<WideBlock64>
+{
+    public long Value0;
+    public long Value1;
+    public long Value2;
+    public long Value3;
+    public long Value4;
+    public long Value5;
+    public long Value6;
+    public long Value7;
+}
+
+[EcsSchema(typeof(Position), typeof(Velocity), typeof(Health), typeof(Scalar), typeof(WideBlock64))]
 internal static partial class ComparisonSchema
 {
 }
