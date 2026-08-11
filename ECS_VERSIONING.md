@@ -30,6 +30,10 @@ Every accepted version still requires tests, allocation checks, canonical state
 comparison where contracts overlap, and benchmark evidence appropriate to the
 change.
 
+Diagnostic benchmark additions do not advance the revision by themselves. The
+3.0.35 100K mixed soak and its change-tracking cost decomposition establish
+longitudinal evidence while leaving production kernel behavior unchanged.
+
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`
 through `3.0.31`, optionally giving the old label once. Historical artifact

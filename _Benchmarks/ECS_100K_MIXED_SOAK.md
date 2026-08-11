@@ -227,3 +227,11 @@ Tests and measurements may change which expansion should come first. The current
 profile says the next useful question is the cost surface of sparse tracked writes
 plus exact changed-row consumption, while preserving this accepted scenario as
 the control.
+
+That investigation is now complete at
+[`ECS_CHANGE_TRACKING_DECOMPOSITION.md`](ECS_CHANGE_TRACKING_DECOMPOSITION.md).
+It finds that version advancement itself is negligible; random checked access,
+chunk locality, resident rows in touched chunks, and fragmented exact-range
+dispatch dominate. ECS remains 3.0.35. The next natural capability is the public
+generated chunk-job/system surface, followed by an end-to-end bounded batch-
+partition experiment only if arbitrary entity-list writes remain important.

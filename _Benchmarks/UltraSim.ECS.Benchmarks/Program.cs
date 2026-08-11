@@ -12,6 +12,12 @@ if (args.Contains("--soak", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--change-decomposition", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = ChangeTrackingDecompositionProgram.Run(args);
+    return;
+}
+
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",

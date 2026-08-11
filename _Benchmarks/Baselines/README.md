@@ -103,3 +103,16 @@ replays match, timed allocation and all collection counts are zero, no command i
 rejected, and chunk occupancy is stable. This is a longitudinal V3 control, not a
 V2 comparison or a scheduler/network/persistence claim; full methodology and
 interpretation live in `../ECS_100K_MIXED_SOAK.md`.
+
+`ecs-v3-3.0.35-change-tracking-decomposition-forward-first-2026-08-11.json`
+and
+`ecs-v3-3.0.35-change-tracking-decomposition-reverse-first-2026-08-11.json`
+are the accepted opposite-pass-order instrumented change-tracking controls.
+Each contains 314 measurements at eight warmups and 31 samples with tiered JIT
+disabled. Together they separate checked/prebound access, dense/exact stamping,
+experimental shared-version/chunk-grouped publication, and dense/exact consumer
+cost across changed density and locality. All timed rows allocate zero bytes,
+collect no GC generation, and pass post-timing cursor/publication validation.
+They are diagnostic 3.0.35 evidence, not a new kernel checkpoint. Methodology,
+caveats, and the resulting implementation priority live in
+`../ECS_CHANGE_TRACKING_DECOMPOSITION.md`.

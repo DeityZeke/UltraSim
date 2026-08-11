@@ -441,3 +441,21 @@ tracked-write/change-density matrix: the four query passes cost about 722 us/tic
 about 191 us, and structural recording/playback/create publication about 92 us.
 Add those variants as separately named contracts so the original replay remains
 stable for regression detection.
+
+The first separately named investigation is now executable and documented in
+[`ECS_CHANGE_TRACKING_DECOMPOSITION.md`](ECS_CHANGE_TRACKING_DECOMPOSITION.md).
+Its two opposite-pass-order 3.0.35 captures show that `ChangeVersion.Next()` is
+only about 0.43 ns and exact row publication adds about 6 ns to a 5K-random
+checked write. Random entity/location/cache traffic and chunk locality are much
+larger. The 5K-random exact consumer examines 100K resident row versions and
+dispatches 4,776 exact ranges to deliver 5K rows. Future change benchmarks must
+therefore report touched-chunk resident rows and changed-run/range count, not only
+changed or delivered rows.
+
+The next candidate benchmark should include the cost of resolving and boundedly
+partitioning an arbitrary entity-list write into chunk-local work; the current
+pre-grouped control deliberately excludes that cost. A separate masked exact-
+consumer prototype should compare one mask-bearing callback per chunk/word with
+the current contiguous-range callbacks at 100 through 100K changes. Do not change
+the row-history representation until those two API/execution-shape experiments
+show what remains expensive.

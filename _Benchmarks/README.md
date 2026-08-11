@@ -34,6 +34,12 @@ The accepted `3.0.35` exact route-level packed-suffix transition capture lives a
 [`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
 The first accepted 100K deterministic mixed-operation soak lives at
 [`Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json`](Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json).
+Its tracked-write/exact-consumer follow-up is documented in
+[`ECS_CHANGE_TRACKING_DECOMPOSITION.md`](ECS_CHANGE_TRACKING_DECOMPOSITION.md).
+Two accepted opposite-pass-order captures decompose checked access, dense/exact
+publication, shared-version and pre-grouped experimental ceilings, touched-chunk
+residency, and exact changed-run dispatch. This investigation retains ECS 3.0.35;
+it does not admit a new production strategy.
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
