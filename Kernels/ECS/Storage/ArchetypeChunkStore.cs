@@ -1112,6 +1112,15 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         EnableBitOperations.Set(_arena.GetChunkBytes(_chunks[chunkIndex].Handle), column, row, enabled);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetBoundEnabledConcurrent(ChunkRow location, int columnIndex, bool enabled)
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasEnableBits);
+        EnableBitOperations.SetAtomic(_arena.GetChunkBytes(_chunks[chunkIndex].Handle), column, row, enabled);
+    }
+
     /// <summary>
     /// Returns the first occupied packed chunk without scanning unallocated capacity.
     /// The single partial chunk is visited before the intrusive full-chunk list.
@@ -1326,6 +1335,39 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
             throw new ArgumentOutOfRangeException(nameof(rowOffset));
 
         _changeVersions[index] = version.Value;
+        _sparseRowChangeVersions[columnIndex]?.StampRange(
+            chunkIndex,
+            rowOffset,
+            rowCount,
+            version);
+    }
+
+    /// <summary>
+    /// Supplemental scheduler writes own distinct logical rows, but may share
+    /// the chunk-level publication cell. Publish that shared cell atomically;
+    /// exact-row cells remain participant-disjoint under the scheduler contract.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void StampSparseChangeVersionConcurrent(
+        uint chunkIndex,
+        int columnIndex,
+        int rowOffset,
+        int rowCount,
+        ChangeVersion version)
+    {
+        ThrowIfDisposed();
+        if (!version.IsValid)
+            throw new ArgumentException("A valid nonzero change version is required.", nameof(version));
+        int index = GetChangeVersionIndex(chunkIndex, columnIndex);
+        ref readonly ChunkRecord chunk = ref _chunks[chunkIndex];
+        if (chunk.State is not (ChunkListState.Partial or ChunkListState.Full))
+            throw new ArgumentException("Only occupied chunks can be marked changed.", nameof(chunkIndex));
+        if (rowOffset < 0 || rowCount <= 0 || rowOffset > chunk.RowCount - rowCount)
+            throw new ArgumentOutOfRangeException(nameof(rowOffset));
+
+        Interlocked.Exchange(
+            ref Unsafe.As<ulong, long>(ref _changeVersions[index]),
+            unchecked((long)version.Value));
         _sparseRowChangeVersions[columnIndex]?.StampRange(
             chunkIndex,
             rowOffset,

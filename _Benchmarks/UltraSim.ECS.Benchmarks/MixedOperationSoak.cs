@@ -272,9 +272,11 @@ internal static class MixedOperationSoakRunner
         {
             SuiteName = "UltraSim ECS deterministic 100K mixed-operation soak",
             ReportFormat = "ultrasim-ecs-mixed-soak-report-v1",
-            WorkloadProfile = configuration.UsePublicJobs
-                ? "ecs-v3-100k-mixed-operations-public-jobs-v1"
-                : "ecs-v3-100k-mixed-operations-v1",
+            WorkloadProfile = configuration.UseScheduler
+                ? "ecs-v3-100k-mixed-operations-scheduled-parity-v1"
+                : configuration.UsePublicJobs
+                    ? "ecs-v3-100k-mixed-operations-public-jobs-v1"
+                    : "ecs-v3-100k-mixed-operations-v1",
             CanonicalStateProfile = "ultrasim-ecs-mixed-soak-canonical-v1",
             KernelVersion = EcsKernelVersion.Value,
             SemanticProfile = EcsKernelVersion.SemanticProfile,
@@ -298,7 +300,14 @@ internal static class MixedOperationSoakRunner
                 SelectionTimingExcludedFromMeasuredEcsWork = true,
                 CanonicalHashTimingExcludedFromTicks = true,
                 NaturalGc = true,
-                Notes = configuration.UsePublicJobs
+                Notes = configuration.UseScheduler
+                    ? "This scheduler parity profile preserves the public-job workload selections and canonical " +
+                      "state, but executes query, 5K prepared random writes, 500 prepared random reads, and exact " +
+                      "change consumption inside the scheduler graph. The phase named Query is the complete graph " +
+                      "tick and is included exactly once. The 100 destroy, 100 create, and 200 transition commands " +
+                      "are intentionally recorded and played outside the graph in this longitudinal parity profile; " +
+                      "worker structural-lane merge is measured separately by scheduler structural fixtures."
+                    : configuration.UsePublicJobs
                     ? "This single-owner profile executes all four ordinary system-like passes, exact changed-row " +
                       "consumption, canonical ownership traversal, cursors, and store inspection through public ECS APIs. " +
                       "The 5K arbitrary entity-list activity writes intentionally remain checked random writes. " +
@@ -1116,7 +1125,7 @@ internal sealed class MixedOperationSoakWorld : IDisposable
                 executionPolicy: SystemExecutionPolicy.Parallel,
                 additionalWrites: [activity], parallelRowThreshold: 1,
                 minimumRowsPerPartition: 256,
-                randomWriteTargetsAreDisjoint: true),
+                parallelRandomAccessPolicy: ParallelRandomAccessPolicy.PartitionDisjoint),
             new ScheduledSoakTrackedWriteRuntime(this));
         _world.RegisterChangedRowsSystem<SoakIdentity, SoakActivity,
             ScheduledSoakChangedRuntime, ScheduledSoakChangedJob>(

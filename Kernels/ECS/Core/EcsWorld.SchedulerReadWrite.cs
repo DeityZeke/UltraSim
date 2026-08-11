@@ -129,4 +129,62 @@ internal sealed partial class EcsWorld<TArena>
         }
         return visited;
     }
+
+    internal int ExecuteTrackedReadWriteSchedulerPartition<TRead, TWrite, TJob>(
+        ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> plan,
+        in SchedulerChunkPartition partition,
+        SchedulerChangePublication publication,
+        in SystemJobContext context,
+        ref TJob job)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TJob : struct, IScheduledTrackedReadWriteChunkJob<TRead, TWrite>
+    {
+        System.Diagnostics.Debug.Assert(_isExecutingScope);
+        ReadOnlySpan<ArchetypeReadWriteQueryRoute<TArena>> routes = plan.Routes;
+        if (!partition.IsValid || unchecked((uint)partition.RouteIndex) >= unchecked((uint)routes.Length))
+            throw new ArgumentException("The scheduler chunk partition is invalid.", nameof(partition));
+        int routeIndex = partition.RouteIndex;
+        int chunkIndex = partition.FirstChunkIndex;
+        int visited = 0;
+        int remaining = partition.ChunkCount;
+        while (remaining != 0)
+        {
+            if (unchecked((uint)routeIndex) >= unchecked((uint)routes.Length))
+                throw new InvalidOperationException("A scheduler partition exceeded its matched routes.");
+            ref readonly ArchetypeReadWriteQueryRoute<TArena> route = ref routes[routeIndex];
+            if (route.HasRowFilters)
+                throw new InvalidOperationException("Scheduled tracked plans do not expose row-filter authoring.");
+            ArchetypeChunkStore<TArena> store = route.Storage.Store;
+            while (chunkIndex >= 0 && remaining != 0)
+            {
+                BoundReadWriteComponentChunk<TRead, TWrite> bound =
+                    store.GetBoundReadWriteComponentChunk<TRead, TWrite>(
+                        chunkIndex, route.ReadColumnIndex, route.WriteColumnIndex,
+                        plan.ReadIsEnableable, plan.WriteIsEnableable);
+                bool writeStamped = false;
+                var trackedWrite = new TrackedWritableComponentChunk<TWrite>(
+                    (EcsWorld<NativeChunkArena>)(object)this,
+                    (ArchetypeChunkStore<NativeChunkArena>)(object)store,
+                    bound.ChunkIndex, route.WriteColumnIndex, rowOffset: 0,
+                    bound.WriteComponents, bound.WriteEnableWords, wholeChunk: true,
+                    publication, ref writeStamped);
+                var chunk = new TrackedReadWriteComponentChunk<TRead, TWrite>(
+                    Id, route.Storage.Id, bound.ChunkIndex, rowOffset: 0,
+                    bound.EntityIndices, bound.ReadComponents, trackedWrite, bound.ReadEnableWords);
+                job.Execute(context, chunk);
+                visited += chunk.Count;
+                remaining--;
+                chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex);
+            }
+            if (remaining != 0)
+            {
+                routeIndex++;
+                chunkIndex = routeIndex < routes.Length
+                    ? routes[routeIndex].Storage.Store.GetFirstOccupiedChunkIndex()
+                    : -1;
+            }
+        }
+        return visited;
+    }
 }

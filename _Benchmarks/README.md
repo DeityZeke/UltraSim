@@ -11,9 +11,11 @@ The first executable Current/Next semantic adapter is documented in
 1K/10K/50K rows with a shared canonical logical-state hash, separate
 record/playback/end-to-end structural boundaries, allocation/GC accounting,
 process isolation, fixed steady-state JIT policy, and explicit unsupported parity
-rows. The accepted 3.1.1 V2-first and V3-first 2026-08-11 captures both produced
-zero state mismatches and zero timed V3 allocation. The original 2026-08-09 and
-3.1.0 artifacts remain immutable. These
+rows. The accepted 3.1.2 V2-first and V3-first 2026-08-11 captures both produced
+zero state/catalog mismatches and zero timed V3 caller allocation. The three
+parallel-capable V3 comparison rows additionally report zero scheduler-worker
+allocation; the adapter does not claim to measure V2 worker allocation. The
+original 2026-08-09 and 3.1.0/3.1.1 artifacts remain immutable. These
 are as-is regression baselines, not complete V2 parity or evidence that V3
 currently wins most overlapping operations.
 
@@ -48,6 +50,12 @@ lives at
 Its 145-row scheduler matrix, corrected longitudinal parity soak, and retained
 scheduler-shaped stress profile live at
 [`Baselines/ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json`](Baselines/ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json).
+The accepted `3.1.2` scheduler/structural proof-hardening comparison capture is
+[`Baselines/ecs-v2-v3-3.1.2-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.2-2026-08-11.json).
+Its 149-row scheduler matrix, 25 cold graph-Seal rows, corrected parity soak,
+random-access synchronization controls, stress profile, and deterministic
+multi-worker replays live at
+[`Baselines/ecs-v3-3.1.2-scheduler-proof-hardening-2026-08-11.json`](Baselines/ecs-v3-3.1.2-scheduler-proof-hardening-2026-08-11.json).
 The first accepted 100K deterministic mixed-operation soak lives at
 [`Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json`](Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json).
 The accepted ECS `3.0.36` public serial generated chunk-job admission matrix
@@ -968,3 +976,47 @@ profile. The normalized logical hash is
 their observation-version hash. Full capability, partition, structural-semantic,
 typed Add/Remove, and evidence details are in
 [`../ECS_3_1_1_HARDENING_REPORT.md`](../ECS_3_1_1_HARDENING_REPORT.md).
+
+## ECS 3.1.2 scheduler/structural proof hardening
+
+The 3.1.2 scheduler capture keeps the exact 3.1.1 parity workload and corrects
+only the proof, accounting, and diagnostic boundaries described in
+[`../ECS_3_1_2_HARDENING_REPORT.md`](../ECS_3_1_2_HARDENING_REPORT.md). The
+30,000-tick parity profile remains 400K generated visits, 5K deterministic
+RNG-selected supplemental tracked writes, 500 RNG-selected reads, 100 destroys,
+100 creates, 200 transitions, and exact change consumption per tick.
+
+| 3.1.2 longitudinal surface | Mean | p95 | p99 |
+| --- | ---: | ---: | ---: |
+| public generated-job control | 1,200.475 us | 1,244.628 | 1,300.397 |
+| scheduled serial | 1,279.727 us | 1,323.817 | 1,378.586 |
+| scheduled parallel, 8 participants | 597.434 us | 696.283 | 819.872 |
+
+The serial scheduler adds `6.60%` over the public boundary. Parallel is `2.01x`
+faster than public and `2.14x` faster than scheduled serial. All three surfaces
+produce normalized logical hash `55107F0D2B7B1F2F76BF7E710E9C6AD5`, match every
+work counter, allocate zero timed caller/worker bytes, and collect no GC
+generation. The scheduled observation hash intentionally differs from the public
+control because a logical scheduled system shares one change version rather than
+advancing once per checked scalar write.
+
+The 149 timed scheduler rows add the exceptional random-access safety cost:
+
+| 5K of 100K random operations | Serial mean/p95 | Parallel C4 mean/p95 |
+| --- | ---: | ---: |
+| component write + dense-version CAS | 286.970/317.178 us | 129.588/151.429 us |
+| enable CAS + dense-version CAS | 459.460/491.875 us | 156.740/179.018 us |
+
+These atomics exist only on the declared supplemental random path; generated
+chunk-owned writes retain the prior non-atomic implementation. The same artifact
+contains 25 cold Seal rows for 16/64/256/1K/4K systems across no-dependency,
+chain, mixed-conflict, random-DAG, and late-ready shapes. At 4K systems, mean
+Seal cost spans `37.583–39.289 ms`; cold allocation is permitted.
+
+The crossover controls show 1K rows remain serial (`1.701` versus `1.712 us` at
+one operation/row), while 10K rows already favor C8 parallel execution (`15.655`
+versus `11.624 us`). At eight operations/row, 10K improves from `64.477` to
+`22.054 us`. RangeJob at 100K/one operation improves from `73.264 us` at C1 to
+`31.329 us` at C8 and regresses to `39.265 us` at C16; 16 operations improve
+from `630.132 us` at C1 to `99.302 us` at C8. These results reinforce the
+existing policy: choose parallelism from measured work, not maximum worker count.

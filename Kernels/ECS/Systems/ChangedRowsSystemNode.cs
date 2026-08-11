@@ -9,6 +9,7 @@ internal sealed class ChangedRowsSystemNode<TSystem, TRead, TChanged, TJob> :
 {
     private readonly EcsWorld<NativeChunkArena> _world;
     private readonly ArchetypeChangedReadQueryPlan<NativeChunkArena, TRead> _plan;
+    private int _deliveredRows;
 
     internal ChangedRowsSystemNode(
         SystemId id,
@@ -24,6 +25,12 @@ internal sealed class ChangedRowsSystemNode<TSystem, TRead, TChanged, TJob> :
     }
 
     internal override bool SupportsParallel => false;
+
+    internal override void Prepare(ulong tick, double deltaSeconds, bool manual, ChangeVersion candidate)
+    {
+        _deliveredRows = 0;
+        base.Prepare(tick, deltaSeconds, manual, candidate);
+    }
 
     internal override SchedulerQueryShape GetShape() =>
         _world.GetChangedRowsSchedulerShape(_plan);
@@ -48,10 +55,13 @@ internal sealed class ChangedRowsSystemNode<TSystem, TRead, TChanged, TJob> :
         var adapter = new Adapter(context, job);
         ChangeCursor cursor = Runtime.Cursor;
         int rows = _world.VisitChangedReadRowsScheduled(_plan, ref cursor, ref adapter);
+        _deliveredRows = rows;
         Runtime.Cursor = cursor;
         job = adapter.Job;
         return rows;
     }
+
+    internal override int GetCompletedRows(in SchedulerQueryShape shape) => _deliveredRows;
 
     private struct Adapter : IReadOnlyChunkJob<TRead>
     {

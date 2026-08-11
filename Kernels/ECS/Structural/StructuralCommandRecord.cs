@@ -19,6 +19,30 @@ internal enum StructuralCommandTargetKind : byte
     Deferred = 2,
 }
 
+/// <summary>
+/// Discriminated identity for one homogeneous structural run. Numeric route IDs
+/// are intentionally local to their command namespace and are never sufficient
+/// by themselves.
+/// </summary>
+internal readonly struct StructuralRunKey
+{
+    internal StructuralRunKey(in StructuralCommandRecord command)
+    {
+        Kind = command.Kind;
+        Phase = command.TransitionPhase;
+        Argument = command.Argument;
+    }
+
+    internal StructuralCommandKind Kind { get; }
+    internal StructuralTransitionPhase Phase { get; }
+    internal uint Argument { get; }
+
+    internal bool Matches(in StructuralCommandRecord command) =>
+        command.Kind == Kind &&
+        command.TransitionPhase == Phase &&
+        command.Argument == Argument;
+}
+
 /// <summary>Fixed unmanaged union stored by the structural command arena.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4, Size = 24)]
 internal readonly struct StructuralCommandRecord

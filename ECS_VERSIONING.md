@@ -23,7 +23,8 @@ transition work is `3.0.32`, and its validate-once trusted commit optimization i
 the public serial generated chunk-job execution surface is `3.0.36`. The bounded
 generated system/job scheduler is the first coherent major capability checkpoint,
 so it advances the middle field and resets the revision as `3.1.0`. The next
-accepted revision is `3.1.1`, the scheduler capability/parity hardening pass.
+accepted revisions are `3.1.1`, the scheduler capability/parity hardening pass,
+and `3.1.2`, the scheduler/structural proof-hardening pass.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -50,6 +51,17 @@ partition maximum global across matching archetype routes, restores an honest
 Add/Remove, and includes exact scheduler bytes in static capacity reports. It is
 a hardening revision, not a second scheduler milestone. The 3.1.0 immutable
 benchmark baselines remain historical controls; 3.1.1 adds new artifacts.
+
+ECS 3.1.2 closes the independently reproduced late-ready graph conflict,
+mixed typed/ordinary structural-run collision, retained-main-arena capability
+escape, registration/dependency transaction leaks, RangeJob exhaustion error,
+shared enable-word update loss, and unsynchronized random-write change metadata.
+It defines one complete `ParallelRandomAccessPolicy`, adds scheduled tracked
+handwritten 1R1W parity, corrects changed-row diagnostics and benchmark
+accounting, hardens partial worker startup, and separates preconstruction memory
+planning from a post-Seal reserved-payload snapshot. It is a correctness
+revision over the same 3.1 scheduler and structural executor, not a new
+execution architecture. The 3.1.0 and 3.1.1 artifacts remain immutable.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

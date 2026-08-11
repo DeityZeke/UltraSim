@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Runtime.CompilerServices;
+using System.Threading;
 
 namespace UltraSim.ECS;
 
@@ -17,6 +19,28 @@ internal static class EnableBitOperations
         ref ulong word = ref words[row >> 6];
         ulong mask = 1UL << (row & 63);
         word = enabled ? word | mask : word & ~mask;
+    }
+
+    /// <summary>
+    /// Supplemental random-access mutation may target different logical rows
+    /// that alias one physical enable word. Keep the generated chunk-owned path
+    /// non-atomic and pay CAS only for this exceptional access mode.
+    /// </summary>
+    internal static void SetAtomic(Span<byte> chunk, in ComponentColumnLayout column, int row, bool enabled)
+    {
+        Span<ulong> words = GetWords(chunk, column);
+        ref long target = ref Unsafe.As<ulong, long>(ref words[row >> 6]);
+        ulong mask = 1UL << (row & 63);
+        long observed = Volatile.Read(ref target);
+        while (true)
+        {
+            ulong current = unchecked((ulong)observed);
+            long desired = unchecked((long)(enabled ? current | mask : current & ~mask));
+            long exchanged = Interlocked.CompareExchange(ref target, desired, observed);
+            if (exchanged == observed)
+                return;
+            observed = exchanged;
+        }
     }
 
     internal static void SetRange(

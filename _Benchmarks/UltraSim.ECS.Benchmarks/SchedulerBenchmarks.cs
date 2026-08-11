@@ -47,9 +47,11 @@ internal static class SchedulerBenchmarkRunner
         RunIndependentSystems(timings, quick);
         RunRange(timings, quick);
         RunEntityIdentityCost(timings, quick);
+        RunRandomAccessSafety(timings, quick);
         RunStructuralMerge(timings, quick);
         RunTypedStructuralRoutes(timings, quick);
         RunPhaseStagger(timings, quick);
+        List<GraphSealTiming> graphSeal = RunGraphSealBenchmarks(quick);
         SchedulerSoakResult soak = RunScheduledSoak(quick);
         SchedulerParitySoakResult paritySoak = RunScheduledParitySoak(quick);
         List<SchedulerDeterminismResult> determinism = RunDeterminism(quick);
@@ -73,10 +75,105 @@ internal static class SchedulerBenchmarkRunner
             AllocationFree = allocationFree,
             CanonicalChecksPassed = canonical,
             Timings = timings,
+            GraphSeal = graphSeal,
             Soak = soak,
             ParitySoak = paritySoak,
             Determinism = determinism,
         };
+    }
+
+    private static List<GraphSealTiming> RunGraphSealBenchmarks(bool quick)
+    {
+        int[] sizes = quick ? [16, 256] : [16, 64, 256, 1_000, 4_000];
+        int samples = quick ? 3 : 5;
+        var results = new List<GraphSealTiming>();
+        foreach (int systems in sizes)
+        foreach (GraphSealShape shape in Enum.GetValues<GraphSealShape>())
+        {
+            var ticks = new long[samples];
+            long allocation = 0;
+            for (int sample = 0; sample < samples; sample++)
+            {
+                using EcsWorld world = CreateGraphSealWorld(systems, shape, sample + 1);
+                long beforeAllocation = GC.GetAllocatedBytesForCurrentThread();
+                long started = Stopwatch.GetTimestamp();
+                world.Seal();
+                ticks[sample] = Stopwatch.GetTimestamp() - started;
+                allocation += GC.GetAllocatedBytesForCurrentThread() - beforeAllocation;
+            }
+            results.Add(new GraphSealTiming
+            {
+                Systems = systems,
+                Shape = shape.ToString(),
+                Samples = samples,
+                MeanMicroseconds = MeanMicroseconds(ticks),
+                P95Microseconds = PercentileMicroseconds(ticks, 0.95),
+                MeanAllocatedBytes = allocation / samples,
+            });
+        }
+        return results;
+    }
+
+    private static EcsWorld CreateGraphSealWorld(int count, GraphSealShape shape, int seed)
+    {
+        ComponentSchema schema = BenchmarkSchema.CreateSchema();
+        ComponentId[] conflicts =
+        [
+            BenchmarkSchema.GetComponentId<BenchmarkPosition>(),
+            BenchmarkSchema.GetComponentId<BenchmarkVelocity>(),
+            BenchmarkSchema.GetComponentId<BenchmarkWide>(),
+            BenchmarkSchema.GetComponentId<BenchmarkScalar>(),
+        ];
+        var scheduler = new EcsSchedulerOptions(
+            maximumSystems: count, maximumDependencies: Math.Max(count * 2, 1),
+            maximumWorkItems: Math.Max(count, 1), maximumStructuralSegments: Math.Max(count, 1),
+            backgroundWorkerCount: 0, structuralCommandsPerProducer: 0,
+            structuralPayloadBytesPerProducer: 0, maximumPartitionsPerSystem: 1);
+        var world = new EcsWorld(schema, new EcsWorldOptions(
+            new EntityCapacity(1), 1, 0, maximumStructuralCommands: 0,
+            scheduler: scheduler));
+        _ = world.RegisterArchetype([], ChunkLayoutOptions.KiB16, 1);
+        var random = new Random(seed);
+        int rootStart = count / 2;
+        for (int index = 0; index < count; index++)
+        {
+            IReadOnlyList<SystemId>? requires = shape switch
+            {
+                GraphSealShape.Chain when index != 0 => [SystemId.FromRegistrationIndex(index - 1)],
+                GraphSealShape.RandomDag when index != 0 =>
+                    [SystemId.FromRegistrationIndex(random.Next(index))],
+                GraphSealShape.LateReady when index < rootStart && index + rootStart < count =>
+                    [SystemId.FromRegistrationIndex(index + rootStart)],
+                _ => null,
+            };
+            IReadOnlyList<ComponentId>? writes = shape is GraphSealShape.MixedConflicts or GraphSealShape.LateReady
+                ? new[] { conflicts[index & 3] }
+                : null;
+            world.RegisterRangeSystem<GraphSealRuntime, GraphSealJob>(
+                new SystemDefinition($"seal.{shape}.{index}", SystemStage.AI,
+                    requires: requires, additionalWrites: writes), new GraphSealRuntime());
+        }
+        return world;
+    }
+
+    private enum GraphSealShape : byte
+    {
+        NoDependencies,
+        Chain,
+        MixedConflicts,
+        RandomDag,
+        LateReady,
+    }
+
+    private sealed class GraphSealRuntime : IRangeSystemRuntime<GraphSealJob>
+    {
+        public int GetRangeCount(in SystemPrepareContext context) => 0;
+        public GraphSealJob Prepare(in SystemPrepareContext context) => default;
+    }
+
+    private readonly struct GraphSealJob : IRangeJob
+    {
+        public void Execute(in SystemJobContext context, int start, int count) { }
     }
 
     private static void RunSerialFamilyMatrix(List<SchedulerTiming> results, bool quick)
@@ -144,6 +241,46 @@ internal static class SchedulerBenchmarkRunner
             bool canonical = directHash == scheduledHash;
             results.Add(a.ToTiming("SerialBoundary", $"Direct_{rows}", rows, 1, 1, directHash, canonical));
             results.Add(b.ToTiming("SerialBoundary", $"Scheduled_{rows}", rows, 1, 1, scheduledHash, canonical));
+        }
+    }
+
+    private static void RunRandomAccessSafety(List<SchedulerTiming> results, bool quick)
+    {
+        const int population = 100_000;
+        const int targets = 5_000;
+        int samples = quick ? 24 : 96;
+        foreach (RandomMutationKind kind in Enum.GetValues<RandomMutationKind>())
+        {
+            Measurement serialMeasurement;
+            ulong serialHash;
+            using (var serial = new RandomAccessSafetyFixture(
+                population, targets, kind, backgroundWorkers: 3, SchedulerRunMode.Serial))
+            {
+                Warm(serial.Tick, 64);
+                serialMeasurement = Measure(serial.Tick, samples, 1);
+                serialHash = serial.Hash();
+            }
+
+            Measurement parallelMeasurement;
+            ulong parallelHash;
+            using (var parallel = new RandomAccessSafetyFixture(
+                population, targets, kind, backgroundWorkers: 3, SchedulerRunMode.Parallel))
+            {
+                Warm(parallel.Tick, 64);
+                parallelMeasurement = Measure(parallel.Tick, samples, 1);
+                parallelHash = parallel.Hash();
+            }
+
+            bool canonical = serialHash == parallelHash;
+            string mechanism = kind == RandomMutationKind.Enable
+                ? "EnableWordAndDenseVersionCAS"
+                : "DenseVersionCAS";
+            results.Add(serialMeasurement.ToTiming(
+                "RandomAccessSafety", $"{mechanism}_Serial_5Kof100K", targets, 1, 1,
+                serialHash, canonical));
+            results.Add(parallelMeasurement.ToTiming(
+                "RandomAccessSafety", $"{mechanism}_Parallel_5Kof100K", targets, 1, 4,
+                parallelHash, canonical));
         }
     }
 
@@ -427,7 +564,7 @@ internal static class SchedulerBenchmarkRunner
             Population = 100_000,
             WarmupTicks = warmupTicks,
             MeasuredTicks = measuredTicks,
-            WorkloadProfile = "ecs-v3-100k-mixed-operations-public-jobs-v1",
+            WorkloadProfile = "ecs-v3-100k-mixed-operations-scheduled-parity-v1",
             QueryRowsPerTick = 400_000,
             TrackedWriteTargetsPerTick = 5_000,
             RandomLookupsPerTick = 500,
@@ -1469,6 +1606,143 @@ internal static class SchedulerBenchmarkWorlds
     }
 }
 
+internal enum RandomMutationKind : byte
+{
+    Component,
+    Enable,
+}
+
+internal sealed class RandomAccessSafetyFixture : IDisposable
+{
+    private readonly EcsWorld _world;
+    private readonly ComponentLookup<BenchmarkVelocity> _velocity;
+    private readonly ComponentLookup<BenchmarkScalar> _scalar;
+    private readonly Entity[] _entities;
+    private readonly RandomMutationKind _kind;
+
+    internal RandomAccessSafetyFixture(
+        int population,
+        int targets,
+        RandomMutationKind kind,
+        int backgroundWorkers,
+        SchedulerRunMode mode)
+    {
+        _kind = kind;
+        ComponentSchema schema = BenchmarkSchema.CreateSchema();
+        ComponentId velocity = BenchmarkSchema.GetComponentId<BenchmarkVelocity>();
+        ComponentId scalar = BenchmarkSchema.GetComponentId<BenchmarkScalar>();
+        ComponentId[] signature = [velocity, scalar];
+        Array.Sort(signature, static (left, right) => left.CompareTo(right));
+        var scheduler = new EcsSchedulerOptions(
+            maximumSystems: 1, maximumDependencies: 0, maximumWorkItems: 32,
+            maximumStructuralSegments: 32, backgroundWorkerCount: backgroundWorkers,
+            callerParticipates: true, structuralCommandsPerProducer: 0,
+            structuralPayloadBytesPerProducer: 0, maximumPartitionsPerSystem: 16);
+        _world = new EcsWorld(schema, new EcsWorldOptions(
+            new EntityCapacity(population), 1, 4, maximumStructuralCommands: 0,
+            scheduler: scheduler));
+        ArchetypeHandle archetype = _world.RegisterArchetype(
+            signature, ChunkLayoutOptions.KiB16, population / 256 + 8);
+        _velocity = _world.PrepareLookup<BenchmarkVelocity>();
+        _scalar = _world.PrepareLookup<BenchmarkScalar>();
+        _entities = new Entity[targets];
+        ComponentId mutated = kind == RandomMutationKind.Enable ? velocity : scalar;
+        _world.RegisterRangeSystem<RandomAccessRuntime, RandomAccessJob>(
+            new SystemDefinition($"benchmark.random-{kind}", SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Parallel,
+                additionalWrites: [mutated], parallelRowThreshold: 1,
+                minimumRowsPerPartition: 64,
+                parallelRandomAccessPolicy: ParallelRandomAccessPolicy.PartitionDisjoint),
+            new RandomAccessRuntime(_entities, _velocity, _scalar, kind));
+        _world.Seal();
+        _world.Initialize();
+        for (int index = 0; index < population; index++)
+        {
+            if (!_world.TryCreate(archetype, out _))
+                throw new InvalidOperationException("Random-access fixture exhausted entity capacity.");
+        }
+        for (int index = 0; index < targets; index++)
+            if (!_world.TryGetEntity(unchecked((uint)((index * 199) % population)), out _entities[index]))
+                throw new InvalidOperationException("Random-access fixture failed to resolve a target.");
+        _world.BeginRun();
+        _world.SchedulerRunMode = mode;
+    }
+
+    internal EcsWorld World => _world;
+    internal void Tick() => _world.Tick(1d / 64d);
+
+    internal ulong Hash()
+    {
+        ulong hash = 1469598103934665603UL;
+        for (int index = 0; index < _entities.Length; index++)
+        {
+            ulong value;
+            if (_kind == RandomMutationKind.Enable)
+            {
+                if (!_world.TryGetEnabled(_entities[index], _velocity, out bool enabled))
+                    throw new InvalidOperationException("Random-access fixture lost an enable target.");
+                value = enabled ? 1UL : 0UL;
+            }
+            else
+            {
+                if (!_world.TryRead(_entities[index], _scalar, out BenchmarkScalar scalar))
+                    throw new InvalidOperationException("Random-access fixture lost a component target.");
+                value = unchecked((uint)scalar.Value);
+            }
+            hash = unchecked((hash ^ value) * 1099511628211UL);
+        }
+        return hash;
+    }
+
+    public void Dispose() => _world.Dispose();
+
+    private sealed class RandomAccessRuntime : IRangeSystemRuntime<RandomAccessJob>
+    {
+        private readonly Entity[] _entities;
+        private readonly ComponentLookup<BenchmarkVelocity> _velocity;
+        private readonly ComponentLookup<BenchmarkScalar> _scalar;
+        private readonly RandomMutationKind _kind;
+        internal RandomAccessRuntime(
+            Entity[] entities,
+            ComponentLookup<BenchmarkVelocity> velocity,
+            ComponentLookup<BenchmarkScalar> scalar,
+            RandomMutationKind kind) =>
+            (_entities, _velocity, _scalar, _kind) = (entities, velocity, scalar, kind);
+        public int GetRangeCount(in SystemPrepareContext context) => _entities.Length;
+        public RandomAccessJob Prepare(in SystemPrepareContext context) =>
+            new(_entities, _velocity, _scalar, _kind, context.Tick);
+    }
+
+    private readonly struct RandomAccessJob : IRangeJob
+    {
+        private readonly Entity[] _entities;
+        private readonly ComponentLookup<BenchmarkVelocity> _velocity;
+        private readonly ComponentLookup<BenchmarkScalar> _scalar;
+        private readonly RandomMutationKind _kind;
+        private readonly ulong _tick;
+        internal RandomAccessJob(
+            Entity[] entities,
+            ComponentLookup<BenchmarkVelocity> velocity,
+            ComponentLookup<BenchmarkScalar> scalar,
+            RandomMutationKind kind,
+            ulong tick) =>
+            (_entities, _velocity, _scalar, _kind, _tick) =
+            (entities, velocity, scalar, kind, tick);
+        public void Execute(in SystemJobContext context, int start, int count)
+        {
+            for (int index = start; index < start + count; index++)
+            {
+                bool accepted = _kind == RandomMutationKind.Enable
+                    ? context.TrySetEnabled(_entities[index], _velocity, (_tick & 1UL) == 0)
+                    : context.TryWrite(_entities[index], _scalar,
+                        new BenchmarkScalar { Value = unchecked((int)_tick + index) });
+                if (!accepted)
+                    throw new InvalidOperationException("Random-access fixture failed a prepared write.");
+            }
+        }
+    }
+}
+
 internal sealed class SchedulerBenchmarkReport
 {
     public string SuiteName { get; set; } = string.Empty; public string ReportFormat { get; set; } = string.Empty;
@@ -1477,8 +1751,18 @@ internal sealed class SchedulerBenchmarkReport
     public string Processor { get; set; } = string.Empty; public int ProcessorCount { get; set; } public bool Quick { get; set; }
     public bool AllocationFree { get; set; } public bool CanonicalChecksPassed { get; set; }
     public List<SchedulerTiming> Timings { get; set; } = []; public SchedulerSoakResult Soak { get; set; } = new();
+    public List<GraphSealTiming> GraphSeal { get; set; } = [];
     public SchedulerParitySoakResult ParitySoak { get; set; } = new();
     public List<SchedulerDeterminismResult> Determinism { get; set; } = [];
+}
+internal sealed class GraphSealTiming
+{
+    public int Systems { get; set; }
+    public string Shape { get; set; } = string.Empty;
+    public int Samples { get; set; }
+    public double MeanMicroseconds { get; set; }
+    public double P95Microseconds { get; set; }
+    public long MeanAllocatedBytes { get; set; }
 }
 internal sealed class SchedulerTiming
 {

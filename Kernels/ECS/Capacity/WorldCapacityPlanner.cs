@@ -1,6 +1,6 @@
 namespace UltraSim.ECS;
 
-/// <summary>Checked, allocation-free aggregation of per-archetype capacity plans.</summary>
+/// <summary>Checked, allocation-free preconstruction capacity estimation.</summary>
 public static class WorldCapacityPlanner
 {
     public static WorldCapacityPlan Plan(

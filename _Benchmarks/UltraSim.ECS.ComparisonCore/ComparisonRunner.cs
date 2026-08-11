@@ -50,7 +50,9 @@ public static class ComparisonRunner
             ReadyToRunSetting = Environment.GetEnvironmentVariable("DOTNET_ReadyToRun") ?? "runtime-default",
             ServerGarbageCollection = GCSettings.IsServerGC,
             ForcesFullCollectionBeforeMeasuredIteration = true,
-            AllocationMeasurementScope = "GC.GetAllocatedBytesForCurrentThread; v1 measured scenarios are single-threaded",
+            AllocationMeasurementScope = "Caller-thread allocation uses GC.GetAllocatedBytesForCurrentThread. " +
+                "Parallel V3 scheduler workloads additionally report scheduler-instrumented background-worker allocation; " +
+                "parallel V2 worker allocation is not captured by this protocol.",
             ProcessorCount = Environment.ProcessorCount,
             TimestampUtc = DateTimeOffset.UtcNow,
             Results = results,
@@ -123,6 +125,8 @@ public static class ComparisonRunner
 
         var nanoseconds = new double[options.IterationCount];
         var allocated = new long[options.IterationCount];
+        var backgroundWorkerAllocated = new long[options.IterationCount];
+        bool reportsBackgroundWorkerAllocation = false;
         long checksum = 0;
         int gen0 = 0;
         int gen1 = 0;
@@ -136,10 +140,13 @@ public static class ComparisonRunner
             int gen1Before = GC.CollectionCount(1);
             int gen2Before = GC.CollectionCount(2);
             long allocationBefore = GC.GetAllocatedBytesForCurrentThread();
+            reportsBackgroundWorkerAllocation |= workload.ReportsBackgroundWorkerAllocation;
+            long workerAllocationBefore = workload.BackgroundWorkerAllocatedBytes;
             long timestampBefore = Stopwatch.GetTimestamp();
             ScenarioMeasurement measurement = workload.Execute();
             long timestampAfter = Stopwatch.GetTimestamp();
             long allocationAfter = GC.GetAllocatedBytesForCurrentThread();
+            long workerAllocationAfter = workload.BackgroundWorkerAllocatedBytes;
             gen0 += GC.CollectionCount(0) - gen0Before;
             gen1 += GC.CollectionCount(1) - gen1Before;
             gen2 += GC.CollectionCount(2) - gen2Before;
@@ -148,6 +155,7 @@ public static class ComparisonRunner
             ValidateState(descriptor, expectedState, state, expectedOperations, measurement.Operations);
             nanoseconds[index] = Stopwatch.GetElapsedTime(timestampBefore, timestampAfter).TotalNanoseconds;
             allocated[index] = allocationAfter - allocationBefore;
+            backgroundWorkerAllocated[index] = workerAllocationAfter - workerAllocationBefore;
             checksum = unchecked(checksum * 397L) ^ measurement.Checksum;
             Consume(measurement.Checksum);
         }
@@ -175,6 +183,13 @@ public static class ComparisonRunner
             EffectiveGiBPerSecond = bytesPerSecond / (1024d * 1024d * 1024d),
             MeanAllocatedBytes = (long)allocated.Average(),
             MaxAllocatedBytes = allocated.Max(),
+            ReportsBackgroundWorkerAllocation = reportsBackgroundWorkerAllocation,
+            MeanBackgroundWorkerAllocatedBytes = reportsBackgroundWorkerAllocation
+                ? (long)backgroundWorkerAllocated.Average()
+                : 0,
+            MaxBackgroundWorkerAllocatedBytes = reportsBackgroundWorkerAllocation
+                ? backgroundWorkerAllocated.Max()
+                : 0,
             Gen0Collections = gen0,
             Gen1Collections = gen1,
             Gen2Collections = gen2,

@@ -17,6 +17,7 @@ public sealed partial class EcsWorld : IDisposable
 {
     private readonly EcsWorld<NativeChunkArena> _core;
     private readonly StructuralCommandBuffer _structuralCommands;
+    private readonly StructuralRecordingGate _structuralRecordingGate;
     private readonly SystemScheduler? _scheduler;
     private readonly int _ownerThreadId;
 
@@ -28,6 +29,7 @@ public sealed partial class EcsWorld : IDisposable
 
         Options = options;
         _ownerThreadId = Environment.CurrentManagedThreadId;
+        _structuralRecordingGate = new StructuralRecordingGate();
         _core = new EcsWorld<NativeChunkArena>(
             schema,
             options.EntityCapacity,
@@ -43,13 +45,15 @@ public sealed partial class EcsWorld : IDisposable
             payloadCapacityBytes: options.Scheduler.IsEnabled
                 ? checked(options.Scheduler.StructuralPayloadBytesPerProducer *
                     options.Scheduler.ExecutionConcurrency)
-                : 0);
+                : 0,
+            recordingGate: _structuralRecordingGate);
         if (options.Scheduler.IsEnabled)
         {
             _scheduler = new SystemScheduler(
                 this,
                 _core,
                 _structuralCommands,
+                _structuralRecordingGate,
                 options.Scheduler,
                 options.MaximumArchetypes);
         }

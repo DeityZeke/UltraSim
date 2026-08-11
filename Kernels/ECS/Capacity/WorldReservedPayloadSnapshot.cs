@@ -1,0 +1,63 @@
+namespace UltraSim.ECS;
+
+/// <summary>
+/// Post-seal accounting of mechanically enumerable world-owned payload. This is
+/// not process working set or CLR object size; array/object headers, allocator
+/// overhead, JIT code, thread stacks, and shared schema payload are excluded.
+/// </summary>
+public readonly struct WorldReservedPayloadSnapshot
+{
+    internal WorldReservedPayloadSnapshot(
+        long entitySlotMetadataBytes,
+        long archetypeRegistryIndexBytes,
+        long archetypeSignatureAndColumnBytes,
+        long archetypeStoreMetadataBytes,
+        long chunkArenaSlotMetadataBytes,
+        long preparedPlanSlotBytes,
+        long mainStructuralCommandBytes,
+        long schedulerBytes,
+        long nativeChunkPayloadBytes)
+    {
+        EntitySlotMetadataBytes = entitySlotMetadataBytes;
+        ArchetypeRegistryIndexBytes = archetypeRegistryIndexBytes;
+        ArchetypeSignatureAndColumnBytes = archetypeSignatureAndColumnBytes;
+        ArchetypeStoreMetadataBytes = archetypeStoreMetadataBytes;
+        ChunkArenaSlotMetadataBytes = chunkArenaSlotMetadataBytes;
+        PreparedPlanSlotBytes = preparedPlanSlotBytes;
+        MainStructuralCommandBytes = mainStructuralCommandBytes;
+        SchedulerBytes = schedulerBytes;
+        NativeChunkPayloadBytes = nativeChunkPayloadBytes;
+        KnownManagedPayloadBytes = checked(
+            entitySlotMetadataBytes + archetypeRegistryIndexBytes +
+            archetypeSignatureAndColumnBytes + archetypeStoreMetadataBytes +
+            chunkArenaSlotMetadataBytes + preparedPlanSlotBytes +
+            mainStructuralCommandBytes + schedulerBytes);
+        TotalKnownPayloadBytes = checked(KnownManagedPayloadBytes + nativeChunkPayloadBytes);
+    }
+
+    public long EntitySlotMetadataBytes { get; }
+    public long ArchetypeRegistryIndexBytes { get; }
+    public long ArchetypeSignatureAndColumnBytes { get; }
+    public long ArchetypeStoreMetadataBytes { get; }
+    public long ChunkArenaSlotMetadataBytes { get; }
+
+    /// <summary>
+    /// Top-level query, public-transition, and structural-route slot arrays.
+    /// Nested cold plan objects and their route/transfer arrays are explicitly
+    /// excluded until they expose a common accounting contract.
+    /// </summary>
+    public long PreparedPlanSlotBytes { get; }
+
+    public long MainStructuralCommandBytes { get; }
+
+    /// <summary>Scheduler-owned graph, job, lane, and worker payload; excludes the main arena.</summary>
+    public long SchedulerBytes { get; }
+
+    public long KnownManagedPayloadBytes { get; }
+    public long NativeChunkPayloadBytes { get; }
+    public long TotalKnownPayloadBytes { get; }
+
+    public const string Exclusions =
+        "CLR object/array headers and alignment, allocator overhead, nested prepared-plan route/transfer arrays, " +
+        "shared ComponentSchema payload, JIT/code pages, thread stacks, and non-ECS process working set.";
+}

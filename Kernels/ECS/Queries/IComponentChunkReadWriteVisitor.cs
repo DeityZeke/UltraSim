@@ -21,6 +21,24 @@ public interface IScheduledReadWriteChunkJob<TRead, TWrite>
         in ReadWriteComponentChunk<TRead, TWrite> chunk);
 }
 
+/// <summary>Allocation-free conditional-write 1R1W chunk job.</summary>
+public interface ITrackedReadWriteChunkJob<TRead, TWrite>
+    where TRead : unmanaged, IComponent<TRead>
+    where TWrite : unmanaged, IComponent<TWrite>
+{
+    void Execute(in TrackedReadWriteComponentChunk<TRead, TWrite> chunk);
+}
+
+/// <summary>Scheduler-aware conditional-write 1R1W chunk job.</summary>
+public interface IScheduledTrackedReadWriteChunkJob<TRead, TWrite>
+    where TRead : unmanaged, IComponent<TRead>
+    where TWrite : unmanaged, IComponent<TWrite>
+{
+    void Execute(
+        in SystemJobContext context,
+        in TrackedReadWriteComponentChunk<TRead, TWrite> chunk);
+}
+
 /// <summary>Compatibility name for the pre-3.0.36 internal query fixtures.</summary>
 internal interface IComponentChunkReadWriteVisitor<TRead, TWrite> :
     IReadWriteChunkJob<TRead, TWrite>

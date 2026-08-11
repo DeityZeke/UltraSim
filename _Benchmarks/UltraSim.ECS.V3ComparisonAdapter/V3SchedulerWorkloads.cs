@@ -87,6 +87,10 @@ internal sealed class V3ScheduledChunkWorkload : IComparisonWorkload
         return builder.Finish();
     }
 
+    public bool ReportsBackgroundWorkerAllocation => true;
+    public long BackgroundWorkerAllocatedBytes =>
+        _world.GetSchedulerRuntimeSnapshot().WorkerManagedAllocationBytes;
+
     public void Dispose() => _world.Dispose();
 
     private sealed class ScheduledChunkRuntime : ISystemRuntime<ScheduledChunkJob>
@@ -160,6 +164,9 @@ internal sealed class V3ScheduledRangeWorkload : IComparisonWorkload
     }
 
     public CanonicalState CaptureCanonicalState() => V3ArrayState.Capture(_descriptor, _values);
+    public bool ReportsBackgroundWorkerAllocation => true;
+    public long BackgroundWorkerAllocatedBytes =>
+        _world.GetSchedulerRuntimeSnapshot().WorkerManagedAllocationBytes;
     public void Dispose() => _world.Dispose();
 
     private sealed class ScheduledRangeRuntime : IRangeSystemRuntime<ScheduledRangeJob>

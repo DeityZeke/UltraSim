@@ -1,7 +1,7 @@
 # ECS 100K Mixed-Operation Soak
 
 Status: accepted 3.0.35 internal control, accepted 3.0.36 public serial generated
-chunk-job control, and accepted 3.1.1 serial/parallel scheduled parity profile;
+chunk-job control, and accepted 3.1.2 serial/parallel scheduled parity profile;
 not yet a network, persistence, prefab, or full gameplay benchmark
 
 ## Purpose
@@ -236,7 +236,7 @@ Representative public normalized costs are `1.779 ns/query row`, `47.84
 ns/random read`, `55.78 ns/tracked scalar write`, `37.49 ns/exact delivered
 row`, `7.22 ns/recorded command`, and `150.40 ns/playback command`.
 
-## Accepted 3.1.1 scheduled parity profile
+## Accepted 3.1.1 and 3.1.2 scheduled parity profiles
 
 The accepted scheduler artifact is
 `Baselines/ecs-v3-3.1.1-scheduler-capability-parity-hardening-2026-08-11.json`.
@@ -267,6 +267,16 @@ scheduled full observation hashes differ only because their legitimate change-
 version publication schedules differ. Scheduled serial and parallel observation
 hashes match exactly.
 
+ECS 3.1.2 preserves this workload and canonical contract while hardening the
+scheduler/structural proofs and correcting aggregate phase accounting. Its
+accepted 30,000-tick means/p95/p99 are `1,200.475/1,244.628/1,300.397 us`
+public, `1,279.727/1,323.817/1,378.586 us` scheduled serial, and
+`597.434/696.283/819.872 us` scheduled parallel C8. Logical hash and all work
+counters still match, caller/worker allocation and GC remain zero, serial
+orchestration overhead is `6.60%`, and parallel is `2.14x` faster than scheduled
+serial. The immutable artifact is
+`Baselines/ecs-v3-3.1.2-scheduler-proof-hardening-2026-08-11.json`.
+
 ## Running it
 
 From the repository root:
@@ -279,7 +289,7 @@ dotnet run --project \
 ```
 
 Add `--soak-public-jobs` to run the public 3.0.36 profile. Add
-`--soak-scheduler-serial` or `--soak-scheduler` for the 3.1.1 scheduled parity
+`--soak-scheduler-serial` or `--soak-scheduler` for the current scheduled parity
 profile; `--soak-scheduler-workers <count>` controls background workers for the
 parallel form. Default result names include the active kernel version and append
 the selected profile.
@@ -331,8 +341,9 @@ It finds that version advancement itself is negligible; random checked access,
 chunk locality, resident rows in touched chunks, and fragmented exact-range
 dispatch dominate. ECS 3.0.36 then admitted the public serial generated chunk-job
 surface without changing this workload's canonical state or sustained timing.
-ECS 3.1.0 subsequently assembled the bounded scheduler, and ECS 3.1.1 repaired
-its capability boundaries and longitudinal parity evidence. The next
+ECS 3.1.0 subsequently assembled the bounded scheduler, ECS 3.1.1 repaired its
+capability boundaries and longitudinal parity evidence, and ECS 3.1.2 made the
+remaining reproduced scheduler/structural proofs mechanically true. The next
 implementation should now follow production need. A bounded batch-partition or
 mask-bearing change-consumer remains a measured option if arbitrary entity-list
 writes or fragmented exact delivery dominate a migrated subsystem; it is not

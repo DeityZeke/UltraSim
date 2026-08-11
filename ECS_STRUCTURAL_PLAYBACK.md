@@ -1,9 +1,10 @@
 # ECS Next Structural Playback
 
-Status: authoritative structural-playback architecture through ECS 3.1.0 as of
-2026-08-11. ECS 3.1.0 retains the packed production strategies and adds bounded
+Status: authoritative structural-playback architecture through ECS 3.1.2 as of
+2026-08-11. ECS 3.1 retains the packed production strategies and adds bounded
 per-participant recording plus deterministic segment merge as another input to
-the same command arena and playback engine.
+the same command arena and playback engine. ECS 3.1.2 hardens command-run
+identity and the retainable main-arena boundary without adding an executor.
 
 The project version convention is defined in
 [`ECS_VERSIONING.md`](ECS_VERSIONING.md). Historical `V31` means `3.0.31`.
@@ -48,6 +49,12 @@ Record order remains stable inside each phase. Duplicate, stale, wrong-source,
 and capacity-failed commands are rejected and counted. Unexpected invariant
 failure faults the world. Commands cannot be emitted during playback. No query or
 public lookup can observe a temporary hole.
+
+Homogeneous run proof uses the discriminated tuple `(command kind, transition
+phase, argument)`. Public prepared-transition IDs and typed component-route IDs
+are separate numeric namespaces; equality of `Argument` alone is never a route
+proof. The computed `StructuralRunKey` adds no bytes to the 24-byte command or
+40-byte slot and is used by grouping, whole-source, and exact-suffix analysis.
 
 These semantics are protected by the scalar reference executor, randomized
 canonical differential tests, focused strategy tests, and the V2/V3 canonical
@@ -281,6 +288,13 @@ typed `Add<T>`/replacement and `Remove<T>` use seal-compiled component/archetype
 routes over the same transition machine. The command record remains 24 bytes and
 the complete command slot remains 40 bytes. No worker mutates entity topology,
 the pool, or stores directly.
+
+The canonical public arena carries a small shared graph-recording gate. A
+reference retained before execution still rejects mutation during `Prepare`,
+caller/background jobs, and `Complete`; scheduled producer lanes remain the only
+graph-time structural authority. External recording before `Tick` and the
+trusted post-graph merge remain legal. This removes participant-dependent access
+without adding a command-buffer array or changing merge order.
 
 Natural future work includes separated-run route grouping, prefab expansion,
 lifecycle publication, and tick budgets. Exact whole-source transition routes now

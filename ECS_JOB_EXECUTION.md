@@ -1,11 +1,19 @@
 # ECS Public Serial Chunk-Job Execution
 
-Status: authoritative ECS 3.0.36 execution contract as of 2026-08-11.
+Status: authoritative direct execution contract through ECS 3.1.2 as of
+2026-08-11.
 
 ECS 3.1.0 retains this direct serial contract unchanged and uses the same generated
 plan, route, stack-only chunk view, and constrained struct call as its scheduled
 chunk execution ABI. Scheduler orchestration is specified in
 [`ECS_SYSTEM_SCHEDULER.md`](ECS_SYSTEM_SCHEDULER.md).
+
+ECS 3.1.2 adds the previously missing handwritten tracked 1R1W parity surface:
+`ITrackedReadWriteChunkJob<TRead,TWrite>`/`ExecuteTrackedJob` for direct use and
+`IScheduledTrackedReadWriteChunkJob<TRead,TWrite>`/
+`RegisterTrackedReadWriteSystem` for scheduled use. Both reuse the existing
+`TrackedWritableComponentChunk<TWrite>` and one invocation-shared publication
+gate; they do not add a query representation or scheduler path.
 
 ECS 3.0.36 exposes the existing generated query machine through the public,
 engine-neutral `EcsWorld` facade. It is a serial owner-thread execution primitive,

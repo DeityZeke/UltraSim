@@ -147,3 +147,15 @@ The RangeJob row is 2.2-6.4% slower; focused 31-sample reruns reproduce a
 2.7-6.3% range. Treat that modest regression as a follow-up signal accepted for
 the required safety repair, not a generalized scheduler result. Full
 interpretation is in `../../ECS_3_1_1_HARDENING_REPORT.md`.
+
+`ecs-v2-v3-3.1.2-2026-08-11.json` is the accepted scheduler/structural proof-
+hardening joined capture, verified in both process orders. It retains all 102
+comparable contracts, zero canonical/catalog mismatches, 10 explicit unsupported
+rows, and zero caller-thread V3 allocation. The three scheduler-capable V3 rows
+also report zero worker allocation; V2 worker allocation remains unknown because
+the frozen adapter exposes no equivalent counter. The 149 timed scheduler rows,
+25 cold graph-Seal rows, corrected 100K parity profile, random enable/version CAS
+controls, long stress soak, and deterministic multi-worker replays are preserved
+in `ecs-v3-3.1.2-scheduler-proof-hardening-2026-08-11.json`. Full correctness,
+performance, and complexity interpretation is in
+`../../ECS_3_1_2_HARDENING_REPORT.md`.

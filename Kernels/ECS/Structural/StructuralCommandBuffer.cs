@@ -32,6 +32,7 @@ public sealed class StructuralCommandBuffer
     private readonly int[] _activeTemporaryArchetypes;
     private readonly byte[] _payload;
     private readonly WorldId _worldId;
+    private readonly StructuralRecordingGate? _recordingGate;
     private uint _bufferId;
     private readonly int _ownerThreadId;
     private readonly bool _schedulerLane;
@@ -57,7 +58,8 @@ public sealed class StructuralCommandBuffer
         int capacity,
         int maximumArchetypes,
         bool schedulerLane = false,
-        int payloadCapacityBytes = 0)
+        int payloadCapacityBytes = 0,
+        StructuralRecordingGate? recordingGate = null)
     {
         if (!worldId.IsValid)
             throw new ArgumentException("A valid world ID is required.", nameof(worldId));
@@ -74,6 +76,7 @@ public sealed class StructuralCommandBuffer
         _bufferId = BufferIdSource.Allocate();
         _ownerThreadId = ownerThreadId;
         _schedulerLane = schedulerLane;
+        _recordingGate = recordingGate;
         _commands = new StructuralCommandRecord[capacity];
         _createdEntities = new Entity[capacity];
         _nextCommand = new int[capacity];
@@ -1154,10 +1157,11 @@ public sealed class StructuralCommandBuffer
             }
             if (first.Kind != StructuralCommandKind.Transition)
                 ThrowCommandInvariant("A transition phase chain contains an invalid command kind.");
-            uint transitionId = first.Argument;
+            var runKey = new StructuralRunKey(first);
+            uint transitionId = runKey.Argument;
             TransitionRunPlan runPlan = AnalyzeTransitionRun(
                 link,
-                transitionId);
+                runKey);
             if (!runPlan.UseGroupedExecution)
             {
                 for (int index = 0; index < runPlan.PrefixCount; index++)
@@ -1180,7 +1184,7 @@ public sealed class StructuralCommandBuffer
             if (TryExecuteExactWholeSourceTransitionRun(
                     world,
                     commandCount,
-                    transitionId,
+                    runKey,
                     transition,
                     ref link,
                     ref applied,
@@ -1191,7 +1195,7 @@ public sealed class StructuralCommandBuffer
             if (TryExecuteExactPackedSuffixTransitionRun(
                     world,
                     commandCount,
-                    transitionId,
+                    runKey,
                     transition,
                     ref link,
                     ref applied,
@@ -1206,7 +1210,7 @@ public sealed class StructuralCommandBuffer
             {
                 commandIndex = link - 1;
                 StructuralCommandRecord command = _commands[commandIndex];
-                if (command.Argument != transitionId)
+                if (!runKey.Matches(command))
                     break;
                 link = _nextCommand[commandIndex];
 
@@ -1259,7 +1263,7 @@ public sealed class StructuralCommandBuffer
     private bool TryExecuteExactWholeSourceTransitionRun(
         EcsWorld<NativeChunkArena> world,
         int commandCount,
-        uint transitionId,
+        StructuralRunKey runKey,
         PreparedArchetypeTransition transition,
         ref int link,
         ref int applied,
@@ -1285,7 +1289,7 @@ public sealed class StructuralCommandBuffer
                 return false;
             int commandIndex = scanLink - 1;
             StructuralCommandRecord command = _commands[commandIndex];
-            if (command.Argument != transitionId ||
+            if (!runKey.Matches(command) ||
                 !TryResolveTarget(command, commandCount, out Entity entity, out _) ||
                 !world.TryGetTransitionSourceRow(entity, transition, out ChunkRow row) ||
                 !IsStrictOrderedTransitionRow(
@@ -1305,8 +1309,7 @@ public sealed class StructuralCommandBuffer
             scanLink = _nextCommand[commandIndex];
         }
 
-        if (scanLink != 0 &&
-            _commands[scanLink - 1].Argument == transitionId)
+        if (scanLink != 0 && runKey.Matches(_commands[scanLink - 1]))
         {
             return false;
         }
@@ -1347,7 +1350,7 @@ public sealed class StructuralCommandBuffer
     private bool TryExecuteExactPackedSuffixTransitionRun(
         EcsWorld<NativeChunkArena> world,
         int commandCount,
-        uint transitionId,
+        StructuralRunKey runKey,
         PreparedArchetypeTransition transition,
         ref int link,
         ref int applied,
@@ -1358,8 +1361,7 @@ public sealed class StructuralCommandBuffer
         while (scanLink != 0)
         {
             int commandIndex = scanLink - 1;
-            if (_commands[commandIndex].Kind != StructuralCommandKind.Transition ||
-                _commands[commandIndex].Argument != transitionId)
+            if (!runKey.Matches(_commands[commandIndex]))
                 break;
             runCount++;
             scanLink = _nextCommand[commandIndex];
@@ -1386,7 +1388,7 @@ public sealed class StructuralCommandBuffer
         {
             int commandIndex = validateLink - 1;
             StructuralCommandRecord command = _commands[commandIndex];
-            if (command.Argument != transitionId ||
+            if (!runKey.Matches(command) ||
                 !TryResolveTarget(command, commandCount, out Entity entity, out _) ||
                 !world.MatchAndAdvanceExactPackedSuffixTransition(
                     entity,
@@ -1441,13 +1443,13 @@ public sealed class StructuralCommandBuffer
         return true;
     }
 
-    private TransitionRunPlan AnalyzeTransitionRun(int link, uint transitionId)
+    private TransitionRunPlan AnalyzeTransitionRun(int link, StructuralRunKey runKey)
     {
         int count = 0;
         while (link != 0 && count < MinimumGroupedTransitionRun)
         {
             int commandIndex = link - 1;
-            if (_commands[commandIndex].Argument != transitionId)
+            if (!runKey.Matches(_commands[commandIndex]))
                 break;
             count++;
             link = _nextCommand[commandIndex];
@@ -1807,6 +1809,11 @@ public sealed class StructuralCommandBuffer
         {
             throw new InvalidOperationException(
                 "This structural command arena has one recording owner.");
+        }
+        if (!_schedulerLane && _recordingGate?.IsSystemGraphActive == true)
+        {
+            throw new InvalidOperationException(
+                "The canonical structural command arena is unavailable during scheduler graph execution; use the issued SystemStructuralWriter capability.");
         }
     }
 

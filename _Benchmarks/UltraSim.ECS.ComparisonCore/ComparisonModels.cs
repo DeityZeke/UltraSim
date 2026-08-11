@@ -43,6 +43,10 @@ public interface IComparisonWorkload : IDisposable
     ScenarioMeasurement Execute();
 
     CanonicalState CaptureCanonicalState();
+
+    bool ReportsBackgroundWorkerAllocation => false;
+
+    long BackgroundWorkerAllocatedBytes => 0;
 }
 
 public sealed class ComparisonScenario
@@ -136,6 +140,12 @@ public sealed class ComparisonScenarioResult
     public long MeanAllocatedBytes { get; init; }
 
     public long MaxAllocatedBytes { get; init; }
+
+    public bool ReportsBackgroundWorkerAllocation { get; init; }
+
+    public long MeanBackgroundWorkerAllocatedBytes { get; init; }
+
+    public long MaxBackgroundWorkerAllocatedBytes { get; init; }
 
     public int Gen0Collections { get; init; }
 

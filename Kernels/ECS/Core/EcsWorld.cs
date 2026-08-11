@@ -94,6 +94,45 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         }
     }
 
+    internal WorldReservedPayloadSnapshot GetReservedPayloadSnapshot(
+        long mainStructuralCommandBytes,
+        long schedulerBytes)
+    {
+        EnsureSealed();
+        long registry = checked(
+            (long)_archetypes.MaximumArchetypes * IntPtr.Size +
+            (long)_archetypes.LookupCapacity * sizeof(int));
+        long signaturesAndColumns = 0;
+        long storeMetadata = 0;
+        long slotMetadata = 0;
+        long nativePayload = 0;
+        for (int index = 0; index < _archetypes.Count; index++)
+        {
+            ArchetypeStorage<TArena> storage = _archetypes.GetStorage(new ArchetypeId((uint)index + 1));
+            signaturesAndColumns = checked(signaturesAndColumns +
+                (long)storage.Signature.Length * Unsafe.SizeOf<ComponentId>() +
+                (long)storage.Columns.Length * Unsafe.SizeOf<ComponentColumnLayout>());
+            ArchetypeChunkSnapshot store = storage.Store.GetSnapshot();
+            ChunkArenaSnapshot arena = storage.Store.Arena.GetSnapshot();
+            storeMetadata = checked(storeMetadata + store.TotalMetadataBytes);
+            slotMetadata = checked(slotMetadata + arena.Capacity.EstimatedSlotMetadataBytes);
+            nativePayload = checked(nativePayload + arena.Capacity.TotalPayloadBytes);
+        }
+        long preparedSlots = checked(
+            (long)(_queryPlans.Length + _publicTransitions.Length +
+                _structuralComponentRoutes.Length) * IntPtr.Size);
+        return new WorldReservedPayloadSnapshot(
+            _entities.Capacity.EstimatedMetadataBytes,
+            registry,
+            signaturesAndColumns,
+            storeMetadata,
+            slotMetadata,
+            preparedSlots,
+            mainStructuralCommandBytes,
+            schedulerBytes,
+            nativePayload);
+    }
+
     internal int ArchetypeCount
     {
         get
@@ -745,7 +784,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
             return false;
         storage.Store.GetBoundComponentRef<T>(row, columnIndex) = value;
-        storage.Store.StampSparseChangeVersion(
+        storage.Store.StampSparseChangeVersionConcurrent(
             row.ChunkIndex,
             columnIndex,
             row.Row,
@@ -767,8 +806,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             ThrowComponentLookupIsNotEnableable();
         if (!TryResolveLookup(entity, lookup, out ArchetypeStorage<TArena>? storage, out ChunkRow row, out int columnIndex))
             return false;
-        storage.Store.SetBoundEnabled(row, columnIndex, enabled);
-        storage.Store.StampSparseChangeVersion(
+        storage.Store.SetBoundEnabledConcurrent(row, columnIndex, enabled);
+        storage.Store.StampSparseChangeVersionConcurrent(
             row.ChunkIndex,
             columnIndex,
             row.Row,
@@ -1645,6 +1684,57 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                 }
             }
 
+            return visitedRows;
+        }
+        finally
+        {
+            ExitExecutionScope();
+        }
+    }
+
+    internal int VisitTrackedReadWriteChunks<TRead, TWrite, TVisitor>(
+        ArchetypeReadWriteQueryPlan<TArena, TRead, TWrite> plan,
+        ref TVisitor visitor)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TVisitor : struct, ITrackedReadWriteChunkJob<TRead, TWrite>
+    {
+        EnsureSealed();
+        ValidateQueryPlan(plan);
+        EnterExecutionScope();
+        try
+        {
+            int visitedRows = 0;
+            ChangeVersion writeVersion = default;
+            ReadOnlySpan<ArchetypeReadWriteQueryRoute<TArena>> routes = plan.Routes;
+            for (int routeIndex = 0; routeIndex < routes.Length; routeIndex++)
+            {
+                ref readonly ArchetypeReadWriteQueryRoute<TArena> route = ref routes[routeIndex];
+                if (route.HasRowFilters)
+                    throw new InvalidOperationException("Public tracked jobs do not yet expose filtered plan authoring.");
+                ArchetypeChunkStore<TArena> store = route.Storage.Store;
+                for (int chunkIndex = store.GetFirstOccupiedChunkIndex();
+                     chunkIndex >= 0;
+                     chunkIndex = store.GetNextOccupiedChunkIndex(chunkIndex))
+                {
+                    BoundReadWriteComponentChunk<TRead, TWrite> bound =
+                        store.GetBoundReadWriteComponentChunk<TRead, TWrite>(
+                            chunkIndex, route.ReadColumnIndex, route.WriteColumnIndex,
+                            plan.ReadIsEnableable, plan.WriteIsEnableable);
+                    bool writeStamped = false;
+                    var trackedWrite = new TrackedWritableComponentChunk<TWrite>(
+                        (EcsWorld<NativeChunkArena>)(object)this,
+                        (ArchetypeChunkStore<NativeChunkArena>)(object)store,
+                        bound.ChunkIndex, route.WriteColumnIndex, rowOffset: 0,
+                        bound.WriteComponents, bound.WriteEnableWords, wholeChunk: true,
+                        ref writeVersion, ref writeStamped);
+                    var chunk = new TrackedReadWriteComponentChunk<TRead, TWrite>(
+                        Id, route.Storage.Id, bound.ChunkIndex, rowOffset: 0,
+                        bound.EntityIndices, bound.ReadComponents, trackedWrite, bound.ReadEnableWords);
+                    visitor.Execute(chunk);
+                    visitedRows += chunk.Count;
+                }
+            }
             return visitedRows;
         }
         finally

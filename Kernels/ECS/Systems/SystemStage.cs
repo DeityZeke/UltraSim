@@ -27,3 +27,18 @@ public enum SchedulerRunMode : byte
     Serial = 0,
     Parallel = 1,
 }
+
+/// <summary>Proof supplied for supplemental random access during parallel execution.</summary>
+public enum ParallelRandomAccessPolicy : byte
+{
+    /// <summary>Any random mutation or read/write overlap forces serial execution.</summary>
+    SerialOnly = 0,
+
+    /// <summary>
+    /// Each participant's supplemental reads are disjoint from every other
+    /// participant's generated/supplemental writes, and its supplemental writes
+    /// are disjoint from every other participant's generated/supplemental reads
+    /// and writes.
+    /// </summary>
+    PartitionDisjoint = 1,
+}

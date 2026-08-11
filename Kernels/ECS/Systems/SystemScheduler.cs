@@ -8,9 +8,11 @@ namespace UltraSim.ECS;
 /// <summary>Bounded owner-coordinated system graph over persistent worker threads.</summary>
 internal sealed class SystemScheduler : IDisposable
 {
+    internal static Action<int>? WorkerStartHookForTesting;
     private readonly EcsWorld _facade;
     private readonly EcsWorld<NativeChunkArena> _world;
     private readonly StructuralCommandBuffer _mainCommands;
+    private readonly StructuralRecordingGate _structuralRecordingGate;
     private readonly EcsSchedulerOptions _options;
     private readonly SystemNode?[] _nodes;
     private readonly ulong[] _readMasks;
@@ -62,12 +64,14 @@ internal sealed class SystemScheduler : IDisposable
         EcsWorld facade,
         EcsWorld<NativeChunkArena> world,
         StructuralCommandBuffer mainCommands,
+        StructuralRecordingGate structuralRecordingGate,
         EcsSchedulerOptions options,
         int maximumArchetypes)
     {
         _facade = facade;
         _world = world;
         _mainCommands = mainCommands;
+        _structuralRecordingGate = structuralRecordingGate;
         _options = options;
         _nodes = new SystemNode[options.MaximumSystems];
         _maskWords = (world.Schema.ComponentCount + 63) >> 6;
@@ -133,7 +137,6 @@ internal sealed class SystemScheduler : IDisposable
         (long)(_participantSystems.Length + _participantWorkOrdinals.Length +
             _participantThreadIds.Length + _participantSegmentStarts.Length) * sizeof(int) +
         SumNodeReservations() +
-        _mainCommands.ReservedBytes +
         SumLaneReservations());
 
     internal SystemId GetNextRegistrationId()
@@ -151,10 +154,15 @@ internal sealed class SystemScheduler : IDisposable
         if (node.Id.Value != _nodeCount)
             throw new InvalidOperationException("System registration IDs are not dense and ordered.");
         ValidateDefinitionIdentity(node.Definition);
-        Span<ulong> readMask = GetMask(_readMasks, node.Id.Value);
-        Span<ulong> writeMask = GetMask(_writeMasks, node.Id.Value);
-        Span<ulong> lookupReadMask = GetMask(_lookupReadMasks, node.Id.Value);
-        Span<ulong> lookupWriteMask = GetMask(_lookupWriteMasks, node.Id.Value);
+
+        // Registration is a cold proof/commit transaction. Failed validation must
+        // leave the reusable slot and dependency budget completely untouched.
+        var proposed = new ulong[checked(_maskWords * 5)];
+        Span<ulong> readMask = proposed.AsSpan(0, _maskWords);
+        Span<ulong> writeMask = proposed.AsSpan(_maskWords, _maskWords);
+        Span<ulong> lookupReadMask = proposed.AsSpan(_maskWords * 2, _maskWords);
+        Span<ulong> lookupWriteMask = proposed.AsSpan(_maskWords * 3, _maskWords);
+        Span<ulong> structuralMask = proposed.AsSpan(_maskWords * 4, _maskWords);
         AddComponents(readMask, reads, nameof(reads));
         AddComponents(writeMask, writes, nameof(writes));
         AddComponents(lookupReadMask, node.Definition.AdditionalReads,
@@ -163,14 +171,20 @@ internal sealed class SystemScheduler : IDisposable
             nameof(node.Definition.AdditionalWrites));
         AddComponents(readMask, node.Definition.AdditionalReads, nameof(node.Definition.AdditionalReads));
         AddComponents(writeMask, node.Definition.AdditionalWrites, nameof(node.Definition.AdditionalWrites));
-        Span<ulong> structuralMask = GetMask(_structuralMasks, node.Id.Value);
         AddComponents(structuralMask, node.Definition.StructuralComponents, nameof(node.Definition.StructuralComponents));
         for (int word = 0; word < _maskWords; word++)
             readMask[word] &= ~writeMask[word];
-        node.HasWrites = !IsEmpty(writeMask);
-        _dependencyCount = checked(_dependencyCount + node.Definition.Requires.Count);
-        if (_dependencyCount > _options.MaximumDependencies)
+        int proposedDependencyCount = checked(_dependencyCount + node.Definition.Requires.Count);
+        if (proposedDependencyCount > _options.MaximumDependencies)
             throw new InvalidOperationException($"System dependency capacity {_options.MaximumDependencies} is exhausted.");
+
+        readMask.CopyTo(GetMask(_readMasks, node.Id.Value));
+        writeMask.CopyTo(GetMask(_writeMasks, node.Id.Value));
+        lookupReadMask.CopyTo(GetMask(_lookupReadMasks, node.Id.Value));
+        lookupWriteMask.CopyTo(GetMask(_lookupWriteMasks, node.Id.Value));
+        structuralMask.CopyTo(GetMask(_structuralMasks, node.Id.Value));
+        node.HasWrites = !IsEmpty(writeMask);
+        _dependencyCount = proposedDependencyCount;
         _nodes[_nodeCount++] = node;
     }
 
@@ -256,6 +270,8 @@ internal sealed class SystemScheduler : IDisposable
     internal void SetRunMode(SchedulerRunMode mode)
     {
         EnsureNotExecuting();
+        if ((uint)mode > (uint)SchedulerRunMode.Parallel)
+            throw new ArgumentOutOfRangeException(nameof(mode));
         if (mode == SchedulerRunMode.Parallel && _options.BackgroundWorkerCount == 0)
             throw new InvalidOperationException("This world reserved no scheduler background workers.");
         _runMode = mode;
@@ -284,6 +300,7 @@ internal sealed class SystemScheduler : IDisposable
             throw new InvalidOperationException("The scheduler tick counter reached its terminal value.");
 
         bool graphEntered = false;
+        bool structuralGateEntered = false;
         bool executionBegun = false;
         try
         {
@@ -295,6 +312,8 @@ internal sealed class SystemScheduler : IDisposable
                 _preBarrierTicks += Stopwatch.GetTimestamp() - phaseStart;
             BeginExecution(deltaSeconds);
             executionBegun = true;
+            _structuralRecordingGate.EnterSystemGraph();
+            structuralGateEntered = true;
             _world.BeginSystemGraphExecution();
             graphEntered = true;
             phaseStart = _options.ProfilingEnabled ? Stopwatch.GetTimestamp() : 0;
@@ -308,6 +327,8 @@ internal sealed class SystemScheduler : IDisposable
                 _graphTicks += Stopwatch.GetTimestamp() - phaseStart;
             _world.EndSystemGraphExecution();
             graphEntered = false;
+            _structuralRecordingGate.ExitSystemGraph();
+            structuralGateEntered = false;
 
             phaseStart = _options.ProfilingEnabled ? Stopwatch.GetTimestamp() : 0;
             MergeStructuralSegments();
@@ -328,6 +349,8 @@ internal sealed class SystemScheduler : IDisposable
                 try { _world.EndSystemGraphExecution(); }
                 catch { }
             }
+            if (structuralGateEntered)
+                _structuralRecordingGate.ExitSystemGraph();
             if (executionBegun)
             {
                 DiscardStructuralLanes();
@@ -349,8 +372,11 @@ internal sealed class SystemScheduler : IDisposable
             throw new InvalidOperationException("Only a manual system can be invoked explicitly.");
         BeginExecution(deltaSeconds);
         bool graphEntered = false;
+        bool structuralGateEntered = false;
         try
         {
+            _structuralRecordingGate.EnterSystemGraph();
+            structuralGateEntered = true;
             _world.BeginSystemGraphExecution();
             graphEntered = true;
             long phaseStart = _options.ProfilingEnabled ? Stopwatch.GetTimestamp() : 0;
@@ -359,6 +385,8 @@ internal sealed class SystemScheduler : IDisposable
                 _graphTicks += Stopwatch.GetTimestamp() - phaseStart;
             _world.EndSystemGraphExecution();
             graphEntered = false;
+            _structuralRecordingGate.ExitSystemGraph();
+            structuralGateEntered = false;
             phaseStart = _options.ProfilingEnabled ? Stopwatch.GetTimestamp() : 0;
             MergeStructuralSegments();
             if (_options.ProfilingEnabled)
@@ -372,6 +400,8 @@ internal sealed class SystemScheduler : IDisposable
                 try { _world.EndSystemGraphExecution(); }
                 catch { }
             }
+            if (structuralGateEntered)
+                _structuralRecordingGate.ExitSystemGraph();
             DiscardStructuralLanes();
             EndExecution();
             Exception fault = _executionFault ?? exception;
@@ -605,14 +635,15 @@ internal sealed class SystemScheduler : IDisposable
                 ?? throw new InvalidOperationException("An active scheduler node is missing.");
             int itemCount = _activeWorkCounts[activeIndex];
             SchedulerQueryShape shape = node.GetShape();
+            int completedRows = node.GetCompletedRows(shape);
             node.Complete(_tick, _deltaSeconds, _activeParallel[activeIndex], manualId.IsValid,
-                shape.Rows, shape.Chunks, itemCount);
+                completedRows, shape.Chunks, itemCount);
             if (node.Publication.WasPublished)
                 _world.PublishSchedulerChangeVersion(node.Publication.Candidate);
             long elapsed = _options.ProfilingEnabled
                 ? Stopwatch.GetTimestamp() - _activeStartTicks[activeIndex]
                 : 0;
-            node.RecordRun(_tick, elapsed, _activeParallel[activeIndex], shape.Rows, shape.Chunks, itemCount);
+            node.RecordRun(_tick, elapsed, _activeParallel[activeIndex], completedRows, shape.Chunks, itemCount);
         }
     }
 
@@ -752,7 +783,12 @@ internal sealed class SystemScheduler : IDisposable
         if (!node.SupportsParallel || _runMode != SchedulerRunMode.Parallel ||
             ExecutionConcurrency <= 1 || shape.Rows == 0)
             return false;
-        if (node.Definition.AdditionalWrites.Count != 0 && !node.Definition.RandomWriteTargetsAreDisjoint)
+        ReadOnlySpan<ulong> lookupWrites = GetMask(_lookupWriteMasks, node.Id.Value);
+        ReadOnlySpan<ulong> lookupReads = GetMask(_lookupReadMasks, node.Id.Value);
+        ReadOnlySpan<ulong> allWrites = GetMask(_writeMasks, node.Id.Value);
+        bool needsRandomOwnershipProof = !IsEmpty(lookupWrites) || Intersects(lookupReads, allWrites);
+        if (needsRandomOwnershipProof &&
+            node.Definition.ParallelRandomAccessPolicy != ParallelRandomAccessPolicy.PartitionDisjoint)
             return false;
         return node.Definition.ExecutionPolicy switch
         {
@@ -799,7 +835,10 @@ internal sealed class SystemScheduler : IDisposable
                         if (dependency.Definition.Stage == node.Definition.Stage)
                             wave = Math.Max(wave, dependency.CompiledWave + 1);
                     }
-                    for (int previous = 0; previous < index; previous++)
+                    // A forward dependency can make a lower-registration node
+                    // ready after a higher-registration conflicting node. Scan
+                    // every already-compiled peer, not merely lower ordinals.
+                    for (int previous = 0; previous < _nodeCount; previous++)
                     {
                         SystemNode earlier = GetNode(previous);
                         if (compiled[previous] && earlier.Definition.Stage == node.Definition.Stage &&
@@ -984,6 +1023,14 @@ internal sealed class SystemScheduler : IDisposable
                 return false;
         return true;
     }
+    private static bool Intersects(ReadOnlySpan<ulong> left, ReadOnlySpan<ulong> right)
+    {
+        System.Diagnostics.Debug.Assert(left.Length == right.Length);
+        for (int index = 0; index < left.Length; index++)
+            if ((left[index] & right[index]) != 0)
+                return true;
+        return false;
+    }
 
     private SystemNode GetNode(SystemId id)
     {
@@ -1085,6 +1132,8 @@ internal sealed class SystemScheduler : IDisposable
         private volatile bool _shutdown;
         private long _wakeCount;
         private long _parkCount;
+        private int _startedCount;
+        private bool _disposed;
 
         internal PersistentWorkerRuntime(SystemScheduler scheduler, int backgroundWorkers, bool callerParticipates)
         {
@@ -1109,8 +1158,20 @@ internal sealed class SystemScheduler : IDisposable
 
         internal void Start()
         {
-            for (int index = 0; index < _threads.Length; index++)
-                _threads[index].Start();
+            try
+            {
+                for (int index = 0; index < _threads.Length; index++)
+                {
+                    WorkerStartHookForTesting?.Invoke(index);
+                    _threads[index].Start();
+                    _startedCount++;
+                }
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
         }
 
         internal void Dispatch(SchedulerWorkItem[] items, int count)
@@ -1172,16 +1233,17 @@ internal sealed class SystemScheduler : IDisposable
 
         public void Dispose()
         {
-            if (_shutdown)
+            if (_disposed)
                 return;
             _shutdown = true;
-            for (int index = 0; index < _events.Length; index++)
+            for (int index = 0; index < _startedCount; index++)
                 _events[index].Set();
-            for (int index = 0; index < _threads.Length; index++)
+            for (int index = 0; index < _startedCount; index++)
                 _threads[index].Join();
             for (int index = 0; index < _events.Length; index++)
                 _events[index].Dispose();
             _complete.Dispose();
+            _disposed = true;
         }
     }
 }

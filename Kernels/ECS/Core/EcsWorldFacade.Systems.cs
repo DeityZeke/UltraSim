@@ -28,6 +28,17 @@ public sealed partial class EcsWorld
         get { EnsureOwnerThread(); return _scheduler?.ReservedBytes ?? 0; }
     }
 
+    /// <summary>Returns post-seal owned-payload categories without double-counting the main arena.</summary>
+    public WorldReservedPayloadSnapshot GetReservedPayloadSnapshot()
+    {
+        EnsureOwnerThread();
+        if (!IsSealed)
+            throw new InvalidOperationException("Reserved payload observation requires a sealed world.");
+        return _core.GetReservedPayloadSnapshot(
+            _structuralCommands.ReservedBytes,
+            _scheduler?.ReservedBytes ?? 0);
+    }
+
     public SystemId RegisterRangeSystem<TSystem, TJob>(
         SystemDefinition definition,
         TSystem runtime)

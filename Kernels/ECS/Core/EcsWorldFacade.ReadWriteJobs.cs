@@ -27,6 +27,29 @@ public sealed partial class EcsWorld
         return id;
     }
 
+    public SystemId RegisterTrackedReadWriteSystem<TRead, TWrite, TSystem, TJob>(
+        SystemDefinition definition,
+        in ReadWriteJobPlan<TRead, TWrite> plan,
+        TSystem runtime)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TSystem : class, ISystemRuntime<TJob>
+        where TJob : struct, IScheduledTrackedReadWriteChunkJob<TRead, TWrite>
+    {
+        EnsureOwnerThread();
+        SystemScheduler scheduler = GetSchedulerForRegistration();
+        ArchetypeReadWriteQueryPlan<NativeChunkArena, TRead, TWrite> prepared = plan.GetPlan();
+        if (prepared.WorldId != Id)
+            throw new ArgumentException("The job plan belongs to a different world.", nameof(plan));
+        SystemId id = scheduler.GetNextRegistrationId();
+        var node = new TrackedReadWriteSystemNode<TSystem, TRead, TWrite, TJob>(
+            id, definition, runtime, scheduler.ExecutionConcurrency, _core, prepared);
+        Span<ComponentId> reads = stackalloc ComponentId[1] { prepared.ReadComponentId };
+        Span<ComponentId> writes = stackalloc ComponentId[1] { prepared.WriteComponentId };
+        scheduler.RegisterNode(node, reads, writes);
+        return id;
+    }
+
     public ReadWriteJobPlan<TRead, TWrite> PrepareReadWriteJob<TRead, TWrite>()
         where TRead : unmanaged, IComponent<TRead>
         where TWrite : unmanaged, IComponent<TWrite>
@@ -50,5 +73,17 @@ public sealed partial class EcsWorld
     {
         EnsureRuntimeAccess();
         return _core.VisitReadWriteChunks(plan.GetPlan(), ref job);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public int ExecuteTrackedJob<TRead, TWrite, TJob>(
+        in ReadWriteJobPlan<TRead, TWrite> plan,
+        ref TJob job)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+        where TJob : struct, ITrackedReadWriteChunkJob<TRead, TWrite>
+    {
+        EnsureRuntimeAccess();
+        return _core.VisitTrackedReadWriteChunks(plan.GetPlan(), ref job);
     }
 }

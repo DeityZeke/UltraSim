@@ -1,9 +1,10 @@
 namespace UltraSim.ECS;
 
 /// <summary>
-/// Aggregate bounded world reservation. Chunk and arena bytes are modeled as native;
-/// current entity-slot metadata and the explicitly supplied scheduler reservation
-/// are modeled as managed.
+/// Preconstruction capacity estimate from caller-supplied population, arena, and
+/// scheduler budgets. This does not claim to be an observed physical-world total;
+/// use <see cref="WorldReservedPayloadSnapshot"/> after Seal for mechanically
+/// enumerable owned payload.
 /// </summary>
 public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
 {
@@ -59,6 +60,9 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
     public long TotalNativeBytes { get; }
 
     public long TotalReservedBytes { get; }
+
+    /// <summary>Unambiguous alias for the preconstruction estimated payload total.</summary>
+    public long TotalPlannedPayloadBytes => TotalReservedBytes;
 
     public bool Equals(WorldCapacityPlan other) =>
         EntityCapacity == other.EntityCapacity &&

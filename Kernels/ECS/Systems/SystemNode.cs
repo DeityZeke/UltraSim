@@ -62,6 +62,7 @@ internal abstract class SystemNode
         in SystemJobContext context);
     internal abstract void Complete(ulong tick, double deltaSeconds, bool parallel, bool manual,
         int rows, int chunks, int workItems);
+    internal virtual int GetCompletedRows(in SchedulerQueryShape shape) => shape.Rows;
     internal abstract long ReservedPayloadBytes { get; }
 
     internal void RecordRun(ulong tick, long elapsedTicks, bool parallel, int rows, int chunks, int workItems)
@@ -191,6 +192,8 @@ internal sealed class RangeSystemNode<TSystem, TJob> : ScheduledSystemNode<TSyst
     {
         if (_rangeCount == 0)
             return 0;
+        if (destination.IsEmpty)
+            throw new InvalidOperationException("Scheduler work-item capacity is exhausted.");
         int count = Math.Min(Math.Min(desiredPartitions, destination.Length), _rangeCount);
         int baseCount = _rangeCount / count;
         int remainder = _rangeCount % count;

@@ -17,13 +17,17 @@ public sealed class SystemDefinition
         IReadOnlyList<ComponentId>? structuralComponents = null,
         int parallelRowThreshold = 16_384,
         int minimumRowsPerPartition = 4_096,
-        bool randomWriteTargetsAreDisjoint = false,
+        ParallelRandomAccessPolicy parallelRandomAccessPolicy = ParallelRandomAccessPolicy.SerialOnly,
         bool automaticallyStagger = false)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("A nonempty canonical system key is required.", nameof(key));
         if ((uint)stage >= (uint)SystemStage.Count)
             throw new ArgumentOutOfRangeException(nameof(stage));
+        if ((uint)executionPolicy > (uint)SystemExecutionPolicy.Auto)
+            throw new ArgumentOutOfRangeException(nameof(executionPolicy));
+        if ((uint)parallelRandomAccessPolicy > (uint)ParallelRandomAccessPolicy.PartitionDisjoint)
+            throw new ArgumentOutOfRangeException(nameof(parallelRandomAccessPolicy));
         if (schedule.PeriodTicks == 0)
             schedule = new SystemSchedule(enabled: true, periodTicks: 1, startOffset: 0);
         if (parallelRowThreshold < 1)
@@ -48,7 +52,7 @@ public sealed class SystemDefinition
         StructuralComponents = Copy(structuralComponents);
         ParallelRowThreshold = parallelRowThreshold;
         MinimumRowsPerPartition = minimumRowsPerPartition;
-        RandomWriteTargetsAreDisjoint = randomWriteTargetsAreDisjoint;
+        ParallelRandomAccessPolicy = parallelRandomAccessPolicy;
         AutomaticallyStagger = automaticallyStagger;
     }
 
@@ -65,7 +69,7 @@ public sealed class SystemDefinition
     public IReadOnlyList<ComponentId> StructuralComponents { get; }
     public int ParallelRowThreshold { get; }
     public int MinimumRowsPerPartition { get; }
-    public bool RandomWriteTargetsAreDisjoint { get; }
+    public ParallelRandomAccessPolicy ParallelRandomAccessPolicy { get; }
     public bool AutomaticallyStagger { get; }
 
     private static T[] Copy<T>(IReadOnlyList<T>? values)

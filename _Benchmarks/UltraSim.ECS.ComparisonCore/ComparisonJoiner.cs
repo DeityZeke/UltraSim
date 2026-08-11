@@ -389,7 +389,6 @@ public static class ComparisonJoiner
             !string.Equals(baseline.ReadyToRunSetting, current.ReadyToRunSetting, StringComparison.Ordinal) ||
             baseline.ServerGarbageCollection != current.ServerGarbageCollection ||
             baseline.ForcesFullCollectionBeforeMeasuredIteration != current.ForcesFullCollectionBeforeMeasuredIteration ||
-            !string.Equals(baseline.AllocationMeasurementScope, current.AllocationMeasurementScope, StringComparison.Ordinal) ||
             baseline.ProcessorCount != current.ProcessorCount)
         {
             throw new InvalidOperationException($"{label} reports were not captured with the same environment and measurement policy.");

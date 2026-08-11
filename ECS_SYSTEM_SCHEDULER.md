@@ -1,12 +1,16 @@
 # ECS Bounded System Scheduler
 
-Status: authoritative ECS 3.1.1 system/scheduler contract as of 2026-08-11.
+Status: authoritative ECS 3.1.2 system/scheduler contract as of 2026-08-11.
 
 ECS 3.1.0 added one bounded system graph above the existing 3.0.36 generated
 chunk machine. It does not introduce another storage, query, task, or structural
 executor. ECS 3.1.1 hardens its capability boundaries, makes the partition cap
 global across every matching archetype route, and repairs the longitudinal 100K
 benchmark evidence without changing the scheduler architecture.
+ECS 3.1.2 makes the remaining concurrency/structural proofs mechanical: complete
+late-ready conflict compilation, transactional registration, discriminated
+structural runs, guarded retained arenas, explicit random-access ownership, and
+safe shared enable/change metadata.
 
 ```text
 register systems and fixed reservations
@@ -37,7 +41,7 @@ Cold registration separates three concepts:
 - `SystemDefinition` is immutable cold metadata: canonical key, stage, schedule,
   execution policy, manual flag, optional persistence ID/schema version,
   dependencies, supplemental random-access masks, structural component routes,
-  parallel thresholds, and explicit disjoint-random-write proof.
+  parallel thresholds, and an explicit parallel random-access ownership policy.
 - a user-owned `ISystemRuntime<TJob>` object is persistent state. It is allocated
   and registered once, receives owner-thread `Initialize`, `Prepare`, `Complete`,
   and `Shutdown`, and may own cursors, timers, configuration, accumulators, or
@@ -61,6 +65,8 @@ The generated scheduled access catalog is:
 
 Writable families also have tracked variants. Exact one-watch changed-row systems
 are scheduled serially so cursor acknowledgement remains success-only.
+The handwritten 1R1W family has matching direct and scheduled tracked adapters in
+3.1.2 and uses the same tracked writable chunk/publication machinery.
 
 ## Tick, graph, and cadence semantics
 
@@ -72,8 +78,9 @@ system/persistence identity fail cold.
 
 Generated read/write masks and declared supplemental random access create automatic
 conflicts. Conflicting systems cannot occupy the same wave. Read/read systems may
-coexist; any overlapping write serializes unless the definition supplies the
-narrow explicit disjoint-random-write proof. Structural component declarations
+coexist. The cold compiler considers every already-compiled same-stage peer,
+including higher-registration nodes that became ready on an earlier dependency
+pass; forward references therefore cannot hide a conflict. Structural component declarations
 compile source-independent routes and authorize deferred command emission; they
 are not in-graph memory hazards because topology remains frozen until the barrier.
 Systems requiring semantic command-emission order declare `Requires`; otherwise
@@ -123,6 +130,12 @@ evidence that it is needed.
 for non-ECS index spaces. Every index is assigned exactly once by static
 partitions. It is not a general task graph.
 
+`TJob : struct` may still contain managed references. Participant job copies are
+shallow; referenced state must therefore be immutable, thread-safe, or
+partition-disjoint when the system runs in parallel. The runtime does not impose
+`unmanaged` because bounded arrays and subsystem references are legitimate job
+inputs.
+
 ## Worker capabilities and change publication
 
 Workers never receive `EcsWorld`. An expiring `SystemJobContext` contains only
@@ -135,15 +148,33 @@ undeclared, and post-callback use is rejected.
 Generated chunk-column access and supplemental random lookup are separate
 capabilities. A generated `Write<Position>` span does not authorize an arbitrary
 `context.TryRead/TryWrite(positionLookup, entity)`; only `AdditionalReads` and
-`AdditionalWrites` do. Combined masks still drive graph conflicts, and
-`RandomWriteTargetsAreDisjoint` governs only explicitly declared supplemental
-writes.
+`AdditionalWrites` do. Combined masks still drive graph conflicts.
+
+`ParallelRandomAccessPolicy.SerialOnly` is the safe default. A system is forced
+serial when it has supplemental writes, or when supplemental reads intersect its
+generated/supplemental writes. `PartitionDisjoint` may admit parallel execution
+only when each participant's supplemental reads are disjoint from every other
+participant's generated/supplemental writes and each participant's supplemental
+writes are disjoint from every other participant's generated/supplemental reads
+and writes. This is a caller-supplied logical ownership proof, not merely a
+promise that write entity IDs differ. Read/read remains parallel-safe. A future
+prepared batch may prove this mechanically; 3.1.2 deliberately does not add one.
+
+The ECS handles private shared metadata behind that promise. Supplemental random
+enable mutation uses a CAS loop on the affected 64-bit enable word, and random
+tracked writes atomically publish the shared chunk/column dense version. Exact
+row stamps remain non-atomic because the partition-disjoint policy gives each
+participant distinct logical rows. Generated chunk-owned enable and change paths
+remain non-atomic and unchanged.
 
 Persistent runtimes may use the facade during `Initialize` and `Shutdown`, but
 direct public runtime access is rejected throughout graph execution, including
 owner-thread `Prepare` and `Complete`. A retained `EcsWorld` therefore cannot
 bypass declared lookups, structural lanes, logical segment order, or dependency
 metadata.
+A retained reference to the canonical `StructuralCommandBuffer` is guarded by
+the same graph epoch on every mutation, so it cannot bypass this rule from the
+caller participant while merely failing on background participants.
 
 Generated views retain the cheap world-local entity-index span. Reconstructing a
 full 12-byte generational `Entity` is explicit and measured separately. It is for
@@ -196,6 +227,12 @@ for exposed writable memory remain visible.
 Initialization unwinds already initialized systems in reverse order on failure.
 Disposal shuts systems down in reverse registration order and joins every worker.
 Contexts and lane epochs are invalidated at every boundary.
+Registration itself is a cold validate-then-commit transaction: all five masks,
+identity, and dependency capacity are proved in local scratch before any live
+slot or counter changes. Range work-item exhaustion is an explicit bounded
+capacity failure. Invalid execution/run-mode enum values fail at cold/control
+boundaries. Partial worker startup tracks the successfully started prefix, then
+signals/joins only that prefix while disposing every synchronization object.
 
 ## Fixed representation and inspection
 
@@ -214,7 +251,8 @@ Current locked sizes are:
 
 `SchedulerReservedBytes` accounts fixed scheduler array/arena payload including
 node participant-job slots, masks, work/partition/segment arrays, participant
-state, the main command arena, and every producer lane. It deliberately excludes
+state, and every producer lane. The main command arena is owned and counted once
+by the structural category, not again by the scheduler. It deliberately excludes
 CLR object/array headers, event objects, and OS thread stacks, which are runtime
 implementation overhead rather than reserved ECS payload. Snapshot counters
 include dispatch/wake/park totals, deterministic merge counts and payload bytes,
@@ -222,12 +260,17 @@ paid identity resolutions, worker-thread managed allocation, and optional
 cumulative pre-barrier/graph/merge/post-barrier timings. Per-system snapshots
 include identity, stage, cadence, policy, wave, last/average/peak duration, last
 rows/chunks/work items, and serial/parallel choice.
+For exact changed-row systems, `LastRows` and `SystemCompleteContext.Rows` are the
+rows actually delivered to callbacks, not the entire matching population scanned
+by the change query.
 
-`WorldCapacityPlanner` accepts an explicit managed scheduler reservation and
-reports entity metadata, scheduler bytes, total managed bytes, total native
-bytes, and the combined bound. The exact input is the cold registered world's
-`SchedulerReservedBytes`; options alone cannot predict generic participant-job
-payload sizes before systems are registered.
+`WorldCapacityPlanner` remains a preconstruction estimate and accepts an explicit
+managed scheduler reservation. After Seal, `GetReservedPayloadSnapshot()`
+mechanically reports exclusively owned categories for entity metadata, registry,
+signatures/columns, store/chunk metadata, top-level plan slots, main structural
+arena, scheduler, and native chunk payload. CLR headers, synchronization objects,
+OS stacks, shared schema payload, and nested route/transfer arrays are explicit
+exclusions rather than silently folded into an ambiguous total.
 
 Profiling is fixed at construction. Disabled profiling avoids hot atomic identity
 accounting and timestamp reads. Snapshot collection is owner-only and copies into
@@ -263,7 +306,18 @@ audit verdict, corrected longitudinal parity profile, typed structural evidence,
 and current regression links are in
 [`ECS_3_1_1_HARDENING_REPORT.md`](ECS_3_1_1_HARDENING_REPORT.md).
 
-## Deliberate boundary after 3.1.1
+ECS 3.1.2 reruns the exact parity profile for 30,000 measured ticks. Mean/p95
+are `1200.475/1244.628 us` for the public control,
+`1279.727/1323.817 us` scheduled serial, and `597.434/696.283 us` scheduled
+parallel. All logical counters/hashes match and caller plus scheduler-worker
+allocation is zero. The four random-access safety controls over 5K targets in a
+100K world measure `57.39 ns/write` component serial, `25.92 ns/write`
+component parallel, `91.89 ns/write` enable serial, and `31.35 ns/write` enable
+parallel. The long scheduler-shaped soak measures serial/parallel mean
+`906.865/385.663 us`. Full evidence and graph-Seal scaling are in
+[`ECS_3_1_2_HARDENING_REPORT.md`](ECS_3_1_2_HARDENING_REPORT.md).
+
+## Deliberate boundary after 3.1.2
 
 This milestone does not include dynamic systems/schema/archetypes, work stealing,
 NUMA/affinity, fusion, a general reduction framework, arbitrary public query

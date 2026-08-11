@@ -54,7 +54,7 @@ allocation:
   prepared-plan, public-transition, and structural-command capacity up front;
   explicit sealing compiles routes and closes allocation, initialization opens
   bootstrap mutation, and `BeginRun` publishes the running state. The facade is
-  deliberately engine-neutral and single-owner. ECS 3.1.1's optional scheduler
+  deliberately engine-neutral and single-owner. ECS 3.1.2's optional scheduler
   grants persistent workers only expiring `SystemJobContext` capabilities rather
   than allowing non-owner access to the facade.
 - Public `ArchetypeHandle` values are eight-byte world/archetype pairs, preventing
@@ -221,6 +221,15 @@ allocation:
   fixed chunk partitions may span archetype routes so the per-system maximum is
   real in fragmented worlds; and structural declarations are explicitly deferred
   capabilities rather than false in-graph hazards.
+- ECS 3.1.2 closes the scheduler's remaining reproduced proof gaps without adding
+  another execution model. Seal now places late-ready systems against every
+  already-compiled same-stage conflict; registration is validate-then-commit;
+  supplemental random mutation is serial unless the caller declares one precise
+  partition-disjoint ownership policy; and its exceptional parallel path uses
+  atomic enable-word and dense-version publication while generated chunk-owned
+  writes remain non-atomic. A retained main structural arena is graph-gated, and
+  structural batching identifies runs by command kind, phase, and numeric route
+  rather than by a coincidentally equal numeric ID.
 - Workers receive an expiring declaration-checked context for optional full
   `Entity` reconstruction, prepared random access, and one fixed structural lane.
   Per-work segments merge in stable graph/work order into the existing command
@@ -233,7 +242,9 @@ allocation:
   3.1.0 admission evidence and full V2/V3 table are in
   [`ECS_3_1_0_ACCEPTANCE_REPORT.md`](../../ECS_3_1_0_ACCEPTANCE_REPORT.md); the
   audit findings, parity repair, and 3.1.1 gates are in
-  [`ECS_3_1_1_HARDENING_REPORT.md`](../../ECS_3_1_1_HARDENING_REPORT.md).
+  [`ECS_3_1_1_HARDENING_REPORT.md`](../../ECS_3_1_1_HARDENING_REPORT.md); the
+  scheduler/structural proof consolidation and measured 3.1.2 admission are in
+  [`ECS_3_1_2_HARDENING_REPORT.md`](../../ECS_3_1_2_HARDENING_REPORT.md).
 - Writable public generated families have an explicit dense/conditional split.
   `ExecuteJob` retains conservative pre-callback dense publication and its direct
   spans. `ExecuteTrackedJob` exposes `TrackedWritableComponentChunk<T>`:
@@ -332,10 +343,15 @@ allocation:
   column, omits tag data, word-rounds enable masks, searches for the maximum
   fitting row count, and reports every padding/tail byte with checked arithmetic.
 - `ArchetypeCapacityPlan` projects a population onto that layout, while
-  `WorldCapacityPlanner` combines archetype chunks with fixed entity metadata
-  an explicit managed scheduler reservation, and command/change/scratch arena
-  budgets. Its totals separate managed entity/scheduler bytes from native bytes.
-  These planners allocate no memory.
+  `WorldCapacityPlanner` produces a preconstruction estimate from archetype
+  chunks, fixed entity metadata, and caller-supplied cold reservation budgets.
+  After Seal, `WorldReservedPayloadSnapshot` mechanically reports the exact
+  world-owned payload categories known to the runtime: entity metadata, store
+  payload/metadata, route tables, change metadata, the main structural arena,
+  and scheduler graph/worker/payload arenas. The main arena has one owner and is
+  reported even when scheduling is disabled. CLR headers, thread objects, OS
+  stacks/event internals, schema objects, and nested cold-plan arrays remain
+  explicit exclusions rather than being hidden inside an ambiguous total.
 - `NativeChunkArena` and `PinnedChunkArena` are internal, fixed-capacity storage
   candidates over the same 12-byte generational `ChunkHandle` lifecycle. Both
   reserve one contiguous 64-byte-aligned slab, reject stale/foreign handles,
@@ -368,7 +384,7 @@ allocation:
 structural work through bounded per-worker command arenas; they will not mutate
 the live pool concurrently.
 
-The current runtime and primitive suite has 218 passing tests, plus 29 focused
+The current runtime and primitive suite has 218 passing tests, plus 42 focused
 scheduler tests, including
 randomized chunk-slot lifecycle parity, alignment/range/type rejection,
 alignment extremes and concurrent arena-ID uniqueness, clear-on-reuse,
