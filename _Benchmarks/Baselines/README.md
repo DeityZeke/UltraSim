@@ -92,3 +92,14 @@ partial exact-suffix workload, so this artifact is a regression gate; causal
 same-binary grouped/suffix evidence is recorded in `_Benchmarks/README.md`. The
 reversed-order verification remains in
 `_Benchmarks/results/ecs-v2-v3-3.0.35-reverse`.
+
+`ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json` is the first immutable
+single-owner production-shaped V3 soak. Two independently constructed worlds
+each warm for 2,000 ticks and measure 30,000 natural-GC ticks over a fixed
+100,000-entity population. Every tick performs 400,000 generated-query visits,
+5,000 exact tracked writes, 500 checked reads, exact change consumption, 100
+destroy/create replacements, and 200 transitions. Interval and final canonical
+replays match, timed allocation and all collection counts are zero, no command is
+rejected, and chunk occupancy is stable. This is a longitudinal V3 control, not a
+V2 comparison or a scheduler/network/persistence claim; full methodology and
+interpretation live in `../ECS_100K_MIXED_SOAK.md`.

@@ -421,3 +421,23 @@ Tests, disassembly, counters, allocation traces, and production-shaped replays m
 recommend a different implementation than this document anticipates. Follow that
 evidence, add the smallest test or benchmark that distinguishes the alternatives,
 and update this contract when the semantics or measurement methodology changes.
+
+## First executable mixed-operation soak
+
+ECS 3.0.35 now has the first executable production-shaped foothold described in
+[`ECS_100K_MIXED_SOAK.md`](ECS_100K_MIXED_SOAK.md). Its stable default combines
+400,000 generated-query row visits, 5,000 exact tracked writes, 500 checked reads,
+an exact change consumer, 100 destroy/create replacements, and 200 transitions
+per tick over a fixed 100,000-entity population. Two independently constructed
+30,000-tick measured worlds and a separate interval-checkpoint replay must agree
+canonically. The accepted run allocated zero bytes and collected no generations.
+
+Treat this as the longitudinal single-owner control, not the completed soak
+matrix. It does not yet exercise public jobs/scheduling, lifecycle streams,
+prefabs, networking, persistence, parallel consumers, slow consumers, many
+archetypes, or maximum configured population. Its first result points toward a
+tracked-write/change-density matrix: the four query passes cost about 722 us/tick,
+5,000 tracked writes about 280 us, exact delivery of approximately 5,095 rows
+about 191 us, and structural recording/playback/create publication about 92 us.
+Add those variants as separately named contracts so the original replay remains
+stable for regression detection.

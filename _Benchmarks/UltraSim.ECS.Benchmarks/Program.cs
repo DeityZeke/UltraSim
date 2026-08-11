@@ -6,6 +6,12 @@ using System.Text.Json;
 using UltraSim.ECS;
 using UltraSim.ECS.Benchmarks;
 
+if (args.Contains("--soak", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = MixedOperationSoakProgram.Run(args);
+    return;
+}
+
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",

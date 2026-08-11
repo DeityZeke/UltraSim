@@ -32,6 +32,8 @@ The accepted `3.0.34` prepared-migration trusted-commit capture lives at
 [`Baselines/ecs-v2-v3-3.0.34-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.34-2026-08-10.json).
 The accepted `3.0.35` exact route-level packed-suffix transition capture lives at
 [`Baselines/ecs-v2-v3-3.0.35-2026-08-10.json`](Baselines/ecs-v2-v3-3.0.35-2026-08-10.json).
+The first accepted 100K deterministic mixed-operation soak lives at
+[`Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json`](Baselines/ecs-v3-3.0.35-100k-mixed-soak-2026-08-11.json).
 Future runs can pass `--baseline=...` to emit current/baseline V2-control and V3
 absolute means, mean/p95 ratios, V2-control-normalized V3 signals, allocation
 deltas, and cross-time canonical-state checks. The
@@ -819,6 +821,28 @@ suffix equivalent, so it is a regression gate rather than causal evidence. A
 saved-capture whole-destroy row initially appeared 7% slower; a back-to-back
 build of committed 3.0.34 and current 3.0.35 under identical steady-state JIT
 settings measured `14.931/14.849 ns/entity`, clearing it as capture drift.
+
+The first deterministic production-shaped soak is now executable through the
+same runner's `--soak` mode and specified in
+[`ECS_100K_MIXED_SOAK.md`](ECS_100K_MIXED_SOAK.md). It holds 100,000 entities
+resident while each tick performs four complete generated-query passes (400,000
+row visits), 5,000 exact tracked writes, 500 checked reads, exact changed-row
+consumption, 100 destroy/create replacements, and 200 balanced transitions. The
+soak uses natural GC, phase distributions, fixed operation counts, store/memory
+snapshots, interval canonical replay, and final independent-world replay.
+
+The accepted two-run capture contains 60,000 timed ticks and 24 billion query row
+visits. Combined total tick mean/p95/p99/p99.9/max were
+`1315.617/1357.328/1404.578/1505.327/2143.741 us`. Both worlds produced canonical
+hash `4450A5AC6A7A1296151BFC6C084C3C6B`, allocated zero timed managed bytes,
+collected zero generations, rejected zero commands, retained unchanged
+50,000/50,000 archetype populations and 50/149 occupied chunks, and reused every
+one of 1.5 million eligible temporary wide-row holes per world without compaction
+or donor relocation. The main mean costs are queries `721.880 us`, tracked writes
+`280.390 us`, exact change consumption `191.009 us`, and combined command record,
+playback, and replacement initialization approximately `91.877 us`. This makes
+the sparse tracked-write/change-delivery surface a more evidence-based next
+performance investigation than another speculative structural special case.
 
 Eight warmup iterations precede the 31 measured iterations. Forced collections
 isolate each microbenchmark before sampling; reported collection deltas cover

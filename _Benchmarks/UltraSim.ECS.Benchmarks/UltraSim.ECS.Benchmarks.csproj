@@ -15,6 +15,7 @@
     <ProjectReference Include="..\..\Kernels\ECS.Generators\UltraSim.ECS.Generators.csproj"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\UltraSim.ECS.ComparisonCore\UltraSim.ECS.ComparisonCore.csproj" />
   </ItemGroup>
 
 </Project>
