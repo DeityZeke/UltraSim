@@ -8,7 +8,8 @@ public static class WorldCapacityPlanner
         ReadOnlySpan<ArchetypeCapacityPlan> archetypes,
         WorldArenaReservations arenas = default,
         long managedSchedulerBytes = 0,
-        long managedLifecycleBytes = 0)
+        long managedLifecycleBytes = 0,
+        long managedPersistenceIdentityBytes = 0)
     {
         if (entityCapacity.MaximumEntities <= 0)
             throw new ArgumentException("Entity capacity is invalid or default initialized.", nameof(entityCapacity));
@@ -16,6 +17,8 @@ public static class WorldCapacityPlanner
             throw new ArgumentOutOfRangeException(nameof(managedSchedulerBytes));
         if (managedLifecycleBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(managedLifecycleBytes));
+        if (managedPersistenceIdentityBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(managedPersistenceIdentityBytes));
 
         checked
         {
@@ -41,7 +44,8 @@ public static class WorldCapacityPlanner
             }
 
             long managedEntityBytes = entityCapacity.EstimatedMetadataBytes;
-            long managedBytes = managedEntityBytes + managedSchedulerBytes + managedLifecycleBytes;
+            long managedBytes = managedEntityBytes + managedSchedulerBytes + managedLifecycleBytes +
+                managedPersistenceIdentityBytes;
             long nativeBytes = nativeChunkBytes + arenas.TotalBytes;
             return new WorldCapacityPlan(
                 entityCapacity,
@@ -52,6 +56,7 @@ public static class WorldCapacityPlanner
                 managedEntityBytes,
                 managedSchedulerBytes,
                 managedLifecycleBytes,
+                managedPersistenceIdentityBytes,
                 managedBytes,
                 nativeChunkBytes,
                 nativeBytes,
@@ -75,11 +80,15 @@ public static class WorldCapacityPlanner
         long lifecycleBytes = checked(
             (long)options.LifecycleRecordCapacity *
             System.Runtime.CompilerServices.Unsafe.SizeOf<LifecycleRecord>());
+        long persistenceIdentityBytes = options.Persistence.IsEnabled
+            ? PersistenceIdentityMap.EstimateReservedBytes(options.EntityCapacity)
+            : 0;
         return Plan(
             options.EntityCapacity,
             archetypes,
             arenas,
             managedSchedulerBytes,
-            lifecycleBytes);
+            lifecycleBytes,
+            persistenceIdentityBytes);
     }
 }

@@ -31,6 +31,10 @@ capability milestone, so the accepted checkpoint is `3.2.0`.
 The cold compiled-content authoring facade, immutable numeric prefab catalog,
 and ordinary immediate/deferred ECS instantiation path form the next capability
 milestone, accepted as `3.3.0`.
+The generated, whole-world, durable-identity persistence participant; bounded
+transactional staging restore; persistent system-state framing; and crash-durable
+multi-participant save-set coordinator form the next capability milestone,
+accepted as `3.4.0`.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -97,6 +101,20 @@ allocation, structural barrier, change-history, and lifecycle machinery; one
 prefab spawn is one command and one `Created` fact, never a component-added
 storm. No authoring class, reflection, callback, or runtime inheritance graph is
 consulted during spawn or simulation.
+
+ECS 3.4.0 adds optional 64-bit world-local durable identity backed by a fixed
+side table, 32-bit snapshot-local reference ordinals, complete runtime-shape
+records distinct from authoritative payload columns, generated canonical
+little-endian codecs, direct old-version readers, aliases/drops, explicit N:M
+shape migration, derived reconstruction, enable bitplanes, stable prefab-key
+provenance, and framed opt-in system state. Restore validates hostile bytes and
+capacity before constructing a new world, allocates every identity before
+reference fixup, hydrates without change/lifecycle publication, and returns a
+complete staging generation. The engine-neutral server coordinator captures all
+participants at one host-owned logical epoch and uses checksummed generation
+directories, durable flushes, atomic `CURRENT` publication, and
+Prepare/Resolve/Validate/single-Commit load semantics. Incremental snapshots,
+merge/append restore, compression, and a V2 binary importer remain future work.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

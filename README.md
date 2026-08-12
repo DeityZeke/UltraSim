@@ -18,7 +18,15 @@ dotnet run --project _Tests/UltraSim.ECS.Tests/UltraSim.ECS.Tests.csproj \
 dotnet run --project \
   _Tests/UltraSim.ECS.Generator.Tests/UltraSim.ECS.Generator.Tests.csproj \
   -c Release
+dotnet run --project \
+  _Tests/UltraSim.Server.Persistence.Tests/UltraSim.Server.Persistence.Tests.csproj \
+  -c Release
 ```
+
+ECS 3.4.0 full-world persistence is specified in
+[`Kernels/ECS/ECS_PERSISTENCE.md`](Kernels/ECS/ECS_PERSISTENCE.md), with accepted
+measurements and V2 comparison limits in
+[`ECS_3_4_0_PERSISTENCE_REPORT.md`](ECS_3_4_0_PERSISTENCE_REPORT.md).
 
 Run the Phase 1 entity/schema/layout/arena/archetype-row benchmark suite without replacing an accepted baseline:
 

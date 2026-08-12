@@ -62,6 +62,8 @@ internal static class GeneratorTests
         Run(nameof(FieldBearingTag_ReportsECSGEN006), FieldBearingTag_ReportsECSGEN006);
         Run(nameof(ComponentLimit_ReservesInvalidIdAndReportsECSGEN007), ComponentLimit_ReservesInvalidIdAndReportsECSGEN007);
         Run(nameof(DuplicateComponentType_ReportsECSGEN008), DuplicateComponentType_ReportsECSGEN008);
+        Run(nameof(UnsupportedPersistentMember_ReportsECSGEN009), UnsupportedPersistentMember_ReportsECSGEN009);
+        Run(nameof(UnmarkedEntityReference_ReportsECSGEN009), UnmarkedEntityReference_ReportsECSGEN009);
         Run(nameof(QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily), QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily);
         Run(nameof(QueryFamilyCatalog_EmitsTwoReadOnlyFamily), QueryFamilyCatalog_EmitsTwoReadOnlyFamily);
         Run(nameof(QueryFamilyCatalog_EmitsOneReadTwoWriteFamily), QueryFamilyCatalog_EmitsOneReadTwoWriteFamily);
@@ -535,6 +537,28 @@ internal static class GeneratorTests
             [EcsSchema(typeof(C), typeof(C))] internal static partial class Schema { }
             """;
         AssertDiagnostic(source, "ECSGEN008");
+    }
+
+    private static void UnsupportedPersistentMember_ReportsECSGEN009()
+    {
+        string source = """
+            using UltraSim.ECS;
+            [EcsComponent("persist.private", PersistenceId = 91)]
+            internal struct C : IComponent<C> { private int Value; }
+            [EcsSchema(typeof(C))] internal static partial class Schema { }
+            """;
+        AssertDiagnostic(source, "ECSGEN009");
+    }
+
+    private static void UnmarkedEntityReference_ReportsECSGEN009()
+    {
+        string source = """
+            using UltraSim.ECS;
+            [EcsComponent("persist.entity", PersistenceId = 92)]
+            internal struct C : IComponent<C> { public Entity Value; }
+            [EcsSchema(typeof(C))] internal static partial class Schema { }
+            """;
+        AssertDiagnostic(source, "ECSGEN009");
     }
 
     private static string ComponentSource(string key, string members) => $$"""

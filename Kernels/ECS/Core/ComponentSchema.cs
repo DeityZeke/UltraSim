@@ -11,7 +11,8 @@ public sealed class ComponentSchema
     public const int MaximumComponentCount = ushort.MaxValue;
     private const int LinearLookupThreshold = 8;
     private const ComponentFlags KnownComponentFlags =
-        ComponentFlags.Tag | ComponentFlags.Enableable | ComponentFlags.Persistent;
+        ComponentFlags.Tag | ComponentFlags.Enableable | ComponentFlags.Persistent |
+        ComponentFlags.PersistEnableState;
 
     private readonly ComponentMetadata[] _metadata;
     private readonly ulong[] _stableKeyHashes;
@@ -283,8 +284,16 @@ public sealed class ComponentSchema
             throw new ArgumentException("Only tag components may have zero storage size.");
         if (!metadata.IsTag && (metadata.Size % metadata.Alignment) != 0)
             throw new ArgumentException("Component size must be a multiple of its natural alignment.");
-        if (metadata.IsPersistent != (metadata.PersistenceId != 0))
-            throw new ArgumentException("Persistent flags and persistence IDs must agree.");
+        if (!Enum.IsDefined(metadata.PersistenceMode) || metadata.PersistenceMode == ComponentPersistenceMode.Auto)
+            throw new ArgumentException("Component persistence mode must be normalized by schema generation.");
+        if (metadata.PersistenceMode == ComponentPersistenceMode.None && metadata.PersistenceId != 0)
+            throw new ArgumentException("A non-persisted component cannot declare a persistence ID.");
+        if (metadata.PersistenceMode != ComponentPersistenceMode.None && metadata.PersistenceId == 0)
+            throw new ArgumentException("A persisted shape member requires a nonzero persistence ID.");
+        if (metadata.IsPersistent != (metadata.PersistenceMode == ComponentPersistenceMode.Value))
+            throw new ArgumentException("Persistent payload flags and persistence mode must agree.");
+        if ((metadata.Flags & ComponentFlags.PersistEnableState) != 0 && !metadata.IsEnableable)
+            throw new ArgumentException("Only enableable components can persist enable state.");
         if (!IsCanonicalKey(current.CanonicalKey))
             throw new ArgumentException($"Invalid canonical component key '{current.CanonicalKey}'.");
         if (StableHash64.Compute(current.CanonicalKey) != current.StableKeyHash)

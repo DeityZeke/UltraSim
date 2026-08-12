@@ -121,6 +121,36 @@ The 3.3 Slice artifacts are:
 - `results/simulation-slice-0/ecs-3.3.0-content-1m-1000-2026-08-12.json`;
 - `results/simulation-slice-0/ecs-3.3.0-content-100k-all-active-10000-2026-08-12.json`.
 
+## ECS 3.4.0 full-world transactional persistence
+
+[`UltraSim.ECS.Persistence`](UltraSim.ECS.Persistence) measures the canonical
+whole-world participant independently from disk/coordinator durability. It runs
+100K and 1M entity scales after one complete warmup and reports capture,
+authoritative collection pause, encode/checksum, hostile-input preflight, staging
+restore, bytes/entity, logical component GiB/s, managed allocation/GC, process
+memory, and byte-identical canonical recapture.
+
+```bash
+dotnet run --project _Benchmarks/UltraSim.ECS.Persistence/UltraSim.ECS.Persistence.csproj -c Release
+```
+
+The accepted artifact is
+[`Baselines/ecs-v3-3.4.0-persistence-2026-08-12.json`](Baselines/ecs-v3-3.4.0-persistence-2026-08-12.json).
+The accepted run meets the milestone gates at both scales: 100K total mean
+capture+preflight+restore is about 145.7 ms; 1M is about 1.041 s; the 1M
+authoritative pause is 167.4 ms mean / 169.4 ms p95; and canonical fixed-width
+component encode is 2.144 GiB/s at 1M. Capture and restore intentionally allocate
+proportional cold-path buffers; those costs are reported rather than described as
+zero allocation. The artifact now also reports section bytes, ordinal/generation
+scratch, durable-ID map ownership, restore-plan temporary memory, and staging-
+world known payload.
+
+There is no honest current-V2 full persistence benchmark. The old V2 permanent
+`PersistenceView` row measures seeding/view construction rather than
+capture/encode/restore. Historical archived save/load results are retained as
+directional allocation evidence only; they are not joined as an equivalent V2
+ratio. See [`../ECS_3_4_0_PERSISTENCE_REPORT.md`](../ECS_3_4_0_PERSISTENCE_REPORT.md).
+
 They retain the 3.2 canonical and ordered-lifecycle hashes while replacing
 bootstrap/default-create content paths with the compiled catalog. Exact results
 and methodology are reported in `../ECS_3_3_0_CONTENT_AUTHORING_REPORT.md`.

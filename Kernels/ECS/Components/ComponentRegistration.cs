@@ -36,10 +36,18 @@ public readonly struct ComponentRegistration
         ulong stableKeyHash,
         ushort version,
         ComponentFlags flags,
-        uint persistenceId)
+        uint persistenceId,
+        ComponentPersistenceMode persistenceMode = ComponentPersistenceMode.Auto)
         where T : unmanaged, IComponent<T>
     {
         ArgumentNullException.ThrowIfNull(canonicalKey);
+
+        if (persistenceMode == ComponentPersistenceMode.Auto)
+        {
+            persistenceMode = persistenceId == 0
+                ? ComponentPersistenceMode.None
+                : ComponentPersistenceMode.Value;
+        }
 
         bool isTag = (flags & ComponentFlags.Tag) != 0;
         int size = isTag ? 0 : Unsafe.SizeOf<T>();
@@ -50,7 +58,8 @@ public readonly struct ComponentRegistration
             alignment,
             version,
             flags,
-            persistenceId);
+            persistenceId,
+            persistenceMode);
 
         return new ComponentRegistration(
             metadata,

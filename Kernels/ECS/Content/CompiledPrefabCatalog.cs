@@ -233,6 +233,18 @@ public sealed class CompiledPrefabCatalog
         return ref _entries[index];
     }
 
+    internal ulong GetKeyHash(uint prefabId)
+    {
+        ref readonly CompiledPrefabEntry entry = ref GetEntry(prefabId);
+        return StableHash64.Compute(_keys[entry.KeyIndex]);
+    }
+
+    internal PrefabKey GetKey(uint prefabId)
+    {
+        ref readonly CompiledPrefabEntry entry = ref GetEntry(prefabId);
+        return new PrefabKey(_keys[entry.KeyIndex]);
+    }
+
     internal ReadOnlySpan<PrefabDefaultDescriptor> GetDescriptors(in CompiledPrefabEntry entry) =>
         _descriptors.AsSpan(entry.DescriptorStart, entry.DescriptorCount);
 

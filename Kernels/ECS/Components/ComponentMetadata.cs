@@ -15,7 +15,8 @@ public readonly struct ComponentMetadata : IEquatable<ComponentMetadata>
     private readonly ushort _version;
     private readonly byte _alignment;
     private readonly ComponentFlags _flags;
-    private readonly ushort _reserved;
+    private readonly ComponentPersistenceMode _persistenceMode;
+    private readonly byte _reserved;
 
     internal ComponentMetadata(
         ComponentId id,
@@ -23,7 +24,8 @@ public readonly struct ComponentMetadata : IEquatable<ComponentMetadata>
         byte alignment,
         ushort version,
         ComponentFlags flags,
-        uint persistenceId)
+        uint persistenceId,
+        ComponentPersistenceMode persistenceMode)
     {
         _persistenceId = persistenceId;
         _size = size;
@@ -31,6 +33,7 @@ public readonly struct ComponentMetadata : IEquatable<ComponentMetadata>
         _version = version;
         _alignment = alignment;
         _flags = flags;
+        _persistenceMode = persistenceMode;
         _reserved = 0;
     }
 
@@ -47,6 +50,8 @@ public readonly struct ComponentMetadata : IEquatable<ComponentMetadata>
 
     public uint PersistenceId => _persistenceId;
 
+    public ComponentPersistenceMode PersistenceMode => _persistenceMode;
+
     public bool IsTag => (_flags & ComponentFlags.Tag) != 0;
 
     public bool IsEnableable => (_flags & ComponentFlags.Enableable) != 0;
@@ -59,7 +64,8 @@ public readonly struct ComponentMetadata : IEquatable<ComponentMetadata>
         _id == other._id &&
         _version == other._version &&
         _alignment == other._alignment &&
-        _flags == other._flags;
+        _flags == other._flags &&
+        _persistenceMode == other._persistenceMode;
 
     public override bool Equals(object? obj) => obj is ComponentMetadata other && Equals(other);
 
@@ -69,5 +75,6 @@ public readonly struct ComponentMetadata : IEquatable<ComponentMetadata>
         _id,
         _version,
         _alignment,
-        _flags);
+        _flags,
+        _persistenceMode);
 }

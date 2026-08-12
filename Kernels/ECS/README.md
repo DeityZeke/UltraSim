@@ -83,6 +83,14 @@ allocation:
   creation allocate ordinary ECS rows, copy compiled constants, and publish one
   ordinary `Created`; no reflection, managed callback, or runtime `IsA` graph
   exists on spawn or tick.
+- ECS 3.4.0 adds optional fixed durable-identity storage and generated,
+  column-oriented full-world snapshots. The production contract separates
+  complete stable runtime shape from authoritative payload, remaps internal
+  `Entity` references through dense save ordinals, persists selected enable
+  planes/prefab provenance/system state, and restores into a validated clean
+  staging world. `Server/Persistence` owns common-epoch multi-participant capture
+  and crash-durable generation publication. See
+  [`ECS_PERSISTENCE.md`](ECS_PERSISTENCE.md).
 - Public `ArchetypeTransition` is a 16-byte unmanaged numeric catalog handle,
   not a reference to an internal migration plan. Cold preparation validates and
   stores a bounded world-owned route; hot immediate or deferred use validates the
@@ -362,9 +370,10 @@ allocation:
   a checked signed-to-unsigned overflow. Entity/chunk slot snapshots, storage
   indices, handwritten views, generated views, routes, and plan ownership share
   regression coverage for that boundary.
-- Runtime handles are not durable IDs and will not be serialized. Persistence
-  restore will construct a temporary old-index-to-new-entity remap during a
-  bounded transactional load.
+- Runtime handles are not durable IDs and are never serialized as identity.
+  ECS 3.4.0 uses a fixed optional side table of monotonic 64-bit
+  `PersistentEntityId` values and remaps internal references through dense
+  32-bit save ordinals after every restored entity has been allocated.
 - `IComponent<TSelf>`, `[EcsComponent]`, and `[EcsSchema]` define a closed,
   generated component set without runtime reflection or a mutable global
   registry.
@@ -532,15 +541,16 @@ transfer, and scalar-reference enable-range copies across offsets and lengths
 around every 64-bit word boundary.
 
 This is now a usable public single-owner component/archetype ECS with an optional
-bounded system scheduler. The current generators emit the core manifest, a
+bounded system scheduler, compiled content, lifecycle observation, and
+whole-world transactional persistence. The current generators emit the core manifest, a
 systematic catalog containing 1R0W, 0R1W, 1R1W, 2R0W, 3R0W, 2R1W, 1R2W, 3R1W,
 and 2R2W access families,
 and the first 2R2C any/all changed family. Further access/watch arities should be
 added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
-refinement entirely. Enabled/disabled public filter authoring, persistence
-serialization, field/prefab descriptors, lifecycle-to-host bridges, system
-fusion, and networking integration remain later work.
+refinement entirely. Incremental persistence, richer field/data-prefab
+descriptors, lifecycle-to-host bridges, system fusion, and networking integration
+remain later work.
 
 Run both executable test suites from the repository root:
 

@@ -1068,6 +1068,20 @@ internal sealed partial class ArchetypeChunkStore<TArena> : IDisposable
         value.CopyTo(_arena.GetChunkBytes(_chunks[chunkIndex].Handle).Slice(offset, value.Length));
     }
 
+    internal void CopyBoundComponentBytes(
+        ChunkRow location,
+        int columnIndex,
+        Span<byte> destination)
+    {
+        ResolveOrThrow(location, out int chunkIndex, out int row);
+        ref readonly ComponentColumnLayout column = ref _columns[columnIndex];
+        System.Diagnostics.Debug.Assert(column.HasData);
+        if (destination.Length != column.ElementSizeBytes)
+            throw new ArgumentException("Component destination size does not match its bound column.", nameof(destination));
+        int offset = checked(column.DataOffsetBytes + (row * column.ElementSizeBytes));
+        _arena.GetChunkBytes(_chunks[chunkIndex].Handle).Slice(offset, destination.Length).CopyTo(destination);
+    }
+
     internal bool IsEnabled(ChunkRow location, in ComponentColumnLayout column)
     {
         int columnIndex = GetOwnedColumnIndex(column);

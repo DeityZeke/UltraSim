@@ -8,6 +8,7 @@ EcsPrimitiveTests.RunAll();
 SchedulerPrimitiveTests.RunAll();
 LifecycleAndPublicFilterTests.RunAll();
 ContentAuthoringTests.RunAll();
+PersistenceTests.RunAll();
 
 internal static class EcsPrimitiveTests
 {

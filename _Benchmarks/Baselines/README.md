@@ -186,3 +186,17 @@ retains zero canonical mismatches and nine explicit unsupported rows, and report
 zero timed V3 allocation in 103/103 rows. The previous 3.2 artifact remains
 immutable; its one expected descriptor mismatch against 3.3 is the deliberate
 admission of this formerly unsupported scenario.
+
+`ecs-v3-3.4.0-persistence-2026-08-12.json` is the accepted standalone full-world
+persistence scale artifact. It contains the 100K/1M canonical snapshot,
+preflight, and staging-restore measurements, authoritative capture-pause facts,
+bytes/entity, fixed-width logical component throughput, managed allocation/GC,
+section/scratch/staging memory accounting, and byte-identical recapture proof. It is deliberately V3-only: current
+V2 has no equivalent accepted full persistence benchmark, and its existing
+`PersistenceView` row is not mislabelled as save/load throughput.
+
+`ecs-v2-v3-3.4.0-2026-08-12.json` is the accepted 3.4 regression/control join,
+verified in both process orders. It retains 103 comparable contracts, zero
+canonical mismatches, and nine explicit unsupported rows. The two persistence
+descriptors intentionally changed from “V3 not implemented” to the accurate
+3.4 contract mismatch; no fake V2 ratio was admitted.

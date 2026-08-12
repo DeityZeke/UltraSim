@@ -139,6 +139,74 @@ internal sealed class SystemScheduler : IDisposable
         SumNodeReservations() +
         SumLaneReservations());
 
+    internal PersistentSystemStateRecord[] CapturePersistentState(int maximumBytes)
+    {
+        if (_executing) throw new InvalidOperationException("System state cannot be captured during graph execution.");
+        if (maximumBytes < 0) throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        var records = new List<PersistentSystemStateRecord>();
+        long totalBytes = 0;
+        for (int index = 0; index < _nodeCount; index++)
+        {
+            SystemNode node = GetNode(index);
+            if (node.Definition.PersistenceId == 0) continue;
+            IPersistentSystemState state = node.PersistentState ?? throw new PersistenceCompatibilityException(
+                $"System '{node.Definition.Key}' declares persistence identity but its runtime has no persistent-state codec.");
+            int byteCount = state.PersistenceStateByteCount;
+            if (byteCount < 0) throw new PersistenceValidationException("A system reported a negative persistence-state size.");
+            totalBytes = checked(totalBytes + byteCount);
+            if (totalBytes > maximumBytes)
+                throw new PersistenceValidationException("Persistent system-state capture exceeds its configured byte bound.");
+            byte[] bytes = new byte[byteCount];
+            state.WritePersistenceState(bytes);
+            records.Add(new PersistentSystemStateRecord(node.Definition.PersistenceId,
+                node.Definition.StateSchemaVersion, state.PersistenceStateRequired, bytes));
+        }
+        records.Sort(static (left, right) => left.PersistenceId.CompareTo(right.PersistenceId));
+        return records.ToArray();
+    }
+
+    internal void RestorePersistentState(ulong tick, ReadOnlySpan<ParsedSystemState> saved)
+    {
+        if (!_initialized || _executing) throw new InvalidOperationException("System state restore requires an idle initialized scheduler.");
+        var current = new List<(ulong Id, string Key, IPersistentSystemState State)>();
+        for (int nodeIndex = 0; nodeIndex < _nodeCount; nodeIndex++)
+        {
+            SystemNode node = GetNode(nodeIndex);
+            ulong id = node.Definition.PersistenceId;
+            if (id == 0) continue;
+            IPersistentSystemState state = node.PersistentState ?? throw new PersistenceCompatibilityException(
+                $"System '{node.Definition.Key}' has no persistent-state codec.");
+            current.Add((id, node.Definition.Key, state));
+        }
+        current.Sort(static (left, right) => left.Id.CompareTo(right.Id));
+        int currentIndex = 0, savedIndex = 0;
+        while (currentIndex < current.Count || savedIndex < saved.Length)
+        {
+            if (savedIndex < saved.Length &&
+                (currentIndex == current.Count || saved[savedIndex].PersistenceId < current[currentIndex].Id))
+            {
+                if (saved[savedIndex].Required)
+                    throw new PersistenceCompatibilityException(
+                        $"Saved required system state {saved[savedIndex].PersistenceId} has no current owner.");
+                savedIndex++;
+                continue;
+            }
+            if (currentIndex < current.Count &&
+                (savedIndex == saved.Length || current[currentIndex].Id < saved[savedIndex].PersistenceId))
+            {
+                if (current[currentIndex].State.PersistenceStateRequired)
+                    throw new PersistenceCompatibilityException(
+                        $"Required system state {current[currentIndex].Id} for '{current[currentIndex].Key}' is absent from the snapshot.");
+                currentIndex++;
+                continue;
+            }
+            current[currentIndex].State.ReadPersistenceState(saved[savedIndex].Version, saved[savedIndex].Bytes);
+            currentIndex++;
+            savedIndex++;
+        }
+        _tick = tick;
+    }
+
     internal SystemId GetNextRegistrationId()
     {
         EnsureRegistrationOpen();

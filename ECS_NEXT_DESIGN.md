@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, the ECS 3.1.2 proof-hardened bounded system scheduler, ECS 3.2.0 lifecycle publication/public generated-query filters, and ECS 3.3.0 compiled content authoring implemented through 2026-08-12
+Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, the ECS 3.1.2 proof-hardened bounded system scheduler, ECS 3.2.0 lifecycle publication/public generated-query filters, ECS 3.3.0 compiled content authoring, and ECS 3.4.0 full-world transactional persistence implemented through 2026-08-12
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -126,6 +126,14 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   fragment storage. Immediate and deferred instantiation reuse existing entity,
   structural, change, lifecycle, hole-reuse, and scheduler-lane mechanics with
   zero warmed allocation and no runtime authoring hierarchy;
+- ECS 3.4.0 generated whole-world persistence: optional fixed durable-identity
+  side tables, canonical save ordinals/reference remapping, complete runtime
+  shapes distinct from component payload, generated little-endian codecs,
+  direct old-version readers, aliases/drops, explicit N:M shape migration,
+  derived reconstruction, enable bitplanes, stable prefab-key provenance,
+  framed persistent scheduler state, hostile-byte bounds/integrity validation,
+  clean staging-world restore, and an engine-neutral crash-durable save-set
+  coordinator with one Prepare/Resolve/Validate/Commit publication point;
 - an initial dense change-tracking substrate: an eight-byte world-local `ChangeVersion` reserves zero for never-written state, explicitly wraps maximum to one, and uses half-range changed-since ordering; every archetype store preallocates a column-major 64-bit stamp for each physical component column and possible chunk, reports its exact metadata bytes, and clears stamps when an emptied chunk is recycled;
 - conservative stamping for successful scalar value/enable writes, single-component writable visitors, and every generated writable family; one lazily acquired version is shared across one visit's chunks and writable columns, filtered visits stamp only chunks with matching rows, stamps precede visitor dispatch so partial writes followed by exceptions remain visible, and read-only families perform no version work;
 - a 16-byte world-bound `ChangeCursor` value with beginning/now factories and copy-to-fork independent-consumer semantics, plus a bounded seal-compiled changed-read plan that prebinds one data column and one same-or-different tracked column across all matching archetypes, rejects unchanged chunks before component binding, composes with existing structural/enable-state filters, and acknowledges the captured observation boundary only after successful visitor completion;
@@ -158,7 +166,7 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   tracked 1R1W, changed-row telemetry, invalid enums, explicit work capacity,
   and deterministic partial-worker-start failure;
 - an isolated-process Current/Next comparison protocol with 12 direct comparison-core tests, stable scenario descriptors, normalized 128-bit canonical logical-state hashing including wide component payloads, strict runtime/descriptor/state joining, record/playback/end-to-end boundaries, effective-byte/allocation/GC reporting, immutable accepted joined artifacts, truthful cross-version V3 profile labels, and current/baseline V2-control plus V3 regression reports. The accepted 3.2.0 primary and reversed-order verification contain 102 comparable rows with zero canonical mismatches; 10 unsupported rows remain visible rather than acquiring fabricated ratios. Caller-thread allocation is reported for every row; the three V3 scheduled rows additionally report scheduler-worker allocation, while V2 worker allocation remains unknown;
-- `25` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 1R0W/0R1W/1R1W/2R0W/3R0W/2R1W/1R2W/3R1W/2R2W scheduled catalog surfaces, generated public required/excluded filter overloads, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
+- `27` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic including inaccessible/unsupported persistence members and unmarked entity references, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 1R0W/0R1W/1R1W/2R0W/3R0W/2R1W/1R2W/3R1W/2R2W scheduled catalog surfaces, generated public required/excluded filter overloads, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
 - `141` Next-only primitive/layout/schema/capacity/arena/archetype-row/registry/migration/world-lifecycle/bound-access/public-lookup/structural-command/chunk-query/query-plan/query-filter/generated-query/change-version/change-cursor/exact-row/multi-change benchmark scenarios with JSON output, exact handle/version/cursor/lookup-route/command-arena facts, end-to-end and playback-only scalar-oracle/grouped structural comparisons, dense versus scattered locality, narrow versus wide retained-copy guards, equal-work 8/32/128/256-row donor-tail transition-compaction guards, whole/tail/sparse deferred-destroy density guards at 1/10/50 percent over a fixed 100,000-row resident population, same-build scalar/V29-style-packed/V30 barrier-local churn controls at 10/50 percent and narrow/512-byte widths, twelve permanent exact packed-suffix transition guards, dense/sparse-version metadata facts, focused scenario filtering, and explicit non-comparable status until equivalent Current adapters exist;
 - a separate deterministic 100K mixed-operation soak with a stable report/workload/canonical profile, four full-world generated passes, sparse tracked writes and exact consumption, checked reads, balanced destroy/create/transition churn, interval and measured-world canonical replay, natural-GC allocation/collection gates, phase p50/p95/p99/p99.9/max, memory/store snapshots, and a first immutable 60,000-tick baseline.
 - a 3.0.36 public-job admission runner with 60 paired traversal rows across all
@@ -352,7 +360,10 @@ Current features:
 - explicit shutdown;
 - no intended process-global mutable registry.
 
-Next requirements:
+ECS 3.4.0 implements the whole-world production subset below. The authoritative
+contract and exclusions are in `Kernels/ECS/ECS_PERSISTENCE.md`.
+
+Implemented requirements:
 
 - retain engine independence and explicit ownership;
 - make the world disposable because it will own workers and possibly native arenas;
@@ -396,7 +407,7 @@ Current features:
 - component masks used by scheduler conflict analysis;
 - archetype signatures represented by component bitsets.
 
-Next requirements:
+ECS 3.4.0 implemented contract:
 
 - generate canonical IDs, sizes, alignment, tag status, persistence IDs, and serializer metadata at build time;
 - generate schema-specific tables rather than using process-global mutable caches;
@@ -1700,34 +1711,49 @@ Next requirements:
   bit packing or old-version reconstruction cannot be expressed by the default
   field generator; no reflection or runtime type dispatch enters capture/restore;
 - no boxing or `List<object?>` capture path;
-- direct chunk-column serialization into caller-provided/preallocated buffers;
+- column-oriented canonical serialization without boxed component values or
+  per-entity managed snapshot objects; further direct chunk-run streaming is a
+  measured future capture optimization;
 - entity save records that retain canonical prefab/archetype provenance where useful plus authoritative component data; prefab defaults are never substituted for saved mutable component state;
-- explicit runtime-shape reconstruction: only authoritative persistent fields
-  need be saved, while transient/derived components are rebuilt from current
-  prefab/archetype provenance before authoritative overrides are applied; V2's
-  accidental persistent-signature shape collapse is not copied blindly;
+- explicit runtime-shape reconstruction: the complete saved stable membership
+  is authoritative and distinct from the persisted value-column subset;
+  membership-only components default and derived components use explicit current
+  reconstructors. Prefab provenance is advisory and never defines or overwrites
+  the saved shape/value. V2's persistent-signature shape collapse is not copied;
 - explicit endianness and format version;
 - strict configured limits for groups, entities, components, strings, and payload bytes before allocation;
 - validation of section uniqueness, signature consistency, component identity, and counts;
 - unknown component and newer-version policy;
 - transactional restore through a staging world/arena or validated commit plan;
-- explicit replace, merge, and append modes;
+- explicit whole-world replacement through a staging generation;
 - durable entity IDs and reference remapping;
 - one stable `SystemPersistenceId` for every opt-in persistent system definition,
   with generated or explicitly bound serialization for its authoritative
   `SystemRuntimeState`; scheduler timing and other reconstructible bookkeeping are
   not durable merely because the scheduler owns them;
-- immutable snapshot views or ownership-transfer leases;
+- an owned immutable snapshot artifact after capture;
 - checksum/corruption detection;
-- asynchronous compression and storage outside the simulation thread;
-- optional incremental snapshots using chunk change versions;
-- copy-on-write or frozen chunk epochs if live asynchronous capture is required.
+- storage outside the simulation thread after the canonical raw snapshot is owned;
 - one shared logical save capture epoch/tick/sequence across ECS, system state,
   inventory, accounts, relationships, and every other save participant. Encoding,
   compression, and disk writes may be asynchronous, but one promoted save set
   must describe a defined common observation boundary.
 
-The server save-set coordinator remains the transaction owner above ECS. It already stages participants, promotes only complete save sets, rotates whole-save backups, supports recovery modes and backup restore, and records participant timing/artifact facts. Next must plug into that contract rather than reimplementing it. Planned coordinator improvements such as artifact checksums, optional parallel participant snapshot/write work, richer retention, and background capture must be benchmarked as host features. Accounting/character data must still load before ECS entities that may refer to it.
+The active server save-set coordinator remains the transaction owner above ECS.
+It captures every participant under one caller-owned frozen logical epoch, writes
+checksummed generation artifacts, durably publishes `CURRENT`, recovers the
+newest complete compatible generation, and prepares/resolves/validates every
+participant before one host generation commit. Rich retention, compression,
+parallel participant encoding, and real accounting/inventory participants remain
+host integration work.
+
+Deferred requirements:
+
+- incremental snapshots using chunk change versions;
+- merge/append restore modes;
+- compression and richer retention/backup policy;
+- copy-on-write or frozen chunk epochs for live asynchronous capture;
+- V2 import tooling, which is deliberately outside the 3.4 production format.
 
 Tests:
 
@@ -1741,10 +1767,12 @@ Tests:
 - durable reference remapping;
 - system-state stable-ID round trips, missing/renamed system policy, and state
   migration fixtures;
-- transient/derived runtime-shape reconstruction from current prefab provenance;
+- complete saved runtime membership independent of prefab availability, with
+  explicit membership-only defaults and derived reconstruction;
 - missing/renamed canonical prefab key handling without losing saved component values;
-- participant ordering with accounting/character identity restored before ECS reference resolution;
-- replace/merge/append semantics;
+- all participants staged before cross-participant durable-reference resolution,
+  validation, and one publication commit;
+- whole-world replacement semantics; merge/append stays explicitly deferred;
 - deterministic canonical serialization;
 - concurrent snapshot policy tests;
 - cross-participant capture-epoch agreement under asynchronous encoding;
@@ -1754,7 +1782,7 @@ Tests:
 Benchmarks:
 
 - view creation, capture, serialization, deserialization, validation, and commit measured separately;
-- full and incremental snapshots;
+- full snapshots; incremental capture stays a separately measured future phase;
 - direct chunk streaming versus Current boxed snapshot capture;
 - raw, ZIP, Zstandard, and any future codec measured as end-to-end CPU/size tradeoffs;
 - 100k and 1m entities;
@@ -1946,9 +1974,17 @@ Tests should compare published semantic items, not merely counts. Include scope-
 
 ### 5.5 Persistence coordinator
 
-Current server-level persistence provides participant ordering, save-set manifests, backups, compression, restore modes, and timing. These policies should remain above the ECS.
+ECS 3.4.0 adds an active engine-neutral save-set coordinator above the ECS. It
+provides common-epoch capture, safe participant artifact names, byte-count and
+SHA-256 manifest validation, durable generation/pointer publication, compatible
+generation recovery, and transactional multi-participant preparation. The ECS
+snapshot remains a participant artifact rather than importing server policy.
 
-Next needs a new ECS participant implementing the same coordinator contract. Tests should run Current and Next participants through identical save, corrupt-primary, backup-recovery, and migration fixtures. Restore semantics must be explicit and transactional before the participant replaces Current.
+The real server host still needs an adapter that owns the authoritative pause,
+builds the ECS staging world, resolves account/inventory/external references,
+and publishes the prepared participant generation. V2 compression, operator
+rotation/restore conveniences, and richer retention may be ported above this
+coordinator after crash and performance tests; they are not kernel concerns.
 
 ### 5.6 Inventory references
 
@@ -2862,6 +2898,9 @@ Gate:
 
 ### Phase 7: persistence and durable identity
 
+Status: the whole-world 3.4.0 kernel/coordinator milestone is implemented.
+Incremental capture and real server participant integrations remain open.
+
 Deliverables:
 
 - generated serializers/migrations;
@@ -2869,8 +2908,8 @@ Deliverables:
 - transactional staging/commit;
 - durable entity IDs/remapping;
 - explicit runtime-versus-durable entity reference contracts and bridge maps;
-- incremental chunk snapshots;
-- server coordinator participant.
+- incremental chunk snapshots (deferred);
+- real server host/account/inventory participant adapters (deferred).
 
 Tests:
 
@@ -3088,18 +3127,20 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 
 ### Persistence
 
-- [ ] Stable persistence IDs
-- [ ] Generated component serializers
-- [ ] Component schema versions/migrations
-- [ ] Binary reader/writer
-- [ ] Full snapshot
+- [x] Stable persistence IDs
+- [x] Generated component serializers
+- [x] Component schema versions/direct readers and explicit shape migrations
+- [x] Canonical little-endian binary container
+- [x] Full whole-world snapshot
 - [ ] Incremental snapshot
-- [ ] Bounded validation
-- [ ] Transactional restore
-- [ ] Replace/merge/append modes
-- [ ] Durable reference remap
-- [ ] System-owned persistence hooks or replacement
-- [ ] Server manifest/backup/recovery adapter
+- [x] Bounded hostile-input validation
+- [x] Transactional staging restore
+- [x] Whole-world replacement generation
+- [ ] Merge/append restore modes
+- [x] Durable identity plus dense save-ordinal reference remap
+- [x] Stable framed system-owned persistence hooks
+- [x] Engine-neutral checksummed save-set manifest/recovery coordinator
+- [ ] Real server/account/inventory participant publication bridge
 
 ### Integrations and tools
 
@@ -3108,7 +3149,7 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 - [ ] AOI rings and cadence
 - [ ] Movement input/state bridge
 - [ ] Inventory durable references
-- [ ] Runtime-versus-durable entity reference mapping
+- [x] ECS runtime-versus-durable entity reference mapping
 - [ ] Accounting/character durable identity remap
 - [ ] Spawner/spawn-set stable key integration
 - [ ] Spawner activation/lifecycle reconciliation
@@ -3314,7 +3355,7 @@ scheduler/persistence milestones.
 | caller participation in worker pool | report background workers, caller, total concurrency, and reserved host cores separately |
 | stateful system save/load hooks | stable system persistence IDs and generated/custom state serialization in the common save epoch |
 | component-owned version-aware serializers | generated default plus generated-bound custom serializer/migrator escape hatch |
-| persistent signatures omit transient components | reconstruct runtime shape from current prefab/archetype provenance, then apply authoritative saved values |
+| persistent signatures omit transient components | persist complete stable runtime membership separately from value payload; prefab provenance is advisory and explicit reconstructors rebuild derived state |
 | save-set participant coordinator | one logical capture epoch/tick/sequence across all promoted participant artifacts |
 | template plus per-instance prefab initialization | retain distinct bulk constant/template and per-spawn initializer plans and benchmarks |
 | direct server access without `World.Tick()` | keep bounded prepared random/direct authoritative operations; scheduler use is not compulsory for rare event/network work |

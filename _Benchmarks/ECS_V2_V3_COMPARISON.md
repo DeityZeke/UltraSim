@@ -1,7 +1,7 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.3.0 compiled-content checkpoint captured
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.4.0 persistence checkpoint captured
 2026-08-12
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
@@ -95,7 +95,8 @@ contains 103 comparable cross-generation rows:
   native runtime representation.
 
 Nine parity rows remain explicitly unsupported in the joined report. They cover
-persistence and lifecycle streams, plus semantics that V2 cannot
+V3 whole-world durable/transactional persistence versus V2's non-equivalent
+filtered/live-mutation contracts, plus semantics that V2 cannot
 reproduce such as independent change cursors, multi-watch any/all queries,
 enable-bit row filters, same-barrier deferred tokens, and fixed-capacity
 structural failure.
@@ -140,6 +141,11 @@ The previous 3.1.0 artifact is
 [`Baselines/ecs-v2-v3-3.1.0-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.0-2026-08-11.json).
 The current 3.1.1 artifact is
 [`Baselines/ecs-v2-v3-3.1.1-2026-08-11.json`](Baselines/ecs-v2-v3-3.1.1-2026-08-11.json).
+The accepted 3.4.0 control artifact is
+[`Baselines/ecs-v2-v3-3.4.0-2026-08-12.json`](Baselines/ecs-v2-v3-3.4.0-2026-08-12.json).
+It retains 103 comparable rows and nine explicit unsupported rows. Persistence
+timings live in the V3-only scale artifact because current V2 has no honest
+equivalent full restore/durable-identity transaction.
 `--accept-baseline=PATH` creates a new immutable artifact and refuses to overwrite
 an existing one.
 

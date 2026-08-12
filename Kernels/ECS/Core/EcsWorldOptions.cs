@@ -14,7 +14,8 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         int maximumPreparedTransitions = 0,
         int maximumStructuralCommands = 0,
         EcsSchedulerOptions scheduler = default,
-        int lifecycleRecordCapacity = 0)
+        int lifecycleRecordCapacity = 0,
+        PersistenceIdentityOptions persistence = default)
     {
         if (entityCapacity.MaximumEntities <= 0)
             throw new ArgumentException("Entity capacity is invalid or default initialized.", nameof(entityCapacity));
@@ -39,6 +40,7 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         MaximumStructuralCommands = maximumStructuralCommands;
         Scheduler = scheduler;
         LifecycleRecordCapacity = lifecycleRecordCapacity;
+        Persistence = persistence;
     }
 
     public EntityCapacity EntityCapacity { get; }
@@ -69,6 +71,9 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
     /// </summary>
     public int LifecycleRecordCapacity { get; }
 
+    /// <summary>Optional fixed durable-identity storage used by full-world persistence.</summary>
+    public PersistenceIdentityOptions Persistence { get; }
+
     public bool IsValid =>
         EntityCapacity.MaximumEntities > 0 &&
         MaximumArchetypes > 0 &&
@@ -85,7 +90,8 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         MaximumPreparedTransitions == other.MaximumPreparedTransitions &&
         MaximumStructuralCommands == other.MaximumStructuralCommands &&
         Scheduler == other.Scheduler &&
-        LifecycleRecordCapacity == other.LifecycleRecordCapacity;
+        LifecycleRecordCapacity == other.LifecycleRecordCapacity &&
+        Persistence == other.Persistence;
 
     public override bool Equals(object? obj) => obj is EcsWorldOptions other && Equals(other);
 
@@ -99,6 +105,7 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         hash.Add(MaximumStructuralCommands);
         hash.Add(Scheduler);
         hash.Add(LifecycleRecordCapacity);
+        hash.Add(Persistence);
         return hash.ToHashCode();
     }
 

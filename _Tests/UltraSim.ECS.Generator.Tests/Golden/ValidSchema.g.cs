@@ -13,30 +13,70 @@ internal static partial class GameSchema
             0xec436a8cf0f575d3UL,
             1,
             (global::UltraSim.ECS.ComponentFlags)0,
-            0U),
+            0U,
+            (global::UltraSim.ECS.ComponentPersistenceMode)1),
         global::UltraSim.ECS.ComponentRegistration.Create<global::Golden.Velocity>(
             new global::UltraSim.ECS.ComponentId(1),
             "core.velocity",
             0x3126928d1f3e1de3UL,
             2,
             (global::UltraSim.ECS.ComponentFlags)6,
-            10U),
+            10U,
+            (global::UltraSim.ECS.ComponentPersistenceMode)2),
         global::UltraSim.ECS.ComponentRegistration.Create<global::Golden.DisabledTag>(
             new global::UltraSim.ECS.ComponentId(2),
             "gameplay.disabled",
             0x84485d240ee5d2e1UL,
             1,
             (global::UltraSim.ECS.ComponentFlags)1,
-            0U),
+            0U,
+            (global::UltraSim.ECS.ComponentPersistenceMode)1),
     };
 
-    public static global::UltraSim.ECS.SchemaId GeneratedSchemaId => new(0x9d20b9804502e8c2UL, 0x57e00d894c1147e6UL);
+    private sealed class PersistenceCodec_1 : global::UltraSim.ECS.IPersistenceComponentCodec<global::Golden.Velocity>, global::UltraSim.ECS.IPersistenceBatchComponentCodec<global::Golden.Velocity>
+    {
+        public int EncodedSize => 16;
+        public void Encode(in global::Golden.Velocity value, global::System.Span<byte> destination, global::UltraSim.ECS.PersistenceWriteContext context)
+        {
+            if (destination.Length != 16) throw new global::System.ArgumentException("Persistence destination size mismatch.", nameof(destination));
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(destination.Slice(0, 8), global::System.BitConverter.DoubleToInt64Bits(value.X));
+            global::System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(destination.Slice(8, 8), global::System.BitConverter.DoubleToInt64Bits(value.Y));
+        }
+        public void Decode(global::System.ReadOnlySpan<byte> source, ref global::Golden.Velocity value, global::UltraSim.ECS.PersistenceReadContext context)
+        {
+            if (source.Length != 16) throw new global::System.ArgumentException("Persistence source size mismatch.", nameof(source));
+            value.X = (double)(global::System.BitConverter.Int64BitsToDouble(global::System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(source.Slice(0, 8))));
+            value.Y = (double)(global::System.BitConverter.Int64BitsToDouble(global::System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(source.Slice(8, 8))));
+        }
+        public void EncodeBatch(global::System.ReadOnlySpan<global::Golden.Velocity> values, global::System.Span<byte> destination, global::UltraSim.ECS.PersistenceWriteContext context)
+        {
+            if (destination.Length != checked(values.Length * EncodedSize)) throw new global::System.ArgumentException("Persistence batch size mismatch.");
+            for (int index = 0; index < values.Length; index++) Encode(values[index], destination.Slice(index * EncodedSize, EncodedSize), context);
+        }
+        public void DecodeBatch(global::System.ReadOnlySpan<byte> source, global::System.Span<global::Golden.Velocity> values, global::UltraSim.ECS.PersistenceReadContext context)
+        {
+            if (source.Length != checked(values.Length * EncodedSize)) throw new global::System.ArgumentException("Persistence batch size mismatch.");
+            for (int index = 0; index < values.Length; index++) Decode(source.Slice(index * EncodedSize, EncodedSize), ref values[index], context);
+        }
+    }
+
+
+    public static global::UltraSim.ECS.SchemaId GeneratedSchemaId => new(0x76457995749d6187UL, 0xb511ecffab4f5598UL);
 
     public static global::System.ReadOnlySpan<global::UltraSim.ECS.ComponentRegistration> GeneratedComponentRegistrations =>
         s_generatedComponentRegistrations;
 
     public static global::UltraSim.ECS.ComponentSchema CreateSchema() =>
         global::UltraSim.ECS.ComponentSchema.Create(GeneratedSchemaId, s_generatedComponentRegistrations);
+
+    public static global::UltraSim.ECS.PersistenceCatalog CreatePersistenceCatalog(
+        global::System.Action<global::UltraSim.ECS.PersistenceCatalogBuilder>? configure = null)
+    {
+        var builder = new global::UltraSim.ECS.PersistenceCatalogBuilder(CreateSchema());
+        builder.Register<global::Golden.Velocity>(new global::UltraSim.ECS.PersistenceSchemaFingerprint(0x83f7c85f30f604f3UL, 0xb5c3271a2aeeda30UL), new PersistenceCodec_1());
+        configure?.Invoke(builder);
+        return builder.Build();
+    }
 
     public static global::UltraSim.ECS.ComponentId GetComponentId<T>()
         where T : unmanaged, global::UltraSim.ECS.IComponent<T>

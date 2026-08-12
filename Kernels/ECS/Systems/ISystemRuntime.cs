@@ -29,6 +29,20 @@ public interface ISystemRuntime<TJob>
     void Shutdown(in SystemShutdownContext context) { }
 }
 
+/// <summary>Opt-in canonical persistent state owned by a registered system runtime.</summary>
+/// <remarks>
+/// Implementations write explicit little-endian/versioned bytes. Scheduler topology,
+/// worker assignment, profiling counters, prepared handles, and change cursors are
+/// not persistence state.
+/// </remarks>
+public interface IPersistentSystemState
+{
+    int PersistenceStateByteCount { get; }
+    bool PersistenceStateRequired => true;
+    void WritePersistenceState(Span<byte> destination);
+    void ReadPersistenceState(ushort savedVersion, ReadOnlySpan<byte> source);
+}
+
 /// <summary>Bounded non-query index work executed by the scheduler worker runtime.</summary>
 /// <remarks>
 /// Use for external arrays, preselected entity operations, or other already-

@@ -55,8 +55,10 @@ public static class ComparisonCatalog
             MeasurementBoundary.EndToEnd, ComparisonStrength.Provisional, 10_000, 10_000, 8,
             "Instantiate one Position prefab with constant defaults through each generation's native resolved runtime prefab representation.",
             "Exactly 10,000 living Position entities exist and every Position equals (42,43). Authoring/compiler and change-publication semantics are intentionally outside this normalized runtime-spawn contract.");
-        AddUnsupported(descriptors, "persistence.filtered-view", "Filtered persistence view", "Persistence", 50_000, "V3 persistence view is not implemented yet.");
-        AddUnsupported(descriptors, "persistence.round-trip-remap", "Persistence round trip with transient-ID remap", "Persistence", 50_000, "V3 persistence and load-remap pipeline are not implemented yet.");
+        AddUnsupported(descriptors, "persistence.filtered-view", "Filtered persistence view", "Persistence", 50_000,
+            "V3 3.4 deliberately supports whole-world generations, while V2's filtered view is not an equivalent snapshot contract.");
+        AddUnsupported(descriptors, "persistence.round-trip-remap", "Persistence round trip with transient-ID remap", "Persistence", 50_000,
+            "V3 3.4 has durable identity and transactional remap, but current V2 has no equivalent durable/transactional restore contract admitted to this adapter.");
         return descriptors;
     }
 

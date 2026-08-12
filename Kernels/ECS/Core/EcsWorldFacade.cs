@@ -44,7 +44,8 @@ public sealed partial class EcsWorld : IDisposable
             static capacity => new NativeChunkArena(capacity),
             options.MaximumPreparedPlans,
             maximumPublicTransitions: options.MaximumPreparedTransitions,
-            lifecycleRecordCapacity: options.LifecycleRecordCapacity);
+            lifecycleRecordCapacity: options.LifecycleRecordCapacity,
+            persistence: options.Persistence);
         _structuralCommands = new StructuralCommandBuffer(
             _core.Id,
             _ownerThreadId,

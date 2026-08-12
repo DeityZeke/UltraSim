@@ -35,6 +35,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     // Cold optional integration state is deliberately last so disabled worlds
     // retain the established offsets of hot scheduler/world fields.
     private readonly LifecycleHistory? _lifecycleHistory;
+    private readonly PersistenceIdentityMap? _persistenceIdentities;
     private CompiledPrefabCatalog? _contentCatalog;
 
     internal EcsWorld(
@@ -45,7 +46,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         int maximumQueryPlans,
         ChangeVersion initialChangeVersion = default,
         int maximumPublicTransitions = 0,
-        int lifecycleRecordCapacity = 0)
+        int lifecycleRecordCapacity = 0,
+        PersistenceIdentityOptions persistence = default)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(arenaFactory);
@@ -63,6 +65,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         _publicTransitions = new PreparedArchetypeTransition[maximumPublicTransitions];
         if (lifecycleRecordCapacity != 0)
             _lifecycleHistory = new LifecycleHistory(lifecycleRecordCapacity);
+        if (persistence.IsEnabled)
+            _persistenceIdentities = new PersistenceIdentityMap(_entities, persistence);
         _changeVersion = initialChangeVersion;
         _state = EcsWorldState.Created;
     }
@@ -141,6 +145,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             schedulerBytes,
             LifecycleReservedBytes,
             _contentCatalog?.GetSnapshot().TotalKnownPayloadBytes ?? 0,
+            _persistenceIdentities?.ReservedBytes ?? 0,
             nativePayload);
     }
 
@@ -155,7 +160,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
     internal int MaximumArchetypes => _archetypes.MaximumArchetypes;
 
+    internal int EntityHighWatermark => _entities.HighWatermark;
+
     internal CompiledPrefabCatalog? ContentCatalog => _contentCatalog;
+
+    internal bool IsPersistenceEnabled => _persistenceIdentities is not null;
+
+    internal PersistenceIdentityMap PersistenceIdentities => _persistenceIdentities ??
+        throw new InvalidOperationException("This world was not configured for persistence.");
 
     internal void BindContentCatalog(CompiledPrefabCatalog catalog)
     {
@@ -777,6 +789,58 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     internal bool TryGetEntity(uint localIndex, out Entity entity) =>
         _entities.TryGetEntity(localIndex, out entity);
 
+    internal bool TryCreatePersistenceRestore(
+        ArchetypeId archetypeId,
+        PersistentEntityId persistentId,
+        ulong prefabKeyHash,
+        out Entity entity)
+    {
+        if (_state != EcsWorldState.Initialized)
+            throw new InvalidOperationException("Persistence restore creation requires an initialized staging world.");
+        if (!TryCreateDefaultCore(archetypeId, out entity, out _))
+            return false;
+        PersistenceIdentities.AssignRestored(entity, persistentId, prefabKeyHash);
+        return true;
+    }
+
+    internal void CopyPersistenceComponent(Entity entity, ComponentId componentId, Span<byte> destination)
+    {
+        if (!_entities.TryGetLocation(entity, out EntityLocation location))
+            throw new PersistenceValidationException("A captured entity lost its storage location.");
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(location.ArchetypeId);
+        int column = storage.Store.GetColumnIndex(componentId);
+        if (column < 0) throw new PersistenceValidationException("A captured shape lost a component column.");
+        storage.Store.CopyBoundComponentBytes(location.ChunkRow, column, destination);
+    }
+
+    internal void RestorePersistenceComponent(Entity entity, ComponentId componentId, ReadOnlySpan<byte> source)
+    {
+        if (!_entities.TryGetLocation(entity, out EntityLocation location))
+            throw new PersistenceValidationException("A restored entity lost its storage location.");
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(location.ArchetypeId);
+        int column = storage.Store.GetColumnIndex(componentId);
+        if (column < 0) throw new PersistenceValidationException("A restored shape has no destination component column.");
+        storage.Store.WriteBoundComponentBytes(location.ChunkRow, column, source);
+    }
+
+    internal bool GetPersistenceEnabled(Entity entity, ComponentId componentId)
+    {
+        if (!_entities.TryGetLocation(entity, out EntityLocation location))
+            throw new PersistenceValidationException("A captured entity lost its storage location.");
+        ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(location.ArchetypeId).Store;
+        int column = store.GetColumnIndex(componentId);
+        return store.IsEnabled(location.ChunkRow, column);
+    }
+
+    internal void RestorePersistenceEnabled(Entity entity, ComponentId componentId, bool enabled)
+    {
+        if (!_entities.TryGetLocation(entity, out EntityLocation location))
+            throw new PersistenceValidationException("A restored entity lost its storage location.");
+        ArchetypeChunkStore<TArena> store = _archetypes.GetStorage(location.ArchetypeId).Store;
+        int column = store.GetColumnIndex(componentId);
+        store.SetEnabled(location.ChunkRow, column, enabled);
+    }
+
     internal void BeginSystemGraphExecution()
     {
         EnsureSealed();
@@ -865,6 +929,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (!TryCreateDefaultCore(prefab.ArchetypeId, out entity, out EntityLocation location))
             return false;
         ApplyPrefabDefaults(catalog, prefab, location);
+        if (_persistenceIdentities is not null)
+            _persistenceIdentities.SetPrefabKey(entity, catalog.GetKey(prefabId));
         PublishCreated(entity);
         return true;
     }
@@ -883,6 +949,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         if (!TryCreateDefaultInTemporaryHoleCore(prefab.ArchetypeId, row, out entity, out EntityLocation location))
             return false;
         ApplyPrefabDefaults(catalog, prefab, location);
+        if (_persistenceIdentities is not null)
+            _persistenceIdentities.SetPrefabKey(entity, catalog.GetKey(prefabId));
         PublishCreated(entity);
         return true;
     }

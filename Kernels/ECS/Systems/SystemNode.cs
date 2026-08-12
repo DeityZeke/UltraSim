@@ -64,6 +64,7 @@ internal abstract class SystemNode
         int rows, int chunks, int workItems);
     internal virtual int GetCompletedRows(in SchedulerQueryShape shape) => shape.Rows;
     internal abstract long ReservedPayloadBytes { get; }
+    internal virtual IPersistentSystemState? PersistentState => null;
 
     internal void RecordRun(ulong tick, long elapsedTicks, bool parallel, int rows, int chunks, int workItems)
     {
@@ -140,6 +141,8 @@ internal abstract class ScheduledSystemNode<TSystem, TJob> : SystemNode
         _participantUsed[participant] = true;
         return ref _participantJobs[participant];
     }
+
+    internal override IPersistentSystemState? PersistentState => Runtime as IPersistentSystemState;
 
     internal override long ReservedPayloadBytes => checked(
         (long)_participantJobs.Length * Unsafe.SizeOf<TJob>() +

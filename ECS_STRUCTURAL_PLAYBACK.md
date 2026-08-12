@@ -1,6 +1,6 @@
 # ECS Next Structural Playback
 
-Status: authoritative structural-playback architecture through ECS 3.3.0 as of
+Status: authoritative structural-playback architecture through ECS 3.4.0 as of
 2026-08-12. ECS 3.1 retains the packed production strategies and adds bounded
 per-participant recording plus deterministic segment merge as another input to
 the same command arena and playback engine. ECS 3.1.2 hardens command-run

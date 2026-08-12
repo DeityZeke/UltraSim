@@ -17,6 +17,7 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         long managedEntityMetadataBytes,
         long managedSchedulerBytes,
         long managedLifecycleBytes,
+        long managedPersistenceIdentityBytes,
         long totalManagedBytes,
         long nativeChunkBytes,
         long totalNativeBytes,
@@ -30,6 +31,7 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         ManagedEntityMetadataBytes = managedEntityMetadataBytes;
         ManagedSchedulerBytes = managedSchedulerBytes;
         ManagedLifecycleBytes = managedLifecycleBytes;
+        ManagedPersistenceIdentityBytes = managedPersistenceIdentityBytes;
         TotalManagedBytes = totalManagedBytes;
         NativeChunkBytes = nativeChunkBytes;
         TotalNativeBytes = totalNativeBytes;
@@ -58,6 +60,9 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
     /// <summary>Fixed lifecycle-record payload requested before construction.</summary>
     public long ManagedLifecycleBytes { get; }
 
+    /// <summary>Fixed durable-identity side-table arrays when persistence is enabled.</summary>
+    public long ManagedPersistenceIdentityBytes { get; }
+
     public long TotalManagedBytes { get; }
 
     public long NativeChunkBytes { get; }
@@ -78,6 +83,7 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         ManagedEntityMetadataBytes == other.ManagedEntityMetadataBytes &&
         ManagedSchedulerBytes == other.ManagedSchedulerBytes &&
         ManagedLifecycleBytes == other.ManagedLifecycleBytes &&
+        ManagedPersistenceIdentityBytes == other.ManagedPersistenceIdentityBytes &&
         TotalManagedBytes == other.TotalManagedBytes &&
         NativeChunkBytes == other.NativeChunkBytes &&
         TotalNativeBytes == other.TotalNativeBytes &&
