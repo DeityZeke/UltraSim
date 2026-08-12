@@ -24,6 +24,9 @@ Does it consume values changed since one consumer last observed them?
 
 Does it need create/destroy/add/remove history or tombstones?
     -> LifecycleCursor over the world's fixed lifecycle history
+
+Does it need to spawn a named content type with compiled defaults?
+    -> resolve PrefabKey once, retain PrefabHandle, then Instantiate
 ```
 
 ## Execution-path inventory
@@ -38,6 +41,7 @@ Does it need create/destroy/add/remove history or tombstones?
 | `SystemStructuralWriter` | Deferred create/destroy/add/remove/transition from a system | Expecting topology changes to be visible during the same graph | Observe after the structural barrier |
 | `ChangeCursor` | Independent observation of changed component values | Expecting destroyed identities, membership deltas, or every intermediate value | `LifecycleCursor` for topology history |
 | `LifecycleCursor` | Independent observation of successful create/destroy/add/remove commits | Expecting component values or physical archetype/chunk changes | `ChangeCursor` for values; lifecycle intentionally hides storage |
+| `PrefabHandle` | Repeated runtime spawn of one precompiled content definition | Looking up a stable string for every spawn or expecting runtime inheritance | Resolve `PrefabKey` once; systems still operate on ordinary components |
 
 The APIs do not have interchangeable costs. A legal full-population `RangeJob`
 using checked lookups can be orders of magnitude slower than a generated job over
@@ -235,7 +239,33 @@ Pre-tick main-arena commands publish at pre-barrier playback. Scheduler commands
 publish at deterministic post-graph playback. `RunManual` merge alone publishes
 nothing.
 
-## 7. World lifecycle and ownership
+## 7. Compiled content: authoring disappears before runtime
+
+Use `BaseClass` and concrete Object Scripts to describe broad shared ECS shape
+and per-content defaults before `Seal`. The compiler resolves inheritance,
+canonicalizes component membership, shares identical signatures, binds physical
+default columns, and emits an immutable catalog. At runtime:
+
+```text
+PrefabKey    -> durable/cold identity
+PrefabHandle -> 12-byte world-local direct spawn route
+Instantiate  -> ordinary Entity in an ordinary Archetype
+```
+
+Different names, jobs, wealth, appearance, or default values do not create new
+archetypes when membership is identical. Adding or removing a component or tag
+does. Resolve stable keys during startup and retain handles for repeated spawn.
+Use immediate `EcsWorld.Instantiate` outside the graph or
+`SystemJobContext.Commands.Instantiate` inside it. A deferred prefab is one
+normal structural command; same-segment typed Adds may customize that instance.
+
+Prefab defaults are initialization, so creation publishes one `Created` fact
+without an initial `ComponentAdded` or changed-row storm. There is no runtime
+Object Script, virtual prefab behavior, `IsA` relation, or per-entity authoring
+object. See [`ECS_CONTENT_AUTHORING.md`](ECS_CONTENT_AUTHORING.md) for the full
+contract.
+
+## 8. World lifecycle and ownership
 
 The normal lifecycle is:
 

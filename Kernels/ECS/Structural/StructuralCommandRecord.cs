@@ -10,6 +10,7 @@ internal enum StructuralCommandKind : byte
     TemporaryHole = 4,
     AddComponent = 5,
     RemoveComponent = 6,
+    InstantiatePrefab = 7,
 }
 
 internal enum StructuralCommandTargetKind : byte
@@ -92,6 +93,18 @@ internal readonly struct StructuralCommandRecord
         default,
         archetypeId.Value,
         0,
+        0,
+        0,
+        0);
+
+    internal static StructuralCommandRecord InstantiatePrefab(
+        uint prefabId,
+        ArchetypeId archetypeId) => new(
+        StructuralCommandKind.InstantiatePrefab,
+        StructuralCommandTargetKind.None,
+        default,
+        prefabId,
+        archetypeId.Value,
         0,
         0,
         0);
@@ -250,6 +263,13 @@ internal readonly struct StructuralCommandRecord
     }
 
     internal ArchetypeId TemporaryHoleArchetypeId => new(_argument);
+
+    internal ArchetypeId CreateArchetypeId => _kind switch
+    {
+        StructuralCommandKind.CreateDefault => new ArchetypeId(_argument),
+        StructuralCommandKind.InstantiatePrefab => new ArchetypeId(_target0),
+        _ => ArchetypeId.Invalid,
+    };
 
     internal ChunkRow TemporaryHoleRow => new(_target0, checked((int)_target1));
 

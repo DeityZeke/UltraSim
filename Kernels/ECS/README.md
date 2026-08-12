@@ -10,6 +10,11 @@ and common misuse cases, start with
 [`ECS_USAGE_GUIDE.md`](ECS_USAGE_GUIDE.md). In short: composition-selected rows
 belong in generated chunk jobs; `RangeJob` is for bounded external or already-
 selected work; `ComponentLookup<T>` is sparse checked random access.
+For RunUO-style `BaseClass`/Object Script authoring, stable prefab identity,
+compiled catalog layout, and one-command spawning, see
+[`ECS_CONTENT_AUTHORING.md`](ECS_CONTENT_AUTHORING.md).
+Acceptance evidence and the complete 3.2/3.3 comparison are in
+[`../../ECS_3_3_0_CONTENT_AUTHORING_REPORT.md`](../../ECS_3_3_0_CONTENT_AUTHORING_REPORT.md).
 
 ## Current implementation slices
 
@@ -68,6 +73,16 @@ allocation:
   dense archetype IDs from colliding across worlds. Public immediate creation,
   initialized creation, transition, destruction, liveness, and current-archetype
   operations preserve the internal stale/entity/transaction checks.
+- ECS 3.3.0 adds a cold `ContentCatalogBuilder` with explicit Object Script
+  registration and direct-DOD definitions. It resolves additive BaseClass
+  composition/defaults, sorts stable `PrefabKey` paths, deduplicates canonical
+  signatures, binds defaults to physical columns, and freezes one immutable
+  world catalog before `Seal`. The runtime retains 12-byte `PrefabHandle` values,
+  32-byte entries, 12-byte default descriptors, one byte blob, and cold key/name
+  metadata—not the authoring object hierarchy. Immediate and deferred prefab
+  creation allocate ordinary ECS rows, copy compiled constants, and publish one
+  ordinary `Created`; no reflection, managed callback, or runtime `IsA` graph
+  exists on spawn or tick.
 - Public `ArchetypeTransition` is a 16-byte unmanaged numeric catalog handle,
   not a reference to an internal migration plan. Cold preparation validates and
   stores a bounded world-owned route; hot immediate or deferred use validates the
@@ -161,8 +176,10 @@ allocation:
   `ECS_STRUCTURAL_PLAYBACK.md`. ECS 3.1.0 adds per-participant arenas,
   deterministic work-segment merge, and typed component payloads without changing
   those packed strategies. Grouping across separated route runs, broader density/
-  entropy-driven compaction and prefab expansion remain
-  later structural work and must be measured against this baseline.
+  entropy-driven compaction remains later structural work and must be measured
+  against this baseline. ECS 3.3.0 adds compiled prefab instantiation as one
+  ordinary create-phase command without changing the 24-byte command or 40-byte
+  slot.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
   and invoke constrained struct visitors with stack-only component/entity-index

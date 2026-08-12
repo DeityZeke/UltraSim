@@ -17,6 +17,7 @@ public readonly struct WorldReservedPayloadSnapshot
         long mainStructuralCommandBytes,
         long schedulerBytes,
         long lifecycleHistoryBytes,
+        long compiledContentBytes,
         long nativeChunkPayloadBytes)
     {
         EntitySlotMetadataBytes = entitySlotMetadataBytes;
@@ -28,12 +29,14 @@ public readonly struct WorldReservedPayloadSnapshot
         MainStructuralCommandBytes = mainStructuralCommandBytes;
         SchedulerBytes = schedulerBytes;
         LifecycleHistoryBytes = lifecycleHistoryBytes;
+        CompiledContentBytes = compiledContentBytes;
         NativeChunkPayloadBytes = nativeChunkPayloadBytes;
         KnownManagedPayloadBytes = checked(
             entitySlotMetadataBytes + archetypeRegistryIndexBytes +
             archetypeSignatureAndColumnBytes + archetypeStoreMetadataBytes +
             chunkArenaSlotMetadataBytes + preparedPlanSlotBytes +
-            mainStructuralCommandBytes + schedulerBytes + lifecycleHistoryBytes);
+            mainStructuralCommandBytes + schedulerBytes + lifecycleHistoryBytes +
+            compiledContentBytes);
         TotalKnownPayloadBytes = checked(KnownManagedPayloadBytes + nativeChunkPayloadBytes);
     }
 
@@ -58,11 +61,18 @@ public readonly struct WorldReservedPayloadSnapshot
     /// <summary>Fixed lifecycle-record ring payload; zero when publication is disabled.</summary>
     public long LifecycleHistoryBytes { get; }
 
+    /// <summary>
+    /// Frozen compiled-prefab entries, default descriptors/bytes, and retained
+    /// stable-key/display character payload. Cold compiler temporaries are excluded.
+    /// </summary>
+    public long CompiledContentBytes { get; }
+
     public long KnownManagedPayloadBytes { get; }
     public long NativeChunkPayloadBytes { get; }
     public long TotalKnownPayloadBytes { get; }
 
     public const string Exclusions =
         "CLR object/array headers and alignment, allocator overhead, nested prepared-plan route/transfer arrays, " +
-        "shared ComponentSchema payload, JIT/code pages, thread stacks, and non-ECS process working set.";
+        "shared ComponentSchema payload, cold content-compiler temporaries, CLR strings/array headers, " +
+        "JIT/code pages, thread stacks, and non-ECS process working set.";
 }

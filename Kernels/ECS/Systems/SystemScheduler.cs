@@ -502,6 +502,15 @@ internal sealed class SystemScheduler : IDisposable
         return lane.TryEnqueueCreateDefault(archetype, out entity);
     }
 
+    internal bool TryEnqueueInstantiate(
+        in SystemJobContext context,
+        PrefabHandle prefab,
+        out DeferredEntity entity)
+    {
+        StructuralCommandBuffer lane = GetStructuralLane(context);
+        return lane.TryEnqueueInstantiate(prefab, out entity);
+    }
+
     internal bool TryEnqueueDestroy(in SystemJobContext context, Entity entity) =>
         GetStructuralLane(context).TryEnqueueDestroy(entity);
     internal bool TryEnqueueDestroy(in SystemJobContext context, DeferredEntity entity) =>

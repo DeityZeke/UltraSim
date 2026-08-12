@@ -131,6 +131,41 @@ public sealed class StructuralCommandBuffer
         return entity;
     }
 
+    /// <summary>Records one compiled prefab instantiation as one structural command.</summary>
+    /// <remarks>
+    /// Playback allocates directly in the prefab's final archetype and copies its
+    /// immutable defaults before publishing one ordinary Created lifecycle fact.
+    /// </remarks>
+    public DeferredEntity EnqueueInstantiate(PrefabHandle prefab)
+    {
+        if (!TryEnqueueInstantiate(prefab, out DeferredEntity entity))
+            throw new StructuralCommandCapacityExceededException(Capacity);
+        return entity;
+    }
+
+    public bool TryEnqueueInstantiate(PrefabHandle prefab, out DeferredEntity entity)
+    {
+        EnsureOwnerAndActive();
+        ValidatePrefab(prefab, nameof(prefab));
+        BeginRecordingIfNeeded();
+        if (_count == _commands.Length)
+        {
+            entity = default;
+            return false;
+        }
+
+        int commandIndex = _count;
+        AppendTrusted(StructuralCommandRecord.InstantiatePrefab(
+            prefab.PrefabId,
+            prefab.ArchetypeId));
+        entity = new DeferredEntity(
+            _worldId,
+            _bufferId,
+            _epoch,
+            unchecked((uint)commandIndex));
+        return true;
+    }
+
     internal StructuralPlaybackDiagnostics LastPlaybackDiagnostics
     {
         get
@@ -564,7 +599,7 @@ public sealed class StructuralCommandBuffer
             token.BufferId != _bufferId ||
             token.Epoch != _epoch ||
             token.CommandIndex >= unchecked((uint)_lastPlaybackCommandCount) ||
-            _commands[token.CommandIndex].Kind != StructuralCommandKind.CreateDefault)
+            !IsCreateCommand(_commands[token.CommandIndex].Kind))
         {
             entity = Entity.Null;
             return false;
@@ -756,7 +791,7 @@ public sealed class StructuralCommandBuffer
         for (int index = 0; index < commandCount; index++)
         {
             StructuralCommandRecord command = _commands[index];
-            if (command.Kind == StructuralCommandKind.CreateDefault)
+            if (IsCreateCommand(command.Kind))
                 ExecuteCreate(command, index, world, ref counts);
         }
 
@@ -826,7 +861,7 @@ public sealed class StructuralCommandBuffer
         ref PlaybackCounts counts,
         bool reuseTemporaryHoles = false)
     {
-        var archetypeId = new ArchetypeId(command.Argument);
+        ArchetypeId archetypeId = command.CreateArchetypeId;
         int archetypeIndex = checked((int)archetypeId.Value);
         int holeLink = reuseTemporaryHoles
             ? _temporaryHoleHeads[archetypeIndex]
@@ -843,10 +878,16 @@ public sealed class StructuralCommandBuffer
             {
                 ThrowCommandInvariant("A temporary-hole chain contains invalid metadata.");
             }
-            created = world.TryCreateDefaultInTemporaryHole(
-                archetypeId,
-                hole.TemporaryHoleRow,
-                out entity);
+            created = command.Kind == StructuralCommandKind.InstantiatePrefab
+                ? world.TryInstantiatePrefabInTemporaryHole(
+                    command.Argument,
+                    archetypeId,
+                    hole.TemporaryHoleRow,
+                    out entity)
+                : world.TryCreateDefaultInTemporaryHole(
+                    archetypeId,
+                    hole.TemporaryHoleRow,
+                    out entity);
             if (created)
             {
                 _temporaryHoleHeads[archetypeIndex] = _nextCommand[holeLink - 1];
@@ -855,7 +896,9 @@ public sealed class StructuralCommandBuffer
         }
         else
         {
-            created = world.TryCreateDefault(archetypeId, out entity);
+            created = command.Kind == StructuralCommandKind.InstantiatePrefab
+                ? world.TryInstantiatePrefab(command.Argument, archetypeId, out entity)
+                : world.TryCreateDefault(archetypeId, out entity);
         }
 
         if (created)
@@ -1640,7 +1683,7 @@ public sealed class StructuralCommandBuffer
             command.DeferredCommandIndex < unchecked((uint)commandCount))
         {
             int index = unchecked((int)command.DeferredCommandIndex);
-            if (_commands[index].Kind == StructuralCommandKind.CreateDefault)
+            if (IsCreateCommand(_commands[index].Kind))
             {
                 entity = _createdEntities[index];
                 createIndex = index;
@@ -1668,9 +1711,9 @@ public sealed class StructuralCommandBuffer
         int commandIndex = _count++;
         _commands[commandIndex] = command;
         _nextCommand[commandIndex] = 0;
-        if (command.Kind == StructuralCommandKind.CreateDefault)
+        if (IsCreateCommand(command.Kind))
         {
-            int archetypeIndex = checked((int)command.Argument);
+            int archetypeIndex = checked((int)command.CreateArchetypeId.Value);
             if (_createDemand[archetypeIndex]++ == 0)
             {
                 _activeTemporaryArchetypes[_activeTemporaryArchetypeCount++] =
@@ -1779,7 +1822,7 @@ public sealed class StructuralCommandBuffer
             entity.BufferId != _bufferId ||
             entity.Epoch != _epoch ||
             entity.CommandIndex >= unchecked((uint)_count) ||
-            _commands[entity.CommandIndex].Kind != StructuralCommandKind.CreateDefault)
+            !IsCreateCommand(_commands[entity.CommandIndex].Kind))
         {
             throw new ArgumentException(
                 "The deferred entity does not identify a create command in this recording epoch.",
@@ -1795,10 +1838,17 @@ public sealed class StructuralCommandBuffer
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ValidatePrefab(PrefabHandle prefab, string parameterName)
+    {
+        if (!prefab.IsValid || prefab.World != _worldId)
+            throw new ArgumentException("The prefab belongs to a different world.", parameterName);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static StructuralPlaybackPhase GetPlaybackPhase(
         in StructuralCommandRecord command)
     {
-        if (command.Kind == StructuralCommandKind.CreateDefault)
+        if (IsCreateCommand(command.Kind))
             return StructuralPlaybackPhase.Create;
         if (command.Kind == StructuralCommandKind.Destroy)
         {
@@ -1825,6 +1875,10 @@ public sealed class StructuralCommandBuffer
 
         throw new InvalidOperationException("The structural command kind is invalid.");
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsCreateCommand(StructuralCommandKind kind) =>
+        kind is StructuralCommandKind.CreateDefault or StructuralCommandKind.InstantiatePrefab;
 
     private int ReservePayload(ReadOnlySpan<byte> payload, int alignment)
     {

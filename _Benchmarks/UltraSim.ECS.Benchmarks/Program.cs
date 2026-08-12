@@ -36,6 +36,12 @@ if (args.Contains("--lifecycle", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--content", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = ContentBenchmarkProgram.Run(args);
+    return;
+}
+
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",

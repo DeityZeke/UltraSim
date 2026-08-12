@@ -1,6 +1,6 @@
 # ECS Next Structural Playback
 
-Status: authoritative structural-playback architecture through ECS 3.2.0 as of
+Status: authoritative structural-playback architecture through ECS 3.3.0 as of
 2026-08-12. ECS 3.1 retains the packed production strategies and adds bounded
 per-participant recording plus deterministic segment merge as another input to
 the same command arena and playback engine. ECS 3.1.2 hardens command-run
@@ -221,6 +221,23 @@ history and requires lagging independent cursors to resynchronize explicitly.
 
 The public proof and retention contract is specified in
 [`Kernels/ECS/ECS_LIFECYCLE_PUBLICATION.md`](Kernels/ECS/ECS_LIFECYCLE_PUBLICATION.md).
+
+## Compiled prefab creation
+
+ECS 3.3.0 extends the existing create phase with `InstantiatePrefab`; it does
+not introduce another queue, interpreter, phase, or command payload. The
+24-byte command stores the dense prefab ID plus its prebound target archetype.
+The same 12-byte result and four-byte phase link retain the 40-byte command-slot
+contract. Scheduler producer lanes record the same command and canonical merge
+remaps its `DeferredEntity` exactly like a default create.
+
+Playback resolves the direct catalog entry, allocates or reuses an ordinary row,
+restores store-defined zero/enabled/change-history state, copies only explicit
+compiled defaults through prebound physical columns, and publishes one
+`Created`. A same-segment typed Add remains an ordinary later replacement or
+membership change. Failed capacity creates publish no lifecycle fact. Barrier-
+local hole reuse is shared with default creation and must restore the complete
+prefab state before publication.
 
 ## Storage row-lifecycle boundary
 

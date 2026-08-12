@@ -9,9 +9,9 @@ for (int tier = 0; tier < profile.TierCounts.Length; tier++)
     averageTierRowsPerTick += profile.TierCounts[tier] / (double)profile.TierPeriods[tier];
 var report = new SliceReport
 {
-    SliceVersion = "ultrasim-simulation-slice-0-v3-lifecycle-filtered",
-    EcsVersion = "3.2.0",
-    EcsSemanticProfile = "ecs-3.2.0-lifecycle-publication",
+    SliceVersion = "ultrasim-simulation-slice-0-v4-compiled-content",
+    EcsVersion = "3.3.0",
+    EcsSemanticProfile = "ecs-3.3.0-compiled-content-authoring",
     RuntimeVersion = Environment.Version.ToString(),
     ProcessorCount = Environment.ProcessorCount,
     Population = options.Population,

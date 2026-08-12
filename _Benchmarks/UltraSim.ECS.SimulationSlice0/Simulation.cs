@@ -1032,6 +1032,9 @@ internal sealed class SimulationWorld : IDisposable
     internal readonly TierBindingBase[] Tiers;
     internal readonly ArchetypeHandle EffectArchetype;
     internal readonly ArchetypeHandle ItemArchetype;
+    internal readonly CompiledPrefabCatalog Content;
+    internal readonly PrefabHandle EffectPrefab;
+    internal readonly PrefabHandle ItemPrefab;
     internal readonly ReadWriteJobPlan<EffectIdentity, Lifetime> EffectLifetimePlan;
     internal readonly ReadReadWriteJobPlan<LogicalIdentity, Position, WorldItemState> ItemPlan;
     internal readonly ReadReadReadWriteJobPlan<LogicalIdentity, Needs, Health, Cooldown> DeathPlan;
@@ -1047,6 +1050,8 @@ internal sealed class SimulationWorld : IDisposable
     internal readonly LifecycleObserver PresentationLifecycle;
     internal readonly LifecycleObserver ReplicationLifecycle;
     internal readonly LifecycleObserver PersistenceLifecycle;
+    internal readonly double ContentCompileMicroseconds;
+    internal double BootstrapMicroseconds { get; private set; }
 
     private readonly ArchetypeTransition[] _toDead;
     private readonly ArchetypeTransition[] _toAlive;
@@ -1089,6 +1094,19 @@ internal sealed class SimulationWorld : IDisposable
 
         EffectArchetype = RegisterEffectArchetype(world, profile);
         ItemArchetype = RegisterItemArchetype(world, profile);
+        long contentCompileStarted = Stopwatch.GetTimestamp();
+        Content = CompileContent(world, profile);
+        ContentCompileMicroseconds = Stopwatch.GetElapsedTime(
+            contentCompileStarted, Stopwatch.GetTimestamp()).TotalMicroseconds;
+        EffectPrefab = Content.GetHandle(new PrefabKey("simulation/effects/temporary"));
+        ItemPrefab = Content.GetHandle(new PrefabKey("simulation/items/world-item"));
+        for (int tier = 0; tier < Tiers.Length; tier++)
+        {
+            Tiers[tier].AlivePrefab = Content.GetHandle(
+                new PrefabKey($"simulation/actors/tier-{tier}/alive"));
+            Tiers[tier].DeadPrefab = Content.GetHandle(
+                new PrefabKey($"simulation/actors/tier-{tier}/dead"));
+        }
         EffectLifetimePlan = world.PrepareReadWriteJob<EffectIdentity, Lifetime>();
         ItemPlan = world.PrepareReadReadWriteJob<LogicalIdentity, Position, WorldItemState>();
         DeathPlan = world.PrepareReadReadReadWriteJob<LogicalIdentity, Needs, Health, Cooldown>();
@@ -1113,7 +1131,7 @@ internal sealed class SimulationWorld : IDisposable
         int maximumSystems = 32;
         int structuralCommandsPerProducer = checked(
             profile.EffectSlots +
-            profile.EffectsSpawnedPerTick * 5 +
+            profile.EffectsSpawnedPerTick * 4 +
             profile.DamageOperations * 2 +
             64);
         var scheduler = new EcsSchedulerOptions(
@@ -1143,7 +1161,10 @@ internal sealed class SimulationWorld : IDisposable
         simulation.RegisterSystems();
         world.Seal();
         world.Initialize();
+        long bootstrapStarted = Stopwatch.GetTimestamp();
         simulation.Seed();
+        simulation.BootstrapMicroseconds = Stopwatch.GetElapsedTime(
+            bootstrapStarted, Stopwatch.GetTimestamp()).TotalMicroseconds;
         simulation.SetObserverCursorsFromNow();
         world.BeginRun();
         world.SchedulerRunMode = parallel ? SchedulerRunMode.Parallel : SchedulerRunMode.Serial;
@@ -1241,7 +1262,7 @@ internal sealed class SimulationWorld : IDisposable
                 parallelRowThreshold: 1,
                 minimumRowsPerPartition: 4),
             new EffectSpawnRuntime(
-                EffectArchetype, Profile, EffectGenerations, Counters));
+                EffectPrefab, Profile, EffectGenerations, Counters));
 
         World.RegisterReadReadWriteSystem<LogicalIdentity, Position, WorldItemState,
             ItemRuntime, ItemJob>(
@@ -1300,7 +1321,7 @@ internal sealed class SimulationWorld : IDisposable
             for (int local = 0; local < Profile.TierCounts[tier]; local++)
             {
                 int logicalId = actorIndex++;
-                if (!World.TryCreate(binding.Alive, out Entity entity))
+                if (!World.TryInstantiate(binding.AlivePrefab, out Entity entity))
                     throw new InvalidOperationException($"Actor creation failed at {logicalId}.");
                 ActorEntities[logicalId] = entity;
                 PresentationLifecycle.RegisterActor(entity, logicalId);
@@ -1312,7 +1333,7 @@ internal sealed class SimulationWorld : IDisposable
 
         for (int item = 0; item < Profile.ItemCount; item++)
         {
-            if (!World.TryCreate(ItemArchetype, out Entity entity))
+            if (!World.TryInstantiate(ItemPrefab, out Entity entity))
                 throw new InvalidOperationException($"Item creation failed at {item}.");
             ItemEntities[item] = entity;
             PresentationLifecycle.RegisterItem(entity, item);
@@ -1327,7 +1348,7 @@ internal sealed class SimulationWorld : IDisposable
         for (int slot = 0; slot < Profile.EffectSlots; slot++)
         {
             EffectGenerations[slot] = 1;
-            if (!World.TryCreate(EffectArchetype, out Entity entity))
+            if (!World.TryInstantiate(EffectPrefab, out Entity entity))
                 throw new InvalidOperationException($"Effect creation failed at {slot}.");
             PresentationLifecycle.RegisterEffect(entity, slot, 1);
             ReplicationLifecycle.RegisterEffect(entity, slot, 1);
@@ -1600,6 +1621,10 @@ internal sealed class SimulationWorld : IDisposable
             oracleSnapshot.Hash,
             Profile,
             World,
+            new ContentIntegrationMetrics(
+                ContentCompileMicroseconds,
+                BootstrapMicroseconds,
+                Content.GetSnapshot()),
             CaptureArchetypeMetrics(),
             _options.DeferredValidation);
     }
@@ -1683,6 +1708,58 @@ internal sealed class SimulationWorld : IDisposable
                 world.Schema, signature, ChunkLayoutOptions.KiB16, profile.ItemCount));
     }
 
+    private static CompiledPrefabCatalog CompileContent(EcsWorld world, SimulationProfile profile)
+    {
+        var content = new ContentCatalogBuilder(world.Schema);
+        DefineTier<Tier0Marker>(content, 0);
+        DefineTier<Tier1Marker>(content, 1);
+        DefineTier<Tier2Marker>(content, 2);
+        DefineTier<Tier3Marker>(content, 3);
+
+        PrefabBuilder effect = content.Define(new PrefabKey("simulation/effects/temporary"));
+        effect.DisplayName("Temporary simulation effect");
+        effect.With<EffectIdentity>();
+        effect.With<Position>();
+        effect.With<Velocity>();
+        effect.With(new Lifetime { Remaining = profile.EffectLifetime });
+
+        PrefabBuilder item = content.Define(new PrefabKey("simulation/items/world-item"));
+        item.DisplayName("World item");
+        item.With<LogicalIdentity>();
+        item.With<Position>();
+        item.With<WorldItemState>();
+
+        return content.Compile(
+            world,
+            new ContentCompilationOptions(ChunkLayoutOptions.KiB16, maximumChunksPerNewArchetype: 1));
+    }
+
+    private static void DefineTier<TMarker>(ContentCatalogBuilder content, int tier)
+        where TMarker : unmanaged, IComponent<TMarker>
+    {
+        PrefabBuilder alive = content.Define(new PrefabKey($"simulation/actors/tier-{tier}/alive"));
+        alive.DisplayName($"Tier {tier} actor");
+        alive.With<LogicalIdentity>();
+        alive.With<Position>();
+        alive.With<Velocity>();
+        alive.With<Needs>();
+        alive.With<Activity>();
+        alive.With<Health>();
+        alive.With<Cooldown>();
+        alive.With<Target>();
+        alive.With<SpatialCell>();
+        alive.With<TMarker>();
+
+        PrefabBuilder dead = content.Define(new PrefabKey($"simulation/actors/tier-{tier}/dead"));
+        dead.DisplayName($"Dead tier {tier} actor");
+        dead.With<LogicalIdentity>();
+        dead.With<Position>();
+        dead.With<Health>();
+        dead.With<Cooldown>();
+        dead.With<DeadState>();
+        dead.With<TMarker>();
+    }
+
     internal void SetTierTransitions(int tier, ArchetypeHandle alive, ArchetypeHandle dead)
     {
         _toDead[tier] = World.PrepareTransition(alive, dead);
@@ -1718,6 +1795,8 @@ internal abstract class TierBindingBase
     internal int Tier { get; }
     internal ArchetypeHandle Alive { get; set; }
     internal ArchetypeHandle Dead { get; set; }
+    internal PrefabHandle AlivePrefab { get; set; }
+    internal PrefabHandle DeadPrefab { get; set; }
     internal ComponentId MarkerId { get; set; }
     internal abstract void RegisterSystems();
 }
@@ -2534,20 +2613,20 @@ internal struct EffectLifetimeJob : IScheduledReadWriteChunkJob<EffectIdentity, 
 
 internal sealed class EffectSpawnRuntime : IRangeSystemRuntime<EffectSpawnJob>
 {
-    private readonly ArchetypeHandle _archetype;
+    private readonly PrefabHandle _prefab;
     private readonly SimulationProfile _profile;
     private readonly int[] _generations;
     private readonly StructuralCounters _counters;
 
-    internal EffectSpawnRuntime(ArchetypeHandle archetype, SimulationProfile profile,
+    internal EffectSpawnRuntime(PrefabHandle prefab, SimulationProfile profile,
         int[] generations, StructuralCounters counters) =>
-        (_archetype, _profile, _generations, _counters) =
-        (archetype, profile, generations, counters);
+        (_prefab, _profile, _generations, _counters) =
+        (prefab, profile, generations, counters);
 
     public int GetRangeCount(in SystemPrepareContext context) => _profile.EffectsSpawnedPerTick;
 
     public EffectSpawnJob Prepare(in SystemPrepareContext context) =>
-        new(_archetype, _profile.EffectSlots, _profile.EffectLifetime,
+        new(_prefab, _profile.EffectSlots, _profile.EffectLifetime,
             _profile.EffectsSpawnedPerTick, _generations);
 
     public void Complete(in SystemCompleteContext context, ReadOnlySpan<EffectSpawnJob> participantResults)
@@ -2562,7 +2641,7 @@ internal sealed class EffectSpawnRuntime : IRangeSystemRuntime<EffectSpawnJob>
 
 internal struct EffectSpawnJob : IRangeJob
 {
-    private readonly ArchetypeHandle _archetype;
+    private readonly PrefabHandle _prefab;
     private readonly int _slots;
     private readonly int _lifetime;
     private readonly int _spawnCount;
@@ -2570,10 +2649,10 @@ internal struct EffectSpawnJob : IRangeJob
     internal int Created;
     internal int Commands;
 
-    internal EffectSpawnJob(ArchetypeHandle archetype, int slots, int lifetime,
+    internal EffectSpawnJob(PrefabHandle prefab, int slots, int lifetime,
         int spawnCount, int[] generations) =>
-        (_archetype, _slots, _lifetime, _spawnCount, _generations, Created, Commands) =
-        (archetype, slots, lifetime, spawnCount, generations, 0, 0);
+        (_prefab, _slots, _lifetime, _spawnCount, _generations, Created, Commands) =
+        (prefab, slots, lifetime, spawnCount, generations, 0, 0);
 
     public void Execute(in SystemJobContext context, int start, int count)
     {
@@ -2586,18 +2665,17 @@ internal struct EffectSpawnJob : IRangeJob
             if ((uint)slot >= unchecked((uint)_slots))
                 throw new InvalidOperationException("Effect slot ring calculation escaped capacity.");
             int generation = ++_generations[slot];
-            DeferredEntity deferred = context.Commands.CreateDefault(_archetype);
+            DeferredEntity deferred = context.Commands.Instantiate(_prefab);
             if (!context.Commands.TryAdd(deferred, new EffectIdentity { Slot = slot, Generation = generation }) ||
                 !context.Commands.TryAdd(deferred, new Position
                 {
                     X = SimulationMath.EffectPosition(slot, generation, context.Tick).X,
                     Y = SimulationMath.EffectPosition(slot, generation, context.Tick).Y,
                 }) ||
-                !context.Commands.TryAdd(deferred, SimulationMath.EffectVelocity(slot, generation)) ||
-                !context.Commands.TryAdd(deferred, new Lifetime { Remaining = _lifetime }))
+                !context.Commands.TryAdd(deferred, SimulationMath.EffectVelocity(slot, generation)))
                 throw new InvalidOperationException("Effect typed replacement Add was rejected.");
             Created++;
-            Commands += 5;
+            Commands += 4;
         }
     }
 }
@@ -2715,6 +2793,7 @@ internal sealed record RunMetrics(
     TimingMetrics Timing,
     AllocationMetrics Allocations,
     MemoryMetrics Memory,
+    ContentIntegrationMetrics Content,
     SchedulerMetrics Scheduler,
     IReadOnlyList<SystemMetrics> Systems,
     RandomOperationMetrics RandomOperations,
@@ -2767,6 +2846,7 @@ internal sealed record RunMetrics(
         ulong oracleHash,
         SimulationProfile profile,
         EcsWorld world,
+        ContentIntegrationMetrics content,
         IReadOnlyList<ArchetypeMetrics> archetypes,
         bool deferredValidation)
     {
@@ -2820,6 +2900,7 @@ internal sealed record RunMetrics(
                 profile.TotalCapacity == 0
                     ? 0d
                     : reserved.TotalKnownPayloadBytes / (double)profile.TotalCapacity),
+            content,
             new SchedulerMetrics(
                 after.BackgroundWorkerCount,
                 after.ExecutionConcurrency,
@@ -2995,6 +3076,11 @@ internal sealed record MemoryMetrics(
     long ManagedFragmentedBytes,
     long KnownEcsReservedBytes,
     double KnownEcsBytesPerCapacitySlot);
+
+internal sealed record ContentIntegrationMetrics(
+    double CompileMicroseconds,
+    double BootstrapMicroseconds,
+    CompiledContentSnapshot Catalog);
 
 internal sealed record SchedulerMetrics(
     int BackgroundWorkers,

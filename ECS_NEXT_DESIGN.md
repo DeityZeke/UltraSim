@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, the ECS 3.1.2 proof-hardened bounded system scheduler, and ECS 3.2.0 lifecycle publication/public generated-query filters implemented through 2026-08-12
+Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, the ECS 3.1.2 proof-hardened bounded system scheduler, ECS 3.2.0 lifecycle publication/public generated-query filters, and ECS 3.3.0 compiled content authoring implemented through 2026-08-12
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -118,6 +118,14 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   seal-compiled route machinery, consistently generated for every public job
   family and handwritten parity surfaces; storage-free tags select topology
   without becoming data columns, scheduler hazards, or hot row predicates;
+- ECS 3.3.0 compiled content authoring: explicit RunUO-style `BaseClass` and
+  concrete Object Script definitions plus direct-DOD definitions compile before
+  `Seal` into one deterministic world-local prefab catalog. Stable `PrefabKey`
+  identity is distinct from a 12-byte `PrefabHandle`; canonical membership
+  deduplicates to ordinary archetypes while defaults and display metadata do not
+  fragment storage. Immediate and deferred instantiation reuse existing entity,
+  structural, change, lifecycle, hole-reuse, and scheduler-lane mechanics with
+  zero warmed allocation and no runtime authoring hierarchy;
 - an initial dense change-tracking substrate: an eight-byte world-local `ChangeVersion` reserves zero for never-written state, explicitly wraps maximum to one, and uses half-range changed-since ordering; every archetype store preallocates a column-major 64-bit stamp for each physical component column and possible chunk, reports its exact metadata bytes, and clears stamps when an emptied chunk is recycled;
 - conservative stamping for successful scalar value/enable writes, single-component writable visitors, and every generated writable family; one lazily acquired version is shared across one visit's chunks and writable columns, filtered visits stamp only chunks with matching rows, stamps precede visitor dispatch so partial writes followed by exceptions remain visible, and read-only families perform no version work;
 - a 16-byte world-bound `ChangeCursor` value with beginning/now factories and copy-to-fork independent-consumer semantics, plus a bounded seal-compiled changed-read plan that prebinds one data column and one same-or-different tracked column across all matching archetypes, rejects unchanged chunks before component binding, composes with existing structural/enable-state filters, and acknowledges the captured observation boundary only after successful visitor completion;
@@ -1452,7 +1460,7 @@ The current benchmarks already show that parallel execution helps some heavy wor
 
 #### Intended RunUO-style authoring model
 
-The prefab layer is deliberately an object-oriented authoring facade over an ECS runtime. It is not merely a dictionary of serialized component blobs, and it is not intended to turn runtime entities into managed objects.
+The prefab layer is deliberately an object-oriented authoring facade over an ECS runtime. It is not merely a dictionary of serialized component blobs, and it is not intended to turn runtime entities into managed objects. ECS 3.3.0 implements the narrow compiled constant-default slice described here; the broader Current/V2 inventory below remains the compatibility target rather than a claim that every listed form is already present in V3.
 
 The conceptual mapping is:
 
@@ -1545,7 +1553,18 @@ Current features:
 - author-editable C# scripts compiled and discovered through the scripting host;
 - applied components marked dirty.
 
-Next requirements:
+ECS 3.3.0 implemented subset:
+
+- explicit monotonic `BaseClass` inheritance and concrete Object Scripts;
+- stable canonical `PrefabKey` plus deterministic world-local numeric handles;
+- one immutable catalog with canonical signature/archetype deduplication;
+- direct-DOD definitions compiling to the same runtime entry format;
+- prebound constant default bytes with no reflection/callback at spawn;
+- immediate and scheduler/deferred one-command spawning;
+- ordinary change/lifecycle semantics and Native/Pinned-equivalent coverage;
+- post-Seal catalog accounting and zero warmed spawn allocation.
+
+Remaining Next requirements:
 
 - retain typed, template, data-driven, and script-authored prefab capabilities;
 - explicitly preserve the RunUO-style class/inheritance authoring facade;
@@ -1572,7 +1591,8 @@ Next requirements:
 - atomic cleanup on scalar failure;
 - defined batch transaction policy on failure;
 - chunk versions/lifecycle events updated once per batch where possible;
-- optional prefab inheritance/composition resolved entirely during import, not spawn.
+- richer traits/fragments and any later composition remain cold/import-time only,
+  never spawn-time inheritance.
 
 Content generation and reload requirements:
 
@@ -1949,17 +1969,17 @@ The repository-wide design rule is explicit: ECS, Network, UI, and Inventory rem
 
 `Server` and `Client` are also engine-agnostic application runtimes, not aliases for Godot projects:
 
-- `Server/Core`, `Server/Hosting`, `Server/Network`, gameplay, persistence, scripting, admission, accounting, and other server services compose the actual server;
-- `Client/Core`, `Client/Network`, prediction, interpolation, projected state, content/cache, and neutral UI services compose the actual client;
+- `Server/Core`, `Server/Hosting`, `Server/Projection`, `Server/Network`, gameplay, persistence, scripting, admission, accounting, and other server services compose the actual server;
+- `Client/Core`, `Client/Local`, `Client/Network`, prediction, interpolation, projected state, content/cache, and neutral UI services compose the actual client;
 - `Server/_Console` is the RunUO-style command-line entry point over the shared server lifecycle/control surface;
 - `Server/_Headless` is the silent dedicated, internal, automation, and embedded/background single-player entry point over that same server runtime;
 - `Server/_Godot` is a Godot-presented operator terminal with buttons, settings, logs, metrics, and inspection views over the same typed control surface;
 - `Client/_Godot` is the graphical presentation/input/audio/resource wrapper over the same engine-neutral client runtime;
 - none of those wrappers owns a separate ECS world model, scheduler, prefab implementation, persistence path, gameplay path, or network protocol.
 
-Single-player remains server-authoritative. The client starts or attaches to the ordinary silent `_Headless` composition, waits for explicit readiness, and connects its normal session driver to localhost. It must traverse the normal handshake, admission, input, ECS authority, replication, AOI, persistence binding, disconnect, and cleanup paths. The client cannot directly read or mutate the server world, share entity/archetype storage, call server gameplay objects instead of sending input, or substitute a local projected-world mutation for network replication.
+Single-player remains server-authoritative, but authority semantics are not the same thing as wire-protocol semantics. The default trusted in-process composition starts the ordinary silent `_Headless` authority, waits for explicit readiness, and attaches `Client/Core` through the bounded local semantic link defined by `NETWORK_NEXT_DESIGN.md`. Logical input still crosses the authority ingress barrier; output still crosses ECS change/lifecycle capture, recipient interest, client projection, and the client apply barrier. The client cannot directly read or mutate the server world, share entity/archetype storage, call server gameplay objects instead of submitting input, retain live ECS spans, or substitute a local projected-world mutation for authoritative results.
 
-The in-memory network loopback remains a deterministic test/benchmark transport. Production-equivalence single-player and wrapper-parity tests should use the real localhost protocol. An optional embedded transport optimization is acceptable only if it preserves identical serialization, lanes, queues, ownership, session, authority, and apply-barrier semantics and passes the same trace suite; it cannot become an undocumented alternate gameplay architecture.
+Offline-direct is above the Network wire layer and deliberately omits serialization, packetization, crypto, ACK/retransmit, congestion, and socket state. It is not an `INetworkTransport`. Full protocol loopback remains the deterministic packet/link test path, and real localhost UDP remains the production-network-equivalence path. Any child-process or socket composition uses the complete production protocol. Tests normalize the shared authority/client result across offline-direct, protocol-loopback, and localhost UDP while separately validating the remote-only security/session/delivery semantics.
 
 ECS host integration therefore exposes neutral lifecycle, tick, capture, persistence, inspection, and command-barrier contracts. Wrappers may start/pump/observe these contracts, but Godot frame callbacks, console reads, or headless process loops do not redefine ECS stage order or provide a second mutation route.
 
@@ -1969,11 +1989,12 @@ Tests should:
 - reject Network, UI, Inventory, Godot, console-I/O, CLI, wrapper, account, or script-host dependencies in the ECS kernel;
 - prove that `_Headless`, `_Console`, and server `_Godot` adapters produce the same canonical ECS/world result for identical configuration and deterministic commands;
 - prove that console commands and Godot buttons reach ECS only through the same typed command/control and safe-barrier surfaces;
-- run single-player startup, localhost connect, entity spawn, movement, save, disconnect, and shutdown without any direct client-to-server ECS reference;
+- run offline-direct single-player startup, local-recipient attach, entity spawn, movement, save, detach, and shutdown without any direct client-to-server ECS reference;
+- run the equivalent protocol-loopback and localhost-UDP traces, including their full handshake/admission/session/baseline/disconnect semantics;
 - inject local bind/startup failure, server crash, cancellation, reconnect, and save-on-stop and verify world/worker/arena disposal;
 - compare real localhost UDP with loopback semantic traces where both declare equivalent delivery behavior.
 
-A performance shortcut that introduces a Network, UI, Inventory, Godot, wrapper, account, or script-host dependency into the ECS kernel is a design failure even if its microbenchmark is faster. A single-player shortcut that bypasses the server-authoritative/networked boundary is likewise a design failure. Optimize the neutral handoff instead.
+A performance shortcut that introduces a Network, UI, Inventory, Godot, wrapper, account, or script-host dependency into the ECS kernel is a design failure even if its microbenchmark is faster. A single-player shortcut that bypasses the authoritative/client-projection boundary is likewise a design failure. Optimize the neutral captured handoff; do not force that handoff through a wire protocol when producer and consumer are trusted in-process objects.
 
 ### 5.8 Script modules and runtime content groups
 
@@ -2489,6 +2510,7 @@ The outer integration topology remains one portable runtime with thin entry poin
 Server/
   Core/                        # Engine-agnostic application runtime
   Hosting/                     # Shared lifecycle/fixed-step/control surface
+  Projection/                  # Shared ECS capture/interest/local semantic bridge
   Network/                     # Engine-agnostic ECS/network bridge
   _Console/                    # RunUO-style command-line wrapper
   _Headless/                   # Silent dedicated/internal/embedded wrapper
@@ -2496,11 +2518,12 @@ Server/
 
 Client/
   Core/                        # Engine-agnostic projected client runtime
+  Local/                       # Trusted in-process semantic adapter
   Network/                     # Engine-agnostic client/network bridge
   _Godot/                      # Presentation/input/audio/resource wrapper
 ```
 
-ECS Next plugs into the portable `Server`/`Client` layers. It does not grow separate Console, Headless, Godot, or single-player ECS implementations. Single-player composes the ordinary `_Headless` server plus ordinary client and connects them through the normal localhost network/session boundary.
+ECS Next plugs into the portable `Server`/`Client` layers. It does not grow separate Console, Headless, Godot, or single-player ECS implementations. Single-player composes the ordinary `_Headless` authority plus ordinary `Client/Core`; trusted in-process play normally uses the shared semantic capture/apply boundary, while protocol loopback and localhost UDP exercise the complete Network path explicitly.
 
 The confusing existing use of “NewBenchmarks” for V2 Current should be resolved in report labels before three-way comparisons begin. Renaming the frozen V2 project is unnecessary; stable report metadata, generation labels, semantic/profile hashes, and explicit executable paths are mandatory.
 
@@ -2890,7 +2913,8 @@ Deliverables:
 - engine-agnostic `Server/Core`/`Server/Hosting` runtime snapshot and control adapters;
 - engine-agnostic `Client/Core` projection/apply adapters;
 - thin `_Console`, `_Headless`, server `_Godot`, and client `_Godot` composition adapters over those shared surfaces;
-- embedded/background `_Headless` single-player startup and normal localhost client-session composition;
+- embedded/background `_Headless` single-player startup and offline-direct client-projection composition;
+- listen-host composition with the host client on the local semantic path and remote clients on secure Network runtime paths;
 - movement world backend selection.
 
 Tests:
@@ -2906,7 +2930,8 @@ Tests:
 - project-reference and forbidden Godot/wrapper dependency tests;
 - deterministic canonical-world parity across `_Headless`, `_Console`, and server `_Godot` wrappers;
 - proof that console commands and Godot controls use the same typed safe-barrier command path;
-- single-player localhost spawn/movement/save/disconnect/shutdown without shared server/client ECS storage or direct calls;
+- single-player offline-direct spawn/movement/save/detach/shutdown without shared server/client ECS storage or direct calls;
+- normalized semantic parity across offline-direct, protocol-loopback, and localhost UDP;
 - local startup failure/crash/cancellation/reconnect disposal tests.
 
 Benchmarks:
@@ -2919,7 +2944,7 @@ Benchmarks:
 - Current and Next server backends under identical traffic replay;
 - engine-agnostic runtime alone versus `_Headless`, `_Console`, and `_Godot` wrapper overhead;
 - embedded/background versus separate-process local server resource contention;
-- real localhost network versus loopback transport with semantic parity labels.
+- offline-direct versus protocol-loopback versus real localhost UDP with semantic parity and cost decomposition labels.
 
 Gate:
 
@@ -2927,7 +2952,7 @@ Gate:
 - zero ECS-side publication allocation within capacity;
 - Next matches or beats Current end-to-end latency and allocation targets;
 - wrapper choice does not change authoritative ECS semantics;
-- single-player remains an ordinary server-authoritative networked composition.
+- single-player remains an ordinary server-authoritative/client-projection composition; a wire session is required only for an actual network topology.
 
 ### Phase 9: cutover and deletion decision
 
@@ -3030,36 +3055,36 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 
 ### Prefabs and scripting
 
-- [ ] RunUO-style class authoring facade
-- [ ] Inherited wide archetype/base classes
+- [x] RunUO-style class authoring facade (compiled constant-default 3.3 slice)
+- [x] Inherited wide archetype/base classes (explicit additive `base.Define`)
 - [ ] Reusable shape fragments/traits
-- [ ] Concrete prefab-to-archetype binding
+- [x] Concrete prefab-to-archetype binding with canonical signature dedupe
 - [ ] Allocation-free transient item/mobile instance facade
 - [ ] Tracked instance-style set/add/remove operations
 - [ ] Prebound rare script-event handlers
 - [ ] High-volume behavior lowering to batch systems
-- [ ] Typed prefabs
-- [ ] Template prefabs
-- [ ] Resolved/bound prefabs
+- [x] Typed C# Object Script and direct-DOD prefab definitions
+- [x] Immutable constant-default templates
+- [x] Resolved/bound runtime prefab entries and physical default columns
 - [ ] Data-driven prefabs
-- [ ] Script prefab catalog
+- [x] Explicit compiled C# Object Script catalog (runtime script host deferred)
 - [ ] Core and script-compile-time generated component/prefab metadata
 - [ ] Unified built-in/script/data/plugin provenance and canonical keys
 - [ ] Runtime content-group ownership
 - [ ] Transactional content-group mount/unmount
 - [ ] Data-prefab revisions, edit leases, atomic publication, and diagnostics
-- [ ] Immediate spawn
-- [ ] Deferred spawn
+- [x] Immediate spawn
+- [x] Deferred one-command scheduler/main-arena spawn
 - [ ] True bulk spawn
-- [ ] Numeric hot-path prefab IDs
-- [ ] Immutable content generations
+- [x] Numeric hot-path prefab IDs in one immutable bound catalog
+- [ ] Replaceable immutable content generations / hot publication
 - [ ] Atomic script reload/rollback
 - [ ] Prefab removal semantics
 - [ ] Existing-entity policy after prefab edit/removal/unmount
 - [ ] Base-shape change invalidation/migration policy
 - [ ] Typed allocation-free per-spawn value generators
 - [ ] Deterministic spawn RNG
-- [ ] Spawn rollback/failure policy
+- [x] Scalar capacity failure is atomic; unexpected post-proof failure uses terminal world fault
 
 ### Persistence
 
@@ -3096,8 +3121,10 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 - [ ] Immutable network publish views
 - [ ] Engine-agnostic `Server/Core` ECS integration
 - [ ] Engine-agnostic `Server/Hosting` lifecycle/control integration
-- [ ] Engine-agnostic `Server/Network` capture integration
+- [ ] Engine-agnostic `Server/Projection` capture/interest integration
+- [ ] Engine-agnostic `Server/Network` remote delivery integration
 - [ ] Engine-agnostic `Client/Core` projected-world integration
+- [ ] Engine-agnostic `Client/Local` semantic apply integration
 - [ ] Engine-agnostic `Client/Network` apply integration
 - [ ] Thin RunUO-style `_Console` adapter
 - [ ] Thin silent dedicated/internal/embedded `_Headless` adapter
@@ -3105,8 +3132,10 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 - [ ] Thin client `_Godot` presentation adapter
 - [ ] No wrapper-specific ECS implementation or mutation path
 - [ ] Canonical-world parity across server wrappers
-- [ ] Single-player `_Headless` startup/readiness/localhost auto-connect
-- [ ] Single-player normal handshake/authority/replication/persistence/cleanup path
+- [ ] Single-player `_Headless` startup/readiness/offline-direct recipient attach
+- [ ] Single-player authority/capture/interest/projection/persistence/cleanup path
+- [ ] Protocol-loopback and localhost-UDP full handshake/session/replication path
+- [ ] Listen-host local-direct plus secure-remote composition
 - [ ] No direct client/server ECS storage or gameplay-call bypass
 - [ ] Real localhost and loopback semantic trace comparison
 - [ ] Wrapper and embedded-versus-process overhead benchmarks
@@ -3138,7 +3167,8 @@ Next is not done because it has a fast query demo. It is done when:
 - all required server integrations run against Next;
 - the engine-agnostic server and client runtimes run against Next without Godot, console, headless-entry-point, or wrapper dependencies entering the ECS kernel;
 - `_Console`, `_Headless`, and both `_Godot` entry points remain thin adapters over shared lifecycle, control, capture, and apply surfaces rather than alternative ECS implementations;
-- single-player starts or attaches to the ordinary silent `_Headless` server and connects the ordinary client over localhost without sharing authoritative ECS storage or bypassing network/session semantics;
+- single-player starts or attaches to the ordinary silent `_Headless` authority and attaches the ordinary client through offline-direct without sharing authoritative ECS storage or bypassing input/capture/interest/apply semantics;
+- protocol-loopback and localhost UDP execute the full network/session contract and converge with offline-direct on normalized authority/client state where profiles overlap;
 - wrapper parity tests produce identical canonical world results for identical deterministic inputs;
 - old, current, and new benchmark runners remain directly comparable;
 - hot ticks allocate zero managed ECS bytes after sealing;
@@ -3192,7 +3222,7 @@ The documents reinforce and clarify these verified Current behaviors:
 9. **Raw read-only ECS inspection exists today.** The server facade adds access checks. Generated component admin metadata, typed edits, rich ECS control panels, telemetry batching, and live builders are mostly planned work, not Current kernel features.
 10. **Spawner primitives exist, but execution does not.** ECS components/runtime state and a stable spawn-set hash registry are present. Spawn execution, package reload, smart proximity activation, editing, and persistence remain planned features.
 11. **The actual server is engine-agnostic.** `Server/Core`, `Server/Hosting`, `Server/Network`, and the other portable server services form the implementation. `_Console` is the RunUO-style command-line shell, `_Headless` is the silent dedicated/internal/embedded shell, and server `_Godot` is an operator terminal/control presentation over the same runtime.
-12. **The actual client is engine-agnostic and single-player remains networked.** `Client/Core` and `Client/Network` own the neutral client runtime. Client `_Godot` owns presentation. Local play starts or attaches a silent `_Headless` server and connects the normal client session over localhost rather than sharing the authoritative ECS or calling server gameplay directly.
+12. **The actual client is engine-agnostic and single-player preserves authority/projection separation.** `Client/Core` owns neutral projected state; `Client/Network` owns remote protocol integration; client `_Godot` owns presentation. Trusted in-process play attaches `Client/Core` to a silent `_Headless` authority through the bounded semantic link rather than sharing authoritative ECS or calling server gameplay directly. Protocol loopback and localhost UDP remain explicit full-network profiles.
 
 ### 13.3 Planned features that materially affect the rebuild
 
@@ -3212,7 +3242,8 @@ The Markdown plans revealed or strengthened requirements that were not explicit 
 - sampled/batched admin telemetry rather than per-system/per-tick UI publication;
 - explicit portable server/client runtime boundaries below `_Console`, `_Headless`, and `_Godot` composition roots;
 - one shared typed lifecycle/control/capture/apply surface across wrappers;
-- single-player `_Headless` readiness and normal localhost session composition with no direct ECS/gameplay bypass;
+- single-player `_Headless` readiness and offline-direct projection composition with no direct ECS/gameplay bypass;
+- protocol-loopback/localhost full-network equivalence plus listen-host mixed-recipient composition;
 - wrapper-parity, forbidden-dependency, local failure/cleanup, and embedded-versus-process resource tests;
 - integration benchmarks that reproduce the widened network workload, content lifecycle, data-prefab publication, spawner waves, identity remap, and live inspector cost.
 

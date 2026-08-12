@@ -7,6 +7,7 @@ using UltraSim.ECS;
 EcsPrimitiveTests.RunAll();
 SchedulerPrimitiveTests.RunAll();
 LifecycleAndPublicFilterTests.RunAll();
+ContentAuthoringTests.RunAll();
 
 internal static class EcsPrimitiveTests
 {

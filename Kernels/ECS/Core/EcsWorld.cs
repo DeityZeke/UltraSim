@@ -32,9 +32,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private Exception? _faultException;
     private bool _hasSealed;
     private bool _isExecutingScope;
-    // Optional observation state is deliberately last so lifecycle-disabled
-    // worlds retain the established offsets of hot scheduler/world fields.
+    // Cold optional integration state is deliberately last so disabled worlds
+    // retain the established offsets of hot scheduler/world fields.
     private readonly LifecycleHistory? _lifecycleHistory;
+    private CompiledPrefabCatalog? _contentCatalog;
 
     internal EcsWorld(
         ComponentSchema schema,
@@ -139,6 +140,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             mainStructuralCommandBytes,
             schedulerBytes,
             LifecycleReservedBytes,
+            _contentCatalog?.GetSnapshot().TotalKnownPayloadBytes ?? 0,
             nativePayload);
     }
 
@@ -149,6 +151,21 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             ThrowIfDisposed();
             return _archetypes.Count;
         }
+    }
+
+    internal int MaximumArchetypes => _archetypes.MaximumArchetypes;
+
+    internal CompiledPrefabCatalog? ContentCatalog => _contentCatalog;
+
+    internal void BindContentCatalog(CompiledPrefabCatalog catalog)
+    {
+        EnsureCreated();
+        ArgumentNullException.ThrowIfNull(catalog);
+        if (catalog.WorldId != Id)
+            throw new ArgumentException("The compiled content catalog belongs to a different world.", nameof(catalog));
+        if (_contentCatalog is not null)
+            throw new InvalidOperationException("This world already owns a compiled content catalog.");
+        _contentCatalog = catalog;
     }
 
     internal int QueryPlanCount
@@ -838,6 +855,38 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         return true;
     }
 
+    internal bool TryInstantiatePrefab(uint prefabId, ArchetypeId expectedArchetypeId, out Entity entity)
+    {
+        EnsureRuntimeMutationAllowed();
+        CompiledPrefabCatalog catalog = GetContentCatalog();
+        ref readonly CompiledPrefabEntry prefab = ref catalog.GetEntry(prefabId);
+        if (prefab.ArchetypeId != expectedArchetypeId)
+            throw new ArgumentException("The prefab command's archetype binding does not match its compiled catalog entry.");
+        if (!TryCreateDefaultCore(prefab.ArchetypeId, out entity, out EntityLocation location))
+            return false;
+        ApplyPrefabDefaults(catalog, prefab, location);
+        PublishCreated(entity);
+        return true;
+    }
+
+    internal bool TryInstantiatePrefabInTemporaryHole(
+        uint prefabId,
+        ArchetypeId expectedArchetypeId,
+        ChunkRow row,
+        out Entity entity)
+    {
+        EnsureRuntimeMutationAllowed();
+        CompiledPrefabCatalog catalog = GetContentCatalog();
+        ref readonly CompiledPrefabEntry prefab = ref catalog.GetEntry(prefabId);
+        if (prefab.ArchetypeId != expectedArchetypeId)
+            throw new ArgumentException("The prefab command's archetype binding does not match its compiled catalog entry.");
+        if (!TryCreateDefaultInTemporaryHoleCore(prefab.ArchetypeId, row, out entity, out EntityLocation location))
+            return false;
+        ApplyPrefabDefaults(catalog, prefab, location);
+        PublishCreated(entity);
+        return true;
+    }
+
     /// <summary>Creates directly into a row reserved by this structural barrier.</summary>
     internal bool TryCreateDefaultInTemporaryHole(
         ArchetypeId archetypeId,
@@ -845,36 +894,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         out Entity entity)
     {
         EnsureRuntimeMutationAllowed();
-        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
-        if (!_entities.TryAllocate(out entity))
-        {
-            entity = Entity.Null;
+        if (!TryCreateDefaultInTemporaryHoleCore(archetypeId, row, out entity, out _))
             return false;
-        }
-
-        if (!storage.Store.TryFillTemporaryHole(row, entity.Index))
-        {
-            if (!_entities.TryFree(entity))
-                ThrowWorldInvariant("A failed temporary-hole entity could not be returned.");
-            entity = Entity.Null;
-            ThrowWorldInvariant("A validated temporary hole rejected publication.");
-        }
-
-        var location = new EntityLocation(archetypeId, row);
-        if (_entities.TryBindLocation(entity, location))
-        {
-            PublishCreated(entity);
-            return true;
-        }
-
-        if (!storage.Store.TryMarkTemporaryHole(row, entity.Index) ||
-            !_entities.TryFree(entity))
-        {
-            ThrowWorldInvariant("Temporary-hole creation rollback failed.");
-        }
-        entity = Entity.Null;
-        ThrowWorldInvariant("A new temporary-hole entity rejected its first location.");
-        return false;
+        PublishCreated(entity);
+        return true;
     }
 
     internal bool TryCreateInitialized<T>(
@@ -1933,6 +1956,64 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         ThrowWorldInvariant("A newly allocated entity rejected its first location publication.");
         return false;
     }
+
+    private bool TryCreateDefaultInTemporaryHoleCore(
+        ArchetypeId archetypeId,
+        ChunkRow row,
+        out Entity entity,
+        out EntityLocation location)
+    {
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
+        if (!_entities.TryAllocate(out entity))
+        {
+            entity = Entity.Null;
+            location = EntityLocation.Invalid;
+            return false;
+        }
+
+        if (!storage.Store.TryFillTemporaryHole(row, entity.Index))
+        {
+            if (!_entities.TryFree(entity))
+                ThrowWorldInvariant("A failed temporary-hole entity could not be returned.");
+            entity = Entity.Null;
+            location = EntityLocation.Invalid;
+            ThrowWorldInvariant("A validated temporary hole rejected publication.");
+        }
+
+        location = new EntityLocation(archetypeId, row);
+        if (_entities.TryBindLocation(entity, location))
+            return true;
+
+        if (!storage.Store.TryMarkTemporaryHole(row, entity.Index) ||
+            !_entities.TryFree(entity))
+        {
+            ThrowWorldInvariant("Temporary-hole creation rollback failed.");
+        }
+        entity = Entity.Null;
+        location = EntityLocation.Invalid;
+        ThrowWorldInvariant("A new temporary-hole entity rejected its first location.");
+        return false;
+    }
+
+    private void ApplyPrefabDefaults(
+        CompiledPrefabCatalog catalog,
+        in CompiledPrefabEntry prefab,
+        EntityLocation location)
+    {
+        ArchetypeStorage<TArena> storage = _archetypes.GetStorage(prefab.ArchetypeId);
+        ReadOnlySpan<PrefabDefaultDescriptor> descriptors = catalog.GetDescriptors(prefab);
+        for (int index = 0; index < descriptors.Length; index++)
+        {
+            ref readonly PrefabDefaultDescriptor descriptor = ref descriptors[index];
+            storage.Store.WriteBoundComponentBytes(
+                location.ChunkRow,
+                descriptor.ColumnIndex,
+                catalog.GetDefaultBytes(descriptor));
+        }
+    }
+
+    private CompiledPrefabCatalog GetContentCatalog() => _contentCatalog ??
+        throw new InvalidOperationException("This world has no compiled content catalog.");
 
     internal bool TryTransition(
         Entity entity,

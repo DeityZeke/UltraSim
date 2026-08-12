@@ -1,8 +1,8 @@
 # ECS V2/V3 Semantic Comparison Adapter
 
 Status: executable Current/Next baseline, protocol
-`ecs-v2-v3-semantic-comparison-v1`, ECS 3.1.1 scheduler-hardening checkpoint captured
-2026-08-11
+`ecs-v2-v3-semantic-comparison-v1`, ECS 3.3.0 compiled-content checkpoint captured
+2026-08-12
 
 This adapter compares the frozen V2 Current ECS with the root V3 Next ECS only
 where both can perform the same useful work and reach the same normalized final
@@ -72,7 +72,7 @@ accounting rather than reusing that claim.
 ## Current coverage
 
 The executable matrix uses 1,000, 10,000, and 50,000 entities and currently
-contains 102 comparable cross-generation rows:
+contains 103 comparable cross-generation rows:
 
 - checked random Position read and tracked write;
 - V3 callback-bounded prepared read/write jobs against the closest V2 path;
@@ -91,9 +91,11 @@ contains 102 comparable cross-generation rows:
 - unchanged change polling;
 - ten-percent and all-row Scalar write/changed-entity collection.
 - typed Add payload publication.
+- provisional resolved constant-default prefab spawn through each generation's
+  native runtime representation.
 
-Ten parity rows remain explicitly unsupported in the joined report. They cover
-prefab, persistence, and lifecycle streams, plus semantics that V2 cannot
+Nine parity rows remain explicitly unsupported in the joined report. They cover
+persistence and lifecycle streams, plus semantics that V2 cannot
 reproduce such as independent change cursors, multi-watch any/all queries,
 enable-bit row filters, same-barrier deferred tokens, and fixed-capacity
 structural failure.
@@ -547,3 +549,24 @@ focused control then measured three 3.2 runs at `0.573-0.627 ns/row` and the cle
 3.1.2 worktree at `0.653-0.657 ns/row`. Serial scheduler and parallel RangeJob
 controls remained stable. The apparent saved-baseline movement is therefore not
 attributed to the disabled lifecycle/filter code path.
+
+## 3.3.0 compiled-content regression gate
+
+ECS 3.3.0 admits one honest, provisional prefab row instead of preserving the
+stale “V3 not implemented” marker. Each generation immediately instantiates
+10,000 Position entities through its native resolved runtime prefab form and
+must produce exactly `(42,43)` for every row. Authoring compilation and the
+generations' intentionally different dirty/lifecycle publication semantics are
+outside the normalized timed contract.
+
+| Scenario | V2 mean / p95 ns/entity | V3 mean / p95 ns/entity | V2 / V3 allocation per 10K | Canonical |
+| --- | ---: | ---: | ---: | --- |
+| constant-default prefab spawn | 68.70 / 70.92 | 77.44 / 80.24 | 3,073,280 / 0 B | equal |
+
+The complete catalog now has 103 comparable rows, nine unsupported rows, zero
+canonical mismatches, and zero timed V3 allocation in 103/103 rows. The one
+descriptor mismatch reported when comparing directly with the immutable 3.2
+artifact is expected: this scenario changed from unsupported to admitted. The
+accepted joined artifact is
+[`Baselines/ecs-v2-v3-3.3.0-2026-08-12.json`](Baselines/ecs-v2-v3-3.3.0-2026-08-12.json);
+both process orders are under `results/ecs-v2-v3-3.3.0-*`.

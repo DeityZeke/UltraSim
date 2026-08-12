@@ -13,6 +13,15 @@ by [`../../ECS_3_2_0_LIFECYCLE_REPORT.md`](../../ECS_3_2_0_LIFECYCLE_REPORT.md)
 > the 3.2.0 report; this file preserves the pre-feature consumer audit rather than
 > rewriting its historical evidence.
 
+> ECS 3.3.0 subsequently compiles ten Slice content definitions (four alive
+> actor tiers, four dead actor tiers, world item, and temporary effect) into the
+> same ten already-registered archetypes. Bootstrap now instantiates through
+> `PrefabHandle`; effect spawn records one prefab command plus three true
+> per-instance replacements instead of default create plus four replacements.
+> The 3.2 canonical and ordered-lifecycle hashes remain exact. Current 100K, 1M,
+> all-active, catalog-memory, allocation, and command-count evidence is in
+> [`../../ECS_3_3_0_CONTENT_AUTHORING_REPORT.md`](../../ECS_3_3_0_CONTENT_AUTHORING_REPORT.md).
+
 ## 1. Audit verdict
 
 **Luna's implementation required consumer and benchmark repairs.** After those

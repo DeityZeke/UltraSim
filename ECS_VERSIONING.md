@@ -28,6 +28,9 @@ and `3.1.2`, the scheduler/structural proof-hardening pass.
 The fixed-capacity lifecycle-publication timeline, narrow public generated-query
 filter bridge, and first real Slice 0 lifecycle integration form the next coherent
 capability milestone, so the accepted checkpoint is `3.2.0`.
+The cold compiled-content authoring facade, immutable numeric prefab catalog,
+and ordinary immediate/deferred ECS instantiation path form the next capability
+milestone, accepted as `3.3.0`.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -82,6 +85,18 @@ through every public generated job family without adding filter terms to schedul
 access masks or hot per-row branches. Simulation Slice 0 consumes both features,
 replaces its four data-bearing tier selectors with storage-free tags, and validates
 independent presentation-, replication-, and persistence-cadence lifecycle readers.
+
+ECS 3.3.0 adds RunUO-shaped `BaseClass`/Object Script authoring that exists only
+before `Seal`. Explicit registration or direct-DOD definitions compile into one
+world-bound immutable catalog: sorted stable `PrefabKey` metadata, 12-byte dense
+`PrefabHandle` values, 32-byte entries, 12-byte bound default descriptors, and
+one default byte blob. Canonical final component signatures share ordinary ECS
+archetypes irrespective of script class, key, display metadata, or default
+values. Immediate and scheduler/deferred instantiation use the ordinary entity
+allocation, structural barrier, change-history, and lifecycle machinery; one
+prefab spawn is one command and one `Created` fact, never a component-added
+storm. No authoring class, reflection, callback, or runtime inheritance graph is
+consulted during spawn or simulation.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

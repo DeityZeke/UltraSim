@@ -18,7 +18,7 @@ opposite-order and worker-scaling captures live under `Baselines` with the
 version.
 
 The first executable Current/Next semantic adapter is documented in
-[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 102 matched
+[`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 103 matched
 1K/10K/50K rows with a shared canonical logical-state hash, separate
 record/playback/end-to-end structural boundaries, allocation/GC accounting,
 process isolation, fixed steady-state JIT policy, and explicit unsupported parity
@@ -94,6 +94,36 @@ allocation scope; future scheduler cases must broaden allocation accounting.
 
 These projects measure the root Next implementation. Frozen V2 Current and
 Legacy runners remain beneath `_V2/_Benchmarks` and run in separate processes.
+
+## ECS 3.3.0 compiled content authoring
+
+The accepted cold-compile/runtime-spawn matrix is
+[`Baselines/ecs-v3-3.3.0-compiled-content-authoring-2026-08-12.json`](Baselines/ecs-v3-3.3.0-compiled-content-authoring-2026-08-12.json).
+It covers 10–10,000 prefab definitions, 1–128 unique signatures, 100K/1M
+immediate spawn, 128 prefabs sharing one signature, 128 mixed signatures,
+16/64/256/1,024-byte defaults, immediate/deferred boundaries, lifecycle count,
+and stable-key/direct-handle lookup. All warmed runtime spawn/lookup rows allocate
+zero managed bytes. Cold compilation intentionally allocates and retains only the
+immutable catalog payload.
+
+The joined cross-generation artifact is
+[`Baselines/ecs-v2-v3-3.3.0-2026-08-12.json`](Baselines/ecs-v2-v3-3.3.0-2026-08-12.json).
+It admits one provisional normalized constant-default prefab-spawn contract,
+bringing the catalog to 103 comparable rows and nine unsupported rows. The
+prefab row reaches identical canonical state: V2 is `68.70 ns/entity` mean and
+allocates `3,073,280 B` per 10K iteration; V3 is `77.44 ns/entity` and allocates
+`0 B`. V2's dirty publication and V3's one-Created/no-initial-change semantics
+remain deliberately outside that normalized contract.
+
+The 3.3 Slice artifacts are:
+
+- `results/simulation-slice-0/ecs-3.3.0-content-100k-10000-2026-08-12.json`;
+- `results/simulation-slice-0/ecs-3.3.0-content-1m-1000-2026-08-12.json`;
+- `results/simulation-slice-0/ecs-3.3.0-content-100k-all-active-10000-2026-08-12.json`.
+
+They retain the 3.2 canonical and ordered-lifecycle hashes while replacing
+bootstrap/default-create content paths with the compiled catalog. Exact results
+and methodology are reported in `../ECS_3_3_0_CONTENT_AUTHORING_REPORT.md`.
 
 The standalone bitmap block-pool experiment and its evidence are documented in
 [`BITMAP_BLOCK_POOL_EXPERIMENT.md`](BITMAP_BLOCK_POOL_EXPERIMENT.md). It compares

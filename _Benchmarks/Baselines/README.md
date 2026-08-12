@@ -172,3 +172,17 @@ capacity-zero/capacity-enabled structural costs, 100/1K/10K/100K publication and
 drain scales, one versus three consumers, small partial spans, explicit overflow,
 and public filtered traversal. Every timed row allocates zero managed bytes. Full
 interpretation is in `../../ECS_3_2_0_LIFECYCLE_REPORT.md`.
+
+`ecs-v3-3.3.0-compiled-content-authoring-2026-08-12.json` is the accepted
+compiled-content cold/startup and warmed-spawn matrix. It records deterministic
+catalog compilation across 10–10,000 prefabs and 1–128 signatures, catalog
+payload, immediate/deferred spawn, a 16–1,024-byte default ladder, direct/stable
+lookup, exact command/lifecycle counts, and zero warmed runtime allocation.
+
+`ecs-v2-v3-3.3.0-2026-08-12.json` is the accepted compiled-content checkpoint
+joined capture, verified in both process orders. It expands the catalog to 103
+comparable contracts by admitting a provisional constant-default prefab spawn,
+retains zero canonical mismatches and nine explicit unsupported rows, and reports
+zero timed V3 allocation in 103/103 rows. The previous 3.2 artifact remains
+immutable; its one expected descriptor mismatch against 3.3 is the deliberate
+admission of this formerly unsupported scenario.

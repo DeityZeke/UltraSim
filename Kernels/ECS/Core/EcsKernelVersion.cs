@@ -7,9 +7,9 @@ namespace UltraSim.ECS;
 internal static class EcsKernelVersion
 {
     internal const int Generation = 3;
-    internal const int Milestone = 2;
+    internal const int Milestone = 3;
     internal const int Revision = 0;
-    internal const string Value = "3.2.0";
+    internal const string Value = "3.3.0";
     internal const string SemanticProfile =
-        "ecs-3.2.0-lifecycle-publication";
+        "ecs-3.3.0-compiled-content-authoring";
 }

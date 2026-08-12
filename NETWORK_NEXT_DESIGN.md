@@ -1,7 +1,9 @@
 # UltraSim Network Next: Rebuild Specification, Feature Inventory, and Validation Plan
 
-Status: proposed implementation specification  
-Scope: network kernel, wire protocol, transports, sessions, replication, AOI, client projection, engine-agnostic server/client runtimes, wrapper/entry-point topologies, application protocols, tests, benchmarks, tooling, and migration  
+Status: proposed implementation specification; authority/client local-topology decision reconciled 2026-08-12
+
+Scope: network kernel, wire protocol, transports, sessions, replication, AOI, local semantic projection, client projection, engine-agnostic server/client runtimes, wrapper/entry-point topologies, application protocols, tests, benchmarks, tooling, and migration
+
 Primary objective: preserve the useful behavior of the current stack while rebuilding for correct delivery semantics, zero steady-state allocation, bounded memory, minimum p95/p99 tick cost, and minimum useful bytes per connection
 
 ## 1. Purpose
@@ -33,6 +35,12 @@ The current rewrite has already demonstrated that a generational improvement is 
 Those figures are valuable acceptance context but must not be silently mixed with differently shaped repository benchmarks. Next must retain named workload profiles and machine-readable artifacts so claims remain reproducible.
 
 Tests and benchmarks are part of the architecture. Every implementation phase must add or port tests, run a semantically equivalent Legacy/Current/Next comparison where one exists, and record allocation, GC, bytes, loss/recovery, and tail latency. The expected direction in this document is intentionally strong, but it is not sacred. If tests, packet traces, disassembly, hardware counters, impairment runs, or production-shaped replays show that a proposed technique loses, change the technique and update this document.
+
+The 2026-08-12 architecture audit establishes one additional foundational rule:
+
+> **Single-player preserves the authoritative-simulation/client-projection boundary, not the physical wire-protocol boundary.**
+
+The default trusted in-process topology uses a bounded local semantic link above packetization. It still routes typed input through the authority barrier and applies captured output through the client projection barrier, but it does not manufacture sockets, packets, crypto, ACKs, retransmissions, congestion state, or network baselines when no network exists. Full protocol loopback and real localhost UDP remain mandatory, separately named protocol/parity topologies. Any bytes crossing an actual socket use the complete production security model.
 
 Documentation is evidence of intent, not proof of implementation. When sources disagree, use this order:
 
@@ -107,6 +115,9 @@ Tests must name and lock each intentional non-parity decision before that Next s
 - Disconnect, timeout, malformed traffic, and socket failure release all owned resources.
 - Hard capacity limits have deterministic failure/degradation behavior and metrics.
 - Multiple world, server, and loopback instances remain isolated.
+- Offline-direct, protocol-loopback, and localhost-UDP traces converge on the same declared authority/client semantics where their profiles overlap.
+- The trusted local path cannot expose live authoritative ECS storage or bypass input, structural, capture, interest, lifecycle, or client-apply barriers.
+- Any path using a real socket uses the production handshake, authentication, encryption, replay, admission, and session rules; LAN and localhost are not security shortcuts.
 - Negative world coordinates use floor division consistently.
 - Origin shifting never changes canonical world position or network identity.
 
@@ -155,12 +166,14 @@ Allocation tests should measure both the combined network tick and each major su
 
 ### 3.5 Concurrency and determinism targets
 
+- The first complete authority/capture/projection vertical is synchronous and single-owner with final ownership boundaries; parallel capture/routing is admitted only after production-shaped measurement proves a crossover.
 - One assembly shard owns a connection at a time.
 - One transport shard owns a socket association's mutable protocol state at a time.
 - Ownership migration is explicit, rare, epoch-stamped, and tested.
 - Shard-local hot state avoids shared atomics and false sharing wherever possible.
 - Cross-thread handoff uses bounded SPSC/MPSC rings with explicit backpressure.
 - No socket worker mutates gameplay state directly; decoded commands enter bounded queues and apply at the server's normal mutation barrier.
+- ECS change/lifecycle evidence is consumed into owned canonical replication state immediately after the structural barrier; recipient lag is contained entirely in network/projection retention.
 - Given the same accepted input trace, interest trace, time source, and configuration, protocol decisions are replayable even if physical socket completion timing differs.
 
 ## 4. Current Network Feature Inventory
@@ -456,7 +469,7 @@ Current limits:
 - vertical policy, multiple interest anchors, hysteresis, prefetch, and teleport behavior are not complete;
 - cadence and global sequence phasing can starve one-shot updates.
 
-Next makes canonical `ChunkKey` stable and stores ring, cadence, phase, priority, known revision, and pending version in per-connection interest state.
+Next makes canonical `ChunkKey` stable and stores ring, cadence, phase, priority, known revision, and pending version in per-recipient interest state. Remote-only delivery/ACK metadata remains on the bound connection/projection edge.
 
 ### 4.10 Scheduler, assembly, and shared fanout
 
@@ -641,17 +654,47 @@ Current's best decisions should be preserved:
 
 The rewrite should not discard these wins while fixing their implementation gaps.
 
+### 4.16 Current-to-Next disposition summary
+
+The rewrite preserves semantic boundaries more often than physical implementations:
+
+| Current concept | Next disposition |
+| --- | --- |
+| engine-independent Network kernel and transport seam | keep strongly |
+| numeric connection/session identities | keep; add generations/epochs and separate `RecipientId` |
+| bit-level span reader/writer | keep concept; generate exact bounded codecs |
+| retry-by-exception/resizing packet codec | replace |
+| queue/dictionary/task-driven UDP internals | replace with fixed slabs, rings, dense tables, and persistent completion workers |
+| latest-wins state versus ordered events | keep strongly as two different representations of time |
+| dictionary/locked/sorted latest-state snapshots | replace with dense versioned state slots and per-scope change indexes |
+| bounded ordered-event ring | keep/refine; sequence after recipient visibility filtering |
+| dictionary/list/hash-set subscription graph | replace with bounded dense bidirectional edges |
+| world-space chunk AOI | keep; remove recipient-relative ring from canonical chunk identity |
+| build-once shared fanout | keep strongly; make cohort/body ownership native |
+| per-client budgets and stream scheduler | keep policy; replace cursor/HOL/admission mechanics |
+| baseline/recovery concept | keep; stage and commit atomically from replication-owned state |
+| send-based state knowledge | replace with ACK-derived knowledge or independent absolute samples |
+| V2 destructive ECS dirty publisher | replace with ECS 3.2 independent change/lifecycle capture |
+| dictionary-heavy client projection | replace hot representation; retain a neutral client apply contract |
+| real socket benchmarks | keep and expand with semantic oracles and direct/loopback/UDP decomposition |
+| V2 loopback | keep as full-protocol deterministic testing, not default offline play |
+| mandatory localhost single-player | replace with offline-direct while retaining authority/client barriers |
+
+This is not a claim that all hashing is forbidden. Genuine sparse keys such as endpoints, security tokens, `ChunkKey`, and stable content keys may use bounded flat/open-addressed maps. Dense generational arrays remain the default for connections, recipients, sessions, replication entities/items, projected slots, buffers, reliable windows, and transfers.
+
 ## 5. Next Architecture Overview
+
+The runtime mental model is intentionally small: identities are numeric; messages are data; authority is separate from delivery; mutable ECS state is captured once; interest routes state; lanes define remote delivery; packetization happens last; application crosses explicit barriers; runtime memory is bounded; and loss never silently changes semantics. Latest state is stored as current state plus versions—not as queued update objects. Ordered events retain every required intermediate fact.
 
 ### 5.1 Runtime planes and lanes
 
-Next retains three external planes:
+The remote Network runtime retains three external planes:
 
 - `Control`: handshake, auth, session, chat, UI actions, admin, graceful close;
 - `Input`: time-sensitive client intent and redundant recent input;
 - `State`: owner correction, observer state, lifecycle, events, snapshots, and world/content streaming.
 
-The send runtime uses independent lanes:
+The remote send runtime uses independent lanes:
 
 | Lane | Default delivery | Ordering domain | Typical content | Overload behavior |
 | --- | --- | --- | --- | --- |
@@ -667,13 +710,26 @@ Service class is a scheduling property derived from lane plus recipient-relative
 
 Tests must verify lane isolation: saturating `Bulk` or `UnreliableFx` cannot delay a small Control/Input/OwnerState packet beyond its configured deadline.
 
+Offline-direct carries the corresponding semantic inputs/projection operations without pretending they are packet lanes. It retains ordering, expiry, lifecycle, and apply requirements that matter to authority/client correctness, while omitting delivery machinery whose only purpose is an unreliable/untrusted byte link.
+
 ### 5.2 Four-stage data flow
 
-The architecture is a publish-once, route-once, budget-before-build pipeline:
+The shared authority-side flow is:
+
+```text
+bounded input ingress
+        -> authority barrier
+        -> ECS simulation/structural barrier
+        -> capture into projection-owned canonical state
+        -> recipient interest/routing
+        -> endpoint-specific delivery
+```
+
+The remote endpoint is a publish-once, route-once, budget-before-build wire pipeline:
 
 1. `Capture/Publish`
    - runs at the simulation boundary;
-   - converts ECS/runtime changes to stable network-owned values;
+   - converts ECS/runtime changes to stable projection-owned values;
    - updates latest-state tables or appends true events;
    - never scans recipients and never performs socket work.
 2. `Route/Schedule`
@@ -691,7 +747,11 @@ The architecture is a publish-once, route-once, budget-before-build pipeline:
    - processes completions and ACK feedback;
    - releases buffers and advances delivery state at the correct commit point.
 
-The simulation thread performs only the bounded capture portion. Route, assemble, and send can operate on network-owned immutable/versioned data without live ECS reads.
+The simulation thread performs only the bounded capture portion. Local projection and remote route/assemble/send operate on replication-owned immutable/versioned data without live ECS reads.
+
+The trusted local endpoint branches after capture and neutral interest routing. It transfers bounded typed views directly to `Client/Core` and commits them at the same client apply barrier. It does not execute remote-only scheduling policy, wire-byte budgeting, codec, packet, security, reliability, congestion, or socket stages. This is not a transport implementation: placing it beneath packetization would retain exactly the costs the offline path exists to remove.
+
+Input follows the inverse rule. `Client/Core` produces the same logical sequenced/expiring input command for both topologies. Offline-direct places it into the bounded authority ingress; the remote adapter encodes redundancy, protection, and delivery metadata before the decoded command reaches that same ingress. Neither path calls gameplay or mutates ECS directly.
 
 ### 5.3 Kernel and bridge boundaries
 
@@ -701,14 +761,15 @@ The kernel owns:
 - connection protocol state;
 - secure datagram framing and reliability;
 - transport I/O abstractions;
-- latest-state/event/snapshot storage contracts;
-- subscription indexes and neutral interest metadata;
+- remote pending/known-state, reliable-event, snapshot/baseline, and recovery state;
+- connection-relative delivery scheduling and remote projection edges;
 - scheduling, packet assembly, pacing, retransmit, and buffer pools;
 - low-cardinality metrics and trace hooks.
 
 The kernel does not own:
 
 - ECS component definitions or live storage;
+- canonical authority capture, local-recipient state, or neutral interest policy/indexes owned by `Server/Projection`;
 - gameplay relevance rules such as party, stealth, ownership, or combat forcing;
 - account/character authorization policy;
 - chat permission/content policy;
@@ -717,7 +778,9 @@ The kernel does not own:
 - Godot nodes, physics bodies, scenes, or resources;
 - persistence coordination.
 
-Server and client bridges provide generated, typed adapters. `Server` and `Client` are themselves portable application runtimes, not names for Godot implementations. Integration tests must prove that no bridge leaks engine types into the kernel, no background worker holds a live ECS ref/span past the capture boundary, and no wrapper-specific dependency enters `Server/Core`, `Server/Hosting`, `Server/Network`, `Client/Core`, or `Client/Network`.
+The trusted in-process semantic link is also not an `IDatagramIo` or fake connection inside the Network kernel. It belongs at the portable authority/client bridge boundary above the wire runtime. It reuses neutral input, captured-state, interest, lifecycle, baseline-commit, and client-apply contracts. The Network kernel remains responsible for converting those same semantic operations to and from secure remote delivery. A pure offline composition therefore does not instantiate `Kernels/Network`; it instantiates the same authority, `Server/Projection`, `Client/Local`, and `Client/Core` used alongside that kernel in a listen host.
+
+Server and client bridges provide generated, typed adapters. `Server` and `Client` are themselves portable application runtimes, not names for Godot implementations. Integration tests must prove that no bridge leaks engine types into the kernel, no background worker holds a live ECS ref/span past the capture boundary, and no wrapper-specific dependency enters `Server/Core`, `Server/Hosting`, `Server/Projection`, `Server/Network`, `Client/Core`, `Client/Local`, or `Client/Network`.
 
 ### 5.4 Engine-agnostic runtimes, wrappers, and deployment topologies
 
@@ -725,6 +788,7 @@ The actual server is the engine-agnostic composition of:
 
 - `Server/Core`: application lifecycle, commands, status, metrics, and common runtime state;
 - `Server/Hosting`: fixed-step host loop, lifecycle orchestration, injected time/log/config/discovery/storage services, and shared control surface;
+- `Server/Projection`: engine-neutral ECS capture, recipient interest, and semantic projection shared by local and remote endpoints;
 - `Server/Network`: server bridge over the Network kernel;
 - ECS, gameplay, scripting, persistence, admission, accounting, inventory, UI-schema, and other server services;
 - no dependency on Godot, console I/O, CLI parsing, windowing, rendering, or a particular process entry point.
@@ -732,6 +796,7 @@ The actual server is the engine-agnostic composition of:
 The actual client is likewise the engine-agnostic composition of:
 
 - `Client/Core`: projected runtime state, input sequencing, prediction, reconciliation, interpolation, content/cache state, and app/session models;
+- `Client/Local`: trusted in-process adapter over the semantic input/projection contracts;
 - `Client/Network`: client bridge over the Network kernel;
 - neutral UI/content/runtime services where applicable;
 - no dependency on Godot nodes, resources, rendering, audio, input devices, windowing, or a particular process entry point.
@@ -795,19 +860,31 @@ The same runtime contracts support:
    - remote clients connect normally.
 4. **Single-player/local world**
    - the client starts or attaches to a silent `_Headless` server in the background;
-   - the server still owns authority, ECS, gameplay, persistence, admission, and replication;
-   - the normal client session driver automatically connects to the advertised localhost endpoint;
+   - the server still owns authority, ECS, gameplay, persistence, world entry, capture, interest, and projection truth;
+   - the default trusted in-process composition attaches `Client/Core` through the bounded local semantic link rather than creating a network connection;
+   - logical input still crosses the authority ingress barrier and output still crosses capture, interest, lifecycle, and client-apply barriers;
    - startup waits for explicit server readiness rather than sleeping for an assumed duration;
    - shutdown ownership and save completion are explicit;
    - startup failure remains visible and diagnosable even though the server is normally silent.
-5. **Test/benchmark composition**
+5. **Local/LAN or public listen host**
+   - the host player may remain on the trusted local semantic link;
+   - the same already-running authority attaches the production secure Network runtime for remote clients;
+   - remote clients perform ordinary handshake, admission, session, baseline, replication, disconnect, and cleanup;
+   - opening the world to LAN does not migrate or replace the simulation.
+6. **Test/benchmark composition**
    - server and client runtimes can run in one process or separate processes;
-   - the chosen transport is declared in the profile;
+   - the selected topology is declared as `OfflineDirect`, `ProtocolLoopback`, or `LocalhostUdp`/remote UDP;
    - semantic shortcuts are forbidden in parity measurements.
 
-Single-player must remain a real network instance. The default parity path uses the production protocol over localhost, including handshake, security, admission, session state, input, authority, replication, AOI, baseline, persistence binding, disconnect, and cleanup. The client must not directly call server gameplay objects, read the authoritative ECS, share entity storage, bypass packet codecs, or substitute local mutation for replication.
+Single-player must remain a real authoritative simulation plus client-projection instance. It does not need to be a wire-protocol instance. Offline-direct may omit remote-only ceremony, but the client must not call server gameplay objects, read or share authoritative ECS/archetype storage, mutate the world directly, bypass the authority input barrier, consume uncaptured live component spans, or substitute local projected mutation for authority results.
 
-The in-memory loopback transport remains valuable for deterministic unit/integration tests and microbenchmarks. It may also be offered as an explicitly selected embedded optimization only if it preserves the exact message, lane, queue, ownership, session, serialization, and apply-barrier semantics and passes the same trace suite. It must not become an unmeasured single-player-only fast path. Production-equivalence and wrapper-parity tests should use real localhost UDP.
+Keep three deliberately different local mechanisms:
+
+1. `OfflineDirect`: typed bounded semantic commands/views, no packet protocol;
+2. `ProtocolLoopback`: complete packet, codec, security/reliability/session semantics over a deterministic in-memory datagram link;
+3. `LocalhostUdp`: complete production protocol plus OS socket path.
+
+Protocol loopback remains valuable for deterministic unit/integration tests, link impairment, and microbenchmarks. Real localhost UDP remains the production-equivalence integration topology. Neither is the default offline path, and offline-direct must never be reported as evidence of codec, protocol, security, congestion, or socket performance.
 
 #### Shared lifecycle and control contract
 
@@ -826,19 +903,21 @@ The common host owns tick accumulation and catch-up policy. A Godot frame, conso
 Tests:
 
 - architecture/reference tests reject `Godot.*`, console I/O, CLI, rendering, and wrapper references below their wrapper projects;
-- the same deterministic server trace through `_Headless`, `_Console`, and `_Godot` adapters produces the same world and network semantic hashes;
+- the same deterministic server trace through `_Headless`, `_Console`, and `_Godot` adapters produces the same world/capture/projection semantic hashes; network hashes are additionally compared when the selected topology includes the Network runtime;
 - lifecycle transition, command, save, settings, kick, inspection, and shutdown behavior is wrapper-equivalent;
-- a local single-player launch starts `_Headless`, observes readiness, connects through the normal localhost session, enters the world, saves, disconnects, and shuts down cleanly;
-- a local client cannot enter the world when handshake, admission, or baseline validation fails;
+- a local single-player launch starts `_Headless`, observes readiness, attaches the trusted local recipient, enters the world, saves, detaches, and shuts down cleanly;
+- offline-direct cannot enter/apply a world when authority readiness, local world-entry policy, capture, or atomic projection construction fails;
+- protocol-loopback and localhost clients cannot enter the world when handshake, admission, or baseline validation fails;
 - local startup cancellation, bind failure, server crash, client exit, reconnect, and save-on-stop have explicit ownership and cleanup assertions;
-- real localhost UDP and in-memory loopback execute the same semantic trace where their declared delivery profile is equivalent;
+- offline-direct, protocol-loopback, and real localhost UDP execute the same semantic trace where their declared profiles overlap;
+- a listen host simultaneously serving one local-direct recipient and remote connections produces the same authority result as the equivalent all-remote trace;
 - no wrapper can mutate ECS/network state except through the shared typed control or runtime input surfaces.
 
 Benchmarks:
 
 - engine-agnostic server runtime alone versus `_Headless`, `_Console` idle, and `_Godot` idle wrapper overhead;
 - dedicated separate-process versus embedded/background single-player CPU, memory, allocation, and tail latency;
-- localhost UDP versus in-memory loopback with semantic parity clearly labeled;
+- offline-direct versus protocol-loopback versus localhost UDP, decomposing projection, protocol/codec, and OS/socket costs with semantic parity clearly labeled;
 - Godot operator telemetry disabled, sampled, and active under gameplay load;
 - client render cost reported separately from `Client/Core`/`Client/Network` decode and apply.
 
@@ -848,16 +927,20 @@ Do not conflate these IDs:
 
 - `ConnectionId`: process-local slot plus generation;
 - `SessionId`: logical login/session lifetime;
+- `RecipientId`: dense generational projection/interest identity shared by local and remote endpoints;
 - `ConnectionToken`: unpredictable wire routing token;
 - `SecurityEpoch`: key/replay epoch;
-- `NetworkEntityId`: connection- or shard-scoped identity for a projected entity;
+- `NetworkEntityId`/`ReplicationEntityId`: authority/network-runtime-local dense generational identity for a replicated entity, stable across recipients during that runtime generation;
+- optional `WireEntityAlias`: compact connection-relative encoding selected only when measured bytes justify its mapping cost;
 - `ReplicationItemId`: stable identity of one replicated state family/item;
 - `ChunkKey`: canonical world chunk coordinate/layer identity;
 - `TransferId`: bounded bulk/UI/content transfer lifetime;
 - ECS runtime entity handle;
 - persistent/account/character/content identity.
 
-For hot tables, IDs should be dense generational indices. On the wire, use the smallest session-local ID that satisfies reuse safety. A mapping is preferable to exposing an ECS index as a protocol contract. Tests must delay and replay traffic across disconnect/reconnect and prove that old IDs cannot mutate new objects occupying the same slots.
+`ConnectionId` is a transport/session fact; `RecipientId` is an interest/projection fact. Remote authentication binds a connection/session to a recipient. Offline composition creates a local recipient without inventing a fake connection. Interest and projection tables key by recipient; packet/reliability/security tables key by connection.
+
+For hot tables, IDs should be dense generational indices. Canonical captured state should use one authority-local replication identity so capture and build-once fanout remain connection-independent. On the wire, use the smallest session-local alias that satisfies reuse safety only when the bandwidth win repays its mapping state. A mapping is preferable to exposing an ECS index as a protocol contract. Tests must delay and replay traffic across disconnect/reconnect and prove that old IDs cannot mutate new objects occupying the same slots.
 
 ### 5.6 Time, ticks, sequence arithmetic, and epochs
 
@@ -883,7 +966,9 @@ All sequence comparisons use generated modular arithmetic helpers with a documen
 
 ### 5.7 Capacity planning and sealing
 
-Every server profile supplies a `NetworkCapacityPlan` before start. It includes:
+Every server profile supplies a bounded `ReplicationCapacityPlan` before start for canonical capture items, lifecycle/events, local and remote recipients, projection/interest edges, client-apply staging, and local initial-projection images. A remote-capable profile additionally supplies a `NetworkCapacityPlan`. The host-level capacity report aggregates them without pretending local projection memory is socket/network memory or double-counting shared canonical state.
+
+The remote `NetworkCapacityPlan` includes:
 
 - maximum verified and unverified endpoints;
 - active connections and sessions;
@@ -892,8 +977,7 @@ Every server profile supplies a `NetworkCapacityPlan` before start. It includes:
 - payload slabs by size class;
 - maximum subscribed scopes per connection;
 - reverse subscribers per scope and total subscription edges;
-- latest-state items, scopes, changed entries, and tombstones;
-- ordered events and retained bytes;
+- remote pending/known item edges, tombstone acknowledgement state, and wire-event retention;
 - reliable send-window packets/bytes;
 - fragment sets and reassembly bytes;
 - active baselines and bulk transfers;
@@ -917,6 +1001,8 @@ The primary direction is a purpose-built secure UDP protocol because UltraSim ne
 
 This is not permission to improvise a half-reliable UDP layer. The protocol is a first-class product with a state machine, deterministic simulator, fuzzing, and security review.
 
+Every real socket—including localhost and LAN—uses this complete production security/session model. There is no plaintext LAN mode or half-protocol localhost shortcut. Only the trusted in-process offline-direct semantic link omits network security because no byte or untrusted endpoint boundary exists.
+
 Keep alternative transports as experiments behind the same message/lane contract:
 
 - loopback for deterministic tests;
@@ -924,6 +1010,8 @@ Keep alternative transports as experiments behind the same message/lane contract
 - QUIC as a separately benchmarked prototype, not an assumed replacement. Runtime/API maturity, datagram availability, stream head-of-line behavior, allocation, and CPU cost must be verified on the deployment runtime before selection.
 
 Transport choice cannot change gameplay APIs or message semantics. A fallback that cannot provide an unreliable lane must explicitly map it to the least harmful behavior and report the mode.
+
+`OfflineDirect` is intentionally absent from this transport list. It is a semantic authority/client adapter above codecs, lanes, packets, and transport—not an alternative implementation of UDP.
 
 ### 6.2 Conservative datagram size and packetization
 
@@ -1291,7 +1379,9 @@ publisher.PublishEvent(canonicalScope, eventType, in value);
 publisher.PublishOwner(ownerId, itemId, version, in value);
 ```
 
-For maximum performance, generated component extractors write directly into network-owned fixed slots or a preallocated staging ring. A single destructive ECS dirty drain cannot be the only source when multiple policies/consumers exist. ECS Next should provide independent change cursors; until then, the server bridge captures once into a network-owned version table and all network cadences consume from it.
+For maximum performance, generated component extractors write directly into replication-owned fixed slots or a preallocated staging ring. The root ECS has already crossed the required boundary: ECS 3.2.0 provides independent change cursors and lifecycle publication, and ECS 3.3.0 supplies compiled content/archetype identity without retaining prefab objects at runtime. The bridge should consume its own change/lifecycle cursors immediately after the ECS structural barrier, update projection-owned canonical state, acknowledge only successful capture, and release ECS history independently of every remote/local recipient's cadence. Do not port V2's destructive dirty-drain publisher or allow a slow recipient to retain ECS history.
+
+Capture typed/quantized canonical replication state, not packet bytes, unless a measured immutable-body cache proves profitable for a specific schema/cohort. Interest, cadence, visibility, recipient origin, feature version, and wire budget are not known at generic ECS capture time. Deferring encoding avoids serializing invisible, off-cadence, superseded, or unadmitted work and lets offline-direct consume the same captured state without decoding a fabricated packet.
 
 Tests compare captured values and lifecycle facts with a reference world model, including partial buffer drains, multiple consumers, entity destruction, component removal, and rapid cross-chunk movement.
 
@@ -1313,7 +1403,7 @@ Tests must prove no duplicate/missing changed slot, no old-scope ghost, and zero
 
 ### 9.3 Recipient-known state
 
-Do not assume that `sent` means `known`. Per connection/cohort track:
+Do not assume that `sent` means `known`. For remote recipients, track only projected/known relationships rather than allocating `connections x world entities`. Per recipient projection/interest edge track:
 
 - committed baseline generation;
 - acknowledged item/version knowledge where delta encoding depends on it;
@@ -1323,7 +1413,7 @@ Do not assume that `sent` means `known`. Per connection/cohort track:
 - tombstone/lifecycle knowledge;
 - forced keyframe deadline.
 
-Transport ACK processing promotes item versions to known through a bounded sent-packet receipt map. If maintaining detailed ACK knowledge costs more than it saves for a hot schema, encode independent absolute compact samples instead of dependency deltas. This is a schema-level benchmark decision.
+Transport ACK processing promotes remote item versions to known through a bounded sent-packet receipt map. Offline-direct commits knowledge at the successful client apply barrier and does not manufacture transport ACK state. If maintaining detailed ACK knowledge costs more than it saves for a hot remote schema, encode independent absolute compact samples instead of dependency deltas. This is a schema-level benchmark decision.
 
 Tests drop arbitrary state datagrams and prove eventual convergence without waiting for a full reconnect.
 
@@ -1396,7 +1486,7 @@ One active baseline exists per connection/scope family. It contains:
 
 Server flow:
 
-1. Acquire or build a snapshot from network-owned state.
+1. Acquire or build a snapshot from replication-owned state.
 2. Freeze its descriptor and cutoff.
 3. Queue reliable bulk fragments without starting another generation.
 4. Continue capturing newer state; retain/coalesce it as post-cutoff pending state.
@@ -1460,7 +1550,7 @@ The canonical publication key is a `ChunkKey`:
 - no ring index;
 - stable across every observer.
 
-Per-connection `InterestEdge` stores:
+Per-recipient `InterestEdge` stores:
 
 - canonical `ChunkKey`;
 - priority ring/class;
@@ -1473,6 +1563,8 @@ Per-connection `InterestEdge` stores:
 - reasons/anchors contributing interest.
 
 The same chunk can therefore be Immediate for client A, Near for B, Far for C, and not subscribed for D. Publish the chunk/item change once; schedule it differently.
+
+Interest answers whether a recipient should conceptually project an object. Delivery policy answers how urgently/often a remote recipient is serviced. Keep those decisions separate. A local recipient still uses interest to avoid copying all simulated entities into presentation, but it has no wire-byte budget, congestion window, RTO, retransmission debt, or packet cadence. Remote scheduling derives service class from the same neutral interest result.
 
 ### 10.2 Initial ring policy
 
@@ -1491,14 +1583,14 @@ The ring-0 reduction from roughly `16 m` to roughly `8 m` should remain a named 
 
 Use shard-owned dense tables:
 
-- connection-to-interest edge ranges;
+- recipient-to-interest edge ranges;
 - chunk-to-subscriber edge ranges;
 - free-list/generation for edges;
 - cached cohorts by compatible scheduling/encoding policy where profitable;
 - incremental row/column updates when the center moves one chunk;
 - full bounded rebuild for teleport.
 
-Avoid global locks, per-update `HashSet`, and rebuilding every subscribed chunk from scratch. Determine sorted/stable ordering once or use dense slot order where wire determinism does not require sort.
+Precompute chunk-offset templates for sealed interest policies. When an anchor remains in its chunk, topology does not change. A normal one-chunk move applies only entering/leaving border strips; teleport uses the slower full bounded rebuild. Avoid global locks, per-update `HashSet`, floating-point reclassification of the full window, and rebuilding every subscribed chunk from scratch. Determine sorted/stable ordering once or use dense slot order where wire determinism does not require sort.
 
 Tests compare incremental movement with a simple full-recompute model across random paths, negative coordinates, ring boundaries, teleports, multiple anchors, and churn.
 
@@ -1750,7 +1842,7 @@ Tests cover sparse near/far cadence, burst delivery, loss, reorder, origin shift
 
 ### 12.4 Client state apply barrier
 
-Network workers decode into bounded client command/state rings. The client runtime applies them at a defined barrier:
+Remote Network workers decode into bounded client command/state rings; offline-direct writes equivalent semantic operations into a separately owned bounded local ring/view. The client runtime applies either source at one defined barrier:
 
 - lifecycle before dependent state;
 - baseline commit as one transaction;
@@ -1758,11 +1850,13 @@ Network workers decode into bounded client command/state rings. The client runti
 - UI/chat application through their own services;
 - presentation notification after data is consistent.
 
-No socket callback creates/destroys Godot nodes or mutates ECS storage directly. Tests assert thread ownership and deterministic apply order.
+No socket callback or local authority callback creates/destroys Godot nodes or mutates client/authority ECS storage directly. Tests assert thread ownership, deterministic apply order, and normalized local/remote apply equivalence.
+
+The Network/Projection contracts do not require the client to use ECS. `Client/Core` may use dense generational SoA slots, a small client ECS, or another bounded representation selected by client workloads. The shared contract is semantic `Spawn`, `Latest`, `Event`, `Leave`, `Despawn`, and atomic `CommitBaseline` application—not a server storage layout.
 
 ### 12.5 Render-window integration
 
-The client network bridge owns the mapping from canonical `ChunkKey`/`NetworkEntityId` to client runtime slots. The Godot bridge owns render/physics resources. On window shift:
+`Client/Core` owns the mapping from canonical `ChunkKey`/`NetworkEntityId` to client runtime slots, regardless of whether operations arrived through `Client/Local` or `Client/Network`. The Godot bridge owns render/physics resources. On window shift:
 
 - network subscriptions/origin change in canonical coordinates;
 - existing network entities retain identity;
@@ -1775,9 +1869,9 @@ Benchmark origin shift separately from network receive so an expensive engine-si
 
 ## 13. Server Bridges and Application Protocols
 
-### 13.1 ECS bridge
+### 13.1 ECS capture/projection bridge
 
-The Server/Network bridge should be generated from replication descriptors attached to components/field groups:
+The engine-neutral server capture bridge should be generated from replication descriptors attached to components/field groups. Its canonical state feeds both local projection and `Server/Network`; it is not owned exclusively by the remote transport path:
 
 - network item family and schema;
 - canonical key construction;
@@ -1792,7 +1886,7 @@ The Server/Network bridge should be generated from replication descriptors attac
 
 Generated capture avoids delegates, reflection, boxing, JSON, and repeated metadata lookup. Rare dynamic script-defined schemas may use a slower cold path but must register a bounded generated-equivalent descriptor before world start/content generation publication.
 
-The bridge consumes ECS Next independent change cursors and lifecycle tombstones when available. Until then it owns one non-destructive captured version table. Tests compare Current and Next publication for the same scripted ECS trace.
+The bridge consumes the independent change cursors and lifecycle stream already accepted in ECS 3.2.0. It translates value changes and topology facts into replication-owned canonical state at one post-barrier capture point; gameplay events such as chat, damage, purchases, or quest outcomes remain explicit application publications rather than being inferred from ECS lifecycle. Tests compare Current and Next publication for the same scripted ECS trace and prove that recipient lag never delays cursor acknowledgement after successful capture.
 
 ### 13.2 Movement and authority
 
@@ -1910,7 +2004,7 @@ Tests run admin inspection under gameplay load and assert protected-lane latency
 
 ### 13.8 Prefab and archetype replication contract
 
-The RunUO-style prefab authoring model remains above the network:
+ECS 3.3.0 now provides the accepted RunUO-style compiled content model. It remains above the network:
 
 - a broad script/base class describes the wide ECS archetype and its replication field groups;
 - a concrete spawnable prefab selects that archetype and fills component values;
@@ -1922,6 +2016,8 @@ The RunUO-style prefab authoring model remains above the network:
 - a prefab/content revision that affects the client's schema or presentation is versioned explicitly; an implementation type name is never the wire contract.
 
 This preserves the desired “entities/components underneath, simple item/mobile scripts on the surface” experience while keeping fanout data-oriented. Tests spawn multiple inherited prefab definitions into the same archetype, compare their initial and incremental replication, verify unauthorized server-only fields never appear, and benchmark mixed concrete prefabs through one shared generated batch codec.
+
+The network generator should bind replication layouts to sealed component/archetype metadata, not to Object Script types. Concrete prefabs such as Villager, Merchant, Guard, and Blacksmith may share one generated owner/observer capture, codec, baseline-layout, and client-apply family when their component membership is identical. Their stable `PrefabKey` is durable server/content provenance; actual resulting ECS values and authorized presentation/content IDs are what cross the wire.
 
 ### 13.9 Persistence, restart, and identity rebinding
 
@@ -1988,23 +2084,30 @@ The client uses an equivalent engine-neutral `IClientApplicationHost` for sessio
 Local single-player startup belongs in wrapper/hosting composition, not the Network kernel. Its conceptual contract returns explicit readiness and lifetime ownership:
 
 ```csharp
-public interface ILocalServerLauncher
+public interface ILocalAuthorityLauncher
 {
-    LocalServerLaunchResult Start(in LocalServerStartOptions options);
+    LocalAuthorityLaunchResult Start(in LocalAuthorityStartOptions options);
 }
 
-public interface ILocalServerHandle : IDisposable
+public interface ILocalAuthorityHandle : IDisposable
 {
-    LocalServerState State { get; }
-    NetworkEndpoint ReadyEndpoint { get; }
-    LocalServerFailure Failure { get; }
+    LocalAuthorityState State { get; }
+    LocalAuthorityReadiness Readiness { get; }
+    ILocalSemanticLink Link { get; }
+    LocalAuthorityFailure Failure { get; }
     void Stop(ServerStopMode mode, long deadlineTimestamp);
+}
+
+public interface ILocalSemanticLink
+{
+    LocalInputResult Submit(in LogicalInputCommand command);
+    LocalProjectionResult Pump(in LocalProjectionBudget budget);
 }
 ```
 
-The client waits for `ReadyEndpoint`, then passes it to the normal `Client/Network` session driver. Whether the handle owns an in-process runtime or child process is a wrapper policy recorded in configuration/metrics; it does not change the network or ECS contract.
+The client waits for authority readiness, attaches one local `RecipientId`, submits only logical commands, and consumes only bounded captured projection operations. The link returns no world, ECS, gameplay object, mutable server collection, or live component view. A true offline-direct link requires trusted in-process composition. If a wrapper chooses a child process or any socket boundary, it uses the ordinary production Network runtime and reports that topology as localhost UDP rather than pretending it is offline-direct.
 
-Tests use fake clocks/process adapters for lifecycle failures and real localhost integration for production-equivalence. API tests prove every wrapper reaches the same control surface and cannot obtain a direct server-world mutation reference.
+Tests use fake clocks/process adapters for lifecycle failures, deterministic protocol loopback for packet semantics, and real localhost integration for production equivalence. API tests prove every wrapper reaches the same control surface and that neither the local semantic handle nor Network bridge can obtain a direct server-world mutation reference.
 
 ### 14.3 Transport I/O
 
@@ -2023,7 +2126,7 @@ Slots contain generational `BufferToken`s and compact metadata. Submission eithe
 ### 14.4 Publication
 
 ```csharp
-public readonly ref struct NetworkPublisher
+public readonly ref struct ReplicationPublisher
 {
     public PublishResult Latest<T>(
         ReplicationItemId item,
@@ -2058,13 +2161,13 @@ public readonly record struct InterestAnchor(
 public interface IInterestRuntime
 {
     InterestUpdateResult SetAnchors(
-        ConnectionId connection,
+        RecipientId recipient,
         ReadOnlySpan<InterestAnchor> anchors,
         ulong tick);
 }
 ```
 
-Higher-layer visibility filters can append/remove forced interest without teaching the kernel party/stealth rules.
+Higher-layer visibility filters can append/remove forced interest without teaching the kernel party/stealth rules. This API is intentionally recipient-based: a local presentation recipient needs spatial interest even though it has no `ConnectionId`, wire budget, congestion window, or reliable session.
 
 ### 14.6 Scheduling
 
@@ -2102,7 +2205,7 @@ The API refuses a second active baseline unless the first is explicitly cancelle
 ### 14.8 Client apply
 
 ```csharp
-public interface IClientNetworkApplySink
+public interface IClientProjectionApplySink
 {
     ApplyResult Spawn(in SpawnView value);
     ApplyResult Latest(in LatestStateView value);
@@ -2113,7 +2216,7 @@ public interface IClientNetworkApplySink
 }
 ```
 
-Views are consume-window-only. Retention requires an explicit copy into client-owned preallocated storage. Tests poison views after the barrier.
+Remote decode and offline-direct projection both drive this semantic sink. Views are consume-window-only. Retention requires an explicit copy into client-owned preallocated storage. Tests poison views after the barrier and compare direct/loopback/UDP application traces. Offline baseline construction may build a bounded candidate image and call `CommitBaseline` directly; it does not fragment or acknowledge that image as network traffic.
 
 ### 14.9 Metrics and tracing
 
@@ -2435,8 +2538,11 @@ For every generated message:
 - engine-agnostic server/client project-reference and forbidden-namespace checks;
 - identical server lifecycle/control/world/network semantics through `_Console`, `_Headless`, and server `_Godot` wrappers;
 - `_Console` command input and `_Godot` buttons route through the same typed control surface;
-- single-player `_Headless` readiness, localhost auto-connect, ordinary admission/world entry, save, disconnect, and shutdown;
-- proof that single-player cannot bypass serialization, session state, authority, ECS isolation, or client apply barriers;
+- offline-direct `_Headless` readiness, local-recipient attach, world entry, save, detach, and shutdown;
+- proof that offline-direct cannot bypass authority ingress, ECS isolation, capture, interest/lifecycle projection, or client apply barriers;
+- protocol-loopback and localhost-UDP handshake, admission, session, world sync, disconnect, and cleanup;
+- identical normalized authority/client semantic traces across offline-direct, protocol-loopback, and localhost UDP where contracts overlap;
+- listen-host trace with one local recipient plus remote recipients;
 - admission/account/character authorization and identity mapping;
 - chat limits, permission, locality, cleanup, and deduplication;
 - UI transfer bounds, cache hot/cold path, supersession, and action validation;
@@ -2629,11 +2735,15 @@ Create stable versioned profiles:
     - one or more bandwidth-limited/high-loss recipients among healthy clients;
     - bounded memory and fairness.
 13. `local_singleplayer`
-    - client wrapper starts or attaches to the silent `_Headless` server;
-    - explicit readiness followed by normal localhost handshake/admission/world sync;
-    - real localhost UDP for the production-equivalence run;
-    - separate-process and embedded/background variants;
-    - verifies save, disconnect, server shutdown, semantic trace, total CPU, memory, allocation, and wrapper overhead.
+    - client wrapper starts the silent embedded `_Headless` authority and attaches an offline-direct recipient after explicit readiness;
+    - paired protocol-loopback and real localhost-UDP runs execute the same normalized semantic trace;
+    - child/separate-process variants necessarily use the production network path;
+    - reports authority simulation, logical projection, codec/protocol, and OS/socket costs separately;
+    - verifies world entry, save, detach/disconnect, server shutdown, semantic trace, total CPU, memory, allocation, and wrapper overhead.
+14. `listen_host_mixed`
+    - one host recipient uses offline-direct while configured remote recipients use production secure UDP;
+    - compares the normalized authority/projection result with an equivalent all-remote trace;
+    - measures local-path latency, remote-path latency, shared capture/fanout reuse, contention, memory, allocation, and shutdown ownership.
 
 Each profile has a canonical seed/trace, expected semantic output, accepted staleness by lane, and capacity plan.
 
@@ -2732,13 +2842,12 @@ Kernels/Network/
     Queues/
   Session/
   Replication/
-    Latest/
-    Events/
+    RemoteKnowledge/
+    ReliableEvents/
     Baseline/
-    Lifecycle/
+    Recovery/
   Interest/
-    Spatial/
-    Subscriptions/
+    RemoteEdges/
     Cohorts/
   Scheduling/
   Assembly/
@@ -2748,8 +2857,13 @@ Kernels/Network/
 Server/
   Core/                       # Engine-agnostic application runtime
   Hosting/                    # Shared fixed-step host and control surface
-  Network/                    # Engine-agnostic bridge over Network Next
+  Projection/                 # Shared canonical capture/interest/projection truth
     EcsCapture/
+    State/
+    Lifecycle/
+    Interest/
+    Local/
+  Network/                    # Engine-agnostic bridge over Network Next
     Movement/
     Sessions/
     Admission/
@@ -2777,6 +2891,7 @@ Client/
     Chat/
     Ui/
     Content/
+  Local/                      # Trusted in-process semantic link to Client/Core
   _Godot/                     # Rendering/input/audio/UI wrapper
 
 _Tests/UltraSim.Network.Tests/
@@ -2804,10 +2919,13 @@ Do not physically duplicate shared `Server/Core`, `Server/Hosting`, `Client/Core
 
 - Next remains isolated enough for Current and Next to run against the same traces until cutover;
 - `_Console`, `_Headless`, and `_Godot` reference the shared runtime/bridge composition rather than receiving Next-specific gameplay implementations;
-- the embedded single-player composition starts the same `_Headless` runtime and connects the same `Client/Network` session over localhost;
+- embedded single-player starts the same `_Headless` authority runtime and normally attaches `Client/Core` through the trusted local semantic link;
+- protocol loopback and localhost UDP remain explicit full-network topologies over the same authority/capture/client-apply contracts;
 - wrappers contain presentation, process, and entry-point concerns only.
 
 ## 20. Implementation Phases and Gates
+
+The ordering is deliberately semantic-first: prove authority input, ECS capture, interest, and client apply through offline-direct; then add generated codecs and deterministic packet loopback; then add secure UDP. Do not make secure reliable UDP, AOI, baseline, application protocols, and every wrapper one monolithic implementation task. Each phase must produce a runnable vertical and preserve the semantic oracle established before the wire exists.
 
 ### Phase 0: freeze evidence and repair comparison tools
 
@@ -2841,7 +2959,41 @@ Gate:
 
 - no Next performance claim until Phase 0 tools are trustworthy.
 
-### Phase 1: capacity, memory, ownership, and generated codec foundation
+### Phase 1A: authority/projection contract and offline-direct vertical
+
+Deliver:
+
+- neutral logical input command and bounded authority ingress;
+- post-ECS-barrier capture using ECS 3.2 change/lifecycle cursors;
+- minimal dense projection-owned current-state table;
+- `RecipientId` and neutral interest/projection edges;
+- bounded trusted `ILocalSemanticLink` above packetization;
+- client apply barrier and atomic local initial-projection commit;
+- one movement/latest-state plus spawn/despawn vertical through engine-neutral `Server` and `Client/Core`;
+- no dependency from ECS or Client/Core on Godot or wire-protocol internals.
+
+Tests:
+
+- semantic oracle across authority input, simulation, capture, interest, and client apply;
+- no live ECS reference/span escapes capture;
+- local client cannot directly mutate or call authority gameplay;
+- lifecycle/change cursors acknowledge only successful capture;
+- recipient attach/detach, capacity, startup, failure, save, and shutdown;
+- Native/Pinned ECS capture parity where the ECS backend is observable;
+- warmed zero allocation through local input/capture/apply.
+
+Benchmarks:
+
+- authority-only versus authority plus local projection;
+- capture by changed density, component width, lifecycle volume, and recipient interest size;
+- 100K/1M simulation-shaped local projection with client presentation excluded;
+- current V2 localhost path retained only as directional context, not semantic parity.
+
+Gate:
+
+- the authority/client ownership model is proven without requiring the wire stack, with canonical state and bounded zero-allocation hot operation.
+
+### Phase 1B: capacity, memory, ownership, and generated codec foundation
 
 Deliver:
 
@@ -2987,7 +3139,7 @@ Deliver:
 - signed 64-bit canonical chunks plus bounded local coordinates;
 - stable `ChunkKey` independent of ring;
 - dense incremental bidirectional subscriptions;
-- per-connection interest metadata/cadence/phase/pending state;
+- per-recipient interest metadata/cadence/phase/pending state, with remote delivery metadata kept connection-relative;
 - hysteresis, forced interest, and initial multiple-anchor support;
 - cross-chunk lifecycle routing;
 - production server bridge uses multi-ring policy;
@@ -3100,7 +3252,8 @@ Deliver:
 - one engine-agnostic client composition through `Client/Core` and `Client/Network`;
 - thin `_Console`, `_Headless`, server `_Godot`, and client `_Godot` composition roots;
 - graceful host behavior in headless, console, and Godot shells;
-- embedded/background `_Headless` single-player startup, readiness, localhost auto-connect, save, and shutdown orchestration;
+- embedded/background `_Headless` single-player startup, readiness, offline-direct recipient attach, save, and shutdown orchestration;
+- listen-host composition that retains the local semantic recipient while attaching secure UDP for remote clients;
 - shared typed lifecycle/control surfaces used by every wrapper.
 
 Tests:
@@ -3113,9 +3266,9 @@ Tests:
 - launch smokes and reconnect loops;
 - wrapper project-reference/engine-dependency enforcement;
 - deterministic world/network semantic parity across server wrappers;
-- single-player localhost full-session smoke with no direct runtime bypass;
+- single-player offline-direct full authority/projection smoke with no direct runtime bypass;
 - local bind/startup/crash/cancellation/save-on-stop cleanup;
-- real localhost UDP versus loopback semantic trace parity.
+- offline-direct versus protocol-loopback versus real localhost-UDP normalized semantic trace parity;
 
 Benchmarks:
 
@@ -3131,7 +3284,7 @@ Gate:
 
 - retained Current user-facing functionality works through Next without violating lane, ownership, or allocation rules;
 - every server wrapper demonstrably hosts the same engine-agnostic runtime;
-- single-player demonstrably remains an ordinary server-authoritative network session.
+- single-player demonstrably remains an ordinary server-authoritative/client-projection composition without requiring a network session.
 
 ### Phase 9: sharding, platform specialization, and hyper-optimization
 
@@ -3201,8 +3354,10 @@ Every checked item requires tests. Performance-sensitive items require a Current
 ### Core, protocol, and memory
 
 - [ ] Engine/ECS/Godot-independent kernel
+- [ ] Trusted bounded offline-direct semantic link above packetization and outside the Network transport layer
 - [ ] Explicit planes, lanes, delivery, service, expiry, and overflow table
 - [ ] Generational connection/session/network item/entity/transfer IDs
+- [ ] Generational `RecipientId` independent of `ConnectionId`
 - [ ] Connection and security epochs
 - [ ] Capacity plan and seal/warmup boundary
 - [ ] Fixed dense tables and bounded queues
@@ -3283,11 +3438,13 @@ Every checked item requires tests. Performance-sensitive items require a Current
 - [ ] wrapper project-reference and forbidden-namespace architecture tests
 - [ ] deterministic server semantic parity across `_Console`, `_Headless`, and `_Godot`
 - [ ] single-player starts or attaches to `_Headless`
-- [ ] single-player waits for explicit readiness and auto-connects through localhost
-- [ ] single-player uses normal handshake, security, admission, authority, replication, persistence, and cleanup
+- [ ] single-player waits for explicit readiness and attaches an offline-direct local recipient by default
+- [ ] offline-direct uses normal authority ingress, capture, interest, lifecycle, client apply, persistence, and cleanup
 - [ ] no direct client-to-server object/ECS/storage bypass
-- [ ] production-equivalence single-player tests use real localhost UDP
-- [ ] loopback remains an explicit semantic transport, not a hidden alternate gameplay path
+- [ ] protocol-equivalence tests use the complete deterministic loopback protocol
+- [ ] production network-equivalence tests use real localhost UDP
+- [ ] listen host supports local-direct and secure remote recipients simultaneously
+- [ ] offline-direct, protocol-loopback, and localhost UDP are explicitly labeled and benchmarked separately
 - [ ] local startup failure, crash, cancellation, reconnect, save, and shutdown ownership
 - [ ] wrapper and embedded-versus-process overhead benchmarks
 
@@ -3330,7 +3487,7 @@ Every checked item requires tests. Performance-sensitive items require a Current
 
 - [ ] First-class baseline descriptor
 - [ ] One active generation per connection/scope family
-- [ ] Network-owned snapshot source, no live ECS read
+- [ ] Replication-owned snapshot source, no live ECS read
 - [ ] Shared snapshot cache with visibility-safe key
 - [ ] Reliable isolated fragments
 - [ ] Client staging image
@@ -3475,7 +3632,7 @@ The largest expected gains are structural, not clever instructions:
 1. **Eliminate per-tick managed allocation and GC.** Current long runs allocate tens of MB/s across server and clients. Removing object/datagram/array churn should reduce both CPU and p95/p99/max stalls.
 2. **Stop full snapshot/scope scans per connection.** Per-scope changed queues and pending versions make work proportional to actual local changes plus recipients, not `connections x global entries`.
 3. **Make shared fanout cohort-native.** One body plus recipient ranges avoids N datagram objects, refcount operations, and repeated header/body work.
-4. **Capture once from ECS.** A network-owned version table prevents destructive dirty drains, duplicate consumers, and cadence re-publication.
+4. **Capture once from ECS.** A replication-owned version table prevents destructive dirty drains, duplicate consumers, and cadence re-publication.
 5. **Use compact relative/quantized homogeneous batches.** This attacks both payload bytes and send-call/packet rate.
 6. **Use persistent socket completion workers.** Remove polling/yield/task scheduling and prevent the simulation tick from synchronously absorbing socket send cost.
 7. **Budget before assembly using wire cost.** Avoid wasted builds, partial output loss, and bursty over-budget flushes.
@@ -3484,6 +3641,7 @@ The largest expected gains are structural, not clever instructions:
 10. **Use dense/hot-cold tables.** Reduce dictionary lookups, cache misses, locks, and pointer chasing in sessions, subscriptions, state, and client stores.
 11. **Use per-connection visible event sequencing.** Removes workaround buffering/gap checks and gives the reliable lane a clean bounded state.
 12. **Exploit ACK feedback for state knowledge.** Prevents needless baseline recovery and incorrect delta omission after loss.
+13. **Do not instantiate a wire protocol for trusted offline play.** Offline-direct preserves authority, capture, interest, and client apply while eliminating serialization, packetization, crypto, ACK/retransmit, congestion, packet pools, and socket work. Protocol-loopback and localhost comparisons quantify those costs instead of hiding them.
 
 Correctness/security will add real CPU and bytes: AEAD tags, packet ACKs, retransmit state, atomic snapshots, and strict validation are not free. The goal is for structural savings to more than repay that cost. Report the security/correctness delta separately so optimization remains honest.
 
@@ -3550,6 +3708,10 @@ Risk: leaks/use-after-free can replace GC cost with worse faults. Mitigation: ge
 
 Risk: optimizing one regular grid or single-family localhost trace harms actual play. Mitigation: versioned workload families, randomized recorded geometry/activity, WAN impairment, multi-hotspot/traversal, application mix, and production telemetry feedback.
 
+### 23.10 Offline semantic drift
+
+Risk: the local semantic path becomes an alternate gameplay implementation or quietly observes results differently from remote clients. Mitigation: one authority input contract, one capture/interest model, one client apply contract, normalized semantic trace parity across offline-direct/protocol-loopback/localhost UDP, architecture tests forbidding world/ECS exposure, and no offline-only gameplay state. Remote-only delivery/security mechanics are intentionally absent and therefore compared as topology costs, not required to hash identically as internal events.
+
 ## 24. Definition of Done
 
 Network Next is not done because it has a fast UDP echo or fanout microbenchmark. It is done when:
@@ -3575,14 +3737,16 @@ Network Next is not done because it has a fast UDP echo or fanout microbenchmark
 - Next meets or beats agreed Current p95/p99/max and useful-byte targets in dense and spread full-mix workloads;
 - cold join/baseline/content storms do not violate established-player latency gates;
 - launch, reconnect, shutdown, and cleanup smokes pass in headless, console, and Godot hosts;
-- `Server/Core`, `Server/Hosting`, `Server/Network`, `Client/Core`, and `Client/Network` remain engine-agnostic and independently testable;
+- `Server/Core`, `Server/Hosting`, `Server/Projection`, `Server/Network`, `Client/Core`, `Client/Local`, and `Client/Network` remain engine-agnostic and independently testable;
 - `_Console`, `_Headless`, and both `_Godot` entry points remain thin wrappers over the same server/client runtime and typed control surfaces;
-- single-player starts the ordinary silent `_Headless` server, auto-connects the ordinary client over localhost, and passes the same handshake, admission, authority, replication, persistence, disconnect, and cleanup fixtures without a direct-call bypass;
+- single-player starts the ordinary silent `_Headless` authority, attaches the ordinary `Client/Core` through offline-direct, and passes authority ingress, capture, interest, lifecycle, projection, persistence, detach, and cleanup fixtures without a direct-call bypass;
+- protocol-loopback and real localhost UDP pass their complete handshake, security, admission, session, baseline, replication, disconnect, and cleanup fixtures and converge with offline-direct on normalized authority/client results where semantics overlap;
+- a listen host can serve a local-direct recipient and secure remote recipients without changing authority state or gameplay code;
 - wrapper parity tests produce identical server/world/network semantic results for identical configuration and inputs;
 - the Legacy/Current/Next report is reproducible from checked-in configs and artifacts;
 - tests and measurements support the final architecture. If they do not, the architecture changes.
 
-The expected result is a secure, subscription-driven, publish-once network runtime whose tick cost scales with accepted local work, whose memory is planned and flat, whose bytes are deliberate, and whose client can traverse an enormous canonical world while rendering around a stable local origin.
+The expected result is one bounded publish-once authority/projection fabric with two endpoints: a near-zero-tax trusted local semantic path and a secure subscription-driven remote Network runtime whose tick cost scales with accepted work, whose memory is planned and flat, whose bytes are deliberate, and whose client can traverse an enormous canonical world while rendering around a stable local origin.
 
 ## 25. Related Documentation Audit
 
@@ -3593,7 +3757,7 @@ The rewrite incorporates the current networking documentation and cross-system p
 | Area | Documents | Material contribution |
 | --- | --- | --- |
 | Network kernel | `_V2/Kernels/Network/AGENTS.md`, `_V2/Kernels/Network/README.md`, `_V2/Kernels/Network/NETWORK_REWORK_IMPLEMENTATION_PLAN.md`, `_V2/Kernels/Network/NETWORK_PARITY_CHECKLIST.md` | Required layering, immutable buffers, lanes, transform seam, shared fanout, AOI policy, Current feature/status and parity gaps |
-| ECS | `_V2/Kernels/ECS/README.md`, root `ECS_NEXT_DESIGN.md` | Capture barrier, independent change/lifecycle streams, stable item identity, immutable network views, old/current/new comparison method |
+| ECS | `_V2/Kernels/ECS/README.md`, root `ECS_NEXT_DESIGN.md`, `ECS_3_2_0_LIFECYCLE_REPORT.md`, `ECS_3_3_0_CONTENT_AUTHORING_REPORT.md`, `Kernels/ECS/ECS_LIFECYCLE_PUBLICATION.md`, `Kernels/ECS/ECS_CONTENT_AUTHORING.md` | Capture barrier, implemented independent change/lifecycle streams, compiled prefab/archetype sharing, stable content identity, immutable network views, old/current/new comparison method |
 | Client | `_V2/Client/README.md`, `_V2/Client/CLIENT_IMPLEMENTATION_PLAN.md`, `_V2/Client/GODOT_CLIENT_SHELL_ROADMAP.md` | Prediction/interpolation, live UDP host, reconnect/keepalive, Godot presentation boundaries and smokes |
 | UI/content | `_V2/Client/UI_SCHEMA_AND_ADMIN_PANEL_PLAN.md`, `_V2/Client/CONTENT_PACK_PIPELINE_PLAN.md`, `_V2/Client/UI/README.md` | Server-driven UI hot/cold schemas, bounded action/model flow, server-scoped cache, logical content IDs, manifest/hash/download needs |
 | Server | `_V2/Server/SERVER.md`, `_V2/Server/SERVER_WRAPPER_IMPLEMENTATION_PLAN.md`, `_V2/Server/Gameplay/README.md`, `_V2/Server/SCRIPT_COMPILER_AND_RUNTIME_LAYOUT_PLAN.md` | Tick/barrier order, host lifecycle, movement authority, script-owned commands/panels/prefabs and content generations |
@@ -3653,7 +3817,7 @@ Cross-checking code/tests and documents confirms:
 10. Current Network/Client/Server test suites provide `257` passing relevant tests in the audited tree.
 11. The server runtime is engine-agnostic: `Server/Core`, `Server/Hosting`, and `Server/Network` are the reusable implementation, while `_Console`, `_Headless`, and `_Godot` are shells over its shared lifecycle/control surface.
 12. The client runtime is also engine-agnostic: `Client/Core` and `Client/Network` own neutral state and protocol behavior, while client `_Godot` owns presentation and device/engine integration.
-13. Single-player is intended to launch or attach a silent local `_Headless` server and connect the normal client session over localhost, preserving server authority and the ordinary network/persistence flow; in-memory loopback remains an explicitly selected test/benchmark transport rather than the default production-equivalence path.
+13. Current documentation intended single-player to launch or attach a silent local `_Headless` server and connect over localhost. Next retains the valuable authority/client separation but deliberately replaces mandatory wire traversal with offline-direct as the default trusted in-process topology. Protocol loopback and localhost UDP remain explicit test/production-equivalence paths.
 
 ### 25.4 Planned or partial features that must not be overstated as Current
 
@@ -3668,10 +3832,10 @@ Cross-checking code/tests and documents confirms:
 - terrain/static manifest and chunk cache transfer are planned.
 - prediction/reconciliation is a narrow movement slice.
 - content-pack network advertisement/download/delta messages are planned.
-- the current benchmark and bot-harness projects do not build at audit time.
+- relocated Current benchmark and bot-harness projects now build/run after the documented reference/path repairs, but their older capacity artifacts still require strict semantic/profile qualification rather than being promoted as new accepted baselines.
 - zero steady-state allocation/GC is not achieved.
 - security hardening, congestion control, WAN impairment, and hostile fuzz coverage are not complete.
-- fully enforced wrapper-parity, forbidden-dependency, and production-equivalent local single-player localhost tests are planned requirements even though the architectural intent already exists.
+- fully enforced wrapper parity, forbidden-dependency tests, offline-direct semantic parity, listen-host mixed-recipient tests, and production-equivalent localhost protocol tests are planned requirements even though the architectural intent already exists.
 
 ### 25.5 Requirements that stay outside the Network kernel
 

@@ -198,6 +198,18 @@ public readonly struct SystemStructuralWriter
         return entity;
     }
 
+    /// <summary>Records one compiled prefab instantiation in this work segment.</summary>
+    public bool TryInstantiate(PrefabHandle prefab, out DeferredEntity entity) =>
+        _context.GetScheduler().TryEnqueueInstantiate(_context, prefab, out entity);
+
+    public DeferredEntity Instantiate(PrefabHandle prefab)
+    {
+        if (!TryInstantiate(prefab, out DeferredEntity entity))
+            throw new StructuralCommandCapacityExceededException(
+                _context.GetScheduler().StructuralCommandsPerProducer);
+        return entity;
+    }
+
     /// <summary>Records destruction for the post-graph structural barrier.</summary>
     public bool TryDestroy(Entity entity) =>
         _context.GetScheduler().TryEnqueueDestroy(_context, entity);

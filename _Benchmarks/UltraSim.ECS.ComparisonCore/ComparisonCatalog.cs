@@ -51,7 +51,10 @@ public static class ComparisonCatalog
             MeasurementBoundary.EndToEnd, ComparisonStrength.Provisional, 100_000, 100_000, 8,
             "Apply one measured warmed arithmetic pass to a 100K integer array over four total execution participants; V2 uses SystemContext.ParallelFor and V3 uses RangeJob.",
             "The complete integer array has identical deterministic final contents.");
-        AddUnsupported(descriptors, "prefab.spawn", "Compiled prefab spawn", "Prefab", 10_000, "V3 prefab compiler/runtime is not implemented yet.");
+        Add(descriptors, "prefab.spawn", "Resolved constant-default prefab spawn", "Prefab",
+            MeasurementBoundary.EndToEnd, ComparisonStrength.Provisional, 10_000, 10_000, 8,
+            "Instantiate one Position prefab with constant defaults through each generation's native resolved runtime prefab representation.",
+            "Exactly 10,000 living Position entities exist and every Position equals (42,43). Authoring/compiler and change-publication semantics are intentionally outside this normalized runtime-spawn contract.");
         AddUnsupported(descriptors, "persistence.filtered-view", "Filtered persistence view", "Persistence", 50_000, "V3 persistence view is not implemented yet.");
         AddUnsupported(descriptors, "persistence.round-trip-remap", "Persistence round trip with transient-ID remap", "Persistence", 50_000, "V3 persistence and load-remap pipeline are not implemented yet.");
         return descriptors;

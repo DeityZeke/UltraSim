@@ -47,6 +47,7 @@ internal static class V2WorkloadFactory
         "scheduler.serial-tick" => new V2ScheduledChunkWorkload(descriptor, parallel: false),
         "scheduler.parallel-tick" => new V2ScheduledChunkWorkload(descriptor, parallel: true),
         "scheduler.range-parallel" => new V2ScheduledRangeWorkload(descriptor),
+        "prefab.spawn" => new V2PrefabSpawnWorkload(descriptor),
         _ when descriptor.Id.StartsWith("structural.churn.balanced-wide-10pct.", StringComparison.Ordinal) => new V2BalancedWideChurnWorkload(descriptor),
         _ when descriptor.Id.StartsWith("structural.create.deferred.", StringComparison.Ordinal) => new V2DeferredStructuralWorkload(descriptor, V2StructuralOperation.Create),
         _ when descriptor.Id.StartsWith("structural.destroy.deferred.", StringComparison.Ordinal) => new V2DeferredStructuralWorkload(descriptor, V2StructuralOperation.Destroy),
