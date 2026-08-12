@@ -7,10 +7,14 @@ namespace UltraSim.ECS;
 /// Fixed-capacity, single-writer arena for one deterministic structural barrier.
 /// </summary>
 /// <remarks>
-/// Recording never mutates the world and is permitted inside ECS jobs. Playback
-/// is explicit and consumes commands in destroy, create, remove, then add phases.
+/// Recording never mutates the world. This canonical arena is owner-thread-bound
+/// and must not be retained as a way around scheduler capabilities; scheduled
+/// jobs use <see cref="SystemJobContext.Commands"/> instead. Playback is explicit
+/// and consumes commands in destroy, create, remove, then add phases.
 /// Expected stale-handle and capacity failures are counted rather than thrown.
 /// Unexpected playback exceptions consume the arena and fault the owning world.
+/// Structural changes are invisible until playback, even to systems ordered later
+/// in the same scheduler graph.
 /// </remarks>
 public sealed class StructuralCommandBuffer
 {
@@ -118,6 +122,8 @@ public sealed class StructuralCommandBuffer
     internal int PayloadCapacityBytes => _payload.Length;
     internal int SchedulerPayloadCount => _payloadCount;
 
+    /// <summary>Records one default create or throws when command capacity is exhausted.</summary>
+    /// <remarks>The returned token belongs to this recording epoch and is not a persistent ID.</remarks>
     public DeferredEntity EnqueueCreateDefault(ArchetypeHandle archetype)
     {
         if (!TryEnqueueCreateDefault(archetype, out DeferredEntity entity))
@@ -322,6 +328,7 @@ public sealed class StructuralCommandBuffer
         return TryAppend(StructuralCommandRecord.RemoveComponent(entity, componentRouteId));
     }
 
+    /// <summary>Attempts to record one default create without mutating world topology.</summary>
     public bool TryEnqueueCreateDefault(
         ArchetypeHandle archetype,
         out DeferredEntity entity)
@@ -394,6 +401,7 @@ public sealed class StructuralCommandBuffer
             throw new StructuralCommandCapacityExceededException(Capacity);
     }
 
+    /// <summary>Attempts to record destruction for the next structural playback.</summary>
     public bool TryEnqueueDestroy(Entity entity)
     {
         EnsureOwnerAndActive();
@@ -445,6 +453,7 @@ public sealed class StructuralCommandBuffer
             throw new StructuralCommandCapacityExceededException(Capacity);
     }
 
+    /// <summary>Attempts to record one prepared membership transition for playback.</summary>
     public bool TryEnqueueTransition(Entity entity, in ArchetypeTransition transition)
     {
         EnsureOwnerAndActive();

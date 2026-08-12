@@ -71,6 +71,7 @@ internal static class GeneratorTests
         Run(nameof(QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily), QueryFamilyCatalog_EmitsTwoReadTwoWatchedAnyAllFamily);
         Run(nameof(QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec), QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec);
         Run(nameof(QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies), QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies);
+        Run(nameof(QueryFamilyCatalog_EmitsExecutionGuidanceDocumentation), QueryFamilyCatalog_EmitsExecutionGuidanceDocumentation);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
         Console.WriteLine($"All {_passed} ECS generator tests passed.");
@@ -151,6 +152,25 @@ internal static class GeneratorTests
             StringComparison.Ordinal));
         TestAssert.True(first.GeneratedSource.Contains(
             "ArchetypeQueryRowFilter.Bind(",
+            StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EmitsExecutionGuidanceDocumentation()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "Use when ECS component composition selects the rows.",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "use ComponentLookup only for sparse referenced entities.",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "tracked registration for conditional/sparse actual writes.",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "Only mutations through tracked wrappers publish exact touched rows.",
             StringComparison.Ordinal));
     }
 

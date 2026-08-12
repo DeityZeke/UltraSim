@@ -6,6 +6,11 @@ namespace UltraSim.ECS;
 /// Stack-only two-column view with one read-only component and one writable
 /// component. The view is valid only during its synchronous visitor call.
 /// </summary>
+/// <remarks>
+/// Direct access to <see cref="WriteComponents"/> is the dense-write path: the
+/// exposed range is conservatively published as changed. Use a tracked chunk job
+/// when only some visited rows mutate.
+/// </remarks>
 public readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     where TRead : unmanaged, IComponent<TRead>
     where TWrite : unmanaged, IComponent<TWrite>
@@ -49,10 +54,12 @@ public readonly ref struct ReadWriteComponentChunk<TRead, TWrite>
     /// <summary>Physical row represented by local row zero in this sliced view.</summary>
     internal int RowOffset { get; }
 
+    /// <summary>Gets world-local entity slot indices for the exposed rows.</summary>
     public ReadOnlySpan<uint> EntityIndices { get; }
 
     public ReadOnlySpan<TRead> ReadComponents { get; }
 
+    /// <summary>Gets direct dense writable access to the exposed component range.</summary>
     public Span<TWrite> WriteComponents { get; }
 
     public int Count => EntityIndices.Length;

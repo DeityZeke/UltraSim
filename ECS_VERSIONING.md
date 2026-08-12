@@ -63,6 +63,13 @@ planning from a post-Seal reserved-payload snapshot. It is a correctness
 revision over the same 3.1 scheduler and structural executor, not a new
 execution architecture. The 3.1.0 and 3.1.1 artifacts remain immutable.
 
+The post-3.1.2 consumer-readiness pass does not advance the kernel version. It
+changes no runtime behavior or public signature. It adds generated and
+handwritten XML guidance plus `Kernels/ECS/ECS_USAGE_GUIDE.md` so consumers can
+distinguish topology-selected chunk work, bounded `RangeJob` work, sparse checked
+lookup, deferred structure, and value-change observation before 3.2.0 adds
+lifecycle publication.
+
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`
 through `3.0.31`, optionally giving the old label once. Historical artifact

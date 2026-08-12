@@ -7,6 +7,11 @@ namespace UltraSim.ECS;
 /// Copying the value creates an independent cursor at the same observation point.
 /// It is transient runtime state, not a durable consumer or persistence identity.
 /// </summary>
+/// <remarks>
+/// A cursor advances only after successful changed-row execution. It observes
+/// component value publication for rows that still exist; it is not a lifecycle
+/// stream and cannot report destroyed entities or membership deltas.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = 16)]
 public readonly struct ChangeCursor : IEquatable<ChangeCursor>
 {

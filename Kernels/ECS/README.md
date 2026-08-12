@@ -5,6 +5,12 @@ This is the new engine-agnostic ECS described by the root
 implementations remain isolated under `_V2/` for differential tests and
 benchmarks.
 
+For the public execution-path decision tree, cost model, structural visibility,
+and common misuse cases, start with
+[`ECS_USAGE_GUIDE.md`](ECS_USAGE_GUIDE.md). In short: composition-selected rows
+belong in generated chunk jobs; `RangeJob` is for bounded external or already-
+selected work; `ComponentLookup<T>` is sparse checked random access.
+
 ## Current implementation slices
 
 The first Phase 1 slice establishes runtime identity and bounded entity-slot

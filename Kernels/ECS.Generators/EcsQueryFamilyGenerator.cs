@@ -185,18 +185,37 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
     private static void AppendPublicJobContract(CodeWriter writer, QueryFamilySpec family)
     {
-        writer.Line($"/// <summary>Public serial generated chunk job with {family.Summary}.</summary>");
+        writer.Line($"/// <summary>Public serial topology-selected chunk job with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Use when ECS component composition selects the rows. Execution walks");
+        writer.Line("/// seal-compiled contiguous columns without per-row component lookup.");
+        if (family.WriteCount != 0)
+        {
+            writer.Line("/// Writable spans use dense publication: the exposed writable range is");
+            writer.Line("/// conservatively reported as changed. Use the tracked counterpart when");
+            writer.Line("/// only a subset of visited rows actually mutates.");
+        }
+        writer.Line("/// </remarks>");
+        writer.Line("/// <example>Use for every entity matching the declared component set.</example>");
         writer.Line($"public interface {family.JobType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
+        writer.Line("/// <summary>Executes once for one contiguous matching chunk slice.</summary>");
         writer.Line($"void Execute(in {family.ChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
 
         writer.Line();
-        writer.Line($"/// <summary>Scheduler-aware generated chunk job with {family.Summary}.</summary>");
+        writer.Line($"/// <summary>Scheduler-aware topology-selected chunk job with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// The context is callback-local and exposes only declared sparse lookup and");
+        writer.Line("/// deferred structural capabilities. Component spans remain chunk-owned.");
+        if (family.WriteCount != 0)
+            writer.Line("/// Writable spans conservatively publish the exposed range as changed.");
+        writer.Line("/// </remarks>");
         writer.Line($"public interface {family.ScheduledJobType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
+        writer.Line("/// <summary>Executes one scheduler-owned contiguous partition slice.</summary>");
         writer.Line($"void Execute(in SystemJobContext context, in {family.ChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
 
@@ -205,17 +224,28 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
         writer.Line();
         writer.Line($"/// <summary>Public serial conditional-write chunk job with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Use for a dense topology-selected candidate scan where only some rows");
+        writer.Line("/// mutate. Writes must use the tracked wrappers; requesting a dense span");
+        writer.Line("/// intentionally publishes the complete exposed range.");
+        writer.Line("/// </remarks>");
         writer.Line($"public interface {family.TrackedJobType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
+        writer.Line("/// <summary>Executes once for one contiguous matching chunk slice.</summary>");
         writer.Line($"void Execute(in {family.TrackedChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
 
         writer.Line();
         writer.Line($"/// <summary>Scheduler-aware conditional-write chunk job with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Use tracked mutation for sparse actual writes inside a dense candidate");
+        writer.Line("/// scan. The callback context and all chunk views expire on return.");
+        writer.Line("/// </remarks>");
         writer.Line($"public interface {family.ScheduledTrackedJobType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
+        writer.Line("/// <summary>Executes one scheduler-owned contiguous partition slice.</summary>");
         writer.Line($"void Execute(in SystemJobContext context, in {family.TrackedChunkType}<{family.TypeParameters}> chunk);");
         writer.Close();
     }
@@ -234,7 +264,13 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
     private static void AppendPublicChunk(CodeWriter writer, QueryFamilySpec family)
     {
-        writer.Line($"/// <summary>Generated stack-only view with {family.Summary}.</summary>");
+        writer.Line($"/// <summary>Generated stack-only contiguous view with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Valid only during its synchronous callback. Entity indices are world-local");
+        writer.Line("/// slots; reconstruct a full Entity only when a later operation requires it.");
+        if (family.WriteCount != 0)
+            writer.Line("/// Direct writable spans are the dense change-publication path.");
+        writer.Line("/// </remarks>");
         writer.Line($"public readonly ref struct {family.ChunkType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
@@ -344,7 +380,11 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
     private static void AppendPublicJobPlan(CodeWriter writer, QueryFamilySpec family)
     {
-        writer.Line($"/// <summary>Opaque world-owned prepared plan for {family.Summary}.</summary>");
+        writer.Line($"/// <summary>Opaque world-owned prepared chunk plan for {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Prepare during cold world construction. Seal compiles matching archetypes");
+        writer.Line("/// and physical columns once; runtime traversal performs no per-row lookup.");
+        writer.Line("/// </remarks>");
         writer.Line($"public readonly struct {family.JobPlanType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
@@ -420,6 +460,10 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
     private static void AppendTrackedPublicChunk(CodeWriter writer, QueryFamilySpec family)
     {
         writer.Line($"/// <summary>Generated stack-only conditional-write view with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Valid only during its callback. Mutate through tracked wrappers to publish");
+        writer.Line("/// exact touched rows; request a dense span only for genuinely dense writes.");
+        writer.Line("/// </remarks>");
         writer.Line($"public readonly ref struct {family.TrackedChunkType}<{family.TypeParameters}>");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
@@ -1603,6 +1647,11 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
     {
         writer.Line("public sealed partial class EcsWorld");
         writer.Open(string.Empty, emitHeader: false);
+        writer.Line($"/// <summary>Prepares a cold topology-selected chunk plan with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// Prepare before Seal. Runtime execution visits matching occupied chunks");
+        writer.Line("/// contiguously; use ComponentLookup only for sparse referenced entities.");
+        writer.Line("/// </remarks>");
         writer.Line($"public {family.JobPlanType}<{family.TypeParameters}> Prepare{family.Name}Job<{family.TypeParameters}>()");
         AppendComponentConstraints(writer, family);
         writer.Open(string.Empty, emitHeader: false);
@@ -1635,6 +1684,9 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
             AppendScheduledRegistration(writer, family, tracked: true);
         }
         writer.Line();
+        writer.Line($"/// <summary>Synchronously executes a topology-selected job with {family.Summary}.</summary>");
+        if (family.WriteCount != 0)
+            writer.Line("/// <remarks>Writable spans conservatively publish the exposed ranges as changed.</remarks>");
         AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining");
         writer.Line($"public int ExecuteJob<{family.TypeParameters}, TJob>(");
         writer.Indent();
@@ -1663,6 +1715,22 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         string prefix = tracked ? "Tracked" : string.Empty;
         string methodPrefix = tracked ? "RegisterTracked" : "Register";
         string jobType = tracked ? family.ScheduledTrackedJobType : family.ScheduledJobType;
+        writer.Line(tracked
+            ? $"/// <summary>Registers a topology-selected tracked chunk system with {family.Summary}.</summary>"
+            : $"/// <summary>Registers a topology-selected chunk system with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// This is the preferred system shape when component composition selects rows.");
+        if (tracked)
+        {
+            writer.Line("/// Use tracked writable wrappers when only some candidate rows mutate; a");
+            writer.Line("/// requested dense span intentionally publishes the complete exposed range.");
+        }
+        else if (family.WriteCount != 0)
+        {
+            writer.Line("/// Writable spans use conservative dense change publication. Choose the");
+            writer.Line("/// tracked registration for conditional/sparse actual writes.");
+        }
+        writer.Line("/// </remarks>");
         writer.Line($"public SystemId {methodPrefix}{family.Name}System<{family.TypeParameters}, TSystem, TJob>(");
         writer.Indent();
         writer.Line("SystemDefinition definition,");
@@ -1700,6 +1768,8 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
 
     private static void AppendTrackedFacadeExecution(CodeWriter writer, QueryFamilySpec family)
     {
+        writer.Line($"/// <summary>Synchronously executes a tracked chunk job with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>Only mutations through tracked wrappers publish exact touched rows.</remarks>");
         AppendMethodImpl(writer, "global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization");
         writer.Line($"public int ExecuteTrackedJob<{family.TypeParameters}, TJob>(");
         writer.Indent();

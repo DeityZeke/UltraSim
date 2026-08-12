@@ -2,6 +2,7 @@ namespace UltraSim.ECS;
 
 public sealed partial class EcsWorld
 {
+    /// <summary>Gets whether this world reserved and owns a scheduler.</summary>
     public bool HasScheduler
     {
         get { EnsureOwnerThread(); return _scheduler is not null; }
@@ -39,6 +40,19 @@ public sealed partial class EcsWorld
             _scheduler?.ReservedBytes ?? 0);
     }
 
+    /// <summary>Registers bounded non-query range work on the scheduler worker runtime.</summary>
+    /// <remarks>
+    /// Use this for external arrays, spatial buckets, preselected entity lists,
+    /// and other bounded index spaces. Do not scan the full entity population
+    /// through <see cref="ComponentLookup{T}"/> when component composition can
+    /// select the rows; use a generated chunk system instead.
+    ///
+    /// Supplemental component access must be declared by
+    /// <see cref="SystemDefinition.AdditionalReads"/> and
+    /// <see cref="SystemDefinition.AdditionalWrites"/>. Random mutation is serial
+    /// unless the definition supplies the complete partition-disjoint proof.
+    /// </remarks>
+    /// <example>Process 512 targets already selected by a combat or spatial index.</example>
     public SystemId RegisterRangeSystem<TSystem, TJob>(
         SystemDefinition definition,
         TSystem runtime)
@@ -49,6 +63,13 @@ public sealed partial class EcsWorld
         return GetSchedulerForRegistration().RegisterRangeSystem<TSystem, TJob>(definition, runtime);
     }
 
+    /// <summary>Executes one complete scheduled tick and its structural barriers.</summary>
+    /// <remarks>
+    /// The graph observes one stable topology. Scheduler-recorded structural
+    /// commands merge deterministically and become visible at the post-graph
+    /// barrier. Direct component writes are visible according to graph ordering.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The world is not running, has no scheduler, or faults.</exception>
     public void Tick(double deltaSeconds)
     {
         EnsureOwnerThread();
@@ -57,6 +78,13 @@ public sealed partial class EcsWorld
         RequireScheduler().Tick(deltaSeconds);
     }
 
+    /// <summary>Executes one system registered as manual through normal scheduler semantics.</summary>
+    /// <remarks>
+    /// Manual execution retains declared capabilities and deterministically merges
+    /// recorded structural segments into the main arena. It does not play them
+    /// back immediately; they become visible at the next explicit structural
+    /// playback or the next scheduled tick's pre-barrier.
+    /// </remarks>
     public void RunManual(SystemId systemId, double deltaSeconds)
     {
         EnsureOwnerThread();

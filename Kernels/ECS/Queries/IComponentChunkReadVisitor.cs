@@ -4,6 +4,7 @@ namespace UltraSim.ECS;
 /// Allocation-free synchronous public job over one read-only component column
 /// in each prepared chunk.
 /// </summary>
+/// <remarks>Use when ECS composition selects the rows; execution is contiguous and lookup-free.</remarks>
 public interface IReadOnlyChunkJob<T>
     where T : unmanaged, IComponent<T>
 {

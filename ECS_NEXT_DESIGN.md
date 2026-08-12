@@ -1322,6 +1322,17 @@ enable/dense-version metadata is synchronized without taxing chunk-owned jobs;
 typed and ordinary structural routes cannot collide by numeric ID; and retained
 main-arena references cannot escape graph capability enforcement.
 
+The 3.1.2 consumer-readiness pass deliberately changes no runtime semantics or
+API signatures. The one-page
+[`ECS_USAGE_GUIDE.md`](Kernels/ECS/ECS_USAGE_GUIDE.md) and generated/handwritten
+XML documentation make the intended physical execution taxonomy explicit:
+composition-selected work uses chunk jobs, preselected/external ranges use
+`RangeJob`, relationships use sparse prepared lookups, topology changes use the
+structural writer, and changed cursors observe values rather than lifecycle.
+This documentation checkpoint exists because Simulation Slice 0 demonstrated an
+up-to-approximately-85x consumer mistake without exposing a kernel performance
+defect.
+
 Persistent system state is not forced into entity components. Startup-created
 managed state may be acceptable when cold and bounded; generated unmanaged state
 slots may be preferable for some systems. Tests and persistence requirements,

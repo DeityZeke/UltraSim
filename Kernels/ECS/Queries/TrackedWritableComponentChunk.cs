@@ -7,6 +7,11 @@ namespace UltraSim.ECS;
 /// Mutation is published before a mutable reference, dense span, or enable-bit
 /// write becomes observable.
 /// </summary>
+/// <remarks>
+/// Use <see cref="GetTracked"/> or <see cref="SetTracked"/> when a dense candidate
+/// scan changes only selected rows. <see cref="DenseSpan"/> is intended for the
+/// case where the complete exposed range is genuinely writable work.
+/// </remarks>
 public readonly ref struct TrackedWritableComponentChunk<T>
     where T : unmanaged, IComponent<T>
 {
@@ -97,7 +102,7 @@ public readonly ref struct TrackedWritableComponentChunk<T>
         }
     }
 
-    /// <summary>Publishes exactly one row, then returns its mutable component.</summary>
+    /// <summary>Publishes exactly one row, then returns its callback-local mutable component.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ref T GetTracked(int row)
     {

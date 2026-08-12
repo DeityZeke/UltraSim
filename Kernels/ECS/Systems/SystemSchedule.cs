@@ -2,7 +2,12 @@ using System.Runtime.InteropServices;
 
 namespace UltraSim.ECS;
 
-/// <summary>Owner-controlled cadence values; graph topology remains sealed.</summary>
+/// <summary>Owner-controlled deterministic cadence; graph topology remains sealed.</summary>
+/// <remarks>
+/// A due tick satisfies the scheduler's period/offset rule. Offset zero includes
+/// tick zero. Dependencies order due invocations but do not force a dependency to
+/// run on a tick where its own cadence is not due.
+/// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4, Size = 16)]
 public readonly struct SystemSchedule : IEquatable<SystemSchedule>
 {
@@ -18,10 +23,13 @@ public readonly struct SystemSchedule : IEquatable<SystemSchedule>
         StartOffset = startOffset;
     }
 
+    /// <summary>Gets whether automatic tick execution is enabled.</summary>
     public bool Enabled { get; }
 
+    /// <summary>Gets the positive execution period in ticks.</summary>
     public int PeriodTicks { get; }
 
+    /// <summary>Gets the due-tick phase in the range zero through period minus one.</summary>
     public int StartOffset { get; }
 
     public bool Equals(SystemSchedule other) =>

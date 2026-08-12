@@ -3,6 +3,11 @@ using System.Runtime.CompilerServices;
 namespace UltraSim.ECS;
 
 /// <summary>Stack-only conditional-write view for the handwritten 1R1W family.</summary>
+/// <remarks>
+/// Read candidates contiguously, then mutate through <see cref="Write"/> so only
+/// actually touched rows are published. Requesting its dense span intentionally
+/// converts the exposed range to dense publication.
+/// </remarks>
 public readonly ref struct TrackedReadWriteComponentChunk<TRead, TWrite>
     where TRead : unmanaged, IComponent<TRead>
     where TWrite : unmanaged, IComponent<TWrite>

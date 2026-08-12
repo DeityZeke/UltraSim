@@ -2,7 +2,11 @@ using System.Runtime.CompilerServices;
 
 namespace UltraSim.ECS;
 
-/// <summary>Opaque world-owned prepared serial job plan with one read and one write.</summary>
+/// <summary>Opaque world-owned prepared chunk plan with one read and one write.</summary>
+/// <remarks>
+/// Prepare before sealing. The plan selects matching archetypes by composition
+/// and binds contiguous columns once; it is not a random-access route.
+/// </remarks>
 public readonly struct ReadWriteJobPlan<TRead, TWrite>
     where TRead : unmanaged, IComponent<TRead>
     where TWrite : unmanaged, IComponent<TWrite>

@@ -1,8 +1,31 @@
 namespace UltraSim.ECS;
 
-/// <summary>Cold system identity, scheduling, dependency, and extra-access metadata.</summary>
+/// <summary>Cold system identity, cadence, dependency, and capability declaration.</summary>
+/// <remarks>
+/// Generated job columns are registered automatically by their typed system
+/// method. <see cref="AdditionalReads"/> and <see cref="AdditionalWrites"/> mean
+/// supplemental random lookup capabilities; they do not describe generated
+/// chunk columns. <see cref="StructuralComponents"/> authorizes deferred command
+/// recording and does not make topology visible during the same graph.
+/// </remarks>
 public sealed class SystemDefinition
 {
+    /// <summary>Creates one cold scheduler declaration.</summary>
+    /// <param name="key">Nonempty canonical identity unique within the world.</param>
+    /// <param name="stage">Coarse deterministic stage.</param>
+    /// <param name="schedule">Cadence; default means enabled every tick at offset zero.</param>
+    /// <param name="executionPolicy">Serial, parallel, or measured-threshold automatic execution.</param>
+    /// <param name="manual">Whether the system runs only through <see cref="EcsWorld.RunManual"/>.</param>
+    /// <param name="persistenceId">Stable persistence identity for runtime state, or zero for none.</param>
+    /// <param name="stateSchemaVersion">Nonzero schema version when <paramref name="persistenceId"/> is nonzero.</param>
+    /// <param name="requires">Explicit system predecessors whose completed value work must be ordered first.</param>
+    /// <param name="additionalReads">Supplemental random-lookup read component IDs.</param>
+    /// <param name="additionalWrites">Supplemental random-lookup write component IDs.</param>
+    /// <param name="structuralComponents">Components this system may add or remove through its structural writer.</param>
+    /// <param name="parallelRowThreshold">Minimum logical rows considered for automatic parallel execution.</param>
+    /// <param name="minimumRowsPerPartition">Lower bound used when forming parallel work partitions.</param>
+    /// <param name="parallelRandomAccessPolicy">Caller-supplied ownership proof for supplemental random access.</param>
+    /// <param name="automaticallyStagger">Whether the scheduler may select a deterministic cadence offset.</param>
     public SystemDefinition(
         string key,
         SystemStage stage,
@@ -63,12 +86,20 @@ public sealed class SystemDefinition
     public bool Manual { get; }
     public ulong PersistenceId { get; }
     public ushort StateSchemaVersion { get; }
+    /// <summary>Gets explicit graph predecessors; structural visibility still waits for the barrier.</summary>
     public IReadOnlyList<SystemId> Requires { get; }
+
+    /// <summary>Gets component IDs authorized for supplemental random lookup reads.</summary>
     public IReadOnlyList<ComponentId> AdditionalReads { get; }
+
+    /// <summary>Gets component IDs authorized for supplemental random lookup writes.</summary>
     public IReadOnlyList<ComponentId> AdditionalWrites { get; }
+
+    /// <summary>Gets component IDs authorized for deferred add/remove commands.</summary>
     public IReadOnlyList<ComponentId> StructuralComponents { get; }
     public int ParallelRowThreshold { get; }
     public int MinimumRowsPerPartition { get; }
+    /// <summary>Gets the caller's supplemental random-access ownership policy.</summary>
     public ParallelRandomAccessPolicy ParallelRandomAccessPolicy { get; }
     public bool AutomaticallyStagger { get; }
 

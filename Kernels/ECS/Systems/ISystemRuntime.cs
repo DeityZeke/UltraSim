@@ -4,11 +4,19 @@ namespace UltraSim.ECS;
 /// Persistent cold-created state around one ephemeral unmanaged or managed-reference
 /// containing job value. Boundary calls occur once per invocation, never per row.
 /// </summary>
+/// <remarks>
+/// Keep persistent system state in the runtime. <see cref="Prepare"/> returns the
+/// ephemeral value copied per participant; <see cref="Complete"/> receives those
+/// participant-local results in deterministic participant order. Job contexts and
+/// chunk views must never be retained by the runtime.
+/// </remarks>
 public interface ISystemRuntime<TJob>
     where TJob : struct
 {
+    /// <summary>Initializes persistent state once after the world is sealed.</summary>
     void Initialize(in SystemInitializationContext context) { }
 
+    /// <summary>Builds the ephemeral job value for one due invocation.</summary>
     TJob Prepare(in SystemPrepareContext context);
 
     /// <summary>
@@ -17,15 +25,23 @@ public interface ISystemRuntime<TJob>
     /// </summary>
     void Complete(in SystemCompleteContext context, ReadOnlySpan<TJob> participantResults) { }
 
+    /// <summary>Releases persistent runtime state during scheduler shutdown.</summary>
     void Shutdown(in SystemShutdownContext context) { }
 }
 
-/// <summary>Bounded non-ECS range work executed by the scheduler worker runtime.</summary>
+/// <summary>Bounded non-query index work executed by the scheduler worker runtime.</summary>
+/// <remarks>
+/// Use for external arrays, preselected entity operations, or other already-
+/// bounded work. Do not scan the entity population with prepared lookups when a
+/// generated chunk job can select the required component topology directly.
+/// </remarks>
+/// <example>Process a preselected array of 256 combat target operations.</example>
 public interface IRangeJob
 {
     void Execute(in SystemJobContext context, int start, int count);
 }
 
+/// <summary>Persistent runtime that supplies the bounded count for an <see cref="IRangeJob"/>.</summary>
 public interface IRangeSystemRuntime<TJob> : ISystemRuntime<TJob>
     where TJob : struct, IRangeJob
 {
@@ -42,6 +58,8 @@ public interface IChangedRowsSystemRuntime<TJob> : ISystemRuntime<TJob>
     ChangeCursor Cursor { get; set; }
 }
 
+/// <summary>Serial scheduler callback over contiguous runs of currently present changed rows.</summary>
+/// <remarks>It observes changed values, not structural lifecycle events or tombstones.</remarks>
 public interface IScheduledChangedRowsChunkJob<TRead>
     where TRead : unmanaged, IComponent<TRead>
 {

@@ -4,6 +4,11 @@ namespace UltraSim.ECS;
 /// Opaque world-owned exact changed-row plan. The watched type is encoded even
 /// though execution exposes only the declared read column.
 /// </summary>
+/// <remarks>
+/// The plan observes value publication for currently present rows. It does not
+/// retain destroyed identities, component-membership events, tombstones, or all
+/// intermediate values between cursor observations.
+/// </remarks>
 public readonly struct ChangedRowsJobPlan<TRead, TChanged>
     where TRead : unmanaged, IComponent<TRead>
     where TChanged : unmanaged, IComponent<TChanged>

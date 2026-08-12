@@ -2,6 +2,13 @@ namespace UltraSim.ECS;
 
 public sealed partial class EcsWorld
 {
+    /// <summary>Registers a serial independent-cursor exact changed-row consumer.</summary>
+    /// <remarks>
+    /// This observes current rows whose watched component value changed after the
+    /// runtime cursor. It does not publish entity creation/destruction, component
+    /// membership changes, tombstones, or every intermediate value.
+    /// Acknowledgement occurs only after successful execution.
+    /// </remarks>
     public SystemId RegisterChangedRowsSystem<TRead, TChanged, TSystem, TJob>(
         SystemDefinition definition,
         in ChangedRowsJobPlan<TRead, TChanged> plan,
@@ -32,6 +39,11 @@ public sealed partial class EcsWorld
     /// Prepares an exact-row independent-consumer plan during world construction.
     /// Routes and bounded row-history storage are compiled by <see cref="Seal"/>.
     /// </summary>
+    /// <remarks>
+    /// Preparing exact observation commits bounded row-history storage for the
+    /// watched component routes. This is value-change observation, not lifecycle
+    /// history.
+    /// </remarks>
     public ChangedRowsJobPlan<TRead, TChanged> PrepareChangedRowsJob<TRead, TChanged>()
         where TRead : unmanaged, IComponent<TRead>
         where TChanged : unmanaged, IComponent<TChanged>
@@ -50,6 +62,10 @@ public sealed partial class EcsWorld
     /// Executes an exact-row changed job and acknowledges the cursor only after
     /// every chunk callback succeeds.
     /// </summary>
+    /// <remarks>
+    /// On exception the cursor is unchanged and the consumer may retry. Copying a
+    /// cursor creates another independent consumer at the same position.
+    /// </remarks>
     [System.Runtime.CompilerServices.MethodImpl(
         System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
     public int ExecuteChangedRowsJob<TRead, TChanged, TJob>(
