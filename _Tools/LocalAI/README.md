@@ -39,6 +39,9 @@ Environment overrides:
 - `ULTRASIM_QWEN_MODEL`: model name; default `ultrasim-qwen`.
 - `ULTRASIM_QWEN_CONTEXT`: request context; default `16384`.
 - `ULTRASIM_QWEN_MAX_INPUT_BYTES`: explicit input limit; default `60000`.
+- `ULTRASIM_QWEN_THINK`: enable Ollama's separate reasoning mode; default
+  `false`. Some Qwen/Ollama combinations can consume the complete output budget
+  as hidden thinking and return an empty review when this is enabled.
 - `OLLAMA_HOST`: Ollama API base URL; default `http://127.0.0.1:11434`.
 
 Do not expose an unauthenticated Ollama endpoint to another network. Do not run

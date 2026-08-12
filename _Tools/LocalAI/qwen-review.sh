@@ -6,7 +6,13 @@ model=${ULTRASIM_QWEN_MODEL:-ultrasim-qwen}
 host=${OLLAMA_HOST:-http://127.0.0.1:11434}
 context=${ULTRASIM_QWEN_CONTEXT:-16384}
 max_bytes=${ULTRASIM_QWEN_MAX_INPUT_BYTES:-60000}
+think=${ULTRASIM_QWEN_THINK:-false}
 review_kind=${1:-ecs}
+
+if [[ "$think" != "true" && "$think" != "false" ]]; then
+    printf 'ULTRASIM_QWEN_THINK must be true or false (received: %s)\n' "$think" >&2
+    exit 2
+fi
 
 if (($# > 0)); then
     shift
@@ -64,11 +70,12 @@ fi
 jq -Rs \
     --arg model "$model" \
     --argjson context "$context" \
+    --argjson think "$think" \
     '{
         model: $model,
         prompt: .,
         stream: false,
-        think: true,
+        think: $think,
         keep_alive: "30m",
         options: {
             num_ctx: $context,

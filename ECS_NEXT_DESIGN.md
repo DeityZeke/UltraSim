@@ -159,6 +159,17 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   caller/worker allocation, and zero collections; it also reports 25 cold graph
   Seal cases through 4,000 systems and four 5K-of-100K component/enable random
   access safety timings;
+- a separate deterministic extreme-sphere integration suite that executes the
+  same 36-byte phase/velocity/movement state through isolated V2 and V3
+  schedulers at 10K through 8M entities, validates a physical-layout-independent
+  canonical final state, records complete timing/system/throughput/allocation/GC/
+  memory evidence in both process orders, and sweeps 3/7/15 background workers.
+  Its V3 Godot 4.7.1 Mono companion keeps every entity simulated, limits only
+  the visible archetype, bulk-packs and uploads one MultiMesh buffer, and
+  separates simulation, transform packing, CPU submission and measured GPU
+  time. The V1 source/test was located but remains non-runnable without a broad
+  reconstruction of its stale monolithic project, so no fabricated Legacy
+  ratio is reported;
 - a 3.0.35 change-tracking decomposition with two opposite-pass-order accepted
   captures, 628 total measured rows, checked/prebound/no-tracking/dense/exact
   write controls, shared-version and pre-grouped experimental ceilings, 100
@@ -2530,6 +2541,16 @@ Implementation status through 2026-08-11:
   dispatch against range-per-run dispatch before row-history representation
   changes;
 - the Current/Next comparison is now an executable longitudinal baseline rather than a projection. The accepted 3.1.2 checkpoint retains 102 matched rows, 0 canonical mismatches, 10 explicit unsupported rows, and zero timed caller allocation/GC in every V3 row across both process orders; scheduler instrumentation also reports zero V3 worker allocation for all three parallel-capable comparison rows. V2 worker allocation remains unknown. The 3.1.0 artifact first added honest scheduler serial, parallel generated-query, and range contracts instead of relabeling 3.0.36 public dispatch as a complete system; all earlier artifacts remain immutable. The 3.0.31 catalog added provisional balanced 72-byte destroy/create churn, where V3 playback is roughly 3.1-3.2x faster at 50K while exposing a V2 stale-default-row defect. At 3.0.32, 50K exact add/remove playback and round-trip costs improve roughly 41-45% from 3.0.31, but remain approximately 2.2-2.7x slower than V2. Most remaining overlapping scalar/structural cases still favor V2. These results are regression evidence, not a passed cutover gate. Native-versus-pinned and small percentage differences remain directional until repeated isolated processes, large footprints, and hardware counters justify them.
+- the extreme-sphere comparison provides a production-shaped counterpoint to
+  those primitive rows: V3 is roughly 1.75-2.04x faster in serial full-world
+  execution and 8.7-11.7x faster in the principal parallel million-row cases,
+  with zero warmed allocation and materially lower memory. This is strong
+  evidence for the generated scheduler on homogeneous streaming systems, not a
+  claim that every gameplay workload inherits the same ratio. At 8M entities,
+  15 background workers plus caller average about 15.93 ms and 44.9 effective
+  GiB/s; p95 remains about 16.84 ms. The renderer companion shows the independent
+  GPU boundary at roughly 15.6 ms for 1M visible low-poly spheres and 30.4 ms for
+  2M;
 
 Deliverables:
 
@@ -3071,7 +3092,11 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
     serialized input capture, minimization, Legacy/Current, parallel, prefab,
     persistence, and network replay remain outstanding.
 - [ ] Legacy/Current/Next comparison report
-  - Current/Next v1 is executable with 96 matched rows and zero state mismatches at the 3.0.32 checkpoint; Legacy remains outstanding.
+  - Current/Next is executable with 102 matched rows and zero state mismatches
+    at the 3.1.2 checkpoint. The extreme-sphere suite adds exact V2/V3
+    integration parity through 8M entities. Legacy remains outstanding; the
+    located V1 sphere project does not currently compile without broad
+    reconstruction.
 - [ ] Short and long GC/native-memory soaks
   - First 60,000-tick natural-GC mixed-operation capture is complete with zero
     timed allocation/collections and stable native chunk occupancy; one-hour,

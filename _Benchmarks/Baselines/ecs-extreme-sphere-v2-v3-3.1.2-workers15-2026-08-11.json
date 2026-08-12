@@ -1,0 +1,616 @@
+{
+  "ProtocolVersion": "ultrasim-extreme-sphere-v1",
+  "TimestampUtc": "2026-08-12T00:21:57.7340991+00:00",
+  "ProcessOrder": "V2 then V3",
+  "RuntimeControls": "Release child processes; DOTNET_TieredCompilation=0; DOTNET_ReadyToRun=0; DOTNET_GCServer=1",
+  "Comparisons": [
+    {
+      "V2": {
+        "ProtocolVersion": "ultrasim-extreme-sphere-v1",
+        "Generation": "V2",
+        "KernelProfile": "V2 current scheduler and packed archetypes",
+        "RuntimeVersion": "8.0.29",
+        "FrameworkDescription": ".NET 8.0.29",
+        "OSDescription": "CachyOS",
+        "ProcessArchitecture": "X64",
+        "ProcessorCount": 16,
+        "TimestampUtc": "2026-08-12T00:21:33.8516957+00:00",
+        "Configuration": {
+          "EntityCount": 1000000,
+          "WarmupTicks": 60,
+          "MeasuredTicks": 300,
+          "Mode": "Parallel",
+          "Pipeline": "Split3",
+          "BackgroundWorkers": 15,
+          "Seed": 12648430,
+          "SpawnRadius": 50,
+          "DeltaSeconds": 0.016666668,
+          "ChunkSizeKiB": 64
+        },
+        "Spawn": {
+          "ElapsedMilliseconds": 188.831641,
+          "NanosecondsPerEntity": 188.831641,
+          "AllThreadsAllocatedBytes": 343758128,
+          "CallerThreadAllocatedBytes": 343754912,
+          "Gen0Collections": 5,
+          "Gen1Collections": 5,
+          "Gen2Collections": 5
+        },
+        "TickTiming": {
+          "MeanMicroseconds": 18186.47690999999,
+          "MinMicroseconds": 17577.133,
+          "P50Microseconds": 18133.148,
+          "P95Microseconds": 18839.715500000002,
+          "P99Microseconds": 19258.979799999997,
+          "P999Microseconds": 19895.771662000017,
+          "MaxMicroseconds": 20123.389,
+          "StandardDeviationMicroseconds": 344.48047361483606
+        },
+        "MeanNanosecondsPerEntityTick": 18.18647690999999,
+        "EntityTicksPerSecond": 54985910.95728615,
+        "EffectiveGiBPerSecond": 4.91612353539045,
+        "Systems": [
+          {
+            "Name": "phase",
+            "RowsPerTick": 1000000,
+            "EffectiveBytesPerEntity": 24,
+            "Timing": {
+              "MeanMicroseconds": 754.9264766666677,
+              "MinMicroseconds": 619.935,
+              "P50Microseconds": 728.188,
+              "P95Microseconds": 954.6250500000001,
+              "P99Microseconds": 1053.475689999999,
+              "P999Microseconds": 1319.2234390000033,
+              "MaxMicroseconds": 1363.218,
+              "StandardDeviationMicroseconds": 96.4703688877719
+            },
+            "MeanNanosecondsPerRow": 0.7549264766666676,
+            "EffectiveGiBPerSecond": 29.60783928186524
+          },
+          {
+            "Name": "velocity",
+            "RowsPerTick": 1000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 1404.2186433333336,
+              "MinMicroseconds": 1256.149,
+              "P50Microseconds": 1371.2375,
+              "P95Microseconds": 1656.1700000000003,
+              "P99Microseconds": 1794.0760999999995,
+              "P999Microseconds": 1852.7131190000002,
+              "MaxMicroseconds": 1857.443,
+              "StandardDeviationMicroseconds": 114.20266445839223
+            },
+            "MeanNanosecondsPerRow": 1.4042186433333335,
+            "EffectiveGiBPerSecond": 23.87634777912462
+          },
+          {
+            "Name": "movement",
+            "RowsPerTick": 1000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 855.0071299999996,
+              "MinMicroseconds": 653.034,
+              "P50Microseconds": 833.112,
+              "P95Microseconds": 1059.64445,
+              "P99Microseconds": 1160.0727999999997,
+              "P999Microseconds": 1222.9935400000008,
+              "MaxMicroseconds": 1233.919,
+              "StandardDeviationMicroseconds": 99.82483150472348
+            },
+            "MeanNanosecondsPerRow": 0.8550071299999996,
+            "EffectiveGiBPerSecond": 39.21325508262983
+          }
+        ],
+        "MeasurementAllocations": {
+          "AllThreadsBytes": 158400,
+          "CallerThreadBytes": 158400,
+          "InstrumentedWorkerBytes": 0,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0
+        },
+        "BeforeWorldMemory": {
+          "ManagedBytes": 73856,
+          "GcHeapBytes": 0,
+          "GcCommittedBytes": 0,
+          "WorkingSetBytes": 37138432,
+          "PrivateBytes": 51793920,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "AfterSeedMemory": {
+          "ManagedBytes": 280108104,
+          "GcHeapBytes": 101901056,
+          "GcCommittedBytes": 104108032,
+          "WorkingSetBytes": 324431872,
+          "PrivateBytes": 475435008,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "AfterMeasurementMemory": {
+          "ManagedBytes": 360514488,
+          "GcHeapBytes": 101901056,
+          "GcCommittedBytes": 104108032,
+          "WorkingSetBytes": 397926400,
+          "PrivateBytes": 555704320,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "CanonicalState": {
+          "Hash": "A6AFEE64E68C2D57CCC4B7AC9EBEAB52",
+          "Rows": 1000000,
+          "NonFiniteValues": 0,
+          "MeanRadius": 37.50310190789542,
+          "MinRadius": 0.0004990409074686174,
+          "MaxRadius": 80.68243851021764,
+          "FloatBitChecksum": -5223772399199299699
+        },
+        "SchedulerDispatches": 0,
+        "SchedulerWorkerWakes": 0,
+        "SchedulerWorkerParks": 0,
+        "TotalRowsVisited": 900000000,
+        "AllocationScope": "GC.GetTotalAllocatedBytes covers caller and V2 worker threads; V2 has no independent worker allocation counter.",
+        "Notes": "Seeded once; warmed once; sustained fixed-population three-system tick. V2 PatchChunks also publishes its native dirty state. ECS-only: no renderer, culling, or transform upload."
+      },
+      "V3": {
+        "ProtocolVersion": "ultrasim-extreme-sphere-v1",
+        "Generation": "V3",
+        "KernelProfile": "ECS 3.1.2 scheduler proof hardening",
+        "RuntimeVersion": "8.0.29",
+        "FrameworkDescription": ".NET 8.0.29",
+        "OSDescription": "CachyOS",
+        "ProcessArchitecture": "X64",
+        "ProcessorCount": 16,
+        "TimestampUtc": "2026-08-12T00:21:35.2744457+00:00",
+        "Configuration": {
+          "EntityCount": 1000000,
+          "WarmupTicks": 60,
+          "MeasuredTicks": 300,
+          "Mode": "Parallel",
+          "Pipeline": "Split3",
+          "BackgroundWorkers": 15,
+          "Seed": 12648430,
+          "SpawnRadius": 50,
+          "DeltaSeconds": 0.016666668,
+          "ChunkSizeKiB": 64
+        },
+        "Spawn": {
+          "ElapsedMilliseconds": 186.835799,
+          "NanosecondsPerEntity": 186.835799,
+          "AllThreadsAllocatedBytes": 0,
+          "CallerThreadAllocatedBytes": 0,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0
+        },
+        "TickTiming": {
+          "MeanMicroseconds": 1482.4897100000003,
+          "MinMicroseconds": 1109.44,
+          "P50Microseconds": 1462.217,
+          "P95Microseconds": 1880.8480000000004,
+          "P99Microseconds": 2136.3551899999998,
+          "P999Microseconds": 2366.343460000002,
+          "MaxMicroseconds": 2390.999,
+          "StandardDeviationMicroseconds": 227.2914390802681
+        },
+        "MeanNanosecondsPerEntityTick": 1.4824897100000003,
+        "EntityTicksPerSecond": 674540938.2976425,
+        "EffectiveGiBPerSecond": 60.3086595205345,
+        "Systems": [
+          {
+            "Name": "phase",
+            "RowsPerTick": 1000000,
+            "EffectiveBytesPerEntity": 24,
+            "Timing": {
+              "MeanMicroseconds": 205.69613333333314,
+              "MinMicroseconds": 143.559,
+              "P50Microseconds": 191.998,
+              "P95Microseconds": 265.29904999999997,
+              "P99Microseconds": 500.37009999999924,
+              "P999Microseconds": 1128.0091090000021,
+              "MaxMicroseconds": 1155.46,
+              "StandardDeviationMicroseconds": 91.07230138885382
+            },
+            "MeanNanosecondsPerRow": 0.20569613333333311,
+            "EffectiveGiBPerSecond": 108.66388895385899
+          },
+          {
+            "Name": "velocity",
+            "RowsPerTick": 1000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 1049.1556866666672,
+              "MinMicroseconds": 777.633,
+              "P50Microseconds": 1041.5855000000001,
+              "P95Microseconds": 1330.89,
+              "P99Microseconds": 1461.0720999999999,
+              "P999Microseconds": 1640.2573570000043,
+              "MaxMicroseconds": 1700.194,
+              "StandardDeviationMicroseconds": 167.1089333403469
+            },
+            "MeanNanosecondsPerRow": 1.0491556866666671,
+            "EffectiveGiBPerSecond": 31.95675638253435
+          },
+          {
+            "Name": "movement",
+            "RowsPerTick": 1000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 226.15833666666677,
+              "MinMicroseconds": 163.648,
+              "P50Microseconds": 209.273,
+              "P95Microseconds": 314.289,
+              "P99Microseconds": 630.39561,
+              "P999Microseconds": 1009.0485260000114,
+              "MaxMicroseconds": 1163.43,
+              "StandardDeviationMicroseconds": 86.93347228501801
+            },
+            "MeanNanosecondsPerRow": 0.22615833666666676,
+            "EffectiveGiBPerSecond": 148.24840499058564
+          }
+        ],
+        "MeasurementAllocations": {
+          "AllThreadsBytes": 0,
+          "CallerThreadBytes": 0,
+          "InstrumentedWorkerBytes": 0,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0
+        },
+        "BeforeWorldMemory": {
+          "ManagedBytes": 74088,
+          "GcHeapBytes": 0,
+          "GcCommittedBytes": 0,
+          "WorkingSetBytes": 42160128,
+          "PrivateBytes": 56717312,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "AfterSeedMemory": {
+          "ManagedBytes": 21298480,
+          "GcHeapBytes": 4117536,
+          "GcCommittedBytes": 4284416,
+          "WorkingSetBytes": 104206336,
+          "PrivateBytes": 245473280,
+          "ReservedEcsPayloadBytes": 61355772,
+          "NativeChunkPayloadBytes": 40304640
+        },
+        "AfterMeasurementMemory": {
+          "ManagedBytes": 21353032,
+          "GcHeapBytes": 4117536,
+          "GcCommittedBytes": 4284416,
+          "WorkingSetBytes": 104771584,
+          "PrivateBytes": 245538816,
+          "ReservedEcsPayloadBytes": 61355772,
+          "NativeChunkPayloadBytes": 40304640
+        },
+        "CanonicalState": {
+          "Hash": "A6AFEE64E68C2D57CCC4B7AC9EBEAB52",
+          "Rows": 1000000,
+          "NonFiniteValues": 0,
+          "MeanRadius": 37.50310190789655,
+          "MinRadius": 0.0004990409074686174,
+          "MaxRadius": 80.68243851021764,
+          "FloatBitChecksum": -5223772399199299699
+        },
+        "SchedulerDispatches": 900,
+        "SchedulerWorkerWakes": 13500,
+        "SchedulerWorkerParks": 13500,
+        "TotalRowsVisited": 900000000,
+        "AllocationScope": "GC.GetTotalAllocatedBytes covers the process; V3 worker counters independently cover scheduler workers.",
+        "Notes": "Seeded once; warmed once; sustained fixed-population three-system tick. ECS-only: no renderer, culling, or transform upload."
+      },
+      "CanonicalMatch": true,
+      "V3TickSpeedup": 12.267523199199802,
+      "V3P95Speedup": 10.016607136780856,
+      "V3SpawnSpeedup": 1.0106823318158635,
+      "V3WorkingSetRatio": 0.26329387545033456,
+      "V3PrivateMemoryRatio": 0.44185155155892974
+    },
+    {
+      "V2": {
+        "ProtocolVersion": "ultrasim-extreme-sphere-v1",
+        "Generation": "V2",
+        "KernelProfile": "V2 current scheduler and packed archetypes",
+        "RuntimeVersion": "8.0.29",
+        "FrameworkDescription": ".NET 8.0.29",
+        "OSDescription": "CachyOS",
+        "ProcessArchitecture": "X64",
+        "ProcessorCount": 16,
+        "TimestampUtc": "2026-08-12T00:21:53.5713395+00:00",
+        "Configuration": {
+          "EntityCount": 8000000,
+          "WarmupTicks": 20,
+          "MeasuredTicks": 80,
+          "Mode": "Parallel",
+          "Pipeline": "Split3",
+          "BackgroundWorkers": 15,
+          "Seed": 12648430,
+          "SpawnRadius": 50,
+          "DeltaSeconds": 0.016666668,
+          "ChunkSizeKiB": 64
+        },
+        "Spawn": {
+          "ElapsedMilliseconds": 1744.745277,
+          "NanosecondsPerEntity": 218.093159625,
+          "AllThreadsAllocatedBytes": 2751292200,
+          "CallerThreadAllocatedBytes": 2751286488,
+          "Gen0Collections": 9,
+          "Gen1Collections": 9,
+          "Gen2Collections": 9
+        },
+        "TickTiming": {
+          "MeanMicroseconds": 157182.9928625,
+          "MinMicroseconds": 155060.293,
+          "P50Microseconds": 157019.3555,
+          "P95Microseconds": 159479.44535,
+          "P99Microseconds": 161374.34296999997,
+          "P999Microseconds": 165612.15679700003,
+          "MaxMicroseconds": 166083.025,
+          "StandardDeviationMicroseconds": 1567.409796529156
+        },
+        "MeanNanosecondsPerEntityTick": 19.6478741078125,
+        "EntityTicksPerSecond": 50896091.582873814,
+        "EffectiveGiBPerSecond": 4.550465188879413,
+        "Systems": [
+          {
+            "Name": "phase",
+            "RowsPerTick": 8000000,
+            "EffectiveBytesPerEntity": 24,
+            "Timing": {
+              "MeanMicroseconds": 9065.914074999999,
+              "MinMicroseconds": 8568.513,
+              "P50Microseconds": 8996.118999999999,
+              "P95Microseconds": 9771.234949999998,
+              "P99Microseconds": 10332.716649999997,
+              "P999Microseconds": 10768.250365000004,
+              "MaxMicroseconds": 10816.643,
+              "StandardDeviationMicroseconds": 353.73299935031423
+            },
+            "MeanNanosecondsPerRow": 1.1332392593749998,
+            "EffectiveGiBPerSecond": 19.72376230867508
+          },
+          {
+            "Name": "velocity",
+            "RowsPerTick": 8000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 15082.020200000003,
+              "MinMicroseconds": 14439.171,
+              "P50Microseconds": 15057.946,
+              "P95Microseconds": 15925.39145,
+              "P99Microseconds": 16123.507489999998,
+              "P999Microseconds": 16229.282249000002,
+              "MaxMicroseconds": 16241.035,
+              "StandardDeviationMicroseconds": 393.49759626992636
+            },
+            "MeanNanosecondsPerRow": 1.8852525250000003,
+            "EffectiveGiBPerSecond": 17.784149466213933
+          },
+          {
+            "Name": "movement",
+            "RowsPerTick": 8000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 11067.735862499996,
+              "MinMicroseconds": 10503.426,
+              "P50Microseconds": 11055.131000000001,
+              "P95Microseconds": 11529.95695,
+              "P99Microseconds": 11882.92729,
+              "P999Microseconds": 11957.830429000001,
+              "MaxMicroseconds": 11966.153,
+              "StandardDeviationMicroseconds": 322.6578806650995
+            },
+            "MeanNanosecondsPerRow": 1.3834669828124995,
+            "EffectiveGiBPerSecond": 24.23448705512129
+          }
+        ],
+        "MeasurementAllocations": {
+          "AllThreadsBytes": 42240,
+          "CallerThreadBytes": 42240,
+          "InstrumentedWorkerBytes": 0,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0
+        },
+        "BeforeWorldMemory": {
+          "ManagedBytes": 73856,
+          "GcHeapBytes": 0,
+          "GcCommittedBytes": 0,
+          "WorkingSetBytes": 37052416,
+          "PrivateBytes": 51793920,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "AfterSeedMemory": {
+          "ManagedBytes": 1409426232,
+          "GcHeapBytes": 1342498848,
+          "GcCommittedBytes": 2169024512,
+          "WorkingSetBytes": 2513534976,
+          "PrivateBytes": 2760294400,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "AfterMeasurementMemory": {
+          "ManagedBytes": 2049684208,
+          "GcHeapBytes": 1342498848,
+          "GcCommittedBytes": 2169024512,
+          "WorkingSetBytes": 2894827520,
+          "PrivateBytes": 3202129920,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "CanonicalState": {
+          "Hash": "936DCA9945106F07860998516AE83C12",
+          "Rows": 8000000,
+          "NonFiniteValues": 0,
+          "MeanRadius": 37.499916201523654,
+          "MinRadius": 4.632278373177219E-05,
+          "MaxRadius": 62.83085055194681,
+          "FloatBitChecksum": -8598113016880903985
+        },
+        "SchedulerDispatches": 0,
+        "SchedulerWorkerWakes": 0,
+        "SchedulerWorkerParks": 0,
+        "TotalRowsVisited": 1920000000,
+        "AllocationScope": "GC.GetTotalAllocatedBytes covers caller and V2 worker threads; V2 has no independent worker allocation counter.",
+        "Notes": "Seeded once; warmed once; sustained fixed-population three-system tick. V2 PatchChunks also publishes its native dirty state. ECS-only: no renderer, culling, or transform upload."
+      },
+      "V3": {
+        "ProtocolVersion": "ultrasim-extreme-sphere-v1",
+        "Generation": "V3",
+        "KernelProfile": "ECS 3.1.2 scheduler proof hardening",
+        "RuntimeVersion": "8.0.29",
+        "FrameworkDescription": ".NET 8.0.29",
+        "OSDescription": "CachyOS",
+        "ProcessArchitecture": "X64",
+        "ProcessorCount": 16,
+        "TimestampUtc": "2026-08-12T00:21:57.4182574+00:00",
+        "Configuration": {
+          "EntityCount": 8000000,
+          "WarmupTicks": 20,
+          "MeasuredTicks": 80,
+          "Mode": "Parallel",
+          "Pipeline": "Split3",
+          "BackgroundWorkers": 15,
+          "Seed": 12648430,
+          "SpawnRadius": 50,
+          "DeltaSeconds": 0.016666668,
+          "ChunkSizeKiB": 64
+        },
+        "Spawn": {
+          "ElapsedMilliseconds": 1469.998085,
+          "NanosecondsPerEntity": 183.749760625,
+          "AllThreadsAllocatedBytes": 0,
+          "CallerThreadAllocatedBytes": 0,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0
+        },
+        "TickTiming": {
+          "MeanMicroseconds": 15933.274524999997,
+          "MinMicroseconds": 14438.231,
+          "P50Microseconds": 16091.8165,
+          "P95Microseconds": 16841.6475,
+          "P99Microseconds": 17010.93479,
+          "P999Microseconds": 17130.879779,
+          "MaxMicroseconds": 17144.207,
+          "StandardDeviationMicroseconds": 641.5036206543183
+        },
+        "MeanNanosecondsPerEntityTick": 1.9916593156249995,
+        "EntityTicksPerSecond": 502093903.38738304,
+        "EffectiveGiBPerSecond": 44.8906931329414,
+        "Systems": [
+          {
+            "Name": "phase",
+            "RowsPerTick": 8000000,
+            "EffectiveBytesPerEntity": 24,
+            "Timing": {
+              "MeanMicroseconds": 3015.4207624999995,
+              "MinMicroseconds": 2732.205,
+              "P50Microseconds": 2984.1735,
+              "P95Microseconds": 3356.1015,
+              "P99Microseconds": 3516.4534899999994,
+              "P999Microseconds": 3571.2495490000006,
+              "MaxMicroseconds": 3577.338,
+              "StandardDeviationMicroseconds": 178.3498929864582
+            },
+            "MeanNanosecondsPerRow": 0.3769275953124999,
+            "EffectiveGiBPerSecond": 59.29982858442692
+          },
+          {
+            "Name": "velocity",
+            "RowsPerTick": 8000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 8208.760162500004,
+              "MinMicroseconds": 6834.559,
+              "P50Microseconds": 8298.5055,
+              "P95Microseconds": 8931.26545,
+              "P99Microseconds": 9194.92548,
+              "P999Microseconds": 9357.024948000002,
+              "MaxMicroseconds": 9375.036,
+              "StandardDeviationMicroseconds": 532.8724225490904
+            },
+            "MeanNanosecondsPerRow": 1.0260950203125005,
+            "EffectiveGiBPerSecond": 32.67495896817264
+          },
+          {
+            "Name": "movement",
+            "RowsPerTick": 8000000,
+            "EffectiveBytesPerEntity": 36,
+            "Timing": {
+              "MeanMicroseconds": 4702.892924999998,
+              "MinMicroseconds": 4393.611,
+              "P50Microseconds": 4706.9925,
+              "P95Microseconds": 4979.316949999999,
+              "P99Microseconds": 5181.191699999999,
+              "P999Microseconds": 5229.80277,
+              "MaxMicroseconds": 5235.204,
+              "StandardDeviationMicroseconds": 170.39031455989326
+            },
+            "MeanNanosecondsPerRow": 0.5878616156249997,
+            "EffectiveGiBPerSecond": 57.03317208508589
+          }
+        ],
+        "MeasurementAllocations": {
+          "AllThreadsBytes": 0,
+          "CallerThreadBytes": 0,
+          "InstrumentedWorkerBytes": 0,
+          "Gen0Collections": 0,
+          "Gen1Collections": 0,
+          "Gen2Collections": 0
+        },
+        "BeforeWorldMemory": {
+          "ManagedBytes": 74088,
+          "GcHeapBytes": 0,
+          "GcCommittedBytes": 0,
+          "WorkingSetBytes": 42205184,
+          "PrivateBytes": 56717312,
+          "ReservedEcsPayloadBytes": 0,
+          "NativeChunkPayloadBytes": 0
+        },
+        "AfterSeedMemory": {
+          "ManagedBytes": 168552736,
+          "GcHeapBytes": 168186904,
+          "GcCommittedBytes": 168292352,
+          "WorkingSetBytes": 504905728,
+          "PrivateBytes": 684990464,
+          "ReservedEcsPayloadBytes": 489701305,
+          "NativeChunkPayloadBytes": 321388544
+        },
+        "AfterMeasurementMemory": {
+          "ManagedBytes": 168585432,
+          "GcHeapBytes": 168186904,
+          "GcCommittedBytes": 168292352,
+          "WorkingSetBytes": 505430016,
+          "PrivateBytes": 685056000,
+          "ReservedEcsPayloadBytes": 489701305,
+          "NativeChunkPayloadBytes": 321388544
+        },
+        "CanonicalState": {
+          "Hash": "936DCA9945106F07860998516AE83C12",
+          "Rows": 8000000,
+          "NonFiniteValues": 0,
+          "MeanRadius": 37.499916201520556,
+          "MinRadius": 4.632278373177219E-05,
+          "MaxRadius": 62.83085055194681,
+          "FloatBitChecksum": -8598113016880903985
+        },
+        "SchedulerDispatches": 240,
+        "SchedulerWorkerWakes": 3600,
+        "SchedulerWorkerParks": 3600,
+        "TotalRowsVisited": 1920000000,
+        "AllocationScope": "GC.GetTotalAllocatedBytes covers the process; V3 worker counters independently cover scheduler workers.",
+        "Notes": "Seeded once; warmed once; sustained fixed-population three-system tick. ECS-only: no renderer, culling, or transform upload."
+      },
+      "CanonicalMatch": true,
+      "V3TickSpeedup": 9.865077804055474,
+      "V3P95Speedup": 9.469349441614902,
+      "V3SpawnSpeedup": 1.186903095183284,
+      "V3WorkingSetRatio": 0.17459762714982066,
+      "V3PrivateMemoryRatio": 0.21393760313135576
+    }
+  ]
+}

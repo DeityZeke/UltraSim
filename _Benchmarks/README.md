@@ -6,6 +6,17 @@ throughput, and scheduler-crossover requirements are recorded in
 They should be adopted feature by feature without pulling implementation out of
 dependency order.
 
+The deterministic extreme-sphere integration/stress suite is documented in
+[`ECS_EXTREME_SPHERE_STRESS.md`](ECS_EXTREME_SPHERE_STRESS.md). It runs the same
+36-byte, three-system phase/velocity/movement workload through isolated V2 and
+V3 processes from 10K through 8M entities, validates canonical final state,
+reports complete latency/throughput/allocation/GC/memory/system metrics, and
+adds a V3 Godot 4.7.1 Mono MultiMesh companion that separates ECS simulation,
+transform packing, buffer submission, and measured GPU time. The accepted
+opposite-order and worker-scaling captures live under `Baselines` with the
+`ecs-extreme-sphere-*` prefix. This diagnostic addition does not advance the ECS
+version.
+
 The first executable Current/Next semantic adapter is documented in
 [`ECS_V2_V3_COMPARISON.md`](ECS_V2_V3_COMPARISON.md). It now covers 102 matched
 1K/10K/50K rows with a shared canonical logical-state hash, separate

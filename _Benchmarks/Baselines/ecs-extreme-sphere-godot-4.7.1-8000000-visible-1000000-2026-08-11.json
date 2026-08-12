@@ -1,0 +1,148 @@
+{
+  "ProtocolVersion": "ultrasim-extreme-sphere-v1",
+  "GodotVersion": "{ \u0022major\u0022: 4, \u0022minor\u0022: 7, \u0022patch\u0022: 1, \u0022hex\u0022: 263937, \u0022status\u0022: \u0022stable\u0022, \u0022build\u0022: \u0022official\u0022, \u0022hash\u0022: \u0022a13da4feb8d8aefc283c3763d33a2f170a18d541\u0022, \u0022timestamp\u0022: 0, \u0022string\u0022: \u00224.7.1-stable (official)\u0022 }",
+  "RenderingMethod": "gl_compatibility",
+  "RenderingDevice": "NVIDIA GeForce RTX 4070 Ti SUPER",
+  "Options": {
+    "Entities": 8000000,
+    "Visible": 1000000,
+    "WarmupFrames": 60,
+    "MeasuredFrames": 300,
+    "Workers": 7,
+    "Serial": false,
+    "Upload": true,
+    "SyncGpu": false,
+    "Seed": 12648430,
+    "Radius": 50,
+    "DeltaSeconds": 0.016666668,
+    "ChunkKiB": 64,
+    "Output": "/mnt/data/mega/Godot Projects/UltraSim/_Benchmarks/results/extreme-sphere-godot-2026-08-11/8000000-visible-1000000.json"
+  },
+  "Spawn": {
+    "ElapsedMilliseconds": 1395.812235,
+    "NanosecondsPerEntity": 174.476529375,
+    "AllThreadsAllocatedBytes": 0,
+    "CallerThreadAllocatedBytes": 0,
+    "Gen0Collections": 0,
+    "Gen1Collections": 0,
+    "Gen2Collections": 0
+  },
+  "FrameWork": {
+    "MeanMicroseconds": 32565.796273333362,
+    "MinMicroseconds": 28880.242,
+    "P50Microseconds": 32704.712,
+    "P95Microseconds": 34452.09385,
+    "P99Microseconds": 37561.9466,
+    "P999Microseconds": 38452.757436000014,
+    "MaxMicroseconds": 38585.584,
+    "StandardDeviationMicroseconds": 1434.3454301958577
+  },
+  "Simulation": {
+    "MeanMicroseconds": 19965.441456666656,
+    "MinMicroseconds": 16448.063,
+    "P50Microseconds": 20083.445,
+    "P95Microseconds": 21694.533850000003,
+    "P99Microseconds": 25008.97549,
+    "P999Microseconds": 25525.14786,
+    "MaxMicroseconds": 25529.591,
+    "StandardDeviationMicroseconds": 1418.3665671224167
+  },
+  "TransformPack": {
+    "MeanMicroseconds": 4761.786376666666,
+    "MinMicroseconds": 4579.449,
+    "P50Microseconds": 4731.638,
+    "P95Microseconds": 4955.026,
+    "P99Microseconds": 5397.270789999999,
+    "P999Microseconds": 5792.861358000004,
+    "MaxMicroseconds": 5844.217,
+    "StandardDeviationMicroseconds": 144.13835990959558
+  },
+  "BufferUpload": {
+    "MeanMicroseconds": 7838.47144,
+    "MinMicroseconds": 7473.883,
+    "P50Microseconds": 7794.4855,
+    "P95Microseconds": 8233.073049999999,
+    "P99Microseconds": 8474.6988,
+    "P999Microseconds": 8620.273039000002,
+    "MaxMicroseconds": 8642.022,
+    "StandardDeviationMicroseconds": 183.7553142773829
+  },
+  "RenderSetupCpu": {
+    "MeanMicroseconds": 5.8,
+    "MinMicroseconds": 5,
+    "P50Microseconds": 5,
+    "P95Microseconds": 9,
+    "P99Microseconds": 11.009999999999991,
+    "P999Microseconds": 14.804000000000087,
+    "MaxMicroseconds": 16,
+    "StandardDeviationMicroseconds": 1.326649916142159
+  },
+  "ViewportRenderCpu": {
+    "MeanMicroseconds": 161.88666666666666,
+    "MinMicroseconds": 139,
+    "P50Microseconds": 151,
+    "P95Microseconds": 200.20000000000005,
+    "P99Microseconds": 257.3299999999997,
+    "P999Microseconds": 755.6500000000142,
+    "MaxMicroseconds": 950,
+    "StandardDeviationMicroseconds": 50.48868344050532
+  },
+  "ViewportRenderGpu": {
+    "MeanMicroseconds": 15488.116663333332,
+    "MinMicroseconds": 15080,
+    "P50Microseconds": 15476,
+    "P95Microseconds": 15868,
+    "P99Microseconds": 15992.08,
+    "P999Microseconds": 16133.069299,
+    "MaxMicroseconds": 16153.999,
+    "StandardDeviationMicroseconds": 214.8085627165189
+  },
+  "EngineFpsMean": 30.173333333333332,
+  "EngineFpsMin": 28,
+  "EngineFpsP95": 31,
+  "BufferBytes": 48000000,
+  "MeasurementAllocations": {
+    "AllThreadsBytes": 0,
+    "CallerThreadBytes": 0,
+    "InstrumentedWorkerBytes": 0,
+    "Gen0Collections": 0,
+    "Gen1Collections": 0,
+    "Gen2Collections": 0
+  },
+  "BeforeWorldMemory": {
+    "ManagedBytes": 1602544,
+    "GcHeapBytes": 0,
+    "GcCommittedBytes": 0,
+    "WorkingSetBytes": 262111232,
+    "PrivateBytes": 336695296,
+    "ReservedEcsPayloadBytes": 0,
+    "NativeChunkPayloadBytes": 0
+  },
+  "AfterSeedMemory": {
+    "ManagedBytes": 168903720,
+    "GcHeapBytes": 169661592,
+    "GcCommittedBytes": 169758720,
+    "WorkingSetBytes": 725729280,
+    "PrivateBytes": 897089536,
+    "ReservedEcsPayloadBytes": 491012005,
+    "NativeChunkPayloadBytes": 322699264
+  },
+  "AfterMeasurementMemory": {
+    "ManagedBytes": 217390544,
+    "GcHeapBytes": 169661592,
+    "GcCommittedBytes": 169758720,
+    "WorkingSetBytes": 979501056,
+    "PrivateBytes": 1141997568,
+    "ReservedEcsPayloadBytes": 491012005,
+    "NativeChunkPayloadBytes": 322699264
+  },
+  "CanonicalState": {
+    "Hash": "8091369D9A39A7B5C9568FC5D70D0B24",
+    "Rows": 8000000,
+    "NonFiniteValues": 0,
+    "MeanRadius": 37.5168101986121,
+    "MinRadius": 9.542929649101084E-05,
+    "MaxRadius": 81.45102262912629,
+    "FloatBitChecksum": -2981420893795174229
+  }
+}
