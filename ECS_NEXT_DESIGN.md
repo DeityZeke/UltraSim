@@ -1,6 +1,6 @@
 # UltraSim ECS Next: Feature Inventory, Rebuild Specification, and Validation Plan
 
-Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, and the ECS 3.1.2 proof-hardened bounded system scheduler implemented through 2026-08-11
+Status: active implementation specification; bounded archetype/query/structural kernel, Current/Next semantic comparison, standalone bitmap block-pool experiment, 3.0.36 public generated chunk jobs, the ECS 3.1.2 proof-hardened bounded system scheduler, and ECS 3.2.0 lifecycle publication/public generated-query filters implemented through 2026-08-12
 Scope: ECS kernel, prefabs, persistence, scripting seams, networking seams, engine-agnostic server/client host seams, wrapper integration, inspection, tests, benchmarks, and migration tooling  
 Primary objective: maximum practical throughput and minimum tail latency with zero steady-state ECS allocation after world sealing
 
@@ -108,6 +108,16 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   1R1W parity, actual changed-row diagnostics, explicit RangeJob capacity
   failure, partial-worker-start cleanup, and separate preconstruction versus
   post-Seal reserved-payload accounting;
+- ECS 3.2.0 fixed-capacity lifecycle publication: one 24-byte-record globally
+  ordered timeline, 16-byte independent world-bound cursors, partial drains,
+  explicit lag/resynchronization, wrap-safe sequence arithmetic, exact create/
+  destroy/membership truth, scalar/optimized structural equivalence, Native/
+  Pinned parity, and exact capacity/reservation accounting; capacity zero keeps
+  publication disabled;
+- ECS 3.2.0 public cold required/excluded query filters over the existing
+  seal-compiled route machinery, consistently generated for every public job
+  family and handwritten parity surfaces; storage-free tags select topology
+  without becoming data columns, scheduler hazards, or hot row predicates;
 - an initial dense change-tracking substrate: an eight-byte world-local `ChangeVersion` reserves zero for never-written state, explicitly wraps maximum to one, and uses half-range changed-since ordering; every archetype store preallocates a column-major 64-bit stamp for each physical component column and possible chunk, reports its exact metadata bytes, and clears stamps when an emptied chunk is recycled;
 - conservative stamping for successful scalar value/enable writes, single-component writable visitors, and every generated writable family; one lazily acquired version is shared across one visit's chunks and writable columns, filtered visits stamp only chunks with matching rows, stamps precede visitor dispatch so partial writes followed by exceptions remain visible, and read-only families perform no version work;
 - a 16-byte world-bound `ChangeCursor` value with beginning/now factories and copy-to-fork independent-consumer semantics, plus a bounded seal-compiled changed-read plan that prebinds one data column and one same-or-different tracked column across all matching archetypes, rejects unchanged chunks before component binding, composes with existing structural/enable-state filters, and acknowledges the captured observation boundary only after successful visitor completion;
@@ -122,7 +132,7 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
 - cold executable-layout validation covering range overlap, reserved-header intrusion, alignment, tag/data disagreement, duplicate IDs, and exact data/enable accounting before any raw storage path is accepted;
 - compile-time diagnostics for malformed schema/component declarations, invalid keys/versions, field-bearing tags, duplicate types/keys/nonzero persistence IDs, and exhaustion of the reserved `ushort` ID space;
 - `218` executable runtime/primitive tests, including warmed zero-allocation assertions, indexed-schema tests, defensive construction tests, planner boundary/invariant/overflow tests, randomized brute-force layout parity, randomized chunk-slot lifecycle parity, native/pinned randomized archetype reference-model parity, scalar/bulk and byte parity, within/cross-chunk relocation, entity-location binding and donor updates, transactional batch-location rejection, an integrated randomized pool/store model, canonical registry collision/capacity/ownership/concurrent-read tests, transactional bidirectional migration and donor relocation, destination-capacity rollback, retained/default/removed state, dense-only and exact change-history relocation across packed removal and cross-archetype migration with Native/Pinned/wrap coverage, composed-world lifecycle/capacity/generation/disposal/foreign-plan tests, public facade lifecycle/thread/fault/handle/lookup tests, randomized migration-safe public lookup parity and bounded-access-job allocation/barrier/exception-release gates, deterministic deferred-command phase/token/capacity/foreign/stale/thread/barrier tests, epoch-rollover and mixed-chain-clear coverage, a 64-seed indexed-versus-scalar canonical differential model, grouped whole/tail/sparse destroy parity with generation/free-list/default-state and warmed allocation gates, exact-plan precedence over hole-market preparation, 3.0.30 balanced wide-row hole reuse, mandatory failure finalization, partial-reuse donor repair, conservative unbalanced fallback, and warmed zero-allocation reuse, skipped-chunk false-tail rejection, direct Native/Pinned whole-store/tail reset parity covering survivor dense/exact history and lazy payload reinitialization, grouped transition parity across 256-command blocks, exact whole-source and exact packed-suffix route parity across multiple blocks and retained-empty reuse, whole/suffix partial-capacity fallback parity, the 256/257 suffix boundary, deferred suffix targets, suffix/whole terminal-fault injection, cross-chunk anonymous-reservation rollback, exact partial-capacity prefixes, Native/Pinned retained-state/change-history parity, a 160-entity locality path crossing independent source/destination chunk boundaries, dense-to-exact run history, exhaustive enable-bit range parity around 64-bit boundaries, adaptive planned compaction across scalar/threshold/whole-chunk cases with survivor state/enable/exact-history/backend parity, and scalar/grouped/exact-route warmed allocation gates, randomized world/bound-access/chunk/query-plan/filter/generated-family models, 16-byte binding layout and misuse tests, generated-ID/type/membership validation, exact-archetype/stale/foreign component and chunk access, initialized creation, seal-complete multi-archetype matching, normalized filter contradiction/ownership checks, required/excluded signature selection, enabled/disabled data/tag row selection, noncontiguous row slices, query alias/tag/capacity/ownership rejection, generated distinct-access/capacity/ownership/non-enableable-write/row-boundary rejection, synchronous barrier/reentrancy/exception-release checks, multi-chunk metadata and enable-state views, enabled-default/state preservation, retained-empty reuse, dense change-version wrap/reset/exact-column/filter/exception semantics, independent cursor acknowledgement/retry/ownership/wrap semantics, exact-row scalar/filter/dense refinement and memory accounting, one/two-watched any/all observation and exact-mask semantics, changed-read plan routing/filtering/backend parity, alignment/range/type rejection, disposal/accounting, terminal retirement, capacity accounting, backend equivalence, and concurrency/isolation checks;
-- `42` focused scheduler tests covering fixed layouts and disabled worlds,
+- `43` focused scheduler tests covering fixed layouts and disabled worlds,
   lifecycle/cadence/manual semantics, every generated access family, serial/
   parallel canonical parity, range partition coverage, `Auto` crossover behavior,
   registration/persistence identity, lifecycle and stage order, graph/conflict
@@ -139,8 +149,8 @@ Phase 1 is active in root `Kernels/ECS`. The implemented bounded slices now incl
   registration/capacity retries, mixed typed/ordinary structural run IDs,
   tracked 1R1W, changed-row telemetry, invalid enums, explicit work capacity,
   and deterministic partial-worker-start failure;
-- an isolated-process Current/Next comparison protocol with 12 direct comparison-core tests, stable scenario descriptors, normalized 128-bit canonical logical-state hashing including wide component payloads, strict runtime/descriptor/state joining, record/playback/end-to-end boundaries, effective-byte/allocation/GC reporting, immutable accepted joined artifacts, truthful cross-version V3 profile labels, and current/baseline V2-control plus V3 regression reports. The accepted 3.1.2 primary and reversed-order verification contain 102 comparable rows with zero canonical mismatches; 10 unsupported rows remain visible rather than acquiring fabricated ratios. Caller-thread allocation is reported for every row; the three V3 scheduled rows additionally report scheduler-worker allocation, while V2 worker allocation remains unknown;
-- `23` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 1R0W/0R1W/1R1W/2R0W/3R0W/2R1W/1R2W/3R1W/2R2W scheduled catalog surfaces, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
+- an isolated-process Current/Next comparison protocol with 12 direct comparison-core tests, stable scenario descriptors, normalized 128-bit canonical logical-state hashing including wide component payloads, strict runtime/descriptor/state joining, record/playback/end-to-end boundaries, effective-byte/allocation/GC reporting, immutable accepted joined artifacts, truthful cross-version V3 profile labels, and current/baseline V2-control plus V3 regression reports. The accepted 3.2.0 primary and reversed-order verification contain 102 comparable rows with zero canonical mismatches; 10 unsupported rows remain visible rather than acquiring fabricated ratios. Caller-thread allocation is reported for every row; the three V3 scheduled rows additionally report scheduler-worker allocation, while V2 worker allocation remains unknown;
+- `25` executable Roslyn generator tests covering exact checked-in golden output, generated compilation, order determinism, schema evolution, every current diagnostic, unique persistence acceptance, the full `65,536`-entry overflow boundary, deterministic query-family output, 1R0W/0R1W/1R1W/2R0W/3R0W/2R1W/1R2W/3R1W/2R2W scheduled catalog surfaces, generated public required/excluded filter overloads, generated 2R2C changed-query surfaces, read-only/writable span contracts, writable-only change-stamp emission, and explicit kernel-only opt-in;
 - `141` Next-only primitive/layout/schema/capacity/arena/archetype-row/registry/migration/world-lifecycle/bound-access/public-lookup/structural-command/chunk-query/query-plan/query-filter/generated-query/change-version/change-cursor/exact-row/multi-change benchmark scenarios with JSON output, exact handle/version/cursor/lookup-route/command-arena facts, end-to-end and playback-only scalar-oracle/grouped structural comparisons, dense versus scattered locality, narrow versus wide retained-copy guards, equal-work 8/32/128/256-row donor-tail transition-compaction guards, whole/tail/sparse deferred-destroy density guards at 1/10/50 percent over a fixed 100,000-row resident population, same-build scalar/V29-style-packed/V30 barrier-local churn controls at 10/50 percent and narrow/512-byte widths, twelve permanent exact packed-suffix transition guards, dense/sparse-version metadata facts, focused scenario filtering, and explicit non-comparable status until equivalent Current adapters exist;
 - a separate deterministic 100K mixed-operation soak with a stable report/workload/canonical profile, four full-world generated passes, sparse tracked writes and exact consumption, checked reads, balanced destroy/create/transition churn, interval and measured-world canonical replay, natural-GC allocation/collection gates, phase p50/p95/p99/p99.9/max, memory/store snapshots, and a first immutable 60,000-tick baseline.
 - a 3.0.36 public-job admission runner with 60 paired traversal rows across all
@@ -191,14 +201,15 @@ The local Ollama/Qwen review workflow lives in `_Tools/LocalAI`. It is used for 
 
 The generated manifest, registry, arenas, row stores, transition executor, public
 single-owner world, migration-safe lookups, bounded structural planner, generated
-job catalog, exact change tracking, and ECS 3.1.2 proof-hardened bounded system graph now form a
+job catalog, exact change tracking, ECS 3.1.2's proof-hardened bounded system
+graph, and ECS 3.2.0 lifecycle/filter integration now form a
 usable engine-neutral ECS/system runtime. The scheduler owns persistent system
 state, stages/cadence/manual execution, dependencies/conflicts, static chunk and
 range work on persistent workers, pre/post barriers, deterministic per-worker
 command merge, typed source-independent add/remove payloads, restricted worker
 capabilities, profiling snapshots, and terminal fault semantics. Field
-descriptors, serializers/schema migrations, prefab writers, public optional
-filters, complete lifecycle streams, persistence serialization, replication,
+descriptors, serializers/schema migrations, prefab writers, optional-component
+query columns, asynchronous publish leases, persistence serialization, replication,
 networking, and tooling integration remain incomplete. The entity pool validates
 a runtime `Entity` generation before exposing its 12-byte archetype/chunk/row
 route; the location intentionally does not duplicate entity generation.
@@ -209,7 +220,7 @@ Next has retired much of the technical risk around whether generated schema,
 bounded chunk storage, safe identity, transactional mutation, generated queries,
 change tracking, and deterministic bounded scheduling can form an allocation-free
 kernel. Product and integration risk remains around prefab compilation,
-persistence, replication, networking, tooling, lifecycle publication, and
+persistence, replication, networking, tooling, lifecycle bridge integration, and
 migration of real gameplay systems. A stronger kernel/scheduler is not a
 replacement until those interactions preserve its correctness, bounded memory,
 determinism, and hot-path constraints.
@@ -1149,19 +1160,21 @@ Next requirements and current status:
   publish leases for asynchronous consumers, and parallel publication rules;
 - evaluate versioned bitset/history alternatives only if they preserve independent
   slow cursors or expose an explicit tested lag/overflow policy;
-- fixed lifecycle event rings for created, component-added, component-removed, and destroyed events;
-- lifecycle records shaped for independent replication, persistence, scripting,
+- implemented fixed lifecycle event history for created, component-added,
+  component-removed, and destroyed facts;
+- implemented lifecycle records shaped for independent replication, persistence, scripting,
   inspection, spatial, inventory, rendering, and AI consumers rather than only
   immediate local systems;
-- deterministic lifecycle ordering with runtime entity index/generation and
+- implemented deterministic lifecycle ordering with runtime entity index/generation and
   component identity preserved in tombstones where required;
-- independent consumers without destructive shared drains;
+- implemented independent consumers without destructive shared drains;
 - no duplicated global dirty stream;
 - no random entity-index deduplication for dense chunk writes;
-- no lost remainder on partial reads;
+- implemented partial reads without lost remainder;
 - direct changed-column access for replication and persistence;
-- explicit wrap handling for versions and cursors;
-- backpressure and overflow policy for lifecycle rings.
+- implemented explicit wrap handling for versions and cursors;
+- implemented non-blocking overwrite with explicit `ResyncRequired` overflow
+  policy for lagging lifecycle cursors.
 
 Tests:
 
@@ -2522,7 +2535,7 @@ addresses, world IDs, and arena backend.
 
 ### Phase 1: generated schema, capacity plan, and memory primitives
 
-Implementation status through 2026-08-11:
+Implementation status through 2026-08-12:
 
 - implemented: generated component manifest, deterministic component/schema identity, runtime layout/tag/enableable/persistence metadata, schema-local lookup, fixed entity-slot pool, four-byte world-local archetype IDs, 12-byte archetype/chunk/row entity locations, checked location bind/unbind and donor relocation, canonical bounded archetype registration, stable collision-checked signature lookup, dense ID-to-store routing, sealed concurrent reads, exact arena ownership, checked chunk/archetype/world capacity planners, native-aligned and pinned-managed fixed arena candidates, generational chunk slots, typed SoA/entity/enable access, clear-on-acquire reuse, disposal/payload accounting, row-owning executable archetype chunks, full/partial/empty lists, retained-empty recycling, bulk default row reservation, within/cross-chunk swap removal, cold-built prebound transition plans, transactional cross-archetype migration with rollback and donor repair, a sealed minimal internal world with capacity-atomic create/transition/destroy/disposal and cross-world plan isolation, 16-byte generated-ID-backed exact-archetype component bindings with copied read/write/enable/initialization paths, synchronous exact-archetype one-column read/write chunk views behind a mutation barrier, an explicitly bounded seal-compiled one-read/one-write plan spanning multiple archetypes, normalized required/excluded/enabled/disabled filters, an opt-in data-driven generated 2R0W/2R1W/1R2W/3R1W/2R2W family catalog, initial preallocated dense per-chunk/per-component versions wired into scalar and writable-query paths, native/pinned randomized row/migration/world/access/query/change-version model tests, integrated randomized pool/store tests, primitive allocation tests, generator golden/diagnostic/catalog tests, and initial metadata/entity/layout/arena/row/registry/migration/world/access/query/change-version benchmarks;
 - implemented follow-on: a world-bound independent cursor value and bounded seal-compiled one-read changed plan with a distinct tracked-column option, existing row-filter composition, success-only acknowledgement, direct unchanged-chunk rejection, opt-in exact-row histories for scalar/filtered/dense writes, relocation-stable dense/exact history across packed removal and retained-component migration, an initial generated two-read/two-watched any/all family, zero-allocation native/pinned execution, a first public single-owner facade with explicit sealed/initialized/running/faulted states, world-checked archetype handles, migration-safe random component lookup, exact lookup-route byte accounting, callback-bounded validate-once component access jobs sharing the ECS execution barrier, a non-retaining numeric transition catalog, and a bounded main-thread deferred-command foothold with same-barrier create tokens, stable record-time phase chains, scalar-oracle differential execution, conflict-safe same-route fixed-block grouping, bulk destination reservation/default initialization, locality-proven contiguous retained-column/enable-bit/history transfer, adaptive donor-tail planned transition-source compaction with transactional location repair, exact ordered whole-archetype and packed-suffix live-destroy evacuation with record-ordered slot retirement, trusted scalar destroy commit, and publication-time dead-row reset;
@@ -2534,14 +2547,15 @@ Implementation status through 2026-08-11:
   occupancy/arena snapshots required by the reflection-free soak profile; and
   same-loop public/internal, tracked-density, fixed-dispatch, and canonical soak
   evidence with zero warmed allocation;
-- still required: scheduler/host orchestration around the public chunk primitive,
-  persistent system runtime state/identity, tick/delta context, pre/post
-  simulation structural sinks, range/manual jobs, persistent field IDs and
+- implemented 3.1/3.2 follow-on: persistent bounded system scheduling, tick
+  context, pre/post structural sinks, range/manual jobs, scheduler-safe random
+  lookup policy, one globally ordered fixed lifecycle history with independent
+  cursors, and required/excluded public generated-query filters used by the
+  lifecycle-integrated Simulation Slice 0;
+- still required: persistent field IDs and
   richer descriptors, generated/custom serializers, workload-driven access
-  shapes including 0R1W/1R0W/3R0W, public filters and two-watch changed authoring,
-  structural lifecycle streams, source-independent add/remove routers, broader
-  query-route memory accounting and possible cold plan interning, worker tokens,
-  per-worker command arenas and deterministic merge, typed/prefab commands,
+  shapes, public two-watch changed authoring, broader query-route memory
+  accounting and possible cold plan interning, prefab expansion/commands,
   final entity-metadata packing, longer native leak/retention soaks, wider
   Current/Next adapters, and the third Legacy adapter/report axis;
 - the 3.0.36 public job result confirms that naturally chunk-local dense and
@@ -2551,7 +2565,7 @@ Implementation status through 2026-08-11:
   admitted. Exact consumption should separately test mask-bearing chunk/word
   dispatch against range-per-run dispatch before row-history representation
   changes;
-- the Current/Next comparison is now an executable longitudinal baseline rather than a projection. The accepted 3.1.2 checkpoint retains 102 matched rows, 0 canonical mismatches, 10 explicit unsupported rows, and zero timed caller allocation/GC in every V3 row across both process orders; scheduler instrumentation also reports zero V3 worker allocation for all three parallel-capable comparison rows. V2 worker allocation remains unknown. The 3.1.0 artifact first added honest scheduler serial, parallel generated-query, and range contracts instead of relabeling 3.0.36 public dispatch as a complete system; all earlier artifacts remain immutable. The 3.0.31 catalog added provisional balanced 72-byte destroy/create churn, where V3 playback is roughly 3.1-3.2x faster at 50K while exposing a V2 stale-default-row defect. At 3.0.32, 50K exact add/remove playback and round-trip costs improve roughly 41-45% from 3.0.31, but remain approximately 2.2-2.7x slower than V2. Most remaining overlapping scalar/structural cases still favor V2. These results are regression evidence, not a passed cutover gate. Native-versus-pinned and small percentage differences remain directional until repeated isolated processes, large footprints, and hardware counters justify them.
+- the Current/Next comparison is now an executable longitudinal baseline rather than a projection. The accepted 3.2.0 checkpoint retains 102 matched rows, 0 canonical mismatches, 10 explicit unsupported rows, and zero timed caller allocation in every V3 row across both process orders; scheduler instrumentation also reports zero V3 worker allocation for all three parallel-capable comparison rows. V2 worker allocation remains unknown. The 3.1.0 artifact first added honest scheduler serial, parallel generated-query, and range contracts instead of relabeling 3.0.36 public dispatch as a complete system; all earlier artifacts remain immutable. The 3.0.31 catalog added provisional balanced 72-byte destroy/create churn, where V3 playback is roughly 3.1-3.2x faster at 50K while exposing a V2 stale-default-row defect. At 3.0.32, 50K exact add/remove playback and round-trip costs improve roughly 41-45% from 3.0.31, but remain approximately 2.2-2.7x slower than V2. Most remaining overlapping scalar/structural cases still favor V2. These results are regression evidence, not a passed cutover gate. Native-versus-pinned and small percentage differences remain directional until repeated isolated processes, large footprints, and hardware counters justify them.
 - the extreme-sphere comparison provides a production-shaped counterpoint to
   those primitive rows: V3 is roughly 1.75-2.04x faster in serial full-world
   execution and 8.7-11.7x faster in the principal parallel million-row cases,
@@ -2665,19 +2679,20 @@ Gate:
 The initial dense chunk-version storage, conservative scalar/query stamping,
 independent cursor value, one-read changed plan, exact-row refinement, and first
 generated two-watch any/all family were pulled forward into Phase 1 because later
-writable and replication APIs depend on them. Phase 4 still owns additional
+writable and replication APIs depend on them. ECS 3.2.0 completes the first
+bounded lifecycle history/cursor/tombstone slice. Phase 4 still owns additional
 generated changed arities, adaptive sparse precision, asynchronous publish leases,
-parallel merge/publication rules, and lifecycle streams.
+parallel publication rules for future non-owner producers, and consumer-specific
+replication/persistence bridges.
 
 Deliverables:
 
 - chunk component versions;
 - sparse bitsets;
-- per-consumer cursors (initial value semantics implemented; retention/publication
-  integration remains);
-- lifecycle event rings;
-- tombstones;
-- backpressure policy.
+- per-consumer change and lifecycle cursors;
+- fixed lifecycle history;
+- runtime tombstones;
+- explicit lag/resynchronization policy.
 
 Tests:
 
@@ -3005,13 +3020,13 @@ Use this checklist in issue tracking. Each item requires tests and, when perform
 
 - [x] Dense chunk versions (initial internal substrate)
 - [ ] Sparse row masks
-- [ ] Created events
-- [ ] Added-component events
-- [ ] Removed-component tombstones
-- [ ] Destroyed-entity tombstones
-- [x] Independent consumer cursors (initial copied value semantics)
-- [ ] Partial reads without loss
-- [ ] Backpressure/overflow policy
+- [x] Created events
+- [x] Added-component events
+- [x] Removed-component tombstones
+- [x] Destroyed-entity tombstones
+- [x] Independent consumer cursors (change and lifecycle value semantics)
+- [x] Partial reads without loss
+- [x] Non-blocking overwrite and explicit resynchronization policy
 
 ### Prefabs and scripting
 

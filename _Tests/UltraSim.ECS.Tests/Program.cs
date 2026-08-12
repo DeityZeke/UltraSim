@@ -6,6 +6,7 @@ using UltraSim.ECS;
 
 EcsPrimitiveTests.RunAll();
 SchedulerPrimitiveTests.RunAll();
+LifecycleAndPublicFilterTests.RunAll();
 
 internal static class EcsPrimitiveTests
 {
@@ -4719,14 +4720,18 @@ internal static class EcsPrimitiveTests
         const int initialEntityCount = 16;
         const int commandCapacity = 128;
         var random = new Random(unchecked((int)0x51A7_C0DE));
+        var indexedLifecycleRecords = new LifecycleRecord[256];
+        var scalarLifecycleRecords = new LifecycleRecord[256];
         for (int iteration = 0; iteration < iterations; iteration++)
         {
             using var indexed = new PublicWorldFixture(
                 entityCapacity: 20,
-                structuralCommandCapacity: commandCapacity);
+                structuralCommandCapacity: commandCapacity,
+                lifecycleCapacity: 512);
             using var scalar = new PublicWorldFixture(
                 entityCapacity: 20,
-                structuralCommandCapacity: commandCapacity);
+                structuralCommandCapacity: commandCapacity,
+                lifecycleCapacity: 512);
             var indexedEntities = new Entity[initialEntityCount];
             var scalarEntities = new Entity[initialEntityCount];
             for (int i = 0; i < initialEntityCount; i++)
@@ -4766,6 +4771,8 @@ internal static class EcsPrimitiveTests
             Assert.True(scalar.World.TryCreate(scalar.Source, out Entity scalarStale));
             Assert.True(indexed.World.TryDestroy(indexedStale));
             Assert.True(scalar.World.TryDestroy(scalarStale));
+            LifecycleCursor indexedLifecycle = indexed.World.CaptureLifecycleCursorFromNow();
+            LifecycleCursor scalarLifecycle = scalar.World.CaptureLifecycleCursorFromNow();
 
             StructuralCommandBuffer indexedCommands = indexed.World.StructuralCommands;
             StructuralCommandBuffer scalarCommands = scalar.World.StructuralCommands;
@@ -4846,6 +4853,30 @@ internal static class EcsPrimitiveTests
             AssertPlaybackResultsEqual(indexedResult, scalarResult);
             Assert.Equal(indexed.World.AliveCount, scalar.World.AliveCount);
             Assert.Equal(indexed.World.CurrentChangeVersion, scalar.World.CurrentChangeVersion);
+            LifecycleReadResult indexedLifecycleRead = indexed.World.ReadLifecycle(
+                ref indexedLifecycle, indexedLifecycleRecords);
+            LifecycleReadResult scalarLifecycleRead = scalar.World.ReadLifecycle(
+                ref scalarLifecycle, scalarLifecycleRecords);
+            Assert.Equal(LifecycleReadStatus.Success, indexedLifecycleRead.Status);
+            Assert.Equal(indexedLifecycleRead.Count, scalarLifecycleRead.Count);
+            Assert.Equal(indexedLifecycleRead.RemainingCount, scalarLifecycleRead.RemainingCount);
+            for (int lifecycleIndex = 0;
+                 lifecycleIndex < indexedLifecycleRead.Count;
+                 lifecycleIndex++)
+            {
+                Assert.Equal(
+                    indexedLifecycleRecords[lifecycleIndex].Kind,
+                    scalarLifecycleRecords[lifecycleIndex].Kind);
+                Assert.Equal(
+                    indexedLifecycleRecords[lifecycleIndex].ComponentId,
+                    scalarLifecycleRecords[lifecycleIndex].ComponentId);
+                Assert.Equal(
+                    indexedLifecycleRecords[lifecycleIndex].Entity.Index,
+                    scalarLifecycleRecords[lifecycleIndex].Entity.Index);
+                Assert.Equal(
+                    indexedLifecycleRecords[lifecycleIndex].Entity.Generation,
+                    scalarLifecycleRecords[lifecycleIndex].Entity.Generation);
+            }
 
             for (int i = 0; i < initialEntityCount; i++)
             {
@@ -5678,13 +5709,16 @@ internal static class EcsPrimitiveTests
     {
         const int entityCount = ArchetypeMigrator.MaximumBatchSize * 2 + 1;
         var fixture = new PublicWorldFixture(
-            entityCount,
-            structuralCommandCapacity: entityCount,
-            maximumChunks: 4);
+            entityCount + 1,
+            structuralCommandCapacity: entityCount + 1,
+            maximumChunks: 4,
+            lifecycleCapacity: 8);
         var entities = new Entity[entityCount];
         for (int index = 0; index < entities.Length; index++)
             Assert.True(fixture.World.TryCreate(fixture.Source, out entities[index]));
+        LifecycleCursor lifecycle = fixture.World.CaptureLifecycleCursorFromNow();
         StructuralCommandBuffer commands = fixture.World.StructuralCommands;
+        _ = commands.EnqueueCreateDefault(fixture.Source);
         commands.EnqueueTransition(
             entities,
             fixture.SourceToDestination);
@@ -5711,6 +5745,20 @@ internal static class EcsPrimitiveTests
         Assert.True(fixture.World.IsFaulted);
         Assert.Equal(EcsWorldState.Faulted, fixture.World.State);
         Assert.False(commands.IsValid);
+        FieldInfo lifecycleHistoryField = typeof(EcsWorld<NativeChunkArena>).GetField(
+            "_lifecycleHistory",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Lifecycle-history field was not found.");
+        var lifecycleHistory = (LifecycleHistory)(lifecycleHistoryField.GetValue(core)
+            ?? throw new InvalidOperationException("Lifecycle history was null."));
+        Span<LifecycleRecord> lifecycleRecords = stackalloc LifecycleRecord[4];
+        LifecycleReadResult lifecycleRead = lifecycleHistory.Read(
+            ref lifecycle,
+            lifecycleRecords);
+        Assert.Equal(LifecycleReadStatus.Success, lifecycleRead.Status);
+        Assert.Equal(1, lifecycleRead.Count);
+        Assert.Equal(LifecycleKind.Created, lifecycleRecords[0].Kind);
+        Assert.Equal(ComponentId.Invalid, lifecycleRecords[0].ComponentId);
         Assert.Throws<InvalidOperationException>(() => fixture.World.IsAlive(entities[0]));
         fixture.Dispose();
     }
@@ -13934,7 +13982,8 @@ internal static class EcsPrimitiveTests
         internal PublicWorldFixture(
             int entityCapacity,
             int structuralCommandCapacity = 0,
-            int maximumChunks = 1)
+            int maximumChunks = 1,
+            int lifecycleCapacity = 0)
         {
             ComponentSchema schema = UltraSim.ECS.Tests.LayoutTestSchema.CreateSchema();
             World = new EcsWorld(
@@ -13944,7 +13993,8 @@ internal static class EcsPrimitiveTests
                     maximumArchetypes: 2,
                     maximumPreparedPlans: 4,
                     maximumPreparedTransitions: 2,
-                    maximumStructuralCommands: structuralCommandCapacity));
+                    maximumStructuralCommands: structuralCommandCapacity,
+                    lifecycleRecordCapacity: lifecycleCapacity));
             ComponentId enableId = UltraSim.ECS.Tests.LayoutTestSchema
                 .GetComponentId<UltraSim.ECS.Tests.LayoutEnableLong>();
             ComponentId intId = UltraSim.ECS.Tests.LayoutTestSchema

@@ -107,6 +107,24 @@ internal static class ArchetypeMigrator
         ArchetypeStorage<TArena> destination,
         ReadOnlySpan<ArchetypeColumnTransfer> transfers,
         out bool capacityExhausted)
+        where TArena : class, IChunkArenaBackend =>
+        MigrateBatch(
+            entityPool,
+            entities,
+            source,
+            destination,
+            transfers,
+            Span<Entity>.Empty,
+            out capacityExhausted);
+
+    internal static int MigrateBatch<TArena>(
+        EntityPool entityPool,
+        ReadOnlySpan<Entity> entities,
+        ArchetypeStorage<TArena> source,
+        ArchetypeStorage<TArena> destination,
+        ReadOnlySpan<ArchetypeColumnTransfer> transfers,
+        Span<Entity> migratedEntities,
+        out bool capacityExhausted)
         where TArena : class, IChunkArenaBackend
     {
         ArgumentNullException.ThrowIfNull(entityPool);
@@ -114,6 +132,8 @@ internal static class ArchetypeMigrator
         ArgumentNullException.ThrowIfNull(destination);
         if (entities.Length > MaximumBatchSize)
             throw new ArgumentOutOfRangeException(nameof(entities));
+        if (!migratedEntities.IsEmpty && migratedEntities.Length < entities.Length)
+            throw new ArgumentException("Migrated-entity output is too short.", nameof(migratedEntities));
         if (entities.IsEmpty)
         {
             capacityExhausted = false;
@@ -138,7 +158,7 @@ internal static class ArchetypeMigrator
                 sourceRows[..reserved]))
         {
             capacityExhausted = reserved < entities.Length;
-            return MigratePreparedContiguousPrefix(
+            int preparedMigrated = MigratePreparedContiguousPrefix(
                 entityPool,
                 entities[..reserved],
                 source,
@@ -146,6 +166,9 @@ internal static class ArchetypeMigrator
                 sourceRows[..reserved],
                 destinationRows[..reserved],
                 transfers);
+            if (!migratedEntities.IsEmpty)
+                entities[..preparedMigrated].CopyTo(migratedEntities);
+            return preparedMigrated;
         }
 
         capacityExhausted = false;
@@ -220,6 +243,8 @@ internal static class ArchetypeMigrator
             }
 
             entityPool.ApplyRelocation(source.Id, sourceRelocation);
+            if (!migratedEntities.IsEmpty)
+                migratedEntities[migrated] = entity;
             migrated++;
         }
 

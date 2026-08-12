@@ -159,3 +159,16 @@ controls, long stress soak, and deterministic multi-worker replays are preserved
 in `ecs-v3-3.1.2-scheduler-proof-hardening-2026-08-11.json`. Full correctness,
 performance, and complexity interpretation is in
 `../../ECS_3_1_2_HARDENING_REPORT.md`.
+
+`ecs-v2-v3-3.2.0-2026-08-12.json` is the accepted lifecycle/public-filter
+checkpoint joined capture, verified in both process orders. It retains 102
+comparable contracts, zero state/descriptor/measurement/catalog mismatches, 10
+explicit unsupported rows, and zero timed V3 allocation. Lifecycle itself has no
+honest frozen-V2 equivalent in this catalog; its dedicated accepted evidence is
+`ecs-v3-3.2.0-lifecycle-publication-2026-08-12.json`.
+
+That lifecycle artifact records the 24-byte record, 16-byte cursor, paired
+capacity-zero/capacity-enabled structural costs, 100/1K/10K/100K publication and
+drain scales, one versus three consumers, small partial spans, explicit overflow,
+and public filtered traversal. Every timed row allocates zero managed bytes. Full
+interpretation is in `../../ECS_3_2_0_LIFECYCLE_REPORT.md`.

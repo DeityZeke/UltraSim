@@ -3,7 +3,15 @@
 Workload identity: `ultrasim-simulation-slice-0-v2-audited`
 
 ECS profile: `3.1.2 scheduler proof hardening`
-Status: corrected downstream benchmark; provisional evidence, not an immutable baseline
+Status: historical 3.1.2 downstream audit; superseded for current measurements
+by [`../../ECS_3_2_0_LIFECYCLE_REPORT.md`](../../ECS_3_2_0_LIFECYCLE_REPORT.md)
+
+> ECS 3.2.0 subsequently implemented both pressures identified here. The live
+> Slice now uses four storage-free tier tags through public required/excluded
+> filters and three independent lifecycle cursors. The complete 100K, 1M,
+> all-active, lifecycle, memory, oracle, allocation, and canonical results are in
+> the 3.2.0 report; this file preserves the pre-feature consumer audit rather than
+> rewriting its historical evidence.
 
 ## 1. Audit verdict
 

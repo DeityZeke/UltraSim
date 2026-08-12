@@ -1031,3 +1031,34 @@ versus `11.624 us`). At eight operations/row, 10K improves from `64.477` to
 `31.329 us` at C8 and regresses to `39.265 us` at C16; 16 operations improve
 from `630.132 us` at C1 to `99.302 us` at C8. These results reinforce the
 existing policy: choose parallelism from measured work, not maximum worker count.
+
+## ECS 3.2.0 lifecycle publication and public filters
+
+The accepted lifecycle/filter artifact is
+[`Baselines/ecs-v3-3.2.0-lifecycle-publication-2026-08-12.json`](Baselines/ecs-v3-3.2.0-lifecycle-publication-2026-08-12.json).
+It contains 23 allocation-free publication/consumption/structural controls plus
+the cold-filter hot-traversal comparison. Raw publication converges at about
+`2.12-2.15 ns/record`; 100K full-span consumption is `0.44 ns/record` for one
+cursor and `0.45 ns/record` across three independent cursors. The public filtered
+50K traversal measures `36.077 ns/row` against a `35.704 ns/row` pre-separated
+control (`+1.04%`, noise band). Structural enabled/disabled costs and complete
+interpretation live in
+[`../ECS_3_2_0_LIFECYCLE_REPORT.md`](../ECS_3_2_0_LIFECYCLE_REPORT.md).
+
+The 3.2 regression matrix reruns 141 permanent kernel rows, 60 public traversal
+rows, 19 tracked-write rows, seven dispatch rows, 314 change-decomposition rows,
+149 scheduler rows, 25 cold graph-Seal controls, and the 30,000-tick scheduler
+parity profile. All canonical/allocation gates pass. The isolated V2-first and
+V3-first comparisons retain 102 comparable contracts, zero mismatches/catalog
+changes, 10 unsupported rows, and zero V3 allocation.
+
+Simulation Slice 0 now uses storage-free tier tags through public cold filters
+and three independent lifecycle cursors. Its accepted-candidate result paths are:
+
+- `results/simulation-slice-0/ecs-3.2.0-100k-10000-2026-08-12.json`;
+- `results/simulation-slice-0/ecs-3.2.0-1m-1000-2026-08-12.json`;
+- `results/simulation-slice-0/ecs-3.2.0-100k-all-active-10000-2026-08-12.json`.
+
+At 100K tiered load, serial/C8 means are `0.189/0.166 ms`; at 1M they are
+`1.488/0.484 ms`. Oracle, serial, and C8 state/lifecycle hashes match, normal
+consumers never resynchronize, and timed caller/worker allocation and GC are zero.

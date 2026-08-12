@@ -526,3 +526,24 @@ Full current tables and baseline regressions:
 - [`results/ecs-v2-v3-3.1.1-v2-first/ecs-v2-v3-regression.md`](results/ecs-v2-v3-3.1.1-v2-first/ecs-v2-v3-regression.md)
 - [`results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-comparison.md`](results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-comparison.md)
 - [`results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-regression.md`](results/ecs-v2-v3-3.1.1-v3-first/ecs-v2-v3-regression.md)
+
+## 3.2.0 lifecycle/public-filter regression gate
+
+ECS 3.2.0 does not fabricate a frozen-V2 lifecycle-stream ratio. Both complete
+process orders retain the 3.1.2 catalog: 102 comparable rows, zero canonical or
+catalog/contract mismatches, and 10 explicit unsupported rows. Capacity-zero V3
+rows allocate zero bytes; the new enabled lifecycle cost is measured in the
+same-binary lifecycle suite.
+
+The accepted V2-first artifact is
+[`Baselines/ecs-v2-v3-3.2.0-2026-08-12.json`](Baselines/ecs-v2-v3-3.2.0-2026-08-12.json).
+Full/reverse reports and saved-baseline regressions are under
+`results/ecs-v2-v3-3.2.0-v2-first` and
+`results/ecs-v2-v3-3.2.0-v3-first`.
+
+The historical 3.1.2 parallel scheduler row was unusually favorable: complete
+3.2 orders measured `0.621/0.704 ns/row` against its `0.534 ns/row`. A same-host
+focused control then measured three 3.2 runs at `0.573-0.627 ns/row` and the clean
+3.1.2 worktree at `0.653-0.657 ns/row`. Serial scheduler and parallel RangeJob
+controls remained stable. The apparent saved-baseline movement is therefore not
+attributed to the disabled lifecycle/filter code path.

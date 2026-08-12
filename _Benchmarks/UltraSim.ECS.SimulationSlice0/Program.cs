@@ -9,9 +9,9 @@ for (int tier = 0; tier < profile.TierCounts.Length; tier++)
     averageTierRowsPerTick += profile.TierCounts[tier] / (double)profile.TierPeriods[tier];
 var report = new SliceReport
 {
-    SliceVersion = "ultrasim-simulation-slice-0-v2-audited",
-    EcsVersion = "3.1.2",
-    EcsSemanticProfile = "ECS 3.1.2 public generated jobs + bounded system scheduler",
+    SliceVersion = "ultrasim-simulation-slice-0-v3-lifecycle-filtered",
+    EcsVersion = "3.2.0",
+    EcsSemanticProfile = "ecs-3.2.0-lifecycle-publication",
     RuntimeVersion = Environment.Version.ToString(),
     ProcessorCount = Environment.ProcessorCount,
     Population = options.Population,
@@ -30,16 +30,20 @@ var report = new SliceReport
     DeferredValidation = options.DeferredValidation,
     AllActive = options.AllActive,
     DeterministicSelfTestsPassed = true,
+    LifecycleOverflowProbePassed = SliceSelfTests.LifecycleOverflowProbePassed,
     OriginalLunaOwnershipCollision = SliceSelfTests.OriginalRandomWriteCollision,
     TierFilterPressure = new TierFilterPressureMetrics(
-        DataComponentTypes: 4,
-        PhysicalActorArchetypeColumns: 8,
-        ResidentPayloadBytes: checked((long)profile.ActorCount * sizeof(int)),
+        RemovedDataComponentTypes: 4,
+        AddedStorageFreeTagTypes: 4,
+        RemovedPhysicalActorArchetypeColumns: 8,
+        OldResidentPayloadBytes: checked((long)profile.ActorCount * sizeof(int)),
+        NewResidentPayloadBytes: 0,
         AverageTierRowsPerTick: averageTierRowsPerTick,
-        ActualMarkerReadBytesPerTick: averageTierRowsPerTick * 4d * sizeof(int),
-        AvoidableMarkerReadBytesPerTick: averageTierRowsPerTick * 2d * sizeof(int),
-        DenseSystemRegistrations: 16,
-        DensePreparedPlans: 16),
+        OldMarkerReadBytesPerTick: averageTierRowsPerTick * 4d * sizeof(int),
+        NewMarkerReadBytesPerTick: 0d,
+        CompiledFilteredRouteCount: 16,
+        FilteredDenseSystemRegistrations: 16,
+        FilteredPreparedPlans: 16),
     Runs = [],
 };
 
@@ -52,6 +56,8 @@ if (report.Runs.Any(run => run.EcsCanonicalHash != run.OracleCanonicalHash))
     throw new InvalidOperationException("The Slice 0 oracle comparison failed.");
 if (report.Runs.Select(run => run.EcsCanonicalHash).Distinct().Count() != 1)
     throw new InvalidOperationException("Serial and parallel canonical state diverged.");
+if (report.Runs.Select(run => run.PresentationLifecycle.OrderedHash).Distinct().Count() != 1)
+    throw new InvalidOperationException("Serial and parallel ordered lifecycle streams diverged.");
 
 Directory.CreateDirectory(Path.GetDirectoryName(options.OutputPath)!);
 File.WriteAllText(options.OutputPath, JsonSerializer.Serialize(report, new JsonSerializerOptions
@@ -101,17 +107,21 @@ internal sealed class SliceReport
     public bool DeferredValidation { get; set; }
     public bool AllActive { get; set; }
     public bool DeterministicSelfTestsPassed { get; set; }
+    public bool LifecycleOverflowProbePassed { get; set; }
     public DamageOwnershipCollision OriginalLunaOwnershipCollision { get; set; }
     public TierFilterPressureMetrics TierFilterPressure { get; set; } = null!;
     public List<RunMetrics> Runs { get; set; } = [];
 }
 
 internal sealed record TierFilterPressureMetrics(
-    int DataComponentTypes,
-    int PhysicalActorArchetypeColumns,
-    long ResidentPayloadBytes,
+    int RemovedDataComponentTypes,
+    int AddedStorageFreeTagTypes,
+    int RemovedPhysicalActorArchetypeColumns,
+    long OldResidentPayloadBytes,
+    long NewResidentPayloadBytes,
     double AverageTierRowsPerTick,
-    double ActualMarkerReadBytesPerTick,
-    double AvoidableMarkerReadBytesPerTick,
-    int DenseSystemRegistrations,
-    int DensePreparedPlans);
+    double OldMarkerReadBytesPerTick,
+    double NewMarkerReadBytesPerTick,
+    int CompiledFilteredRouteCount,
+    int FilteredDenseSystemRegistrations,
+    int FilteredPreparedPlans);

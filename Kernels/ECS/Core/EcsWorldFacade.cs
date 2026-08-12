@@ -43,7 +43,8 @@ public sealed partial class EcsWorld : IDisposable
             options.MaximumArchetypes,
             static capacity => new NativeChunkArena(capacity),
             options.MaximumPreparedPlans,
-            maximumPublicTransitions: options.MaximumPreparedTransitions);
+            maximumPublicTransitions: options.MaximumPreparedTransitions,
+            lifecycleRecordCapacity: options.LifecycleRecordCapacity);
         _structuralCommands = new StructuralCommandBuffer(
             _core.Id,
             _ownerThreadId,
@@ -260,6 +261,25 @@ public sealed partial class EcsWorld : IDisposable
         EnsureOwnerThread();
         ComponentLookupPlan<NativeChunkArena, T> plan = _core.PrepareComponentLookup<T>();
         return new ComponentLookup<T>(plan);
+    }
+
+    /// <summary>Prepares an immutable required/excluded topology selection.</summary>
+    /// <remarks>
+    /// Use this cold handle with generated job preparation. Filter components,
+    /// including storage-free tags, select matching archetypes but do not become
+    /// job data access or scheduler hazards. Duplicate terms are canonicalized;
+    /// contradictions and schema-foreign IDs are rejected before sealing.
+    /// </remarks>
+    public EcsQueryFilter PrepareQueryFilter(
+        ReadOnlySpan<ComponentId> requiredComponents,
+        ReadOnlySpan<ComponentId> excludedComponents)
+    {
+        EnsureOwnerThread();
+        return new EcsQueryFilter(_core.CreateQueryFilter(
+            requiredComponents,
+            excludedComponents,
+            ReadOnlySpan<ComponentId>.Empty,
+            ReadOnlySpan<ComponentId>.Empty));
     }
 
     /// <summary>Creates an independent value-change cursor that observes all published changes.</summary>

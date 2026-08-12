@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using UltraSim.ECS;
 
@@ -139,6 +140,17 @@ internal sealed class SimulationProfile
     internal int TotalCapacity => checked(ActorCount + ItemCount + EffectSlots);
     internal int TargetOperations => Math.Min(512, ActorCount);
     internal int DamageOperations => Math.Min(256, ActorCount);
+    // One tick can retire and respawn every bounded damage source. Each actor
+    // transition publishes five removals plus one addition. Effects contribute
+    // one destroy and one create per recycled slot. Sixty ticks is the longest
+    // normal observer cadence; four extra ticks provide an explicit scheduling
+    // and final-drain margin without making retention population-dependent.
+    internal int MaximumLifecycleRecordsPerTick => checked(
+        DamageOperations * 12 + EffectsSpawnedPerTick * 2);
+    internal int LifecycleRetentionTicks => 64;
+    internal int LifecycleRecordCapacity => Math.Max(
+        4_096,
+        checked(MaximumLifecycleRecordsPerTick * LifecycleRetentionTicks));
     internal int RespawnDelay => 20;
     internal bool PartitionSafeRandomWrites { get; }
     internal bool AllActive { get; }
@@ -398,7 +410,25 @@ internal sealed class SemanticOracle
     private readonly EffectSnapshot[] _effects;
     private readonly ItemSnapshot[] _items;
     private readonly bool[] _justDied;
+    private readonly bool[] _justRespawned;
     private readonly int[] _effectGenerations;
+    private readonly int[] _deathsThisTick;
+    private readonly int[] _respawnsThisTick;
+    private readonly int[] _destroyedEffectsThisTick;
+    private readonly int[] _destroyedEffectGenerationsThisTick;
+    private readonly int[] _createdEffectsThisTick;
+    private readonly int[] _effectIterationSlots;
+    private readonly int[] _effectRows;
+    private int _effectIterationCount;
+    private readonly ComponentId[] _deathRemoved;
+    private readonly ComponentId[] _deathAdded;
+    private readonly ComponentId[] _respawnRemoved;
+    private readonly ComponentId[] _respawnAdded;
+    private readonly int[][] _aliveIteration;
+    private readonly int[][] _deadIteration;
+    private readonly int[] _aliveCounts;
+    private readonly int[] _deadCounts;
+    private readonly int[] _actorRows;
 
     internal SemanticOracle(SimulationProfile profile)
     {
@@ -407,7 +437,35 @@ internal sealed class SemanticOracle
         _effects = new EffectSnapshot[profile.EffectSlots];
         _items = new ItemSnapshot[profile.ItemCount];
         _justDied = new bool[profile.ActorCount];
+        _justRespawned = new bool[profile.ActorCount];
         _effectGenerations = new int[profile.EffectSlots];
+        _deathsThisTick = new int[profile.ActorCount];
+        _respawnsThisTick = new int[profile.ActorCount];
+        _destroyedEffectsThisTick = new int[profile.EffectSlots];
+        _destroyedEffectGenerationsThisTick = new int[profile.EffectSlots];
+        _createdEffectsThisTick = new int[profile.EffectSlots];
+        _effectIterationSlots = new int[profile.EffectSlots];
+        _effectRows = new int[profile.EffectSlots];
+        ComponentId dead = SimulationSchema.GetComponentId<DeadState>();
+        _deathRemoved = Sorted(
+            SimulationSchema.GetComponentId<Activity>(),
+            SimulationSchema.GetComponentId<Needs>(),
+            SimulationSchema.GetComponentId<SpatialCell>(),
+            SimulationSchema.GetComponentId<Target>(),
+            SimulationSchema.GetComponentId<Velocity>());
+        _deathAdded = [dead];
+        _respawnRemoved = [dead];
+        _respawnAdded = (ComponentId[])_deathRemoved.Clone();
+        _aliveIteration = new int[4][];
+        _deadIteration = new int[4][];
+        _aliveCounts = new int[4];
+        _deadCounts = new int[4];
+        _actorRows = new int[profile.ActorCount];
+        for (int tier = 0; tier < 4; tier++)
+        {
+            _aliveIteration[tier] = new int[profile.TierCounts[tier]];
+            _deadIteration[tier] = new int[profile.TierCounts[tier]];
+        }
         Initialize();
     }
 
@@ -417,6 +475,9 @@ internal sealed class SemanticOracle
     internal long ActorRespawns { get; private set; }
     internal long EffectsCreated { get; private set; }
     internal long EffectsDestroyed { get; private set; }
+    internal ulong LifecycleHash { get; private set; } = LifecycleHashing.Offset;
+    internal ulong OrderedLifecycleHash { get; private set; } = LifecycleHashing.Offset;
+    internal long LifecycleEvents { get; private set; }
 
     internal void Initialize()
     {
@@ -433,10 +494,15 @@ internal sealed class SemanticOracle
                 Target = new Target { LogicalId = 0 },
                 Cell = OracleMath.Cell(position),
             };
+            int tier = _profile.ActorTier[id];
+            _actorRows[id] = _aliveCounts[tier];
+            _aliveIteration[tier][_aliveCounts[tier]++] = id;
         }
 
         for (int slot = 0; slot < _effects.Length; slot++)
         {
+            _effectIterationSlots[slot] = slot;
+            _effectRows[slot] = slot;
             _effectGenerations[slot] = 1;
             _effects[slot] = new EffectSnapshot
             {
@@ -447,6 +513,7 @@ internal sealed class SemanticOracle
                 Lifetime = _profile.EffectLifetime,
             };
         }
+        _effectIterationCount = _effects.Length;
 
         for (int item = 0; item < _items.Length; item++)
         {
@@ -461,8 +528,13 @@ internal sealed class SemanticOracle
 
     internal void Step(ulong tick)
     {
+        int deathCount = 0;
+        int respawnCount = 0;
+        int destroyedEffectCount = 0;
+        int createdEffectCount = 0;
         LastDamageOwnershipCollision = null;
         Array.Clear(_justDied);
+        Array.Clear(_justRespawned);
         for (int id = 0; id < _actors.Length; id++)
         {
             ActorSnapshot actor = _actors[id];
@@ -562,6 +634,7 @@ internal sealed class SemanticOracle
                     actor.Cell = default;
                     actor.Cooldown = default;
                     ActorRespawns++;
+                    _justRespawned[id] = true;
                 }
                 else
                 {
@@ -571,15 +644,56 @@ internal sealed class SemanticOracle
             }
         }
 
-        for (int slot = 0; slot < _effects.Length; slot++)
+        for (int tier = 0; tier < 4; tier++)
         {
+            int aliveCount = _aliveCounts[tier];
+            for (int row = 0; row < aliveCount; row++)
+            {
+                int id = _aliveIteration[tier][row];
+                if (_justDied[id])
+                    _deathsThisTick[deathCount++] = id;
+            }
+            int deadCount = _deadCounts[tier];
+            for (int row = 0; row < deadCount; row++)
+            {
+                int id = _deadIteration[tier][row];
+                if (_justRespawned[id])
+                    _respawnsThisTick[respawnCount++] = id;
+            }
+        }
+
+        for (int index = 0; index < deathCount; index++)
+            MoveActor(_deathsThisTick[index], toAlive: false);
+        for (int index = 0; index < respawnCount; index++)
+            MoveActor(_respawnsThisTick[index], toAlive: true);
+
+        int effectRowsAtTickStart = _effectIterationCount;
+        for (int row = 0; row < effectRowsAtTickStart; row++)
+        {
+            int slot = _effectIterationSlots[row];
             EffectSnapshot effect = _effects[slot];
             if (effect.Active && --effect.Lifetime <= 0)
             {
                 effect = default;
                 EffectsDestroyed++;
+                _destroyedEffectsThisTick[destroyedEffectCount] = slot;
+                _destroyedEffectGenerationsThisTick[destroyedEffectCount] = _effectGenerations[slot];
+                destroyedEffectCount++;
             }
             _effects[slot] = effect;
+        }
+
+        // Independently model the logical iteration container's packed removal
+        // order so expected lifecycle ordering follows command record order.
+        for (int index = 0; index < destroyedEffectCount; index++)
+        {
+            int slot = _destroyedEffectsThisTick[index];
+            int row = _effectRows[slot];
+            int donorRow = --_effectIterationCount;
+            int donorSlot = _effectIterationSlots[donorRow];
+            _effectIterationSlots[row] = donorSlot;
+            _effectRows[donorSlot] = row;
+            _effectRows[slot] = -1;
         }
 
         if (tick + 1 >= unchecked((ulong)_profile.EffectLifetime))
@@ -598,6 +712,12 @@ internal sealed class SemanticOracle
                     Lifetime = _profile.EffectLifetime,
                 };
                 EffectsCreated++;
+                _createdEffectsThisTick[createdEffectCount++] = slot;
+                if (_effectRows[slot] < 0)
+                {
+                    _effectRows[slot] = _effectIterationCount;
+                    _effectIterationSlots[_effectIterationCount++] = slot;
+                }
             }
         }
 
@@ -610,6 +730,34 @@ internal sealed class SemanticOracle
                 _items[item] = value;
             }
         }
+
+        // Canonical structural playback commits live destroys, creates, remove
+        // transitions, then add transitions. The oracle independently emits
+        // normalized logical facts in that same public order.
+        for (int index = 0; index < destroyedEffectCount; index++)
+        {
+            int slot = _destroyedEffectsThisTick[index];
+            AddLifecycle(
+                LifecycleKind.Destroyed,
+                LifecycleDomain.Effect,
+                slot,
+                _destroyedEffectGenerationsThisTick[index],
+                ComponentId.Invalid);
+        }
+        for (int index = 0; index < createdEffectCount; index++)
+        {
+            int slot = _createdEffectsThisTick[index];
+            AddLifecycle(
+                LifecycleKind.Created,
+                LifecycleDomain.Effect,
+                slot,
+                _effectGenerations[slot],
+                ComponentId.Invalid);
+        }
+        for (int index = 0; index < deathCount; index++)
+            AddTransitionLifecycle(_deathsThisTick[index], _deathRemoved, _deathAdded);
+        for (int index = 0; index < respawnCount; index++)
+            AddTransitionLifecycle(_respawnsThisTick[index], _respawnRemoved, _respawnAdded);
     }
 
     internal void CopyTo(SimulationSnapshot destination)
@@ -641,8 +789,70 @@ internal sealed class SemanticOracle
         _effects[slot] = effect;
     }
 
-    internal void ResetMetrics() =>
+    internal void ResetMetrics()
+    {
         (ActorDeaths, ActorRespawns, EffectsCreated, EffectsDestroyed) = (0, 0, 0, 0);
+        LifecycleHash = LifecycleHashing.Offset;
+        OrderedLifecycleHash = LifecycleHashing.Offset;
+        LifecycleEvents = 0;
+    }
+
+    private void AddTransitionLifecycle(
+        int logicalId,
+        ReadOnlySpan<ComponentId> removed,
+        ReadOnlySpan<ComponentId> added)
+    {
+        for (int index = 0; index < removed.Length; index++)
+            AddLifecycle(LifecycleKind.ComponentRemoved, LifecycleDomain.Actor, logicalId, 0, removed[index]);
+        for (int index = 0; index < added.Length; index++)
+            AddLifecycle(LifecycleKind.ComponentAdded, LifecycleDomain.Actor, logicalId, 0, added[index]);
+    }
+
+    private void MoveActor(int logicalId, bool toAlive)
+    {
+        int tier = _profile.ActorTier[logicalId];
+        int[] source = toAlive ? _deadIteration[tier] : _aliveIteration[tier];
+        int[] destination = toAlive ? _aliveIteration[tier] : _deadIteration[tier];
+        ref int sourceCount = ref (toAlive ? ref _deadCounts[tier] : ref _aliveCounts[tier]);
+        ref int destinationCount = ref (toAlive ? ref _aliveCounts[tier] : ref _deadCounts[tier]);
+        int row = _actorRows[logicalId];
+        int donorRow = --sourceCount;
+        int donorId = source[donorRow];
+        source[row] = donorId;
+        _actorRows[donorId] = row;
+        _actorRows[logicalId] = destinationCount;
+        destination[destinationCount++] = logicalId;
+    }
+
+    private void AddLifecycle(
+        LifecycleKind kind,
+        LifecycleDomain domain,
+        int logicalId,
+        int logicalGeneration,
+        ComponentId component)
+    {
+        LifecycleHash = LifecycleHashing.Add(
+            LifecycleHash,
+            kind,
+            domain,
+            logicalId,
+            logicalGeneration,
+            component);
+        OrderedLifecycleHash = LifecycleHashing.AddOrdered(
+            OrderedLifecycleHash,
+            kind,
+            domain,
+            logicalId,
+            logicalGeneration,
+            component);
+        LifecycleEvents++;
+    }
+
+    private static ComponentId[] Sorted(params ComponentId[] values)
+    {
+        Array.Sort(values);
+        return values;
+    }
 }
 
 internal readonly record struct DamageOwnershipCollision(
@@ -654,6 +864,7 @@ internal readonly record struct DamageOwnershipCollision(
 internal static class SliceSelfTests
 {
     internal static DamageOwnershipCollision OriginalRandomWriteCollision { get; private set; }
+    internal static bool LifecycleOverflowProbePassed { get; private set; }
 
     internal static void Run()
     {
@@ -729,6 +940,42 @@ internal static class SliceSelfTests
             Assert(!safeOwnership.LastDamageOwnershipCollision.HasValue,
                 $"The corrected PartitionDisjoint probe produced a target collision at tick {tick}.");
         }
+
+        RunLifecycleOverflowProbe();
+    }
+
+    private static void RunLifecycleOverflowProbe()
+    {
+        using var world = new EcsWorld(
+            SimulationSchema.CreateSchema(),
+            new EcsWorldOptions(
+                new EntityCapacity(4),
+                maximumArchetypes: 1,
+                maximumPreparedPlans: 0,
+                lifecycleRecordCapacity: 4));
+        ArchetypeHandle archetype = world.RegisterArchetype(
+            [SimulationSchema.GetComponentId<Position>()],
+            ChunkLayoutOptions.KiB16,
+            maximumChunks: 1);
+        world.Seal();
+        world.Initialize();
+        world.BeginRun();
+        LifecycleCursor cursor = world.CaptureLifecycleCursorFromBeginning();
+        for (int index = 0; index < 3; index++)
+        {
+            Assert(world.TryCreate(archetype, out Entity entity),
+                "Lifecycle overflow probe create failed.");
+            Assert(world.TryDestroy(entity),
+                "Lifecycle overflow probe destroy failed.");
+        }
+        ulong originalSequence = cursor.NextSequence;
+        Span<LifecycleRecord> records = stackalloc LifecycleRecord[4];
+        LifecycleReadResult read = world.ReadLifecycle(ref cursor, records);
+        Assert(read.Status == LifecycleReadStatus.ResyncRequired,
+            "A deliberately lagged Slice lifecycle cursor did not require resynchronization.");
+        Assert(cursor.NextSequence == originalSequence,
+            "Resync-required advanced the deliberately lagged Slice lifecycle cursor.");
+        LifecycleOverflowProbePassed = true;
     }
 
     private static SimulationOptions CreateOptions(
@@ -797,6 +1044,9 @@ internal sealed class SimulationWorld : IDisposable
     internal readonly PositionObserverRuntime PersistenceObserver;
     internal readonly StructuralCounters Counters = new();
     internal readonly RandomOperationCounters RandomOperations = new();
+    internal readonly LifecycleObserver PresentationLifecycle;
+    internal readonly LifecycleObserver ReplicationLifecycle;
+    internal readonly LifecycleObserver PersistenceLifecycle;
 
     private readonly ArchetypeTransition[] _toDead;
     private readonly ArchetypeTransition[] _toAlive;
@@ -849,6 +1099,9 @@ internal sealed class SimulationWorld : IDisposable
         PresentationObserver = new PositionObserverRuntime();
         ReplicationObserver = new HealthObserverRuntime();
         PersistenceObserver = new PositionObserverRuntime();
+        PresentationLifecycle = new LifecycleObserver(period: 1, profile.TotalCapacity);
+        ReplicationLifecycle = new LifecycleObserver(period: 2, profile.TotalCapacity);
+        PersistenceLifecycle = new LifecycleObserver(period: 60, profile.TotalCapacity);
     }
 
     internal static SimulationWorld Create(SimulationOptions options, bool parallel)
@@ -883,7 +1136,8 @@ internal sealed class SimulationWorld : IDisposable
                 maximumPreparedPlans: 64,
                 maximumPreparedTransitions: 8,
                 maximumStructuralCommands: 131_072,
-                scheduler: scheduler));
+                scheduler: scheduler,
+                lifecycleRecordCapacity: profile.LifecycleRecordCapacity));
 
         var simulation = new SimulationWorld(options, profile, world);
         simulation.RegisterSystems();
@@ -1049,7 +1303,10 @@ internal sealed class SimulationWorld : IDisposable
                 if (!World.TryCreate(binding.Alive, out Entity entity))
                     throw new InvalidOperationException($"Actor creation failed at {logicalId}.");
                 ActorEntities[logicalId] = entity;
-                WriteActorInitial(entity, logicalId, binding.MarkerId);
+                PresentationLifecycle.RegisterActor(entity, logicalId);
+                ReplicationLifecycle.RegisterActor(entity, logicalId);
+                PersistenceLifecycle.RegisterActor(entity, logicalId);
+                WriteActorInitial(entity, logicalId);
             }
         }
 
@@ -1058,6 +1315,9 @@ internal sealed class SimulationWorld : IDisposable
             if (!World.TryCreate(ItemArchetype, out Entity entity))
                 throw new InvalidOperationException($"Item creation failed at {item}.");
             ItemEntities[item] = entity;
+            PresentationLifecycle.RegisterItem(entity, item);
+            ReplicationLifecycle.RegisterItem(entity, item);
+            PersistenceLifecycle.RegisterItem(entity, item);
             Position position = new() { X = item * 11 - 2_000, Y = item * 7 - 1_000 };
             Write(entity, Identity, new LogicalIdentity { Value = item });
             Write(entity, Position, position);
@@ -1069,6 +1329,9 @@ internal sealed class SimulationWorld : IDisposable
             EffectGenerations[slot] = 1;
             if (!World.TryCreate(EffectArchetype, out Entity entity))
                 throw new InvalidOperationException($"Effect creation failed at {slot}.");
+            PresentationLifecycle.RegisterEffect(entity, slot, 1);
+            ReplicationLifecycle.RegisterEffect(entity, slot, 1);
+            PersistenceLifecycle.RegisterEffect(entity, slot, 1);
             Position position = SimulationMath.EffectPosition(slot, 1, 0);
             Write(entity, Effect, new EffectIdentity { Slot = slot, Generation = 1 });
             Write(entity, Position, position);
@@ -1077,7 +1340,7 @@ internal sealed class SimulationWorld : IDisposable
         }
     }
 
-    private void WriteActorInitial(Entity entity, int logicalId, ComponentId markerId)
+    private void WriteActorInitial(Entity entity, int logicalId)
     {
         Position position = SimulationMath.InitialActorPosition(logicalId);
         Write(entity, Identity, new LogicalIdentity { Value = logicalId });
@@ -1089,14 +1352,6 @@ internal sealed class SimulationWorld : IDisposable
         Write(entity, Cooldown, default);
         Write(entity, Target, default);
         Write(entity, Cell, SimulationMath.Cell(position));
-        if (markerId == Tier0.MarkerId)
-            Write(entity, Tier0.Marker, new Tier0Marker { LogicalId = logicalId });
-        else if (markerId == Tier1.MarkerId)
-            Write(entity, Tier1.Marker, new Tier1Marker { LogicalId = logicalId });
-        else if (markerId == Tier2.MarkerId)
-            Write(entity, Tier2.Marker, new Tier2Marker { LogicalId = logicalId });
-        else
-            Write(entity, Tier3.Marker, new Tier3Marker { LogicalId = logicalId });
     }
 
     private void Write<T>(Entity entity, in ComponentLookup<T> lookup, in T value)
@@ -1113,6 +1368,17 @@ internal sealed class SimulationWorld : IDisposable
         PresentationObserver.Cursor = cursor;
         ReplicationObserver.Cursor = cursor;
         PersistenceObserver.Cursor = cursor;
+        LifecycleCursor lifecycle = World.CaptureLifecycleCursorFromNow();
+        PresentationLifecycle.Cursor = lifecycle;
+        ReplicationLifecycle.Cursor = lifecycle;
+        PersistenceLifecycle.Cursor = lifecycle;
+    }
+
+    private void ConsumeLifecycle(ulong tick, bool force = false)
+    {
+        PresentationLifecycle.ConsumeIfDue(World, Effect, tick, force);
+        ReplicationLifecycle.ConsumeIfDue(World, Effect, tick, force);
+        PersistenceLifecycle.ConsumeIfDue(World, Effect, tick, force);
     }
 
     internal SimulationSnapshot Capture(SimulationSnapshot destination)
@@ -1192,7 +1458,11 @@ internal sealed class SimulationWorld : IDisposable
         {
             ulong firstWarmupTick = World.TickCount;
             for (int warmup = 0; warmup < _options.WarmupTicks; warmup++)
+            {
+                ulong tick = World.TickCount;
                 World.Tick(1d / 60d);
+                ConsumeLifecycle(tick);
+            }
             for (int warmup = 0; warmup < _options.WarmupTicks; warmup++)
                 oracle.Step(firstWarmupTick + unchecked((ulong)warmup));
             if (_options.WarmupTicks != 0)
@@ -1207,6 +1477,7 @@ internal sealed class SimulationWorld : IDisposable
             {
                 ulong tick = World.TickCount;
                 World.Tick(1d / 60d);
+                ConsumeLifecycle(tick);
                 oracle.Step(tick);
                 if ((warmup + 1) % _options.ValidationEvery == 0)
                     Validate(oracle, ecsSnapshot, oracleSnapshot, tick);
@@ -1223,6 +1494,13 @@ internal sealed class SimulationWorld : IDisposable
         PresentationObserver.ResetMetrics();
         ReplicationObserver.ResetMetrics();
         PersistenceObserver.ResetMetrics();
+        // Align every independent lifecycle cursor to the measured interval.
+        // Cadenced consumers may otherwise retain a warmup-only suffix after
+        // their counters and the semantic oracle have been reset.
+        ConsumeLifecycle(World.TickCount, force: true);
+        PresentationLifecycle.ResetMetrics();
+        ReplicationLifecycle.ResetMetrics();
+        PersistenceLifecycle.ResetMetrics();
         long callerAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         int gen0Before = GC.CollectionCount(0);
         int gen1Before = GC.CollectionCount(1);
@@ -1238,6 +1516,7 @@ internal sealed class SimulationWorld : IDisposable
             World.Tick(1d / 60d);
             samples[measured] = Stopwatch.GetTimestamp() - start;
             ecsTickCallerAllocated += GC.GetAllocatedBytesForCurrentThread() - tickAllocationBefore;
+            ConsumeLifecycle(tick);
             if (!_options.DeferredValidation)
             {
                 oracle.Step(tick);
@@ -1255,6 +1534,7 @@ internal sealed class SimulationWorld : IDisposable
             for (int measured = 0; measured < samples.Length; measured++)
                 oracle.Step(firstMeasuredTick + unchecked((ulong)measured));
         }
+        ConsumeLifecycle(World.TickCount, force: true);
         Validate(oracle, ecsSnapshot, oracleSnapshot, World.TickCount == 0 ? 0 : World.TickCount - 1);
         if (Counters.CommandsAttempted !=
             schedulerAfter.MergedCommandCount - schedulerBefore.MergedCommandCount)
@@ -1275,6 +1555,24 @@ internal sealed class SimulationWorld : IDisposable
             throw new InvalidOperationException(
                 "Final ECS alive population diverged from the canonical oracle population.");
         }
+        if (PresentationLifecycle.Hash != oracle.LifecycleHash ||
+            ReplicationLifecycle.Hash != oracle.LifecycleHash ||
+            PersistenceLifecycle.Hash != oracle.LifecycleHash)
+        {
+            throw new InvalidOperationException(
+                $"Lifecycle oracle mismatch: expected=0x{oracle.LifecycleHash:X16}, " +
+                $"presentation=0x{PresentationLifecycle.Hash:X16}, " +
+                $"replication=0x{ReplicationLifecycle.Hash:X16}, " +
+                $"persistence=0x{PersistenceLifecycle.Hash:X16}, " +
+                $"expected-events={oracle.LifecycleEvents}, actual-events={PresentationLifecycle.TotalRecords}, " +
+                $"actual=(C{PresentationLifecycle.Created},D{PresentationLifecycle.Destroyed}," +
+                $"A{PresentationLifecycle.ComponentAdded},R{PresentationLifecycle.ComponentRemoved}).");
+        }
+        if (PresentationLifecycle.OrderedHash != ReplicationLifecycle.OrderedHash ||
+            PresentationLifecycle.OrderedHash != PersistenceLifecycle.OrderedHash)
+        {
+            throw new InvalidOperationException("Independent lifecycle cursors observed different ordered streams.");
+        }
 
         return RunMetrics.Create(
             samples,
@@ -1293,6 +1591,11 @@ internal sealed class SimulationWorld : IDisposable
             PresentationObserver,
             ReplicationObserver,
             PersistenceObserver,
+            PresentationLifecycle,
+            ReplicationLifecycle,
+            PersistenceLifecycle,
+            oracle.LifecycleHash,
+            oracle.LifecycleEvents,
             ecsSnapshot.Hash,
             oracleSnapshot.Hash,
             Profile,
@@ -1420,13 +1723,12 @@ internal abstract class TierBindingBase
 }
 
 internal sealed class TierBinding<TMarker> : TierBindingBase
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     internal TierBinding(SimulationWorld owner, int tier)
         : base(owner, tier)
     {
         MarkerId = SimulationSchema.GetComponentId<TMarker>();
-        Marker = owner.World.PrepareLookup<TMarker>();
         ComponentId[] aliveSignature = Sorted(
                 SimulationSchema.GetComponentId<LogicalIdentity>(),
                 SimulationSchema.GetComponentId<Position>(),
@@ -1463,17 +1765,17 @@ internal sealed class TierBinding<TMarker> : TierBindingBase
                 owner.Profile.TierCounts[tier]));
         owner.SetTierTransitions(tier, Alive, Dead);
 
-        NeedsPlan = owner.World.PrepareReadReadWriteJob<TMarker, Activity, Needs>();
-        SteeringPlan = owner.World.PrepareReadReadReadWriteJob<TMarker, Needs, Activity, Velocity>();
-        MovementPlan = owner.World.PrepareReadReadWriteJob<TMarker, Velocity, Position>();
-        SpatialPlan = owner.World.PrepareReadReadWriteJob<TMarker, Position, SpatialCell>();
+        EcsQueryFilter filter = owner.World.PrepareQueryFilter([MarkerId], []);
+        NeedsPlan = owner.World.PrepareReadReadWriteJob<LogicalIdentity, Activity, Needs>(filter);
+        SteeringPlan = owner.World.PrepareReadReadReadWriteJob<LogicalIdentity, Needs, Activity, Velocity>(filter);
+        MovementPlan = owner.World.PrepareReadReadWriteJob<LogicalIdentity, Velocity, Position>(filter);
+        SpatialPlan = owner.World.PrepareReadReadWriteJob<LogicalIdentity, Position, SpatialCell>(filter);
     }
 
-    internal ComponentLookup<TMarker> Marker { get; }
-    internal ReadReadWriteJobPlan<TMarker, Activity, Needs> NeedsPlan { get; }
-    internal ReadReadReadWriteJobPlan<TMarker, Needs, Activity, Velocity> SteeringPlan { get; }
-    internal ReadReadWriteJobPlan<TMarker, Velocity, Position> MovementPlan { get; }
-    internal ReadReadWriteJobPlan<TMarker, Position, SpatialCell> SpatialPlan { get; }
+    internal ReadReadWriteJobPlan<LogicalIdentity, Activity, Needs> NeedsPlan { get; }
+    internal ReadReadReadWriteJobPlan<LogicalIdentity, Needs, Activity, Velocity> SteeringPlan { get; }
+    internal ReadReadWriteJobPlan<LogicalIdentity, Velocity, Position> MovementPlan { get; }
+    internal ReadReadWriteJobPlan<LogicalIdentity, Position, SpatialCell> SpatialPlan { get; }
 
     internal override void RegisterSystems()
     {
@@ -1486,7 +1788,7 @@ internal sealed class TierBinding<TMarker> : TierBindingBase
             executionPolicy: SystemExecutionPolicy.Parallel,
             parallelRowThreshold: 1,
             minimumRowsPerPartition: 64);
-        NeedsSystem = Owner.World.RegisterReadReadWriteSystem<TMarker, Activity, Needs,
+        NeedsSystem = Owner.World.RegisterReadReadWriteSystem<LogicalIdentity, Activity, Needs,
             NeedsRuntime<TMarker>, NeedsJob<TMarker>>(needsDefinition, NeedsPlan, new NeedsRuntime<TMarker>());
 
         SystemDefinition steeringDefinition = new(
@@ -1497,7 +1799,7 @@ internal sealed class TierBinding<TMarker> : TierBindingBase
             requires: [NeedsSystem],
             parallelRowThreshold: 1,
             minimumRowsPerPartition: 64);
-        SteeringSystem = Owner.World.RegisterReadReadReadWriteSystem<TMarker, Needs, Activity, Velocity,
+        SteeringSystem = Owner.World.RegisterReadReadReadWriteSystem<LogicalIdentity, Needs, Activity, Velocity,
             SteeringRuntime<TMarker>, SteeringJob<TMarker>>(steeringDefinition, SteeringPlan,
             new SteeringRuntime<TMarker>());
 
@@ -1509,7 +1811,7 @@ internal sealed class TierBinding<TMarker> : TierBindingBase
             requires: [SteeringSystem],
             parallelRowThreshold: 1,
             minimumRowsPerPartition: 64);
-        MovementSystem = Owner.World.RegisterReadReadWriteSystem<TMarker, Velocity, Position,
+        MovementSystem = Owner.World.RegisterReadReadWriteSystem<LogicalIdentity, Velocity, Position,
             MovementRuntime<TMarker>, MovementJob<TMarker>>(movementDefinition, MovementPlan,
             new MovementRuntime<TMarker>());
 
@@ -1521,7 +1823,7 @@ internal sealed class TierBinding<TMarker> : TierBindingBase
             requires: [MovementSystem],
             parallelRowThreshold: 1,
             minimumRowsPerPartition: 64);
-        SpatialSystem = Owner.World.RegisterReadReadWriteSystem<TMarker, Position, SpatialCell,
+        SpatialSystem = Owner.World.RegisterReadReadWriteSystem<LogicalIdentity, Position, SpatialCell,
             SpatialRuntime<TMarker>, SpatialJob<TMarker>>(spatialDefinition, SpatialPlan,
             new SpatialRuntime<TMarker>());
     }
@@ -1539,66 +1841,64 @@ internal sealed class TierBinding<TMarker> : TierBindingBase
 }
 
 internal sealed class NeedsRuntime<TMarker> : ISystemRuntime<NeedsJob<TMarker>>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public NeedsJob<TMarker> Prepare(in SystemPrepareContext context) => new();
 }
 
-internal struct NeedsJob<TMarker> : IScheduledReadReadWriteChunkJob<TMarker, Activity, Needs>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+internal struct NeedsJob<TMarker> : IScheduledReadReadWriteChunkJob<LogicalIdentity, Activity, Needs>
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public void Execute(in SystemJobContext context,
-        in ReadReadWriteComponentChunk<TMarker, Activity, Needs> chunk)
+        in ReadReadWriteComponentChunk<LogicalIdentity, Activity, Needs> chunk)
     {
         for (int row = 0; row < chunk.Count; row++)
         {
-            TMarker marker = chunk.ReadComponents1[row];
+            LogicalIdentity identity = chunk.ReadComponents1[row];
             Activity activity = chunk.ReadComponents2[row];
             ref Needs needs = ref chunk.WriteComponents[row];
-            int activityMix = unchecked(GetLogicalId(marker) + activity.Value + (int)context.Tick);
-            int fatigueMix = unchecked(GetLogicalId(marker) + (int)context.Tick);
+            int activityMix = unchecked(identity.Value + activity.Value + (int)context.Tick);
+            int fatigueMix = unchecked(identity.Value + (int)context.Tick);
             needs.Hunger = unchecked((needs.Hunger + 1 + (activityMix & 3)) % 1_000);
             needs.Fatigue = unchecked((needs.Fatigue + 2 + (fatigueMix & 1)) % 1_000);
         }
     }
 
-    private static int GetLogicalId(TMarker marker) => marker.LogicalId;
 }
 
 internal sealed class SteeringRuntime<TMarker> : ISystemRuntime<SteeringJob<TMarker>>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public SteeringJob<TMarker> Prepare(in SystemPrepareContext context) => new();
 }
 
-internal struct SteeringJob<TMarker> : IScheduledReadReadReadWriteChunkJob<TMarker, Needs, Activity, Velocity>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+internal struct SteeringJob<TMarker> : IScheduledReadReadReadWriteChunkJob<LogicalIdentity, Needs, Activity, Velocity>
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public void Execute(in SystemJobContext context,
-        in ReadReadReadWriteComponentChunk<TMarker, Needs, Activity, Velocity> chunk)
+        in ReadReadReadWriteComponentChunk<LogicalIdentity, Needs, Activity, Velocity> chunk)
     {
         for (int row = 0; row < chunk.Count; row++)
         {
-            int id = GetLogicalId(chunk.ReadComponents1[row]);
+            int id = chunk.ReadComponents1[row].Value;
             chunk.WriteComponents[row] = SimulationMath.Steering(
                 id, chunk.ReadComponents2[row], chunk.ReadComponents3[row], context.Tick);
         }
     }
 
-    private static int GetLogicalId(TMarker marker) => marker.LogicalId;
 }
 
 internal sealed class MovementRuntime<TMarker> : ISystemRuntime<MovementJob<TMarker>>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public MovementJob<TMarker> Prepare(in SystemPrepareContext context) => new();
 }
 
-internal struct MovementJob<TMarker> : IScheduledReadReadWriteChunkJob<TMarker, Velocity, Position>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+internal struct MovementJob<TMarker> : IScheduledReadReadWriteChunkJob<LogicalIdentity, Velocity, Position>
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public void Execute(in SystemJobContext context,
-        in ReadReadWriteComponentChunk<TMarker, Velocity, Position> chunk)
+        in ReadReadWriteComponentChunk<LogicalIdentity, Velocity, Position> chunk)
     {
         for (int row = 0; row < chunk.Count; row++)
         {
@@ -1611,16 +1911,16 @@ internal struct MovementJob<TMarker> : IScheduledReadReadWriteChunkJob<TMarker, 
 }
 
 internal sealed class SpatialRuntime<TMarker> : ISystemRuntime<SpatialJob<TMarker>>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public SpatialJob<TMarker> Prepare(in SystemPrepareContext context) => new();
 }
 
-internal struct SpatialJob<TMarker> : IScheduledReadReadWriteChunkJob<TMarker, Position, SpatialCell>
-    where TMarker : unmanaged, IComponent<TMarker>, ITierMarker
+internal struct SpatialJob<TMarker> : IScheduledReadReadWriteChunkJob<LogicalIdentity, Position, SpatialCell>
+    where TMarker : unmanaged, IComponent<TMarker>
 {
     public void Execute(in SystemJobContext context,
-        in ReadReadWriteComponentChunk<TMarker, Position, SpatialCell> chunk)
+        in ReadReadWriteComponentChunk<LogicalIdentity, Position, SpatialCell> chunk)
     {
         for (int row = 0; row < chunk.Count; row++)
             chunk.WriteComponents[row] = SimulationMath.Cell(chunk.ReadComponents2[row]);
@@ -1642,6 +1942,273 @@ internal sealed class StructuralCounters
         EffectsCreated = 0;
         EffectsDestroyed = 0;
         CommandsAttempted = 0;
+    }
+}
+
+internal enum LifecycleDomain : byte
+{
+    Actor = 1,
+    Effect = 2,
+    Item = 3,
+}
+
+internal static class LifecycleHashing
+{
+    internal const ulong Offset = 1469598103934665603UL;
+
+    internal static ulong Add(
+        ulong hash,
+        LifecycleKind kind,
+        LifecycleDomain domain,
+        int logicalId,
+        int logicalGeneration,
+        ComponentId component)
+    {
+        ulong fact = Offset;
+        fact = Mix(fact, (uint)kind);
+        fact = Mix(fact, (uint)domain);
+        fact = Mix(fact, unchecked((uint)logicalId));
+        fact = Mix(fact, unchecked((uint)logicalGeneration));
+        fact = Mix(fact, component.Value);
+        // Independent oracle comparison canonicalizes away packed physical row
+        // order while retaining every normalized logical fact and multiplicity.
+        return unchecked(hash + RotateLeft(fact, logicalId & 63));
+    }
+
+    internal static ulong AddOrdered(
+        ulong hash,
+        LifecycleKind kind,
+        LifecycleDomain domain,
+        int logicalId,
+        int logicalGeneration,
+        ComponentId component)
+    {
+        hash = Mix(hash, (uint)kind);
+        hash = Mix(hash, (uint)domain);
+        hash = Mix(hash, unchecked((uint)logicalId));
+        hash = Mix(hash, unchecked((uint)logicalGeneration));
+        return Mix(hash, component.Value);
+    }
+
+    private static ulong Mix(ulong hash, uint value) =>
+        unchecked((hash ^ value) * 1099511628211UL);
+
+    private static ulong RotateLeft(ulong value, int count) =>
+        (value << count) | (value >> ((64 - count) & 63));
+}
+
+internal sealed class LifecycleIdentityMap
+{
+    private readonly byte[] _domains;
+    private readonly int[] _logicalIds;
+    private readonly int[] _logicalGenerations;
+    private readonly uint[] _entityGenerations;
+
+    internal LifecycleIdentityMap(int capacity)
+    {
+        _domains = new byte[capacity];
+        _logicalIds = new int[capacity];
+        _logicalGenerations = new int[capacity];
+        _entityGenerations = new uint[capacity];
+    }
+
+    internal void RegisterActor(Entity entity, int logicalId) =>
+        Register(entity, LifecycleDomain.Actor, logicalId, 0);
+
+    internal void RegisterEffect(Entity entity, int slot, int generation) =>
+        Register(entity, LifecycleDomain.Effect, slot, generation);
+
+    internal void RegisterItem(Entity entity, int logicalId) =>
+        Register(entity, LifecycleDomain.Item, logicalId, 0);
+
+    internal void Register(
+        Entity entity,
+        LifecycleDomain domain,
+        int logicalId,
+        int logicalGeneration)
+    {
+        int index = checked((int)entity.Index);
+        _domains[index] = (byte)domain;
+        _logicalIds[index] = logicalId;
+        _logicalGenerations[index] = logicalGeneration;
+        _entityGenerations[index] = entity.Generation;
+    }
+
+    internal bool TryResolve(
+        Entity entity,
+        out LifecycleDomain domain,
+        out int logicalId,
+        out int logicalGeneration)
+    {
+        uint index = entity.Index;
+        if (index >= unchecked((uint)_domains.Length) ||
+            _domains[index] == 0 ||
+            _entityGenerations[index] != entity.Generation)
+        {
+            domain = default;
+            logicalId = 0;
+            logicalGeneration = 0;
+            return false;
+        }
+
+        domain = (LifecycleDomain)_domains[index];
+        logicalId = _logicalIds[index];
+        logicalGeneration = _logicalGenerations[index];
+        return true;
+    }
+
+    internal void Clear(Entity entity)
+    {
+        uint index = entity.Index;
+        if (index < unchecked((uint)_domains.Length) &&
+            _entityGenerations[index] == entity.Generation)
+        {
+            _domains[index] = 0;
+            _entityGenerations[index] = 0;
+        }
+    }
+}
+
+internal sealed class LifecycleObserver
+{
+    private readonly int _period;
+    private readonly LifecycleRecord[] _scratch = new LifecycleRecord[2_048];
+    private readonly LifecycleIdentityMap _identities;
+
+    internal LifecycleObserver(int period, int entityCapacity)
+    {
+        _period = period;
+        _identities = new LifecycleIdentityMap(entityCapacity);
+    }
+
+    internal void RegisterActor(Entity entity, int logicalId) =>
+        _identities.RegisterActor(entity, logicalId);
+
+    internal void RegisterEffect(Entity entity, int slot, int generation) =>
+        _identities.RegisterEffect(entity, slot, generation);
+
+    internal void RegisterItem(Entity entity, int logicalId) =>
+        _identities.RegisterItem(entity, logicalId);
+
+    internal LifecycleCursor Cursor;
+    internal long TotalRecords;
+    internal long Calls;
+    internal int MaximumRecordsPerConsume;
+    internal ulong MaximumLag;
+    internal long ResyncRequiredCount;
+    internal long Created;
+    internal long Destroyed;
+    internal long ComponentAdded;
+    internal long ComponentRemoved;
+    internal ulong Hash = LifecycleHashing.Offset;
+    internal ulong OrderedHash = LifecycleHashing.Offset;
+    internal long DrainTimestampTicks;
+
+    internal void ResetMetrics()
+    {
+        TotalRecords = 0;
+        Calls = 0;
+        MaximumRecordsPerConsume = 0;
+        MaximumLag = 0;
+        ResyncRequiredCount = 0;
+        Created = 0;
+        Destroyed = 0;
+        ComponentAdded = 0;
+        ComponentRemoved = 0;
+        Hash = LifecycleHashing.Offset;
+        OrderedHash = LifecycleHashing.Offset;
+        DrainTimestampTicks = 0;
+    }
+
+    internal void ConsumeIfDue(
+        EcsWorld world,
+        in ComponentLookup<EffectIdentity> effectLookup,
+        ulong tick,
+        bool force)
+    {
+        if (!force && tick % unchecked((ulong)_period) != 0)
+            return;
+
+        long drainStart = Stopwatch.GetTimestamp();
+        int consumed = 0;
+        while (true)
+        {
+            LifecycleReadResult result = world.ReadLifecycle(ref Cursor, _scratch);
+            if (result.Status == LifecycleReadStatus.ResyncRequired)
+            {
+                ResyncRequiredCount++;
+                throw new InvalidOperationException(
+                    $"Lifecycle consumer period {_period} exceeded retained history; " +
+                    $"cursor={Cursor.NextSequence}, oldest={result.OldestRetainedSequence}, " +
+                    $"next={result.NextPublishedSequence}.");
+            }
+            if (result.Status == LifecycleReadStatus.NoData)
+                break;
+
+            ulong lag = unchecked((ulong)result.Count) + result.RemainingCount;
+            if (lag > MaximumLag)
+                MaximumLag = lag;
+            for (int index = 0; index < result.Count; index++)
+                ConsumeRecord(world, effectLookup, _scratch[index]);
+            consumed += result.Count;
+            if (result.RemainingCount == 0 || result.Count == 0)
+                break;
+        }
+
+        Calls++;
+        MaximumRecordsPerConsume = Math.Max(MaximumRecordsPerConsume, consumed);
+        DrainTimestampTicks += Stopwatch.GetTimestamp() - drainStart;
+    }
+
+    private void ConsumeRecord(
+        EcsWorld world,
+        in ComponentLookup<EffectIdentity> effectLookup,
+        in LifecycleRecord record)
+    {
+        if (!_identities.TryResolve(
+                record.Entity,
+                out LifecycleDomain domain,
+                out int logicalId,
+                out int logicalGeneration))
+        {
+            if (record.Kind != LifecycleKind.Created ||
+                !world.TryRead(record.Entity, effectLookup, out EffectIdentity effect))
+            {
+                throw new InvalidOperationException(
+                    $"Lifecycle record {record.Sequence} could not be normalized to a logical identity.");
+            }
+            domain = LifecycleDomain.Effect;
+            logicalId = effect.Slot;
+            logicalGeneration = effect.Generation;
+            _identities.Register(record.Entity, domain, logicalId, logicalGeneration);
+        }
+
+        Hash = LifecycleHashing.Add(
+            Hash,
+            record.Kind,
+            domain,
+            logicalId,
+            logicalGeneration,
+            record.ComponentId);
+        OrderedHash = LifecycleHashing.AddOrdered(
+            OrderedHash,
+            record.Kind,
+            domain,
+            logicalId,
+            logicalGeneration,
+            record.ComponentId);
+        TotalRecords++;
+        switch (record.Kind)
+        {
+            case LifecycleKind.Created: Created++; break;
+            case LifecycleKind.Destroyed:
+                Destroyed++;
+                _identities.Clear(record.Entity);
+                break;
+            case LifecycleKind.ComponentAdded: ComponentAdded++; break;
+            case LifecycleKind.ComponentRemoved: ComponentRemoved++; break;
+            default: throw new InvalidOperationException("Unknown lifecycle record kind.");
+        }
     }
 }
 
@@ -2154,6 +2721,12 @@ internal sealed record RunMetrics(
     ObserverMetrics PresentationObserver,
     ObserverMetrics ReplicationObserver,
     ObserverMetrics PersistenceObserver,
+    LifecycleObserverMetrics PresentationLifecycle,
+    LifecycleObserverMetrics ReplicationLifecycle,
+    LifecycleObserverMetrics PersistenceLifecycle,
+    ulong OracleLifecycleHash,
+    long OracleLifecycleEvents,
+    LifecycleHistoryMetrics LifecycleHistory,
     long ActorDeaths,
     long ActorRespawns,
     long EffectsCreated,
@@ -2185,6 +2758,11 @@ internal sealed record RunMetrics(
         PositionObserverRuntime presentation,
         HealthObserverRuntime replication,
         PositionObserverRuntime persistence,
+        LifecycleObserver presentationLifecycle,
+        LifecycleObserver replicationLifecycle,
+        LifecycleObserver persistenceLifecycle,
+        ulong oracleLifecycleHash,
+        long oracleLifecycleEvents,
         ulong ecsHash,
         ulong oracleHash,
         SimulationProfile profile,
@@ -2221,6 +2799,7 @@ internal sealed record RunMetrics(
         }
 
         WorldReservedPayloadSnapshot reserved = world.GetReservedPayloadSnapshot();
+        LifecycleHistorySnapshot lifecycleHistory = world.GetLifecycleHistorySnapshot();
         using Process process = Process.GetCurrentProcess();
         GCMemoryInfo gc = GC.GetGCMemoryInfo();
         return new RunMetrics(
@@ -2270,6 +2849,22 @@ internal sealed record RunMetrics(
                 replication.MaximumRowsPerConsume, replication.Hash),
             new ObserverMetrics(persistence.TotalRows, persistence.Calls,
                 persistence.MaximumRowsPerConsume, persistence.Hash),
+            LifecycleObserverMetrics.From(
+                presentationLifecycle, lifecycleHistory.NextPublishedSequence, samples.Length),
+            LifecycleObserverMetrics.From(
+                replicationLifecycle, lifecycleHistory.NextPublishedSequence, samples.Length),
+            LifecycleObserverMetrics.From(
+                persistenceLifecycle, lifecycleHistory.NextPublishedSequence, samples.Length),
+            oracleLifecycleHash,
+            oracleLifecycleEvents,
+            new LifecycleHistoryMetrics(
+                lifecycleHistory.Capacity,
+                lifecycleHistory.RetainedCount,
+                lifecycleHistory.HighWatermark,
+                lifecycleHistory.OverwrittenCount,
+                lifecycleHistory.OldestRetainedSequence,
+                lifecycleHistory.NextPublishedSequence,
+                lifecycleHistory.ReservedBytes),
             counters.ActorDeaths,
             counters.ActorRespawns,
             counters.EffectsCreated,
@@ -2288,6 +2883,59 @@ internal sealed record RunMetrics(
     private static double ToMicroseconds(long ticks) =>
         ticks * 1_000_000d / Stopwatch.Frequency;
 }
+
+internal sealed record LifecycleObserverMetrics(
+    long TotalRecords,
+    long Calls,
+    int MaximumRecordsPerConsume,
+    double RecordsPerTick,
+    double BytesPerTick,
+    ulong CurrentLag,
+    ulong MaximumLag,
+    long ResyncRequiredCount,
+    long Created,
+    long Destroyed,
+    long ComponentAdded,
+    long ComponentRemoved,
+    double TotalDrainMicroseconds,
+    double AverageDrainMicroseconds,
+    ulong Hash,
+    ulong OrderedHash)
+{
+    internal static LifecycleObserverMetrics From(
+        LifecycleObserver value,
+        ulong nextPublishedSequence,
+        int measuredTicks) => new(
+        value.TotalRecords,
+        value.Calls,
+        value.MaximumRecordsPerConsume,
+        measuredTicks == 0 ? 0d : value.TotalRecords / (double)measuredTicks,
+        measuredTicks == 0
+            ? 0d
+            : value.TotalRecords * (double)Unsafe.SizeOf<LifecycleRecord>() / measuredTicks,
+        unchecked(nextPublishedSequence - value.Cursor.NextSequence),
+        value.MaximumLag,
+        value.ResyncRequiredCount,
+        value.Created,
+        value.Destroyed,
+        value.ComponentAdded,
+        value.ComponentRemoved,
+        value.DrainTimestampTicks * 1_000_000d / Stopwatch.Frequency,
+        value.Calls == 0
+            ? 0d
+            : value.DrainTimestampTicks * 1_000_000d / Stopwatch.Frequency / value.Calls,
+        value.Hash,
+        value.OrderedHash);
+}
+
+internal sealed record LifecycleHistoryMetrics(
+    int Capacity,
+    int RetainedCount,
+    int HighWatermark,
+    ulong OverwrittenCount,
+    ulong OldestRetainedSequence,
+    ulong NextPublishedSequence,
+    long ReservedBytes);
 
 internal sealed record TimingMetrics(
     double MinimumMicroseconds,

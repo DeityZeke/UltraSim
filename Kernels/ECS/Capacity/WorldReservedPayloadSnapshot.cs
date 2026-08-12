@@ -16,6 +16,7 @@ public readonly struct WorldReservedPayloadSnapshot
         long preparedPlanSlotBytes,
         long mainStructuralCommandBytes,
         long schedulerBytes,
+        long lifecycleHistoryBytes,
         long nativeChunkPayloadBytes)
     {
         EntitySlotMetadataBytes = entitySlotMetadataBytes;
@@ -26,12 +27,13 @@ public readonly struct WorldReservedPayloadSnapshot
         PreparedPlanSlotBytes = preparedPlanSlotBytes;
         MainStructuralCommandBytes = mainStructuralCommandBytes;
         SchedulerBytes = schedulerBytes;
+        LifecycleHistoryBytes = lifecycleHistoryBytes;
         NativeChunkPayloadBytes = nativeChunkPayloadBytes;
         KnownManagedPayloadBytes = checked(
             entitySlotMetadataBytes + archetypeRegistryIndexBytes +
             archetypeSignatureAndColumnBytes + archetypeStoreMetadataBytes +
             chunkArenaSlotMetadataBytes + preparedPlanSlotBytes +
-            mainStructuralCommandBytes + schedulerBytes);
+            mainStructuralCommandBytes + schedulerBytes + lifecycleHistoryBytes);
         TotalKnownPayloadBytes = checked(KnownManagedPayloadBytes + nativeChunkPayloadBytes);
     }
 
@@ -52,6 +54,9 @@ public readonly struct WorldReservedPayloadSnapshot
 
     /// <summary>Scheduler-owned graph, job, lane, and worker payload; excludes the main arena.</summary>
     public long SchedulerBytes { get; }
+
+    /// <summary>Fixed lifecycle-record ring payload; zero when publication is disabled.</summary>
+    public long LifecycleHistoryBytes { get; }
 
     public long KnownManagedPayloadBytes { get; }
     public long NativeChunkPayloadBytes { get; }

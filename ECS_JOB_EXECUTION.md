@@ -1,7 +1,7 @@
 # ECS Public Serial Chunk-Job Execution
 
-Status: authoritative direct execution contract through ECS 3.1.2 as of
-2026-08-11.
+Status: authoritative direct execution contract through ECS 3.2.0 as of
+2026-08-12.
 
 ECS 3.1.0 retains this direct serial contract unchanged and uses the same generated
 plan, route, stack-only chunk view, and constrained struct call as its scheduled
@@ -53,6 +53,15 @@ internal seal-compiled plan. Default plans, foreign-world plans, execution befor
 initialization, owner-thread violations, use after disposal, and capacity
 exhaustion are rejected. Preparing a plan before later archetype registrations is
 supported; `Seal` compiles the final registered archetype set.
+
+ECS 3.2.0 also accepts an immutable public `EcsQueryFilter` prepared cold with
+required and excluded component membership. Every generated family, the
+handwritten 1R1W family, and the exact changed-row family provide a matching
+filtered overload. Storage-free tags belong in this filter rather than in job
+data columns. Filter terms select seal-compiled archetype routes only: they do
+not grant component access, enter scheduler read/write masks, or add a per-row
+predicate to execution. Default and foreign-world filters, unknown component
+IDs, and contradictory required/excluded terms are rejected during preparation.
 
 Ordinary execution is:
 
@@ -112,9 +121,9 @@ families. Its writable slots are `TrackedWritableComponentChunk<T>` values:
 - a no-write conditional job does not advance the world change version.
 
 Tracked job preparation reuses the ordinary generated plan. It adds no plan
-slot, route array, command-buffer array, or persistent reservation. Public filter
-authoring is deliberately deferred; the current tracked entry only accepts the
-unfiltered plans that the public preparation API creates.
+slot, route array, command-buffer array, or persistent reservation. A tracked
+job executes either the unfiltered plan or the same cold filtered plan used by
+its dense counterpart; the write-publication contract is otherwise unchanged.
 
 ## Changed-row jobs
 
@@ -207,5 +216,6 @@ pre/post simulation barriers, persistence identity, controls, and profiling.
 
 ECS 3.1.0 subsequently supplied those orchestration capabilities without wrapping
 this primitive in a second hot execution framework. Persistence serialization,
-public arbitrary filters, lifecycle event streams, system fusion, work stealing,
-and general reduction APIs remain later measured extensions.
+optional-component query columns, system fusion, work stealing, and general
+reduction APIs remain later measured extensions. Required/excluded public
+topology filtering and lifecycle observation landed in 3.2.0.

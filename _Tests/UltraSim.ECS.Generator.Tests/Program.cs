@@ -72,6 +72,7 @@ internal static class GeneratorTests
         Run(nameof(QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec), QueryFamilyCatalog_EmitsPublicSerialJobsFromTheSameFamilySpec);
         Run(nameof(QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies), QueryFamilyCatalog_EmitsSchedulerAdaptersAndMissingFamilies);
         Run(nameof(QueryFamilyCatalog_EmitsExecutionGuidanceDocumentation), QueryFamilyCatalog_EmitsExecutionGuidanceDocumentation);
+        Run(nameof(QueryFamilyCatalog_EmitsPublicTopologyFilterOverloads), QueryFamilyCatalog_EmitsPublicTopologyFilterOverloads);
         Run(nameof(QueryFamilyGeneration_IsExplicitlyOptIn), QueryFamilyGeneration_IsExplicitlyOptIn);
 
         Console.WriteLine($"All {_passed} ECS generator tests passed.");
@@ -171,6 +172,25 @@ internal static class GeneratorTests
             StringComparison.Ordinal));
         TestAssert.True(generation.GeneratedSource.Contains(
             "Only mutations through tracked wrappers publish exact touched rows.",
+            StringComparison.Ordinal));
+    }
+
+    private static void QueryFamilyCatalog_EmitsPublicTopologyFilterOverloads()
+    {
+        const string source = "[assembly: UltraSim.ECS.EcsQueryFamilies] internal sealed class Marker { }";
+        Generation generation = Generate(source, new EcsQueryFamilyGenerator().AsSourceGenerator());
+        AssertNoGeneratorErrors(generation);
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "PrepareReadReadWriteJob<TRead1, TRead2, TWrite>(in EcsQueryFilter filter)",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "filter.GetFilter(Id, nameof(filter))",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "including storage-free tags, are selection predicates",
+            StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains(
+            "no membership predicate runs per row",
             StringComparison.Ordinal));
     }
 

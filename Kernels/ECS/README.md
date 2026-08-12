@@ -62,7 +62,8 @@ allocation:
   bootstrap mutation, and `BeginRun` publishes the running state. The facade is
   deliberately engine-neutral and single-owner. ECS 3.1.2's optional scheduler
   grants persistent workers only expiring `SystemJobContext` capabilities rather
-  than allowing non-owner access to the facade.
+  than allowing non-owner access to the facade. ECS 3.2.0 adds an optional fixed
+  lifecycle-history capacity; zero preserves the disabled publication path.
 - Public `ArchetypeHandle` values are eight-byte world/archetype pairs, preventing
   dense archetype IDs from colliding across worlds. Public immediate creation,
   initialized creation, transition, destruction, liveness, and current-archetype
@@ -160,7 +161,7 @@ allocation:
   `ECS_STRUCTURAL_PLAYBACK.md`. ECS 3.1.0 adds per-participant arenas,
   deterministic work-segment merge, and typed component payloads without changing
   those packed strategies. Grouping across separated route runs, broader density/
-  entropy-driven compaction, prefab expansion, and lifecycle publication remain
+  entropy-driven compaction and prefab expansion remain
   later structural work and must be measured against this baseline.
 - `VisitReadChunks` and `VisitWriteChunks` are the first system-facing execution
   path. They reuse an exact binding, walk only occupied partial/full chunk lists,
@@ -186,6 +187,12 @@ allocation:
   components become structural requirements; contradictions, foreign descriptors,
   non-enableable row filters, invalid IDs, and access/exclusion conflicts fail
   before sealing.
+- ECS 3.2.0 exposes the narrow public `EcsQueryFilter` bridge for required and
+  excluded topology membership. Every generated job family plus handwritten
+  1R1W and changed-row plans has a filtered preparation overload. Storage-free
+  tags can select routes without becoming data columns or scheduler access
+  hazards. Seal still compiles exact matching routes, so required/excluded
+  filtering adds no per-row predicate to warmed traversal.
 - Seal compilation merge-matches structural filters against canonical signatures
   and reduces row filters to direct enable-bit offsets per route. Runtime combines
   those words and exposes only contiguous matching slices, with a physical
@@ -263,10 +270,20 @@ allocation:
 - `ChangedRowsJobPlan<TRead,TChanged>` and `ExecuteChangedRowsJob` are the first
   public exact changed-row consumer surface. They preserve independent cursors,
   success-only acknowledgement, exception retry, and the existing contiguous
-  range-per-run delivery. Public filters, public two-watch any/all authoring,
+  range-per-run delivery. Public two-watch any/all authoring,
   mask-bearing delivery, additional access arities, and full entity
   materialization remain measured follow-ons. The concise contract and admission
   evidence live in [`ECS_JOB_EXECUTION.md`](../../ECS_JOB_EXECUTION.md).
+- ECS 3.2.0 adds one optional fixed-capacity lifecycle observation machine above
+  successful logical commits. Its 24-byte records form one globally ordered
+  timeline of `Created`, `Destroyed`, `ComponentAdded`, and `ComponentRemoved`
+  facts. Independent 16-byte cursors drain into caller spans, partial reads
+  advance only delivered records, and retention loss is explicit
+  `ResyncRequired`. Creation/destruction do not emit membership storms;
+  transitions emit stable removed-then-added signature deltas; rejected commands,
+  value/enable writes, donor moves, and record/merge alone emit nothing. The
+  scalar oracle and optimized whole/suffix/grouped strategies publish identical
+  logical sequences. See [`ECS_LIFECYCLE_PUBLICATION.md`](ECS_LIFECYCLE_PUBLICATION.md).
 - `ChangeVersion` is an eight-byte world-local sequence with zero reserved for
   "never changed," explicit maximum-to-one wrap behavior, and half-range
   changed-since comparison. Every archetype store preallocates one 64-bit stamp
@@ -504,9 +521,9 @@ and 2R2W access families,
 and the first 2R2C any/all changed family. Further access/watch arities should be
 added only when real system signatures require them. Occupancy/density
 measurements may show that some shapes should remain dense or bypass change
-refinement entirely. Structural creation/migration/removal events, optional
-public filters, persistence serialization, field/prefab descriptors, lifecycle
-streams, system fusion, and networking integration remain later work.
+refinement entirely. Enabled/disabled public filter authoring, persistence
+serialization, field/prefab descriptors, lifecycle-to-host bridges, system
+fusion, and networking integration remain later work.
 
 Run both executable test suites from the repository root:
 

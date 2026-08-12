@@ -30,6 +30,12 @@ if (args.Contains("--scheduler", StringComparer.OrdinalIgnoreCase))
     return;
 }
 
+if (args.Contains("--lifecycle", StringComparer.OrdinalIgnoreCase))
+{
+    Environment.ExitCode = LifecycleBenchmarkProgram.Run(args);
+    return;
+}
+
 string outputPath = Path.GetFullPath(Path.Combine(
     AppContext.BaseDirectory,
     "..", "..", "..", "..",

@@ -5,6 +5,7 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
 {
     private const int MaximumSupportedPreparedTransitions = 1 << 20;
     private const int MaximumSupportedStructuralCommands = 1 << 24;
+    private const int MaximumSupportedLifecycleRecords = 1 << 28;
 
     public EcsWorldOptions(
         EntityCapacity entityCapacity,
@@ -12,7 +13,8 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         int maximumPreparedPlans,
         int maximumPreparedTransitions = 0,
         int maximumStructuralCommands = 0,
-        EcsSchedulerOptions scheduler = default)
+        EcsSchedulerOptions scheduler = default,
+        int lifecycleRecordCapacity = 0)
     {
         if (entityCapacity.MaximumEntities <= 0)
             throw new ArgumentException("Entity capacity is invalid or default initialized.", nameof(entityCapacity));
@@ -26,6 +28,9 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         if (maximumStructuralCommands < 0 ||
             maximumStructuralCommands > MaximumSupportedStructuralCommands)
             throw new ArgumentOutOfRangeException(nameof(maximumStructuralCommands));
+        if (lifecycleRecordCapacity < 0 ||
+            lifecycleRecordCapacity > MaximumSupportedLifecycleRecords)
+            throw new ArgumentOutOfRangeException(nameof(lifecycleRecordCapacity));
 
         EntityCapacity = entityCapacity;
         MaximumArchetypes = maximumArchetypes;
@@ -33,6 +38,7 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         MaximumPreparedTransitions = maximumPreparedTransitions;
         MaximumStructuralCommands = maximumStructuralCommands;
         Scheduler = scheduler;
+        LifecycleRecordCapacity = lifecycleRecordCapacity;
     }
 
     public EntityCapacity EntityCapacity { get; }
@@ -57,12 +63,19 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
     /// </summary>
     public EcsSchedulerOptions Scheduler { get; }
 
+    /// <summary>
+    /// Capacity of the fixed lifecycle-history ring. Zero disables lifecycle
+    /// retention and preserves the pre-3.2 publication cost model.
+    /// </summary>
+    public int LifecycleRecordCapacity { get; }
+
     public bool IsValid =>
         EntityCapacity.MaximumEntities > 0 &&
         MaximumArchetypes > 0 &&
         MaximumPreparedPlans >= 0 &&
         MaximumPreparedTransitions is >= 0 and <= MaximumSupportedPreparedTransitions &&
         MaximumStructuralCommands is >= 0 and <= MaximumSupportedStructuralCommands &&
+        LifecycleRecordCapacity is >= 0 and <= MaximumSupportedLifecycleRecords &&
         (!Scheduler.IsEnabled || Scheduler.ExecutionConcurrency > 0);
 
     public bool Equals(EcsWorldOptions other) =>
@@ -71,17 +84,23 @@ public readonly struct EcsWorldOptions : IEquatable<EcsWorldOptions>
         MaximumPreparedPlans == other.MaximumPreparedPlans &&
         MaximumPreparedTransitions == other.MaximumPreparedTransitions &&
         MaximumStructuralCommands == other.MaximumStructuralCommands &&
-        Scheduler == other.Scheduler;
+        Scheduler == other.Scheduler &&
+        LifecycleRecordCapacity == other.LifecycleRecordCapacity;
 
     public override bool Equals(object? obj) => obj is EcsWorldOptions other && Equals(other);
 
-    public override int GetHashCode() => HashCode.Combine(
-        EntityCapacity,
-        MaximumArchetypes,
-        MaximumPreparedPlans,
-        MaximumPreparedTransitions,
-        MaximumStructuralCommands,
-        Scheduler);
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(EntityCapacity);
+        hash.Add(MaximumArchetypes);
+        hash.Add(MaximumPreparedPlans);
+        hash.Add(MaximumPreparedTransitions);
+        hash.Add(MaximumStructuralCommands);
+        hash.Add(Scheduler);
+        hash.Add(LifecycleRecordCapacity);
+        return hash.ToHashCode();
+    }
 
     public static bool operator ==(EcsWorldOptions left, EcsWorldOptions right) => left.Equals(right);
 

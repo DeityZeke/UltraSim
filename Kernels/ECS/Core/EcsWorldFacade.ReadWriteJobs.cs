@@ -81,6 +81,30 @@ public sealed partial class EcsWorld
             _core.PrepareReadWriteQuery<TRead, TWrite>(readComponentId, writeComponentId));
     }
 
+    /// <summary>Prepares a filtered cold 1-read/1-write generated chunk route.</summary>
+    /// <remarks>
+    /// Required/excluded filter components are compiled topology predicates,
+    /// not data access or scheduler hazards. Storage-free tags may be used, and
+    /// membership filtering adds no per-row predicate to matched routes.
+    /// </remarks>
+    public ReadWriteJobPlan<TRead, TWrite> PrepareReadWriteJob<TRead, TWrite>(
+        in EcsQueryFilter filter)
+        where TRead : unmanaged, IComponent<TRead>
+        where TWrite : unmanaged, IComponent<TWrite>
+    {
+        EnsureOwnerThread();
+        ArchetypeQueryFilter preparedFilter = filter.GetFilter(Id, nameof(filter));
+        if (!Schema.TryGetComponentId<TRead>(out ComponentId readComponentId))
+            throw new ArgumentException($"Component type {typeof(TRead)} is not registered in this world schema.");
+        if (!Schema.TryGetComponentId<TWrite>(out ComponentId writeComponentId))
+            throw new ArgumentException($"Component type {typeof(TWrite)} is not registered in this world schema.");
+        return new ReadWriteJobPlan<TRead, TWrite>(
+            _core.PrepareReadWriteQuery<TRead, TWrite>(
+                readComponentId,
+                writeComponentId,
+                preparedFilter));
+    }
+
     /// <summary>Synchronously executes a dense generated 1-read/1-write chunk job.</summary>
     /// <remarks>The writable range is conservatively published as changed.</remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

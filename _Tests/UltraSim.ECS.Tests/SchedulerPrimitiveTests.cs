@@ -41,6 +41,7 @@ internal static class SchedulerPrimitiveTests
         Run(nameof(PhaseStaggering_IsOptInDeterministicAndStageBounded), PhaseStaggering_IsOptInDeterministicAndStageBounded);
         Run(nameof(WorkerCapabilities_ExpireAndCrossSegmentDeferredTargetsFault), WorkerCapabilities_ExpireAndCrossSegmentDeferredTargetsFault);
         Run(nameof(StructuralLanes_MergeInLogicalOrderAndApplyAtPostBarrier), StructuralLanes_MergeInLogicalOrderAndApplyAtPostBarrier);
+        Run(nameof(Lifecycle_PreBarrierAndPostBarrierFollowCommitOrder), Lifecycle_PreBarrierAndPostBarrierFollowCommitOrder);
         Run(nameof(Tick_PreBarrierMakesExternalCommandsVisibleToSystems), Tick_PreBarrierMakesExternalCommandsVisibleToSystems);
         Run(nameof(TypedStructuralRoutes_HandleAddReplaceRemoveTagsAndPayloadExhaustion), TypedStructuralRoutes_HandleAddReplaceRemoveTagsAndPayloadExhaustion);
         Run(nameof(StructuralRunKeys_DiscriminateTypedRoutesFromPublicTransitions), StructuralRunKeys_DiscriminateTypedRoutesFromPublicTransitions);
@@ -905,6 +906,7 @@ internal static class SchedulerPrimitiveTests
         using EcsWorld world = CreateStructuralWorld(Options(2), manual: false,
             out ArchetypeHandle source, out _, out AddRuntime runtime);
         Start(world, source, 0);
+        LifecycleCursor lifecycle = world.CaptureLifecycleCursorFromNow();
         world.Tick(1d / 60d);
         Assert.Equal(64, world.AliveCount);
         Assert.Equal(64, runtime.Completed);
@@ -918,6 +920,17 @@ internal static class SchedulerPrimitiveTests
         Assert.True(snapshot.MergedSegmentCount > 1);
         Assert.Equal(128L, snapshot.MergedCommandCount);
         Assert.True(snapshot.MergedPayloadBytes >= 64 * sizeof(int));
+        Span<LifecycleRecord> lifecycleRecords = stackalloc LifecycleRecord[128];
+        LifecycleReadResult lifecycleRead = world.ReadLifecycle(ref lifecycle, lifecycleRecords);
+        Assert.Equal(128, lifecycleRead.Count);
+        for (int index = 0; index < 64; index++)
+            Assert.Equal(LifecycleKind.Created, lifecycleRecords[index].Kind);
+        ComponentId integer = LayoutTestSchema.GetComponentId<LayoutInt>();
+        for (int index = 64; index < 128; index++)
+        {
+            Assert.Equal(LifecycleKind.ComponentAdded, lifecycleRecords[index].Kind);
+            Assert.Equal(integer, lifecycleRecords[index].ComponentId);
+        }
     }
 
     private static void Tick_PreBarrierMakesExternalCommandsVisibleToSystems()
@@ -935,6 +948,33 @@ internal static class SchedulerPrimitiveTests
         Assert.Equal(0, world.StructuralCommands.Count);
     }
 
+    private static void Lifecycle_PreBarrierAndPostBarrierFollowCommitOrder()
+    {
+        using EcsWorld world = CreateStructuralWorld(Options(2), manual: false,
+            out ArchetypeHandle source, out _, out _);
+        Start(world, source, 0);
+        LifecycleCursor cursor = world.CaptureLifecycleCursorFromNow();
+        world.StructuralCommands.EnqueueCreateDefault(source);
+        Assert.Equal(
+            LifecycleReadStatus.NoData,
+            world.ReadLifecycle(ref cursor, Span<LifecycleRecord>.Empty).Status);
+
+        world.Tick(1d / 60d);
+        var records = new LifecycleRecord[129];
+        LifecycleReadResult read = world.ReadLifecycle(ref cursor, records);
+        Assert.Equal(LifecycleReadStatus.Success, read.Status);
+        Assert.Equal(129, read.Count);
+        Assert.Equal(LifecycleKind.Created, records[0].Kind);
+        for (int index = 1; index <= 64; index++)
+            Assert.Equal(LifecycleKind.Created, records[index].Kind);
+        ComponentId integer = LayoutTestSchema.GetComponentId<LayoutInt>();
+        for (int index = 65; index < records.Length; index++)
+        {
+            Assert.Equal(LifecycleKind.ComponentAdded, records[index].Kind);
+            Assert.Equal(integer, records[index].ComponentId);
+        }
+    }
+
     private static void TypedStructuralRoutes_HandleAddReplaceRemoveTagsAndPayloadExhaustion()
     {
         ComponentSchema schema = LayoutTestSchema.CreateSchema();
@@ -948,7 +988,8 @@ internal static class SchedulerPrimitiveTests
             maximumPartitionsPerSystem: 1);
         using EcsWorld world = new(schema, new EcsWorldOptions(
             new EntityCapacity(8), 3, 4, maximumPreparedTransitions: 4,
-            maximumStructuralCommands: 8, scheduler));
+            maximumStructuralCommands: 8, scheduler,
+            lifecycleRecordCapacity: 64));
         ArchetypeHandle source = world.RegisterArchetype([wide], ChunkLayoutOptions.KiB16, 1);
         ComponentId[] withIntegerSignature = [wide, integer];
         Array.Sort(withIntegerSignature, static (a, b) => a.CompareTo(b));
@@ -970,6 +1011,7 @@ internal static class SchedulerPrimitiveTests
         Assert.True(world.TryCreate(source, out runtime.AddTag));
         Assert.True(world.TryCreate(withTag, out runtime.RemoveTag));
         Assert.True(world.TryWrite(runtime.ReplaceInteger, integers, new LayoutInt { Value = 7 }));
+        LifecycleCursor lifecycle = world.CaptureLifecycleCursorFromNow();
         world.BeginRun();
         world.Tick(0.1);
 
@@ -980,6 +1022,17 @@ internal static class SchedulerPrimitiveTests
         Assert.False(world.Has(runtime.RemoveInteger, integers));
         Assert.True(world.Has(runtime.AddTag, tags));
         Assert.False(world.Has(runtime.RemoveTag, tags));
+        Span<LifecycleRecord> lifecycleRecords = stackalloc LifecycleRecord[8];
+        LifecycleReadResult lifecycleRead = world.ReadLifecycle(ref lifecycle, lifecycleRecords);
+        Assert.Equal(4, lifecycleRead.Count);
+        Assert.Equal(LifecycleKind.ComponentRemoved, lifecycleRecords[0].Kind);
+        Assert.Equal(integer, lifecycleRecords[0].ComponentId);
+        Assert.Equal(LifecycleKind.ComponentRemoved, lifecycleRecords[1].Kind);
+        Assert.Equal(tag, lifecycleRecords[1].ComponentId);
+        Assert.Equal(LifecycleKind.ComponentAdded, lifecycleRecords[2].Kind);
+        Assert.Equal(integer, lifecycleRecords[2].ComponentId);
+        Assert.Equal(LifecycleKind.ComponentAdded, lifecycleRecords[3].Kind);
+        Assert.Equal(tag, lifecycleRecords[3].ComponentId);
 
         var tinyScheduler = new EcsSchedulerOptions(
             maximumSystems: 1, maximumDependencies: 0, maximumWorkItems: 1,
@@ -1317,12 +1370,18 @@ internal static class SchedulerPrimitiveTests
         using EcsWorld world = CreateStructuralWorld(Options(0), manual: true,
             out ArchetypeHandle source, out _, out AddRuntime runtime);
         Start(world, source, 0);
+        LifecycleCursor lifecycle = world.CaptureLifecycleCursorFromNow();
         world.RunManual(runtime.Id, 0.25);
         Assert.Equal(0, world.AliveCount);
         Assert.Equal(128, world.StructuralCommands.Count);
+        Span<LifecycleRecord> lifecycleRecords = stackalloc LifecycleRecord[128];
+        Assert.Equal(
+            LifecycleReadStatus.NoData,
+            world.ReadLifecycle(ref lifecycle, lifecycleRecords).Status);
         world.Tick(0.25);
         Assert.Equal(64, world.AliveCount);
         Assert.Equal(1UL, world.TickCount);
+        Assert.Equal(128, world.ReadLifecycle(ref lifecycle, lifecycleRecords).Count);
     }
 
     private static void PhaseStaggering_IsOptInDeterministicAndStageBounded()
@@ -1505,7 +1564,14 @@ internal static class SchedulerPrimitiveTests
         ComponentId wide = LayoutTestSchema.GetComponentId<LayoutWide>();
         ComponentId integer = LayoutTestSchema.GetComponentId<LayoutInt>();
         var world = new EcsWorld(schema,
-            new EcsWorldOptions(new EntityCapacity(128), 2, 8, 8, 4_096, scheduler));
+            new EcsWorldOptions(
+                new EntityCapacity(128),
+                2,
+                8,
+                8,
+                4_096,
+                scheduler,
+                lifecycleRecordCapacity: 512));
         source = world.RegisterArchetype([wide], ChunkLayoutOptions.KiB16, 2);
         ComponentId[] signature = [wide, integer];
         Array.Sort(signature, static (a, b) => a.CompareTo(b));

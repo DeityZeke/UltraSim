@@ -23,7 +23,7 @@ Does it consume values changed since one consumer last observed them?
     -> ChangeCursor plus a changed-row job
 
 Does it need create/destroy/add/remove history or tombstones?
-    -> not implemented in 3.1.2; lifecycle publication is the next milestone
+    -> LifecycleCursor over the world's fixed lifecycle history
 ```
 
 ## Execution-path inventory
@@ -36,7 +36,8 @@ Does it need create/destroy/add/remove history or tombstones?
 | `ComponentLookup<T>` | Sparse/irregular access to referenced entities | Per-row access for dense traversal | Generated chunk job |
 | `TryGetEntity` | Reconstruct a full generation-safe `Entity` when a later API needs it | Reconstructing every row merely to identify it | Use the chunk's local entity index |
 | `SystemStructuralWriter` | Deferred create/destroy/add/remove/transition from a system | Expecting topology changes to be visible during the same graph | Observe after the structural barrier |
-| `ChangeCursor` | Independent observation of changed component values | Expecting destroyed identities, membership deltas, or every intermediate value | Lifecycle publication (planned for 3.2) |
+| `ChangeCursor` | Independent observation of changed component values | Expecting destroyed identities, membership deltas, or every intermediate value | `LifecycleCursor` for topology history |
+| `LifecycleCursor` | Independent observation of successful create/destroy/add/remove commits | Expecting component values or physical archetype/chunk changes | `ChangeCursor` for values; lifecycle intentionally hides storage |
 
 The APIs do not have interchangeable costs. A legal full-population `RangeJob`
 using checked lookups can be orders of magnitude slower than a generated job over
@@ -69,12 +70,18 @@ Generated `EntityIndices` are world-local slot indices. Reconstruct a full
 `Entity` through `SystemJobContext.TryGetEntity` only for accepted rows that need
 structural or relationship work.
 
-Current 3.1.2 limitation: the public generated facade cannot yet author a
-required/excluded/enabled/disabled filter. If a topology distinction such as a
-fidelity tier needs a dedicated archetype route, use an explicit component and
-separate prepared plan for now. Do not replace the missing filter with a
-full-world `RangeJob` scan. A narrow cold public filter handle is planned with or
-immediately after lifecycle publication.
+Use `PrepareQueryFilter(required, excluded)` before `Seal` when composition
+selects a narrower topology than the generated data columns alone. Pass the
+result to the filtered `Prepare...Job` overload. Required/excluded terms are
+compiled into immutable archetype routes; no membership predicate runs per row.
+Storage-free tags are the preferred fidelity/category selectors because filter
+membership does not make them data columns, read/write capabilities, or scheduler
+hazards.
+
+The public 3.2 surface deliberately exposes required/excluded membership only.
+Internal enabled/disabled row filtering remains available to kernel plans but is
+not part of this narrow public handle. Do not replace a missing predicate with a
+full-world checked `RangeJob` scan.
 
 ## 2. RangeJob: bounded work already selected elsewhere
 
@@ -194,7 +201,41 @@ What were all intermediate values between observations?
 
 Those are lifecycle/event-history requirements, not value-change requirements.
 
-## 6. World lifecycle and ownership
+## 6. Lifecycle observation: topology, not values
+
+Lifecycle and change cursors answer different questions:
+
+```text
+ChangeCursor
+    -> which currently present component values changed?
+
+LifecycleCursor
+    -> which entity/component topology commits succeeded?
+```
+
+Set `EcsWorldOptions.LifecycleRecordCapacity` to a positive fixed capacity to
+enable retention; zero leaves publication disabled. Capture an independent cursor
+from the oldest retained record or from now, then drain into caller-owned
+`Span<LifecycleRecord>` storage. The one globally ordered timeline contains:
+
+- one `Created` for successful creation, without an initial-component storm;
+- one `Destroyed` runtime tombstone, without destruction-time removals;
+- `ComponentRemoved` then `ComponentAdded` signature deltas for successful
+  membership transitions, each component set in ascending ID order;
+- no record for value replacement, enable mutation, rejected commands, donor
+  relocation, compaction, or command recording/merge alone.
+
+If a cursor falls behind the fixed ring, `ReadLifecycle` returns
+`ResyncRequired` and does not advance it. The consumer must rebuild its own view
+and explicitly capture a new cursor. Runtime `Entity` and schema-local
+`ComponentId` values are observation facts, not durable persistence identities.
+Reading remains owner-thread-only and allocation-free.
+
+Pre-tick main-arena commands publish at pre-barrier playback. Scheduler commands
+publish at deterministic post-graph playback. `RunManual` merge alone publishes
+nothing.
+
+## 7. World lifecycle and ownership
 
 The normal lifecycle is:
 

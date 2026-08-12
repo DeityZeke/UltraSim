@@ -58,6 +58,29 @@ public sealed partial class EcsWorld
             _core.PrepareChangedRowsQuery<TRead>(readComponentId, changedComponentId));
     }
 
+    /// <summary>Prepares a filtered exact-row independent-consumer plan.</summary>
+    /// <remarks>
+    /// Filter components select archetypes only and do not become changed-value
+    /// watches, data access, or scheduler hazards.
+    /// </remarks>
+    public ChangedRowsJobPlan<TRead, TChanged> PrepareChangedRowsJob<TRead, TChanged>(
+        in EcsQueryFilter filter)
+        where TRead : unmanaged, IComponent<TRead>
+        where TChanged : unmanaged, IComponent<TChanged>
+    {
+        EnsureOwnerThread();
+        ArchetypeQueryFilter preparedFilter = filter.GetFilter(Id, nameof(filter));
+        if (!Schema.TryGetComponentId<TRead>(out ComponentId readComponentId))
+            throw new ArgumentException($"Component type {typeof(TRead)} is not registered in this world schema.");
+        if (!Schema.TryGetComponentId<TChanged>(out ComponentId changedComponentId))
+            throw new ArgumentException($"Component type {typeof(TChanged)} is not registered in this world schema.");
+        return new ChangedRowsJobPlan<TRead, TChanged>(
+            _core.PrepareChangedRowsQuery<TRead>(
+                readComponentId,
+                changedComponentId,
+                preparedFilter));
+    }
+
     /// <summary>
     /// Executes an exact-row changed job and acknowledges the cursor only after
     /// every chunk callback succeeds.

@@ -1278,6 +1278,7 @@ public sealed class StructuralCommandBuffer
         ref int applied,
         ref PlaybackDiagnostics diagnostics)
     {
+        int runStartLink = link;
         int firstCommandIndex = link - 1;
         StructuralCommandRecord first = _commands[firstCommandIndex];
         if (!TryResolveTarget(first, commandCount, out Entity firstEntity, out _) ||
@@ -1343,6 +1344,23 @@ public sealed class StructuralCommandBuffer
         }
 
         world.CompleteWholeSourceTransition(transition, population);
+        if (world.IsLifecycleEnabled)
+        {
+            int publishLink = runStartLink;
+            int publishRemaining = population;
+            while (publishRemaining != 0)
+            {
+                int publishCount = Math.Min(publishRemaining, batch.Length);
+                for (int index = 0; index < publishCount; index++)
+                {
+                    int commandIndex = publishLink - 1;
+                    batch[index] = _createdEntities[commandIndex];
+                    publishLink = _nextCommand[commandIndex];
+                }
+                world.PublishTransitionLifecycle(batch[..publishCount], transition);
+                publishRemaining -= publishCount;
+            }
+        }
         link = scanLink;
         applied = checked(applied + population);
         diagnostics.ExactWholeSourceResets++;
@@ -1365,6 +1383,7 @@ public sealed class StructuralCommandBuffer
         ref int applied,
         ref PlaybackDiagnostics diagnostics)
     {
+        int runStartLink = link;
         int scanLink = link;
         int runCount = 0;
         while (scanLink != 0)
@@ -1443,6 +1462,23 @@ public sealed class StructuralCommandBuffer
             transition,
             sourcePopulation,
             runCount);
+        if (world.IsLifecycleEnabled)
+        {
+            int publishLink = runStartLink;
+            int publishRemaining = runCount;
+            while (publishRemaining != 0)
+            {
+                int publishCount = Math.Min(publishRemaining, batch.Length);
+                for (int index = 0; index < publishCount; index++)
+                {
+                    int commandIndex = publishLink - 1;
+                    batch[index] = _createdEntities[commandIndex];
+                    publishLink = _nextCommand[commandIndex];
+                }
+                world.PublishTransitionLifecycle(batch[..publishCount], transition);
+                publishRemaining -= publishCount;
+            }
+        }
         diagnostics.ExactSuffixShrinks++;
         diagnostics.ExactSuffixCommands = checked(diagnostics.ExactSuffixCommands + runCount);
         diagnostics.ExactSuffixRowsBulkShrunk = checked(

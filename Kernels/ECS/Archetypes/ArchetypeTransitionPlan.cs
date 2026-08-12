@@ -7,11 +7,15 @@ internal sealed class ArchetypeTransitionPlan<TArena>
     where TArena : class, IChunkArenaBackend
 {
     private readonly ArchetypeColumnTransfer[] _transfers;
+    private readonly ComponentId[] _removedComponents;
+    private readonly ComponentId[] _addedComponents;
 
     private ArchetypeTransitionPlan(
         ArchetypeStorage<TArena> source,
         ArchetypeStorage<TArena> destination,
         ArchetypeColumnTransfer[] transfers,
+        ComponentId[] removedComponents,
+        ComponentId[] addedComponents,
         int retainedComponentCount,
         int addedComponentCount,
         int removedComponentCount)
@@ -19,6 +23,8 @@ internal sealed class ArchetypeTransitionPlan<TArena>
         Source = source;
         Destination = destination;
         _transfers = transfers;
+        _removedComponents = removedComponents;
+        _addedComponents = addedComponents;
         RetainedComponentCount = retainedComponentCount;
         AddedComponentCount = addedComponentCount;
         RemovedComponentCount = removedComponentCount;
@@ -38,11 +44,17 @@ internal sealed class ArchetypeTransitionPlan<TArena>
 
     internal int RemovedComponentCount { get; }
 
+    internal ReadOnlySpan<ComponentId> RemovedComponents => _removedComponents;
+
+    internal ReadOnlySpan<ComponentId> AddedComponents => _addedComponents;
+
     internal PreparedArchetypeTransition ToPrepared(WorldId worldId) => new(
         worldId,
         Source.Id,
         Destination.Id,
         _transfers,
+        _removedComponents,
+        _addedComponents,
         AddedComponentCount == 0
             ? StructuralTransitionPhase.Remove
             : StructuralTransitionPhase.Add);
@@ -64,6 +76,13 @@ internal sealed class ArchetypeTransitionPlan<TArena>
             out int retained,
             out int added,
             out int removed);
+        var removedComponents = new ComponentId[removed];
+        var addedComponents = new ComponentId[added];
+        FillMembershipDeltas(
+            sourceSignature,
+            destinationSignature,
+            removedComponents,
+            addedComponents);
 
         int stateful = CountStatefulTransfers(source, destination);
         var transfers = new ArchetypeColumnTransfer[stateful];
@@ -118,9 +137,50 @@ internal sealed class ArchetypeTransitionPlan<TArena>
             source,
             destination,
             transfers,
+            removedComponents,
+            addedComponents,
             retained,
             added,
             removed);
+    }
+
+    private static void FillMembershipDeltas(
+        ReadOnlySpan<ComponentId> source,
+        ReadOnlySpan<ComponentId> destination,
+        Span<ComponentId> removed,
+        Span<ComponentId> added)
+    {
+        int sourceIndex = 0;
+        int destinationIndex = 0;
+        int removedIndex = 0;
+        int addedIndex = 0;
+        while (sourceIndex < source.Length && destinationIndex < destination.Length)
+        {
+            ComponentId sourceId = source[sourceIndex];
+            ComponentId destinationId = destination[destinationIndex];
+            if (sourceId.Value < destinationId.Value)
+            {
+                removed[removedIndex++] = sourceId;
+                sourceIndex++;
+            }
+            else if (destinationId.Value < sourceId.Value)
+            {
+                added[addedIndex++] = destinationId;
+                destinationIndex++;
+            }
+            else
+            {
+                sourceIndex++;
+                destinationIndex++;
+            }
+        }
+        while (sourceIndex < source.Length)
+            removed[removedIndex++] = source[sourceIndex++];
+        while (destinationIndex < destination.Length)
+            added[addedIndex++] = destination[destinationIndex++];
+
+        if (removedIndex != removed.Length || addedIndex != added.Length)
+            throw new InvalidOperationException("Transition membership-delta accounting is inconsistent.");
     }
 
     private static void CountChanges(

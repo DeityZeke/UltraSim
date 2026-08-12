@@ -1,7 +1,7 @@
 # ECS Next Structural Playback
 
-Status: authoritative structural-playback architecture through ECS 3.1.2 as of
-2026-08-11. ECS 3.1 retains the packed production strategies and adds bounded
+Status: authoritative structural-playback architecture through ECS 3.2.0 as of
+2026-08-12. ECS 3.1 retains the packed production strategies and adds bounded
 per-participant recording plus deterministic segment merge as another input to
 the same command arena and playback engine. ECS 3.1.2 hardens command-run
 identity and the retainable main-arena boundary without adding an executor.
@@ -31,6 +31,8 @@ analyze one physical strategy per run
 reserve / initialize / transfer / remove / compact
         ↓
 publish entity identity, location, and result counters
+        ↓
+publish successful logical lifecycle facts when provisioned
         ↓
 leave every query-visible store dense
 ```
@@ -198,7 +200,29 @@ Persistent sparse storage remains rejected for hot archetypes. A future cold or
 `ChurnOptimized` policy must independently prove that saved structural relocation
 repays fragmented traversal, retained chunks, and more complex capacity rules.
 
-## Storage lifecycle boundary
+## Public lifecycle publication boundary
+
+ECS 3.2.0 makes lifecycle an observation product of the existing logical commit,
+not another structural interpreter. Recording and scheduler-lane merge publish
+nothing. Immediate mutations publish only after their checked commit; deferred
+commands publish only when canonical playback succeeds. Creation emits one
+`Created`, destruction one `Destroyed`, and membership transitions emit only the
+stable removed-then-added signature delta. Replacement writes, rejections,
+enable changes, hole reuse, donor moves, compaction, resets, and tail shrinks emit
+nothing.
+
+Transition plans precompute their immutable membership deltas cold. Scalar,
+grouped, whole-source, and exact-suffix execution share the same publication
+helpers; optimized routes publish only after the physical route finalizes, in
+canonical command order. Production and scalar differential tests compare both
+logical world state and lifecycle records. Capacity zero leaves publication
+disabled. A full ring never backpressures structural commit; it overwrites old
+history and requires lagging independent cursors to resynchronize explicitly.
+
+The public proof and retention contract is specified in
+[`Kernels/ECS/ECS_LIFECYCLE_PUBLICATION.md`](Kernels/ECS/ECS_LIFECYCLE_PUBLICATION.md).
+
+## Storage row-lifecycle boundary
 
 Structural playback does not manipulate enable masks or change-history arrays
 directly. Store-level row operations own those details:
@@ -297,7 +321,7 @@ trusted post-graph merge remain legal. This removes participant-dependent access
 without adding a command-buffer array or changing merge order.
 
 Natural future work includes separated-run route grouping, prefab expansion,
-lifecycle publication, and tick budgets. Exact whole-source transition routes now
+and tick budgets. Exact whole-source transition routes now
 plan beyond the 256-command execution block without enlarging scratch, and exact
 packed suffixes now do the same through the narrowly proved 3.0.35 strategy.
 General partial-source planning, arbitrary sparse compaction, and source-chunk

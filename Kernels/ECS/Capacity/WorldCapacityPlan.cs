@@ -16,6 +16,7 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         long requiredChunkCount,
         long managedEntityMetadataBytes,
         long managedSchedulerBytes,
+        long managedLifecycleBytes,
         long totalManagedBytes,
         long nativeChunkBytes,
         long totalNativeBytes,
@@ -28,6 +29,7 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         RequiredChunkCount = requiredChunkCount;
         ManagedEntityMetadataBytes = managedEntityMetadataBytes;
         ManagedSchedulerBytes = managedSchedulerBytes;
+        ManagedLifecycleBytes = managedLifecycleBytes;
         TotalManagedBytes = totalManagedBytes;
         NativeChunkBytes = nativeChunkBytes;
         TotalNativeBytes = totalNativeBytes;
@@ -53,6 +55,9 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
     /// </summary>
     public long ManagedSchedulerBytes { get; }
 
+    /// <summary>Fixed lifecycle-record payload requested before construction.</summary>
+    public long ManagedLifecycleBytes { get; }
+
     public long TotalManagedBytes { get; }
 
     public long NativeChunkBytes { get; }
@@ -72,6 +77,7 @@ public readonly struct WorldCapacityPlan : IEquatable<WorldCapacityPlan>
         RequiredChunkCount == other.RequiredChunkCount &&
         ManagedEntityMetadataBytes == other.ManagedEntityMetadataBytes &&
         ManagedSchedulerBytes == other.ManagedSchedulerBytes &&
+        ManagedLifecycleBytes == other.ManagedLifecycleBytes &&
         TotalManagedBytes == other.TotalManagedBytes &&
         NativeChunkBytes == other.NativeChunkBytes &&
         TotalNativeBytes == other.TotalNativeBytes &&

@@ -2,11 +2,6 @@ using UltraSim.ECS;
 
 namespace UltraSim.ECS.SimulationSlice0;
 
-internal interface ITierMarker
-{
-    int LogicalId { get; }
-}
-
 [EcsComponent("simulation-slice-0.logical-identity")]
 internal struct LogicalIdentity : IComponent<LogicalIdentity>
 {
@@ -65,32 +60,17 @@ internal struct SpatialCell : IComponent<SpatialCell>
     public int Y { get; set; }
 }
 
-// These are data-bearing query keys rather than tags. ECS 3.1.2 generated data
-// query plans deliberately reject storage-free tag columns and the public
-// generated facade does not yet expose filter authoring.
-[EcsComponent("simulation-slice-0.tier-0")]
-internal struct Tier0Marker : IComponent<Tier0Marker>, ITierMarker
-{
-    public int LogicalId { get; set; }
-}
+[EcsComponent("simulation-slice-0.tier-0", IsTag = true)]
+internal struct Tier0Marker : IComponent<Tier0Marker> { }
 
-[EcsComponent("simulation-slice-0.tier-1")]
-internal struct Tier1Marker : IComponent<Tier1Marker>, ITierMarker
-{
-    public int LogicalId { get; set; }
-}
+[EcsComponent("simulation-slice-0.tier-1", IsTag = true)]
+internal struct Tier1Marker : IComponent<Tier1Marker> { }
 
-[EcsComponent("simulation-slice-0.tier-2")]
-internal struct Tier2Marker : IComponent<Tier2Marker>, ITierMarker
-{
-    public int LogicalId { get; set; }
-}
+[EcsComponent("simulation-slice-0.tier-2", IsTag = true)]
+internal struct Tier2Marker : IComponent<Tier2Marker> { }
 
-[EcsComponent("simulation-slice-0.tier-3")]
-internal struct Tier3Marker : IComponent<Tier3Marker>, ITierMarker
-{
-    public int LogicalId { get; set; }
-}
+[EcsComponent("simulation-slice-0.tier-3", IsTag = true)]
+internal struct Tier3Marker : IComponent<Tier3Marker> { }
 
 [EcsComponent("simulation-slice-0.dead-state")]
 internal struct DeadState : IComponent<DeadState>

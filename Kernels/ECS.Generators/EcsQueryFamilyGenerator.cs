@@ -1677,6 +1677,36 @@ public sealed class EcsQueryFamilyGenerator : IIncrementalGenerator
         writer.Unindent();
         writer.Close();
         writer.Line();
+        writer.Line($"/// <summary>Prepares a filtered cold topology-selected chunk plan with {family.Summary}.</summary>");
+        writer.Line("/// <remarks>");
+        writer.Line("/// The filter is compiled into matching archetype routes before runtime. Filter-only");
+        writer.Line("/// components, including storage-free tags, are selection predicates rather than");
+        writer.Line("/// job data access or scheduler hazards; no membership predicate runs per row.");
+        writer.Line("/// </remarks>");
+        writer.Line($"public {family.JobPlanType}<{family.TypeParameters}> Prepare{family.Name}Job<{family.TypeParameters}>(in EcsQueryFilter filter)");
+        AppendComponentConstraints(writer, family);
+        writer.Open(string.Empty, emitHeader: false);
+        writer.Line("EnsureOwnerThread();");
+        writer.Line("ArchetypeQueryFilter preparedFilter = filter.GetFilter(Id, nameof(filter));");
+        for (int index = 0; index < family.Slots.Length; index++)
+        {
+            AccessSlot slot = family.Slots[index];
+            writer.Line($"if (!Schema.TryGetComponentId<{slot.TypeName}>(out ComponentId {slot.GeneratedComponentIdParameter}))");
+            writer.Indent();
+            writer.Line($"throw new global::System.ArgumentException(\"Component type {slot.TypeName} is not registered in this world schema.\");");
+            writer.Unindent();
+        }
+        writer.Line($"return new {family.JobPlanType}<{family.TypeParameters}>(");
+        writer.Indent();
+        writer.Line($"_core.Prepare{family.Name}Query<{family.TypeParameters}>(");
+        writer.Indent();
+        for (int index = 0; index < family.Slots.Length; index++)
+            writer.Line($"{family.Slots[index].GeneratedComponentIdParameter},");
+        writer.Line("preparedFilter));");
+        writer.Unindent();
+        writer.Unindent();
+        writer.Close();
+        writer.Line();
         AppendScheduledRegistration(writer, family, tracked: false);
         if (family.WriteCount != 0)
         {

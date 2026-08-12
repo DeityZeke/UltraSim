@@ -25,6 +25,9 @@ generated system/job scheduler is the first coherent major capability checkpoint
 so it advances the middle field and resets the revision as `3.1.0`. The next
 accepted revisions are `3.1.1`, the scheduler capability/parity hardening pass,
 and `3.1.2`, the scheduler/structural proof-hardening pass.
+The fixed-capacity lifecycle-publication timeline, narrow public generated-query
+filter bridge, and first real Slice 0 lifecycle integration form the next coherent
+capability milestone, so the accepted checkpoint is `3.2.0`.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -69,6 +72,16 @@ handwritten XML guidance plus `Kernels/ECS/ECS_USAGE_GUIDE.md` so consumers can
 distinguish topology-selected chunk work, bounded `RangeJob` work, sparse checked
 lookup, deferred structure, and value-change observation before 3.2.0 adds
 lifecycle publication.
+
+ECS 3.2.0 adds one explicitly provisioned, globally ordered lifecycle history
+with independent value cursors and explicit lag/resynchronization semantics.
+Successful create, destroy, and component-membership commits publish runtime
+facts; value changes, enable state, rejected commands, and physical row movement
+do not. The same checkpoint exposes immutable required/excluded component filters
+through every public generated job family without adding filter terms to scheduler
+access masks or hot per-row branches. Simulation Slice 0 consumes both features,
+replaces its four data-bearing tier selectors with storage-free tags, and validates
+independent presentation-, replication-, and persistence-cadence lifecycle readers.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

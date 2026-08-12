@@ -32,6 +32,9 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     private Exception? _faultException;
     private bool _hasSealed;
     private bool _isExecutingScope;
+    // Optional observation state is deliberately last so lifecycle-disabled
+    // worlds retain the established offsets of hot scheduler/world fields.
+    private readonly LifecycleHistory? _lifecycleHistory;
 
     internal EcsWorld(
         ComponentSchema schema,
@@ -40,7 +43,8 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         Func<ChunkArenaCapacity, TArena> arenaFactory,
         int maximumQueryPlans,
         ChangeVersion initialChangeVersion = default,
-        int maximumPublicTransitions = 0)
+        int maximumPublicTransitions = 0,
+        int lifecycleRecordCapacity = 0)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(arenaFactory);
@@ -48,12 +52,16 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             throw new ArgumentOutOfRangeException(nameof(maximumQueryPlans));
         if (maximumPublicTransitions < 0 || maximumPublicTransitions > MaximumSupportedPublicTransitions)
             throw new ArgumentOutOfRangeException(nameof(maximumPublicTransitions));
+        if (lifecycleRecordCapacity < 0)
+            throw new ArgumentOutOfRangeException(nameof(lifecycleRecordCapacity));
 
         _schema = schema;
         _entities = new EntityPool(WorldId.Create(), entityCapacity);
         _archetypes = new ArchetypeRegistry<TArena>(schema, maximumArchetypes, arenaFactory);
         _queryPlans = new IArchetypeQueryPlan<TArena>[maximumQueryPlans];
         _publicTransitions = new PreparedArchetypeTransition[maximumPublicTransitions];
+        if (lifecycleRecordCapacity != 0)
+            _lifecycleHistory = new LifecycleHistory(lifecycleRecordCapacity);
         _changeVersion = initialChangeVersion;
         _state = EcsWorldState.Created;
     }
@@ -130,6 +138,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             preparedSlots,
             mainStructuralCommandBytes,
             schedulerBytes,
+            LifecycleReservedBytes,
             nativePayload);
     }
 
@@ -172,6 +181,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     }
 
     internal bool IsSystemGraphExecuting => _isExecutingScope;
+
+    internal bool IsLifecycleEnabled => _lifecycleHistory is not null;
+
+    internal long LifecycleReservedBytes => _lifecycleHistory?.ReservedBytes ?? 0;
 
     internal ArchetypeId RegisterArchetype(
         ReadOnlySpan<ComponentId> canonicalSignature,
@@ -819,7 +832,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     internal bool TryCreateDefault(ArchetypeId archetypeId, out Entity entity)
     {
         EnsureRuntimeMutationAllowed();
-        return TryCreateDefaultCore(archetypeId, out entity, out _);
+        if (!TryCreateDefaultCore(archetypeId, out entity, out _))
+            return false;
+        PublishCreated(entity);
+        return true;
     }
 
     /// <summary>Creates directly into a row reserved by this structural barrier.</summary>
@@ -846,7 +862,10 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         var location = new EntityLocation(archetypeId, row);
         if (_entities.TryBindLocation(entity, location))
+        {
+            PublishCreated(entity);
             return true;
+        }
 
         if (!storage.Store.TryMarkTemporaryHole(row, entity.Index) ||
             !_entities.TryFree(entity))
@@ -884,6 +903,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             location.ChunkRow.Row,
             rowCount: 1,
             AdvanceChangeVersion());
+        PublishCreated(entity);
         return true;
     }
 
@@ -1144,6 +1164,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             location.ChunkRow.Row,
             rowCount: 1,
             AdvanceChangeVersion());
+        PublishCreated(entity);
         return true;
     }
 
@@ -1927,11 +1948,14 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
                 nameof(plan));
         }
 
-        return ArchetypeMigrator.TryMigrate(
+        bool migrated = ArchetypeMigrator.TryMigrate(
             _entities,
             entity,
             plan,
             out destinationLocation);
+        if (migrated)
+            PublishTransitionLifecycle(entity, plan);
+        return migrated;
     }
 
     internal bool TryTransition(
@@ -1953,13 +1977,16 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
         ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
-        return ArchetypeMigrator.TryMigrate(
+        bool migrated = ArchetypeMigrator.TryMigrate(
             _entities,
             entity,
             source,
             destination,
             transition.Transfers,
             out destinationLocation);
+        if (migrated)
+            PublishTransitionLifecycle(entity, transition);
+        return migrated;
     }
 
     internal bool TryTransition(Entity entity, uint transitionId, out EntityLocation destinationLocation)
@@ -2003,13 +2030,28 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         ArchetypeStorage<TArena> source = _archetypes.GetStorage(transition.SourceId);
         ArchetypeStorage<TArena> destination = _archetypes.GetStorage(transition.DestinationId);
-        return ArchetypeMigrator.MigrateBatch(
+        if (_lifecycleHistory is null)
+        {
+            return ArchetypeMigrator.MigrateBatch(
+                _entities,
+                entities,
+                source,
+                destination,
+                transition.Transfers,
+                out capacityExhausted);
+        }
+
+        Span<Entity> migratedEntities = stackalloc Entity[ArchetypeMigrator.MaximumBatchSize];
+        int migrated = ArchetypeMigrator.MigrateBatch(
             _entities,
             entities,
             source,
             destination,
             transition.Transfers,
+            migratedEntities,
             out capacityExhausted);
+        PublishTransitionLifecycle(migratedEntities[..migrated], transition);
+        return migrated;
     }
 
     /// <summary>
@@ -2279,6 +2321,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         ownedStorage.Store.ClearAllOccupiedRows();
         _entities.RetireValidatedLocated(entities);
+        PublishDestroyed(entities);
         return true;
     }
 
@@ -2326,6 +2369,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         ownedStorage.Store.RemoveTailRows(entities.Length);
         _entities.RetireValidatedLocated(entities);
+        PublishDestroyed(entities);
         return true;
     }
 
@@ -2358,6 +2402,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         fixedRowBytes = storage.Layout.FixedRowBytes;
         _entities.RetireLocatedIntoTemporaryHoleValidated(entity, location);
+        PublishDestroyed(entity);
         return true;
     }
 
@@ -2406,6 +2451,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
             location,
             ownedStorage.Id,
             relocation);
+        PublishDestroyed(entity);
         return true;
     }
 

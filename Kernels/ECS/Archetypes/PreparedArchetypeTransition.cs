@@ -7,12 +7,16 @@ namespace UltraSim.ECS;
 internal sealed class PreparedArchetypeTransition
 {
     private readonly ArchetypeColumnTransfer[] _transfers;
+    private readonly ComponentId[] _removedComponents;
+    private readonly ComponentId[] _addedComponents;
 
     internal PreparedArchetypeTransition(
         WorldId worldId,
         ArchetypeId sourceId,
         ArchetypeId destinationId,
         ArchetypeColumnTransfer[] transfers,
+        ComponentId[] removedComponents,
+        ComponentId[] addedComponents,
         StructuralTransitionPhase phase)
     {
         if (!worldId.IsValid)
@@ -22,11 +26,15 @@ internal sealed class PreparedArchetypeTransition
         if (!destinationId.IsValid || destinationId == sourceId)
             throw new ArgumentException("A distinct valid destination archetype is required.", nameof(destinationId));
         ArgumentNullException.ThrowIfNull(transfers);
+        ArgumentNullException.ThrowIfNull(removedComponents);
+        ArgumentNullException.ThrowIfNull(addedComponents);
 
         WorldId = worldId;
         SourceId = sourceId;
         DestinationId = destinationId;
         _transfers = transfers;
+        _removedComponents = removedComponents;
+        _addedComponents = addedComponents;
         Phase = phase;
     }
 
@@ -39,4 +47,8 @@ internal sealed class PreparedArchetypeTransition
     internal StructuralTransitionPhase Phase { get; }
 
     internal ReadOnlySpan<ArchetypeColumnTransfer> Transfers => _transfers;
+
+    internal ReadOnlySpan<ComponentId> RemovedComponents => _removedComponents;
+
+    internal ReadOnlySpan<ComponentId> AddedComponents => _addedComponents;
 }

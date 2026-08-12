@@ -7,12 +7,15 @@ public static class WorldCapacityPlanner
         EntityCapacity entityCapacity,
         ReadOnlySpan<ArchetypeCapacityPlan> archetypes,
         WorldArenaReservations arenas = default,
-        long managedSchedulerBytes = 0)
+        long managedSchedulerBytes = 0,
+        long managedLifecycleBytes = 0)
     {
         if (entityCapacity.MaximumEntities <= 0)
             throw new ArgumentException("Entity capacity is invalid or default initialized.", nameof(entityCapacity));
         if (managedSchedulerBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(managedSchedulerBytes));
+        if (managedLifecycleBytes < 0)
+            throw new ArgumentOutOfRangeException(nameof(managedLifecycleBytes));
 
         checked
         {
@@ -38,7 +41,7 @@ public static class WorldCapacityPlanner
             }
 
             long managedEntityBytes = entityCapacity.EstimatedMetadataBytes;
-            long managedBytes = managedEntityBytes + managedSchedulerBytes;
+            long managedBytes = managedEntityBytes + managedSchedulerBytes + managedLifecycleBytes;
             long nativeBytes = nativeChunkBytes + arenas.TotalBytes;
             return new WorldCapacityPlan(
                 entityCapacity,
@@ -48,10 +51,35 @@ public static class WorldCapacityPlanner
                 requiredChunkCount,
                 managedEntityBytes,
                 managedSchedulerBytes,
+                managedLifecycleBytes,
                 managedBytes,
                 nativeChunkBytes,
                 nativeBytes,
                 managedBytes + nativeBytes);
         }
+    }
+
+    /// <summary>
+    /// Plans a world using the lifecycle capacity carried by its construction options.
+    /// Scheduler bytes remain explicit because exact scheduler reservation is known
+    /// only after cold graph registration.
+    /// </summary>
+    public static WorldCapacityPlan PlanFromOptions(
+        EcsWorldOptions options,
+        ReadOnlySpan<ArchetypeCapacityPlan> archetypes,
+        WorldArenaReservations arenas = default,
+        long managedSchedulerBytes = 0)
+    {
+        if (!options.IsValid)
+            throw new ArgumentException("World options are invalid or default initialized.", nameof(options));
+        long lifecycleBytes = checked(
+            (long)options.LifecycleRecordCapacity *
+            System.Runtime.CompilerServices.Unsafe.SizeOf<LifecycleRecord>());
+        return Plan(
+            options.EntityCapacity,
+            archetypes,
+            arenas,
+            managedSchedulerBytes,
+            lifecycleBytes);
     }
 }
