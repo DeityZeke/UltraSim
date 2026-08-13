@@ -9,6 +9,8 @@ var tests = new (string Name, Action Body)[]
     ("RuntimeTicksARealScheduledEcsSystem", RuntimeTicksARealScheduledEcsSystem),
     ("EmptyCompositionDoesNotBecomeForbiddenRuntimePolicy", EmptyCompositionDoesNotBecomeForbiddenRuntimePolicy),
     ("HostSurfaceDoesNotExposeGenerationReplacement", HostSurfaceDoesNotExposeGenerationReplacement),
+    ("GameFacetIsCallbackScopedRunningAndOwnerBound", GameFacetIsCallbackScopedRunningAndOwnerBound),
+    ("GameFacetFailureTerminallyFaultsRuntime", GameFacetFailureTerminallyFaultsRuntime),
     ("OwnerThreadBoundaryRejectsForeignHostControl", OwnerThreadBoundaryRejectsForeignHostControl),
     ("InvalidElapsedRejectsTransactionallyWithoutFaulting", InvalidElapsedRejectsTransactionallyWithoutFaulting),
     ("FailedReplacementLeavesActiveGenerationUnchanged", FailedReplacementLeavesActiveGenerationUnchanged),
@@ -89,7 +91,63 @@ static void HostSurfaceDoesNotExposeGenerationReplacement()
     Assert.True(typeof(ServerRuntime).GetMethod("ReplaceGeneration", publicInstance) is null);
     Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.ActiveGenerationId), publicInstance) is not null);
     Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.SimulationTick), publicInstance) is not null);
+    Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.Game), publicInstance) is not null);
+    Assert.True(typeof(ServerGameFacet).GetProperty("World", publicInstance) is null);
     Assert.True(typeof(ServerGenerationBuilder).GetMethod("RestoreClockSnapshot", publicInstance) is null);
+}
+
+static void GameFacetIsCallbackScopedRunningAndOwnerBound()
+{
+    var composition = new EmptyComposition();
+    using var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(
+        CreateWorldOptions(), WorldClockOptions.Default));
+
+    Assert.False(runtime.Game.TryUseActiveGeneration(
+        static (world, generationId) => (world.Id, generationId),
+        out _));
+    runtime.Initialize();
+    Assert.False(runtime.Game.TryUseActiveGeneration(
+        static (world, generationId) => (world.Id, generationId),
+        out _));
+    runtime.Start();
+    Assert.True(runtime.Game.TryUseActiveGeneration(
+        static (world, generationId) => (world.Id, generationId),
+        out (WorldId World, ulong Generation) active));
+    Assert.True(active.World.IsValid);
+    Assert.Equal(runtime.ActiveGenerationId, active.Generation);
+
+    Exception? observed = null;
+    var thread = new Thread(() =>
+    {
+        try
+        {
+            runtime.Game.TryUseActiveGeneration(
+                static (_, generationId) => generationId,
+                out _);
+        }
+        catch (Exception exception)
+        {
+            observed = exception;
+        }
+    });
+    thread.Start();
+    thread.Join();
+    Assert.True(observed is InvalidOperationException);
+}
+
+static void GameFacetFailureTerminallyFaultsRuntime()
+{
+    using var runtime = new ServerRuntime(new EmptyComposition(), new ServerRuntimeOptions(
+        CreateWorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+
+    Assert.Throws<InvalidOperationException>(() => runtime.Game.TryUseActiveGeneration<int>(
+        static (_, _) => throw new InvalidOperationException("injected game failure"),
+        out _));
+
+    Assert.Equal(ServerRuntimeState.Faulted, runtime.State);
+    Assert.Throws<InvalidOperationException>(() => runtime.Tick());
 }
 
 static void OwnerThreadBoundaryRejectsForeignHostControl()

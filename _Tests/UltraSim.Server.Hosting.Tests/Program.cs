@@ -6,6 +6,7 @@ using System.Diagnostics;
 var tests = new (string Name, Action Body)[]
 {
     ("HostsUseTheSameConcreteRuntimeType", HostsUseTheSameConcreteRuntimeType),
+    ("HostSurfaceDoesNotExposeGameFacet", HostSurfaceDoesNotExposeGameFacet),
     ("HostLifecyclePreservesRuntimeRejections", HostLifecyclePreservesRuntimeRejections),
     ("HostControlRemainsSingleOwner", HostControlRemainsSingleOwner),
     ("InternalAndHeadlessProduceIdenticalCanonicalState", InternalAndHeadlessProduceIdenticalCanonicalState),
@@ -94,6 +95,14 @@ static void HostsUseTheSameConcreteRuntimeType()
     Assert.Equal(internalHost.ActiveGenerationId, headlessHost.ActiveGenerationId);
     internalHost.Stop();
     headlessHost.Stop();
+}
+
+static void HostSurfaceDoesNotExposeGameFacet()
+{
+    Assert.True(typeof(InternalHost).GetProperty(nameof(ServerRuntime.Game)) is null);
+    Assert.True(typeof(HeadlessHost).GetProperty(nameof(ServerRuntime.Game)) is null);
+    Assert.True(typeof(InternalHost).GetProperty("Runtime") is null);
+    Assert.True(typeof(HeadlessHost).GetProperty("Runtime") is null);
 }
 
 static void InternalAndHeadlessProduceIdenticalCanonicalState()

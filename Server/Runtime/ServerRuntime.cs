@@ -31,7 +31,14 @@ public sealed class ServerRuntime : IDisposable
         _composition = composition;
         _schema = schema;
         _options = options;
+        Game = new ServerGameFacet(this);
     }
+
+    /// <summary>
+    /// Trusted callback-scoped game authority over the active generation.
+    /// Hosts deliberately do not expose this facet.
+    /// </summary>
+    public ServerGameFacet Game { get; }
 
     public ServerRuntimeState State
     {
@@ -55,6 +62,32 @@ public sealed class ServerRuntime : IDisposable
     }
 
     internal ServerRuntimeOptions OptionsForTesting => _options;
+
+    internal bool TryUseActiveGeneration<TResult>(
+        ServerGenerationOperation<TResult> operation,
+        out TResult result)
+    {
+        EnsureOwnerThread();
+        if (_state != ServerRuntimeState.Running || _currentGeneration is null)
+        {
+            result = default!;
+            return false;
+        }
+
+        try
+        {
+            result = operation(_currentGeneration.EcsWorld, _currentGeneration.GenerationId);
+            return true;
+        }
+        catch
+        {
+            // A trusted game callback may already have mutated the active ECS.
+            // Its failure therefore has the same terminal policy as a failed
+            // simulation step: there is no provable rollback boundary.
+            _state = ServerRuntimeState.Faulted;
+            throw;
+        }
+    }
 
     /// <summary>Identity of the currently active authoritative generation.</summary>
     public ulong ActiveGenerationId

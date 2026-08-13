@@ -31,7 +31,7 @@ S0 completion summary
 
 [x] S0.4 — Local client UI runtime + minimal Godot renderer
 
-[ ] S0.5 — Admission + optional minimal Accounting
+[x] S0.5 — Admission + optional minimal Accounting
 
 [ ] S0.6 — Real ECS + Accounting transactional persistence integration
 
@@ -1511,6 +1511,43 @@ full extensible admission event/hook framework.
 Exit gate
 
 The same ServerRuntime supports both an accountless instant-entry game policy and an account-backed character-selection policy without core runtime changes.
+
+Accepted S0.5 invariants
+
+- Runtime remains unaware of Admission and Accounting. Trusted game policy
+  reaches the active generation through `ServerGameFacet`, a synchronous,
+  owner-thread-bound callback capability. Hosts do not expose the facet and no
+  game assembly receives `InternalsVisibleTo` access to Runtime internals.
+- A game-facet callback exception terminally faults Runtime because active ECS
+  mutation may already be partial. Expected policy rejection returns a value
+  and does not throw across that boundary.
+- Accountless admission does not construct or require `AccountingStore`, an
+  Account, or a CharacterRecord. Its entity binder must be transactional on a
+  false result and transfers one newly created live entity on success.
+- Account-backed admission uses the same Runtime and a game-owned compiled
+  CharacterSelect definition. Cold open, exact-cache hot reopen, dynamic Play
+  availability, typed row intent, and selector close all use S0.4 semantics.
+- Hot reopen applies only to a session still waiting for selection. It cannot
+  demote an entered binding while retaining its controlled entity/character.
+- Character selection resolves the selected account-owned
+  `PersistentEntityKey` against the current active generation. Foreign-world,
+  missing/stale, non-playable, unowned, and already-controlled entities reject
+  explicitly.
+- Admission sessions and Accounting are owner-thread-bound. Expected UI-open
+  failures do not publish half-created sessions; duplicate view ownership and
+  failed hot reopen cannot leave stale view routing.
+- Accounting owns only account/character identity, status, ownership, display,
+  prefab provenance, and durable entity linkage. Character IDs, per-account
+  slots, and persistent entity links are unambiguous; transform, health, and
+  inventory remain exclusively ECS truth.
+- `LocalAdmissionUiPort` has explicit lifetime and detaches its S0.4 event
+  forwarding when disposed. Admission disposal attempts every open view even
+  when one close fails.
+
+Here, "without core runtime changes" means neither admission policy changes
+the Runtime lifecycle, generation model, or embeds game/account semantics in
+Runtime. S0.5 adds only the generic game-facet capability anticipated by
+section 4.1; both policies use the same concrete Runtime implementation.
 
 16. S0.6 — Real multi-participant persistence integration
 
