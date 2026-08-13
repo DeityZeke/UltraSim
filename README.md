@@ -15,8 +15,10 @@ contract for the first cross-layer runtime milestone. S0.0 — the contract and
 scaffolding slice — is accepted in [`S0.0 Acceptance Report.md`](S0.0%20Acceptance%20Report.md).
 S0.1 — the concrete runtime and generation slice — is accepted in
 [`S0.1 Acceptance Report.md`](S0.1%20Acceptance%20Report.md). S0.0 froze
-ownership and dependency direction; later slices introduce hosts, UI,
-admission, and game composition incrementally.
+ownership and dependency direction. S0.2 — the InternalHost, HeadlessHost, and
+minimal typed host capabilities slice — is accepted in
+[`S0.2 Acceptance Report.md`](S0.2%20Acceptance%20Report.md). Later slices
+introduce UI, admission, and game composition incrementally.
 
 ## Current executable slices
 
@@ -33,6 +35,9 @@ dotnet run --project \
   -c Release
 dotnet run --project \
   _Tests/UltraSim.Server.Runtime.Tests/UltraSim.Server.Runtime.Tests.csproj \
+  -c Release
+dotnet run --project \
+  _Tests/UltraSim.Server.Hosting.Tests/UltraSim.Server.Hosting.Tests.csproj \
   -c Release
 ```
 

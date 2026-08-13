@@ -25,7 +25,7 @@ S0 completion summary
 
 [x] S0.1 — Concrete ServerRuntime + atomic ServerGeneration root
 
-[ ] S0.2 — Internal and Headless hosts + minimal host capabilities
+[x] S0.2 — Internal and Headless hosts + minimal host capabilities
 
 [ ] S0.3 — UI-0 definition/compiler kernel
 
@@ -1124,6 +1124,24 @@ Host-specific logging/output does not alter simulation state.
 Exit gate
 
 A second renderer/host could theoretically instantiate ServerRuntime using documented startup hooks without subclassing or modifying the authoritative runtime.
+
+Accepted S0.2 review clarifications
+
+Optional diagnostics are best-effort and non-authoritative. An ordinary sink
+failure cannot change simulation or lifecycle outcome; catastrophic resource
+failure is not hidden.
+
+Ordinary host lifecycle commands preserve `ServerRuntime` rejection semantics.
+Headless `Shutdown` is a distinct cleanup operation and remains safe before
+startup, after stop/fault, and when repeated.
+
+Hosts preserve Runtime's single-owner thread contract. S0.2 deliberately does
+not add concurrent lifecycle/tick access or locks around authoritative state.
+
+`RunFixedSteps` is the deterministic S0.2 headless driver. It checks cancellation
+between completed ticks and requires a running Runtime even when zero work was
+requested. A future real-time process loop may drive `Tick(elapsed)` without
+changing authoritative runtime semantics.
 
 13. S0.3 — UI-0 kernel and definition compiler
 
