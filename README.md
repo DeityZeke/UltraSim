@@ -13,9 +13,10 @@ ECS capture/identity seams.
 [`S0 Integration Design.md`](S0%20Integration%20Design.md) is the authoritative
 contract for the first cross-layer runtime milestone. S0.0 — the contract and
 scaffolding slice — is accepted in [`S0.0 Acceptance Report.md`](S0.0%20Acceptance%20Report.md).
-It freezes ownership and dependency direction without adding runtime features;
-the later S0.1+ slices introduce the runtime, hosts, UI, admission, and game
-composition incrementally.
+S0.1 — the concrete runtime and generation slice — is accepted in
+[`S0.1 Acceptance Report.md`](S0.1%20Acceptance%20Report.md). S0.0 froze
+ownership and dependency direction; later slices introduce hosts, UI,
+admission, and game composition incrementally.
 
 ## Current executable slices
 
@@ -29,6 +30,9 @@ dotnet run --project \
   -c Release
 dotnet run --project \
   _Tests/UltraSim.Server.Persistence.Tests/UltraSim.Server.Persistence.Tests.csproj \
+  -c Release
+dotnet run --project \
+  _Tests/UltraSim.Server.Runtime.Tests/UltraSim.Server.Runtime.Tests.csproj \
   -c Release
 ```
 

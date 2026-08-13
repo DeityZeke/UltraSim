@@ -23,7 +23,7 @@ S0 completion summary
 
 [x] S0.0 — Integration contract and project boundaries frozen
 
-[ ] S0.1 — Concrete ServerRuntime + atomic ServerGeneration root
+[x] S0.1 — Concrete ServerRuntime + atomic ServerGeneration root
 
 [ ] S0.2 — Internal and Headless hosts + minimal host capabilities
 
@@ -1012,6 +1012,23 @@ commands/admin/settings/discovery.
 Exit gate
 
 ServerRuntime can run a real ECS generation and replace the generation through a single authoritative root boundary without becoming a generalized V2 server facade.
+
+Accepted S0.1 review clarifications
+
+The scheduled-system requirement is an acceptance fixture, not a rule that every
+valid game composition must register a system. The ECS scheduler is required;
+an empty registered graph remains valid.
+
+The host-facing Runtime API exposes lifecycle control and bounded status, not the
+mutable generation root or an unconditional public replacement operation.
+Replacement remains a controlled internal seam for later staged persistence.
+
+`WorldClockSnapshot` establishes the persistable tick/world-time contract in
+S0.1. Installation into a real durable multi-participant save set remains S0.6;
+an in-memory snapshot round trip must not be described as durable persistence.
+
+World-time rate defaults are mechanism-neutral. The 24x rate below is an explicit
+test/game configuration, not Runtime's default game policy.
 
 Authoritative simulation/world clock
 
