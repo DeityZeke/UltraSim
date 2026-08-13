@@ -200,3 +200,17 @@ verified in both process orders. It retains 103 comparable contracts, zero
 canonical mismatches, and nine explicit unsupported rows. The two persistence
 descriptors intentionally changed from “V3 not implemented” to the accurate
 3.4 contract mismatch; no fake V2 ratio was admitted.
+
+`ecs-v3-3.4.1-persistence-2026-08-12.json` is the accepted adversarial-hardening
+scale artifact. Unlike the original 3/5-sample milestone run, it uses 21 samples
+at both 100K and 1M so p95 is not merely the maximum. Canonical digests and
+artifact sizes are byte-identical to 3.4.0. Its larger restore-plan temporary
+figures are intentional conservative accounting for the artifact clone, section
+copies, parsed tables, and transient decode ownership that 3.4.0 omitted.
+
+`ecs-v2-v3-3.4.1-2026-08-12.json` is the accepted post-hardening regression join,
+verified in both process orders against 3.4.0. It retains 103 comparable rows,
+zero canonical/contract mismatches, nine unsupported rows, and zero timed V3
+managed allocation. Focused 31-sample create controls verified that the cold
+durable-identity creation hook does not retain the initial experimental hot-path
+regression in non-persistent worlds.

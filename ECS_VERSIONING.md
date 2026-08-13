@@ -35,6 +35,13 @@ The generated, whole-world, durable-identity persistence participant; bounded
 transactional staging restore; persistent system-state framing; and crash-durable
 multi-participant save-set coordinator form the next capability milestone,
 accepted as `3.4.0`.
+The adversarial persistence correctness pass is accepted as `3.4.1`. It retains
+the 3.4 architecture while making publication attempts terminal before host code,
+bounding actual array-backed preflight ownership, recovering safely from malformed
+`CURRENT`, serializing cross-process writers, enforcing forward-only generations,
+validating participant/snapshot identities, tightening codec/catalog/container
+canonicality, and assigning durable IDs at successful entity creation rather than
+during a fallible capture.
 
 This is an engineering/checkpoint scheme, not yet a public API compatibility
 promise. A revision may change internal APIs while V3 is not a replacement.
@@ -115,6 +122,14 @@ participants at one host-owned logical epoch and uses checksummed generation
 directories, durable flushes, atomic `CURRENT` publication, and
 Prepare/Resolve/Validate/single-Commit load semantics. Incremental snapshots,
 merge/append restore, compression, and a V2 binary importer remain future work.
+
+ECS 3.4.1 is a correctness/hardening revision, not a new persistence milestone.
+The 3.4.0 artifacts remain immutable historical baselines. The active container
+is explicitly array-backed and capped at `Array.MaxLength`; multi-gigabyte or
+streaming snapshots require a future segmented/streaming format rather than an
+unhonored configuration value. Compatible save-set recovery skips only recognized
+corruption/compatibility failures and never hides arbitrary implementation,
+resource, or transient I/O exceptions behind an older generation.
 
 Historical shorthand such as `V28`, `V29`, `V30`, and `V31` remains valid when
 referring to immutable reports and filenames. New prose should prefer `3.0.28`

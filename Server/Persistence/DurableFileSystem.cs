@@ -5,6 +5,7 @@ namespace UltraSim.Server.Persistence;
 public interface IDurableFileSystem
 {
     Stream CreateDurableFile(string path);
+    Stream OpenRead(string path);
     void FlushFile(Stream stream);
     void FlushDirectory(string path);
     void MoveDirectory(string source, string destination);
@@ -15,6 +16,8 @@ public sealed class DurableFileSystem : IDurableFileSystem
 {
     public Stream CreateDurableFile(string path) => new FileStream(path, FileMode.CreateNew, FileAccess.Write,
         FileShare.None, 64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan);
+    public Stream OpenRead(string path) => new FileStream(path, FileMode.Open, FileAccess.Read,
+        FileShare.Read, 64 * 1024, FileOptions.SequentialScan);
     public void FlushFile(Stream stream)
     {
         if (stream is not FileStream file) throw new ArgumentException("Durable flush requires a FileStream.", nameof(stream));

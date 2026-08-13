@@ -111,7 +111,7 @@ internal sealed class BoundPersistenceCodec<T> : IBoundPersistenceCodec
         Fingerprint = fingerprint;
         _codec = codec;
         EncodedSize = codec.EncodedSize;
-        if (EncodedSize < 0) throw new ArgumentOutOfRangeException(nameof(codec), "Encoded size cannot be negative.");
+        if (EncodedSize <= 0) throw new ArgumentOutOfRangeException(nameof(codec), "Value-component encoded size must be positive.");
     }
     public ComponentId ComponentId { get; }
     public uint PersistenceId { get; }
@@ -166,6 +166,7 @@ internal sealed class BoundHistoricalReader<T> : IBoundPersistenceCodec
         PersistenceId = metadata.PersistenceId;
         CurrentVersion = savedVersion;
         EncodedSize = encodedSize;
+        if (EncodedSize <= 0) throw new ArgumentOutOfRangeException(nameof(encodedSize), "Historical encoded size must be positive.");
         Fingerprint = fingerprint;
         _reader = reader;
     }

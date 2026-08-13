@@ -1,6 +1,6 @@
-# ECS 3.4.0 Full-World Persistence
+# ECS 3.4.1 Full-World Persistence
 
-Status: authoritative persistence contract for ECS 3.4.0, accepted 2026-08-12.
+Status: authoritative persistence contract for ECS 3.4.1, accepted 2026-08-12.
 
 ## Scope
 
@@ -28,7 +28,8 @@ as durable identity.
   is null.
 
 The optional fixed-capacity identity side table is configured by
-`EcsWorldOptions.Persistence`. IDs survive runtime slot reuse, are never reused,
+`EcsWorldOptions.Persistence`. IDs are assigned as part of successful entity
+creation, survive runtime slot reuse, are never reused,
 and restore reinstates the allocator high-water mark before publication. Capture
 sorts entities by persistent ID, assigns save ordinals, and encodes internal
 entity references as ordinals. Restore allocates every identity first and only
@@ -56,7 +57,8 @@ generator diagnostic and use an explicitly registered reflection-free codec.
 
 `IPersistenceComponentReader<T>` registers one direct saved-version-to-current
 reader. Migration chains are not used. Stable-ID aliases and explicit drops are
-cold catalog declarations. Fingerprints are compatibility diagnostics and fast
+cold, mutually exclusive historical-ID declarations; aliases cannot chain through
+other aliases or contradict current/drop identities. Fingerprints are compatibility diagnostics and fast
 reject hints, never the only proof of compatibility.
 
 ## Runtime shape and migration
@@ -104,8 +106,9 @@ has initialized and before the world begins running.
 The format is explicitly versioned and little-endian. A fixed header names the
 world, snapshot sequence/time, allocator high-water, schema hint, entity/shape
 counts, directory location, and whole-artifact SHA-256. Directory entries are
-bounds-checked, overlap-checked, unique where required, and carry per-section
-CRC32.
+bounds-checked, physically ordered, padding-zero checked, uniquely and contiguously
+numbered where required, and carry per-section CRC32. Reserved header/directory
+bytes and generated boolean payload bytes are canonical, not merely tolerated.
 
 Sections include:
 
@@ -133,7 +136,7 @@ one-call `Capture` convenience composes both for standalone use. The active
 save-set participant always uses the split form, and disk I/O occurs only after
 the shared epoch has been released.
 
-The current 3.4.0 implementation uses proportional arrays and per-shape records;
+The current 3.4.1 implementation uses proportional arrays and per-shape records;
 it does not box component values or create per-entity managed objects. It is not a
 zero-allocation operation, and the measured peak/allocation report is part of the
 accepted evidence. Persistence is a cold checkpoint path; the ordinary warmed ECS
@@ -162,6 +165,13 @@ stream while writing, not merely checked after materialization. Startup may
 select strict `CURRENT` or the newest complete compatible generation. `.pending`
 directories are never load candidates.
 
+Save writers acquire one cross-process root lease before cleaning abandoned
+pending state, selecting a forward-only sequence, capturing, and publishing.
+Concurrent coordinators therefore cannot delete another active writer's staging
+directory or move `CURRENT` backward. Ordinary in-process failures remove their
+private pending generation; process termination leaves it for the next exclusive
+writer to clean.
+
 Load is one transaction across participants:
 
 ```text
@@ -169,7 +179,9 @@ Prepare all -> Resolve all -> Validate all -> host Commit(generation)
 ```
 
 Participants may not mutate live state during prepare/resolve/validate. The host
-commit callback is the single publication point. Fault-injection tests cover
+commit callback is the single, exactly-once publication attempt. If host code
+throws after partial publication the prepared generation becomes terminal and
+cannot be retried. Fault-injection tests cover
 every durability boundary and require recovery to expose either the previous
 complete generation or the new complete generation—never a hybrid.
 
@@ -179,9 +191,14 @@ rather than silently claiming crash durability.
 
 ## Untrusted input and failure policy
 
-Snapshot and manifest bytes are hostile input. `PersistenceLimits` bounds the
-artifact, entities, shapes, components, sections, payload, strings, and temporary
-work before staging allocation. Parsing rejects truncation, overflow, overlap,
+Snapshot and manifest bytes are hostile input. The current container is
+array-backed, so its public artifact ceiling is `Array.MaxLength`; defaults no
+longer advertise impossible multi-gigabyte artifacts. `PersistenceLimits` bounds
+the artifact, entities, shapes, components, sections, payload, strings, and
+temporary work before the immutable artifact clone and section copies are
+allocated. The reported temporary estimate conservatively includes proportional
+parse ownership, not only small restore scratch. Parsing rejects truncation,
+overflow, overlap,
 duplicates, inconsistent counts, invalid ordinals, malformed UTF-8, nonzero
 enable padding, invalid prefab hashes, CRC failure, and whole digest failure.
 
@@ -216,14 +233,18 @@ of the complete participant generation.
 
 ## Tests and expected evolution
 
-3.4.0 tests cover canonical round trip, durable slot reuse, internal references,
+3.4.1 tests cover canonical round trip, durable slot reuse, internal references,
 external durable keys, missing-current-prefab provenance, tags/membership,
 enable planes, lifecycle/change cleanliness, N:1 shape
 migration, derived reconstruction, persistent system state/tick, corruption and
-bounds mutations, packed-row-order independence, byte-exact Native/Pinned capture,
+bounds mutations, strict temporary-memory accounting, long component keys,
+zero-width codec rejection, static-member generation, canonical padding/order/
+boolean rejection, packed-row-order independence, byte-exact Native/Pinned capture,
 serial/C8 scheduled-state parity, failed participant preparation, bounded
-participant writes, missing-pointer recovery, and crash injection at every
-save-set publication boundary.
+participant writes, malformed-pointer compatible recovery, prepared-key and
+manifest/snapshot-sequence validation, exactly-once publication attempts,
+cross-process writer serialization, actual child-process termination, and crash
+injection at every save-set publication boundary.
 
 Future tests remain mandatory as formats evolve: golden fixtures, direct
 historical-reader matrices, optional/missing system policy, more randomized world

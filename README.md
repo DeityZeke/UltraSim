@@ -23,10 +23,12 @@ dotnet run --project \
   -c Release
 ```
 
-ECS 3.4.0 full-world persistence is specified in
+ECS 3.4.1 full-world persistence is specified in
 [`Kernels/ECS/ECS_PERSISTENCE.md`](Kernels/ECS/ECS_PERSISTENCE.md), with accepted
 measurements and V2 comparison limits in
-[`ECS_3_4_0_PERSISTENCE_REPORT.md`](ECS_3_4_0_PERSISTENCE_REPORT.md).
+[`ECS_3_4_0_PERSISTENCE_REPORT.md`](ECS_3_4_0_PERSISTENCE_REPORT.md), plus the
+adversarial correctness results in
+[`ECS_3_4_1_PERSISTENCE_HARDENING_REPORT.md`](ECS_3_4_1_PERSISTENCE_HARDENING_REPORT.md).
 
 Run the Phase 1 entity/schema/layout/arena/archetype-row benchmark suite without replacing an accepted baseline:
 

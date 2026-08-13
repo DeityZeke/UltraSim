@@ -5,16 +5,16 @@ using System.Text;
 
 namespace UltraSim.ECS;
 
-public enum PersistenceRecoveryMode : byte { Strict = 0, RecoverCompatible = 1 }
-
 public readonly struct PersistenceLimits
 {
     public PersistenceLimits(long maximumArtifactBytes, int maximumEntities, int maximumShapes,
         int maximumComponents, int maximumSections, long maximumComponentPayloadBytes, long maximumTemporaryBytes)
     {
-        if (maximumArtifactBytes <= 0 || maximumEntities < 0 || maximumShapes <= 0 || maximumComponents <= 0 ||
+        if (maximumArtifactBytes <= 0 || maximumArtifactBytes > Array.MaxLength || maximumEntities < 0 || maximumShapes <= 0 || maximumComponents <= 0 ||
             maximumSections <= 0 || maximumComponentPayloadBytes < 0 || maximumTemporaryBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumArtifactBytes), "Persistence limits must be positive and bounded.");
+        if (maximumComponentPayloadBytes > maximumArtifactBytes)
+            throw new ArgumentOutOfRangeException(nameof(maximumComponentPayloadBytes), "Component payload cannot exceed the array-backed artifact bound.");
         MaximumArtifactBytes = maximumArtifactBytes;
         MaximumEntities = maximumEntities;
         MaximumShapes = maximumShapes;
@@ -30,25 +30,23 @@ public readonly struct PersistenceLimits
     public int MaximumSections { get; }
     public long MaximumComponentPayloadBytes { get; }
     public long MaximumTemporaryBytes { get; }
-    public static PersistenceLimits ServerDefault => new(8L * 1024 * 1024 * 1024, 20_000_000, 65_536,
-        ComponentSchema.MaximumComponentCount, 1_000_000, 6L * 1024 * 1024 * 1024, 4L * 1024 * 1024 * 1024);
+    public static PersistenceLimits ServerDefault => new(1_500_000_000, 20_000_000, 65_536,
+        ComponentSchema.MaximumComponentCount, 1_000_000, 1_250_000_000, 2_000_000_000);
 }
 
 public readonly struct PersistenceRestoreOptions
 {
     public PersistenceRestoreOptions(PersistenceLimits limits, ChunkLayoutOptions chunkLayout,
-        PersistenceRecoveryMode recoveryMode = PersistenceRecoveryMode.Strict, int maximumDiagnostics = 256)
+        int maximumDiagnostics = 256)
     {
         if (!chunkLayout.IsValid) throw new ArgumentException("Chunk layout is invalid.", nameof(chunkLayout));
-        if (maximumDiagnostics < 0) throw new ArgumentOutOfRangeException(nameof(maximumDiagnostics));
+        if (maximumDiagnostics is < 0 or > 4096) throw new ArgumentOutOfRangeException(nameof(maximumDiagnostics));
         Limits = limits;
         ChunkLayout = chunkLayout;
-        RecoveryMode = recoveryMode;
         MaximumDiagnostics = maximumDiagnostics;
     }
     public PersistenceLimits Limits { get; }
     public ChunkLayoutOptions ChunkLayout { get; }
-    public PersistenceRecoveryMode RecoveryMode { get; }
     public int MaximumDiagnostics { get; }
 }
 
@@ -65,17 +63,20 @@ public sealed class PersistenceRestoreRequirements
 {
     private readonly PersistenceRestoreShapeRequirement[] _shapes;
     internal PersistenceRestoreRequirements(ComponentSchema schema, PersistentWorldId worldId, ulong highWater,
-        int entityCount, PersistenceRestoreShapeRequirement[] shapes, long estimatedTemporaryBytes, long estimatedChunkBytes)
+        ulong snapshotSequence, int entityCount, PersistenceRestoreShapeRequirement[] shapes, int requiredArchetypes,
+        long estimatedTemporaryBytes, long estimatedChunkBytes)
     {
-        Schema = schema; PersistentWorldId = worldId; AllocatorHighWater = highWater; EntityCount = entityCount;
+        Schema = schema; PersistentWorldId = worldId; AllocatorHighWater = highWater; SnapshotSequence = snapshotSequence; EntityCount = entityCount;
+        RequiredArchetypes = requiredArchetypes;
         _shapes = shapes; EstimatedTemporaryBytes = estimatedTemporaryBytes; EstimatedChunkPayloadBytes = estimatedChunkBytes;
     }
     public ComponentSchema Schema { get; }
     public PersistentWorldId PersistentWorldId { get; }
     public ulong AllocatorHighWater { get; }
+    public ulong SnapshotSequence { get; }
     public int EntityCount { get; }
     public IReadOnlyList<PersistenceRestoreShapeRequirement> Shapes => _shapes;
-    public int RequiredArchetypes => _shapes.Length;
+    public int RequiredArchetypes { get; }
     public long EstimatedTemporaryBytes { get; }
     public long EstimatedChunkPayloadBytes { get; }
     public PersistenceIdentityOptions IdentityOptions => new(PersistentWorldId, AllocatorHighWater);
@@ -255,8 +256,12 @@ public static partial class EcsPersistenceRestore
     {
         ArgumentNullException.ThrowIfNull(catalog);
         long parseStart = Stopwatch.GetTimestamp();
+        long knownTemporaryBytes = SnapshotParser.EstimateKnownTemporaryBytes(artifact.Span, options.Limits);
+        if (knownTemporaryBytes > options.Limits.MaximumTemporaryBytes)
+            throw new PersistenceValidationException("Restore preflight memory estimate exceeds the configured temporary-memory limit.");
         byte[] immutable = artifact.ToArray();
         ParsedSnapshot parsed = SnapshotParser.Parse(immutable, options);
+        parsed.KnownTemporaryBytes = knownTemporaryBytes;
         long parseTicks = Stopwatch.GetTimestamp() - parseStart;
         long preflightStart = Stopwatch.GetTimestamp();
         PersistenceRestoreRequirements requirements = parsed.Resolve(catalog, options);
@@ -268,6 +273,7 @@ public static partial class EcsPersistenceRestore
 internal sealed class ParsedSnapshot
 {
     internal required PersistentWorldId WorldId;
+    internal SchemaId SchemaHint;
     internal required ulong AllocatorHighWater;
     internal required ulong Sequence;
     internal required SavedSchema[] Schemas;
@@ -282,11 +288,15 @@ internal sealed class ParsedSnapshot
     internal required List<string> Diagnostics;
     internal int MigratedComponents;
     internal int DroppedComponents;
+    internal long KnownTemporaryBytes;
 
     internal PersistenceRestoreRequirements Resolve(PersistenceCatalog catalog, PersistenceRestoreOptions options)
     {
+        if (SchemaHint != catalog.Schema.Id && Diagnostics.Count < options.MaximumDiagnostics)
+            Diagnostics.Add($"Snapshot schema hint {SchemaHint} differs from current schema {catalog.Schema.Id}; compatibility was resolved from stable persistence identities.");
         var schemaById = Schemas.ToDictionary(static schema => schema.PersistenceId);
         long chunkBytes = 0;
+        int requiredArchetypes = 0;
         var requirements = new PersistenceRestoreShapeRequirement[Shapes.Length];
         for (int shapeIndex = 0; shapeIndex < Shapes.Length; shapeIndex++)
         {
@@ -321,6 +331,7 @@ internal sealed class ParsedSnapshot
         for (int shapeIndex = 0; shapeIndex < Shapes.Length; shapeIndex++)
         {
             if (assigned[shapeIndex]) continue;
+            requiredArchetypes++;
             ComponentId[] signature = Shapes[shapeIndex].CurrentComponents;
             long population = 0;
             for (int candidate = shapeIndex; candidate < Shapes.Length; candidate++)
@@ -382,12 +393,13 @@ internal sealed class ParsedSnapshot
             enable.ComponentId = id;
         }
 
-        long temporary = checked((long)Entities.Length * (sizeof(uint) + 12 + sizeof(ulong)) +
+        long restoreScratch = checked((long)Entities.Length * (sizeof(uint) + 12 + sizeof(ulong)) +
             (long)Entities.Length * sizeof(uint) + (long)Shapes.Length * 64);
+        long temporary = Math.Max(KnownTemporaryBytes, restoreScratch);
         if (temporary > options.Limits.MaximumTemporaryBytes)
             throw new PersistenceValidationException("Restore scratch estimate exceeds the configured temporary-memory limit.");
-        return new PersistenceRestoreRequirements(catalog.Schema, WorldId, AllocatorHighWater, Entities.Length,
-            requirements, temporary, chunkBytes);
+        return new PersistenceRestoreRequirements(catalog.Schema, WorldId, AllocatorHighWater, Sequence, Entities.Length,
+            requirements, requiredArchetypes, temporary, chunkBytes);
     }
 }
 

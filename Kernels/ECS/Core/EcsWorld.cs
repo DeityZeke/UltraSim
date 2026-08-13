@@ -797,7 +797,7 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
     {
         if (_state != EcsWorldState.Initialized)
             throw new InvalidOperationException("Persistence restore creation requires an initialized staging world.");
-        if (!TryCreateDefaultCore(archetypeId, out entity, out _))
+        if (!TryCreateDefaultCore(archetypeId, out entity, out _, assignPersistentIdentity: false))
             return false;
         PersistenceIdentities.AssignRestored(entity, persistentId, prefabKeyHash);
         return true;
@@ -1986,10 +1986,12 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         visitor.Execute(in chunk);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private bool TryCreateDefaultCore(
         ArchetypeId archetypeId,
         out Entity entity,
-        out EntityLocation location)
+        out EntityLocation location,
+        bool assignPersistentIdentity = true)
     {
         ArchetypeStorage<TArena> storage = _archetypes.GetStorage(archetypeId);
 
@@ -2014,7 +2016,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         location = new EntityLocation(archetypeId, row);
         if (_entities.TryBindLocation(entity, location))
+        {
+            if (assignPersistentIdentity && _persistenceIdentities is not null)
+                AssignPersistentIdentityOrRollback(storage.Store, archetypeId, row, ref entity, ref location);
             return true;
+        }
 
         RollBackJustAddedRow(storage.Store, row, entity.Index);
         if (!_entities.TryFree(entity))
@@ -2050,7 +2056,11 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
 
         location = new EntityLocation(archetypeId, row);
         if (_entities.TryBindLocation(entity, location))
+        {
+            if (_persistenceIdentities is not null)
+                AssignPersistentIdentityInTemporaryHoleOrRollback(storage.Store, row, ref entity, ref location);
             return true;
+        }
 
         if (!storage.Store.TryMarkTemporaryHole(row, entity.Index) ||
             !_entities.TryFree(entity))
@@ -2061,6 +2071,51 @@ internal sealed partial class EcsWorld<TArena> : IDisposable
         location = EntityLocation.Invalid;
         ThrowWorldInvariant("A new temporary-hole entity rejected its first location.");
         return false;
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AssignPersistentIdentityOrRollback(
+        ArchetypeChunkStore<TArena> store,
+        ArchetypeId archetypeId,
+        ChunkRow row,
+        ref Entity entity,
+        ref EntityLocation location)
+    {
+        try
+        {
+            _ = _persistenceIdentities!.GetOrAssign(entity);
+        }
+        catch
+        {
+            if (!store.TryRemove(row, entity.Index, out ChunkRowRelocation relocation))
+                ThrowWorldInvariant("Persistent-identity creation rollback could not remove its row.");
+            _entities.ApplyRelocationAndRetireValidated(entity, location, archetypeId, relocation);
+            entity = Entity.Null;
+            location = EntityLocation.Invalid;
+            throw;
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void AssignPersistentIdentityInTemporaryHoleOrRollback(
+        ArchetypeChunkStore<TArena> store,
+        ChunkRow row,
+        ref Entity entity,
+        ref EntityLocation location)
+    {
+        try
+        {
+            _ = _persistenceIdentities!.GetOrAssign(entity);
+        }
+        catch
+        {
+            if (!store.TryMarkTemporaryHole(row, entity.Index))
+                ThrowWorldInvariant("Persistent-identity temporary-hole rollback could not restore its hole.");
+            _entities.RetireLocatedIntoTemporaryHoleValidated(entity, location);
+            entity = Entity.Null;
+            location = EntityLocation.Invalid;
+            throw;
+        }
     }
 
     private void ApplyPrefabDefaults(

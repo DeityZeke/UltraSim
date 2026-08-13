@@ -83,7 +83,7 @@ allocation:
   creation allocate ordinary ECS rows, copy compiled constants, and publish one
   ordinary `Created`; no reflection, managed callback, or runtime `IsA` graph
   exists on spawn or tick.
-- ECS 3.4.0 adds optional fixed durable-identity storage and generated,
+- ECS 3.4.1 retains the 3.4 optional fixed durable-identity storage and generated,
   column-oriented full-world snapshots. The production contract separates
   complete stable runtime shape from authoritative payload, remaps internal
   `Entity` references through dense save ordinals, persists selected enable
@@ -371,7 +371,7 @@ allocation:
   indices, handwritten views, generated views, routes, and plan ownership share
   regression coverage for that boundary.
 - Runtime handles are not durable IDs and are never serialized as identity.
-  ECS 3.4.0 uses a fixed optional side table of monotonic 64-bit
+  ECS 3.4.1 uses a fixed optional side table of monotonic 64-bit
   `PersistentEntityId` values and remaps internal references through dense
   32-bit save ordinals after every restored entity has been allocated.
 - `IComponent<TSelf>`, `[EcsComponent]`, and `[EcsSchema]` define a closed,

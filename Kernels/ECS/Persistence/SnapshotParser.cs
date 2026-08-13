@@ -8,6 +8,34 @@ internal static class SnapshotParser
 {
     internal static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
+    internal static long EstimateKnownTemporaryBytes(ReadOnlySpan<byte> bytes, PersistenceLimits limits)
+    {
+        if (bytes.Length < SnapshotContainerBuilder.HeaderSize + 32 || bytes.Length > limits.MaximumArtifactBytes)
+            throw new PersistenceValidationException("Snapshot size is outside configured bounds.");
+        ReadOnlySpan<byte> header = bytes[..SnapshotContainerBuilder.HeaderSize];
+        if (BinaryPrimitives.ReadUInt64LittleEndian(header) != SnapshotContainerBuilder.Magic)
+            throw new PersistenceValidationException("Snapshot magic does not identify an ECS 3.4 container.");
+        int entities = BinaryPrimitives.ReadInt32LittleEndian(header[56..]);
+        int shapes = BinaryPrimitives.ReadInt32LittleEndian(header[60..]);
+        int sections = BinaryPrimitives.ReadInt32LittleEndian(header[64..]);
+        if (entities < 0 || entities > limits.MaximumEntities || shapes < 0 || shapes > limits.MaximumShapes ||
+            sections <= 0 || sections > limits.MaximumSections)
+            throw new PersistenceValidationException("Snapshot preflight counts exceed configured bounds.");
+        try
+        {
+            // The parser owns an immutable artifact clone and may copy every
+            // section payload once. A third artifact-sized allowance covers
+            // parsed tables/strings and the largest transient decoded column;
+            // entity/shape/directory arrays are accounted separately.
+            return checked((long)bytes.Length * 3L + (long)entities * 40L +
+                (long)shapes * 128L + (long)sections * 64L);
+        }
+        catch (OverflowException exception)
+        {
+            throw new PersistenceValidationException($"Snapshot temporary-memory estimate overflowed: {exception.Message}");
+        }
+    }
+
     internal static ParsedSnapshot Parse(byte[] bytes, PersistenceRestoreOptions options)
     {
         PersistenceLimits limits = options.Limits;
@@ -19,12 +47,17 @@ internal static class SnapshotParser
         if (BinaryPrimitives.ReadUInt32LittleEndian(header[8..]) != 1 ||
             BinaryPrimitives.ReadUInt32LittleEndian(header[12..]) != SnapshotContainerBuilder.HeaderSize)
             throw new PersistenceValidationException("Unsupported snapshot format/header version.");
+        if (BinaryPrimitives.ReadUInt32LittleEndian(header[68..]) != 0 ||
+            header[104..].ContainsAnyExcept((byte)0))
+            throw new PersistenceValidationException("Snapshot header reserved bytes are not canonical zero.");
         ulong declaredLength = BinaryPrimitives.ReadUInt64LittleEndian(header[16..]);
         if (declaredLength != unchecked((ulong)bytes.Length))
             throw new PersistenceValidationException("Snapshot total length is inconsistent.");
         ulong sequence = BinaryPrimitives.ReadUInt64LittleEndian(header[24..]);
         ulong worldId = BinaryPrimitives.ReadUInt64LittleEndian(header[32..]);
         ulong highWater = BinaryPrimitives.ReadUInt64LittleEndian(header[40..]);
+        var schemaHint = new SchemaId(BinaryPrimitives.ReadUInt64LittleEndian(header[88..]),
+            BinaryPrimitives.ReadUInt64LittleEndian(header[96..]));
         int entityCount = BinaryPrimitives.ReadInt32LittleEndian(header[56..]);
         int shapeCount = BinaryPrimitives.ReadInt32LittleEndian(header[60..]);
         int sectionCount = BinaryPrimitives.ReadInt32LittleEndian(header[64..]);
@@ -54,6 +87,8 @@ internal static class SnapshotParser
             int offset = ToBoundedInt(BinaryPrimitives.ReadUInt64LittleEndian(entry[8..]), directoryOffset, "section offset");
             int length = ToBoundedInt(BinaryPrimitives.ReadUInt64LittleEndian(entry[16..]), directoryOffset, "section length");
             uint crc = BinaryPrimitives.ReadUInt32LittleEndian(entry[24..]);
+            if (BinaryPrimitives.ReadUInt32LittleEndian(entry[28..]) != 0)
+                throw new PersistenceValidationException("Snapshot directory reserved bytes are not canonical zero.");
             if (!Enum.IsDefined(kind) || ordinal < 0 || offset < SnapshotContainerBuilder.HeaderSize ||
                 length < 0 || checked(offset + length) > directoryOffset || !unique.Add((kind, ordinal)))
                 throw new PersistenceValidationException("Snapshot section directory is invalid or duplicated.");
@@ -61,14 +96,33 @@ internal static class SnapshotParser
                 throw new PersistenceValidationException($"Snapshot section checksum mismatch for {kind}:{ordinal}.");
             entries[index] = new SectionEntry(kind, ordinal, offset, length);
         }
-        SectionEntry[] physical = (SectionEntry[])entries.Clone();
-        Array.Sort(physical, static (left, right) => left.Offset.CompareTo(right.Offset));
-        int end = SnapshotContainerBuilder.HeaderSize;
-        foreach (SectionEntry entry in physical)
+        if (entries.Length < 6 || entries[0].Kind != SnapshotSectionKind.Schema || entries[0].Ordinal != 0 ||
+            entries[1].Kind != SnapshotSectionKind.Shapes || entries[1].Ordinal != 0 ||
+            entries[2].Kind != SnapshotSectionKind.Prefabs || entries[2].Ordinal != 0 ||
+            entries[3].Kind != SnapshotSectionKind.Entities || entries[3].Ordinal != 0 ||
+            entries[4].Kind != SnapshotSectionKind.ShapeRows || entries[4].Ordinal != 0 ||
+            entries[^1].Kind != SnapshotSectionKind.Systems || entries[^1].Ordinal != 0)
+            throw new PersistenceValidationException("Snapshot section directory order is not canonical.");
+        int columnOrdinal = 0;
+        for (int index = 5; index < entries.Length - 1; index++)
         {
-            if (entry.Offset < end) throw new PersistenceValidationException("Snapshot sections overlap.");
-            end = checked(entry.Offset + entry.Length);
+            if (entries[index].Kind is not (SnapshotSectionKind.Column or SnapshotSectionKind.Enable) ||
+                entries[index].Ordinal != columnOrdinal++)
+                throw new PersistenceValidationException("Snapshot column/enable ordinals are not contiguous and canonical.");
         }
+        int end = SnapshotContainerBuilder.HeaderSize;
+        foreach (SectionEntry entry in entries)
+        {
+            if (entry.Offset != end)
+                throw new PersistenceValidationException("Snapshot section offsets are not in canonical physical order.");
+            end = checked(entry.Offset + entry.Length);
+            int aligned = Align8(end);
+            if (bytes.AsSpan(end, aligned - end).ContainsAnyExcept((byte)0))
+                throw new PersistenceValidationException("Snapshot section padding is not canonical zero.");
+            end = aligned;
+        }
+        if (end != directoryOffset)
+            throw new PersistenceValidationException("Snapshot payload does not end at the canonical directory boundary.");
 
         SectionEntry schemaEntry = RequireSingle(entries, SnapshotSectionKind.Schema);
         SectionEntry shapesEntry = RequireSingle(entries, SnapshotSectionKind.Shapes);
@@ -95,7 +149,7 @@ internal static class SnapshotParser
 
         return new ParsedSnapshot
         {
-            WorldId = new PersistentWorldId(worldId), AllocatorHighWater = highWater, Sequence = sequence,
+            WorldId = new PersistentWorldId(worldId), AllocatorHighWater = highWater, Sequence = sequence, SchemaHint = schemaHint,
             Schemas = schemas, Shapes = shapes, Entities = entities, ShapeOrdinals = ordinals,
             Columns = columns, Enables = enables, Systems = systems, Prefabs = prefabs, SchedulerTick = schedulerTick,
             Diagnostics = new List<string>(options.MaximumDiagnostics),
@@ -163,7 +217,11 @@ internal static class SnapshotParser
             ulong low = reader.ReadUInt64("component fingerprint low");
             ulong high = reader.ReadUInt64("component fingerprint high");
             ulong keyHash = reader.ReadUInt64("component stable-key hash");
-            string key = reader.ReadUtf8("component canonical key", PrefabKey.MaximumLength);
+            // Component canonical keys use the container's ushort UTF-8 length
+            // field. PrefabKey's intentionally smaller authoring bound is a
+            // different contract and must not make a capturable schema
+            // unrestorable.
+            string key = reader.ReadUtf8("component canonical key", ushort.MaxValue);
             if (id == 0 || id <= previous || version == 0 || !Enum.IsDefined(mode) || mode is ComponentPersistenceMode.Auto or ComponentPersistenceMode.None)
                 throw new PersistenceValidationException("Component schema directory is not canonical.");
             const ComponentFlags knownFlags = ComponentFlags.Tag | ComponentFlags.Enableable |
@@ -352,6 +410,7 @@ internal static class SnapshotParser
         if (left < 0 || right < 0 || value > maximum || value > int.MaxValue) throw new PersistenceValidationException($"Invalid {field}.");
         return checked((int)value);
     }
+    private static int Align8(int value) => checked((value + 7) & ~7);
     private static int CompareLex(uint[] left, uint[] right)
     {
         int count = Math.Min(left.Length, right.Length);

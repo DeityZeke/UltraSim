@@ -372,14 +372,14 @@ public sealed class EcsSchemaGenerator : IIncrementalGenerator
                 string? memberName = null;
                 bool entityReference = false;
                 bool inaccessible = false;
-                if (member is IFieldSymbol field && !field.IsImplicitlyDeclared)
+                if (member is IFieldSymbol field && !field.IsStatic && !field.IsImplicitlyDeclared)
                 {
                     memberType = field.Type;
                     memberName = field.Name;
                     entityReference = HasAttribute(field, EntityReferenceAttributeName);
                     inaccessible = !IsPersistenceMemberAccessible(field.DeclaredAccessibility) || field.IsReadOnly;
                 }
-                else if (member is IPropertySymbol property && !property.IsIndexer)
+                else if (member is IPropertySymbol property && !property.IsStatic && !property.IsIndexer)
                 {
                     memberType = property.Type;
                     memberName = property.Name;
@@ -808,7 +808,7 @@ public sealed class EcsSchemaGenerator : IIncrementalGenerator
         string slice = $"source.Slice({offset}, {member.EncodedSize})";
         string read = member.Kind switch
         {
-            "bool" => $"source[{offset}] != 0",
+            "bool" => $"source[{offset}] switch {{ 0 => false, 1 => true, _ => throw new global::UltraSim.ECS.PersistenceValidationException(\"Boolean persistence payload is not canonical.\") }}",
             "byte" => $"source[{offset}]",
             "sbyte" => $"unchecked((sbyte)source[{offset}])",
             "int16" => "global::System.Buffers.Binary.BinaryPrimitives.ReadInt16LittleEndian(" + slice + ")",

@@ -1,7 +1,18 @@
 using System.Text;
 using System.Buffers.Binary;
+using System.Diagnostics;
+using System.Reflection;
 using UltraSim.ECS;
 using UltraSim.Server.Persistence;
+
+if (args.Length == 3 && args[0] == "--crash-writer")
+{
+    string childRoot = args[1];
+    SaveSetFaultPoint childPoint = Enum.Parse<SaveSetFaultPoint>(args[2]);
+    new SaveSetCoordinator(childRoot, faults: new ExitAt(childPoint)).Save(
+        [new FakeParticipant("world", "generation-2")], new SaveSetContext(2, 2), action => action());
+    Environment.Exit(98);
+}
 
 CrashPointsLeaveLastOrNewCompleteGeneration();
 PrepareFailureNeverPublishesMixedParticipants();
@@ -9,6 +20,13 @@ CompatibleRecoveryFindsCompleteGenerationWithoutCurrentPointer();
 EcsParticipantPublishesOnlyThroughGenerationCommit();
 EncodingAndDurabilityOccurOutsideCommonCaptureEpoch();
 ParticipantArtifactBoundStopsTheWrite();
+PublicationAttemptCannotBeRetried();
+MalformedCurrentFallsBackOnlyInCompatibleMode();
+PreparedParticipantKeyMustMatch();
+CompatibleRecoveryDoesNotHideImplementationFailures();
+ConcurrentWritersCannotMoveCurrentBackward();
+EcsSnapshotSequenceMustMatchSaveSet();
+ProcessTerminationLeavesRecoverableGeneration();
 Console.WriteLine("All save-set transaction tests passed.");
 
 static void CrashPointsLeaveLastOrNewCompleteGeneration()
@@ -169,9 +187,176 @@ static void ParticipantArtifactBoundStopsTheWrite()
             throw new InvalidOperationException("An oversized participant artifact was accepted.");
         }
         catch (IOException) { }
-        string pending = Path.Combine(root, "generations", "00000000000000000001.pending", "world.bin");
-        if (!File.Exists(pending) || new FileInfo(pending).Length > participant.ArtifactBound)
-            throw new InvalidOperationException("The participant artifact bound was enforced only after an oversized file was written.");
+        string pending = Path.Combine(root, "generations", "00000000000000000001.pending");
+        if (Directory.Exists(pending))
+            throw new InvalidOperationException("An ordinary save failure left its private pending generation behind.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void PublicationAttemptCannotBeRetried()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var participant = new FakeParticipant("world", "once");
+        var coordinator = new SaveSetCoordinator(root);
+        coordinator.Save([participant], new SaveSetContext(1, 1), action => action());
+        using PreparedLoadGeneration prepared = coordinator.PrepareLoad([participant], EmptyResolver.Instance);
+        int attempts = 0;
+        try { prepared.Commit(_ => { attempts++; throw new InvalidOperationException("after publication"); }); }
+        catch (InvalidOperationException exception) when (exception.Message == "after publication") { }
+        try
+        {
+            prepared.Commit(_ => attempts++);
+            throw new InvalidOperationException("A partially published generation was retryable.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message != "A partially published generation was retryable.") { }
+        if (attempts != 1) throw new InvalidOperationException("Publication callback executed more than once.");
+        if (participant.LastPrepared is null || participant.LastPrepared.Disposed)
+            throw new InvalidOperationException("Coordinator reclaimed participant ownership after publication began.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void MalformedCurrentFallsBackOnlyInCompatibleMode()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var participant = new FakeParticipant("world", "recoverable");
+        var coordinator = new SaveSetCoordinator(root);
+        coordinator.Save([participant], new SaveSetContext(1, 1), action => action());
+        File.WriteAllText(Path.Combine(root, "CURRENT"), "../outside");
+        using PreparedLoadGeneration recovered = coordinator.PrepareLoad(
+            [participant], EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete);
+        if (recovered.Sequence != 1) throw new InvalidOperationException("Malformed CURRENT did not fall back to a complete generation.");
+        try
+        {
+            coordinator.PrepareLoad([participant], EmptyResolver.Instance, SaveSetRecoveryMode.StrictCurrent);
+            throw new InvalidOperationException("Strict recovery accepted malformed CURRENT.");
+        }
+        catch (InvalidDataException) { }
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void PreparedParticipantKeyMustMatch()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var participant = new FakeParticipant("world", "wrong") { PreparedKey = "accounts" };
+        var coordinator = new SaveSetCoordinator(root);
+        coordinator.Save([participant], new SaveSetContext(1, 1), action => action());
+        try
+        {
+            coordinator.PrepareLoad([participant], EmptyResolver.Instance);
+            throw new InvalidOperationException("A mismatched prepared participant key was accepted.");
+        }
+        catch (InvalidDataException) { }
+        if (participant.LastPrepared is null || !participant.LastPrepared.Disposed)
+            throw new InvalidOperationException("The rejected prepared participant was not disposed.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void CompatibleRecoveryDoesNotHideImplementationFailures()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var participant = new FakeParticipant("world", "valid");
+        var coordinator = new SaveSetCoordinator(root);
+        coordinator.Save([participant], new SaveSetContext(1, 1), action => action());
+        participant.PrepareException = new InvalidOperationException("implementation defect");
+        try
+        {
+            coordinator.PrepareLoad([participant], EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete);
+            throw new InvalidOperationException("Compatible recovery swallowed an implementation failure.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message == "implementation defect") { }
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void ConcurrentWritersCannotMoveCurrentBackward()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var newer = new FakeParticipant("world", "new") { OnWrite = () => { entered.Set(); release.Wait(); } };
+        var older = new FakeParticipant("world", "old");
+        Task<SaveSetManifest> newSave = Task.Run(() => new SaveSetCoordinator(root).Save(
+            [newer], new SaveSetContext(2, 2), action => action()));
+        if (!entered.Wait(TimeSpan.FromSeconds(5))) throw new InvalidOperationException("Concurrent writer fixture did not enter capture.");
+        Task oldSave = Task.Run(() => new SaveSetCoordinator(root).Save(
+            [older], new SaveSetContext(1, 1), action => action()));
+        release.Set();
+        _ = newSave.GetAwaiter().GetResult();
+        try
+        {
+            oldSave.GetAwaiter().GetResult();
+            throw new InvalidOperationException("An older concurrent save moved publication backward.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("does not advance", StringComparison.Ordinal)) { }
+        string current = File.ReadAllText(Path.Combine(root, "CURRENT")).Trim();
+        if (current != "00000000000000000002") throw new InvalidOperationException("CURRENT moved backward after concurrent saves.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void EcsSnapshotSequenceMustMatchSaveSet()
+{
+    ComponentSchema schema = ComponentSchema.Create(new SchemaId(0x88, 0x88),
+    [
+        ComponentRegistration.Create<CoordinatorValue>(new ComponentId(0), "coordinator.value", StableHash64.Compute("coordinator.value"),
+            version: 1, ComponentFlags.Persistent, persistenceId: 880088, ComponentPersistenceMode.Value),
+    ]);
+    PersistenceCatalog catalog = new PersistenceCatalogBuilder(schema)
+        .Register<CoordinatorValue>(new PersistenceSchemaFingerprint(0x88, 0x8800), new CoordinatorValueCodec()).Build();
+    using var source = new EcsWorld(schema, CoordinatorOptions(new PersistenceIdentityOptions(new PersistentWorldId(0x880088))));
+    ArchetypeHandle shape = source.RegisterArchetype([new ComponentId(0)], ChunkLayoutOptions.KiB16, 1);
+    source.Seal(); source.Initialize(); source.BeginRun();
+    AssertCoordinator(source.TryCreate(shape, out _), "sequence fixture create failed");
+    PersistenceSnapshotArtifact artifact = EcsPersistence.Capture(source, catalog, new PersistenceCaptureOptions(1), out _);
+    var participant = new EcsWorldSaveSetParticipant(source, catalog,
+        new PersistenceRestoreOptions(new PersistenceLimits(1_000_000, 10, 10, 10, 100, 1_000_000, 1_000_000), ChunkLayoutOptions.KiB16),
+        requirements => new EcsWorld(requirements.Schema, CoordinatorOptions(requirements.IdentityOptions)));
+    try
+    {
+        participant.Prepare(artifact.Bytes, new SaveSetContext(2, 2));
+        throw new InvalidOperationException("ECS artifact/save-set sequence mismatch was accepted.");
+    }
+    catch (PersistenceValidationException) { }
+}
+
+static void ProcessTerminationLeavesRecoverableGeneration()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var participant = new FakeParticipant("world", "generation-1");
+        new SaveSetCoordinator(root).Save([participant], new SaveSetContext(1, 1), action => action());
+        string assembly = Assembly.GetExecutingAssembly().Location;
+        using var child = Process.Start(new ProcessStartInfo("dotnet")
+        {
+            ArgumentList = { assembly, "--crash-writer", root, nameof(SaveSetFaultPoint.AfterPendingDirectoryFlush) },
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        }) ?? throw new InvalidOperationException("Could not start crash-recovery child process.");
+        if (!child.WaitForExit(15_000) || child.ExitCode != 97)
+            throw new InvalidOperationException("Crash-recovery child did not terminate at the requested durable boundary.");
+        using PreparedLoadGeneration recovered = new SaveSetCoordinator(root).PrepareLoad(
+            [participant], EmptyResolver.Instance, SaveSetRecoveryMode.CurrentThenNewestComplete);
+        if (recovered.Sequence != 1) throw new InvalidOperationException("A process-terminated pending generation displaced the last complete generation.");
+        participant.Value = "generation-3";
+        new SaveSetCoordinator(root).Save([participant], new SaveSetContext(3, 3), action => action());
+        if (Directory.EnumerateDirectories(Path.Combine(root, "generations"), "*.pending").Any())
+            throw new InvalidOperationException("The next exclusive writer did not clean the abandoned pending generation.");
     }
     finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }
@@ -193,7 +378,9 @@ sealed class FakeParticipant : ISaveSetParticipant
     internal bool FailPrepare { get; set; }
     internal Action? OnCapture { get; init; }
     internal Action? OnWrite { get; init; }
-    internal long ArtifactBound { get; init; } = int.MaxValue;
+    internal long ArtifactBound { get; init; } = Array.MaxLength;
+    internal string? PreparedKey { get; init; }
+    internal Exception? PrepareException { get; set; }
     public long MaximumArtifactBytes => ArtifactBound;
     internal FakePrepared? LastPrepared { get; private set; }
     public ICapturedSaveSetParticipant Capture(in SaveSetContext context)
@@ -203,8 +390,9 @@ sealed class FakeParticipant : ISaveSetParticipant
     }
     public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context)
     {
+        if (PrepareException is not null) throw PrepareException;
         if (FailPrepare) throw new InvalidDataException("injected prepare failure");
-        return LastPrepared = new FakePrepared(Key, Encoding.UTF8.GetString(artifact.Span));
+        return LastPrepared = new FakePrepared(PreparedKey ?? Key, Encoding.UTF8.GetString(artifact.Span));
     }
 }
 
@@ -249,6 +437,16 @@ sealed class ThrowAt : ISaveSetFaultInjector
 }
 
 sealed class InjectedFailure : Exception;
+
+sealed class ExitAt : ISaveSetFaultInjector
+{
+    private readonly SaveSetFaultPoint _point;
+    internal ExitAt(SaveSetFaultPoint point) => _point = point;
+    public void Reach(SaveSetFaultPoint point, string path)
+    {
+        if (point == _point) Environment.Exit(97);
+    }
+}
 
 struct CoordinatorValue : IComponent<CoordinatorValue> { public int Value; }
 

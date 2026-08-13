@@ -7,11 +7,13 @@ int[] populations = args.Length == 0 ? [100_000, 1_000_000] : args.Select(int.Pa
 var results = new List<PersistenceScaleResult>();
 foreach (int population in populations)
 {
-    int iterations = population >= 1_000_000 ? 3 : 5;
+    // Twenty-one samples make p95 an actual tail statistic rather than the
+    // maximum of a three/five-sample smoke run.
+    int iterations = 21;
     results.Add(Run(population, iterations));
 }
-var report = new PersistenceBenchmarkReport("ecs-3.4.0-full-world-transactional-persistence", DateTimeOffset.UtcNow, results.ToArray());
-string output = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../results/ecs-v3-3.4.0-persistence.json"));
+var report = new PersistenceBenchmarkReport("ecs-3.4.1-persistence-correctness-hardening", DateTimeOffset.UtcNow, results.ToArray());
+string output = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../results/ecs-v3-3.4.1-persistence.json"));
 Directory.CreateDirectory(Path.GetDirectoryName(output)!);
 File.WriteAllText(output, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine(JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));

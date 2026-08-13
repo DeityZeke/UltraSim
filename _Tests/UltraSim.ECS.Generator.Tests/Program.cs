@@ -64,6 +64,7 @@ internal static class GeneratorTests
         Run(nameof(DuplicateComponentType_ReportsECSGEN008), DuplicateComponentType_ReportsECSGEN008);
         Run(nameof(UnsupportedPersistentMember_ReportsECSGEN009), UnsupportedPersistentMember_ReportsECSGEN009);
         Run(nameof(UnmarkedEntityReference_ReportsECSGEN009), UnmarkedEntityReference_ReportsECSGEN009);
+        Run(nameof(StaticPersistenceMembersAreIgnoredAndBooleanDecodeIsCanonical), StaticPersistenceMembersAreIgnoredAndBooleanDecodeIsCanonical);
         Run(nameof(QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily), QueryFamilyMarker_EmitsDeterministicTwoReadOneWriteFamily);
         Run(nameof(QueryFamilyCatalog_EmitsTwoReadOnlyFamily), QueryFamilyCatalog_EmitsTwoReadOnlyFamily);
         Run(nameof(QueryFamilyCatalog_EmitsOneReadTwoWriteFamily), QueryFamilyCatalog_EmitsOneReadTwoWriteFamily);
@@ -559,6 +560,29 @@ internal static class GeneratorTests
             [EcsSchema(typeof(C))] internal static partial class Schema { }
             """;
         AssertDiagnostic(source, "ECSGEN009");
+    }
+
+    private static void StaticPersistenceMembersAreIgnoredAndBooleanDecodeIsCanonical()
+    {
+        const string source = """
+            using UltraSim.ECS;
+            [EcsComponent("persist.static", PersistenceId = 93)]
+            internal struct C : IComponent<C>
+            {
+                public static int StaticField;
+                public static int StaticProperty { get; set; }
+                public bool Enabled { get; set; }
+            }
+            [EcsSchema(typeof(C))] internal static partial class Schema { }
+            """;
+        Generation generation = Generate(source);
+        AssertNoGeneratorErrors(generation);
+        Diagnostic[] compileErrors = generation.OutputCompilation.GetDiagnostics()
+            .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
+        TestAssert.Equal(0, compileErrors.Length);
+        TestAssert.False(generation.GeneratedSource.Contains("value.StaticField", StringComparison.Ordinal));
+        TestAssert.False(generation.GeneratedSource.Contains("value.StaticProperty", StringComparison.Ordinal));
+        TestAssert.True(generation.GeneratedSource.Contains("switch { 0 => false, 1 => true", StringComparison.Ordinal));
     }
 
     private static string ComponentSource(string key, string members) => $$"""

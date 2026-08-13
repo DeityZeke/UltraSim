@@ -121,7 +121,7 @@ The 3.3 Slice artifacts are:
 - `results/simulation-slice-0/ecs-3.3.0-content-1m-1000-2026-08-12.json`;
 - `results/simulation-slice-0/ecs-3.3.0-content-100k-all-active-10000-2026-08-12.json`.
 
-## ECS 3.4.0 full-world transactional persistence
+## ECS 3.4.1 full-world transactional persistence
 
 [`UltraSim.ECS.Persistence`](UltraSim.ECS.Persistence) measures the canonical
 whole-world participant independently from disk/coordinator durability. It runs
@@ -135,11 +135,13 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Persistence/UltraSim.ECS.Persisten
 ```
 
 The accepted artifact is
-[`Baselines/ecs-v3-3.4.0-persistence-2026-08-12.json`](Baselines/ecs-v3-3.4.0-persistence-2026-08-12.json).
-The accepted run meets the milestone gates at both scales: 100K total mean
-capture+preflight+restore is about 145.7 ms; 1M is about 1.041 s; the 1M
-authoritative pause is 167.4 ms mean / 169.4 ms p95; and canonical fixed-width
-component encode is 2.144 GiB/s at 1M. Capture and restore intentionally allocate
+[`Baselines/ecs-v3-3.4.1-persistence-2026-08-12.json`](Baselines/ecs-v3-3.4.1-persistence-2026-08-12.json).
+The 21-sample hardening run reports 100K total mean capture+preflight+restore of
+about 110.5 ms and 1M of about 1.036 s. The 1M authoritative pause is 167.2 ms
+mean / 170.5 ms p95, and canonical fixed-width component encode is 1.635 GiB/s.
+The older 3.4.0 3/5-sample artifact remains immutable but its p95 was effectively
+the maximum and its 2.144 GiB/s encode result was not reproduced by the longer
+run. Capture and restore intentionally allocate
 proportional cold-path buffers; those costs are reported rather than described as
 zero allocation. The artifact now also reports section bytes, ordinal/generation
 scratch, durable-ID map ownership, restore-plan temporary memory, and staging-
@@ -149,7 +151,7 @@ There is no honest current-V2 full persistence benchmark. The old V2 permanent
 `PersistenceView` row measures seeding/view construction rather than
 capture/encode/restore. Historical archived save/load results are retained as
 directional allocation evidence only; they are not joined as an equivalent V2
-ratio. See [`../ECS_3_4_0_PERSISTENCE_REPORT.md`](../ECS_3_4_0_PERSISTENCE_REPORT.md).
+ratio. See [`../ECS_3_4_1_PERSISTENCE_HARDENING_REPORT.md`](../ECS_3_4_1_PERSISTENCE_HARDENING_REPORT.md).
 
 They retain the 3.2 canonical and ordered-lifecycle hashes while replacing
 bootstrap/default-create content paths with the compiled catalog. Exact results

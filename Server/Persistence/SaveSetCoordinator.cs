@@ -1,7 +1,9 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using UltraSim.ECS;
 
 namespace UltraSim.Server.Persistence;
 
@@ -10,6 +12,7 @@ public sealed class SaveSetCoordinator
     private const int MaximumManifestBytes = 1024 * 1024;
     private const string ManifestName = "manifest.json";
     private const string CurrentName = "CURRENT";
+    private const string WriterLockName = "SAVE.LOCK";
     private readonly string _root;
     private readonly string _generations;
     private readonly IDurableFileSystem _files;
@@ -23,12 +26,28 @@ public sealed class SaveSetCoordinator
         Directory.CreateDirectory(_generations);
         _files = files ?? new DurableFileSystem();
         _faults = faults;
-        foreach (string abandoned in Directory.EnumerateDirectories(_generations, "*.pending"))
-            Directory.Delete(abandoned, recursive: true);
     }
 
     /// <summary>Captures all participants inside one caller-owned frozen logical epoch.</summary>
     public SaveSetManifest Save(IReadOnlyList<ISaveSetParticipant> participants, in SaveSetContext context,
+        Action<Action> captureBoundary)
+    {
+        using IDisposable writerLease = AcquireWriterLease();
+        CleanupAbandonedPending();
+        EnsureForwardSequence(context.Sequence);
+        string pending = Path.Combine(_generations, context.Sequence.ToString("D20") + ".pending");
+        try
+        {
+            return SaveUnderLease(participants, context, captureBoundary);
+        }
+        catch
+        {
+            if (Directory.Exists(pending)) Directory.Delete(pending, recursive: true);
+            throw;
+        }
+    }
+
+    private SaveSetManifest SaveUnderLease(IReadOnlyList<ISaveSetParticipant> participants, in SaveSetContext context,
         Action<Action> captureBoundary)
     {
         ArgumentNullException.ThrowIfNull(participants);
@@ -77,10 +96,11 @@ public sealed class SaveSetCoordinator
                         captured[index]!.WriteArtifact(bounded);
                     _files.FlushFile(stream);
                     length = stream.Length;
-                    if (length < 0 || length > participant.MaximumArtifactBytes || length > int.MaxValue)
+                    if (length < 0 || length > participant.MaximumArtifactBytes || length > Array.MaxLength)
                         throw new IOException($"Participant '{participant.Key}' exceeded its configured artifact bound.");
                 }
-                byte[] digest = SHA256.HashData(File.ReadAllBytes(path));
+                byte[] digest;
+                using (Stream read = _files.OpenRead(path)) digest = SHA256.HashData(read);
                 artifacts[index] = new SaveSetArtifact(participant.Key, name, length, Convert.ToHexString(digest));
                 Reach(SaveSetFaultPoint.AfterParticipantFile, path);
             }
@@ -128,7 +148,8 @@ public sealed class SaveSetCoordinator
         foreach (string generation in EnumerateCandidates(recoveryMode))
         {
             try { return PrepareGeneration(generation, participants, resolver); }
-            catch (Exception exception) when (recoveryMode == SaveSetRecoveryMode.CurrentThenNewestComplete)
+            catch (Exception exception) when (recoveryMode == SaveSetRecoveryMode.CurrentThenNewestComplete &&
+                IsRecoverableCandidateFailure(exception))
             { currentFailure ??= exception; }
         }
         throw new IOException("No complete compatible save-set generation could be prepared.", currentFailure);
@@ -140,12 +161,18 @@ public sealed class SaveSetCoordinator
         string manifestPath = Path.Combine(directory, ManifestName);
         long manifestLength = new FileInfo(manifestPath).Length;
         if (manifestLength <= 0 || manifestLength > MaximumManifestBytes)
-            throw new IOException("Save-set manifest size is outside its configured bound.");
-        SaveSetManifest manifest = JsonSerializer.Deserialize(File.ReadAllBytes(manifestPath),
-            SaveSetJsonContext.Default.SaveSetManifest) ?? throw new IOException("Save-set manifest is empty.");
-        if (manifest.FormatVersion != 1 || manifest.Sequence == 0) throw new IOException("Unsupported save-set manifest.");
+            throw new InvalidDataException("Save-set manifest size is outside its configured bound.");
+        SaveSetManifest manifest;
+        using (Stream manifestStream = _files.OpenRead(manifestPath))
+            manifest = JsonSerializer.Deserialize(manifestStream,
+                SaveSetJsonContext.Default.SaveSetManifest) ?? throw new InvalidDataException("Save-set manifest is empty.");
+        if (manifest.FormatVersion != 1 || manifest.Sequence == 0) throw new InvalidDataException("Unsupported save-set manifest.");
+        string directoryName = Path.GetFileName(directory);
+        if (directoryName.Length != 20 || !ulong.TryParse(directoryName, out ulong directorySequence) ||
+            directorySequence != manifest.Sequence)
+            throw new InvalidDataException("Save-set manifest sequence disagrees with its generation directory.");
         if (manifest.Artifacts is null || manifest.Artifacts.Length != participants.Count)
-            throw new IOException("Save-set manifest participant count is inconsistent.");
+            throw new InvalidDataException("Save-set manifest participant count is inconsistent.");
         var artifactKeys = new HashSet<string>(StringComparer.Ordinal);
         var artifactFiles = new HashSet<string>(StringComparer.Ordinal);
         foreach (SaveSetArtifact artifact in manifest.Artifacts)
@@ -153,7 +180,7 @@ public sealed class SaveSetCoordinator
             if (!IsKey(artifact.Key) || artifact.FileName != artifact.Key + ".bin" ||
                 artifact.ByteCount < 0 || string.IsNullOrEmpty(artifact.Sha256) || artifact.Sha256.Length != 64 ||
                 !artifactKeys.Add(artifact.Key) || !artifactFiles.Add(artifact.FileName))
-                throw new IOException("Save-set manifest artifact directory is invalid or duplicated.");
+                throw new InvalidDataException("Save-set manifest artifact directory is invalid or duplicated.");
         }
         var artifactByKey = manifest.Artifacts.ToDictionary(static artifact => artifact.Key, StringComparer.Ordinal);
         var prepared = new IPreparedLoadParticipant[participants.Count];
@@ -164,16 +191,24 @@ public sealed class SaveSetCoordinator
             foreach (ISaveSetParticipant participant in participants)
             {
                 if (!artifactByKey.TryGetValue(participant.Key, out SaveSetArtifact? artifact))
-                    throw new IOException($"Manifest has no artifact for participant '{participant.Key}'.");
+                    throw new InvalidDataException($"Manifest has no artifact for participant '{participant.Key}'.");
                 string path = ResolveContained(directory, artifact.FileName);
                 long physicalLength = new FileInfo(path).Length;
                 if (physicalLength != artifact.ByteCount || physicalLength > participant.MaximumArtifactBytes ||
-                    physicalLength > int.MaxValue)
-                    throw new IOException($"Artifact size is invalid for participant '{participant.Key}'.");
-                byte[] bytes = File.ReadAllBytes(path);
+                    physicalLength > Array.MaxLength)
+                    throw new InvalidDataException($"Artifact size is invalid for participant '{participant.Key}'.");
+                byte[] bytes = GC.AllocateUninitializedArray<byte>(checked((int)physicalLength));
+                using (Stream read = _files.OpenRead(path)) read.ReadExactly(bytes);
                 if (!StringComparer.Ordinal.Equals(Convert.ToHexString(SHA256.HashData(bytes)), artifact.Sha256))
-                    throw new IOException($"Artifact integrity failed for participant '{participant.Key}'.");
-                prepared[count++] = participant.Prepare(bytes, context);
+                    throw new InvalidDataException($"Artifact integrity failed for participant '{participant.Key}'.");
+                IPreparedLoadParticipant state = participant.Prepare(bytes, context) ??
+                    throw new InvalidDataException($"Participant '{participant.Key}' returned no prepared state.");
+                if (!StringComparer.Ordinal.Equals(state.Key, participant.Key))
+                {
+                    state.Dispose();
+                    throw new InvalidDataException("Prepared participant identity differs from its registered key.");
+                }
+                prepared[count++] = state;
             }
             for (int i = 0; i < count; i++) prepared[i].Resolve(resolver);
             for (int i = 0; i < count; i++) prepared[i].Validate();
@@ -192,9 +227,25 @@ public sealed class SaveSetCoordinator
         string? currentPath = null;
         if (File.Exists(pointer))
         {
-            string current = File.ReadAllText(pointer).Trim();
-            currentPath = ResolveContained(_generations, current);
-            if (Directory.Exists(currentPath)) yield return currentPath;
+            try
+            {
+                var info = new FileInfo(pointer);
+                if (info.Length is <= 0 or > 64) throw new InvalidDataException("CURRENT pointer size is invalid.");
+                string current = File.ReadAllText(pointer).Trim();
+                if (current.Length != 20 || current.Any(static character => character is < '0' or > '9') || current == new string('0', 20))
+                    throw new InvalidDataException("CURRENT pointer is malformed.");
+                currentPath = ResolveContained(_generations, current);
+                if (!Directory.Exists(currentPath))
+                {
+                    currentPath = null;
+                    if (mode == SaveSetRecoveryMode.StrictCurrent) throw new InvalidDataException("CURRENT generation is absent.");
+                }
+            }
+            catch (InvalidDataException) when (mode == SaveSetRecoveryMode.CurrentThenNewestComplete)
+            {
+                currentPath = null;
+            }
+            if (currentPath is not null) yield return currentPath;
         }
         else if (mode == SaveSetRecoveryMode.StrictCurrent)
         {
@@ -214,7 +265,7 @@ public sealed class SaveSetCoordinator
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (ISaveSetParticipant participant in participants)
         {
-            if (participant is null || participant.MaximumArtifactBytes <= 0 ||
+            if (participant is null || participant.MaximumArtifactBytes <= 0 || participant.MaximumArtifactBytes > Array.MaxLength ||
                 !IsKey(participant.Key) || !keys.Add(participant.Key))
                 throw new ArgumentException("Participant keys must be unique lowercase safe file-name tokens.", nameof(participants));
         }
@@ -224,11 +275,54 @@ public sealed class SaveSetCoordinator
     private static string ResolveContained(string root, string relative)
     {
         if (Path.IsPathRooted(relative) || relative.Contains(Path.DirectorySeparatorChar) || relative.Contains(Path.AltDirectorySeparatorChar))
-            throw new IOException("Manifest/pointer contains an unsafe relative path.");
+            throw new InvalidDataException("Manifest/pointer contains an unsafe relative path.");
         string full = Path.GetFullPath(Path.Combine(root, relative));
         string prefix = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
-        if (!full.StartsWith(prefix, StringComparison.Ordinal)) throw new IOException("Path escapes the save-set root.");
+        if (!full.StartsWith(prefix, StringComparison.Ordinal)) throw new InvalidDataException("Path escapes the save-set root.");
         return full;
+    }
+    private static bool IsRecoverableCandidateFailure(Exception exception) => exception is
+        InvalidDataException or FileNotFoundException or DirectoryNotFoundException or
+        JsonException or PersistenceValidationException or PersistenceCompatibilityException;
+
+    private IDisposable AcquireWriterLease()
+    {
+        string path = Path.Combine(_root, WriterLockName);
+        long started = Stopwatch.GetTimestamp();
+        while (true)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
+                    1, FileOptions.WriteThrough);
+            }
+            catch (IOException) when (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(30))
+            {
+                Thread.Sleep(10);
+            }
+        }
+    }
+
+    private void CleanupAbandonedPending()
+    {
+        foreach (string abandoned in Directory.EnumerateDirectories(_generations, "*.pending"))
+            Directory.Delete(abandoned, recursive: true);
+        foreach (string pointer in Directory.EnumerateFiles(_root, CurrentName + ".tmp.*"))
+            File.Delete(pointer);
+    }
+
+    private void EnsureForwardSequence(ulong sequence)
+    {
+        if (sequence == 0) throw new ArgumentOutOfRangeException(nameof(sequence));
+        ulong greatest = 0;
+        foreach (string directory in Directory.EnumerateDirectories(_generations))
+        {
+            string name = Path.GetFileName(directory);
+            if (name.Length == 20 && ulong.TryParse(name, out ulong candidate) && candidate > greatest)
+                greatest = candidate;
+        }
+        if (sequence <= greatest)
+            throw new InvalidOperationException($"Save-set sequence {sequence} does not advance the published generation high-water {greatest}.");
     }
     private void Reach(SaveSetFaultPoint point, string path) => _faults?.Reach(point, path);
 }

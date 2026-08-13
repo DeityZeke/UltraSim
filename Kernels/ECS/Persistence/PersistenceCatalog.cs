@@ -52,6 +52,10 @@ public sealed class PersistenceCatalogBuilder
         EnsureMutable();
         if (savedPersistenceId == 0 || currentPersistenceId == 0 || !_schema.TryGetComponentIdByPersistenceId(currentPersistenceId, out _))
             throw new ArgumentException("Alias IDs must be nonzero and the destination must exist in the current schema.");
+        if (savedPersistenceId == currentPersistenceId ||
+            _schema.TryGetComponentIdByPersistenceId(savedPersistenceId, out _) ||
+            _drops.Contains(savedPersistenceId) || _aliases.ContainsValue(savedPersistenceId))
+            throw new ArgumentException("Alias sources must be distinct historical IDs that are neither current, dropped, nor alias destinations.");
         if (!_aliases.TryAdd(savedPersistenceId, currentPersistenceId)) throw new ArgumentException("Duplicate persistence alias.");
         return this;
     }
@@ -59,7 +63,9 @@ public sealed class PersistenceCatalogBuilder
     public PersistenceCatalogBuilder Drop(uint savedPersistenceId)
     {
         EnsureMutable();
-        if (savedPersistenceId == 0 || !_drops.Add(savedPersistenceId)) throw new ArgumentException("Invalid or duplicate drop declaration.");
+        if (savedPersistenceId == 0 || _schema.TryGetComponentIdByPersistenceId(savedPersistenceId, out _) ||
+            _aliases.ContainsKey(savedPersistenceId) || _aliases.ContainsValue(savedPersistenceId) || !_drops.Add(savedPersistenceId))
+            throw new ArgumentException("Drop declarations must be unique historical IDs and cannot contradict current or alias identities.");
         return this;
     }
 

@@ -38,6 +38,8 @@ public sealed class EcsWorldSaveSetParticipant : ISaveSetParticipant
     public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context)
     {
         PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(artifact, _catalog, _restoreOptions);
+        if (plan.Requirements.SnapshotSequence != context.Sequence)
+            throw new PersistenceValidationException("ECS snapshot sequence disagrees with the enclosing save-set generation.");
         return new PreparedEcsWorldParticipant(Key, plan, _stagingWorldFactory);
     }
 }

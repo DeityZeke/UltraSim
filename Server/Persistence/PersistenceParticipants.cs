@@ -7,7 +7,7 @@ public readonly record struct SaveSetContext(ulong Sequence, long UnixMillisecon
 public interface ISaveSetParticipant
 {
     string Key { get; }
-    long MaximumArtifactBytes => int.MaxValue;
+    long MaximumArtifactBytes => Array.MaxLength;
     ICapturedSaveSetParticipant Capture(in SaveSetContext context);
     IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context);
 }
@@ -35,7 +35,7 @@ public interface IPersistentEntityResolver
 public sealed class PreparedLoadGeneration : IDisposable
 {
     private readonly IPreparedLoadParticipant[] _participants;
-    private bool _committed;
+    private bool _publicationAttempted;
     private bool _disposed;
     internal PreparedLoadGeneration(ulong sequence, IPreparedLoadParticipant[] participants)
     { Sequence = sequence; _participants = participants; }
@@ -44,15 +44,19 @@ public sealed class PreparedLoadGeneration : IDisposable
     public void Commit(Action<IReadOnlyList<IPreparedLoadParticipant>> publishGeneration)
     {
         ArgumentNullException.ThrowIfNull(publishGeneration);
-        if (_disposed || _committed) throw new InvalidOperationException("Prepared generation is no longer publishable.");
+        if (_disposed || _publicationAttempted) throw new InvalidOperationException("Prepared generation is no longer publishable.");
+        // Publication is an exactly-once ownership transfer. Mark the attempt
+        // before invoking host code: once arbitrary publication code has run,
+        // rollback cannot be proven and retry could duplicate partially
+        // published participants.
+        _publicationAttempted = true;
         publishGeneration(_participants);
-        _committed = true;
     }
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
-        if (!_committed)
+        if (!_publicationAttempted)
             foreach (IPreparedLoadParticipant participant in _participants) participant.Dispose();
     }
 }

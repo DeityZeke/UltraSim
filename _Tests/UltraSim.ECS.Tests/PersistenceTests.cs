@@ -1,5 +1,6 @@
 using UltraSim.ECS;
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 
 internal static class PersistenceTests
 {
@@ -35,6 +36,10 @@ internal static class PersistenceTests
         Console.WriteLine("PASS Persistence_SerialAndC8ScheduledWorldsCaptureIdentically");
         ExternalKeyAndMissingPrefabProvenanceRoundTrip();
         Console.WriteLine("PASS Persistence_ExternalKeyAndMissingPrefabProvenanceRoundTrip");
+        AdversarialContractsAreEnforced();
+        Console.WriteLine("PASS Persistence_AdversarialContractsAreEnforced");
+        CanonicalContainerRejectsNoncanonicalEncoding();
+        Console.WriteLine("PASS Persistence_CanonicalContainerRejectsNoncanonicalEncoding");
     }
 
     private static void RoundTripIsCanonicalAndClean()
@@ -107,6 +112,10 @@ internal static class PersistenceTests
         PersistenceRestoreOptions tiny = new(
             new PersistenceLimits(64, 1, 1, 1, 1, 1, 1), ChunkLayoutOptions.KiB16);
         Assert.Throws<PersistenceValidationException>(() => EcsPersistenceRestore.Preflight(corrupt, catalog, tiny));
+        PersistenceRestoreOptions tinyTemporary = new(
+            new PersistenceLimits(1_000_000, 100, 10, 10, 100, 1_000_000, 92), ChunkLayoutOptions.KiB16);
+        byte[] bounded = EcsPersistence.Capture(world, catalog, new PersistenceCaptureOptions(3), out _).Bytes.ToArray();
+        Assert.Throws<PersistenceValidationException>(() => EcsPersistenceRestore.Preflight(bounded, catalog, tinyTemporary));
 
         byte[] valid = EcsPersistence.Capture(world, catalog, new PersistenceCaptureOptions(2), out _).Bytes.ToArray();
         int stride = Math.Max(1, valid.Length / 31);
@@ -283,6 +292,7 @@ internal static class PersistenceTests
         PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(artifact.Bytes, currentCatalog,
             new PersistenceRestoreOptions(new PersistenceLimits(2_000_000, 1000, 10, 10, 100, 2_000_000, 2_000_000), ChunkLayoutOptions.KiB16));
         Assert.True(plan.Requirements.Shapes.All(static shape => shape.MaximumChunks >= 2));
+        Assert.Equal(1, plan.Requirements.RequiredArchetypes);
         using EcsWorld restored = plan.Restore(requirements => new EcsWorld(requirements.Schema,
             Options(requirements.IdentityOptions)), out _);
         Assert.Equal(300, restored.AliveCount);
@@ -383,6 +393,7 @@ internal static class PersistenceTests
         ComponentLookup<VersionedValue> restoredLookup = default;
         PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(artifact.Bytes, currentCatalog,
             new PersistenceRestoreOptions(new PersistenceLimits(1_000_000, 10, 10, 10, 100, 1_000_000, 1_000_000), ChunkLayoutOptions.KiB16));
+        Assert.True(plan.Diagnostics.Count != 0);
         using EcsWorld restored = plan.Restore(requirements =>
         {
             var world = new EcsWorld(requirements.Schema, Options(requirements.IdentityOptions));
@@ -629,6 +640,139 @@ internal static class PersistenceTests
         Assert.Equal(missingPrefab, provenance);
     }
 
+    private static void AdversarialContractsAreEnforced()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PersistenceLimits(
+            (long)Array.MaxLength + 1, 1, 1, 1, 1, 1, 1));
+        const string ordinaryKey = "adversarial.value";
+        var schema = ComponentSchema.Create(new SchemaId(0xAD, 0x01),
+        [
+            ComponentRegistration.Create<VersionedValue>(new ComponentId(0), ordinaryKey, StableHash64.Compute(ordinaryKey),
+                version: 1, ComponentFlags.Persistent, persistenceId: 9001, ComponentPersistenceMode.Value),
+        ]);
+        Assert.Throws<ArgumentOutOfRangeException>(() => new PersistenceCatalogBuilder(schema)
+            .Register<VersionedValue>(new PersistenceSchemaFingerprint(1, 1), new ZeroWidthCodec()));
+        Assert.Throws<ArgumentException>(() => new PersistenceCatalogBuilder(schema).AddAlias(9001, 9001));
+        Assert.Throws<ArgumentException>(() => new PersistenceCatalogBuilder(schema).Drop(9001));
+        var aliasBuilder = new PersistenceCatalogBuilder(schema).AddAlias(8001, 9001);
+        Assert.Throws<ArgumentException>(() => aliasBuilder.Drop(8001));
+        var dropBuilder = new PersistenceCatalogBuilder(schema).Drop(8002);
+        Assert.Throws<ArgumentException>(() => dropBuilder.AddAlias(8002, 9001));
+
+        string longKey = new('k', 257);
+        ComponentSchema longSchema = ComponentSchema.Create(new SchemaId(0xAD, 0x02),
+        [
+            ComponentRegistration.Create<VersionedValue>(new ComponentId(0), longKey, StableHash64.Compute(longKey),
+                version: 1, ComponentFlags.Persistent, persistenceId: 9002, ComponentPersistenceMode.Value),
+        ]);
+        PersistenceCatalog longCatalog = new PersistenceCatalogBuilder(longSchema)
+            .Register<VersionedValue>(new PersistenceSchemaFingerprint(2, 2), new VersionedValueCodec()).Build();
+        using var longWorld = new EcsWorld(longSchema, Options(new PersistenceIdentityOptions(new PersistentWorldId(0xAD02))));
+        ArchetypeHandle longShape = longWorld.RegisterArchetype([new ComponentId(0)], ChunkLayoutOptions.KiB16, 1);
+        longWorld.Seal(); longWorld.Initialize(); longWorld.BeginRun();
+        Assert.True(longWorld.TryCreate(longShape, out _));
+        PersistenceSnapshotArtifact longArtifact = EcsPersistence.Capture(longWorld, longCatalog, new PersistenceCaptureOptions(1), out _);
+        PersistenceRestorePlan longPlan = EcsPersistenceRestore.Preflight(longArtifact.Bytes, longCatalog,
+            new PersistenceRestoreOptions(new PersistenceLimits(1_000_000, 10, 10, 10, 100, 1_000_000, 1_000_000), ChunkLayoutOptions.KiB16));
+        using EcsWorld restored = longPlan.Restore(requirements => new EcsWorld(requirements.Schema,
+            Options(requirements.IdentityOptions)), out _);
+        Assert.Equal(1, restored.AliveCount);
+
+        PersistenceCatalog throwingCatalog = new PersistenceCatalogBuilder(schema)
+            .Register<VersionedValue>(new PersistenceSchemaFingerprint(3, 3), new ThrowingCodec()).Build();
+        using var failureWorld = new EcsWorld(schema, Options(new PersistenceIdentityOptions(new PersistentWorldId(0xAD03))));
+        ArchetypeHandle failureShape = failureWorld.RegisterArchetype([new ComponentId(0)], ChunkLayoutOptions.KiB16, 1);
+        failureWorld.Seal(); failureWorld.Initialize(); failureWorld.BeginRun();
+        Assert.True(failureWorld.TryCreate(failureShape, out Entity first));
+        Assert.Equal(1UL, failureWorld.PersistenceCore.PersistenceIdentities.AllocatorHighWater);
+        Assert.Throws<InvalidOperationException>(() => EcsPersistence.Capture(failureWorld, throwingCatalog,
+            new PersistenceCaptureOptions(1), out _));
+        Assert.Equal(1UL, failureWorld.PersistenceCore.PersistenceIdentities.AllocatorHighWater);
+        Assert.True(failureWorld.TryCreate(failureShape, out Entity second));
+        Assert.Equal(2UL, failureWorld.GetOrAssignPersistentId(second).Value);
+    }
+
+    private static void CanonicalContainerRejectsNoncanonicalEncoding()
+    {
+        ComponentSchema schema = PersistenceBooleanSchema.CreateSchema();
+        PersistenceCatalog catalog = PersistenceBooleanSchema.CreatePersistenceCatalog();
+        using var world = new EcsWorld(schema, Options(new PersistenceIdentityOptions(new PersistentWorldId(0xB001))));
+        ArchetypeHandle shape = world.RegisterArchetype([PersistenceBooleanSchema.GetComponentId<PersistBoolean>()], ChunkLayoutOptions.KiB16, 1);
+        world.Seal(); world.Initialize(); world.BeginRun();
+        Assert.True(world.TryCreate(shape, out _));
+        byte[] artifact = EcsPersistence.Capture(world, catalog, new PersistenceCaptureOptions(1), out _).Bytes.ToArray();
+        PersistenceRestoreOptions options = new(
+            new PersistenceLimits(1_000_000, 10, 10, 10, 100, 1_000_000, 1_000_000), ChunkLayoutOptions.KiB16);
+
+        byte[] padding = (byte[])artifact.Clone();
+        int directory = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(padding.AsSpan(72)));
+        int firstOffset = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(padding.AsSpan(directory + 8)));
+        int firstLength = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(padding.AsSpan(directory + 16)));
+        int paddingOffset = firstOffset + firstLength;
+        if ((paddingOffset & 7) != 0)
+        {
+            padding[paddingOffset] = 1;
+            RehashSnapshot(padding, recomputeSectionChecksums: false);
+            Assert.Throws<PersistenceValidationException>(() => EcsPersistenceRestore.Preflight(padding, catalog, options));
+        }
+
+        byte[] directoryOrder = (byte[])artifact.Clone();
+        directory = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(directoryOrder.AsSpan(72)));
+        byte[] entry = directoryOrder.AsSpan(directory, 32).ToArray();
+        directoryOrder.AsSpan(directory + 32, 32).CopyTo(directoryOrder.AsSpan(directory, 32));
+        entry.CopyTo(directoryOrder, directory + 32);
+        RehashSnapshot(directoryOrder, recomputeSectionChecksums: false);
+        Assert.Throws<PersistenceValidationException>(() => EcsPersistenceRestore.Preflight(directoryOrder, catalog, options));
+
+        byte[] boolean = (byte[])artifact.Clone();
+        directory = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(boolean.AsSpan(72)));
+        int sectionCount = BinaryPrimitives.ReadInt32LittleEndian(boolean.AsSpan(64));
+        for (int index = 0; index < sectionCount; index++)
+        {
+            int entryOffset = directory + index * 32;
+            if (BinaryPrimitives.ReadUInt32LittleEndian(boolean.AsSpan(entryOffset)) != 5) continue;
+            int offset = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(boolean.AsSpan(entryOffset + 8)));
+            boolean[offset + 20] = 2;
+            break;
+        }
+        RehashSnapshot(boolean, recomputeSectionChecksums: true);
+        PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(boolean, catalog, options);
+        Assert.Throws<PersistenceValidationException>(() =>
+        {
+            using EcsWorld unexpected = plan.Restore(requirements => new EcsWorld(requirements.Schema,
+                Options(requirements.IdentityOptions)), out _);
+        });
+    }
+
+    private static void RehashSnapshot(byte[] bytes, bool recomputeSectionChecksums)
+    {
+        int directory = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(72)));
+        int digest = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(80)));
+        if (recomputeSectionChecksums)
+        {
+            int count = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(64));
+            for (int index = 0; index < count; index++)
+            {
+                int entry = directory + index * 32;
+                int offset = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(entry + 8)));
+                int length = checked((int)BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(entry + 16)));
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(entry + 24), TestCrc32(bytes.AsSpan(offset, length)));
+            }
+        }
+        SHA256.HashData(bytes.AsSpan(0, digest)).CopyTo(bytes, digest);
+    }
+
+    private static uint TestCrc32(ReadOnlySpan<byte> bytes)
+    {
+        uint crc = 0xffffffffU;
+        foreach (byte value in bytes)
+        {
+            crc ^= value;
+            for (int bit = 0; bit < 8; bit++) crc = (crc >> 1) ^ (0xedb88320U & unchecked((uint)-(int)(crc & 1)));
+        }
+        return ~crc;
+    }
+
     private static EcsWorldOptions Options(PersistenceIdentityOptions persistence, EcsSchedulerOptions scheduler = default) => new(
         new EntityCapacity(512), maximumArchetypes: 8, maximumPreparedPlans: 8,
         maximumPreparedTransitions: 8, maximumStructuralCommands: 8,
@@ -687,6 +831,28 @@ internal struct PersistTarget : IComponent<PersistTarget>
 internal struct PersistExternalLink : IComponent<PersistExternalLink>
 {
     public PersistentEntityKey Value { get; set; }
+}
+
+[EcsComponent("persistence.boolean", PersistenceId = 1007)]
+internal struct PersistBoolean : IComponent<PersistBoolean> { public bool Value { get; set; } }
+
+[EcsSchema(typeof(PersistBoolean))]
+internal static partial class PersistenceBooleanSchema { }
+
+internal sealed class ZeroWidthCodec : IPersistenceComponentCodec<VersionedValue>
+{
+    public int EncodedSize => 0;
+    public void Encode(in VersionedValue value, Span<byte> destination, PersistenceWriteContext context) { }
+    public void Decode(ReadOnlySpan<byte> source, ref VersionedValue value, PersistenceReadContext context) { }
+}
+
+internal sealed class ThrowingCodec : IPersistenceComponentCodec<VersionedValue>
+{
+    public int EncodedSize => sizeof(int);
+    public void Encode(in VersionedValue value, Span<byte> destination, PersistenceWriteContext context) =>
+        throw new InvalidOperationException("injected encode failure");
+    public void Decode(ReadOnlySpan<byte> source, ref VersionedValue value, PersistenceReadContext context) =>
+        throw new NotSupportedException();
 }
 
 [EcsSchema(typeof(PersistEnabled), typeof(PersistExternalLink), typeof(PersistMembership), typeof(PersistPosition), typeof(PersistTag), typeof(PersistTarget))]
