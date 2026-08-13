@@ -21,23 +21,23 @@ A parent item is not complete until its listed acceptance gates are complete.
 
 S0 completion summary
 
-S0.0 — Integration contract and project boundaries frozen
+[x] S0.0 — Integration contract and project boundaries frozen
 
-S0.1 — Concrete ServerRuntime + atomic ServerGeneration root
+[ ] S0.1 — Concrete ServerRuntime + atomic ServerGeneration root
 
-S0.2 — Internal and Headless hosts + minimal host capabilities
+[ ] S0.2 — Internal and Headless hosts + minimal host capabilities
 
-S0.3 — UI-0 definition/compiler kernel
+[ ] S0.3 — UI-0 definition/compiler kernel
 
-S0.4 — Local client UI runtime + minimal Godot renderer
+[ ] S0.4 — Local client UI runtime + minimal Godot renderer
 
-S0.5 — Admission + optional minimal Accounting
+[ ] S0.5 — Admission + optional minimal Accounting
 
-S0.6 — Real ECS + Accounting transactional persistence integration
+[ ] S0.6 — Real ECS + Accounting transactional persistence integration
 
-S0.7 — Game-owned ECS inventory vertical + generic Gump UI
+[ ] S0.7 — Game-owned ECS inventory vertical + generic Gump UI
 
-S0.8 — Integrated end-to-end acceptance scenario and baselines
+[ ] S0.8 — Integrated end-to-end acceptance scenario and baselines
 
 S0 is accepted only when S0.0 through S0.8 are all accepted.
 

@@ -8,6 +8,15 @@ The rebuild starts with the ECS specification in
 [`NETWORK_NEXT_DESIGN.md`](NETWORK_NEXT_DESIGN.md) and will build on validated
 ECS capture/identity seams.
 
+## Integrated S0 contract
+
+[`S0 Integration Design.md`](S0%20Integration%20Design.md) is the authoritative
+contract for the first cross-layer runtime milestone. S0.0 — the contract and
+scaffolding slice — is accepted in [`S0.0 Acceptance Report.md`](S0.0%20Acceptance%20Report.md).
+It freezes ownership and dependency direction without adding runtime features;
+the later S0.1+ slices introduce the runtime, hosts, UI, admission, and game
+composition incrementally.
+
 ## Current executable slices
 
 Build and run the ECS runtime and generator tests:
