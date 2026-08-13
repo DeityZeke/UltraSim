@@ -210,7 +210,8 @@ public sealed class SaveSetCoordinator
                 }
                 prepared[count++] = state;
             }
-            for (int i = 0; i < count; i++) prepared[i].Resolve(resolver);
+            IPersistentEntityResolver stagedResolver = new PreparedParticipantResolver(resolver, prepared, count);
+            for (int i = 0; i < count; i++) prepared[i].Resolve(stagedResolver);
             for (int i = 0; i < count; i++) prepared[i].Validate();
             return new PreparedLoadGeneration(manifest.Sequence, prepared);
         }
@@ -284,6 +285,39 @@ public sealed class SaveSetCoordinator
     private static bool IsRecoverableCandidateFailure(Exception exception) => exception is
         InvalidDataException or FileNotFoundException or DirectoryNotFoundException or
         JsonException or PersistenceValidationException or PersistenceCompatibilityException;
+
+    private sealed class PreparedParticipantResolver : IPersistentEntityResolver
+    {
+        private readonly IPersistentEntityResolver _fallback;
+        private readonly IPreparedLoadParticipant[] _participants;
+        private readonly int _count;
+
+        internal PreparedParticipantResolver(
+            IPersistentEntityResolver fallback,
+            IPreparedLoadParticipant[] participants,
+            int count)
+        {
+            _fallback = fallback;
+            _participants = participants;
+            _count = count;
+        }
+
+        public bool TryResolve(PersistentEntityKey key, out object? value)
+        {
+            // Candidate providers are checked first so a staged durable entity
+            // cannot accidentally resolve to an old active-world object.
+            for (int index = 0; index < _count; index++)
+            {
+                if (_participants[index] is IPreparedPersistentEntityResolver provider &&
+                    provider.TryResolve(key, out value))
+                {
+                    return true;
+                }
+            }
+
+            return _fallback.TryResolve(key, out value);
+        }
+    }
 
     private IDisposable AcquireWriterLease()
     {

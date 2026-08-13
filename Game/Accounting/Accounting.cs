@@ -154,17 +154,49 @@ public readonly record struct CharacterRecord
     public PersistentEntityKey PersistentEntityKey { get; }
 }
 
+/// <summary>One durable trusted-local-identity to account binding.</summary>
+public readonly record struct TrustedIdentityBinding(
+    TrustedLocalIdentity Identity,
+    AccountId AccountId);
+
 /// <summary>
-/// In-memory S0.5 account store. It is intentionally a domain collection, not
-/// a second ECS or persistence root; S0.6 makes it a save-set participant.
+/// Immutable logical Accounting state captured for one save-set epoch. The
+/// lists are sorted by their durable identities and contain no runtime ECS
+/// handles.
+/// </summary>
+public sealed class AccountingSnapshot
+{
+    public AccountingSnapshot(
+        IReadOnlyList<AccountRecord> accounts,
+        IReadOnlyList<CharacterRecord> characters,
+        IReadOnlyList<TrustedIdentityBinding> trustedIdentities)
+    {
+        ArgumentNullException.ThrowIfNull(accounts);
+        ArgumentNullException.ThrowIfNull(characters);
+        ArgumentNullException.ThrowIfNull(trustedIdentities);
+        Accounts = Array.AsReadOnly(accounts.ToArray());
+        Characters = Array.AsReadOnly(characters.ToArray());
+        TrustedIdentities = Array.AsReadOnly(trustedIdentities.ToArray());
+    }
+
+    public IReadOnlyList<AccountRecord> Accounts { get; }
+
+    public IReadOnlyList<CharacterRecord> Characters { get; }
+
+    public IReadOnlyList<TrustedIdentityBinding> TrustedIdentities { get; }
+}
+
+/// <summary>
+/// Stable game-owned account store. It is intentionally a domain collection,
+/// not a second ECS or a duplicate gameplay-state root.
 /// </summary>
 public sealed class AccountingStore
 {
-    private readonly Dictionary<AccountId, AccountRecord> _accounts = [];
-    private readonly Dictionary<CharacterId, CharacterRecord> _characters = [];
-    private readonly Dictionary<TrustedLocalIdentity, AccountId> _trustedIdentities = [];
-    private readonly HashSet<(AccountId Account, int Slot)> _characterSlots = [];
-    private readonly HashSet<PersistentEntityKey> _persistentCharacters = [];
+    private Dictionary<AccountId, AccountRecord> _accounts = [];
+    private Dictionary<CharacterId, CharacterRecord> _characters = [];
+    private Dictionary<TrustedLocalIdentity, AccountId> _trustedIdentities = [];
+    private HashSet<(AccountId Account, int Slot)> _characterSlots = [];
+    private HashSet<PersistentEntityKey> _persistentCharacters = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
 
     public int AccountCount
@@ -285,6 +317,54 @@ public sealed class AccountingStore
             return slot != 0 ? slot : left.CharacterId.CompareTo(right.CharacterId);
         });
         return characters;
+    }
+
+    /// <summary>Captures a deterministic immutable domain snapshot.</summary>
+    public AccountingSnapshot CaptureSnapshot()
+    {
+        EnsureOwnerThread();
+        AccountRecord[] accounts = _accounts.Values
+            .OrderBy(static account => account.AccountId)
+            .ToArray();
+        CharacterRecord[] characters = _characters.Values
+            .OrderBy(static character => character.CharacterId)
+            .ToArray();
+        TrustedIdentityBinding[] identities = _trustedIdentities
+            .Select(static pair => new TrustedIdentityBinding(pair.Key, pair.Value))
+            .OrderBy(static binding => binding.Identity.Value, StringComparer.Ordinal)
+            .ToArray();
+        return new AccountingSnapshot(accounts, characters, identities);
+    }
+
+    /// <summary>Builds an isolated store from a validated durable snapshot.</summary>
+    public static AccountingStore FromSnapshot(AccountingSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var store = new AccountingStore();
+        foreach (AccountRecord account in snapshot.Accounts)
+            store.AddAccount(account);
+        foreach (TrustedIdentityBinding identity in snapshot.TrustedIdentities)
+            store.BindTrustedIdentity(identity.Identity, identity.AccountId);
+        foreach (CharacterRecord character in snapshot.Characters)
+            store.AddCharacter(character);
+        return store;
+    }
+
+    /// <summary>
+    /// Atomically adopts another owner-thread-bound store's domain state. The
+    /// caller uses this only at a game/runtime generation publication boundary;
+    /// the store object itself remains stable for existing Admission clients.
+    /// </summary>
+    public void Adopt(AccountingStore source)
+    {
+        EnsureOwnerThread();
+        ArgumentNullException.ThrowIfNull(source);
+        source.EnsureOwnerThread();
+        _accounts = new Dictionary<AccountId, AccountRecord>(source._accounts);
+        _characters = new Dictionary<CharacterId, CharacterRecord>(source._characters);
+        _trustedIdentities = new Dictionary<TrustedLocalIdentity, AccountId>(source._trustedIdentities);
+        _characterSlots = new HashSet<(AccountId Account, int Slot)>(source._characterSlots);
+        _persistentCharacters = new HashSet<PersistentEntityKey>(source._persistentCharacters);
     }
 
     private void EnsureOwnerThread()

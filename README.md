@@ -24,8 +24,9 @@ client UI runtime and minimal Godot renderer — is accepted in
 [`S0.4 Acceptance Report.md`](S0.4%20Acceptance%20Report.md). S0.5 — game-owned
 admission with optional minimal Accounting — is accepted in
 [`S0.5 Acceptance Report.md`](S0.5%20Acceptance%20Report.md).
-Later slices introduce transactional participant integration and game
-composition incrementally.
+S0.6 — real ECS + Accounting transactional persistence — is accepted in
+[`S0.6 Acceptance Report.md`](S0.6%20Acceptance%20Report.md). Later slices
+introduce game composition incrementally.
 
 ## Current executable slices
 
@@ -54,6 +55,9 @@ dotnet run --project \
   -c Release
 dotnet run --project \
   _Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj \
+  -c Release
+dotnet run --project \
+  _Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj \
   -c Release
 ```
 

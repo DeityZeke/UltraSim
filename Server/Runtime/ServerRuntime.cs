@@ -89,6 +89,52 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
+    internal bool TryPublishPreparedGeneration(
+        EcsWorld preparedWorld,
+        Action? publicationAction,
+        out ulong generationId)
+    {
+        EnsureOwnerThread();
+        EnsureRunning(nameof(TryPublishPreparedGeneration));
+        ArgumentNullException.ThrowIfNull(preparedWorld);
+        ServerGeneration? candidate = null;
+        try
+        {
+            if (preparedWorld.OwnerThreadId != _ownerThreadId)
+                throw new InvalidOperationException("A prepared ECS world belongs to a different owner thread.");
+            if (!preparedWorld.IsRunning || !preparedWorld.HasScheduler)
+                throw new InvalidOperationException("A prepared generation requires a running scheduled ECS world.");
+            if (preparedWorld.Schema.Id != _schema.Id)
+                throw new InvalidOperationException("A prepared generation uses a different ECS schema.");
+            if (ReferenceEquals(preparedWorld, _currentGeneration!.EcsWorld))
+                throw new InvalidOperationException("The active ECS world cannot be published as its own replacement.");
+            if (_nextGenerationId == ulong.MaxValue)
+                throw new InvalidOperationException("The server generation identity space is exhausted.");
+
+            WorldClockSnapshot clockSnapshot = _currentGeneration.Clock.CaptureSnapshot();
+            candidate = new ServerGeneration(
+                _nextGenerationId,
+                preparedWorld,
+                new WorldClock(_options.ClockOptions));
+            candidate.Clock.RestoreSnapshot(clockSnapshot);
+            PublishCandidate(candidate, publicationAction);
+            generationId = candidate.GenerationId;
+            _nextGenerationId++;
+            return true;
+        }
+        catch
+        {
+            // Once PublishCandidate marks the candidate, it is the active
+            // terminal root even if a publication callback fails. Before that
+            // boundary ownership remains with the caller of this method.
+            if (candidate is null)
+                preparedWorld.Dispose();
+            else if (!candidate.IsPublished)
+                candidate.Dispose();
+            throw;
+        }
+    }
+
     /// <summary>Identity of the currently active authoritative generation.</summary>
     public ulong ActiveGenerationId
     {
@@ -284,7 +330,7 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
-    private void PublishCandidate(ServerGeneration candidate)
+    private void PublishCandidate(ServerGeneration candidate, Action? publicationAction = null)
     {
         ServerGeneration? previous = _currentGeneration;
         _currentGeneration = candidate;
@@ -292,6 +338,11 @@ public sealed class ServerRuntime : IDisposable
 
         try
         {
+            // Game-owned participant state transfers before the optional
+            // observation hook so the first observable post-swap state is the
+            // complete composition. The callback is still after the active
+            // ECS root swap and remains terminal if it fails.
+            publicationAction?.Invoke();
             _options.PublicationBoundaryHook?.Invoke(candidate, previous);
         }
         catch

@@ -31,6 +31,16 @@ public interface IPersistentEntityResolver
     bool TryResolve(PersistentEntityKey key, out object? value);
 }
 
+/// <summary>
+/// A prepared participant can expose durable identities to later prepared
+/// participants during one staged load. Implementations must resolve only
+/// candidate state, never an independently active generation.
+/// </summary>
+public interface IPreparedPersistentEntityResolver
+{
+    bool TryResolve(PersistentEntityKey key, out object? value);
+}
+
 /// <summary>A completely prepared generation; publication is one host-owned atomic swap.</summary>
 public sealed class PreparedLoadGeneration : IDisposable
 {

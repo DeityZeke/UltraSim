@@ -69,7 +69,7 @@ internal sealed class CapturedEcsWorldParticipant : ICapturedSaveSetParticipant
 }
 
 /// <summary>Prepared ECS staging generation. The publishing host takes ownership exactly once.</summary>
-public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant
+public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant, IPreparedPersistentEntityResolver
 {
     private PersistenceRestorePlan? _plan;
     private readonly Func<PersistenceRestoreRequirements, EcsWorld> _stagingWorldFactory;
@@ -87,6 +87,23 @@ public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant
     public string Key { get; }
     public PersistenceRestoreReport RestoreReport { get; private set; }
     public EcsWorld World => _world ?? throw new InvalidOperationException("The ECS participant has not completed Resolve.");
+
+    public bool TryResolve(PersistentEntityKey key, out object? value)
+    {
+        if (_world is not null &&
+            key.IsValid &&
+            key.World == _world.PersistentWorldId &&
+            _world.TryResolvePersistentEntity(key.Entity, out Entity entity) &&
+            entity.IsValid &&
+            _world.IsAlive(entity))
+        {
+            value = entity;
+            return true;
+        }
+
+        value = null;
+        return false;
+    }
 
     public void Resolve(IPersistentEntityResolver resolver)
     {

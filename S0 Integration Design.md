@@ -33,7 +33,7 @@ S0 completion summary
 
 [x] S0.5 — Admission + optional minimal Accounting
 
-[ ] S0.6 — Real ECS + Accounting transactional persistence integration
+[x] S0.6 — Real ECS + Accounting transactional persistence integration
 
 [ ] S0.7 — Game-owned ECS inventory vertical + generic Gump UI
 

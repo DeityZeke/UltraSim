@@ -43,4 +43,24 @@ public sealed class ServerGameFacet
         ArgumentNullException.ThrowIfNull(operation);
         return _runtime.TryUseActiveGeneration(operation, out result);
     }
+
+    /// <summary>
+    /// Publishes a fully prepared running ECS world through the same active
+    /// generation root used by normal Runtime replacements.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="publicationAction"/> is invoked synchronously after the
+    /// candidate becomes active and before the old generation is disposed. A
+    /// callback failure is terminal because the publication boundary has been
+    /// crossed; callers must make the callback's state transfer non-throwing
+    /// after candidate validation.
+    /// </remarks>
+    public bool TryPublishPreparedGeneration(
+        EcsWorld preparedWorld,
+        Action? publicationAction,
+        out ulong generationId)
+    {
+        ArgumentNullException.ThrowIfNull(preparedWorld);
+        return _runtime.TryPublishPreparedGeneration(preparedWorld, publicationAction, out generationId);
+    }
 }
