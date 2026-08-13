@@ -19,8 +19,10 @@ ownership and dependency direction. S0.2 — the InternalHost, HeadlessHost, and
 minimal typed host capabilities slice — is accepted in
 [`S0.2 Acceptance Report.md`](S0.2%20Acceptance%20Report.md). S0.3 — the UI-0
 definition/compiler kernel — is accepted in
-[`S0.3 Acceptance Report.md`](S0.3%20Acceptance%20Report.md). Later slices
-introduce the client renderer, admission, and game composition incrementally.
+[`S0.3 Acceptance Report.md`](S0.3%20Acceptance%20Report.md). S0.4 — the local
+client UI runtime and minimal Godot renderer — is accepted in
+[`S0.4 Acceptance Report.md`](S0.4%20Acceptance%20Report.md). Later slices
+introduce admission and game composition incrementally.
 
 ## Current executable slices
 
@@ -43,6 +45,9 @@ dotnet run --project \
   -c Release
 dotnet run --project \
   _Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj \
+  -c Release
+dotnet run --project \
+  _Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj \
   -c Release
 ```
 

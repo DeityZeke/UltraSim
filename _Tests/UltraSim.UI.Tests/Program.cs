@@ -21,6 +21,7 @@ var tests = new (string Name, Action Body)[]
     ("FailedAuthoringCallbacksDoNotPoisonBuilder", FailedAuthoringCallbacksDoNotPoisonBuilder),
     ("DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous", DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous),
     ("MixedLayoutAndElementSiblingOrderIsPreserved", MixedLayoutAndElementSiblingOrderIsPreserved),
+    ("ListRowActionsHaveExplicitContext", ListRowActionsHaveExplicitContext),
 };
 
 foreach ((string name, Action body) in tests)
@@ -523,6 +524,34 @@ static void MixedLayoutAndElementSiblingOrderIsPreserved()
     Assert.False(middleLayout.Hash == finalLayout.Hash);
 }
 
+static void ListRowActionsHaveExplicitContext()
+{
+    var valid = new UiDefinitionBuilder("list-action");
+    UiSlotReference rows = valid.DeclareSlot("rows", UiSlotValueKind.List);
+    UiActionReference select = valid.DeclareAction("select", acceptsRowContext: true);
+    valid.AddCanvas(canvas => canvas.AddList(
+        "rows", rows, select,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100))));
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(valid);
+    Assert.Equal(definition.Prepare(select), definition.Elements[0].Action);
+
+    var listWithoutContext = new UiDefinitionBuilder("bad-list-action");
+    UiSlotReference badRows = listWithoutContext.DeclareSlot("rows", UiSlotValueKind.List);
+    UiActionReference badSelect = listWithoutContext.DeclareAction("select");
+    listWithoutContext.AddCanvas(canvas => canvas.AddList(
+        "rows", badRows, badSelect,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(listWithoutContext));
+
+    var buttonWithContext = new UiDefinitionBuilder("bad-button-action");
+    UiSlotReference label = buttonWithContext.DeclareSlot("label", UiSlotValueKind.Text);
+    UiActionReference rowAction = buttonWithContext.DeclareAction("row", acceptsRowContext: true);
+    buttonWithContext.AddCanvas(canvas => canvas.AddButton(
+        "button", rowAction, label,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(buttonWithContext));
+}
+
 static UiDefinitionBuilder CreateMixedOrderFixture(bool layoutLast)
 {
     var builder = new UiDefinitionBuilder("mixed-order");
@@ -587,7 +616,7 @@ static UiDefinitionBuilder CreateFixture(float canvasWidth = 800)
         canvas.AddVertical("content", vertical =>
         {
             vertical.AddText("title-label", "title");
-            vertical.AddList("item-list", "rows");
+            vertical.AddList("item-list", "rows", "select");
             vertical.AddHorizontal("footer", horizontal =>
             {
                 horizontal.AddToggle("enabled-toggle", "enabled");

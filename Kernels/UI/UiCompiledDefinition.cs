@@ -538,6 +538,14 @@ public static class UiDefinitionCompiler
         if (element.ActionKey is not null)
         {
             UiSourceAction action = definitionSource.Actions[actionIds[element.ActionKey].Value];
+            bool requiresRowContext = element.Kind == UiElementKind.List;
+            if (action.AcceptsRowContext != requiresRowContext)
+            {
+                throw new InvalidDataException(
+                    requiresRowContext
+                        ? $"List '{element.Key}' requires a row-context action."
+                        : $"UI element '{element.Key}' cannot bind a row-context action outside a List.");
+            }
             UiValueKind expectedInput = element.Kind switch
             {
                 UiElementKind.TextInput => UiValueKind.Text,

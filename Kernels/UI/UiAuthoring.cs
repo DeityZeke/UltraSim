@@ -252,9 +252,25 @@ public abstract class UiContainerBuilder
         AddElement(new UiSourceElement(UiElementKind.List, key, placement, null, null,
             rowsSlotKey, actionKey: null));
 
+    public void AddList(
+        string key,
+        string rowsSlotKey,
+        string actionKey,
+        UiChildLayout placement = default) =>
+        AddElement(new UiSourceElement(UiElementKind.List, key, placement, null, null,
+            rowsSlotKey, actionKey));
+
     public void AddList(string key, UiSlotReference rows, UiChildLayout placement = default) =>
         AddElement(new UiSourceElement(UiElementKind.List, key, placement, null, null,
             rows, default));
+
+    public void AddList(
+        string key,
+        UiSlotReference rows,
+        UiActionReference action,
+        UiChildLayout placement = default) =>
+        AddElement(new UiSourceElement(UiElementKind.List, key, placement, null, null,
+            rows, action));
 
     private void AddLayout(
         UiLayoutKind kind,

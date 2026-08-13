@@ -29,7 +29,7 @@ S0 completion summary
 
 [x] S0.3 — UI-0 definition/compiler kernel
 
-[ ] S0.4 — Local client UI runtime + minimal Godot renderer
+[x] S0.4 — Local client UI runtime + minimal Godot renderer
 
 [ ] S0.5 — Admission + optional minimal Accounting
 
@@ -1408,6 +1408,37 @@ input or toggle.
 Exit gate
 
 The exact same compiled definition/model/action semantics operate locally through a generic client runtime and native Godot controls, with cold cache, hot cache, and live delta behavior.
+
+Accepted S0.4 invariants
+
+- Exact cache identity includes server/composition/protocol/key/version/hash;
+  definition-family replacement is version-monotonic and same-version hash
+  conflicts reject before mutation.
+- View IDs are owner-thread-bound, monotonic identities. Closed IDs retire;
+  only a proven newer revision of the same family may replace an open instance
+  while retaining its ID.
+- Open operations and deltas own immutable snapshots. Renderers receive a
+  read-only model view, and scalar deltas share immutable list snapshots rather
+  than cloning every row.
+- Delta validation precedes candidate model mutation. Multiple distinct row
+  changes to one list form one ordered atomic delta; duplicate row targets and
+  replace-plus-row ambiguity reject.
+- Renderer callbacks are valid only after Create/Apply/Close returns. Native
+  renderer failure or synchronous callback reentry terminally faults the
+  client runtime because external control state may already be partial.
+- List row actions are explicit in the compiled definition, require row
+  context, preserve stable row identity through native input, and respect
+  dynamic action availability.
+- The Godot acceptance scene instantiates the full S0 element vocabulary and
+  verifies freeform Canvas placement, flow nesting, shared Overlay bounds,
+  Scroll padding, in-place scalar/list updates, typed actions, and close.
+- Permanent engine-neutral regression rows cover cold open, exact-cache hot
+  open, scalar patch, and one-row list patch. These are bounded managed UI
+  operations, not ECS zero-allocation hot paths.
+
+Later remote transport must apply explicit artifact/message/value/count limits
+before materializing untrusted UI definitions or dynamic payloads. S0.4 is a
+trusted in-process semantic bridge and does not invent Network framing limits.
 
 15. S0.5 — Admission and optional Accounting
 

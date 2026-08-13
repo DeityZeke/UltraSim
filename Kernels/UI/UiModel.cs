@@ -27,6 +27,20 @@ public sealed class UiModel
 
     public CompiledUiDefinition Definition => _definition;
 
+    /// <summary>Creates an independent dynamic snapshot for a client view or delta transaction.</summary>
+    public UiModel Clone()
+    {
+        var clone = new UiModel(_definition);
+        Array.Copy(_values, clone._values, _values.Length);
+        Array.Copy(_actionStates, clone._actionStates, _actionStates.Length);
+        // Row arrays and UiListRow cell arrays are immutable snapshots: the
+        // model never mutates either and ReplaceRows always publishes a new
+        // private array. Clones can therefore share them until a list slot is
+        // replaced, avoiding a whole-list deep copy for scalar deltas.
+        Array.Copy(_rows, clone._rows, _rows.Length);
+        return clone;
+    }
+
     /// <summary>Sets one prepared scalar slot without performing source-key lookup.</summary>
     public void Set(UiSlotId slot, UiValue value)
     {
