@@ -27,7 +27,7 @@ S0 completion summary
 
 [x] S0.2 — Internal and Headless hosts + minimal host capabilities
 
-[ ] S0.3 — UI-0 definition/compiler kernel
+[x] S0.3 — UI-0 definition/compiler kernel
 
 [ ] S0.4 — Local client UI runtime + minimal Godot renderer
 
@@ -1270,6 +1270,33 @@ Grid unless proven necessary.
 Exit gate
 
 A UI definition can be authored readably, compiled once into an immutable renderer-neutral definition, and populated/updated through typed dynamic model/action state without stringly runtime routing.
+
+Accepted S0.3 invariants
+
+`UiDefinitionHandle` identifies an exact canonical compiled revision, not merely
+the reusable authoring key. Layout/action revisions therefore cannot accept a
+stale action request solely because their `UiDefinitionKey` is unchanged.
+
+Flow-container child order is one shared ordinal across nested layouts and
+elements. The compiled layout and element tables retain that ordinal so a
+renderer can reconstruct interleaved authoring order without relying on table
+or kind grouping.
+
+Normal game authoring retains definition-local `UiSlotReference` and
+`UiActionReference` values returned by declaration. These references are used
+both by scoped element builders and to prepare compact runtime IDs after
+compilation. Cold string binding remains available for freeform/tooling input
+and diagnostics, but it is not the preferred game-code route.
+
+Action contracts declare row-context and input-kind requirements. Definition,
+instance, row-context, action availability, and input kind are validated before
+transient intent is accepted. TextInput and Toggle may bind typed Text and
+Boolean actions respectively; an omitted action represents display-only state.
+
+Compilation independently revalidates layout options and containment rather
+than relying on public constructors. Canonical floats normalize signed zero,
+and invalid anchors, non-positive Canvas dimensions, duplicate/missing sibling
+orders, unsupported kinds, and cross-definition authoring references reject.
 
 14. S0.4 — Client UI runtime, LocalSemanticLink, and minimal Godot renderer
 

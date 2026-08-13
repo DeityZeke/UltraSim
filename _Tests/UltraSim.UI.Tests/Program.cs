@@ -1,0 +1,643 @@
+using UltraSim.UI;
+
+var tests = new (string Name, Action Body)[]
+{
+    ("AuthoringCompilesToPreparedNumericSurface", AuthoringCompilesToPreparedNumericSurface),
+    ("DynamicModelDoesNotChangeDefinitionHash", DynamicModelDoesNotChangeDefinitionHash),
+    ("LayoutChangesDefinitionHash", LayoutChangesDefinitionHash),
+    ("CompilationIsDeterministicInSourceOrder", CompilationIsDeterministicInSourceOrder),
+    ("CompleteS0VocabularyCompiles", CompleteS0VocabularyCompiles),
+    ("UnsupportedKindsRejectSafely", UnsupportedKindsRejectSafely),
+    ("UnknownBindingsAndDuplicateDeclarationsReject", UnknownBindingsAndDuplicateDeclarationsReject),
+    ("InvalidContainmentAndLimitsReject", InvalidContainmentAndLimitsReject),
+    ("TypedModelValuesAndRowsAreBounded", TypedModelValuesAndRowsAreBounded),
+    ("ActionAvailabilityIsDynamicAndPrepared", ActionAvailabilityIsDynamicAndPrepared),
+    ("PreparedReferencesAvoidRuntimeBindingStrings", PreparedReferencesAvoidRuntimeBindingStrings),
+    ("CrossDefinitionReferencesReject", CrossDefinitionReferencesReject),
+    ("StaleDefinitionRevisionRejects", StaleDefinitionRevisionRejects),
+    ("TypedActionInputRejectsWrongValue", TypedActionInputRejectsWrongValue),
+    ("CanonicalFloatFormsHashIdentically", CanonicalFloatFormsHashIdentically),
+    ("CompilerRevalidatesInjectedLayoutState", CompilerRevalidatesInjectedLayoutState),
+    ("FailedAuthoringCallbacksDoNotPoisonBuilder", FailedAuthoringCallbacksDoNotPoisonBuilder),
+    ("DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous", DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous),
+    ("MixedLayoutAndElementSiblingOrderIsPreserved", MixedLayoutAndElementSiblingOrderIsPreserved),
+};
+
+foreach ((string name, Action body) in tests)
+{
+    body();
+    Console.WriteLine($"PASS {name}");
+}
+
+Console.WriteLine($"All {tests.Length} UI S0.3 tests passed.");
+
+static void AuthoringCompilesToPreparedNumericSurface()
+{
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(CreateFixture());
+
+    Assert.Equal(new UiDefinitionKey("fixture.inventory"), definition.Key);
+    Assert.True(definition.Handle.IsValid);
+    Assert.True(definition.Hash.IsValid);
+    Assert.Equal(3, definition.LayoutNodeCount);
+    Assert.Equal(5, definition.ElementCount);
+    Assert.Equal(3, definition.SlotCount);
+    Assert.Equal(2, definition.ActionCount);
+
+    UiSlotId title = definition.Bindings.RequireSlot("title");
+    UiActionId select = definition.Bindings.RequireAction("select");
+    Assert.Equal((ushort)0, title.Value);
+    Assert.Equal((ushort)1, select.Value);
+    Assert.Equal(UiSlotValueKind.Text, definition.GetSlotValueKind(title));
+    Assert.True(definition.GetAction(select).AcceptsRowContext);
+    Assert.Equal(UiLayoutKind.Canvas, definition.LayoutNodes[0].Kind);
+    Assert.Equal(UiLayoutKind.Vertical, definition.LayoutNodes[1].Kind);
+    Assert.Equal(UiElementKind.List, definition.Elements[2].Kind);
+}
+
+static void DynamicModelDoesNotChangeDefinitionHash()
+{
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(CreateFixture());
+    UiModel first = new(definition);
+    UiModel second = new(definition);
+    UiSlotId title = definition.Bindings.RequireSlot("title");
+    UiSlotId rows = definition.Bindings.RequireSlot("rows");
+    UiActionId select = definition.Bindings.RequireAction("select");
+
+    first.SetText(title, "Alice");
+    first.ReplaceRows(rows, new[]
+    {
+        new UiListRow(new UiRowId(1), new[] { UiValue.FromText("Sword") }),
+    });
+    second.SetText(title, "Bob");
+    second.ReplaceRows(rows, new[]
+    {
+        new UiListRow(new UiRowId(2), new[] { UiValue.FromText("Shield") }),
+        new UiListRow(new UiRowId(3), new[] { UiValue.FromText("Potion") }),
+    });
+    second.SetActionState(select, new UiActionState(false, "Not your turn."));
+
+    Assert.Equal(first.Definition.Hash, second.Definition.Hash);
+    Assert.Equal("Alice", first.Get(title).Text);
+    Assert.Equal(1, first.GetRows(rows).Length);
+    Assert.Equal(2, second.GetRows(rows).Length);
+}
+
+static void LayoutChangesDefinitionHash()
+{
+    CompiledUiDefinition original = UiDefinitionCompiler.Compile(CreateFixture(canvasWidth: 800));
+    CompiledUiDefinition changed = UiDefinitionCompiler.Compile(CreateFixture(canvasWidth: 801));
+
+    Assert.False(original.Hash == changed.Hash);
+    Assert.False(original.Handle == changed.Handle);
+}
+
+static void CompilationIsDeterministicInSourceOrder()
+{
+    CompiledUiDefinition first = UiDefinitionCompiler.Compile(CreateFixture());
+    CompiledUiDefinition second = UiDefinitionCompiler.Compile(CreateFixture());
+
+    Assert.Equal(first.Hash, second.Hash);
+    Assert.Equal(first.Handle, second.Handle);
+    for (int index = 0; index < first.LayoutNodeCount; index++)
+    {
+        Assert.Equal(first.LayoutNodes[index].Id.Value, second.LayoutNodes[index].Id.Value);
+        Assert.Equal(first.LayoutNodes[index].Key, second.LayoutNodes[index].Key);
+    }
+    for (int index = 0; index < first.ElementCount; index++)
+        Assert.Equal(first.Elements[index].Key, second.Elements[index].Key);
+}
+
+static void CompleteS0VocabularyCompiles()
+{
+    var builder = new UiDefinitionBuilder("complete-vocabulary");
+    builder.DeclareSlot("text", UiSlotValueKind.Text);
+    builder.DeclareSlot("enabled", UiSlotValueKind.Boolean);
+    builder.DeclareSlot("rows", UiSlotValueKind.List);
+    builder.DeclareAction("click");
+    builder.AddCanvas(canvas =>
+    {
+        canvas.AddPanel("panel", "surface",
+            UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 400, 300)));
+        canvas.AddText("text", "text",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 10, 100, 20)));
+        canvas.AddImage("image", "icon",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 40, 32, 32)));
+        canvas.AddButton("button", "click", "text",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 80, 100, 24)));
+        canvas.AddTextInput("input", "text",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 110, 100, 24)));
+        canvas.AddToggle("toggle", "enabled",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 140, 100, 24)));
+        canvas.AddList("list", "rows",
+            UiChildLayout.Canvas(new UiCanvasPlacement(10, 170, 200, 100)));
+        canvas.AddOverlay("overlay", overlay =>
+        {
+            overlay.AddScroll("scroll", scroll => scroll.AddTextInput("nested-input", "text"),
+                flow: new UiFlowOptions(spacing: 2));
+        }, UiChildLayout.Canvas(new UiCanvasPlacement(220, 10, 160, 120)));
+    });
+
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder);
+    Assert.Equal(3, definition.LayoutNodeCount);
+    Assert.Equal(8, definition.ElementCount);
+    bool hasOverlay = false;
+    bool hasScroll = false;
+    foreach (UiCompiledLayoutNode node in definition.LayoutNodes)
+    {
+        hasOverlay |= node.Kind == UiLayoutKind.Overlay;
+        hasScroll |= node.Kind == UiLayoutKind.Scroll;
+    }
+    bool hasImage = false;
+    bool hasTextInput = false;
+    foreach (UiCompiledElement element in definition.Elements)
+    {
+        hasImage |= element.Kind == UiElementKind.Image;
+        hasTextInput |= element.Kind == UiElementKind.TextInput;
+    }
+    Assert.True(hasOverlay);
+    Assert.True(hasScroll);
+    Assert.True(hasImage);
+    Assert.True(hasTextInput);
+
+    Assert.Throws<ArgumentOutOfRangeException>(() => UiChildLayout.Flow((UiSizing)99));
+    Assert.Throws<ArgumentOutOfRangeException>(() => new UiFlowOptions(alignment: (UiAlignment)99));
+}
+
+static void UnknownBindingsAndDuplicateDeclarationsReject()
+{
+    var unknown = new UiDefinitionBuilder("unknown");
+    unknown.AddCanvas(canvas => canvas.AddText(
+        "label", "typo", UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(unknown));
+
+    var duplicateSlot = new UiDefinitionBuilder("duplicate-slot");
+    duplicateSlot.DeclareSlot("value", UiSlotValueKind.Text);
+    duplicateSlot.DeclareSlot("value", UiSlotValueKind.Text);
+    duplicateSlot.AddCanvas(_ => { });
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(duplicateSlot));
+
+    var duplicateAction = new UiDefinitionBuilder("duplicate-action");
+    duplicateAction.DeclareAction("submit");
+    duplicateAction.DeclareAction("submit");
+    duplicateAction.AddCanvas(_ => { });
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(duplicateAction));
+
+    var wrongType = new UiDefinitionBuilder("wrong-type");
+    wrongType.DeclareSlot("enabled", UiSlotValueKind.Boolean);
+    wrongType.AddCanvas(canvas => canvas.AddText(
+        "label", "enabled", UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(wrongType));
+}
+
+static void UnsupportedKindsRejectSafely()
+{
+    var badLayout = new UiDefinitionBuilder("unsupported-layout");
+    var layoutRoot = new UiSourceLayoutNode(
+        UiLayoutKind.Canvas, "root", default, default, UiCanvasOptions.Default);
+    layoutRoot.Children.Add(new UiSourceLayoutNode(
+        (UiLayoutKind)99,
+        "unsupported",
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)),
+        default,
+        default));
+    badLayout.SetRootForTesting(layoutRoot);
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(badLayout));
+
+    var badElement = new UiDefinitionBuilder("unsupported-element");
+    var elementRoot = new UiSourceLayoutNode(
+        UiLayoutKind.Canvas, "root", default, default, UiCanvasOptions.Default);
+    elementRoot.Elements.Add(new UiSourceElement(
+        (UiElementKind)99,
+        "unsupported",
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)),
+        null,
+        null,
+        null,
+        null));
+    badElement.SetRootForTesting(elementRoot);
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(badElement));
+}
+
+static void InvalidContainmentAndLimitsReject()
+{
+    var flowWithCanvasPlacement = new UiDefinitionBuilder("bad-placement");
+    flowWithCanvasPlacement.AddCanvas(canvas => canvas.AddVertical(
+        "column",
+        vertical => vertical.AddPanel("panel", "surface", UiChildLayout.Canvas(
+            new UiCanvasPlacement(0, 0, 100, 100))),
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(flowWithCanvasPlacement));
+
+    var canvasWithoutPlacement = new UiDefinitionBuilder("missing-placement");
+    canvasWithoutPlacement.AddCanvas(canvas => canvas.AddPanel("panel", "surface"));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(canvasWithoutPlacement));
+
+    var deep = new UiDefinitionBuilder("deep");
+    deep.AddCanvas(canvas => canvas.AddVertical("level-1", level1 =>
+        level1.AddVertical("level-2", level2 => level2.AddVertical("level-3", _ => { }))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(
+        deep, new UiCompileLimits(maximumDepth: 2)));
+
+    var tooMuchText = new UiDefinitionBuilder("text-limit");
+    tooMuchText.DeclareSlot("text", UiSlotValueKind.Text);
+    tooMuchText.AddCanvas(canvas => canvas.AddText(
+        "label", "text", UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(
+        tooMuchText, new UiCompileLimits(maximumTextCharacters: 8)));
+
+    var tooManyElements = new UiDefinitionBuilder("element-limit");
+    tooManyElements.AddCanvas(canvas =>
+    {
+        canvas.AddPanel("one", "surface", UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)));
+        canvas.AddPanel("two", "surface", UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)));
+    });
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(
+        tooManyElements, new UiCompileLimits(maximumElements: 1)));
+}
+
+static void TypedModelValuesAndRowsAreBounded()
+{
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(CreateFixture());
+    UiModel model = new(definition);
+    UiSlotId title = definition.Bindings.RequireSlot("title");
+    UiSlotId enabled = definition.Bindings.RequireSlot("enabled");
+    UiSlotId rows = definition.Bindings.RequireSlot("rows");
+
+    model.SetText(title, "Ready");
+    model.SetBoolean(enabled, true);
+    Assert.Equal(UiValueKind.Text, model.Get(title).Kind);
+    Assert.Equal(UiValueKind.Boolean, model.Get(enabled).Kind);
+    Assert.Throws<InvalidOperationException>(() => model.SetNumber(title, 3));
+
+    UiListRow[] source =
+    [
+        new UiListRow(new UiRowId(10), new[] { UiValue.FromText("A") }),
+        new UiListRow(new UiRowId(11), new[] { UiValue.FromText("B") }),
+    ];
+    model.ReplaceRows(rows, source);
+    Assert.Equal(2, model.GetRows(rows).Length);
+    Assert.Equal(new UiRowId(11), model.GetRows(rows)[1].Id);
+    Assert.Throws<InvalidDataException>(() => model.ReplaceRows(rows,
+        new[]
+        {
+            new UiListRow(new UiRowId(12), ReadOnlySpan<UiValue>.Empty),
+            new UiListRow(new UiRowId(12), ReadOnlySpan<UiValue>.Empty),
+        }));
+    CompiledUiDefinition limitedDefinition = UiDefinitionCompiler.Compile(
+        CreateFixture(), new UiCompileLimits(maximumRowsPerList: 1));
+    UiModel limitedModel = new(limitedDefinition);
+    UiSlotId limitedRows = limitedDefinition.Bindings.RequireSlot("rows");
+    Assert.Throws<InvalidDataException>(() => limitedModel.ReplaceRows(limitedRows,
+        new[]
+        {
+            new UiListRow(new UiRowId(13), ReadOnlySpan<UiValue>.Empty),
+            new UiListRow(new UiRowId(14), ReadOnlySpan<UiValue>.Empty),
+        }));
+}
+
+static void ActionAvailabilityIsDynamicAndPrepared()
+{
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(CreateFixture());
+    UiModel model = new(definition);
+    UiActionId select = definition.Bindings.RequireAction("select");
+    UiActionId close = definition.Bindings.RequireAction("close");
+    var request = new UiActionRequest(
+        new UiViewInstanceId(42), definition.Handle, select, new UiRowId(99));
+
+    model.ValidateAction(request);
+    model.SetActionState(select, new UiActionState(false, "Not available."));
+    Assert.Equal("Not available.", model.GetActionState(select).UnavailableReason);
+    Assert.Throws<InvalidOperationException>(() => model.ValidateAction(request));
+
+    var nonRowRequest = new UiActionRequest(new UiViewInstanceId(42), definition.Handle, close);
+    model.ValidateAction(nonRowRequest);
+    Assert.Throws<InvalidOperationException>(() => model.ValidateAction(
+        new UiActionRequest(new UiViewInstanceId(42), definition.Handle, close, new UiRowId(1))));
+    Assert.Throws<InvalidOperationException>(() => model.ValidateAction(
+        new UiActionRequest(new UiViewInstanceId(42), UiDefinitionHandle.Invalid, close)));
+}
+
+static void PreparedReferencesAvoidRuntimeBindingStrings()
+{
+    var builder = new UiDefinitionBuilder("typed-authoring");
+    UiSlotReference label = builder.DeclareSlot("label", UiSlotValueKind.Text);
+    UiSlotReference enabled = builder.DeclareSlot("enabled", UiSlotValueKind.Boolean);
+    UiActionReference submit = builder.DeclareAction("submit");
+    UiActionReference changed = builder.DeclareAction("changed", inputKind: UiValueKind.Boolean);
+    builder.AddCanvas(canvas => canvas.AddVertical(
+        "content",
+        column =>
+        {
+            column.AddText("label", label);
+            column.AddButton("submit", submit, label);
+            column.AddToggle("toggle", enabled, changed);
+        },
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100))));
+
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder);
+    UiSlotId labelId = definition.Prepare(label);
+    UiSlotId enabledId = definition.Prepare(enabled);
+    UiActionId submitId = definition.Prepare(submit);
+    UiActionId changedId = definition.Prepare(changed);
+
+    Assert.Equal((ushort)0, labelId.Value);
+    Assert.Equal((ushort)1, enabledId.Value);
+    Assert.Equal((ushort)0, submitId.Value);
+    Assert.Equal(UiValueKind.Boolean, definition.GetAction(changedId).InputKind);
+}
+
+static void CrossDefinitionReferencesReject()
+{
+    var first = new UiDefinitionBuilder("first");
+    UiSlotReference firstText = first.DeclareSlot("text", UiSlotValueKind.Text);
+    UiActionReference firstAction = first.DeclareAction("act");
+    first.AddCanvas(canvas => canvas.AddButton(
+        "button", firstAction, firstText,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10))));
+    CompiledUiDefinition firstDefinition = UiDefinitionCompiler.Compile(first);
+
+    var second = new UiDefinitionBuilder("second");
+    second.DeclareSlot("text", UiSlotValueKind.Text);
+    second.DeclareAction("act");
+    second.AddCanvas(canvas => canvas.AddButton(
+        "button", firstAction, firstText,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10))));
+
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(second));
+    CompiledUiDefinition ownDefinition = UiDefinitionCompiler.Compile(CreateFixture());
+    Assert.Throws<InvalidOperationException>(() => ownDefinition.Prepare(firstText));
+    Assert.True(firstDefinition.Prepare(firstText).IsValid);
+}
+
+static void StaleDefinitionRevisionRejects()
+{
+    CompiledUiDefinition original = UiDefinitionCompiler.Compile(CreateFixture(canvasWidth: 800));
+    CompiledUiDefinition changed = UiDefinitionCompiler.Compile(CreateFixture(canvasWidth: 801));
+    UiActionId oldAction = original.Bindings.RequireAction("close");
+
+    Assert.False(original.Handle == changed.Handle);
+    Assert.Throws<InvalidOperationException>(() => changed.ValidateAction(new UiActionRequest(
+        new UiViewInstanceId(1), original.Handle, oldAction)));
+}
+
+static void TypedActionInputRejectsWrongValue()
+{
+    var builder = new UiDefinitionBuilder("typed-action");
+    UiSlotReference text = builder.DeclareSlot("text", UiSlotValueKind.Text);
+    UiActionReference edit = builder.DeclareAction("edit", inputKind: UiValueKind.Text);
+    builder.AddCanvas(canvas => canvas.AddTextInput(
+        "input", text, edit,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder);
+    UiActionId action = definition.Prepare(edit);
+    var instance = new UiViewInstanceId(1);
+
+    definition.ValidateAction(new UiActionRequest(
+        instance, definition.Handle, action, input: UiValue.FromText("ok")));
+    Assert.Throws<InvalidOperationException>(() => definition.ValidateAction(new UiActionRequest(
+        instance, definition.Handle, action, input: UiValue.FromBoolean(true))));
+
+    var mismatch = new UiDefinitionBuilder("typed-action-mismatch");
+    UiSlotReference mismatchText = mismatch.DeclareSlot("text", UiSlotValueKind.Text);
+    UiActionReference booleanAction = mismatch.DeclareAction("edit", inputKind: UiValueKind.Boolean);
+    mismatch.AddCanvas(canvas => canvas.AddTextInput(
+        "input", mismatchText, booleanAction,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(mismatch));
+}
+
+static void CanonicalFloatFormsHashIdentically()
+{
+    CompiledUiDefinition positive = UiDefinitionCompiler.Compile(CreateZeroFixture(+0.0f));
+    CompiledUiDefinition negative = UiDefinitionCompiler.Compile(CreateZeroFixture(-0.0f));
+    Assert.Equal(positive.Hash, negative.Hash);
+    Assert.Equal(positive.Handle, negative.Handle);
+    Assert.Throws<ArgumentOutOfRangeException>(() => new UiCanvasPlacement(
+        0, 0, 10, 10, anchorMinX: 0.75f, anchorMaxX: 0.25f));
+}
+
+static void CompilerRevalidatesInjectedLayoutState()
+{
+    var invalidCanvas = new UiDefinitionBuilder("invalid-injected-canvas");
+    invalidCanvas.SetRootForTesting(new UiSourceLayoutNode(
+        UiLayoutKind.Canvas, "root", default, default, default));
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(invalidCanvas));
+
+    var invalidPlacement = new UiDefinitionBuilder("invalid-injected-placement");
+    var root = new UiSourceLayoutNode(
+        UiLayoutKind.Canvas, "root", default, default, UiCanvasOptions.Default);
+    root.Elements.Add(new UiSourceElement(
+        UiElementKind.Panel,
+        "panel",
+        default,
+        "surface",
+        null,
+        null,
+        null));
+    invalidPlacement.SetRootForTesting(root);
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(invalidPlacement));
+
+    var nestedCanvas = new UiDefinitionBuilder("nested-canvas");
+    var nestedRoot = new UiSourceLayoutNode(
+        UiLayoutKind.Canvas, "root", default, default, UiCanvasOptions.Default);
+    nestedRoot.AddChild(new UiSourceLayoutNode(
+        UiLayoutKind.Canvas,
+        "illegal",
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)),
+        default,
+        UiCanvasOptions.Default,
+        siblingOrder: 0));
+    nestedCanvas.SetRootForTesting(nestedRoot);
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(nestedCanvas));
+
+    var nullElementKey = new UiDefinitionBuilder("null-element-key");
+    var nullKeyRoot = new UiSourceLayoutNode(
+        UiLayoutKind.Canvas, "root", default, default, UiCanvasOptions.Default);
+    nullKeyRoot.AddElement(new UiSourceElement(
+        UiElementKind.Panel,
+        null!,
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)),
+        "surface",
+        null,
+        null,
+        null,
+        siblingOrder: 0));
+    nullElementKey.SetRootForTesting(nullKeyRoot);
+    Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(nullElementKey));
+}
+
+static void FailedAuthoringCallbacksDoNotPoisonBuilder()
+{
+    var root = new UiDefinitionBuilder("retry-root");
+    Assert.Throws<InvalidOperationException>(() => root.AddCanvas(_ =>
+        throw new InvalidOperationException("injected")));
+    root.AddCanvas(_ => { });
+    Assert.True(UiDefinitionCompiler.Compile(root).Hash.IsValid);
+
+    var child = new UiDefinitionBuilder("retry-child");
+    child.AddCanvas(canvas =>
+    {
+        Assert.Throws<InvalidOperationException>(() => canvas.AddVertical(
+            "failed", _ => throw new InvalidOperationException("injected"),
+            UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10))));
+        canvas.AddVertical(
+            "accepted", _ => { },
+            UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10)));
+    });
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(child);
+    Assert.Equal(2, definition.LayoutNodeCount);
+    Assert.Equal("accepted", definition.LayoutNodes[1].Key);
+}
+
+static void DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous()
+{
+    Assert.Throws<ArgumentOutOfRangeException>(() => new UiDefinitionKey(new string('x', 257)));
+
+    var builder = new UiDefinitionBuilder("any-slot");
+    UiSlotReference any = builder.DeclareSlot("any", UiSlotValueKind.Any);
+    builder.AddCanvas(_ => { });
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder);
+    UiSlotId slot = definition.Prepare(any);
+    UiModel model = new(definition);
+    model.SetText(slot, "value");
+    model.ReplaceRows(slot, new[] { new UiListRow(new UiRowId(1), ReadOnlySpan<UiValue>.Empty) });
+    Assert.Equal(UiValueKind.Unset, model.Get(slot).Kind);
+    model.SetBoolean(slot, true);
+    Assert.Equal(0, model.GetRows(slot).Length);
+}
+
+static void MixedLayoutAndElementSiblingOrderIsPreserved()
+{
+    CompiledUiDefinition middleLayout = UiDefinitionCompiler.Compile(CreateMixedOrderFixture(layoutLast: false));
+    CompiledUiDefinition finalLayout = UiDefinitionCompiler.Compile(CreateMixedOrderFixture(layoutLast: true));
+
+    UiCompiledLayoutNode middleNested = FindLayout(middleLayout, "nested");
+    UiCompiledLayoutNode finalNested = FindLayout(finalLayout, "nested");
+    UiCompiledElement first = FindElement(middleLayout, "first");
+    UiCompiledElement last = FindElement(middleLayout, "last");
+
+    Assert.Equal(0, first.SiblingOrder);
+    Assert.Equal(1, middleNested.SiblingOrder);
+    Assert.Equal(2, last.SiblingOrder);
+    Assert.Equal(2, finalNested.SiblingOrder);
+    Assert.False(middleLayout.Hash == finalLayout.Hash);
+}
+
+static UiDefinitionBuilder CreateMixedOrderFixture(bool layoutLast)
+{
+    var builder = new UiDefinitionBuilder("mixed-order");
+    builder.AddCanvas(canvas => canvas.AddVertical(
+        "content",
+        vertical =>
+        {
+            vertical.AddPanel("first", "surface");
+            if (!layoutLast)
+                vertical.AddHorizontal("nested", _ => { });
+            vertical.AddPanel("last", "surface");
+            if (layoutLast)
+                vertical.AddHorizontal("nested", _ => { });
+        },
+        UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100))));
+    return builder;
+}
+
+static UiCompiledLayoutNode FindLayout(CompiledUiDefinition definition, string key)
+{
+    foreach (UiCompiledLayoutNode node in definition.LayoutNodes)
+    {
+        if (node.Key == key)
+            return node;
+    }
+    throw new InvalidOperationException($"Layout '{key}' was not found.");
+}
+
+static UiCompiledElement FindElement(CompiledUiDefinition definition, string key)
+{
+    foreach (UiCompiledElement element in definition.Elements)
+    {
+        if (element.Key == key)
+            return element;
+    }
+    throw new InvalidOperationException($"Element '{key}' was not found.");
+}
+
+static UiDefinitionBuilder CreateZeroFixture(float zero)
+{
+    var builder = new UiDefinitionBuilder("canonical-zero");
+    builder.AddCanvas(canvas => canvas.AddVertical(
+        "content",
+        _ => { },
+        UiChildLayout.Canvas(new UiCanvasPlacement(zero, zero, 10, 10)),
+        new UiFlowOptions(spacing: zero, padding: new UiPadding(zero, zero, zero, zero))));
+    return builder;
+}
+
+static UiDefinitionBuilder CreateFixture(float canvasWidth = 800)
+{
+    var builder = new UiDefinitionBuilder("fixture.inventory");
+    builder.DeclareSlot("title", UiSlotValueKind.Text);
+    builder.DeclareSlot("rows", UiSlotValueKind.List);
+    builder.DeclareSlot("enabled", UiSlotValueKind.Boolean);
+    builder.DeclareAction("close");
+    builder.DeclareAction("select", acceptsRowContext: true);
+    builder.AddCanvas(new UiCanvasOptions(canvasWidth, 600), canvas =>
+    {
+        canvas.AddPanel("background", "inventory.surface",
+            UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, canvasWidth, 600)));
+        canvas.AddVertical("content", vertical =>
+        {
+            vertical.AddText("title-label", "title");
+            vertical.AddList("item-list", "rows");
+            vertical.AddHorizontal("footer", horizontal =>
+            {
+                horizontal.AddToggle("enabled-toggle", "enabled");
+                horizontal.AddButton("close-button", "close", "title");
+            });
+        }, UiChildLayout.Canvas(new UiCanvasPlacement(20, 20, 760, 540)),
+        new UiFlowOptions(spacing: 4, alignment: UiAlignment.Stretch));
+    });
+    return builder;
+}
+
+static class Assert
+{
+    public static void True(bool value)
+    {
+        if (!value)
+            throw new InvalidOperationException("Expected true.");
+    }
+
+    public static void False(bool value)
+    {
+        if (value)
+            throw new InvalidOperationException("Expected false.");
+    }
+
+    public static void Equal<T>(T expected, T actual)
+    {
+        if (!EqualityComparer<T>.Default.Equals(expected, actual))
+        {
+            throw new InvalidOperationException($"Expected '{expected}', got '{actual}'.");
+        }
+    }
+
+    public static TException Throws<TException>(Action body)
+        where TException : Exception
+    {
+        try
+        {
+            body();
+        }
+        catch (TException exception)
+        {
+            return exception;
+        }
+        catch (Exception exception)
+        {
+            throw new InvalidOperationException(
+                $"Expected {typeof(TException).Name}, got {exception.GetType().Name}.", exception);
+        }
+
+        throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
+    }
+}

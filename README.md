@@ -17,8 +17,10 @@ S0.1 — the concrete runtime and generation slice — is accepted in
 [`S0.1 Acceptance Report.md`](S0.1%20Acceptance%20Report.md). S0.0 froze
 ownership and dependency direction. S0.2 — the InternalHost, HeadlessHost, and
 minimal typed host capabilities slice — is accepted in
-[`S0.2 Acceptance Report.md`](S0.2%20Acceptance%20Report.md). Later slices
-introduce UI, admission, and game composition incrementally.
+[`S0.2 Acceptance Report.md`](S0.2%20Acceptance%20Report.md). S0.3 — the UI-0
+definition/compiler kernel — is accepted in
+[`S0.3 Acceptance Report.md`](S0.3%20Acceptance%20Report.md). Later slices
+introduce the client renderer, admission, and game composition incrementally.
 
 ## Current executable slices
 
@@ -38,6 +40,9 @@ dotnet run --project \
   -c Release
 dotnet run --project \
   _Tests/UltraSim.Server.Hosting.Tests/UltraSim.Server.Hosting.Tests.csproj \
+  -c Release
+dotnet run --project \
+  _Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj \
   -c Release
 ```
 
