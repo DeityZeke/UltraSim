@@ -210,6 +210,15 @@ public sealed class StructuralCommandBuffer
         return count >= 0 && count <= _commands.Length - _count;
     }
 
+    /// <summary>Opens the canonical arena epoch before scheduler payload preflight and copy.</summary>
+    internal void BeginSchedulerMerge()
+    {
+        if (_schedulerLane)
+            throw new InvalidOperationException("A scheduler lane cannot be the canonical merge destination.");
+        EnsureOwnerAndActive();
+        BeginRecordingIfNeeded();
+    }
+
     internal int GetSchedulerMergedPayloadEnd(
         EcsWorld<NativeChunkArena> world,
         int start,

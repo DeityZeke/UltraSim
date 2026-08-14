@@ -12,24 +12,33 @@ public readonly record struct GameStaging(
     EcsWorld World,
     InventoryGenerationState Inventory,
     GameContent Content,
-    ComponentLookup<GameSimulationState> SimulationLookup);
+    ComponentLookup<GameSimulationState> SimulationLookup,
+    GameReplicationBindings? Replication = null);
 
 /// <summary>Concrete game composition owning one schema, content set, and generation-state root.</summary>
 public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEntityBinder
 {
+    public const int NetworkLifecycleRecordCapacity = 4_096;
+    public const int NetworkCommandCapacity = 256;
+
     private readonly ConditionalWeakTable<EcsWorld, GameContent> _contentByWorld = new();
     private readonly InventoryLimits _inventoryLimits;
     private readonly int _maximumChunksPerContentArchetype;
+    private readonly GameRuntimeProfile _runtimeProfile;
 
     public UltraSimGameComposition(
         InventoryLimits? inventoryLimits = null,
-        int maximumChunksPerContentArchetype = 16)
+        int maximumChunksPerContentArchetype = 16,
+        GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local)
     {
         _inventoryLimits = inventoryLimits ?? InventoryLimits.Default;
         _inventoryLimits.Validate();
         if (maximumChunksPerContentArchetype <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumChunksPerContentArchetype));
+        if ((uint)runtimeProfile > (uint)GameRuntimeProfile.Networked)
+            throw new ArgumentOutOfRangeException(nameof(runtimeProfile));
         _maximumChunksPerContentArchetype = maximumChunksPerContentArchetype;
+        _runtimeProfile = runtimeProfile;
         Schema = GameSchema.CreateSchema();
         PersistenceCatalog = GameSchema.CreatePersistenceCatalog();
     }
@@ -40,12 +49,14 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
     public void Configure(ServerGenerationBuilder generation)
     {
         GameContent content = CompileContent(generation.World);
-        ComponentLookup<GameSimulationState> simulation = PrepareSimulation(generation.World);
+        (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
+            PrepareSimulation(generation.World, _runtimeProfile);
         generation.SetGameState(new GameGenerationState(
             new AccountingStore(),
             new InventoryGenerationState(generation.World, content, _inventoryLimits),
             content,
-            simulation));
+            simulation,
+            replication));
     }
 
     public GameStaging CreateStaging(
@@ -54,16 +65,19 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
     {
         var world = new EcsWorld(requirements.Schema, CreateWorldOptions(
             Math.Max(64, requirements.EntityCount),
-            requirements.IdentityOptions));
+            requirements.IdentityOptions,
+            _runtimeProfile));
         try
         {
             GameContent content = CompileContent(world);
-            ComponentLookup<GameSimulationState> simulation = PrepareSimulation(world);
+            (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
+                PrepareSimulation(world, _runtimeProfile);
             return new GameStaging(
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                simulation);
+                simulation,
+                replication);
         }
         catch
         {
@@ -77,16 +91,18 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         PersistenceIdentityOptions identity,
         InventoryLimits? limits = null)
     {
-        var world = new EcsWorld(Schema, CreateWorldOptions(entityCapacity, identity));
+        var world = new EcsWorld(Schema, CreateWorldOptions(entityCapacity, identity, _runtimeProfile));
         try
         {
             GameContent content = CompileContent(world);
-            ComponentLookup<GameSimulationState> simulation = PrepareSimulation(world);
+            (ComponentLookup<GameSimulationState> simulation, GameReplicationBindings? replication) =
+                PrepareSimulation(world, _runtimeProfile);
             return new GameStaging(
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
                 content,
-                simulation);
+                simulation,
+                replication);
         }
         catch
         {
@@ -112,16 +128,29 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
 
     public static EcsWorldOptions CreateWorldOptions(
         int entityCapacity = 4_096,
-        PersistenceIdentityOptions? identity = null) => new(
+        PersistenceIdentityOptions? identity = null,
+        GameRuntimeProfile runtimeProfile = GameRuntimeProfile.Local) => new(
         new EntityCapacity(entityCapacity),
         maximumArchetypes: 32,
         maximumPreparedPlans: 32,
+        maximumStructuralCommands: runtimeProfile switch
+        {
+            GameRuntimeProfile.Local => 0,
+            GameRuntimeProfile.Networked => NetworkCommandCapacity,
+            _ => throw new ArgumentOutOfRangeException(nameof(runtimeProfile)),
+        },
         scheduler: new EcsSchedulerOptions(
             maximumSystems: 8,
             maximumDependencies: 16,
             maximumWorkItems: 16,
             maximumStructuralSegments: 16,
             backgroundWorkerCount: 0),
+        lifecycleRecordCapacity: runtimeProfile switch
+        {
+            GameRuntimeProfile.Local => 0,
+            GameRuntimeProfile.Networked => NetworkLifecycleRecordCapacity,
+            _ => throw new ArgumentOutOfRangeException(nameof(runtimeProfile)),
+        },
         persistence: identity ?? new PersistenceIdentityOptions(new PersistentWorldId(0x7007)));
 
     private GameContent CompileContent(EcsWorld world)
@@ -135,9 +164,36 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         return content;
     }
 
-    private static ComponentLookup<GameSimulationState> PrepareSimulation(EcsWorld world)
+    private static (ComponentLookup<GameSimulationState>, GameReplicationBindings?) PrepareSimulation(
+        EcsWorld world,
+        GameRuntimeProfile runtimeProfile)
     {
         WriteJobPlan<GameSimulationState> plan = world.PrepareWriteJob<GameSimulationState>();
+        ComponentLookup<GameSimulationState> lookup = world.PrepareLookup<GameSimulationState>();
+        GameReplicationBindings? replication = null;
+        if (runtimeProfile == GameRuntimeProfile.Networked)
+        {
+            ReadJobPlan<GameSimulationState> baseline = world.PrepareReadJob<GameSimulationState>();
+            ChangedRowsJobPlan<GameSimulationState, GameSimulationState> changes =
+                world.PrepareChangedRowsJob<GameSimulationState, GameSimulationState>();
+            var commands = new GameSimulationCommandRuntime(NetworkCommandCapacity, lookup);
+            ComponentId simulationId = GameSchema.GetComponentId<GameSimulationState>();
+            world.RegisterRangeSystem<GameSimulationCommandRuntime, GameSimulationCommandJob>(
+                new SystemDefinition(
+                    "game.replication.authoritative-ingress",
+                    SystemStage.Input,
+                    executionPolicy: SystemExecutionPolicy.Serial,
+                    additionalReads: [simulationId],
+                    additionalWrites: [simulationId],
+                    structuralComponents: [simulationId]),
+                commands);
+            replication = new GameReplicationBindings(
+                world.Id,
+                baseline,
+                changes,
+                commands,
+                simulationId);
+        }
         world.RegisterWriteSystem<
             GameSimulationState,
             GameSimulationSystemRuntime,
@@ -148,6 +204,6 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 executionPolicy: SystemExecutionPolicy.Serial),
             plan,
             new GameSimulationSystemRuntime());
-        return world.PrepareLookup<GameSimulationState>();
+        return (lookup, replication);
     }
 }

@@ -87,7 +87,7 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison
 Regression against an accepted artifact:
 
 ```bash
-dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.4.1-2026-08-12.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
+dotnet run --project _Benchmarks/UltraSim.ECS.Comparison/UltraSim.ECS.Comparison.csproj -c Release -- --warmups=4 --iterations=15 --baseline=_Benchmarks/Baselines/ecs-v2-v3-3.4.2-2026-08-14.json --output-dir=_Benchmarks/results/ecs-v2-v3-current
 ```
 
 The orchestrator fixes tiering/ReadyToRun policy for both children and embeds it

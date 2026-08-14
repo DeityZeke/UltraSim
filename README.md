@@ -2,13 +2,14 @@
 
 UltraSim is a bounded, deterministic simulation and game-runtime foundation for
 very large persistent worlds. The current repository contains the accepted ECS
-3.4.1 kernel, authoritative Runtime/hosts, transactional persistence, neutral UI
+3.4.2 kernel, authoritative Runtime/hosts, transactional persistence, neutral UI
 protocol and Godot renderer, concrete game composition, Accounting, Admission,
 Inventory, and the completed S0 end-to-end integration slice.
 
-Network V3 is the active major implementation milestone. Its N0.0 dependency,
-identity, lane, deterministic-evidence, and comparison foundation is implemented;
-canonical game projection and OfflineDirect capture are next.
+Network V3 is the active major implementation milestone. N0.0's dependency,
+identity, lane, deterministic-evidence, and comparison foundation plus N0.1's
+canonical game projection and OfflineDirect oracle are implemented. Bounded
+packet/codec foundations are next.
 
 ## Design
 
@@ -47,7 +48,8 @@ per-step behavior is an explicit documented choice.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, and semantic port.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
 - `Client/*` — retained client projection and Godot presentation.
-- `Game/*` — concrete game schema/content/state and authoritative workflows.
+- `Game/*` — concrete game schema/content/state, authoritative workflows, and
+  N0.1 canonical replication projection.
 - `_Tests`, `_Benchmarks`, `_Tools` — executable correctness, evidence, and gates.
 - `_V2` — frozen historical/reference source used only by explicit comparisons.
 
@@ -88,6 +90,7 @@ Start with the [documentation map](Docs/README.md).
 - [Game composition](Docs/GAME.md)
 - [ECS](Kernels/ECS/README.md)
 - [Network kernel foundation](Kernels/Network/README.md)
+- [Game replication](Game/Replication/README.md)
 - [Benchmark methodology](_Benchmarks/README.md)
 - [Network V3 active plan](Docs/Plans/NETWORK.md)
 

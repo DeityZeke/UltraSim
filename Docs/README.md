@@ -18,6 +18,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
   Godot presentation.
 - [Game](GAME.md) — concrete game composition, schema/content ownership,
   Accounting, Admission, and Inventory.
+- [Game replication](../Game/Replication/README.md) — N0.1 canonical projection,
+  capture/history, authoritative ingress, and OfflineDirect oracle.
 
 ## ECS
 
@@ -33,7 +35,7 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Network kernel foundation](../Kernels/Network/README.md) — N0.0 identity,
   lane, deterministic trace/impairment, V2 archaeology, and evidence contracts.
-- [Network V3 active plan](Plans/NETWORK.md) — N0.1 through the complete remote
+- [Network V3 active plan](Plans/NETWORK.md) — N0.2 through the complete remote
   authority/client vertical.
 
 ## Evidence and tools
@@ -45,9 +47,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  N0.0 is accepted; N0.1 starts from the accepted S0 boundaries and
-  cadence-independent Runtime without treating completed ECS or S0 plans as
-  unfinished work.
+  N0.0 and N0.1 are accepted; N0.2 starts from the bounded canonical game
+  projection without treating completed ECS or S0 plans as unfinished work.
 
 ## Source-of-truth hierarchy
 

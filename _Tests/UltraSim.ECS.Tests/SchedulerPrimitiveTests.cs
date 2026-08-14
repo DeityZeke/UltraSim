@@ -1034,6 +1034,15 @@ internal static class SchedulerPrimitiveTests
         Assert.Equal(LifecycleKind.ComponentAdded, lifecycleRecords[3].Kind);
         Assert.Equal(tag, lifecycleRecords[3].ComponentId);
 
+        // A second tick opens a new canonical command-buffer epoch. Typed Add
+        // payload must be installed after that epoch opens; otherwise the first
+        // append clears the just-merged payload count and playback faults.
+        world.Tick(0.1);
+        Assert.True(world.TryRead(runtime.AddInteger, integers, out LayoutInt secondTickAdded));
+        Assert.Equal(42, secondTickAdded.Value);
+        Assert.True(world.TryRead(runtime.ReplaceInteger, integers, out LayoutInt secondTickReplaced));
+        Assert.Equal(99, secondTickReplaced.Value);
+
         var tinyScheduler = new EcsSchedulerOptions(
             maximumSystems: 1, maximumDependencies: 0, maximumWorkItems: 1,
             maximumStructuralSegments: 1, backgroundWorkerCount: 0,

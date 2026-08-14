@@ -56,6 +56,24 @@ Accounting, and Clock; Inventory is reconstructed from ECS truth.
 
 Narrow historical integration helpers are not production composition roots.
 
+## Replication projection
+
+`Game/Replication` owns the canonical client-semantic projection introduced in
+Network N0.1. It observes a complete committed generation through exact changed
+rows and lifecycle cursors, publishes connection-independent
+`ReplicationEntityId` slots within a `StateEpoch`, binds current Admission
+participants, and retains projection lifecycle separately from explicit
+application events.
+
+The network-enabled composition profile alone reserves lifecycle history,
+structural merge capacity, prepared observation, and bounded authoritative
+ingress. The normal local profile remains free of this cost. `OfflineDirect` is
+the packet-free semantic oracle; it receives no ECS entities or mutable world
+authority and atomically applies only complete baselines/frames.
+
+See [Game replication](../Game/Replication/README.md) for the current executable
+contract and [Network V3](Plans/NETWORK.md) for the remaining protocol work.
+
 ## Simulation rules
 
 Scheduled work selected by component topology uses generated chunk systems.

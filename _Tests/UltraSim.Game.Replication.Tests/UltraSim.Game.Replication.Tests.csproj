@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Game/Accounting/UltraSim.Game.Accounting.csproj" />
+    <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
+    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
+    <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+    <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+  </ItemGroup>
+</Project>

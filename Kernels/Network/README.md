@@ -1,8 +1,8 @@
 # UltraSim Network kernel
 
-Status: N0.0 contract and evidence foundation accepted. Packet framing, pools,
-codecs, security, reliability, transport, and game replication remain subsequent
-N0 checkpoints.
+Status: N0.0 contract and evidence foundation accepted. N0.1 game projection and
+OfflineDirect are accepted in `Game/Replication`. Packet framing, pools, codecs,
+security, reliability, and transport remain subsequent N0 checkpoints.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It currently contains only the executable contracts that
@@ -154,5 +154,6 @@ Run the focused gate:
 dotnet run --project _Tests/UltraSim.Network.Tests -c Release
 ```
 
-N0.1 is next: a game-owned canonical projection/capture service and OfflineDirect
-semantic oracle over the already accepted `ServerRuntime` and ECS capture boundary.
+N0.1 is implemented by [Game replication](../../Game/Replication/README.md).
+N0.2 is next: fixed Network capacities, generational connection state,
+packet/slab ownership, bounded rings, strict framing, and generated codecs.

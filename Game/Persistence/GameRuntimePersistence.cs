@@ -146,7 +146,11 @@ public sealed class GameRuntimePersistence
             built.Inventory.Rebuild(stagedWorld);
             stagedAccounting = accounting.TakeStore();
             candidate = new GameGenerationState(
-                stagedAccounting, built.Inventory, built.Content, built.SimulationLookup);
+                stagedAccounting,
+                built.Inventory,
+                built.Content,
+                built.SimulationLookup,
+                built.Replication);
 
             ulong publishedGeneration = 0;
             prepared.Commit(_ =>

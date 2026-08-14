@@ -25,6 +25,7 @@ string[] testProjects =
     "_Tests/UltraSim.Server.Hosting.Tests/UltraSim.Server.Hosting.Tests.csproj",
     "_Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj",
     "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
+    "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
     "_Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj",
     "_Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj",
@@ -117,6 +118,15 @@ static void VerifyArchitecture(string root)
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
+        ["Game/Replication/UltraSim.Game.Replication.csproj"] =
+        [
+            "Game/Admission/UltraSim.Game.Admission.csproj",
+            "Game/Composition/UltraSim.Game.Composition.csproj",
+            "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Kernels/ECS/UltraSim.ECS.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+            "Server/Runtime/UltraSim.Server.Runtime.csproj",
+        ],
     };
 
     string[] roots = ["Kernels", "Server", "Client", "Game"];
@@ -186,6 +196,7 @@ static void VerifyDocumentation(string root)
         "Kernels/ECS/LIFECYCLE.md",
         "Kernels/ECS/PERSISTENCE.md",
         "Kernels/Network/README.md",
+        "Game/Replication/README.md",
         "_Benchmarks/README.md",
         "_Benchmarks/Baselines/README.md",
         "_Benchmarks/ECS_V2_V3_COMPARISON.md",
@@ -207,7 +218,7 @@ static void VerifyDocumentation(string root)
         [
             "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
             "Docs/Plans/NETWORK.md", "Kernels/ECS/README.md", "Kernels/Network/README.md",
-            "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
+            "Game/Replication/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =
         [

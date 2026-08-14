@@ -1,9 +1,10 @@
 # Network V3: N0 remote-authority implementation plan
 
 Status: active forward plan. N0.0 contract/evidence foundation is implemented;
-N0.1 canonical game projection and OfflineDirect capture is next.
+N0.1 canonical game projection and OfflineDirect capture is accepted. N0.2
+bounded Network kernel foundations is next.
 
-This plan starts from accepted ECS 3.4.1, Server Runtime, game composition,
+This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
 It is an implementation contract for the machine that exists now—not a plan to
 invent another server core around Network. `_V2` remains executable historical
@@ -771,7 +772,22 @@ Tests/gate:
 - mismatched profiles refuse headline ratios;
 - no production protocol work begins until ownership is explicit.
 
-### N0.1 — Canonical game projection and capture
+### N0.1 — Canonical game projection and capture — accepted
+
+Implemented in `Game/Replication` and the network-enabled concrete game profile.
+The accepted shape is one bounded, owner-thread canonical projection using exact
+changed values plus ECS lifecycle evidence; independent recoverable lifecycle and
+non-coalescible application-event retention; current Admission participant
+bindings; bounded preselected authoritative ingress; and atomic OfflineDirect
+baseline/frame application. The local game profile retains zero lifecycle and
+replication reservation.
+
+The focused gate proves cursor transactionality, lifecycle overflow/resync,
+same-tick post-graph structural visibility, rapid topology folding, derived-fault
+containment, generation replacement for durable and accountless sessions,
+deterministic hashes/traces, and zero warmed managed allocation for the admitted
+tick/capture/direct-apply loop. It also added an ECS regression for typed
+structural payload merge across successive scheduler epochs.
 
 Deliver:
 

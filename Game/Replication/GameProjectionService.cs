@@ -1,0 +1,995 @@
+using System.Runtime.CompilerServices;
+using UltraSim.ECS;
+using UltraSim.Game.Admission;
+using UltraSim.Game.Composition;
+using UltraSim.Network;
+using UltraSim.Server.Runtime;
+
+namespace UltraSim.Game.Replication;
+
+/// <summary>
+/// Single-owner canonical game projection captured after complete authoritative steps.
+/// </summary>
+/// <remarks>
+/// This service owns derived state only. Expected capacity/history failures are
+/// returned without acknowledging ECS cursors. Unexpected projection failures are
+/// contained and fault this service rather than escaping the trusted Runtime callback.
+/// </remarks>
+public sealed class GameProjectionService : IDisposable
+{
+    private readonly ServerGameFacet _runtime;
+    private readonly AdmissionService _admission;
+    private readonly GameReplicationLimits _limits;
+    private readonly int _ownerThreadId;
+    private readonly uint[] _runtimeGenerations;
+    private readonly uint[] _replicationGenerations;
+    private readonly GameProjectedEntity[] _entities;
+    private readonly GameProjectedEntity[] _workingEntities;
+    private readonly uint[] _workingRuntimeGenerations;
+    private readonly uint[] _workingReplicationGenerations;
+    private readonly uint[] _workingStamps;
+    private readonly uint[] _touchedIndices;
+    private readonly Entity[] _baselineEntities;
+    private readonly GameSimulationState[] _baselineSimulation;
+    private readonly bool[] _baselineHasSimulation;
+    private readonly LifecycleRecord[] _lifecycleScratch;
+    private readonly ChangedValue[] _changedScratch;
+    private readonly GameProjectionDelta[] _stagedDeltas;
+    private readonly bool[] _stagedIsLifecycle;
+    private readonly ulong[] _stagedSourceSequences;
+    private readonly LifecycleKind[] _stagedLifecycleKinds;
+    private readonly GameProjectionDelta[] _lastDeltas;
+    private readonly GameProjectionLifecycleFact[] _lifecycleHistory;
+    private readonly GameApplicationEvent[] _applicationEvents;
+    private readonly GameAuthoritativeInput[] _inputs;
+    private readonly GameSimulationCommand[] _commandScratch;
+    private readonly ParticipantId[] _participantScratch;
+    private readonly Dictionary<ParticipantId, ParticipantState> _participants;
+    private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _captureOperation;
+    private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _rebuildOperation;
+    private readonly ServerGenerationStateOperation<GameGenerationState, IngressCommit> _ingressPublisher;
+
+    private LifecycleCursor _lifecycleCursor;
+    private ChangeCursor _changeCursor;
+    private StateEpoch _stateEpoch;
+    private ulong _nextStateEpoch = 1;
+    private ulong _generationId;
+    private ulong _frameSequence;
+    private GameProjectionFrame _lastFrame;
+    private ulong _nextDeltaSequence;
+    private int _entityCount;
+    private int _lastDeltaCount;
+    private uint _workingStamp;
+    private int _touchedCount;
+    private int _lifecycleHead;
+    private int _lifecycleCount;
+    private ulong _lifecycleNextSequence;
+    private ulong _lifecycleOverwritten;
+    private int _applicationHead;
+    private int _applicationCount;
+    private ulong _applicationNextSequence;
+    private int _inputCount;
+    private bool _participantCapacityExceeded;
+    private bool _rebuildRequired;
+    private Exception? _fault;
+    private bool _disposed;
+    private ulong _ingressExpectedGeneration;
+    private int _ingressAcceptedCount;
+
+    internal Action<GameProjectionFaultPoint>? FaultInjector { get; set; }
+
+    public GameProjectionService(
+        ServerGameFacet runtime,
+        AdmissionService admission,
+        GameReplicationLimits limits = default)
+    {
+        _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
+        _admission = admission ?? throw new ArgumentNullException(nameof(admission));
+        if (limits == default) limits = GameReplicationLimits.Default;
+        limits.Validate();
+        _limits = limits;
+        _ownerThreadId = Environment.CurrentManagedThreadId;
+        _runtimeGenerations = new uint[limits.MaximumEntities];
+        _replicationGenerations = new uint[limits.MaximumEntities];
+        _entities = new GameProjectedEntity[limits.MaximumEntities];
+        _workingEntities = new GameProjectedEntity[limits.MaximumEntities];
+        _workingRuntimeGenerations = new uint[limits.MaximumEntities];
+        _workingReplicationGenerations = new uint[limits.MaximumEntities];
+        _workingStamps = new uint[limits.MaximumEntities];
+        _touchedIndices = new uint[Math.Min(limits.MaximumEntities, limits.MaximumDeltasPerCapture)];
+        _baselineEntities = new Entity[limits.MaximumEntities];
+        _baselineSimulation = new GameSimulationState[limits.MaximumEntities];
+        _baselineHasSimulation = new bool[limits.MaximumEntities];
+        _lifecycleScratch = new LifecycleRecord[limits.MaximumLifecycleFactsPerCapture];
+        _changedScratch = new ChangedValue[limits.MaximumDeltasPerCapture];
+        _stagedDeltas = new GameProjectionDelta[limits.MaximumDeltasPerCapture];
+        _stagedIsLifecycle = new bool[limits.MaximumDeltasPerCapture];
+        _stagedSourceSequences = new ulong[limits.MaximumDeltasPerCapture];
+        _stagedLifecycleKinds = new LifecycleKind[limits.MaximumDeltasPerCapture];
+        _lastDeltas = new GameProjectionDelta[limits.MaximumDeltasPerCapture];
+        _lifecycleHistory = new GameProjectionLifecycleFact[limits.LifecycleHistoryCapacity];
+        _applicationEvents = new GameApplicationEvent[limits.ApplicationEventCapacity];
+        _inputs = new GameAuthoritativeInput[limits.AuthoritativeInputCapacity];
+        _commandScratch = new GameSimulationCommand[limits.AuthoritativeInputCapacity];
+        _participantScratch = new ParticipantId[limits.MaximumParticipants];
+        _participants = new Dictionary<ParticipantId, ParticipantState>(limits.MaximumParticipants);
+        _captureOperation = CaptureInsideCallback;
+        _rebuildOperation = RebuildInsideCallback;
+        _ingressPublisher = PublishIngressInsideCallback;
+        _admission.Entered += HandleAdmissionEntered;
+        _admission.Rejected += HandleAdmissionRejected;
+        _runtime.GenerationPublished += HandleGenerationPublished;
+    }
+
+    public StateEpoch StateEpoch
+    {
+        get { EnsureOperational(); return _stateEpoch; }
+    }
+
+    public bool IsFaulted
+    {
+        get { EnsureOwnerThread(); return _fault is not null; }
+    }
+
+    /// <summary>Synchronizes one pre-existing or newly admitted participant into projection ownership.</summary>
+    public bool SynchronizeParticipant(ParticipantId participant)
+    {
+        EnsureOperational();
+        if (!participant.IsValid || !_admission.TryGetSession(participant, out AdmissionResult session))
+            return false;
+        UpdateParticipant(session);
+        return session.IsEntered && _participants.ContainsKey(participant);
+    }
+
+    /// <summary>Captures committed lifecycle and changed values after a complete Runtime step.</summary>
+    public GameProjectionCaptureResult CaptureAfterTick()
+    {
+        EnsureOperational();
+        if (_fault is not null)
+            return Failure(GameProjectionCaptureStatus.Faulted, _fault.Message);
+        if (_participantCapacityExceeded)
+            return Failure(GameProjectionCaptureStatus.CapacityExceeded, "The participant projection capacity was exceeded.");
+        if (_rebuildRequired)
+            return Failure(GameProjectionCaptureStatus.RebuildRequired, "The projection requires an explicit baseline rebuild.");
+
+        if (!_runtime.TryUseActiveGeneration<GameGenerationState, GameProjectionCaptureResult>(
+            _captureOperation,
+            out GameProjectionCaptureResult result))
+        {
+            return Failure(GameProjectionCaptureStatus.RuntimeNotRunning, "Projection capture requires a running Runtime.");
+        }
+        if (result.Succeeded)
+            BindParticipantsToProjection();
+        return result;
+    }
+
+    /// <summary>Explicitly rebuilds canonical truth and resets generation-local histories.</summary>
+    public GameProjectionCaptureResult RebuildBaseline()
+    {
+        EnsureOperational();
+        if (_fault is not null)
+            return Failure(GameProjectionCaptureStatus.Faulted, _fault.Message);
+        if (!_runtime.TryUseActiveGeneration<GameGenerationState, GameProjectionCaptureResult>(
+            _rebuildOperation,
+            out GameProjectionCaptureResult result))
+        {
+            return Failure(GameProjectionCaptureStatus.RuntimeNotRunning, "Projection rebuild requires a running Runtime.");
+        }
+        if (result.Succeeded)
+            BindParticipantsToProjection();
+        return result;
+    }
+
+    /// <summary>Copies current active projected entities in canonical slot order.</summary>
+    public int CopyEntities(Span<GameProjectedEntity> destination)
+    {
+        EnsureOperational();
+        if (destination.Length < _entityCount)
+            throw new ArgumentException("Destination cannot contain every projected entity.", nameof(destination));
+        int written = 0;
+        for (int index = 0; index < _entities.Length; index++)
+            if (_entities[index].Entity.IsValid) destination[written++] = _entities[index];
+        return written;
+    }
+
+    /// <summary>Copies current entered participant bindings sorted by participant identity.</summary>
+    public int CopyParticipants(Span<GameProjectionParticipant> destination)
+    {
+        EnsureOperational();
+        int count = 0;
+        foreach (ParticipantState state in _participants.Values)
+        {
+            if (!state.Binding.ControlledEntity.IsValid) continue;
+            if (count >= destination.Length)
+                throw new ArgumentException("Destination cannot contain every projected participant.", nameof(destination));
+            destination[count++] = state.Binding;
+        }
+        destination[..count].Sort(static (left, right) => left.Participant.CompareTo(right.Participant));
+        return count;
+    }
+
+    public int CopyLastFrameDeltas(Span<GameProjectionDelta> destination)
+    {
+        EnsureOperational();
+        if (destination.Length < _lastDeltaCount)
+            throw new ArgumentException("Destination cannot contain the complete frame.", nameof(destination));
+        _lastDeltas.AsSpan(0, _lastDeltaCount).CopyTo(destination);
+        return _lastDeltaCount;
+    }
+
+    public GameProjectionFrame GetLastFrame()
+    {
+        EnsureOperational();
+        return _lastFrame;
+    }
+
+    /// <summary>Copies retained projection-lifecycle history without advancing hidden state.</summary>
+    public GameProjectionHistoryReadResult ReadLifecycle(
+        ulong nextSequence,
+        Span<GameProjectionLifecycleFact> destination)
+    {
+        EnsureOperational();
+        ulong oldest = unchecked(_lifecycleNextSequence - (ulong)_lifecycleCount);
+        if (nextSequence < oldest)
+            return new(GameProjectionHistoryReadStatus.HistoryLost, 0, nextSequence, oldest, _lifecycleNextSequence);
+        ulong pending = unchecked(_lifecycleNextSequence - nextSequence);
+        if (pending == 0)
+            return new(GameProjectionHistoryReadStatus.NoData, 0, nextSequence, oldest, _lifecycleNextSequence);
+        int count = Math.Min(destination.Length, checked((int)pending));
+        CopyRing(_lifecycleHistory, _lifecycleHead, oldest, nextSequence, destination[..count]);
+        return new(GameProjectionHistoryReadStatus.Success, count, unchecked(nextSequence + (ulong)count), oldest,
+            _lifecycleNextSequence);
+    }
+
+    /// <summary>Retains one explicit application event; full retention rejects without mutation.</summary>
+    public bool TryPublishApplicationEvent(
+        ParticipantId participant,
+        ushort kind,
+        ulong subject,
+        ulong payloadHash,
+        out GameApplicationEvent applicationEvent)
+    {
+        EnsureOperational();
+        if (!_stateEpoch.IsValid || !participant.IsValid || kind == 0 ||
+            _applicationCount == _applicationEvents.Length ||
+            _applicationNextSequence == ulong.MaxValue)
+        {
+            applicationEvent = default;
+            return false;
+        }
+        int index = (_applicationHead + _applicationCount) % _applicationEvents.Length;
+        applicationEvent = new GameApplicationEvent(
+            _applicationNextSequence++, _stateEpoch, participant, kind, subject, payloadHash);
+        _applicationEvents[index] = applicationEvent;
+        _applicationCount++;
+        return true;
+    }
+
+    public GameProjectionHistoryReadResult ReadApplicationEvents(
+        ulong nextSequence,
+        Span<GameApplicationEvent> destination)
+    {
+        EnsureOperational();
+        ulong oldest = unchecked(_applicationNextSequence - (ulong)_applicationCount);
+        if (nextSequence < oldest)
+            return new(GameProjectionHistoryReadStatus.HistoryLost, 0, nextSequence, oldest, _applicationNextSequence);
+        ulong pending = unchecked(_applicationNextSequence - nextSequence);
+        if (pending == 0)
+            return new(GameProjectionHistoryReadStatus.NoData, 0, nextSequence, oldest, _applicationNextSequence);
+        int count = Math.Min(destination.Length, checked((int)pending));
+        CopyRing(_applicationEvents, _applicationHead, oldest, nextSequence, destination[..count]);
+        return new(GameProjectionHistoryReadStatus.Success, count, unchecked(nextSequence + (ulong)count), oldest,
+            _applicationNextSequence);
+    }
+
+    /// <summary>Discards application events proven safe by every admitted consumer.</summary>
+    public void DiscardApplicationEventsThrough(ulong exclusiveSequence)
+    {
+        EnsureOperational();
+        ulong oldest = unchecked(_applicationNextSequence - (ulong)_applicationCount);
+        if (exclusiveSequence < oldest || exclusiveSequence > _applicationNextSequence)
+            throw new ArgumentOutOfRangeException(nameof(exclusiveSequence));
+        int remove = checked((int)unchecked(exclusiveSequence - oldest));
+        if (remove == 0) return;
+        _applicationEvents.AsSpan(_applicationHead, Math.Min(remove, _applicationEvents.Length - _applicationHead)).Clear();
+        int wrapped = remove - Math.Min(remove, _applicationEvents.Length - _applicationHead);
+        if (wrapped != 0) _applicationEvents.AsSpan(0, wrapped).Clear();
+        _applicationHead = (_applicationHead + remove) % _applicationEvents.Length;
+        _applicationCount -= remove;
+    }
+
+    public bool TryEnqueueAuthoritativeInput(in GameAuthoritativeInput input)
+    {
+        EnsureOperational();
+        if (!input.Participant.IsValid || input.ClientSequence == 0 ||
+            (uint)input.Kind > (uint)GameSimulationCommandKind.RetireControlledEntity ||
+            _inputCount == _inputs.Length)
+            return false;
+        _inputs[_inputCount++] = input;
+        return true;
+    }
+
+    /// <summary>Publishes validated preselected inputs into the generation's bounded RangeJob arena.</summary>
+    public GameAuthoritativeIngressResult PublishAuthoritativeIngress()
+    {
+        EnsureOperational();
+        if (_inputCount == 0)
+            return new(GameAuthoritativeIngressStatus.NoData, 0, 0);
+        int accepted = 0;
+        int rejected = 0;
+        ulong expectedGeneration = 0;
+        for (int index = 0; index < _inputCount; index++)
+        {
+            ref readonly GameAuthoritativeInput input = ref _inputs[index];
+            if (!_participants.TryGetValue(input.Participant, out ParticipantState state) ||
+                !state.Session.IsEntered || !state.Session.Entity.IsValid)
+            {
+                rejected++;
+                continue;
+            }
+            ulong sequenceFloor = state.LastAcceptedInputSequence;
+            for (int previous = accepted - 1; previous >= 0; previous--)
+            {
+                if (_commandScratch[previous].Participant != input.Participant) continue;
+                sequenceFloor = _commandScratch[previous].ClientSequence;
+                break;
+            }
+            if (input.ClientSequence <= sequenceFloor ||
+                (expectedGeneration != 0 && state.Session.GenerationId != expectedGeneration))
+            {
+                rejected++;
+                continue;
+            }
+            if (expectedGeneration == 0)
+                expectedGeneration = state.Session.GenerationId;
+            _commandScratch[accepted++] = new GameSimulationCommand(
+                input.Participant,
+                state.Session.Entity,
+                input.ClientSequence,
+                input.Kind,
+                input.TickMarkerDelta);
+        }
+
+        IngressCommit commit = default;
+        if (accepted != 0)
+        {
+            _ingressExpectedGeneration = expectedGeneration;
+            _ingressAcceptedCount = accepted;
+            if (!_runtime.TryUseActiveGeneration<GameGenerationState, IngressCommit>(
+                _ingressPublisher,
+                out commit))
+            {
+                return new(GameAuthoritativeIngressStatus.RuntimeNotRunning, 0, 0);
+            }
+            if (!commit.Committed)
+                return new(commit.Status, 0, rejected);
+        }
+
+        for (int index = 0; index < accepted; index++)
+        {
+            GameSimulationCommand command = _commandScratch[index];
+            ParticipantState state = _participants[command.Participant];
+            state.LastAcceptedInputSequence = command.ClientSequence;
+            _participants[command.Participant] = state;
+        }
+        _inputs.AsSpan(0, _inputCount).Clear();
+        _commandScratch.AsSpan(0, accepted).Clear();
+        _inputCount = 0;
+        return new(GameAuthoritativeIngressStatus.Success, accepted, rejected);
+    }
+
+    public GameProjectionSnapshot GetSnapshot()
+    {
+        EnsureOwnerThread();
+        int bound = 0;
+        foreach (ParticipantState state in _participants.Values)
+            if (state.Binding.ControlledEntity.IsValid) bound++;
+        return new(
+            _stateEpoch,
+            _generationId,
+            _frameSequence,
+            _entityCount,
+            bound,
+            _lastDeltaCount,
+            _rebuildRequired,
+            _fault is not null,
+            _lifecycleOverwritten,
+            _applicationCount,
+            _inputCount,
+            CalculateReservedBytes());
+    }
+
+    public void Dispose()
+    {
+        EnsureOwnerThread();
+        if (_disposed) return;
+        _disposed = true;
+        _admission.Entered -= HandleAdmissionEntered;
+        _admission.Rejected -= HandleAdmissionRejected;
+        _runtime.GenerationPublished -= HandleGenerationPublished;
+        _participants.Clear();
+        _fault = null;
+        FaultInjector = null;
+    }
+
+    private GameProjectionCaptureResult CaptureInsideCallback(
+        EcsWorld world,
+        ulong generationId,
+        GameGenerationState state)
+    {
+        try
+        {
+            if (state.Replication is null || state.Replication.WorldId != world.Id)
+                return Failure(GameProjectionCaptureStatus.ReplicationNotConfigured,
+                    "The active game generation was not created with the network profile.");
+            if (generationId != _generationId)
+                return RebuildInsideCallback(world, generationId, state);
+
+            LifecycleCursor stagedLifecycleCursor = _lifecycleCursor;
+            LifecycleReadResult lifecycle = world.ReadLifecycle(ref stagedLifecycleCursor, _lifecycleScratch);
+            if (lifecycle.Status == LifecycleReadStatus.ResyncRequired)
+            {
+                _rebuildRequired = true;
+                return Failure(GameProjectionCaptureStatus.LifecycleResyncRequired,
+                    "ECS lifecycle history was overwritten before canonical capture.");
+            }
+            if (lifecycle.RemainingCount != 0)
+                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                    "One capture interval exceeded its lifecycle scratch capacity.");
+
+            ChangeCursor stagedChangeCursor = _changeCursor;
+            var visitor = new ChangedVisitor(_changedScratch);
+            int changedRows = state.Replication.ExecuteChanges(world, ref stagedChangeCursor, ref visitor);
+            if (visitor.Overflowed)
+                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                    "One capture interval exceeded its changed-row scratch capacity.");
+
+            BeginWorkingSet();
+            int deltaCount = 0;
+            for (int index = 0; index < lifecycle.Count; index++)
+            {
+                if (!TryStageLifecycle(world, state, _lifecycleScratch[index], ref deltaCount, out string? error))
+                    return Failure(GameProjectionCaptureStatus.CapacityExceeded, error!);
+            }
+            for (int index = 0; index < visitor.Count; index++)
+            {
+                if (!TryStageValue(world, visitor.Values[index], ref deltaCount, out string? error))
+                    return Failure(GameProjectionCaptureStatus.CapacityExceeded, error!);
+            }
+
+            FaultInjector?.Invoke(GameProjectionFaultPoint.BeforeCaptureCommit);
+            CommitWorkingSet(deltaCount);
+            _lifecycleCursor = stagedLifecycleCursor;
+            _changeCursor = stagedChangeCursor;
+            ulong previous = _frameSequence;
+            _frameSequence = checked(_frameSequence + 1);
+            GameProjectionFrame frame = CreateFrame(previous, _frameSequence, deltaCount, world.TickCount);
+            _lastFrame = frame;
+            return new(GameProjectionCaptureStatus.Success, frame, lifecycle.Count, changedRows, null);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _fault = exception;
+            return Failure(GameProjectionCaptureStatus.Faulted,
+                $"The derived projection faulted: {exception.Message}");
+        }
+    }
+
+    private GameProjectionCaptureResult RebuildInsideCallback(
+        EcsWorld world,
+        ulong generationId,
+        GameGenerationState state)
+    {
+        try
+        {
+            if (state.Replication is null || state.Replication.WorldId != world.Id)
+                return Failure(GameProjectionCaptureStatus.ReplicationNotConfigured,
+                    "The active game generation was not created with the network profile.");
+            if (world.Options.EntityCapacity.MaximumEntities > _limits.MaximumEntities)
+                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                    "The projection entity capacity is smaller than the active ECS capacity.");
+            if (world.GetLifecycleHistorySnapshot().Capacity == 0)
+                return Failure(GameProjectionCaptureStatus.ReplicationNotConfigured,
+                    "The network profile requires ECS lifecycle history.");
+            if (_nextStateEpoch == ulong.MaxValue)
+                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                    "The projection StateEpoch identity space is exhausted.");
+
+            Array.Clear(_baselineHasSimulation);
+            var baseline = new BaselineVisitor(_baselineSimulation, _baselineHasSimulation);
+            _ = state.Replication.ExecuteBaseline(world, ref baseline);
+            int count = 0;
+            for (uint index = 0; index < world.Options.EntityCapacity.MaximumEntities; index++)
+            {
+                if (!world.TryGetEntity(index, out Entity entity)) continue;
+                if (count == _baselineEntities.Length)
+                    return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                        "The projection cannot contain the active entity population.");
+                _baselineEntities[count++] = entity;
+            }
+            LifecycleCursor lifecycleCursor = world.CaptureLifecycleCursorFromNow();
+            ChangeCursor changeCursor = world.CreateChangeCursorFromNow();
+            FaultInjector?.Invoke(GameProjectionFaultPoint.BeforeBaselineCommit);
+
+            Array.Clear(_runtimeGenerations);
+            Array.Clear(_replicationGenerations);
+            Array.Clear(_entities);
+            _entityCount = 0;
+            for (int index = 0; index < count; index++)
+            {
+                Entity entity = _baselineEntities[index];
+                uint slot = entity.Index;
+                var id = new ReplicationEntityId(slot, 1);
+                _runtimeGenerations[slot] = entity.Generation;
+                _replicationGenerations[slot] = 1;
+                _entities[slot] = new GameProjectedEntity(
+                    id,
+                    _baselineHasSimulation[slot],
+                    _baselineSimulation[slot]);
+                _entityCount++;
+            }
+            _baselineEntities.AsSpan(0, count).Clear();
+            _generationId = generationId;
+            _stateEpoch = new StateEpoch(_nextStateEpoch++);
+            _lifecycleCursor = lifecycleCursor;
+            _changeCursor = changeCursor;
+            _frameSequence = 0;
+            _nextDeltaSequence = 0;
+            _lastDeltaCount = 0;
+            ClearLifecycleHistory();
+            ClearApplicationEvents();
+            _rebuildRequired = false;
+            _fault = null;
+            GameProjectionFrame frame = CreateFrame(0, 0, 0, world.TickCount);
+            _lastFrame = frame;
+            return new(GameProjectionCaptureStatus.BaselineRebuilt, frame, 0, 0, null);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _fault = exception;
+            return Failure(GameProjectionCaptureStatus.Faulted,
+                $"The derived projection rebuild faulted: {exception.Message}");
+        }
+    }
+
+    private bool TryStageLifecycle(
+        EcsWorld world,
+        GameGenerationState gameState,
+        in LifecycleRecord record,
+        ref int deltaCount,
+        out string? error)
+    {
+        if (deltaCount == _stagedDeltas.Length)
+        {
+            error = "The capture delta capacity was exceeded.";
+            return false;
+        }
+        Entity entity = record.Entity;
+        if (entity.Index >= _entities.Length)
+        {
+            error = "A lifecycle entity index exceeded projection capacity.";
+            return false;
+        }
+        ref GameProjectedEntity projected = ref GetWorkingEntity(entity.Index);
+        ref uint runtimeGeneration = ref _workingRuntimeGenerations[entity.Index];
+        ref uint replicationGeneration = ref _workingReplicationGenerations[entity.Index];
+        GameProjectionDelta delta;
+        switch (record.Kind)
+        {
+            case LifecycleKind.Created:
+                if (projected.Entity.IsValid || runtimeGeneration != 0 || replicationGeneration == uint.MaxValue)
+                {
+                    error = "Created lifecycle identity conflicts with canonical projection state.";
+                    return false;
+                }
+                replicationGeneration++;
+                runtimeGeneration = entity.Generation;
+                bool hasSimulation = gameState.TryReadSimulationState(world, entity, out GameSimulationState simulation);
+                projected = new GameProjectedEntity(
+                    new ReplicationEntityId(entity.Index, replicationGeneration),
+                    hasSimulation,
+                    simulation);
+                delta = new(0, GameProjectionDeltaKind.Created, projected.Entity,
+                    ComponentId.Invalid, projected.HasSimulationState, projected.SimulationState);
+                break;
+            case LifecycleKind.Destroyed:
+                if (!Matches(projected, runtimeGeneration, entity))
+                {
+                    error = "Destroyed lifecycle identity was absent from canonical projection state.";
+                    return false;
+                }
+                delta = new(0, GameProjectionDeltaKind.Destroyed, projected.Entity,
+                    ComponentId.Invalid, projected.HasSimulationState, projected.SimulationState);
+                projected = default;
+                runtimeGeneration = 0;
+                break;
+            case LifecycleKind.ComponentAdded:
+            case LifecycleKind.ComponentRemoved:
+                if (!Matches(projected, runtimeGeneration, entity))
+                {
+                    error = "Membership lifecycle identity was absent from canonical projection state.";
+                    return false;
+                }
+                if (record.ComponentId == GameSchema.GetComponentId<GameSimulationState>())
+                {
+                    bool added = record.Kind == LifecycleKind.ComponentAdded;
+                    GameSimulationState simulationValue = default;
+                    bool present = added && gameState.TryReadSimulationState(world, entity, out simulationValue);
+                    projected = projected with
+                    {
+                        HasSimulationState = present,
+                        SimulationState = simulationValue,
+                    };
+                }
+                delta = new(
+                    0,
+                    record.Kind == LifecycleKind.ComponentAdded
+                        ? GameProjectionDeltaKind.ComponentAdded
+                        : GameProjectionDeltaKind.ComponentRemoved,
+                    projected.Entity,
+                    record.ComponentId,
+                    projected.HasSimulationState,
+                    projected.SimulationState);
+                break;
+            default:
+                error = "Unknown lifecycle kind.";
+                return false;
+        }
+        _stagedDeltas[deltaCount] = delta;
+        _stagedIsLifecycle[deltaCount] = true;
+        _stagedSourceSequences[deltaCount] = record.Sequence;
+        _stagedLifecycleKinds[deltaCount] = record.Kind;
+        deltaCount++;
+        error = null;
+        return true;
+    }
+
+    private bool TryStageValue(
+        EcsWorld world,
+        in ChangedValue change,
+        ref int deltaCount,
+        out string? error)
+    {
+        if (deltaCount == _stagedDeltas.Length || change.EntityIndex >= _entities.Length ||
+            !world.TryGetEntity(change.EntityIndex, out Entity entity))
+        {
+            error = "A changed row could not fit or resolve in canonical projection state.";
+            return false;
+        }
+        ref GameProjectedEntity projected = ref GetWorkingEntity(change.EntityIndex);
+        ref uint runtimeGeneration = ref _workingRuntimeGenerations[change.EntityIndex];
+        if (!Matches(projected, runtimeGeneration, entity))
+        {
+            error = "A changed row was absent from canonical projection state.";
+            return false;
+        }
+        projected = projected with
+        {
+            HasSimulationState = true,
+            SimulationState = change.Value,
+        };
+        _stagedDeltas[deltaCount] = new(
+            0,
+            GameProjectionDeltaKind.SimulationStateChanged,
+            projected.Entity,
+            GameSchema.GetComponentId<GameSimulationState>(),
+            true,
+            change.Value);
+        _stagedIsLifecycle[deltaCount] = false;
+        _stagedSourceSequences[deltaCount] = 0;
+        _stagedLifecycleKinds[deltaCount] = default;
+        deltaCount++;
+        error = null;
+        return true;
+    }
+
+    private void BeginWorkingSet()
+    {
+        _touchedCount = 0;
+        _workingStamp++;
+        if (_workingStamp != 0) return;
+        Array.Clear(_workingStamps);
+        _workingStamp = 1;
+    }
+
+    private ref GameProjectedEntity GetWorkingEntity(uint index)
+    {
+        if (_workingStamps[index] != _workingStamp)
+        {
+            if (_touchedCount == _touchedIndices.Length)
+                throw new InvalidOperationException("Touched projection capacity was exceeded.");
+            _workingStamps[index] = _workingStamp;
+            _workingEntities[index] = _entities[index];
+            _workingRuntimeGenerations[index] = _runtimeGenerations[index];
+            _workingReplicationGenerations[index] = _replicationGenerations[index];
+            _touchedIndices[_touchedCount++] = index;
+        }
+        return ref _workingEntities[index];
+    }
+
+    private void CommitWorkingSet(int deltaCount)
+    {
+        for (int index = 0; index < _touchedCount; index++)
+        {
+            uint slot = _touchedIndices[index];
+            bool wasActive = _entities[slot].Entity.IsValid;
+            bool isActive = _workingEntities[slot].Entity.IsValid;
+            _entities[slot] = _workingEntities[slot];
+            _runtimeGenerations[slot] = _workingRuntimeGenerations[slot];
+            _replicationGenerations[slot] = _workingReplicationGenerations[slot];
+            if (!wasActive && isActive) _entityCount++;
+            else if (wasActive && !isActive) _entityCount--;
+        }
+        for (int index = 0; index < deltaCount; index++)
+        {
+            GameProjectionDelta staged = _stagedDeltas[index];
+            GameProjectionDelta committed = staged with { Sequence = _nextDeltaSequence++ };
+            _lastDeltas[index] = committed;
+            if (_stagedIsLifecycle[index])
+            {
+                AppendLifecycle(new GameProjectionLifecycleFact(
+                    _lifecycleNextSequence,
+                    _stagedSourceSequences[index],
+                    _stagedLifecycleKinds[index],
+                    committed.Entity,
+                    committed.Component));
+            }
+        }
+        if (_lastDeltaCount > deltaCount)
+            _lastDeltas.AsSpan(deltaCount, _lastDeltaCount - deltaCount).Clear();
+        _lastDeltaCount = deltaCount;
+    }
+
+    private void AppendLifecycle(in GameProjectionLifecycleFact fact)
+    {
+        int index;
+        if (_lifecycleCount == _lifecycleHistory.Length)
+        {
+            index = _lifecycleHead;
+            _lifecycleHead = (_lifecycleHead + 1) % _lifecycleHistory.Length;
+            _lifecycleOverwritten++;
+        }
+        else
+        {
+            index = (_lifecycleHead + _lifecycleCount) % _lifecycleHistory.Length;
+            _lifecycleCount++;
+        }
+        _lifecycleHistory[index] = fact;
+        _lifecycleNextSequence++;
+    }
+
+    private void RefreshParticipants()
+    {
+        int count = 0;
+        foreach (ParticipantId participant in _participants.Keys)
+            _participantScratch[count++] = participant;
+        for (int index = 0; index < count; index++)
+        {
+            ParticipantId participant = _participantScratch[index];
+            if (_admission.TryGetSession(participant, out AdmissionResult session)) UpdateParticipant(session);
+            else _participants.Remove(participant);
+        }
+    }
+
+    private void BindParticipantsToProjection()
+    {
+        int count = 0;
+        foreach (ParticipantId participant in _participants.Keys)
+            _participantScratch[count++] = participant;
+        for (int index = 0; index < count; index++)
+        {
+            ParticipantId participant = _participantScratch[index];
+            ParticipantState state = _participants[participant];
+            ReplicationEntityId id = default;
+            if (state.Session.IsEntered && state.Session.GenerationId == _generationId &&
+                state.Session.Entity.Index < _entities.Length &&
+                _runtimeGenerations[state.Session.Entity.Index] == state.Session.Entity.Generation)
+            {
+                id = _entities[state.Session.Entity.Index].Entity;
+            }
+            state.Binding = new GameProjectionParticipant(participant, id, state.Session.GenerationId);
+            _participants[participant] = state;
+        }
+    }
+
+    private void HandleAdmissionEntered(AdmissionResult result)
+    {
+        if (_disposed) return;
+        try { UpdateParticipant(result); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { _fault ??= exception; }
+    }
+
+    private void HandleAdmissionRejected(AdmissionResult result)
+    {
+        if (_disposed) return;
+        _participants.Remove(result.Participant);
+    }
+
+    private void HandleGenerationPublished(ulong generationId)
+    {
+        if (_disposed) return;
+        try { RefreshParticipants(); }
+        catch (Exception exception) when (exception is not OutOfMemoryException) { _fault ??= exception; }
+    }
+
+    private IngressCommit PublishIngressInsideCallback(
+        EcsWorld world,
+        ulong generationId,
+        GameGenerationState state)
+    {
+        if (generationId != _ingressExpectedGeneration)
+            return new IngressCommit(GameAuthoritativeIngressStatus.GenerationChanged, false);
+        if (state.Replication is null)
+            return new IngressCommit(GameAuthoritativeIngressStatus.ReplicationNotConfigured, false);
+        return state.Replication.TryEnqueueCommands(_commandScratch.AsSpan(0, _ingressAcceptedCount))
+            ? new IngressCommit(GameAuthoritativeIngressStatus.Success, true)
+            : new IngressCommit(GameAuthoritativeIngressStatus.SchedulerCapacityExceeded, false);
+    }
+
+    private void UpdateParticipant(AdmissionResult result)
+    {
+        if (!result.Participant.IsValid) return;
+        if (!result.IsEntered)
+        {
+            _participants.Remove(result.Participant);
+            return;
+        }
+        if (!_participants.TryGetValue(result.Participant, out ParticipantState state) &&
+            _participants.Count == _limits.MaximumParticipants)
+        {
+            _participantCapacityExceeded = true;
+            return;
+        }
+        state.Session = result;
+        _participants[result.Participant] = state;
+    }
+
+    private GameProjectionCaptureResult Failure(GameProjectionCaptureStatus status, string message) =>
+        new(status, CreateFrame(_frameSequence, _frameSequence, _lastDeltaCount, 0), 0, 0, message);
+
+    private GameProjectionFrame CreateFrame(ulong previous, ulong current, int deltas, ulong tick) => new(
+        _stateEpoch,
+        _generationId,
+        tick,
+        previous,
+        current,
+        deltas,
+        unchecked(_lifecycleNextSequence - (ulong)_lifecycleCount),
+        _lifecycleNextSequence,
+        unchecked(_applicationNextSequence - (ulong)_applicationCount),
+        _applicationNextSequence);
+
+    private static bool Matches(in GameProjectedEntity projected, uint runtimeGeneration, Entity entity) =>
+        projected.Entity.IsValid && runtimeGeneration == entity.Generation;
+
+    private void ClearLifecycleHistory()
+    {
+        Array.Clear(_lifecycleHistory);
+        _lifecycleHead = 0;
+        _lifecycleCount = 0;
+        _lifecycleNextSequence = 0;
+        _lifecycleOverwritten = 0;
+    }
+
+    private void ClearApplicationEvents()
+    {
+        Array.Clear(_applicationEvents);
+        _applicationHead = 0;
+        _applicationCount = 0;
+        _applicationNextSequence = 0;
+    }
+
+    private long CalculateReservedBytes() => checked(
+        (long)_runtimeGenerations.Length * sizeof(uint) +
+        (long)_replicationGenerations.Length * sizeof(uint) +
+        (long)_entities.Length * Unsafe.SizeOf<GameProjectedEntity>() +
+        (long)_workingEntities.Length * Unsafe.SizeOf<GameProjectedEntity>() +
+        (long)_workingRuntimeGenerations.Length * sizeof(uint) +
+        (long)_workingReplicationGenerations.Length * sizeof(uint) +
+        (long)_workingStamps.Length * sizeof(uint) +
+        (long)_touchedIndices.Length * sizeof(uint) +
+        (long)_baselineEntities.Length * Unsafe.SizeOf<Entity>() +
+        (long)_baselineSimulation.Length * Unsafe.SizeOf<GameSimulationState>() +
+        _baselineHasSimulation.Length +
+        (long)_lifecycleScratch.Length * Unsafe.SizeOf<LifecycleRecord>() +
+        (long)_changedScratch.Length * Unsafe.SizeOf<ChangedValue>() +
+        (long)_stagedDeltas.Length * Unsafe.SizeOf<GameProjectionDelta>() +
+        _stagedIsLifecycle.Length +
+        (long)_stagedSourceSequences.Length * sizeof(ulong) +
+        (long)_stagedLifecycleKinds.Length * Unsafe.SizeOf<LifecycleKind>() +
+        (long)_lastDeltas.Length * Unsafe.SizeOf<GameProjectionDelta>() +
+        (long)_lifecycleHistory.Length * Unsafe.SizeOf<GameProjectionLifecycleFact>() +
+        (long)_applicationEvents.Length * Unsafe.SizeOf<GameApplicationEvent>() +
+        (long)_inputs.Length * Unsafe.SizeOf<GameAuthoritativeInput>() +
+        (long)_commandScratch.Length * Unsafe.SizeOf<GameSimulationCommand>() +
+        (long)_participantScratch.Length * Unsafe.SizeOf<ParticipantId>());
+
+    private static void CopyRing<T>(
+        T[] source,
+        int head,
+        ulong oldest,
+        ulong requested,
+        Span<T> destination)
+    {
+        int offset = checked((int)unchecked(requested - oldest));
+        int start = (head + offset) % source.Length;
+        int first = Math.Min(destination.Length, source.Length - start);
+        source.AsSpan(start, first).CopyTo(destination);
+        if (destination.Length != first)
+            source.AsSpan(0, destination.Length - first).CopyTo(destination[first..]);
+    }
+
+    private void EnsureOperational()
+    {
+        EnsureOwnerThread();
+        if (_disposed) throw new ObjectDisposedException(nameof(GameProjectionService));
+    }
+
+    private void EnsureOwnerThread()
+    {
+        if (Environment.CurrentManagedThreadId != _ownerThreadId)
+            throw new InvalidOperationException("Game projection is bound to its creating owner thread.");
+    }
+
+    private readonly record struct ChangedValue(uint EntityIndex, GameSimulationState Value);
+    private readonly record struct IngressCommit(GameAuthoritativeIngressStatus Status, bool Committed);
+
+    private struct ParticipantState
+    {
+        internal AdmissionResult Session;
+        internal GameProjectionParticipant Binding;
+        internal ulong LastAcceptedInputSequence;
+    }
+
+    private struct BaselineVisitor : IReadChunkJob<GameSimulationState>
+    {
+        private readonly GameSimulationState[] _values;
+        private readonly bool[] _present;
+
+        internal BaselineVisitor(GameSimulationState[] values, bool[] present) =>
+            (_values, _present) = (values, present);
+
+        public void Execute(in ReadComponentChunk<GameSimulationState> chunk)
+        {
+            for (int row = 0; row < chunk.Count; row++)
+            {
+                uint index = chunk.EntityIndices[row];
+                _values[index] = chunk.ReadComponents[row];
+                _present[index] = true;
+            }
+        }
+    }
+
+    private struct ChangedVisitor : IReadOnlyChunkJob<GameSimulationState>
+    {
+        private readonly ChangedValue[] _values;
+
+        internal ChangedVisitor(ChangedValue[] values)
+        {
+            _values = values;
+            Count = 0;
+            Overflowed = false;
+        }
+
+        internal int Count;
+        internal bool Overflowed;
+        internal readonly ReadOnlySpan<ChangedValue> Values => _values.AsSpan(0, Count);
+
+        public void Execute(in ReadOnlyComponentChunk<GameSimulationState> chunk)
+        {
+            if (chunk.Count > _values.Length - Count)
+            {
+                Overflowed = true;
+                return;
+            }
+            for (int row = 0; row < chunk.Count; row++)
+                _values[Count++] = new ChangedValue(chunk.EntityIndices[row], chunk.Components[row]);
+        }
+    }
+}
+
+internal enum GameProjectionFaultPoint : byte
+{
+    BeforeBaselineCommit = 1,
+    BeforeCaptureCommit = 2,
+}

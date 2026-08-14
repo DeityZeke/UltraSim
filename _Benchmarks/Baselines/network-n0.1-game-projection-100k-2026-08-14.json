@@ -1,0 +1,45 @@
+{
+  "Workload": "ultrasim-network-n0.1-canonical-projection-v1",
+  "CapturedUtc": "2026-08-14T18:03:41.5611394+00:00",
+  "Runtime": "8.0.29",
+  "ProcessorCount": 16,
+  "Population": 100000,
+  "Warmup": 4,
+  "Samples": 12,
+  "BaselineMicroseconds": 12789.625,
+  "ScheduledTick": {
+    "MeanMicroseconds": 768.5187500000001,
+    "P50Microseconds": 766.4730000000001,
+    "P95Microseconds": 781.993,
+    "P99Microseconds": 781.993,
+    "MaximumMicroseconds": 781.993
+  },
+  "CanonicalCapture": {
+    "MeanMicroseconds": 5835.506666666667,
+    "P50Microseconds": 5826.428,
+    "P95Microseconds": 5882.597,
+    "P99Microseconds": 5882.597,
+    "MaximumMicroseconds": 5882.597
+  },
+  "OfflineDirectApply": {
+    "MeanMicroseconds": 2124.921833333333,
+    "P50Microseconds": 2137.53,
+    "P95Microseconds": 2202.64,
+    "P99Microseconds": 2202.64,
+    "MaximumMicroseconds": 2202.64
+  },
+  "IdleCapture": {
+    "MeanMicroseconds": 4.862156249999997,
+    "P50Microseconds": 1.77,
+    "P95Microseconds": 1.84,
+    "P99Microseconds": 197.058,
+    "MaximumMicroseconds": 197.058
+  },
+  "TimedManagedBytes": 0,
+  "ProjectionReservedBytes": 16077152,
+  "OfflineReservedBytes": 91204224,
+  "ProjectionEntityCount": 100000,
+  "OfflineEntityCount": 100000,
+  "OfflineCanonicalHash": 1529499648330439756,
+  "SemanticTraceDigest": "968548F4D1719E3B48BCF800DEDBBF38"
+}

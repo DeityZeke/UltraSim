@@ -813,8 +813,6 @@ internal sealed class SystemScheduler : IDisposable
     {
         int commands = 0;
         int segments = 0;
-        int payloadStart = _mainCommands.SchedulerPayloadCount;
-        int payloadEnd = payloadStart;
         for (int index = 0; index < _segmentCount; index++)
         {
             StructuralSegment segment = _segments[index];
@@ -822,6 +820,25 @@ internal sealed class SystemScheduler : IDisposable
                 continue;
             segments++;
             commands += segment.Count;
+        }
+        if (commands == 0)
+        {
+            DiscardStructuralLanes();
+            return;
+        }
+
+        // A previous playback leaves the canonical arena in a completed epoch.
+        // Open its next recording epoch before payload offsets are preflighted
+        // or copied; otherwise BeginRecordingIfNeeded in the first append would
+        // clear the payload count after the bytes had already been installed.
+        _mainCommands.BeginSchedulerMerge();
+        int payloadStart = _mainCommands.SchedulerPayloadCount;
+        int payloadEnd = payloadStart;
+        for (int index = 0; index < _segmentCount; index++)
+        {
+            StructuralSegment segment = _segments[index];
+            if (segment.Count == 0)
+                continue;
             payloadEnd = _structuralLanes[segment.Lane].GetSchedulerMergedPayloadEnd(
                 _world,
                 segment.Start,

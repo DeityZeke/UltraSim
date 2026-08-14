@@ -26,10 +26,12 @@ Unless a workload says otherwise, Runtime performance evidence uses fixed 60 Hz,
 
 Useful current anchors can be located by their embedded workload or filename:
 
-- `ecs-v2-v3-3.4.1-*` — current cross-generation ECS control;
+- `ecs-v2-v3-3.4.2-*` — current cross-generation ECS control;
 - `ecs-v3-3.4.1-persistence-*` — current ECS persistence evidence;
 - `s0.8-integrated-acceptance-cadence-independent-*` — accepted integrated
   Runtime/game/persistence/cadence gate;
+- `network-n0.1-game-projection-100k-*` — canonical changed-state capture and
+  packet-free OfflineDirect semantic-apply evidence;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

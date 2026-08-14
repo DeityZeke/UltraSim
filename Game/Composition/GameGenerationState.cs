@@ -29,7 +29,8 @@ public sealed class GameGenerationState : IGameGenerationStateProvider, IDisposa
         AccountingStore accounting,
         InventoryGenerationState inventory,
         GameContent content,
-        ComponentLookup<GameSimulationState> simulationLookup)
+        ComponentLookup<GameSimulationState> simulationLookup,
+        GameReplicationBindings? replication = null)
     {
         Accounting = accounting ?? throw new ArgumentNullException(nameof(accounting));
         Inventory = inventory ?? throw new ArgumentNullException(nameof(inventory));
@@ -39,11 +40,15 @@ public sealed class GameGenerationState : IGameGenerationStateProvider, IDisposa
         if (inventory.WorldId != content.Prefabs.WorldId)
             throw new ArgumentException("Inventory and content belong to different ECS worlds.", nameof(content));
         _simulationLookup = simulationLookup;
+        Replication = replication;
     }
 
     public AccountingStore Accounting { get; }
     public InventoryGenerationState Inventory { get; }
     public GameContent Content { get; }
+
+    /// <summary>Gets generation-bound replication capabilities when the network profile was selected.</summary>
+    public GameReplicationBindings? Replication { get; }
 
     private readonly ComponentLookup<GameSimulationState> _simulationLookup;
 

@@ -7,6 +7,7 @@ namespace UltraSim.Game.Composition;
 public static class GamePrefabKeys
 {
     public static readonly PrefabKey Character = new("game.character.default");
+    public static readonly PrefabKey CharacterDormant = new("game.character.dormant");
     public static readonly PrefabKey Backpack = new("game.container.backpack");
     public static readonly PrefabKey WorldChest = new("game.container.world-chest");
     public static readonly PrefabKey Bread = new("game.item.bread");
@@ -104,6 +105,11 @@ public sealed class GameContent : IInventoryContentCatalog
         character.With(new GameCharacter { Marker = 1 });
         character.With(new GameSimulationState { TickMarker = 0 });
         character.DisplayName("Character");
+        // The paired no-simulation shape is a real content route used when a
+        // character's scheduled simulation membership is explicitly suspended.
+        PrefabBuilder dormantCharacter = content.Define(GamePrefabKeys.CharacterDormant);
+        dormantCharacter.With(new GameCharacter { Marker = 1 });
+        dormantCharacter.DisplayName("Dormant Character");
         InventoryContainerAuthoring backpackSource = InventoryContent.DefineContainer(
             content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);
         InventoryContainerAuthoring chestSource = InventoryContent.DefineContainer(

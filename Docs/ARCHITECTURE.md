@@ -104,5 +104,7 @@ derived/application indexes when their ownership and scale are explicit.
 - `_V2`: frozen historical/reference implementation, compiled only by explicit
   comparison projects.
 
-Network V3 is the active major layer. Its N0.0 kernel/evidence foundation is
-implemented; the remaining checkpoints are in [`Plans/NETWORK.md`](Plans/NETWORK.md).
+Network V3 is the active major layer. Its N0.0 kernel/evidence foundation and
+N0.1 game-owned canonical projection/OfflineDirect oracle are implemented;
+bounded packet/codec foundations begin at N0.2. The remaining checkpoints are in
+[`Plans/NETWORK.md`](Plans/NETWORK.md).

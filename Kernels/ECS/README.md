@@ -1,4 +1,4 @@
-# UltraSim ECS 3.4.1
+# UltraSim ECS 3.4.2
 
 UltraSim ECS is a bounded, owner-controlled, archetype/SoA kernel for large
 deterministic simulations. It combines compact generational entity identity,
@@ -105,8 +105,10 @@ reported and bounded policies.
 
 ## Version and evidence
 
-The active internal engineering identity is `3.4.1`. It identifies benchmark and
-persistence evidence; it is not SemVer or a broad public compatibility promise.
+The active internal engineering identity is `3.4.2`. It adds the scheduler
+typed-structural-payload epoch correction discovered by Network N0.1. It
+identifies benchmark and persistence evidence; it is not SemVer or a broad
+public compatibility promise.
 Format/schema versions are owned separately by their persisted/protocol contracts.
 
 Accepted machine-readable evidence is under
