@@ -6,35 +6,6 @@ using UltraSim.UI;
 
 namespace UltraSim.Game.Admission;
 
-/// <summary>Stable participant identity for the local S0.5 admission fixture.</summary>
-public readonly struct ParticipantId : IEquatable<ParticipantId>, IComparable<ParticipantId>
-{
-    public ParticipantId(ulong value)
-    {
-        if (value == 0)
-            throw new ArgumentOutOfRangeException(nameof(value));
-        Value = value;
-    }
-
-    public ulong Value { get; }
-
-    public bool IsValid => Value != 0;
-
-    public int CompareTo(ParticipantId other) => Value.CompareTo(other.Value);
-
-    public bool Equals(ParticipantId other) => Value == other.Value;
-
-    public override bool Equals(object? obj) => obj is ParticipantId other && Equals(other);
-
-    public override int GetHashCode() => Value.GetHashCode();
-
-    public override string ToString() => IsValid ? $"Participant({Value})" : "Participant(Invalid)";
-
-    public static bool operator ==(ParticipantId left, ParticipantId right) => left.Equals(right);
-
-    public static bool operator !=(ParticipantId left, ParticipantId right) => !left.Equals(right);
-}
-
 public enum AdmissionStage : byte
 {
     WaitingForCharacter = 0,
@@ -80,22 +51,6 @@ public readonly record struct AdmissionResult(
     public bool IsRejected => Stage == AdmissionStage.Rejected;
 
     public bool IsWaitingForCharacter => Stage == AdmissionStage.WaitingForCharacter;
-}
-
-/// <summary>
-/// Game policy seam for creating and validating playable ECS entities. The
-/// admission service never invents an archetype or duplicates player state.
-/// </summary>
-/// <remarks>
-/// A <see langword="false"/> create result must leave the world unchanged. A
-/// successful result transfers one newly created live entity to Admission.
-/// Unexpected exceptions cross the ServerGameFacet terminal-fault boundary.
-/// </remarks>
-public interface IAdmissionEntityBinder
-{
-    bool TryCreatePlayable(EcsWorld world, ParticipantId participant, out Entity entity);
-
-    bool IsPlayable(EcsWorld world, in CharacterRecord character, Entity resolvedEntity);
 }
 
 /// <summary>Semantic UI operations required by account-backed admission.</summary>

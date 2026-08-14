@@ -8,7 +8,7 @@ public enum InventoryMutationStatus : byte
     RuntimeWorldMismatch = 1,
     MissingItem = 2,
     MissingContainer = 3,
-    MissingCharacter = 4,
+    MissingEquipOwner = 4,
     WrongSource = 5,
     InvalidQuantity = 6,
     CapacityExceeded = 7,
@@ -17,10 +17,9 @@ public enum InventoryMutationStatus : byte
     ItemAlreadyEquipped = 10,
     InvariantViolation = 11,
     ContainerNotEmpty = 12,
-    InvalidItemKind = 13,
+    ItemPolicyViolation = 13,
 }
 
-/// <summary>Outcome of one atomic game-owned inventory intent.</summary>
 public readonly record struct InventoryMutationResult(
     InventoryMutationStatus Status,
     Entity Item,
@@ -30,118 +29,113 @@ public readonly record struct InventoryMutationResult(
     public bool Accepted => Status == InventoryMutationStatus.Accepted;
 }
 
-/// <summary>One projected inventory row before UI-specific encoding.</summary>
 public readonly record struct InventoryItemView(
     Entity Entity,
     PersistentEntityId PersistentId,
-    InventoryItemKind Kind,
+    PrefabKey Prefab,
+    string DisplayName,
     InventoryEquipSlot EquipSlot,
     int Quantity);
 
-/// <summary>
-/// Capability implemented by generation roots that own inventory derived state.
-/// It allows Inventory to compose with Accounting and other game-owned roots
-/// without teaching ServerRuntime any game-domain structure.
-/// </summary>
 public interface IInventoryGenerationStateProvider
 {
     InventoryGenerationState Inventory { get; }
 }
 
 /// <summary>
-/// The single generation-owned inventory state root. It contains only a
-/// derived index and cold-bound ECS access plans; authoritative item/container
-/// facts remain in ECS components.
+/// Generation-owned inventory rules and derived index. Content supplies item
+/// identities/policies; ECS remains authoritative for mutable relationships.
 /// </summary>
 public sealed class InventoryGenerationState : IInventoryGenerationStateProvider, IDisposable
 {
     private readonly WorldId _worldId;
-    private readonly InventoryPrefabHandles _prefabs;
-    private readonly ComponentLookup<InventoryCharacter> _characterLookup;
+    private readonly IInventoryContentCatalog _content;
     private readonly ComponentLookup<InventoryContainer> _containerLookup;
+    private readonly ComponentLookup<InventoryContainerOwner> _ownerLookup;
     private readonly ComponentLookup<InventoryItem> _itemLookup;
+    private readonly ComponentLookup<InventoryStackPolicy> _stackLookup;
+    private readonly ComponentLookup<InventoryEquipCapability> _equipLookup;
     private bool _disposed;
 
     public InventoryGenerationState(
         EcsWorld world,
-        InventoryPrefabHandles prefabs,
+        IInventoryContentCatalog content,
         InventoryLimits? limits = null)
     {
         ArgumentNullException.ThrowIfNull(world);
+        _content = content ?? throw new ArgumentNullException(nameof(content));
+        if (content.Prefabs.WorldId != world.Id)
+            throw new ArgumentException("Inventory content belongs to another world.", nameof(content));
         _worldId = world.Id;
-        ValidatePrefabs(world, prefabs);
-        _prefabs = prefabs;
-        _characterLookup = world.PrepareLookup<InventoryCharacter>();
         _containerLookup = world.PrepareLookup<InventoryContainer>();
+        _ownerLookup = world.PrepareLookup<InventoryContainerOwner>();
         _itemLookup = world.PrepareLookup<InventoryItem>();
+        _stackLookup = world.PrepareLookup<InventoryStackPolicy>();
+        _equipLookup = world.PrepareLookup<InventoryEquipCapability>();
         Limits = limits ?? InventoryLimits.Default;
         Limits.Validate();
         Index = new InventoryIndex(Limits);
     }
 
     public InventoryLimits Limits { get; }
-
     public InventoryIndex Index { get; }
-
+    public WorldId WorldId => _worldId;
     InventoryGenerationState IInventoryGenerationStateProvider.Inventory => this;
 
-    /// <summary>Rebuilds derived state after ECS restore and before publication.</summary>
     public void Rebuild(EcsWorld world)
     {
         EnsureWorld(world);
-        Index.Rebuild(world, _characterLookup, _containerLookup, _itemLookup);
+        Index.Rebuild(
+            world,
+            _containerLookup,
+            _ownerLookup,
+            _itemLookup,
+            _stackLookup,
+            _equipLookup,
+            _content);
     }
 
-    public bool TryCreateCharacter(EcsWorld world, out Entity entity)
-    {
-        EnsureWorld(world);
-        return world.TryInstantiate(_prefabs.Character, out entity);
-    }
+    public bool TryCreateContainer(
+        EcsWorld world,
+        PrefabHandle prefab,
+        int capacity,
+        out Entity entity) =>
+        TryCreateContainerCore(world, prefab, Entity.Null, hasOwner: false, capacity, out entity);
 
-    public bool TryCreateContainer(EcsWorld world, Entity owner, int capacity, out Entity entity)
-    {
-        EnsureWorld(world);
-        entity = Entity.Null;
-        if (!world.IsAlive(owner) || !world.Has(owner, _characterLookup) ||
-            !Index.CanAddContainer(capacity))
-            return false;
-        if (!world.TryInstantiate(_prefabs.Backpack, out entity))
-            return false;
-        if (!world.TryWrite(entity, _containerLookup, new InventoryContainer { Owner = owner, Capacity = capacity }))
-        {
-            DestroyFailedCreationOrThrow(world, entity, "container initialization");
-        }
-        if (!Index.TryAddContainer(entity, capacity))
-            throw new InvalidOperationException("A prevalidated inventory container was rejected by the index.");
-        return true;
-    }
+    public bool TryCreateOwnedContainer(
+        EcsWorld world,
+        PrefabHandle prefab,
+        Entity owner,
+        int capacity,
+        out Entity entity) =>
+        TryCreateContainerCore(world, prefab, owner, hasOwner: true, capacity, out entity);
 
     public bool TryCreateItem(
         EcsWorld world,
         Entity parent,
-        InventoryItemKind kind,
+        in InventoryItemDefinition definition,
         int quantity,
         out Entity entity)
     {
         EnsureWorld(world);
         entity = Entity.Null;
-        if (!world.IsAlive(parent) || !world.Has(parent, _containerLookup) ||
-            !IsValidContainedItem(kind, quantity) || !Index.CanAddContainedItem(parent))
+        if (!IsBoundDefinition(definition) || quantity <= 0 || quantity > definition.MaximumQuantity ||
+            !world.IsAlive(parent) || !world.Has(parent, _containerLookup) ||
+            !Index.CanAddContainedItem(parent))
+        {
             return false;
-        PrefabHandle prefab = kind == InventoryItemKind.Bread ? _prefabs.Bread : _prefabs.IronSword;
-        if (!world.TryInstantiate(prefab, out entity))
+        }
+        if (!world.TryInstantiate(definition.Handle, out entity))
             return false;
+        ValidateInstantiatedItemOrThrow(world, entity, definition);
         var value = new InventoryItem
         {
             Parent = parent,
-            Kind = kind,
             EquipSlot = InventoryEquipSlot.None,
             Quantity = quantity,
         };
         if (!world.TryWrite(entity, _itemLookup, value))
-        {
             DestroyFailedCreationOrThrow(world, entity, "item initialization");
-        }
         if (!Index.TryAddItem(entity, value))
             throw new InvalidOperationException("A prevalidated inventory item was rejected by the index.");
         return true;
@@ -166,14 +160,13 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             return Reject(InventoryMutationStatus.InvariantViolation, item, "ECS and inventory index topology disagree.");
         if (source == destination)
             return Accept(item, Entity.Null, "The item is already in the destination container.");
-        if (!Index.CanMoveItem(item, source, destination) ||
-            Index.GetItems(destination).Count >= GetContainerCapacity(world, destination))
+        if (!Index.CanMoveItem(item, source, destination))
             return Reject(InventoryMutationStatus.CapacityExceeded, item, "The destination container is full.");
 
         InventoryItem moved = value;
         moved.Parent = destination;
         if (!world.TryWrite(item, _itemLookup, moved))
-            return Reject(InventoryMutationStatus.InvariantViolation, item, "The item could not be updated.");
+            throw new InvalidOperationException("A validated inventory move rejected its ECS update.");
         if (!Index.TryMoveItem(item, source, destination))
             throw new InvalidOperationException("A prevalidated inventory move was rejected by the index.");
         return Accept(item, Entity.Null, "Move accepted.");
@@ -184,7 +177,7 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         EnsureWorld(world);
         if (quantity <= 0)
             return Reject(InventoryMutationStatus.InvalidQuantity, item, "Split quantity must be positive.");
-        if (!world.IsAlive(item))
+        if (!world.IsAlive(item) || !world.TryRead(item, _itemLookup, out InventoryItem original))
             return Reject(InventoryMutationStatus.MissingItem, item, "The item is stale or missing.");
         if (!Index.ContainsContainer(source) || !Index.ContainsContainer(destination))
             return Reject(InventoryMutationStatus.MissingContainer, item, "The source or destination container is missing.");
@@ -192,19 +185,17 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             return Reject(InventoryMutationStatus.WrongSource, item, "The item is not in the requested source container.");
         if (location.EquipSlot != InventoryEquipSlot.None)
             return Reject(InventoryMutationStatus.ItemAlreadyEquipped, item, "An equipped item cannot be split.");
-        if (!world.TryRead(item, _itemLookup, out InventoryItem original))
-            return Reject(InventoryMutationStatus.MissingItem, item, "The item component is missing.");
         if (original.Parent != source || original.EquipSlot != InventoryEquipSlot.None)
             return Reject(InventoryMutationStatus.InvariantViolation, item, "ECS and inventory index topology disagree.");
-        if (original.Kind != InventoryItemKind.Bread)
-            return Reject(InventoryMutationStatus.InvalidItemKind, item, "Only stackable bread can be split in S0.");
+        if (!TryGetDefinition(world, item, out InventoryItemDefinition definition) || !definition.IsStackable)
+            return Reject(InventoryMutationStatus.ItemPolicyViolation, item, "The item content is not stackable.");
         if (quantity >= original.Quantity)
             return Reject(InventoryMutationStatus.InvalidQuantity, item, "Split quantity must leave a positive source stack.");
-        if (!Index.CanAddContainedItem(destination) ||
-            Index.GetItems(destination).Count >= GetContainerCapacity(world, destination))
+        if (!Index.CanAddContainedItem(destination))
             return Reject(InventoryMutationStatus.CapacityExceeded, item, "The destination container is full.");
-        if (!world.TryInstantiate(_prefabs.Bread, out Entity created))
-            return Reject(InventoryMutationStatus.InvariantViolation, item, "The inventory item capacity was exhausted.");
+        if (!world.TryInstantiate(definition.Handle, out Entity created))
+            return Reject(InventoryMutationStatus.CapacityExceeded, item, "The inventory entity capacity was exhausted.");
+        ValidateInstantiatedItemOrThrow(world, created, definition);
 
         InventoryItem sourceAfter = original;
         sourceAfter.Quantity -= quantity;
@@ -224,17 +215,18 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         EcsWorld world,
         Entity item,
         Entity source,
-        Entity character,
+        Entity owner,
         InventoryEquipSlot slot)
     {
         EnsureWorld(world);
         if (!world.IsAlive(item))
             return Reject(InventoryMutationStatus.MissingItem, item, "The item is stale or missing.");
-        if (!world.IsAlive(character) || !world.Has(character, _characterLookup))
-            return Reject(InventoryMutationStatus.MissingCharacter, item, "The target character is missing.");
-        if (slot == InventoryEquipSlot.None || (byte)slot > (byte)InventoryEquipSlot.MainHand)
+        if (!world.IsAlive(owner))
+            return Reject(InventoryMutationStatus.MissingEquipOwner, item, "The equipment owner is missing.");
+        InventoryEquipSlots requested = slot.ToCapability();
+        if (requested == InventoryEquipSlots.None)
             return Reject(InventoryMutationStatus.InvalidEquipmentSlot, item, "The equipment slot is invalid.");
-        if (Index.TryGetEquipped(character, slot, out _))
+        if (Index.TryGetEquipped(owner, slot, out _))
             return Reject(InventoryMutationStatus.SlotOccupied, item, "The equipment slot is occupied.");
         if (!Index.TryGetLocation(item, out InventoryLocation location) || location.Parent != source)
             return Reject(InventoryMutationStatus.WrongSource, item, "The item is not in the requested source container.");
@@ -246,19 +238,22 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
             return Reject(InventoryMutationStatus.MissingItem, item, "The item component is missing.");
         if (original.Parent != source || original.EquipSlot != InventoryEquipSlot.None)
             return Reject(InventoryMutationStatus.InvariantViolation, item, "ECS and inventory index topology disagree.");
-        if (original.Kind != InventoryItemKind.IronSword)
-            return Reject(InventoryMutationStatus.InvalidItemKind, item, "The item cannot use the requested equipment slot.");
+        if (!world.TryRead(item, _equipLookup, out InventoryEquipCapability capability) ||
+            (capability.AllowedSlots & requested) == 0)
+        {
+            return Reject(InventoryMutationStatus.ItemPolicyViolation, item, "The item cannot use the requested equipment slot.");
+        }
         if (original.Quantity != 1)
             return Reject(InventoryMutationStatus.InvalidQuantity, item, "Only a single item may be equipped.");
-        if (!Index.CanEquipItem(item, source, character, slot))
+        if (!Index.CanEquipItem(item, source, owner, slot))
             return Reject(InventoryMutationStatus.InvariantViolation, item, "The inventory index cannot prove the equipment mutation.");
 
         InventoryItem equipped = original;
-        equipped.Parent = character;
+        equipped.Parent = owner;
         equipped.EquipSlot = slot;
         if (!world.TryWrite(item, _itemLookup, equipped))
-            return Reject(InventoryMutationStatus.InvariantViolation, item, "The item could not be equipped.");
-        if (!Index.TryEquipItem(item, source, character, slot))
+            throw new InvalidOperationException("A validated equip rejected its ECS update.");
+        if (!Index.TryEquipItem(item, source, owner, slot))
             throw new InvalidOperationException("A prevalidated inventory equip was rejected by the index.");
         return Accept(item, Entity.Null, "Equip accepted.");
     }
@@ -291,29 +286,48 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return Accept(Entity.Null, Entity.Null, "Container destroy accepted.");
     }
 
-    public IReadOnlyList<InventoryItemView> Snapshot(EcsWorld world, Entity container)
+    public InventoryItemView[] Snapshot(EcsWorld world, Entity container)
     {
         EnsureWorld(world);
         if (!Index.ContainsContainer(container))
             return Array.Empty<InventoryItemView>();
-        var result = new List<InventoryItemView>(Index.GetItems(container).Count);
+        var result = new InventoryItemView[Index.GetItems(container).Count];
+        int index = 0;
         foreach (Entity item in Index.GetItems(container))
         {
-            if (!world.TryRead(item, _itemLookup, out InventoryItem value) || !world.IsAlive(item))
-                throw new InvalidOperationException("The inventory index contains a stale item.");
-            if (!world.TryGetPersistentId(item, out PersistentEntityId id))
-                throw new InvalidOperationException("An inventory item has no durable identity.");
-            result.Add(new InventoryItemView(item, id, value.Kind, value.EquipSlot, value.Quantity));
+            if (!TryProjectItem(world, item, out InventoryItemView view))
+                throw new InvalidOperationException("The inventory index contains an unprojectable item.");
+            result[index++] = view;
         }
-        result.Sort(static (left, right) => left.PersistentId.CompareTo(right.PersistentId));
+        Array.Sort(result, static (left, right) => left.PersistentId.CompareTo(right.PersistentId));
         return result;
+    }
+
+    public bool TryProjectItem(EcsWorld world, Entity item, out InventoryItemView view)
+    {
+        EnsureWorld(world);
+        if (!world.IsAlive(item) || !world.TryRead(item, _itemLookup, out InventoryItem value) ||
+            !world.TryGetPersistentId(item, out PersistentEntityId id) ||
+            !TryGetDefinition(world, item, out InventoryItemDefinition definition))
+        {
+            view = default;
+            return false;
+        }
+        view = new InventoryItemView(
+            item,
+            id,
+            definition.Key,
+            definition.DisplayName,
+            value.EquipSlot,
+            value.Quantity);
+        return true;
     }
 
     public bool TryGetContainerOwner(EcsWorld world, Entity container, out Entity owner)
     {
         EnsureWorld(world);
-        if (!world.TryRead(container, _containerLookup, out InventoryContainer value) ||
-            !world.IsAlive(value.Owner) || !world.Has(value.Owner, _characterLookup))
+        if (!world.TryRead(container, _ownerLookup, out InventoryContainerOwner value) ||
+            !world.IsAlive(value.Owner))
         {
             owner = Entity.Null;
             return false;
@@ -322,39 +336,92 @@ public sealed class InventoryGenerationState : IInventoryGenerationStateProvider
         return true;
     }
 
+    public bool TryGetContainerDefinition(
+        EcsWorld world,
+        Entity container,
+        out InventoryContainerDefinition definition)
+    {
+        EnsureWorld(world);
+        if (world.IsAlive(container) && world.Has(container, _containerLookup) &&
+            world.TryGetPrefabProvenance(container, out PrefabKey key))
+        {
+            return _content.TryGetContainer(key, out definition);
+        }
+        definition = default;
+        return false;
+    }
+
     public bool TryReadItem(EcsWorld world, Entity item, out InventoryItem value)
     {
         EnsureWorld(world);
         return world.TryRead(item, _itemLookup, out value);
     }
 
-    private int GetContainerCapacity(EcsWorld world, Entity container)
+    private bool TryCreateContainerCore(
+        EcsWorld world,
+        PrefabHandle prefab,
+        Entity owner,
+        bool hasOwner,
+        int capacity,
+        out Entity entity)
     {
-        if (!world.TryRead(container, _containerLookup, out InventoryContainer value))
-            return 0;
-        return value.Capacity;
+        EnsureWorld(world);
+        entity = Entity.Null;
+        if (!prefab.IsValid || prefab.World != world.Id ||
+            !_content.TryGetContainer(prefab, out InventoryContainerDefinition definition) ||
+            definition.HasOwner != hasOwner || !Index.CanAddContainer(capacity) ||
+            (hasOwner && !world.IsAlive(owner)))
+        {
+            return false;
+        }
+        if (!world.TryInstantiate(prefab, out entity))
+            return false;
+        if (!world.Has(entity, _containerLookup) || world.Has(entity, _ownerLookup) != hasOwner)
+            DestroyFailedCreationOrThrow(world, entity, "container content validation");
+        if (!world.TryWrite(entity, _containerLookup, new InventoryContainer { Capacity = capacity }))
+            DestroyFailedCreationOrThrow(world, entity, "container initialization");
+        if (hasOwner && !world.TryWrite(entity, _ownerLookup, new InventoryContainerOwner { Owner = owner }))
+            DestroyFailedCreationOrThrow(world, entity, "container ownership initialization");
+        if (!Index.TryAddContainer(entity, capacity))
+            throw new InvalidOperationException("A prevalidated inventory container was rejected by the index.");
+        return true;
     }
 
-    private static bool IsValidContainedItem(InventoryItemKind kind, int quantity) =>
-        kind == InventoryItemKind.Bread ? quantity > 0 :
-        kind == InventoryItemKind.IronSword && quantity == 1;
+    private bool IsBoundDefinition(in InventoryItemDefinition definition) =>
+        definition.Handle.IsValid && definition.Handle.World == _worldId &&
+        _content.TryGetItem(definition.Handle, out InventoryItemDefinition bound) &&
+        bound == definition;
 
-    private static void ValidatePrefabs(EcsWorld world, InventoryPrefabHandles prefabs)
+    private bool TryGetDefinition(EcsWorld world, Entity item, out InventoryItemDefinition definition)
     {
-        if (!prefabs.Character.IsValid || !prefabs.Backpack.IsValid ||
-            !prefabs.Bread.IsValid || !prefabs.IronSword.IsValid ||
-            prefabs.Character.World != world.Id || prefabs.Backpack.World != world.Id ||
-            prefabs.Bread.World != world.Id || prefabs.IronSword.World != world.Id)
-        {
-            throw new ArgumentException("Inventory prefab handles are invalid or belong to another world.", nameof(prefabs));
-        }
+        if (world.TryGetPrefabProvenance(item, out PrefabKey key) && _content.TryGetItem(key, out definition))
+            return true;
+        definition = default;
+        return false;
+    }
+
+    private void ValidateInstantiatedItemOrThrow(
+        EcsWorld world,
+        Entity entity,
+        in InventoryItemDefinition definition)
+    {
+        if (!world.Has(entity, _itemLookup))
+            DestroyFailedCreationOrThrow(world, entity, "item content validation");
+        int maximum = world.TryRead(entity, _stackLookup, out InventoryStackPolicy stack)
+            ? stack.MaximumQuantity
+            : 1;
+        InventoryEquipSlots allowed = world.TryRead(entity, _equipLookup, out InventoryEquipCapability equip)
+            ? equip.AllowedSlots
+            : InventoryEquipSlots.None;
+        if (maximum != definition.MaximumQuantity || allowed != definition.AllowedEquipSlots)
+            DestroyFailedCreationOrThrow(world, entity, "item policy validation");
     }
 
     private static void DestroyFailedCreationOrThrow(EcsWorld world, Entity entity, string operation)
     {
         if (entity.IsValid && !world.TryDestroy(entity))
-            throw new InvalidOperationException($"Inventory {operation} failed and its created entity could not be reclaimed.");
-        throw new InvalidOperationException($"A compiled inventory prefab rejected {operation}.");
+            throw new InvalidOperationException($"Inventory {operation} failed and its entity could not be reclaimed.");
+        throw new InvalidOperationException($"Compiled inventory content rejected {operation}.");
     }
 
     private void EnsureWorld(EcsWorld world)

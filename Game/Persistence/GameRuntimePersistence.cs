@@ -1,80 +1,70 @@
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
-using UltraSim.Game.Persistence;
+using UltraSim.Game.Composition;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 
-namespace UltraSim.Game.Inventory;
+namespace UltraSim.Game.Persistence;
 
-/// <summary>Private staged ECS world plus its rebuilt derived inventory state.</summary>
-public readonly record struct InventoryStaging(
-    EcsWorld World,
-    InventoryGenerationState State);
-
-/// <summary>Result of an inventory save attempt.</summary>
-public readonly record struct InventorySaveResult(
+public readonly record struct GameSaveResult(
     bool Succeeded,
     SaveSetManifest? Manifest,
     Exception? Failure);
 
-/// <summary>Result of an inventory restore/publication attempt.</summary>
-public readonly record struct InventoryLoadResult(
+public readonly record struct GameLoadResult(
     bool Succeeded,
     ulong GenerationId,
     Exception? Failure);
 
 /// <summary>
-/// Game-owned persistence bridge for the S0 aggregate. InventoryIndex is
-/// rebuilt from restored ECS truth and deliberately has no participant artifact;
-/// Accounting remains an independent durable participant.
+/// Whole-game persistence composition. Feature-owned derived state contributes
+/// staged reconstruction, but does not own sibling participants or publication.
 /// </summary>
-public sealed class InventoryRuntimePersistence
+public sealed class GameRuntimePersistence
 {
     private readonly ServerGameFacet _runtime;
-    private readonly PersistenceCatalog _catalog;
+    private readonly UltraSimGameComposition _composition;
     private readonly PersistenceRestoreOptions _restoreOptions;
-    private readonly Func<PersistenceRestoreRequirements, InventoryStaging> _stagingFactory;
     private readonly SaveSetCoordinator _coordinator;
     private readonly AccountingPersistenceOptions _accountingOptions;
+    private readonly Func<PersistenceRestoreRequirements, GameStaging>? _stagingOverride;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
 
-    public InventoryRuntimePersistence(
+    public GameRuntimePersistence(
         ServerGameFacet runtime,
-        PersistenceCatalog catalog,
+        UltraSimGameComposition composition,
         PersistenceRestoreOptions restoreOptions,
-        Func<PersistenceRestoreRequirements, InventoryStaging> stagingFactory,
         SaveSetCoordinator coordinator,
-        AccountingPersistenceOptions? accountingOptions = null)
+        AccountingPersistenceOptions? accountingOptions = null,
+        Func<PersistenceRestoreRequirements, GameStaging>? stagingOverride = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
-        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        _composition = composition ?? throw new ArgumentNullException(nameof(composition));
         _restoreOptions = restoreOptions;
-        _stagingFactory = stagingFactory ?? throw new ArgumentNullException(nameof(stagingFactory));
         _coordinator = coordinator ?? throw new ArgumentNullException(nameof(coordinator));
         _accountingOptions = accountingOptions ?? new AccountingPersistenceOptions();
+        _stagingOverride = stagingOverride;
     }
 
-    public InventorySaveResult TrySave(in SaveSetContext context, Action<Action> captureBoundary)
+    public GameSaveResult TrySave(in SaveSetContext context, Action<Action> captureBoundary)
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(captureBoundary);
         SaveSetManifest? manifest = null;
         Exception? failure = null;
         SaveSetContext saveContext = context;
-        bool ran = _runtime.TryUseActiveGeneration<IInventoryGameGenerationStateProvider, bool>(
+        bool ran = _runtime.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
             (world, _, game) =>
             {
                 try
                 {
-                    var participant = new EcsWorldSaveSetParticipant(
+                    var ecs = new EcsWorldSaveSetParticipant(
                         world,
-                        _catalog,
+                        _composition.PersistenceCatalog,
                         _restoreOptions,
-                        requirements => _stagingFactory(requirements).World);
-                    var accounting = new AccountingSaveSetParticipant(
-                        game.Accounting,
-                        _accountingOptions);
-                    manifest = _coordinator.Save([participant, accounting], saveContext, captureBoundary);
+                        requirements => CreateStaging(requirements).World);
+                    var accounting = new AccountingSaveSetParticipant(game.Accounting, _accountingOptions);
+                    manifest = _coordinator.Save([ecs, accounting], saveContext, captureBoundary);
                     return true;
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -84,39 +74,36 @@ public sealed class InventoryRuntimePersistence
                 }
             },
             out bool succeeded);
-
         if (!ran)
         {
-            failure = new InvalidOperationException(
-                "Inventory persistence requires a running aggregate game generation.");
-            return new InventorySaveResult(false, null, failure);
+            failure = new InvalidOperationException("Game persistence requires a running game generation.");
+            return new GameSaveResult(false, null, failure);
         }
-        return new InventorySaveResult(succeeded, manifest, failure);
+        return new GameSaveResult(succeeded, manifest, failure);
     }
 
-    public InventoryLoadResult TryLoad(
-        SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
+    public GameLoadResult TryLoad(SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
     {
         EnsureOwnerThread();
         Exception? failure = null;
         ulong publishedGeneration = 0;
-        bool ran = _runtime.TryUseActiveGeneration<IInventoryGameGenerationStateProvider, bool>(
+        bool ran = _runtime.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
             (world, _, game) =>
             {
-                InventoryStaging? staging = null;
+                GameStaging? staging = null;
                 EcsWorld? stagedWorld = null;
                 AccountingStore? stagedAccounting = null;
-                InventoryGameGenerationState? candidate = null;
+                GameGenerationState? candidate = null;
                 bool transferred = false;
                 try
                 {
-                    var participant = new EcsWorldSaveSetParticipant(
+                    var ecsParticipant = new EcsWorldSaveSetParticipant(
                         world,
-                        _catalog,
+                        _composition.PersistenceCatalog,
                         _restoreOptions,
                         requirements =>
                         {
-                            InventoryStaging value = _stagingFactory(requirements);
+                            GameStaging value = CreateStaging(requirements);
                             staging = value;
                             return value.World;
                         });
@@ -124,7 +111,7 @@ public sealed class InventoryRuntimePersistence
                         game.Accounting,
                         _accountingOptions);
                     using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
-                        [participant, accountingParticipant],
+                        [ecsParticipant, accountingParticipant],
                         EmptyResolver.Instance,
                         recoveryMode);
                     PreparedEcsWorldParticipant ecs = prepared.Participants
@@ -134,24 +121,17 @@ public sealed class InventoryRuntimePersistence
                         .OfType<PreparedAccountingParticipant>()
                         .Single();
                     stagedWorld = ecs.TakeWorld();
-                    InventoryGenerationState stagedState = staging?.State ??
-                        throw new InvalidOperationException("The inventory staging factory did not produce state.");
-                    stagedState.Rebuild(stagedWorld);
+                    GameStaging built = staging ??
+                        throw new InvalidOperationException("The game staging factory did not produce state.");
+                    built.Inventory.Rebuild(stagedWorld);
                     stagedAccounting = accounting.TakeStore();
-                    candidate = new InventoryGameGenerationState(stagedAccounting, stagedState);
+                    candidate = new GameGenerationState(stagedAccounting, built.Inventory, built.Content);
 
                     prepared.Commit(_ =>
                     {
-                        // Runtime owns/reclaims both values from this point,
-                        // including terminal failures after publication starts.
                         transferred = true;
-                        if (!_runtime.TryPublishPreparedGeneration(
-                                stagedWorld,
-                                candidate,
-                                out publishedGeneration))
-                        {
-                            throw new InvalidOperationException("The prepared inventory generation was not published.");
-                        }
+                        if (!_runtime.TryPublishPreparedGeneration(stagedWorld, candidate, out publishedGeneration))
+                            throw new InvalidOperationException("The prepared game generation was not published.");
                     });
                     return true;
                 }
@@ -168,7 +148,7 @@ public sealed class InventoryRuntimePersistence
                         else
                         {
                             stagedAccounting?.Dispose();
-                            staging?.State.Dispose();
+                            staging?.Inventory.Dispose();
                         }
                         if (stagedWorld is not null && !stagedWorld.IsDisposed)
                             stagedWorld.Dispose();
@@ -178,20 +158,21 @@ public sealed class InventoryRuntimePersistence
                 }
             },
             out bool succeeded);
-
         if (!ran)
         {
-            failure = new InvalidOperationException(
-                "Inventory persistence requires a running aggregate game generation.");
-            return new InventoryLoadResult(false, 0, failure);
+            failure = new InvalidOperationException("Game persistence requires a running game generation.");
+            return new GameLoadResult(false, 0, failure);
         }
-        return new InventoryLoadResult(succeeded, succeeded ? publishedGeneration : 0, failure);
+        return new GameLoadResult(succeeded, succeeded ? publishedGeneration : 0, failure);
     }
+
+    private GameStaging CreateStaging(PersistenceRestoreRequirements requirements) =>
+        _stagingOverride?.Invoke(requirements) ?? _composition.CreateStaging(requirements);
 
     private void EnsureOwnerThread()
     {
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
-            throw new InvalidOperationException("Inventory persistence is bound to its creating owner thread.");
+            throw new InvalidOperationException("Game persistence is bound to its creating owner thread.");
     }
 
     private sealed class EmptyResolver : IPersistentEntityResolver

@@ -2,97 +2,137 @@ using UltraSim.ECS;
 
 namespace UltraSim.Game.Inventory;
 
-/// <summary>Stable content keys for the minimal S0 inventory fixture.</summary>
-public static class InventoryPrefabKeys
+/// <summary>Cold content descriptor for a compiled container prefab.</summary>
+public readonly record struct InventoryContainerDefinition
 {
-    public static readonly PrefabKey Character = new("game.character.inventory");
-    public static readonly PrefabKey Backpack = new("game.inventory.backpack");
-    public static readonly PrefabKey Bread = new("game.item.bread");
-    public static readonly PrefabKey IronSword = new("game.item.iron-sword");
-}
-
-/// <summary>World-bound handles for the compiled inventory content set.</summary>
-public readonly record struct InventoryPrefabHandles(
-    PrefabHandle Character,
-    PrefabHandle Backpack,
-    PrefabHandle Bread,
-    PrefabHandle IronSword)
-{
-    public static InventoryPrefabHandles Bind(CompiledPrefabCatalog catalog)
+    public InventoryContainerDefinition(
+        PrefabHandle handle,
+        PrefabKey key,
+        string displayName,
+        bool hasOwner)
     {
-        ArgumentNullException.ThrowIfNull(catalog);
-        return new InventoryPrefabHandles(
-            catalog.GetHandle(InventoryPrefabKeys.Character),
-            catalog.GetHandle(InventoryPrefabKeys.Backpack),
-            catalog.GetHandle(InventoryPrefabKeys.Bread),
-            catalog.GetHandle(InventoryPrefabKeys.IronSword));
+        if (!handle.IsValid)
+            throw new ArgumentException("An inventory container definition requires a compiled prefab handle.", nameof(handle));
+        if (!key.IsValid)
+            throw new ArgumentException("An inventory container definition requires a stable prefab key.", nameof(key));
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        Handle = handle;
+        Key = key;
+        DisplayName = displayName;
+        HasOwner = hasOwner;
     }
+
+    public PrefabHandle Handle { get; }
+    public PrefabKey Key { get; }
+    public string DisplayName { get; }
+    public bool HasOwner { get; }
 }
 
 /// <summary>
-/// Cold game-owned inventory prefab authoring. Callers may add additional
-/// game components to the returned builders before compiling the catalog.
+/// Cold content descriptor used to validate a requested item before runtime
+/// instantiation. The actual item facts are also compiled into ECS components.
 /// </summary>
+public readonly record struct InventoryItemDefinition
+{
+    public InventoryItemDefinition(
+        PrefabHandle handle,
+        PrefabKey key,
+        string displayName,
+        int maximumQuantity,
+        InventoryEquipSlots allowedEquipSlots)
+    {
+        if (!handle.IsValid)
+            throw new ArgumentException("An inventory item definition requires a compiled prefab handle.", nameof(handle));
+        if (!key.IsValid)
+            throw new ArgumentException("An inventory item definition requires a stable prefab key.", nameof(key));
+        ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        if (maximumQuantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumQuantity));
+        if ((allowedEquipSlots & ~InventoryEquipSlots.MainHand) != 0)
+            throw new ArgumentOutOfRangeException(nameof(allowedEquipSlots));
+        if (allowedEquipSlots != InventoryEquipSlots.None && maximumQuantity != 1)
+            throw new ArgumentException("Equippable S0 items must be non-stackable.", nameof(maximumQuantity));
+
+        Handle = handle;
+        Key = key;
+        DisplayName = displayName;
+        MaximumQuantity = maximumQuantity;
+        AllowedEquipSlots = allowedEquipSlots;
+    }
+
+    public PrefabHandle Handle { get; }
+    public PrefabKey Key { get; }
+    public string DisplayName { get; }
+    public int MaximumQuantity { get; }
+    public InventoryEquipSlots AllowedEquipSlots { get; }
+    public bool IsStackable => MaximumQuantity > 1;
+}
+
+/// <summary>
+/// Game-content capability consumed by Inventory. Adding a new item prefab is
+/// a content-layer operation and does not require Inventory rule changes.
+/// </summary>
+public interface IInventoryContentCatalog
+{
+    CompiledPrefabCatalog Prefabs { get; }
+
+    bool TryGetContainer(PrefabHandle handle, out InventoryContainerDefinition definition);
+
+    bool TryGetContainer(PrefabKey key, out InventoryContainerDefinition definition);
+
+    bool TryGetItem(PrefabHandle handle, out InventoryItemDefinition definition);
+
+    bool TryGetItem(PrefabKey key, out InventoryItemDefinition definition);
+}
+
+/// <summary>Reusable Inventory component authoring for game-owned content.</summary>
 public static class InventoryContent
 {
-    public static PrefabBuilder DefineCharacter(ContentCatalogBuilder content)
+    public static PrefabBuilder DefineContainer(
+        ContentCatalogBuilder content,
+        PrefabKey key,
+        string displayName,
+        int defaultCapacity,
+        bool hasOwner)
     {
         ArgumentNullException.ThrowIfNull(content);
-        PrefabBuilder prefab = content.Define(InventoryPrefabKeys.Character);
-        prefab.With(new InventoryCharacter { Marker = 1 });
-        prefab.DisplayName("Character");
+        if (defaultCapacity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(defaultCapacity));
+        var prefab = content.Define(key);
+        prefab.With(new InventoryContainer { Capacity = defaultCapacity });
+        if (hasOwner)
+            prefab.With(new InventoryContainerOwner { Owner = Entity.Null });
+        prefab.DisplayName(displayName);
         return prefab;
     }
 
-    public static PrefabBuilder DefineBackpack(ContentCatalogBuilder content)
+    public static PrefabBuilder DefineItem(
+        ContentCatalogBuilder content,
+        PrefabKey key,
+        string displayName,
+        int maximumQuantity,
+        InventoryEquipSlots allowedEquipSlots = InventoryEquipSlots.None)
     {
         ArgumentNullException.ThrowIfNull(content);
-        PrefabBuilder prefab = content.Define(InventoryPrefabKeys.Backpack);
-        prefab.With(new InventoryContainer { Owner = Entity.Null, Capacity = 8 });
-        prefab.DisplayName("Backpack");
-        return prefab;
-    }
+        if (maximumQuantity <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumQuantity));
+        if ((allowedEquipSlots & ~InventoryEquipSlots.MainHand) != 0)
+            throw new ArgumentOutOfRangeException(nameof(allowedEquipSlots));
+        if (allowedEquipSlots != InventoryEquipSlots.None && maximumQuantity != 1)
+            throw new ArgumentException("Equippable S0 items must be non-stackable.", nameof(maximumQuantity));
 
-    public static PrefabBuilder DefineBread(ContentCatalogBuilder content)
-    {
-        ArgumentNullException.ThrowIfNull(content);
-        PrefabBuilder prefab = content.Define(InventoryPrefabKeys.Bread);
+        var prefab = content.Define(key);
         prefab.With(new InventoryItem
         {
             Parent = Entity.Null,
-            Kind = InventoryItemKind.Bread,
             EquipSlot = InventoryEquipSlot.None,
             Quantity = 1,
         });
-        prefab.DisplayName("Bread");
+        if (maximumQuantity > 1)
+            prefab.With(new InventoryStackPolicy { MaximumQuantity = maximumQuantity });
+        if (allowedEquipSlots != InventoryEquipSlots.None)
+            prefab.With(new InventoryEquipCapability { AllowedSlots = allowedEquipSlots });
+        prefab.DisplayName(displayName);
         return prefab;
-    }
-
-    public static PrefabBuilder DefineIronSword(ContentCatalogBuilder content)
-    {
-        ArgumentNullException.ThrowIfNull(content);
-        PrefabBuilder prefab = content.Define(InventoryPrefabKeys.IronSword);
-        prefab.With(new InventoryItem
-        {
-            Parent = Entity.Null,
-            Kind = InventoryItemKind.IronSword,
-            EquipSlot = InventoryEquipSlot.None,
-            Quantity = 1,
-        });
-        prefab.DisplayName("Iron Sword");
-        return prefab;
-    }
-
-    public static InventoryPrefabHandles CompileDefaults(
-        EcsWorld world,
-        ContentCompilationOptions options)
-    {
-        ArgumentNullException.ThrowIfNull(world);
-        var content = new ContentCatalogBuilder(world.Schema);
-        _ = DefineCharacter(content);
-        _ = DefineBackpack(content);
-        _ = DefineBread(content);
-        _ = DefineIronSword(content);
-        return InventoryPrefabHandles.Bind(content.Compile(world, options));
     }
 }

@@ -1,11 +1,11 @@
 using UltraSim.Client.Core;
 using UltraSim.ECS;
+using UltraSim.Game.Inventory;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
-namespace UltraSim.Game.Inventory;
+namespace UltraSim.Game.UI;
 
-/// <summary>Game-owned typed contract for the S0.7 inventory Gump.</summary>
 public static class InventoryUi
 {
     private static readonly Contract _contract = CreateContract();
@@ -22,39 +22,29 @@ public static class InventoryUi
 
     private static Contract CreateContract()
     {
-        var source = new UiDefinitionBuilder("game.inventory.gump", version: 2);
+        var source = new UiDefinitionBuilder("game.inventory.gump", version: 3);
         UiSlotReference title = source.DeclareSlot("title", UiSlotValueKind.Text);
         UiSlotReference items = source.DeclareSlot("items", UiSlotValueKind.List);
         UiSlotReference status = source.DeclareSlot("status", UiSlotValueKind.Text);
         UiSlotReference splitLabel = source.DeclareSlot("split-label", UiSlotValueKind.Text);
         UiSlotReference equipLabel = source.DeclareSlot("equip-label", UiSlotValueKind.Text);
-        UiActionReference select = source.DeclareAction(
-            "select",
-            acceptsRowContext: true);
-        UiActionReference split = source.DeclareAction(
-            "split");
-        UiActionReference equip = source.DeclareAction(
-            "equip",
-            inputKind: UiValueKind.Unset);
-
-        source.AddCanvas(canvas =>
-        {
-            canvas.AddVertical(
-                "content",
-                content =>
+        UiActionReference select = source.DeclareAction("select", acceptsRowContext: true);
+        UiActionReference split = source.DeclareAction("split");
+        UiActionReference equip = source.DeclareAction("equip");
+        source.AddCanvas(canvas => canvas.AddVertical(
+            "content",
+            content =>
+            {
+                content.AddText("title", title);
+                content.AddList("items", items, select);
+                content.AddHorizontal("actions", actions =>
                 {
-                    content.AddText("title", title);
-                    content.AddList("items", items, select);
-                    content.AddHorizontal("actions", actions =>
-                    {
-                        actions.AddButton("split", split, splitLabel);
-                        actions.AddButton("equip", equip, equipLabel);
-                    });
-                    content.AddText("status", status);
-                },
-                UiChildLayout.Canvas(new UiCanvasPlacement(16, 16, 768, 568)));
-        });
-
+                    actions.AddButton("split", split, splitLabel);
+                    actions.AddButton("equip", equip, equipLabel);
+                });
+                content.AddText("status", status);
+            },
+            UiChildLayout.Canvas(new UiCanvasPlacement(16, 16, 768, 568))));
         CompiledUiDefinition definition = UiDefinitionCompiler.Compile(source);
         return new Contract(
             definition,
@@ -80,17 +70,12 @@ public static class InventoryUi
         UiActionId Equip);
 }
 
-/// <summary>Semantic view operations required by the inventory controller.</summary>
 public interface IInventoryUiPort
 {
     event Action<UiActionRequest>? ActionSubmitted;
-
     UiViewInstanceId OpenView(UiOpenView operation);
-
     UiViewInstanceId OpenHotView(UiHotOpenView operation);
-
     void UpdateView(UiUpdateView operation);
-
     bool CloseView(UiCloseView operation);
 }
 
@@ -114,8 +99,8 @@ public readonly record struct InventoryUiOpenResult(
     string Message);
 
 /// <summary>
-/// Projects authoritative ECS inventory state into one retained UI view and
-/// translates split/equip intents back into domain mutations.
+/// Game UI workflow for Inventory. Retained references use complete persistent
+/// keys and successful mutations publish row-granular list deltas.
 /// </summary>
 public sealed class InventoryUiController : IDisposable
 {
@@ -134,9 +119,10 @@ public sealed class InventoryUiController : IDisposable
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _ui = ui ?? throw new ArgumentNullException(nameof(ui));
         if (options.ServerIdentity is null && options.CompositionIdentity is null)
-        {
-            options = new InventoryUiOptions("local-server", "game-composition", 1);
-        }
+            options = new InventoryUiOptions(
+                ServerIdentity: "local-server",
+                CompositionIdentity: "game-composition",
+                ProtocolVersion: 1);
         options.Validate();
         _cacheKey = new UiDefinitionCacheKey(
             options.ServerIdentity!,
@@ -148,41 +134,11 @@ public sealed class InventoryUiController : IDisposable
         _ui.ActionSubmitted += HandleAction;
     }
 
-    public int OpenViewCount
-    {
-        get
-        {
-            EnsureOperational();
-            return _sessions.Count;
-        }
-    }
-
+    public int OpenViewCount { get { EnsureOperational(); return _sessions.Count; } }
     public event Action<InventoryMutationResult>? MutationCompleted;
 
-    public InventoryUiOpenResult Open(Entity container)
-        => OpenCore(container, hot: false);
-
-    public InventoryUiOpenResult OpenHot(Entity container)
-        => OpenCore(container, hot: true);
-
-    private InventoryUiOpenResult OpenCore(Entity container, bool hot)
-    {
-        EnsureOperational();
-        InventoryProjection projection = CaptureProjection(container);
-        if (!projection.Succeeded)
-            return new InventoryUiOpenResult(false, UiViewInstanceId.Invalid, projection.Message);
-
-        UiModel model = CreateModel(projection.Items, "Backpack", "Ready");
-        UiViewInstanceId instance = hot
-            ? _ui.OpenHotView(new UiHotOpenView(_cacheKey, model, sequence: 1))
-            : _ui.OpenView(new UiOpenView(_cacheKey, InventoryUi.Definition, model));
-        if (!instance.IsValid)
-            throw new InvalidOperationException("The inventory UI port returned an invalid view ID.");
-        if (_sessions.ContainsKey(instance))
-            throw new InvalidOperationException("The inventory UI port returned an already-owned view ID.");
-        _sessions.Add(instance, new Session(instance, projection.ContainerId, model, sequence: 1));
-        return new InventoryUiOpenResult(true, instance, "Inventory opened.");
-    }
+    public InventoryUiOpenResult Open(Entity container) => OpenCore(container, hot: false);
+    public InventoryUiOpenResult OpenHot(Entity container) => OpenCore(container, hot: true);
 
     public bool Close(UiViewInstanceId instance)
     {
@@ -194,33 +150,61 @@ public sealed class InventoryUiController : IDisposable
         return _sessions.Remove(instance);
     }
 
+    private InventoryUiOpenResult OpenCore(Entity container, bool hot)
+    {
+        EnsureOperational();
+        InventoryProjection projection = CaptureProjection(container);
+        if (!projection.Succeeded)
+            return new InventoryUiOpenResult(false, UiViewInstanceId.Invalid, projection.Message);
+        UiModel model = CreateModel(projection.Items, projection.Title, "Ready");
+        UiViewInstanceId instance = hot
+            ? _ui.OpenHotView(new UiHotOpenView(_cacheKey, model, sequence: 1))
+            : _ui.OpenView(new UiOpenView(_cacheKey, InventoryUi.Definition, model));
+        if (!instance.IsValid)
+            throw new InvalidOperationException("The inventory UI port returned an invalid view ID.");
+        if (_sessions.ContainsKey(instance))
+            throw new InvalidOperationException("The inventory UI port returned an already-owned view ID.");
+        _sessions.Add(instance, new Session(instance, projection.Container, model, sequence: 1));
+        return new InventoryUiOpenResult(true, instance, "Inventory opened.");
+    }
+
     private void HandleAction(UiActionRequest request)
     {
         EnsureOperational();
         if (!_sessions.TryGetValue(request.Instance, out Session? session))
             return;
+        session.Model.ValidateAction(request);
+        if (request.Action == InventoryUi.Select)
+        {
+            HandleSelection(session, request.Row);
+            return;
+        }
 
         InventoryMutationResult result = new(
             InventoryMutationStatus.InvariantViolation,
             Entity.Null,
             Entity.Null,
             "The inventory action did not complete.");
-        InventoryItemView[]? updatedItems = null;
+        UiListPatch[] listPatches = Array.Empty<UiListPatch>();
+        bool staleWorld = false;
         try
         {
-            session.Model.ValidateAction(request);
-            if (request.Action == InventoryUi.Select)
-            {
-                HandleSelection(session, request.Row);
-                return;
-            }
-
             bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, bool>(
                 (world, _, provider) =>
                 {
+                    if (world.PersistentWorldId != session.Container.World)
+                    {
+                        staleWorld = true;
+                        result = new InventoryMutationResult(
+                            InventoryMutationStatus.RuntimeWorldMismatch,
+                            Entity.Null,
+                            Entity.Null,
+                            "The inventory view belongs to a different persistent world.");
+                        return true;
+                    }
                     InventoryGenerationState state = provider.Inventory;
                     if (!session.SelectedItem.IsValid ||
-                        !world.TryResolvePersistentEntity(session.SelectedItem, out Entity item))
+                        !TryResolve(world, session.SelectedItem, out Entity item))
                     {
                         result = new InventoryMutationResult(
                             InventoryMutationStatus.MissingItem,
@@ -229,7 +213,7 @@ public sealed class InventoryUiController : IDisposable
                             "The selected item is stale or missing.");
                         return true;
                     }
-                    if (!world.TryResolvePersistentEntity(session.Container, out Entity container) ||
+                    if (!TryResolve(world, session.Container, out Entity container) ||
                         !state.Index.ContainsContainer(container))
                     {
                         result = new InventoryMutationResult(
@@ -243,24 +227,34 @@ public sealed class InventoryUiController : IDisposable
                     if (request.Action == InventoryUi.Split)
                     {
                         result = state.Split(world, item, container, container, quantity: 1);
+                        if (result.Accepted &&
+                            state.TryProjectItem(world, item, out InventoryItemView source) &&
+                            state.TryProjectItem(world, result.CreatedItem, out InventoryItemView created))
+                        {
+                            listPatches =
+                            [
+                                UiListPatch.Update(InventoryUi.Items, ToRow(source)),
+                                UiListPatch.Add(InventoryUi.Items, ToRow(created)),
+                            ];
+                        }
                     }
                     else if (request.Action == InventoryUi.Equip)
                     {
                         if (!state.TryGetContainerOwner(world, container, out Entity owner))
                         {
                             result = new InventoryMutationResult(
-                                InventoryMutationStatus.MissingContainer,
+                                InventoryMutationStatus.MissingEquipOwner,
                                 item,
                                 Entity.Null,
-                                "The inventory container is stale or missing.");
+                                "This container has no equipment owner.");
                             return true;
                         }
-                        result = state.Equip(
-                            world,
-                            item,
-                            container,
-                            owner,
-                            InventoryEquipSlot.MainHand);
+                        result = state.Equip(world, item, container, owner, InventoryEquipSlot.MainHand);
+                        if (result.Accepted)
+                        {
+                            listPatches =
+                            [UiListPatch.Remove(InventoryUi.Items, new UiRowId(session.SelectedItem.Entity.Value))];
+                        }
                     }
                     else
                     {
@@ -269,15 +263,10 @@ public sealed class InventoryUiController : IDisposable
                             item,
                             Entity.Null,
                             "The inventory action is unknown.");
-                        return true;
                     }
-
-                    if (result.Accepted)
-                        updatedItems = state.Snapshot(world, container).ToArray();
                     return true;
                 },
                 out bool completed);
-
             if (!ran)
             {
                 result = new InventoryMutationResult(
@@ -304,8 +293,14 @@ public sealed class InventoryUiController : IDisposable
                 "The inventory action was rejected: " + exception.Message);
         }
 
+        if (staleWorld)
+        {
+            _ = Close(request.Instance);
+            MutationCompleted?.Invoke(result);
+            return;
+        }
+        PublishResult(session, result, listPatches);
         MutationCompleted?.Invoke(result);
-        PublishResult(session, result, updatedItems);
     }
 
     private void HandleSelection(Session session, UiRowId row)
@@ -321,11 +316,13 @@ public sealed class InventoryUiController : IDisposable
         }
         if (!found)
         {
-            PublishStatus(session, "Rejected: The selected inventory row is stale.", enableActions: false);
             session.SelectedItem = default;
+            PublishStatus(session, "Rejected: The selected inventory row is stale.", enableActions: false);
             return;
         }
-        session.SelectedItem = new PersistentEntityId(row.Value);
+        session.SelectedItem = new PersistentEntityKey(
+            session.Container.World,
+            new PersistentEntityId(row.Value));
         PublishStatus(session, "Item selected.", enableActions: true);
     }
 
@@ -336,36 +333,40 @@ public sealed class InventoryUiController : IDisposable
             {
                 InventoryGenerationState state = provider.Inventory;
                 if (!state.Index.ContainsContainer(container))
-                    return new InventoryProjection(false, default, Array.Empty<InventoryItemView>(), "The container is missing.");
-                if (!world.TryGetPersistentId(container, out PersistentEntityId containerId))
-                    return new InventoryProjection(false, default, Array.Empty<InventoryItemView>(), "The container has no durable identity.");
-                return new InventoryProjection(true, containerId, state.Snapshot(world, container).ToArray(), "Inventory opened.");
+                    return new InventoryProjection(false, default, "", [], "The container is missing.");
+                if (!world.TryGetPersistentId(container, out PersistentEntityId id))
+                    return new InventoryProjection(false, default, "", [], "The container has no durable identity.");
+                if (!state.TryGetContainerDefinition(world, container, out InventoryContainerDefinition definition))
+                    return new InventoryProjection(false, default, "", [], "The container content is unknown.");
+                return new InventoryProjection(
+                    true,
+                    new PersistentEntityKey(world.PersistentWorldId, id),
+                    definition.DisplayName,
+                    state.Snapshot(world, container),
+                    "Inventory opened.");
             },
             out InventoryProjection projection);
         return ran
             ? projection
-            : new InventoryProjection(false, default, Array.Empty<InventoryItemView>(), "The inventory runtime is not running.");
+            : new InventoryProjection(false, default, "", [], "The inventory runtime is not running.");
     }
 
-    private void PublishResult(Session session, InventoryMutationResult result, InventoryItemView[]? updatedItems)
+    private void PublishResult(Session session, InventoryMutationResult result, UiListPatch[] listPatches)
     {
         string status = result.Accepted ? result.Message : "Rejected: " + result.Message;
-        UiListPatch[] lists = result.Accepted && updatedItems is not null
-            ? [UiListPatch.Replace(InventoryUi.Items, ToRows(updatedItems))]
-            : Array.Empty<UiListPatch>();
-        var scalar = new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status));
-        bool clearSelection = result.Accepted;
-        UiActionStatePatch[] actions = clearSelection
-            ? DisabledActionPatches()
-            : Array.Empty<UiActionStatePatch>();
+        UiActionStatePatch[] actions = result.Accepted ? DisabledActionPatches() : [];
         ulong sequence = checked(session.Sequence + 1);
-        var delta = new UiModelDelta(InventoryUi.Definition.Handle, sequence, [scalar], lists, actions);
+        var delta = new UiModelDelta(
+            InventoryUi.Definition.Handle,
+            sequence,
+            [new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status))],
+            listPatches,
+            actions);
         _ui.UpdateView(new UiUpdateView(session.Instance, delta));
         session.Sequence = sequence;
         session.Model.SetText(InventoryUi.Status, status);
-        if (result.Accepted && updatedItems is not null)
-            session.Model.ReplaceRows(InventoryUi.Items, ToRows(updatedItems));
-        if (clearSelection)
+        ApplyListPatches(session.Model, listPatches);
+        if (result.Accepted)
         {
             session.SelectedItem = default;
             SetActionState(session.Model, enabled: false);
@@ -375,9 +376,7 @@ public sealed class InventoryUiController : IDisposable
     private void PublishStatus(Session session, string status, bool enableActions)
     {
         ulong sequence = checked(session.Sequence + 1);
-        UiActionStatePatch[] actions = enableActions
-            ? EnabledActionPatches()
-            : DisabledActionPatches();
+        UiActionStatePatch[] actions = enableActions ? EnabledActionPatches() : DisabledActionPatches();
         var delta = new UiModelDelta(
             InventoryUi.Definition.Handle,
             sequence,
@@ -389,10 +388,34 @@ public sealed class InventoryUiController : IDisposable
         SetActionState(session.Model, enableActions);
     }
 
-    private static UiModel CreateModel(
-        IReadOnlyList<InventoryItemView> items,
-        string title,
-        string status)
+    private static void ApplyListPatches(UiModel model, ReadOnlySpan<UiListPatch> patches)
+    {
+        if (patches.Length == 0)
+            return;
+        var rows = model.GetRows(InventoryUi.Items).ToArray().ToList();
+        foreach (UiListPatch patch in patches)
+        {
+            int index = rows.FindIndex(row => row.Id == patch.RowId);
+            switch (patch.Kind)
+            {
+                case UiListDeltaKind.Add when index < 0:
+                    rows.Add(patch.Row);
+                    break;
+                case UiListDeltaKind.Update when index >= 0:
+                    rows[index] = patch.Row;
+                    break;
+                case UiListDeltaKind.Remove when index >= 0:
+                    rows.RemoveAt(index);
+                    break;
+                default:
+                    throw new InvalidOperationException("The inventory row delta disagrees with its retained model.");
+            }
+        }
+        rows.Sort(static (left, right) => left.Id.Value.CompareTo(right.Id.Value));
+        model.ReplaceRows(InventoryUi.Items, rows.ToArray());
+    }
+
+    private static UiModel CreateModel(IReadOnlyList<InventoryItemView> items, string title, string status)
     {
         var model = new UiModel(InventoryUi.Definition);
         model.SetText(InventoryUi.Title, title);
@@ -402,6 +425,30 @@ public sealed class InventoryUiController : IDisposable
         model.SetText(InventoryUi.EquipLabel, "Equip");
         SetActionState(model, enabled: false);
         return model;
+    }
+
+    private static UiListRow[] ToRows(IReadOnlyList<InventoryItemView> items)
+    {
+        var rows = new UiListRow[items.Count];
+        for (int index = 0; index < rows.Length; index++)
+            rows[index] = ToRow(items[index]);
+        return rows;
+    }
+
+    private static UiListRow ToRow(in InventoryItemView item) => new(
+        new UiRowId(item.PersistentId.Value),
+        [
+            UiValue.FromText(item.DisplayName),
+            UiValue.FromNumber(item.Quantity),
+            UiValue.FromText(item.EquipSlot == InventoryEquipSlot.None ? "Container" : "Main Hand"),
+        ]);
+
+    private static bool TryResolve(EcsWorld world, in PersistentEntityKey key, out Entity entity)
+    {
+        if (key.World == world.PersistentWorldId)
+            return world.TryResolvePersistentEntity(key.Entity, out entity);
+        entity = Entity.Null;
+        return false;
     }
 
     private static UiActionStatePatch[] EnabledActionPatches() =>
@@ -429,23 +476,6 @@ public sealed class InventoryUiController : IDisposable
         model.SetActionState(InventoryUi.Equip, state);
     }
 
-    private static UiListRow[] ToRows(IReadOnlyList<InventoryItemView> items)
-    {
-        var rows = new UiListRow[items.Count];
-        for (int index = 0; index < items.Count; index++)
-        {
-            InventoryItemView item = items[index];
-            rows[index] = new UiListRow(
-                new UiRowId(item.PersistentId.Value),
-                [
-                    UiValue.FromText(item.Kind == InventoryItemKind.Bread ? "Bread" : "Iron Sword"),
-                    UiValue.FromNumber(item.Quantity),
-                    UiValue.FromText(item.EquipSlot == InventoryEquipSlot.None ? "Backpack" : "Main Hand"),
-                ]);
-        }
-        return rows;
-    }
-
     private void EnsureOperational()
     {
         if (_disposed)
@@ -468,10 +498,7 @@ public sealed class InventoryUiController : IDisposable
             try
             {
                 if (!_ui.CloseView(new UiCloseView(instance)))
-                {
-                    firstFailure ??= new InvalidOperationException(
-                        $"The inventory UI port did not close view {instance.Value}.");
-                }
+                    firstFailure ??= new InvalidOperationException($"The inventory UI port did not close view {instance.Value}.");
             }
             catch (Exception exception) when (exception is not OutOfMemoryException)
             {
@@ -486,7 +513,7 @@ public sealed class InventoryUiController : IDisposable
 
     private sealed class Session
     {
-        internal Session(UiViewInstanceId instance, PersistentEntityId container, UiModel model, ulong sequence)
+        internal Session(UiViewInstanceId instance, PersistentEntityKey container, UiModel model, ulong sequence)
         {
             Instance = instance;
             Container = container;
@@ -495,15 +522,16 @@ public sealed class InventoryUiController : IDisposable
         }
 
         internal UiViewInstanceId Instance { get; }
-        internal PersistentEntityId Container { get; }
-        internal PersistentEntityId SelectedItem { get; set; }
+        internal PersistentEntityKey Container { get; }
+        internal PersistentEntityKey SelectedItem { get; set; }
         internal UiModel Model { get; }
         internal ulong Sequence { get; set; }
     }
 
     private readonly record struct InventoryProjection(
         bool Succeeded,
-        PersistentEntityId ContainerId,
+        PersistentEntityKey Container,
+        string Title,
         InventoryItemView[] Items,
         string Message);
 }

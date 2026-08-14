@@ -250,6 +250,7 @@ Client/
     _Godot/              S0.4 renderer/host implementation
 
 Game/                    logical game-composition boundary
+    Contracts/           narrow cross-domain policy types; no UI/client dependency
     Composition/
     Simulation/
     Admission/
@@ -1716,39 +1717,54 @@ A real game subsystem has successfully used ECS, Runtime, UI, Admission/Accounti
 
 Accepted S0.7 invariants
 
-- Inventory truth is limited to game-owned ECS components: character marker,
-  container ownership/capacity, and item parent/kind/equipment/quantity. There
-  is no generic Inventory kernel and no Inventory persistence participant. The
-  canonical character/container/item fixtures are instantiated from compiled
-  content prefabs with stable keys and preserved prefab provenance.
-- `InventoryIndex` is generation-owned, bounded, and derived. Normal container
-  enumeration uses packed indexed child lists with O(1) donor repair; a full ECS
-  scan is reserved for rebuild. Stable UI order is a persistent-ID projection,
-  not a physical-list invariant. `MaximumItems` bounds both indexed item count
-  and aggregate reserved child slots, while explicit snapshots report limits,
-  live counts, and reserved slots. Rebuild validates ownership, capacity, item
-  state, containment, and unique equipment slots transactionally before
-  swapping the derived maps.
+- Inventory is a narrow feature, not the game integration root. `Game/Composition`
+  owns one generated `GameSchema`, concrete compiled content, and the aggregate
+  `GameGenerationState(Accounting + Inventory + Content)`. `Game/Persistence`
+  owns whole-game participant staging/publication and `Game/UI` owns the
+  inventory workflow. Inventory itself depends only on ECS. A narrow
+  `Game/Contracts` assembly carries admission policy types so Composition does
+  not depend on the Admission/UI implementation or Client.Core.
+- Inventory contributes generated component declarations but owns no numeric
+  component IDs and no closed feature schema. Final IDs come from the one game
+  schema alongside unrelated simulation/character components.
+- Inventory truth is limited to game-owned ECS facts: container capacity,
+  optional container ownership, item parent/equipment/quantity, and optional
+  stack/equipment policies. Stable prefab provenance supplies item identity and
+  presentation. Bread/Sword/Apple are game content, not an Inventory enum or
+  switch; a third item requires no Inventory rule/index edit.
+- Being a container and having an owner are independent. The same rules/index
+  support both an owned Backpack and an ownerless World Chest. Creation and
+  rebuild validate registered content provenance and owned/ownerless shape.
+- `InventoryIndex` is generation-owned, bounded, and derived. Contained items
+  occupy a global dense child-node pool consumed by actual rows; empty
+  containers retain metadata only and do not reserve their theoretical gameplay
+  capacity. Packed removal repairs the one moved donor node's links/location.
+  A full ECS scan is reserved for transactional rebuild. Accounting reports
+  known child-array bytes separately from explicitly excluded CLR dictionary
+  overhead.
 - Creation, Move, Split, Equip, and destruction preflight expected failures and
   commit ECS plus index state as one game-domain mutation. Rejections preserve
-  ECS liveness, change version, and index state; stale entities, missing
-  containers/characters, invalid kinds/quantities, reservation/capacity limits,
+  ECS liveness and index state; stale entities, missing containers/owners,
+  invalid policy/quantities, content/capacity limits,
   occupied slots, and duplicate/loss paths are explicit outcomes. Raw ECS
   topology mutation is not a second supported Inventory write path.
 - The inventory Gump uses the generic compiled UI definition, `UiModel`, and
   `UiModelDelta` path. One item list supplies row selection to separate
-  Split/Equip controls. Sessions retain persistent IDs; rows are projected from
-  ECS/index truth; accepted mutations publish list/scalar deltas without
-  close/reopen; rejected/stale selections publish explicit status responses.
-- The game publishes one aggregate Accounting + Inventory root through the
-  opaque Runtime generation slot. Admission and persistence consume game-owned
-  capability interfaces rather than adding domain APIs to Runtime.
+  Split/Equip controls. Sessions retain `PersistentEntityKey` and prove the
+  persistent world before resolving compact row IDs, preventing cross-world
+  durable-identity ABA. Accepted Split publishes `Update + Add`; accepted Equip
+  publishes `Remove`; neither sends a full list `Replace` or close/reopen.
 - ECS save/load is the only inventory persistence path. The save set contains
   `world` and `accounting` artifacts but no Inventory artifact. A staged restore
   resolves runtime entity references, rebuilds and validates `InventoryIndex`,
-  combines it with prepared Accounting, and publishes the whole aggregate once;
+  combines it with prepared Accounting/content in `GameGenerationState`, and
+  publishes the whole aggregate once;
   old ECS handles become stale and the restored inventory reopens through the
   hot client UI path.
+- The scale gate creates 100,000 empty capacity-20 containers (2,000,000
+  theoretical gameplay slots) with a 32-row child pool and zero contained rows.
+  This locks the actual-use storage contract without pretending dictionary
+  metadata is included in the 640 known child-array bytes.
 
 18. S0.8 — Integrated acceptance scenario
 

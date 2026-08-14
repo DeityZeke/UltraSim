@@ -26,9 +26,13 @@ admission with optional minimal Accounting — is accepted in
 [`S0.5 Acceptance Report.md`](S0.5%20Acceptance%20Report.md).
 S0.6 — real ECS + Accounting transactional persistence — is accepted in
 [`S0.6 Acceptance Report.md`](S0.6%20Acceptance%20Report.md). S0.7 — the
-game-owned ECS inventory vertical and generic inventory Gump — is accepted in
-[`S0.7 Acceptance Report.md`](S0.7%20Acceptance%20Report.md). Later slices
-introduce game composition incrementally.
+composed game-owned ECS inventory vertical and generic inventory Gump — is
+accepted in [`S0.7 Acceptance Report.md`](S0.7%20Acceptance%20Report.md).
+S0.7 introduces the concrete `Game/Composition` root because multiple game
+domains now require one schema, content catalog, generation root, and
+persistence publication boundary. `Game/Contracts` keeps the narrow Admission
+policy seam free of UI/client dependencies. Later slices extend the composition
+root rather than making a feature project own the game around it.
 
 ## Current executable slices
 
