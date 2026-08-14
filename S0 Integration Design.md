@@ -298,6 +298,12 @@ InventoryIndex?        // derived, generation-bound
 
 Exact types are implementation decisions.
 
+Accepted S0.6 implementation note: Runtime stores one opaque game-state object
+inside `ServerGeneration`; composition may install it cold through
+`ServerGenerationBuilder.SetGameState`. Typed game callbacks receive that state
+paired with the same generation's ECS world. Runtime owns its lifetime but does
+not inspect its game-domain meaning.
+
 Generation lifetime invariants
 
 A generation is constructed privately before publication.

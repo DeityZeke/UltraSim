@@ -8,6 +8,13 @@ namespace UltraSim.Server.Runtime;
 /// <param name="generationId">The active generation identity paired with <paramref name="world"/>.</param>
 public delegate TResult ServerGenerationOperation<TResult>(EcsWorld world, ulong generationId);
 
+/// <summary>One synchronous trusted-game operation over typed generation-owned state.</summary>
+public delegate TResult ServerGenerationStateOperation<TState, TResult>(
+    EcsWorld world,
+    ulong generationId,
+    TState gameState)
+    where TState : class;
+
 /// <summary>
 /// Callback-scoped game authority over the active server generation.
 /// </summary>
@@ -45,22 +52,38 @@ public sealed class ServerGameFacet
     }
 
     /// <summary>
-    /// Publishes a fully prepared running ECS world through the same active
-    /// generation root used by normal Runtime replacements.
+    /// Runs one trusted game operation when Runtime is running and the active
+    /// generation owns the requested game-state type.
     /// </summary>
     /// <remarks>
-    /// <paramref name="publicationAction"/> is invoked synchronously after the
-    /// candidate becomes active and before the old generation is disposed. A
-    /// callback failure is terminal because the publication boundary has been
-    /// crossed; callers must make the callback's state transfer non-throwing
-    /// after candidate validation.
+    /// The supplied world and game state are one callback-scoped authority.
+    /// Neither may be retained after the callback returns.
+    /// </remarks>
+    public bool TryUseActiveGeneration<TState, TResult>(
+        ServerGenerationStateOperation<TState, TResult> operation,
+        out TResult result)
+        where TState : class
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+        return _runtime.TryUseActiveGeneration(operation, out result);
+    }
+
+    /// <summary>
+    /// Publishes a fully prepared ECS world and opaque game-owned state through
+    /// the same active generation root used by normal Runtime replacements.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="preparedGameState"/> becomes candidate-owned before
+    /// publication. Runtime never interprets its domain type or contents. Once
+    /// the inputs pass active-root alias rejection, this call takes ownership
+    /// and reclaims both inputs if candidate validation fails.
     /// </remarks>
     public bool TryPublishPreparedGeneration(
         EcsWorld preparedWorld,
-        Action? publicationAction,
+        object? preparedGameState,
         out ulong generationId)
     {
         ArgumentNullException.ThrowIfNull(preparedWorld);
-        return _runtime.TryPublishPreparedGeneration(preparedWorld, publicationAction, out generationId);
+        return _runtime.TryPublishPreparedGeneration(preparedWorld, preparedGameState, out generationId);
     }
 }

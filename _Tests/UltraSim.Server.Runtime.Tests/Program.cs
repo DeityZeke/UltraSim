@@ -15,6 +15,7 @@ var tests = new (string Name, Action Body)[]
     ("InvalidElapsedRejectsTransactionallyWithoutFaulting", InvalidElapsedRejectsTransactionallyWithoutFaulting),
     ("FailedReplacementLeavesActiveGenerationUnchanged", FailedReplacementLeavesActiveGenerationUnchanged),
     ("SuccessfulReplacementPublishesOneCoherentRoot", SuccessfulReplacementPublishesOneCoherentRoot),
+    ("GenerationOwnedGameStatePublishesAndRetiresAtomically", GenerationOwnedGameStatePublishesAndRetiresAtomically),
     ("PublicationFailureIsTerminalAfterRootSwap", PublicationFailureIsTerminalAfterRootSwap),
     ("FixedWorldClockIsDeterministicAndSnapshotRestores", FixedWorldClockIsDeterministicAndSnapshotRestores),
     ("PlaybackChangesHostReachTimeNotTickMeaning", PlaybackChangesHostReachTimeNotTickMeaning),
@@ -277,6 +278,51 @@ static void PublicationFailureIsTerminalAfterRootSwap()
     Assert.Throws<InvalidOperationException>(() => runtime.Tick());
 }
 
+static void GenerationOwnedGameStatePublishesAndRetiresAtomically()
+{
+    var composition = new GameStateComposition();
+    using var runtime = CreateRuntime(composition);
+    runtime.Initialize();
+    runtime.Start();
+
+    ServerGeneration oldGeneration = runtime.CurrentGeneration;
+    var oldState = (GenerationStateProbe)oldGeneration.GameState!;
+    Assert.True(runtime.Game.TryUseActiveGeneration<GenerationStateProbe, bool>(
+        (world, generationId, state) =>
+            ReferenceEquals(world, oldGeneration.EcsWorld) &&
+            generationId == oldGeneration.GenerationId &&
+            ReferenceEquals(state, oldState),
+        out bool coherent));
+    Assert.True(coherent);
+
+    composition.FailAfterState = true;
+    Assert.Throws<InvalidOperationException>(() => runtime.ReplaceGeneration());
+    Assert.True(ReferenceEquals(oldGeneration, runtime.CurrentGeneration));
+    Assert.False(oldState.IsDisposed);
+    Assert.True(composition.LastCreatedState!.IsDisposed);
+
+    bool observedOneRoot = false;
+    runtime.OptionsForTesting.PublicationBoundaryHook = (candidate, previous) =>
+    {
+        observedOneRoot =
+            ReferenceEquals(candidate, runtime.CurrentGeneration) &&
+            candidate.GameState is GenerationStateProbe candidateState &&
+            candidateState.GenerationId == candidate.GenerationId &&
+            !candidateState.IsDisposed &&
+            ReferenceEquals(previous, oldGeneration) &&
+            !oldState.IsDisposed;
+    };
+
+    runtime.ReplaceGeneration();
+
+    Assert.True(observedOneRoot);
+    Assert.True(oldGeneration.IsDisposed);
+    Assert.True(oldState.IsDisposed);
+    var replacementState = runtime.CurrentGeneration.GameState as GenerationStateProbe ??
+        throw new InvalidOperationException("Replacement generation has no game state.");
+    Assert.False(replacementState.IsDisposed);
+}
+
 static void FixedWorldClockIsDeterministicAndSnapshotRestores()
 {
     WorldClockOptions options = new(simulationFrequencyHz: 60, worldTimeRate: 24);
@@ -425,7 +471,7 @@ static double Percentile95(double[] values)
 }
 
 static ServerRuntime CreateRuntime(
-    TestComposition composition,
+    IServerComposition composition,
     WorldClockOptions? clockOptions = null,
     bool allowVariablePlayback = false)
 {
@@ -560,6 +606,40 @@ sealed class EmptyComposition : IServerComposition
         _ = generation.World.RegisterArchetype(
             ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
     }
+}
+
+sealed class GameStateComposition : IServerComposition
+{
+    public ComponentSchema Schema { get; } = ComponentSchema.Create(
+        new SchemaId(0x51, 0x03), ReadOnlySpan<ComponentRegistration>.Empty);
+
+    public bool FailAfterState { get; set; }
+
+    public GenerationStateProbe? LastCreatedState { get; private set; }
+
+    public void Configure(ServerGenerationBuilder generation)
+    {
+        LastCreatedState = new GenerationStateProbe(generation.GenerationId);
+        generation.SetGameState(LastCreatedState);
+        if (FailAfterState)
+        {
+            FailAfterState = false;
+            throw new InvalidOperationException("injected failure after game-state construction");
+        }
+        _ = generation.World.RegisterArchetype(
+            ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
+    }
+}
+
+sealed class GenerationStateProbe : IDisposable
+{
+    public GenerationStateProbe(ulong generationId) => GenerationId = generationId;
+
+    public ulong GenerationId { get; }
+
+    public bool IsDisposed { get; private set; }
+
+    public void Dispose() => IsDisposed = true;
 }
 
 sealed class TickCounter

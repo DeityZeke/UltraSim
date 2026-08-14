@@ -20,8 +20,10 @@ public interface IServerComposition
     /// <summary>Configures one private generation candidate before validation and publication.</summary>
     /// <remarks>
     /// This method may run again for later candidate generations. Authoritative
-    /// mutable state belongs to the candidate world/system runtimes, not to the
-    /// long-lived composition object.
+/// mutable state belongs to the candidate world/system runtimes or to the one
+/// opaque game-state root installed through
+/// <see cref="ServerGenerationBuilder.SetGameState{TState}(TState)"/>, not to
+/// the long-lived composition object.
     /// </remarks>
     void Configure(ServerGenerationBuilder generation);
 }

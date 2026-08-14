@@ -9,6 +9,8 @@ namespace UltraSim.Game.Persistence;
 /// <summary>Fixed bounds for the minimal durable Accounting artifact.</summary>
 public sealed class AccountingPersistenceOptions
 {
+    public const int HardMaximumRecordsPerSection = 100_000;
+
     public AccountingPersistenceOptions(
         long maximumArtifactBytes = 16 * 1024 * 1024,
         int maximumAccounts = 100_000,
@@ -17,11 +19,11 @@ public sealed class AccountingPersistenceOptions
     {
         if (maximumArtifactBytes <= 0 || maximumArtifactBytes > Array.MaxLength)
             throw new ArgumentOutOfRangeException(nameof(maximumArtifactBytes));
-        if (maximumAccounts <= 0)
+        if (maximumAccounts <= 0 || maximumAccounts > HardMaximumRecordsPerSection)
             throw new ArgumentOutOfRangeException(nameof(maximumAccounts));
-        if (maximumCharacters <= 0)
+        if (maximumCharacters <= 0 || maximumCharacters > HardMaximumRecordsPerSection)
             throw new ArgumentOutOfRangeException(nameof(maximumCharacters));
-        if (maximumTrustedIdentities <= 0)
+        if (maximumTrustedIdentities <= 0 || maximumTrustedIdentities > HardMaximumRecordsPerSection)
             throw new ArgumentOutOfRangeException(nameof(maximumTrustedIdentities));
         MaximumArtifactBytes = maximumArtifactBytes;
         MaximumAccounts = maximumAccounts;
@@ -79,10 +81,12 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
     {
         if (context.Sequence == 0)
             throw new ArgumentOutOfRangeException(nameof(context));
+        if (artifact.Length == 0 || artifact.Length > _options.MaximumArtifactBytes)
+            throw new PersistenceValidationException("The Accounting artifact size is outside its configured bound.");
         AccountingSnapshot snapshot;
         try
         {
-            snapshot = Parse(artifact.Span, context.Sequence);
+            snapshot = Parse(artifact.Span, context.Sequence, _options);
         }
         catch (PersistenceException)
         {
@@ -107,7 +111,10 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
             throw new PersistenceValidationException("The Accounting trusted-identity limit was exceeded.");
     }
 
-    private static AccountingSnapshot Parse(ReadOnlySpan<byte> bytes, ulong expectedSequence)
+    private static AccountingSnapshot Parse(
+        ReadOnlySpan<byte> bytes,
+        ulong expectedSequence,
+        AccountingPersistenceOptions options)
     {
         var reader = new ArtifactReader(bytes);
         if (reader.ReadUInt32() != Magic || reader.ReadUInt16() != FormatVersion)
@@ -119,25 +126,50 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
         int accountCount = reader.ReadCount("account");
         int characterCount = reader.ReadCount("character");
         int identityCount = reader.ReadCount("trusted identity");
-        if (accountCount > 100_000 || characterCount > 100_000 || identityCount > 100_000)
-            throw new PersistenceValidationException("The Accounting artifact exceeds its hard parse bounds.");
+        if (accountCount > options.MaximumAccounts)
+            throw new PersistenceValidationException("The Accounting account limit was exceeded.");
+        if (characterCount > options.MaximumCharacters)
+            throw new PersistenceValidationException("The Accounting character limit was exceeded.");
+        if (identityCount > options.MaximumTrustedIdentities)
+            throw new PersistenceValidationException("The Accounting trusted-identity limit was exceeded.");
+        reader.EnsureRemaining(
+            checked((long)accountCount * 9L +
+                (long)identityCount * 12L +
+                (long)characterCount * 44L));
 
         var accounts = new AccountRecord[accountCount];
+        ulong previousAccountId = 0;
         for (int index = 0; index < accounts.Length; index++)
         {
             AccountId accountId = new(reader.ReadUInt64());
             AccountStatus status = (AccountStatus)reader.ReadByte();
+            if (accountId.Value <= previousAccountId)
+                throw new PersistenceValidationException("Accounting account records are not in canonical order.");
+            if (status is not (AccountStatus.Disabled or AccountStatus.Enabled))
+                throw new PersistenceValidationException("The Accounting artifact contains an invalid account status.");
             accounts[index] = new AccountRecord(accountId, status);
+            previousAccountId = accountId.Value;
         }
 
         var identities = new TrustedIdentityBinding[identityCount];
+        string? previousIdentity = null;
         for (int index = 0; index < identities.Length; index++)
         {
-            TrustedLocalIdentity identity = new(reader.ReadString(TrustedLocalIdentity.MaximumLength));
+            string encodedIdentity = reader.ReadString(TrustedLocalIdentity.MaximumLength);
+            TrustedLocalIdentity identity = new(encodedIdentity);
+            if (!StringComparer.Ordinal.Equals(identity.Value, encodedIdentity) ||
+                (previousIdentity is not null &&
+                    StringComparer.Ordinal.Compare(previousIdentity, identity.Value) >= 0))
+            {
+                throw new PersistenceValidationException(
+                    "Accounting trusted identities are not canonically encoded and ordered.");
+            }
             identities[index] = new TrustedIdentityBinding(identity, new AccountId(reader.ReadUInt64()));
+            previousIdentity = identity.Value;
         }
 
         var characters = new CharacterRecord[characterCount];
+        ulong previousCharacterId = 0;
         for (int index = 0; index < characters.Length; index++)
         {
             CharacterId characterId = new(reader.ReadUInt64());
@@ -148,13 +180,21 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
             var persistentKey = new PersistentEntityKey(
                 new PersistentWorldId(reader.ReadUInt64()),
                 new PersistentEntityId(reader.ReadUInt64()));
-            characters[index] = new CharacterRecord(
+            var character = new CharacterRecord(
                 characterId,
                 accountId,
                 slot,
                 displayName,
                 prefabKey,
                 persistentKey);
+            if (characterId.Value <= previousCharacterId ||
+                !StringComparer.Ordinal.Equals(character.DisplayName, displayName))
+            {
+                throw new PersistenceValidationException(
+                    "Accounting character records are not canonically encoded and ordered.");
+            }
+            characters[index] = character;
+            previousCharacterId = characterId.Value;
         }
 
         reader.EnsureEnd();
@@ -320,6 +360,7 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
 /// <summary>Small bounded little-endian reader for the Accounting artifact.</summary>
 internal ref struct ArtifactReader
 {
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly ReadOnlySpan<byte> _bytes;
     private int _offset;
 
@@ -384,7 +425,7 @@ internal ref struct ArtifactReader
         string value;
         try
         {
-            value = new UTF8Encoding(false, true).GetString(_bytes.Slice(_offset, byteCount));
+            value = StrictUtf8.GetString(_bytes.Slice(_offset, byteCount));
         }
         catch (DecoderFallbackException)
         {
@@ -400,6 +441,12 @@ internal ref struct ArtifactReader
     {
         if (_offset != _bytes.Length)
             throw new PersistenceValidationException("The Accounting artifact contains trailing bytes.");
+    }
+
+    internal void EnsureRemaining(long count)
+    {
+        if (count < 0 || count > _bytes.Length - _offset)
+            throw new PersistenceValidationException("The Accounting artifact counts exceed its remaining bytes.");
     }
 
     private void Ensure(int count)

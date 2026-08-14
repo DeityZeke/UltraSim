@@ -51,21 +51,20 @@ static void AccountlessEntryDoesNotCreateAccountingRecords()
 static void AccountBackedCharacterSelectUsesRealUiAndBindsPersistentEntity()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
-    runtime.Initialize();
-    runtime.Start();
-
     var accounting = new AccountingStore();
     var account = new AccountId(10);
     var identity = new TrustedLocalIdentity("local-user-10");
     accounting.AddAccount(new AccountRecord(account));
     accounting.BindTrustedIdentity(identity, account);
+    using var runtime = CreateRuntime(composition, accounting);
+    runtime.Initialize();
+    runtime.Start();
 
     var renderer = new NoopRenderer();
     var client = new UiClientRuntime(renderer);
     var link = new LocalSemanticLink(client);
     using var ui = new LocalAdmissionUiPort(link);
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
 
     Entity persistentEntity = CreatePersistentPlayable(runtime, composition, new ParticipantId(1));
     CharacterRecord character = composition.CreateCharacterRecord(account, 1, "Alice");
@@ -114,10 +113,6 @@ static void AccountBackedCharacterSelectUsesRealUiAndBindsPersistentEntity()
 static void ForeignAndMissingDurableReferencesRejectEntry()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
-    runtime.Initialize();
-    runtime.Start();
-
     var accounting = new AccountingStore();
     var account = new AccountId(20);
     var identity = new TrustedLocalIdentity("local-user-20");
@@ -132,11 +127,14 @@ static void ForeignAndMissingDurableReferencesRejectEntry()
         new PersistentEntityKey(
             new PersistentWorldId(0x5150),
             new PersistentEntityId(1))));
+    using var runtime = CreateRuntime(composition, accounting);
+    runtime.Initialize();
+    runtime.Start();
 
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
     using var ui = new LocalAdmissionUiPort(link);
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(3), identity);
     ReadOnlySpan<UiListRow> rows = client.GetRows(waiting.CharacterSelectView, CharacterSelectUi.Characters);
     client.SubmitAction(waiting.CharacterSelectView, CharacterSelectUi.Play, rows[0].Id);
@@ -146,43 +144,36 @@ static void ForeignAndMissingDurableReferencesRejectEntry()
     Assert.Equal(AdmissionRejection.DurableWorldMismatch, rejected.Rejection);
     Assert.Equal(0, client.OpenViewCount);
 
-    var missingAccounting = new AccountingStore();
-    var missingAccount = new AccountId(21);
-    var missingIdentity = new TrustedLocalIdentity("local-user-21");
-    missingAccounting.AddAccount(new AccountRecord(missingAccount));
-    missingAccounting.BindTrustedIdentity(missingIdentity, missingAccount);
-    missingAccounting.AddCharacter(new CharacterRecord(
+    accounting.AddCharacter(new CharacterRecord(
         new CharacterId(3),
-        missingAccount,
-        slot: 0,
+        account,
+        slot: 1,
         "Missing",
         new PrefabKey("characters/missing"),
         new PersistentEntityKey(
             new PersistentWorldId(0x5050),
             new PersistentEntityId(999))));
-    using var missingService = new AdmissionService(runtime.Game, composition, missingAccounting, ui);
-    AdmissionResult missing = missingService.JoinAccountBacked(new ParticipantId(5), missingIdentity);
+    AdmissionResult missing = service.JoinAccountBacked(new ParticipantId(5), identity);
     client.SubmitAction(missing.CharacterSelectView, CharacterSelectUi.Play, new UiRowId(3));
-    Assert.True(missingService.TryGetSession(new ParticipantId(5), out AdmissionResult missingResult));
+    Assert.True(service.TryGetSession(new ParticipantId(5), out AdmissionResult missingResult));
     Assert.Equal(AdmissionRejection.DurableEntityMissing, missingResult.Rejection);
 }
 
 static void EmptyCharacterSelectDisablesPlayDynamically()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
-    runtime.Initialize();
-    runtime.Start();
-
     var accounting = new AccountingStore();
     var account = new AccountId(15);
     var identity = new TrustedLocalIdentity("local-user-15");
     accounting.AddAccount(new AccountRecord(account));
     accounting.BindTrustedIdentity(identity, account);
+    using var runtime = CreateRuntime(composition, accounting);
+    runtime.Initialize();
+    runtime.Start();
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
     using var ui = new LocalAdmissionUiPort(link);
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
 
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(4), identity);
 
@@ -226,12 +217,12 @@ static void AccountingOrdersCharactersAndKeepsOnlyDomainFacts()
 static void AdmissionUiOpenFailureIsTransactional()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
+    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(40);
+    using var runtime = CreateRuntime(composition, accounting);
     runtime.Initialize();
     runtime.Start();
-    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(40);
     var ui = new FaultingUiPort { ThrowOnOpen = true };
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
 
     AdmissionResult result = service.JoinAccountBacked(new ParticipantId(40), identity);
 
@@ -243,12 +234,12 @@ static void AdmissionUiOpenFailureIsTransactional()
 static void DuplicateViewOwnershipRejectsWithoutCorruptingFirstSession()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
+    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(41);
+    using var runtime = CreateRuntime(composition, accounting);
     runtime.Initialize();
     runtime.Start();
-    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(41);
     var ui = new FaultingUiPort { FixedView = new UiViewInstanceId(77) };
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
 
     AdmissionResult first = service.JoinAccountBacked(new ParticipantId(41), identity);
     AdmissionResult second = service.JoinAccountBacked(new ParticipantId(42), identity);
@@ -264,12 +255,12 @@ static void DuplicateViewOwnershipRejectsWithoutCorruptingFirstSession()
 static void HotReopenFailureLeavesNoStaleViewMapping()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
+    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(43);
+    using var runtime = CreateRuntime(composition, accounting);
     runtime.Initialize();
     runtime.Start();
-    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(43);
     var ui = new FaultingUiPort { FixedView = new UiViewInstanceId(78), ThrowOnHotOpen = true };
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(43), identity);
 
     AdmissionResult failed = service.ReopenCharacterSelect(waiting.Participant);
@@ -283,16 +274,16 @@ static void HotReopenFailureLeavesNoStaleViewMapping()
 static void PlayableEntityCannotBindTwoParticipants()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
+    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(44);
+    using var runtime = CreateRuntime(composition, accounting);
     runtime.Initialize();
     runtime.Start();
-    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(44);
     _ = CreatePersistentPlayable(runtime, composition, new ParticipantId(99));
     accounting.AddCharacter(composition.CreateCharacterRecord(new AccountId(44), 44, "Shared"));
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
     using var ui = new LocalAdmissionUiPort(link);
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult first = service.JoinAccountBacked(new ParticipantId(44), identity);
     AdmissionResult second = service.JoinAccountBacked(new ParticipantId(45), identity);
 
@@ -363,12 +354,12 @@ static void LocalAdmissionUiPortDetachesOnDispose()
 static void AdmissionDisposeAttemptsEveryOpenView()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
+    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(60);
+    using var runtime = CreateRuntime(composition, accounting);
     runtime.Initialize();
     runtime.Start();
-    (AccountingStore accounting, TrustedLocalIdentity identity) = CreateAccount(60);
     var ui = new FaultingUiPort { UseSequentialViews = true, ThrowOnClose = true };
-    var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    var service = new AdmissionService(runtime.Game, composition, ui);
     Assert.True(service.JoinAccountBacked(new ParticipantId(60), identity).IsWaitingForCharacter);
     Assert.True(service.JoinAccountBacked(new ParticipantId(61), identity).IsWaitingForCharacter);
 
@@ -380,29 +371,39 @@ static void AdmissionDisposeAttemptsEveryOpenView()
 
 static void AdmissionConfigurationRejectionsAreExplicit()
 {
-    var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
-    runtime.Initialize();
-    runtime.Start();
-    using var accountlessOnly = new AdmissionService(runtime.Game, composition);
-    Assert.Equal(AdmissionRejection.InvalidParticipant,
-        accountlessOnly.JoinAccountless(default).Rejection);
-    Assert.Equal(AdmissionRejection.AccountingUnavailable,
-        accountlessOnly.JoinAccountBacked(new ParticipantId(70), new TrustedLocalIdentity("unknown")).Rejection);
+    var accountlessComposition = new AdmissionComposition();
+    using var accountlessRuntime = CreateRuntime(accountlessComposition);
+    accountlessRuntime.Initialize();
+    accountlessRuntime.Start();
+    using var accountlessOnly = new AdmissionService(accountlessRuntime.Game, accountlessComposition);
+    Assert.Equal(AdmissionRejection.InvalidParticipant, accountlessOnly.JoinAccountless(default).Rejection);
+    Assert.Equal(
+        AdmissionRejection.AccountingUnavailable,
+        accountlessOnly.JoinAccountBacked(
+            new ParticipantId(70),
+            new TrustedLocalIdentity("unknown")).Rejection);
 
     var disabled = new AccountingStore();
     var disabledAccount = new AccountId(70);
     var disabledIdentity = new TrustedLocalIdentity("disabled");
     disabled.AddAccount(new AccountRecord(disabledAccount, AccountStatus.Disabled));
     disabled.BindTrustedIdentity(disabledIdentity, disabledAccount);
-    using var disabledService = new AdmissionService(runtime.Game, composition, disabled);
+    var disabledComposition = new AdmissionComposition();
+    using var disabledRuntime = CreateRuntime(disabledComposition, disabled);
+    disabledRuntime.Initialize();
+    disabledRuntime.Start();
+    using var disabledService = new AdmissionService(disabledRuntime.Game, disabledComposition);
     Assert.Equal(AdmissionRejection.TrustedIdentityUnknown,
         disabledService.JoinAccountBacked(new ParticipantId(71), new TrustedLocalIdentity("missing")).Rejection);
     Assert.Equal(AdmissionRejection.AccountDisabled,
         disabledService.JoinAccountBacked(new ParticipantId(72), disabledIdentity).Rejection);
 
     (AccountingStore enabled, TrustedLocalIdentity enabledIdentity) = CreateAccount(71);
-    using var missingUi = new AdmissionService(runtime.Game, composition, enabled);
+    var enabledComposition = new AdmissionComposition();
+    using var enabledRuntime = CreateRuntime(enabledComposition, enabled);
+    enabledRuntime.Initialize();
+    enabledRuntime.Start();
+    using var missingUi = new AdmissionService(enabledRuntime.Game, enabledComposition);
     Assert.Equal(AdmissionRejection.UiUnavailable,
         missingUi.JoinAccountBacked(new ParticipantId(73), enabledIdentity).Rejection);
     Assert.Equal(0, accountlessOnly.SessionCount);
@@ -413,9 +414,6 @@ static void AdmissionConfigurationRejectionsAreExplicit()
 static void UnownedCharacterRowRejectsAndClosesSelector()
 {
     var composition = new AdmissionComposition();
-    using var runtime = CreateRuntime(composition);
-    runtime.Initialize();
-    runtime.Start();
     var accounting = new AccountingStore();
     var firstAccount = new AccountId(80);
     var secondAccount = new AccountId(81);
@@ -433,10 +431,13 @@ static void UnownedCharacterRowRejectsAndClosesSelector()
         secondAccount,
         0,
         new PersistentEntityKey(new PersistentWorldId(0x5050), new PersistentEntityId(81))));
+    using var runtime = CreateRuntime(composition, accounting);
+    runtime.Initialize();
+    runtime.Start();
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
     using var ui = new LocalAdmissionUiPort(link);
-    using var service = new AdmissionService(runtime.Game, composition, accounting, ui);
+    using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(80), identity);
 
     client.SubmitAction(waiting.CharacterSelectView, CharacterSelectUi.Play, new UiRowId(81));
@@ -501,8 +502,12 @@ static Entity CreatePersistentPlayable(
     return created;
 }
 
-static ServerRuntime CreateRuntime(AdmissionComposition composition) =>
-    new(composition, new ServerRuntimeOptions(
+static ServerRuntime CreateRuntime(
+    AdmissionComposition composition,
+    AccountingStore? accounting = null)
+{
+    composition.InitialAccounting = accounting;
+    return new ServerRuntime(composition, new ServerRuntimeOptions(
         new EcsWorldOptions(
             new EntityCapacity(8),
             maximumArchetypes: 1,
@@ -515,6 +520,7 @@ static ServerRuntime CreateRuntime(AdmissionComposition composition) =>
                 backgroundWorkerCount: 0),
             persistence: new PersistenceIdentityOptions(new PersistentWorldId(0x5050))),
         WorldClockOptions.Default));
+}
 
 sealed class AdmissionComposition : IServerComposition, IAdmissionEntityBinder
 {
@@ -528,8 +534,15 @@ sealed class AdmissionComposition : IServerComposition, IAdmissionEntityBinder
 
     public PersistentEntityKey LastPersistentKey { get; private set; }
 
+    internal AccountingStore? InitialAccounting { get; set; }
+
     public void Configure(ServerGenerationBuilder generation)
     {
+        if (InitialAccounting is not null)
+        {
+            generation.SetGameState(InitialAccounting);
+            InitialAccounting = null;
+        }
         ArchetypeHandle archetype = generation.World.RegisterArchetype(
             ReadOnlySpan<ComponentId>.Empty,
             ChunkLayoutOptions.KiB16,

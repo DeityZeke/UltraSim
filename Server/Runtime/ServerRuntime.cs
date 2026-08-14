@@ -89,14 +89,48 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
+    internal bool TryUseActiveGeneration<TState, TResult>(
+        ServerGenerationStateOperation<TState, TResult> operation,
+        out TResult result)
+        where TState : class
+    {
+        EnsureOwnerThread();
+        if (_state != ServerRuntimeState.Running ||
+            _currentGeneration is null ||
+            _currentGeneration.GameState is not TState gameState)
+        {
+            result = default!;
+            return false;
+        }
+
+        try
+        {
+            result = operation(
+                _currentGeneration.EcsWorld,
+                _currentGeneration.GenerationId,
+                gameState);
+            return true;
+        }
+        catch
+        {
+            _state = ServerRuntimeState.Faulted;
+            throw;
+        }
+    }
+
     internal bool TryPublishPreparedGeneration(
         EcsWorld preparedWorld,
-        Action? publicationAction,
+        object? preparedGameState,
         out ulong generationId)
     {
         EnsureOwnerThread();
         EnsureRunning(nameof(TryPublishPreparedGeneration));
         ArgumentNullException.ThrowIfNull(preparedWorld);
+        if (ReferenceEquals(preparedWorld, _currentGeneration!.EcsWorld))
+            throw new InvalidOperationException("The active ECS world cannot be published as its own replacement.");
+        if (preparedGameState is not null && ReferenceEquals(preparedGameState, _currentGeneration.GameState))
+            throw new InvalidOperationException("Active game state cannot be published as its own replacement.");
+
         ServerGeneration? candidate = null;
         try
         {
@@ -106,8 +140,6 @@ public sealed class ServerRuntime : IDisposable
                 throw new InvalidOperationException("A prepared generation requires a running scheduled ECS world.");
             if (preparedWorld.Schema.Id != _schema.Id)
                 throw new InvalidOperationException("A prepared generation uses a different ECS schema.");
-            if (ReferenceEquals(preparedWorld, _currentGeneration!.EcsWorld))
-                throw new InvalidOperationException("The active ECS world cannot be published as its own replacement.");
             if (_nextGenerationId == ulong.MaxValue)
                 throw new InvalidOperationException("The server generation identity space is exhausted.");
 
@@ -115,9 +147,10 @@ public sealed class ServerRuntime : IDisposable
             candidate = new ServerGeneration(
                 _nextGenerationId,
                 preparedWorld,
-                new WorldClock(_options.ClockOptions));
+                new WorldClock(_options.ClockOptions),
+                preparedGameState);
             candidate.Clock.RestoreSnapshot(clockSnapshot);
-            PublishCandidate(candidate, publicationAction);
+            PublishCandidate(candidate);
             generationId = candidate.GenerationId;
             _nextGenerationId++;
             return true;
@@ -125,10 +158,10 @@ public sealed class ServerRuntime : IDisposable
         catch
         {
             // Once PublishCandidate marks the candidate, it is the active
-            // terminal root even if a publication callback fails. Before that
-            // boundary ownership remains with the caller of this method.
+            // terminal root. Before that boundary every transferred candidate
+            // object must be reclaimed together.
             if (candidate is null)
-                preparedWorld.Dispose();
+                DisposePreparedGeneration(preparedWorld, preparedGameState);
             else if (!candidate.IsPublished)
                 candidate.Dispose();
             throw;
@@ -330,7 +363,7 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
-    private void PublishCandidate(ServerGeneration candidate, Action? publicationAction = null)
+    private void PublishCandidate(ServerGeneration candidate)
     {
         ServerGeneration? previous = _currentGeneration;
         _currentGeneration = candidate;
@@ -338,11 +371,6 @@ public sealed class ServerRuntime : IDisposable
 
         try
         {
-            // Game-owned participant state transfers before the optional
-            // observation hook so the first observable post-swap state is the
-            // complete composition. The callback is still after the active
-            // ECS root swap and remains terminal if it fails.
-            publicationAction?.Invoke();
             _options.PublicationBoundaryHook?.Invoke(candidate, previous);
         }
         catch
@@ -375,6 +403,34 @@ public sealed class ServerRuntime : IDisposable
             _state = ServerRuntimeState.Faulted;
             throw;
         }
+    }
+
+    private static void DisposePreparedGeneration(EcsWorld world, object? gameState)
+    {
+        Exception? failure = null;
+        if (gameState is IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        }
+
+        try
+        {
+            world.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failure ??= exception;
+        }
+
+        if (failure is not null)
+            throw new InvalidOperationException("A rejected prepared generation could not release all owned state.", failure);
     }
 
     private void EnsureRunning(string operation)

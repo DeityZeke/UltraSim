@@ -25,7 +25,6 @@ public readonly record struct LoadAttemptResult(
 public sealed class RuntimeAccountingPersistence
 {
     private readonly ServerGameFacet _runtime;
-    private readonly AccountingStore _accounting;
     private readonly PersistenceCatalog _catalog;
     private readonly PersistenceRestoreOptions _restoreOptions;
     private readonly Func<PersistenceRestoreRequirements, EcsWorld> _stagingWorldFactory;
@@ -35,7 +34,6 @@ public sealed class RuntimeAccountingPersistence
 
     public RuntimeAccountingPersistence(
         ServerGameFacet runtime,
-        AccountingStore accounting,
         PersistenceCatalog catalog,
         PersistenceRestoreOptions restoreOptions,
         Func<PersistenceRestoreRequirements, EcsWorld> stagingWorldFactory,
@@ -43,7 +41,6 @@ public sealed class RuntimeAccountingPersistence
         AccountingPersistenceOptions? accountingOptions = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
-        _accounting = accounting ?? throw new ArgumentNullException(nameof(accounting));
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _restoreOptions = restoreOptions;
         _stagingWorldFactory = stagingWorldFactory ?? throw new ArgumentNullException(nameof(stagingWorldFactory));
@@ -51,7 +48,15 @@ public sealed class RuntimeAccountingPersistence
         _accountingOptions = accountingOptions ?? new AccountingPersistenceOptions();
     }
 
-    public AccountingStore Accounting => _accounting;
+    /// <summary>Uses the active generation's Accounting state synchronously.</summary>
+    public bool TryUseAccounting<TResult>(Func<AccountingStore, TResult> operation, out TResult result)
+    {
+        EnsureOwnerThread();
+        ArgumentNullException.ThrowIfNull(operation);
+        return _runtime.TryUseActiveGeneration<AccountingStore, TResult>(
+            (_, _, accounting) => operation(accounting),
+            out result);
+    }
 
     /// <summary>
     /// Captures ECS and Accounting through one SaveSetCoordinator epoch. Save
@@ -67,8 +72,8 @@ public sealed class RuntimeAccountingPersistence
         SaveSetContext saveContext = context;
         SaveSetManifest? manifest = null;
         Exception? failure = null;
-        bool ran = _runtime.TryUseActiveGeneration(
-            (world, _) =>
+        bool ran = _runtime.TryUseActiveGeneration<AccountingStore, bool>(
+            (world, _, accounting) =>
             {
                 try
                 {
@@ -77,10 +82,10 @@ public sealed class RuntimeAccountingPersistence
                         _catalog,
                         _restoreOptions,
                         _stagingWorldFactory);
-                    ISaveSetParticipant accounting = new AccountingSaveSetParticipant(
-                        _accounting,
+                    ISaveSetParticipant accountingParticipant = new AccountingSaveSetParticipant(
+                        accounting,
                         _accountingOptions);
-                    manifest = _coordinator.Save([ecs, accounting], saveContext, captureBoundary);
+                    manifest = _coordinator.Save([ecs, accountingParticipant], saveContext, captureBoundary);
                     return true;
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
@@ -93,7 +98,8 @@ public sealed class RuntimeAccountingPersistence
 
         if (!ran)
         {
-            failure = new InvalidOperationException("Persistence requires a running ServerRuntime.");
+            failure = new InvalidOperationException(
+                "Persistence requires a running ServerRuntime generation with Accounting state.");
             return new SaveAttemptResult(false, null, failure);
         }
         return new SaveAttemptResult(succeeded, manifest, failure);
@@ -111,8 +117,8 @@ public sealed class RuntimeAccountingPersistence
         EnsureOwnerThread();
         Exception? failure = null;
         ulong publishedGeneration = 0;
-        bool ran = _runtime.TryUseActiveGeneration(
-            (world, _) =>
+        bool ran = _runtime.TryUseActiveGeneration<AccountingStore, bool>(
+            (world, _, activeAccounting) =>
             {
                 try
                 {
@@ -122,7 +128,7 @@ public sealed class RuntimeAccountingPersistence
                         _restoreOptions,
                         _stagingWorldFactory);
                     var accountingParticipant = new AccountingSaveSetParticipant(
-                        _accounting,
+                        activeAccounting,
                         _accountingOptions);
                     using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
                         [ecsParticipant, accountingParticipant],
@@ -142,7 +148,7 @@ public sealed class RuntimeAccountingPersistence
                     {
                         publicationSucceeded = _runtime.TryPublishPreparedGeneration(
                             stagedWorld,
-                            () => _accounting.Adopt(stagedAccounting),
+                            stagedAccounting,
                             out publishedGeneration);
                     });
                     if (!publicationSucceeded)
@@ -159,7 +165,8 @@ public sealed class RuntimeAccountingPersistence
 
         if (!ran)
         {
-            failure = new InvalidOperationException("Persistence requires a running ServerRuntime.");
+            failure = new InvalidOperationException(
+                "Persistence requires a running ServerRuntime generation with Accounting state.");
             return new LoadAttemptResult(false, 0, failure);
         }
         return new LoadAttemptResult(succeeded, succeeded ? publishedGeneration : 0, failure);

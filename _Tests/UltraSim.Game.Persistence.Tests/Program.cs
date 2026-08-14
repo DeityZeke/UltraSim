@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
+using System.Text.Json;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Game.Persistence;
@@ -8,10 +10,16 @@ using UltraSim.Server.Runtime;
 var tests = new (string Name, Action Body)[]
 {
     ("AccountingArtifactIsDeterministic", AccountingArtifactIsDeterministic),
+    ("AccountingArtifactBoundsAndCanonicalEncodingAreStrict", AccountingArtifactBoundsAndCanonicalEncodingAreStrict),
+    ("DuplicateDurableCharacterLinkIsRejected", DuplicateDurableCharacterLinkIsRejected),
     ("RealRuntimeSaveLoadPublishesEcsAndAccountingTogether", RealRuntimeSaveLoadPublishesEcsAndAccountingTogether),
+    ("SaveRestoreRecaptureIsCanonical", SaveRestoreRecaptureIsCanonical),
     ("MissingCharacterEntityLeavesActiveGenerationUntouched", MissingCharacterEntityLeavesActiveGenerationUntouched),
     ("AccountingPrepareFailureLeavesActiveGenerationUntouched", AccountingPrepareFailureLeavesActiveGenerationUntouched),
+    ("AccountingDomainValidationFailureLeavesActiveGenerationUntouched", AccountingDomainValidationFailureLeavesActiveGenerationUntouched),
+    ("ParticipantSequenceMismatchLeavesActiveGenerationUntouched", ParticipantSequenceMismatchLeavesActiveGenerationUntouched),
     ("EcsPrepareFailureLeavesActiveGenerationUntouched", EcsPrepareFailureLeavesActiveGenerationUntouched),
+    ("CandidateConstructionFailureLeavesActiveGenerationUntouched", CandidateConstructionFailureLeavesActiveGenerationUntouched),
 };
 
 foreach ((string name, Action body) in tests)
@@ -37,6 +45,96 @@ static void AccountingArtifactIsDeterministic()
     prepared.Validate();
     Assert.Equal(fixture.Entity, prepared.ResolvedEntities[new CharacterId(1)]);
     prepared.Dispose();
+
+    using var forward = new AccountingStore();
+    forward.AddAccount(new AccountRecord(new AccountId(1)));
+    forward.AddAccount(new AccountRecord(new AccountId(2)));
+    forward.BindTrustedIdentity(new TrustedLocalIdentity("alpha"), new AccountId(1));
+    forward.BindTrustedIdentity(new TrustedLocalIdentity("beta"), new AccountId(2));
+    using var reverse = new AccountingStore();
+    reverse.AddAccount(new AccountRecord(new AccountId(2)));
+    reverse.AddAccount(new AccountRecord(new AccountId(1)));
+    reverse.BindTrustedIdentity(new TrustedLocalIdentity("beta"), new AccountId(2));
+    reverse.BindTrustedIdentity(new TrustedLocalIdentity("alpha"), new AccountId(1));
+    Assert.SequenceEqual(
+        Capture(new AccountingSaveSetParticipant(forward), new SaveSetContext(8, 800)),
+        Capture(new AccountingSaveSetParticipant(reverse), new SaveSetContext(8, 800)));
+}
+
+static void AccountingArtifactBoundsAndCanonicalEncodingAreStrict()
+{
+    using Fixture fixture = CreateFixture();
+    var participant = new AccountingSaveSetParticipant(fixture.Accounting);
+    byte[] valid = Capture(participant, new SaveSetContext(7, 700));
+
+    Assert.Throws<ArgumentOutOfRangeException>(() => _ = new AccountingPersistenceOptions(
+        maximumAccounts: AccountingPersistenceOptions.HardMaximumRecordsPerSection + 1));
+    var byteRestricted = new AccountingSaveSetParticipant(
+        fixture.Accounting,
+        new AccountingPersistenceOptions(maximumArtifactBytes: 32));
+    Assert.Throws<PersistenceValidationException>(() =>
+        byteRestricted.Prepare(valid, new SaveSetContext(7, 700)));
+
+    byte[] countOnly = BuildAccountingArtifact(
+        sequence: 7,
+        accounts:
+        [
+            new AccountRecord(new AccountId(1)),
+            new AccountRecord(new AccountId(2)),
+        ],
+        identities: [],
+        characters: []);
+    var countRestricted = new AccountingSaveSetParticipant(
+        fixture.Accounting,
+        new AccountingPersistenceOptions(maximumAccounts: 1));
+    PersistenceValidationException countFailure = Assert.Throws<PersistenceValidationException>(() =>
+        countRestricted.Prepare(countOnly, new SaveSetContext(7, 700)));
+    Assert.True(countFailure.Message.Contains("account limit", StringComparison.Ordinal));
+
+    byte[] noncanonicalOrder = BuildAccountingArtifact(
+        sequence: 7,
+        accounts:
+        [
+            new AccountRecord(new AccountId(2)),
+            new AccountRecord(new AccountId(1)),
+        ],
+        identities: [],
+        characters: []);
+    Assert.Throws<PersistenceValidationException>(() =>
+        participant.Prepare(noncanonicalOrder, new SaveSetContext(7, 700)));
+    Assert.Throws<PersistenceValidationException>(() =>
+        participant.Prepare(valid, new SaveSetContext(8, 800)));
+}
+
+static void DuplicateDurableCharacterLinkIsRejected()
+{
+    using Fixture fixture = CreateFixture();
+    AccountRecord account = new(new AccountId(1));
+    PersistentEntityKey key = fixture.Key;
+    byte[] artifact = BuildAccountingArtifact(
+        sequence: 7,
+        accounts: [account],
+        identities: [],
+        characters:
+        [
+            new CharacterRecord(
+                new CharacterId(1), account.AccountId, 0, "Alice",
+                new PrefabKey("characters/alice"), key),
+            new CharacterRecord(
+                new CharacterId(2), account.AccountId, 1, "Bob",
+                new PrefabKey("characters/bob"), key),
+        ]);
+    var participant = new AccountingSaveSetParticipant(fixture.Accounting);
+    using IPreparedLoadParticipant prepared = participant.Prepare(
+        artifact,
+        new SaveSetContext(7, 700));
+    Assert.Throws<PersistenceValidationException>(() =>
+        prepared.Resolve(new StaticResolver(key, fixture.Entity)));
+
+    using IPreparedLoadParticipant unresolved = participant.Prepare(
+        Capture(participant, new SaveSetContext(7, 700)),
+        new SaveSetContext(7, 700));
+    Assert.Throws<PersistenceValidationException>(unresolved.Validate);
 }
 
 static void RealRuntimeSaveLoadPublishesEcsAndAccountingTogether()
@@ -64,12 +162,10 @@ static void RealRuntimeSaveLoadPublishesEcsAndAccountingTogether()
     Assert.True(load.Succeeded);
     Assert.Equal(2UL, load.GenerationId);
     Assert.Equal(2UL, fixture.Runtime.ActiveGenerationId);
-    Assert.True(fixture.Accounting.TryGetCharacter(new CharacterId(1), out CharacterRecord restoredCharacter));
-    Assert.Equal("Alice", restoredCharacter.DisplayName);
-
-    Assert.True(fixture.Runtime.Game.TryUseActiveGeneration(
-        (world, _) =>
+    Assert.True(fixture.Runtime.Game.TryUseActiveGeneration<AccountingStore, CharacterRecord>(
+        (world, _, accounting) =>
         {
+            Assert.True(accounting.TryGetCharacter(new CharacterId(1), out CharacterRecord restoredCharacter));
             Assert.True(world.TryResolvePersistentEntity(
                 restoredCharacter.PersistentEntityKey.Entity,
                 out Entity restoredEntity));
@@ -77,14 +173,15 @@ static void RealRuntimeSaveLoadPublishesEcsAndAccountingTogether()
             Assert.True(world.TryRead(restoredEntity, lookup, out PersistedValue value));
             Assert.Equal(123, value.Value);
             Assert.False(restoredEntity == oldEntity);
-            return true;
+            return restoredCharacter;
         },
-        out bool verified));
-    Assert.True(verified);
+        out CharacterRecord restoredCharacter));
+    Assert.Equal("Alice", restoredCharacter.DisplayName);
     Assert.True(fixture.CurrentWorld.IsRunning);
     Assert.True(oldEntity.IsValid);
     Assert.True(oldWorld.IsDisposed);
     Assert.Throws<ObjectDisposedException>(() => _ = fixture.OldWorld!.IsAlive(oldEntity));
+    Assert.Throws<ObjectDisposedException>(() => _ = fixture.Accounting.AccountCount);
 }
 
 static void MissingCharacterEntityLeavesActiveGenerationUntouched()
@@ -125,7 +222,6 @@ static void AccountingPrepareFailureLeavesActiveGenerationUntouched()
 
     var restrictive = new RuntimeAccountingPersistence(
         fixture.Runtime.Game,
-        fixture.Accounting,
         fixture.Composition.Catalog,
         fixture.RestoreOptions,
         fixture.CreateStagingWorld,
@@ -147,7 +243,6 @@ static void EcsPrepareFailureLeavesActiveGenerationUntouched()
     Assert.True(fixture.Persistence.TrySave(new SaveSetContext(1, 1), static capture => capture()).Succeeded);
     var restrictive = new RuntimeAccountingPersistence(
         fixture.Runtime.Game,
-        fixture.Accounting,
         fixture.Composition.Catalog,
         new PersistenceRestoreOptions(
             new PersistenceLimits(1_000_000, 0, 10, 10, 100, 1_000_000, 1_000_000),
@@ -164,7 +259,132 @@ static void EcsPrepareFailureLeavesActiveGenerationUntouched()
     Assert.True(oldWorld.IsAlive(fixture.Entity));
 }
 
-static byte[] Capture(AccountingSaveSetParticipant participant, SaveSetContext context)
+static void AccountingDomainValidationFailureLeavesActiveGenerationUntouched()
+{
+    using Fixture fixture = CreateFixture();
+    SaveAttemptResult save = fixture.Persistence.TrySave(
+        new SaveSetContext(1, 1),
+        static capture => capture());
+    Assert.True(save.Succeeded);
+    byte[] invalid = BuildAccountingArtifact(
+        sequence: 1,
+        accounts: [new AccountRecord(new AccountId(1))],
+        identities: [],
+        characters:
+        [
+            new CharacterRecord(
+                new CharacterId(1), new AccountId(1), 0, "Alice",
+                new PrefabKey("characters/alice"), fixture.Key),
+            new CharacterRecord(
+                new CharacterId(2), new AccountId(1), 1, "Bob",
+                new PrefabKey("characters/bob"), fixture.Key),
+        ]);
+    ReplaceSavedAccountingArtifact(fixture.Root, save.Manifest!, invalid);
+
+    EcsWorld activeWorld = fixture.CurrentWorld;
+    ulong activeGeneration = fixture.Runtime.ActiveGenerationId;
+    LoadAttemptResult load = fixture.Persistence.TryLoad();
+
+    Assert.False(load.Succeeded);
+    Assert.True(load.Failure is PersistenceValidationException);
+    Assert.Equal(activeGeneration, fixture.Runtime.ActiveGenerationId);
+    Assert.True(ReferenceEquals(activeWorld, fixture.CurrentWorld));
+    Assert.True(activeWorld.IsRunning);
+    Assert.Equal(1, fixture.Accounting.CharacterCount);
+}
+
+static void ParticipantSequenceMismatchLeavesActiveGenerationUntouched()
+{
+    using Fixture fixture = CreateFixture();
+    SaveAttemptResult save = fixture.Persistence.TrySave(
+        new SaveSetContext(1, 1),
+        static capture => capture());
+    Assert.True(save.Succeeded);
+    byte[] wrongSequence = BuildAccountingArtifact(
+        sequence: 2,
+        accounts: [new AccountRecord(new AccountId(1))],
+        identities: [],
+        characters: []);
+    ReplaceSavedAccountingArtifact(fixture.Root, save.Manifest!, wrongSequence);
+
+    EcsWorld activeWorld = fixture.CurrentWorld;
+    LoadAttemptResult load = fixture.Persistence.TryLoad();
+
+    Assert.False(load.Succeeded);
+    Assert.True(load.Failure is PersistenceValidationException);
+    Assert.Equal(1UL, fixture.Runtime.ActiveGenerationId);
+    Assert.True(ReferenceEquals(activeWorld, fixture.CurrentWorld));
+    Assert.True(activeWorld.IsRunning);
+}
+
+static void SaveRestoreRecaptureIsCanonical()
+{
+    using Fixture fixture = CreateFixture();
+    var context = new SaveSetContext(9, 900);
+    byte[] originalAccounting = Capture(
+        new AccountingSaveSetParticipant(fixture.Accounting),
+        context);
+    byte[] originalEcs = Capture(
+        new EcsWorldSaveSetParticipant(
+            fixture.CurrentWorld,
+            fixture.Composition.Catalog,
+            fixture.RestoreOptions,
+            fixture.CreateStagingWorld),
+        context);
+
+    Assert.True(fixture.Persistence.TrySave(
+        new SaveSetContext(1, 1),
+        static capture => capture()).Succeeded);
+    Assert.True(fixture.Persistence.TryLoad().Succeeded);
+
+    Assert.True(fixture.Runtime.Game.TryUseActiveGeneration<AccountingStore, CanonicalArtifacts>(
+        (world, _, accounting) => new CanonicalArtifacts(
+            Capture(new AccountingSaveSetParticipant(accounting), context),
+            Capture(
+                new EcsWorldSaveSetParticipant(
+                    world,
+                    fixture.Composition.Catalog,
+                    fixture.RestoreOptions,
+                    fixture.CreateStagingWorld),
+                context)),
+        out CanonicalArtifacts restored));
+    Assert.SequenceEqual(originalAccounting, restored.Accounting);
+    Assert.SequenceEqual(originalEcs, restored.Ecs);
+}
+
+static void CandidateConstructionFailureLeavesActiveGenerationUntouched()
+{
+    using Fixture fixture = CreateFixture();
+    EcsWorld activeWorld = fixture.CurrentWorld;
+    ulong activeGeneration = fixture.Runtime.ActiveGenerationId;
+    Assert.Throws<InvalidOperationException>(() =>
+        fixture.Runtime.Game.TryPublishPreparedGeneration(
+            activeWorld,
+            fixture.Accounting,
+            out _));
+    Assert.True(activeWorld.IsRunning);
+    Assert.Equal(1, fixture.Accounting.AccountCount);
+
+    var rejectedState = new AccountingStore();
+    var invalidWorld = new EcsWorld(
+        fixture.Composition.Schema,
+        WorldOptions());
+
+    Assert.Throws<InvalidOperationException>(() =>
+        fixture.Runtime.Game.TryPublishPreparedGeneration(
+            invalidWorld,
+            rejectedState,
+            out _));
+
+    Assert.Equal(activeGeneration, fixture.Runtime.ActiveGenerationId);
+    Assert.True(ReferenceEquals(activeWorld, fixture.CurrentWorld));
+    Assert.True(activeWorld.IsRunning);
+    Assert.True(invalidWorld.IsDisposed);
+    Assert.Throws<ObjectDisposedException>(() => _ = rejectedState.AccountCount);
+    Assert.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
+}
+
+static byte[] Capture(ISaveSetParticipant participant, SaveSetContext context)
 {
     using var stream = new MemoryStream();
     using (ICapturedSaveSetParticipant capture = participant.Capture(context))
@@ -172,16 +392,83 @@ static byte[] Capture(AccountingSaveSetParticipant participant, SaveSetContext c
     return stream.ToArray();
 }
 
+static byte[] BuildAccountingArtifact(
+    ulong sequence,
+    IReadOnlyList<AccountRecord> accounts,
+    IReadOnlyList<TrustedIdentityBinding> identities,
+    IReadOnlyList<CharacterRecord> characters)
+{
+    using var stream = new MemoryStream();
+    using var writer = new BinaryWriter(stream, System.Text.Encoding.UTF8, leaveOpen: true);
+    writer.Write(0x43415355U);
+    writer.Write((ushort)1);
+    writer.Write(sequence);
+    writer.Write(accounts.Count);
+    writer.Write(characters.Count);
+    writer.Write(identities.Count);
+    foreach (AccountRecord account in accounts)
+    {
+        writer.Write(account.AccountId.Value);
+        writer.Write((byte)account.Status);
+    }
+    foreach (TrustedIdentityBinding identity in identities)
+    {
+        WriteString(writer, identity.Identity.Value);
+        writer.Write(identity.AccountId.Value);
+    }
+    foreach (CharacterRecord character in characters)
+    {
+        writer.Write(character.CharacterId.Value);
+        writer.Write(character.AccountId.Value);
+        writer.Write(character.Slot);
+        WriteString(writer, character.DisplayName);
+        WriteString(writer, character.PrefabKey.Value);
+        writer.Write(character.PersistentEntityKey.World.Value);
+        writer.Write(character.PersistentEntityKey.Entity.Value);
+    }
+    writer.Flush();
+    return stream.ToArray();
+}
+
+static void WriteString(BinaryWriter writer, string value)
+{
+    byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value);
+    writer.Write(bytes.Length);
+    writer.Write(bytes);
+}
+
+static void ReplaceSavedAccountingArtifact(
+    string root,
+    SaveSetManifest manifest,
+    byte[] replacement)
+{
+    string generation = Path.Combine(root, "generations", manifest.Sequence.ToString("D20"));
+    string artifactPath = Path.Combine(generation, "accounting.bin");
+    File.WriteAllBytes(artifactPath, replacement);
+    SaveSetArtifact[] artifacts = manifest.Artifacts
+        .Select(artifact => artifact.Key == "accounting"
+            ? artifact with
+            {
+                ByteCount = replacement.Length,
+                Sha256 = Convert.ToHexString(SHA256.HashData(replacement)),
+            }
+            : artifact)
+        .ToArray();
+    File.WriteAllText(
+        Path.Combine(generation, "manifest.json"),
+        JsonSerializer.Serialize(manifest with { Artifacts = artifacts }));
+}
+
 static Fixture CreateFixture()
 {
     string root = Path.Combine(Path.GetTempPath(), "ultrasim-s0-6-" + Guid.NewGuid().ToString("N"));
-    var composition = new PersistenceComposition();
-    var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(WorldOptions(), WorldClockOptions.Default));
-    runtime.Initialize();
-    runtime.Start();
     var accounting = new AccountingStore();
     accounting.AddAccount(new AccountRecord(new AccountId(1)));
     accounting.BindTrustedIdentity(new TrustedLocalIdentity("local-alice"), new AccountId(1));
+    var composition = new PersistenceComposition(accounting);
+    var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(WorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
 
     Assert.True(runtime.Game.TryUseActiveGeneration(
         (world, _) =>
@@ -207,7 +494,6 @@ static Fixture CreateFixture()
     var coordinator = new SaveSetCoordinator(root);
     var persistence = new RuntimeAccountingPersistence(
         runtime.Game,
-        accounting,
         composition.Catalog,
         RestoreOptions(),
         requirements => composition.CreateStagingWorld(requirements),
@@ -232,6 +518,8 @@ static PersistenceRestoreOptions RestoreOptions() => new(
     ChunkLayoutOptions.KiB16);
 
 readonly record struct EntitySetup(Entity Entity, PersistentEntityKey Key);
+
+readonly record struct CanonicalArtifacts(byte[] Accounting, byte[] Ecs);
 
 sealed class Fixture : IDisposable
 {
@@ -291,9 +579,11 @@ sealed class Fixture : IDisposable
 sealed class PersistenceComposition : IServerComposition
 {
     private readonly Dictionary<WorldId, ArchetypeHandle> _archetypes = [];
+    private AccountingStore? _initialAccounting;
 
-    internal PersistenceComposition()
+    internal PersistenceComposition(AccountingStore initialAccounting)
     {
+        _initialAccounting = initialAccounting ?? throw new ArgumentNullException(nameof(initialAccounting));
         Schema = ComponentSchema.Create(
             new SchemaId(0x60, 0x06),
             new[]
@@ -326,6 +616,10 @@ sealed class PersistenceComposition : IServerComposition
 
     public void Configure(ServerGenerationBuilder generation)
     {
+        AccountingStore accounting = _initialAccounting ??
+            throw new InvalidOperationException("Initial Accounting was already assigned to a generation.");
+        _initialAccounting = null;
+        generation.SetGameState(accounting);
         LastWorld = generation.World;
         _archetypes.Add(
             generation.World.Id,

@@ -14,11 +14,16 @@ internal sealed class ServerGeneration
 {
     private bool _disposed;
 
-    internal ServerGeneration(ulong generationId, EcsWorld ecsWorld, WorldClock clock)
+    internal ServerGeneration(
+        ulong generationId,
+        EcsWorld ecsWorld,
+        WorldClock clock,
+        object? gameState)
     {
         GenerationId = generationId;
         EcsWorld = ecsWorld;
         Clock = clock;
+        GameState = gameState;
     }
 
     public ulong GenerationId { get; }
@@ -26,6 +31,12 @@ internal sealed class ServerGeneration
     public EcsWorld EcsWorld { get; }
 
     public WorldClock Clock { get; }
+
+    /// <summary>
+    /// Opaque game-owned state that must change coherently with this ECS world.
+    /// Runtime owns its lifetime but never interprets its domain meaning.
+    /// </summary>
+    public object? GameState { get; }
 
     public bool IsPublished { get; private set; }
 
@@ -57,7 +68,30 @@ internal sealed class ServerGeneration
             return;
 
         _disposed = true;
-        EcsWorld.Dispose();
+        Exception? failure = null;
+        if (GameState is IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        }
+
+        try
+        {
+            EcsWorld.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failure ??= exception;
+        }
+
+        if (failure is not null)
+            throw new InvalidOperationException("A server generation could not release all owned state.", failure);
     }
 }
 
@@ -72,6 +106,8 @@ internal sealed class ServerGeneration
 public sealed class ServerGenerationBuilder
 {
     private readonly ulong _generationId;
+    private object? _gameState;
+    private bool _gameStateAssigned;
     private bool _built;
 
     internal ServerGenerationBuilder(
@@ -87,6 +123,28 @@ public sealed class ServerGenerationBuilder
     public ulong GenerationId => _generationId;
 
     public EcsWorld World { get; }
+
+    /// <summary>
+    /// Installs the single opaque game-owned state root for this private
+    /// generation candidate.
+    /// </summary>
+    /// <remarks>
+    /// Use one composition-owned aggregate when several game-domain objects
+    /// must publish with the ECS world. Runtime owns and disposes the supplied
+    /// object when it implements <see cref="IDisposable"/> but never interprets
+    /// its type or contents.
+    /// </remarks>
+    public void SetGameState<TState>(TState state) where TState : class
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        if (_built)
+            throw new InvalidOperationException("A built generation candidate is no longer cold-configurable.");
+        if (_gameStateAssigned)
+            throw new InvalidOperationException("A generation can own only one game-state root.");
+
+        _gameState = state;
+        _gameStateAssigned = true;
+    }
 
     internal WorldClock Clock { get; }
 
@@ -104,7 +162,7 @@ public sealed class ServerGenerationBuilder
             throw new InvalidOperationException("A server generation builder can only build once.");
 
         _built = true;
-        return new ServerGeneration(_generationId, World, Clock);
+        return new ServerGeneration(_generationId, World, Clock, _gameState);
     }
 
     internal void DisposeUnbuilt()
@@ -113,6 +171,29 @@ public sealed class ServerGenerationBuilder
             return;
 
         _built = true;
-        World.Dispose();
+        Exception? failure = null;
+        if (_gameState is IDisposable disposable)
+        {
+            try
+            {
+                disposable.Dispose();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        }
+
+        try
+        {
+            World.Dispose();
+        }
+        catch (Exception exception)
+        {
+            failure ??= exception;
+        }
+
+        if (failure is not null)
+            throw new InvalidOperationException("An unbuilt server generation could not release all owned state.", failure);
     }
 }

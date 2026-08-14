@@ -174,9 +174,16 @@ public sealed class AccountingSnapshot
         ArgumentNullException.ThrowIfNull(accounts);
         ArgumentNullException.ThrowIfNull(characters);
         ArgumentNullException.ThrowIfNull(trustedIdentities);
-        Accounts = Array.AsReadOnly(accounts.ToArray());
-        Characters = Array.AsReadOnly(characters.ToArray());
-        TrustedIdentities = Array.AsReadOnly(trustedIdentities.ToArray());
+        AccountRecord[] accountCopy = accounts.ToArray();
+        CharacterRecord[] characterCopy = characters.ToArray();
+        TrustedIdentityBinding[] identityCopy = trustedIdentities.ToArray();
+        Array.Sort(accountCopy, static (left, right) => left.AccountId.CompareTo(right.AccountId));
+        Array.Sort(characterCopy, static (left, right) => left.CharacterId.CompareTo(right.CharacterId));
+        Array.Sort(identityCopy, static (left, right) =>
+            StringComparer.Ordinal.Compare(left.Identity.Value, right.Identity.Value));
+        Accounts = Array.AsReadOnly(accountCopy);
+        Characters = Array.AsReadOnly(characterCopy);
+        TrustedIdentities = Array.AsReadOnly(identityCopy);
     }
 
     public IReadOnlyList<AccountRecord> Accounts { get; }
@@ -190,20 +197,21 @@ public sealed class AccountingSnapshot
 /// Stable game-owned account store. It is intentionally a domain collection,
 /// not a second ECS or a duplicate gameplay-state root.
 /// </summary>
-public sealed class AccountingStore
+public sealed class AccountingStore : IDisposable
 {
-    private Dictionary<AccountId, AccountRecord> _accounts = [];
-    private Dictionary<CharacterId, CharacterRecord> _characters = [];
-    private Dictionary<TrustedLocalIdentity, AccountId> _trustedIdentities = [];
-    private HashSet<(AccountId Account, int Slot)> _characterSlots = [];
-    private HashSet<PersistentEntityKey> _persistentCharacters = [];
+    private readonly Dictionary<AccountId, AccountRecord> _accounts = [];
+    private readonly Dictionary<CharacterId, CharacterRecord> _characters = [];
+    private readonly Dictionary<TrustedLocalIdentity, AccountId> _trustedIdentities = [];
+    private readonly HashSet<(AccountId Account, int Slot)> _characterSlots = [];
+    private readonly HashSet<PersistentEntityKey> _persistentCharacters = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
+    private bool _disposed;
 
     public int AccountCount
     {
         get
         {
-            EnsureOwnerThread();
+            EnsureOperational();
             return _accounts.Count;
         }
     }
@@ -212,14 +220,14 @@ public sealed class AccountingStore
     {
         get
         {
-            EnsureOwnerThread();
+            EnsureOperational();
             return _characters.Count;
         }
     }
 
     public void AddAccount(AccountRecord account)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         if (!account.AccountId.IsValid)
             throw new ArgumentException("A valid account ID is required.", nameof(account));
         if (account.Status is not (AccountStatus.Disabled or AccountStatus.Enabled))
@@ -230,7 +238,7 @@ public sealed class AccountingStore
 
     public void AddCharacter(CharacterRecord character)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         if (!_accounts.ContainsKey(character.AccountId))
         {
             throw new InvalidOperationException(
@@ -264,7 +272,7 @@ public sealed class AccountingStore
 
     public void BindTrustedIdentity(TrustedLocalIdentity identity, AccountId accountId)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         if (!identity.IsValid)
             throw new ArgumentException("A valid trusted local identity is required.", nameof(identity));
         if (!_accounts.ContainsKey(accountId))
@@ -278,19 +286,19 @@ public sealed class AccountingStore
 
     public bool TryGetAccount(AccountId accountId, out AccountRecord account)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         return _accounts.TryGetValue(accountId, out account);
     }
 
     public bool TryGetCharacter(CharacterId characterId, out CharacterRecord character)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         return _characters.TryGetValue(characterId, out character);
     }
 
     public bool TryResolveAccount(TrustedLocalIdentity identity, out AccountRecord account)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         if (_trustedIdentities.TryGetValue(identity, out AccountId accountId) &&
             _accounts.TryGetValue(accountId, out account))
         {
@@ -303,7 +311,7 @@ public sealed class AccountingStore
 
     public IReadOnlyList<CharacterRecord> GetCharacters(AccountId accountId)
     {
-        EnsureOwnerThread();
+        EnsureOperational();
         var characters = new List<CharacterRecord>();
         foreach (CharacterRecord character in _characters.Values)
         {
@@ -322,16 +330,11 @@ public sealed class AccountingStore
     /// <summary>Captures a deterministic immutable domain snapshot.</summary>
     public AccountingSnapshot CaptureSnapshot()
     {
-        EnsureOwnerThread();
-        AccountRecord[] accounts = _accounts.Values
-            .OrderBy(static account => account.AccountId)
-            .ToArray();
-        CharacterRecord[] characters = _characters.Values
-            .OrderBy(static character => character.CharacterId)
-            .ToArray();
+        EnsureOperational();
+        AccountRecord[] accounts = _accounts.Values.ToArray();
+        CharacterRecord[] characters = _characters.Values.ToArray();
         TrustedIdentityBinding[] identities = _trustedIdentities
             .Select(static pair => new TrustedIdentityBinding(pair.Key, pair.Value))
-            .OrderBy(static binding => binding.Identity.Value, StringComparer.Ordinal)
             .ToArray();
         return new AccountingSnapshot(accounts, characters, identities);
     }
@@ -350,21 +353,24 @@ public sealed class AccountingStore
         return store;
     }
 
-    /// <summary>
-    /// Atomically adopts another owner-thread-bound store's domain state. The
-    /// caller uses this only at a game/runtime generation publication boundary;
-    /// the store object itself remains stable for existing Admission clients.
-    /// </summary>
-    public void Adopt(AccountingStore source)
+    /// <summary>Retires this generation-owned Accounting state.</summary>
+    public void Dispose()
     {
         EnsureOwnerThread();
-        ArgumentNullException.ThrowIfNull(source);
-        source.EnsureOwnerThread();
-        _accounts = new Dictionary<AccountId, AccountRecord>(source._accounts);
-        _characters = new Dictionary<CharacterId, CharacterRecord>(source._characters);
-        _trustedIdentities = new Dictionary<TrustedLocalIdentity, AccountId>(source._trustedIdentities);
-        _characterSlots = new HashSet<(AccountId Account, int Slot)>(source._characterSlots);
-        _persistentCharacters = new HashSet<PersistentEntityKey>(source._persistentCharacters);
+        if (_disposed)
+            return;
+        _disposed = true;
+        _accounts.Clear();
+        _characters.Clear();
+        _trustedIdentities.Clear();
+        _characterSlots.Clear();
+        _persistentCharacters.Clear();
+    }
+
+    private void EnsureOperational()
+    {
+        EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
     }
 
     private void EnsureOwnerThread()

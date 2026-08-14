@@ -200,11 +200,15 @@ public sealed class AdmissionOptions
 /// S0.5 admission service. It supports accountless instant entry and an
 /// account-backed CharacterSelect flow over the same active ServerRuntime.
 /// </summary>
+/// <remarks>
+/// Account-backed operations resolve <see cref="AccountingStore"/> from the
+/// active generation. The service never retains a second Accounting authority
+/// across generation replacement.
+/// </remarks>
 public sealed class AdmissionService : IDisposable
 {
     private readonly ServerGameFacet _runtime;
     private readonly IAdmissionEntityBinder _binder;
-    private readonly AccountingStore? _accounting;
     private readonly IAdmissionUiPort? _ui;
     private readonly UiDefinitionCacheKey _characterSelectCacheKey;
     private readonly Dictionary<ParticipantId, Session> _sessions = [];
@@ -215,13 +219,11 @@ public sealed class AdmissionService : IDisposable
     public AdmissionService(
         ServerGameFacet runtime,
         IAdmissionEntityBinder binder,
-        AccountingStore? accounting = null,
         IAdmissionUiPort? ui = null,
         AdmissionOptions? options = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
         _binder = binder ?? throw new ArgumentNullException(nameof(binder));
-        _accounting = accounting;
         _ui = ui;
         options ??= new AdmissionOptions();
         _characterSelectCacheKey = new UiDefinitionCacheKey(
@@ -308,16 +310,35 @@ public sealed class AdmissionService : IDisposable
             return RejectNew(participant, AdmissionRejection.DuplicateParticipant,
                 "The participant already has an admission session.");
         }
-        if (_accounting is null)
+        if (!_runtime.TryUseActiveGeneration(
+            static (_, generationId) => generationId,
+            out _))
+        {
+            return RejectNew(participant, AdmissionRejection.RuntimeNotRunning,
+                "Admission requires a running ServerRuntime.");
+        }
+        if (!_runtime.TryUseActiveGeneration<AccountingStore, AccountSelection>(
+            (_, generationId, accounting) =>
+            {
+                if (!accounting.TryResolveAccount(trustedIdentity, out AccountRecord account))
+                    return AccountSelection.Missing(generationId);
+                return new AccountSelection(
+                    account,
+                    accounting.GetCharacters(account.AccountId),
+                    generationId,
+                    true);
+            },
+            out AccountSelection selection))
         {
             return RejectNew(participant, AdmissionRejection.AccountingUnavailable,
-                "This composition does not enable Accounting.");
+                "This active game generation does not enable Accounting.");
         }
-        if (!_accounting.TryResolveAccount(trustedIdentity, out AccountRecord account))
+        if (!selection.Found)
         {
             return RejectNew(participant, AdmissionRejection.TrustedIdentityUnknown,
                 "The trusted local identity does not resolve to an account.");
         }
+        AccountRecord account = selection.Account;
         if (!account.IsEnabled)
         {
             return RejectNew(participant, AdmissionRejection.AccountDisabled,
@@ -328,15 +349,7 @@ public sealed class AdmissionService : IDisposable
             return RejectNew(participant, AdmissionRejection.UiUnavailable,
                 "Account-backed admission requires a CharacterSelect UI port.");
         }
-        if (!_runtime.TryUseActiveGeneration(
-            static (_, generationId) => generationId,
-            out ulong generationId))
-        {
-            return RejectNew(participant, AdmissionRejection.RuntimeNotRunning,
-                "Admission requires a running ServerRuntime.");
-        }
-
-        IReadOnlyList<CharacterRecord> characters = _accounting.GetCharacters(account.AccountId);
+        IReadOnlyList<CharacterRecord> characters = selection.Characters;
         if (characters.Count > CharacterSelectUi.Definition.Limits.MaximumRowsPerList)
         {
             return RejectNew(participant, AdmissionRejection.UiUnavailable,
@@ -367,7 +380,7 @@ public sealed class AdmissionService : IDisposable
         {
             Stage = AdmissionStage.WaitingForCharacter,
             AccountId = account.AccountId,
-            GenerationId = generationId,
+            GenerationId = selection.GenerationId,
             CharacterSelectView = view,
         };
         _sessions.Add(participant, session);
@@ -389,20 +402,38 @@ public sealed class AdmissionService : IDisposable
             return RejectNew(participant, AdmissionRejection.InvalidSessionStage,
                 "CharacterSelect can only be reopened while the participant is waiting for character selection.");
         }
-        if (_accounting is null || _ui is null)
+        if (_ui is null)
             return RejectExisting(session, AdmissionRejection.AccountingUnavailable,
                 "Account-backed admission is not configured.");
-        if (!_accounting.TryGetAccount(session.AccountId, out AccountRecord account) ||
-            !account.IsEnabled)
+        if (!_runtime.TryUseActiveGeneration(
+            static (_, generationId) => generationId,
+            out _))
+        {
+            return RejectExisting(session, AdmissionRejection.RuntimeNotRunning,
+                "Admission requires a running ServerRuntime.");
+        }
+        if (!_runtime.TryUseActiveGeneration<AccountingStore, AccountSelection>(
+            (_, generationId, accounting) =>
+            {
+                if (!accounting.TryGetAccount(session.AccountId, out AccountRecord account))
+                    return AccountSelection.Missing(generationId);
+                return new AccountSelection(
+                    account,
+                    accounting.GetCharacters(account.AccountId),
+                    generationId,
+                    true);
+            },
+            out AccountSelection selection))
+        {
+            return RejectExisting(session, AdmissionRejection.AccountingUnavailable,
+                "The active game generation does not enable Accounting.");
+        }
+        if (!selection.Found || !selection.Account.IsEnabled)
         {
             return RejectExisting(session, AdmissionRejection.AccountDisabled,
                 "The admission account is missing or disabled.");
         }
-        if (!_runtime.TryUseActiveGeneration(
-            static (_, generationId) => generationId,
-            out ulong generationId))
-            return RejectExisting(session, AdmissionRejection.RuntimeNotRunning,
-                "Admission requires a running ServerRuntime.");
+        AccountRecord account = selection.Account;
 
         if (session.CharacterSelectView.IsValid)
         {
@@ -424,7 +455,7 @@ public sealed class AdmissionService : IDisposable
             }
         }
 
-        IReadOnlyList<CharacterRecord> characters = _accounting.GetCharacters(session.AccountId);
+        IReadOnlyList<CharacterRecord> characters = selection.Characters;
         if (characters.Count > CharacterSelectUi.Definition.Limits.MaximumRowsPerList)
         {
             return RejectExisting(session, AdmissionRejection.UiUnavailable,
@@ -450,7 +481,7 @@ public sealed class AdmissionService : IDisposable
                 "CharacterSelect returned an invalid or already-owned view instance.");
         }
         session.Stage = AdmissionStage.WaitingForCharacter;
-        session.GenerationId = generationId;
+        session.GenerationId = selection.GenerationId;
         session.CharacterSelectView = view;
         session.Rejection = AdmissionRejection.None;
         session.Message = null;
@@ -521,13 +552,6 @@ public sealed class AdmissionService : IDisposable
                 "The CharacterSelect action was not a valid Play row action.");
             return;
         }
-        if (_accounting is null)
-        {
-            RejectExisting(session, AdmissionRejection.AccountingUnavailable,
-                "Account-backed admission is not configured.");
-            return;
-        }
-
         CharacterId characterId;
         try
         {
@@ -540,19 +564,31 @@ public sealed class AdmissionService : IDisposable
             return;
         }
 
-        if (!_accounting.TryGetCharacter(characterId, out CharacterRecord character) ||
-            character.AccountId != session.AccountId)
-        {
-            RejectExisting(session, AdmissionRejection.CharacterNotOwned,
-                "The selected character is not owned by the resolved account.");
-            return;
-        }
+        CharacterRecord character = default;
         if (!_runtime.TryUseActiveGeneration(
-            (world, generationId) => ResolveCharacter(world, generationId, character),
-            out CharacterResolution resolution))
+            static (_, generationId) => generationId,
+            out _))
         {
             RejectExisting(session, AdmissionRejection.RuntimeNotRunning,
                 "Admission requires a running ServerRuntime.");
+            return;
+        }
+        if (!_runtime.TryUseActiveGeneration<AccountingStore, CharacterResolution>(
+            (world, generationId, accounting) =>
+            {
+                if (!accounting.TryGetCharacter(characterId, out character) ||
+                    character.AccountId != session.AccountId)
+                {
+                    return CharacterResolution.Reject(
+                        AdmissionRejection.CharacterNotOwned,
+                        "The selected character is not owned by the resolved account.");
+                }
+                return ResolveCharacter(world, generationId, character);
+            },
+            out CharacterResolution resolution))
+        {
+            RejectExisting(session, AdmissionRejection.AccountingUnavailable,
+                "The active game generation does not enable Accounting.");
             return;
         }
         if (resolution.Rejection != AdmissionRejection.None)
@@ -710,6 +746,16 @@ public sealed class AdmissionService : IDisposable
     }
 
     private readonly record struct WorldBindingResult(bool Success, Entity Entity, ulong GenerationId);
+
+    private readonly record struct AccountSelection(
+        AccountRecord Account,
+        IReadOnlyList<CharacterRecord> Characters,
+        ulong GenerationId,
+        bool Found)
+    {
+        internal static AccountSelection Missing(ulong generationId) =>
+            new(default, Array.Empty<CharacterRecord>(), generationId, false);
+    }
 
     private readonly record struct CharacterResolution(
         Entity Entity,
