@@ -7,6 +7,7 @@ public readonly record struct NetworkProtocolLimits(
     int MaximumMessageBytes,
     int MaximumFragmentsPerMessage,
     int SentPacketCapacity,
+    int MaximumInboundPacketsPerPump,
     int MaximumPacketsPerPump,
     int MinimumRetransmissionSteps,
     int MaximumRetransmissionSteps,
@@ -14,7 +15,7 @@ public readonly record struct NetworkProtocolLimits(
     int MaximumCongestionWindowPackets)
 {
     public static NetworkProtocolLimits Default => new(
-        128, 128, 16_384, 64, 2_048, 64, 2, 128, 4, 128);
+        128, 128, 16_384, 64, 2_048, 64, 64, 2, 128, 4, 128);
 
     internal void Validate(DeterministicDatagramLimits datagrams)
     {
@@ -29,6 +30,8 @@ public readonly record struct NetworkProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumFragmentsPerMessage));
         if (SentPacketCapacity is <= 0 or > 1_048_576)
             throw new ArgumentOutOfRangeException(nameof(SentPacketCapacity));
+        if (MaximumInboundPacketsPerPump is <= 0 or > 65_536)
+            throw new ArgumentOutOfRangeException(nameof(MaximumInboundPacketsPerPump));
         if (MaximumPacketsPerPump is <= 0 or > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumPacketsPerPump));
         if (MinimumRetransmissionSteps <= 0 || MaximumRetransmissionSteps < MinimumRetransmissionSteps)
@@ -46,24 +49,64 @@ public readonly record struct NetworkProtocolLimits(
         _ = checked((long)NetworkLaneContracts.Count * MaximumMessageBytes);
     }
 
-    public long EstimateReservedPayloadBytes(DeterministicDatagramLimits datagrams)
+    /// <summary>
+    /// Returns a conservative preconstruction estimate for peer-owned array and
+    /// secret payload. CLR object/array headers and opaque cryptography-provider
+    /// state are not part of this payload accounting contract.
+    /// </summary>
+    public long EstimateReservedPayloadBytes(
+        DeterministicDatagramLimits datagrams,
+        int protocolMessageCount = NetworkLaneContracts.Count)
     {
         Validate(datagrams);
+        if (protocolMessageCount <= 0) throw new ArgumentOutOfRangeException(nameof(protocolMessageCount));
         return checked(
             (long)MaximumReliableMessages * MaximumMessageBytes +
             (long)MaximumReceivedMessages * MaximumMessageBytes +
-            2L * NetworkLaneContracts.Count * MaximumMessageBytes +
+            (long)protocolMessageCount * MaximumMessageBytes +
+            (long)NetworkLaneContracts.Count * MaximumMessageBytes +
             (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
             (long)SentPacketCapacity * NetworkSentPacketMetadata.EstimatedBytes +
-            4L * datagrams.MaximumDatagramBytes);
+            (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
+            (long)protocolMessageCount * NetworkUnreliableStreamMetadata.EstimatedBytes +
+            (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
+                sizeof(ulong) * 2 + sizeof(byte) + sizeof(int)) +
+            (long)MaximumReceivedMessages * (NetworkDeliveredMessageMetadata.EstimatedBytes + sizeof(int) * 2) +
+            4L * datagrams.MaximumDatagramBytes +
+            64L);
     }
 }
 
 internal static class NetworkSentPacketMetadata
 {
-    internal const int EstimatedBytes = sizeof(ulong) * 2 + sizeof(int) * 2 + sizeof(byte);
+    internal const int EstimatedBytes = 32;
 }
 
+internal static class NetworkOutgoingMessageMetadata
+{
+    internal const int EstimatedBytes = 32;
+}
+
+internal static class NetworkUnreliableStreamMetadata
+{
+    internal const int EstimatedBytes = 56;
+}
+
+internal static class NetworkReassemblyMetadata
+{
+    internal const int EstimatedBytes = 32;
+}
+
+internal static class NetworkDeliveredMessageMetadata
+{
+    internal const int EstimatedBytes = 24;
+}
+
+/// <summary>
+/// Cold protocol diagnostics. <see cref="ReservedBytes"/> is the exact payload
+/// of peer-owned managed arrays and directional master-secret copies; it excludes
+/// CLR object/array headers and opaque cryptography-provider state.
+/// </summary>
 public readonly record struct NetworkProtocolSnapshot(
     bool Established,
     SecurityEpoch SendSecurityEpoch,
@@ -83,4 +126,3 @@ public readonly record struct NetworkProtocolSnapshot(
     ulong SmoothedRoundTripSteps,
     ulong RetransmissionTimeoutSteps,
     long ReservedBytes);
-

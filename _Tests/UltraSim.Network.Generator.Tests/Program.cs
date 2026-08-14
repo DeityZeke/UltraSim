@@ -7,6 +7,9 @@ var tests = new (string Name, Action Body)[]
 {
     ("ValidProtocolGeneratesExactCodecAndManifest", ValidProtocolGeneratesExactCodecAndManifest),
     ("SignedValuesRoundTripUnderCheckedOverflow", SignedValuesRoundTripUnderCheckedOverflow),
+    ("EnumWritesRejectNonCanonicalValuesTransactionally", EnumWritesRejectNonCanonicalValuesTransactionally),
+    ("CrossNamespaceSameNamedMessagesGenerateUniqueCodecs", CrossNamespaceSameNamedMessagesGenerateUniqueCodecs),
+    ("UnsupportedDeclarationShapesReportNETGEN001", UnsupportedDeclarationShapesReport),
     ("DuplicateMessageIdReportsNETGEN003", DuplicateMessageIdReports),
     ("DuplicateCanonicalKeyReportsNETGEN003", DuplicateCanonicalKeyReports),
     ("UnsupportedFieldReportsNETGEN002", UnsupportedFieldReports),
@@ -68,6 +71,74 @@ static void SignedValuesRoundTripUnderCheckedOverflow()
     System.Reflection.Assembly assembly = System.Reflection.Assembly.Load(stream.ToArray());
     bool passed = (bool)assembly.GetType("SignedFixture.Probe")!.GetMethod("Run")!.Invoke(null, null)!;
     if (!passed) throw new InvalidOperationException("The signed checked-build codec did not round-trip.");
+}
+
+static void EnumWritesRejectNonCanonicalValuesTransactionally()
+{
+    Generation generation = Generate("""
+        using System;
+        using UltraSim.Network;
+        namespace EnumFixture;
+        public enum Mode : byte { A = 1, B = 2 }
+        [Flags] public enum Options : byte { None = 0, A = 1, B = 2 }
+        [NetworkProtocol(1)] public static partial class Protocol { }
+        [NetworkMessage(1, "enum", 1, NetworkLane.Control)]
+        public partial struct EnumMessage { public Mode Mode; public Options Options; }
+        public static class Probe
+        {
+            public static bool Run()
+            {
+                var badMode = new EnumMessage { Mode = (Mode)3, Options = Options.A };
+                var badFlags = new EnumMessage { Mode = Mode.A, Options = (Options)4 };
+                Span<byte> bytes = stackalloc byte[16];
+                var writer = new NetworkPacketWriter(bytes);
+                if (!writer.TryWriteByte(99)) return false;
+                int before = writer.WrittenCount;
+                return !EnumMessageCodec.TryMeasure(in badMode, out int badModeBytes) && badModeBytes == 0 &&
+                    !EnumMessageCodec.TryWrite(ref writer, in badMode) && writer.WrittenCount == before &&
+                    !EnumMessageCodec.TryMeasure(in badFlags, out int badFlagsBytes) && badFlagsBytes == 0 &&
+                    !EnumMessageCodec.TryWrite(ref writer, in badFlags) && writer.WrittenCount == before;
+            }
+        }
+        """);
+    AssertExecutableProbe(generation, "EnumFixture.Probe");
+}
+
+static void CrossNamespaceSameNamedMessagesGenerateUniqueCodecs()
+{
+    Generation generation = Generate("""
+        using UltraSim.Network;
+        namespace ProtocolSpace { [NetworkProtocol(1)] public static partial class Protocol { } }
+        namespace First { [NetworkMessage(1, "first", 1, NetworkLane.Control)] public partial struct Same { public uint Value; } }
+        namespace Second { [NetworkMessage(2, "second", 1, NetworkLane.Event)] public partial struct Same { public uint Value; } }
+        """);
+    AssertNoCompilationErrors(generation);
+    Contains(generation.Source, "global::First.SameCodec.Descriptor");
+    Contains(generation.Source, "global::Second.SameCodec.Descriptor");
+}
+
+static void UnsupportedDeclarationShapesReport()
+{
+    AssertDiagnostic("""
+        using UltraSim.Network;
+        [NetworkProtocol(1)] internal static partial class Protocol { }
+        [NetworkMessage(1, "a", 1, NetworkLane.Control)] public partial struct A { public uint Value; }
+        """, "NETGEN001");
+    AssertDiagnostic("""
+        using UltraSim.Network;
+        [NetworkProtocol(1)] public static partial class Protocol<T> { }
+        [NetworkMessage(1, "a", 1, NetworkLane.Control)] public partial struct A { public uint Value; }
+        """, "NETGEN001");
+    AssertDiagnostic("""
+        using UltraSim.Network;
+        [NetworkProtocol(1)] public static partial class Protocol { }
+        [NetworkMessage(1, "a", 1, NetworkLane.Control)] internal partial struct A { public uint Value; }
+        """, "NETGEN001");
+    AssertDiagnostic("""
+        using UltraSim.Network;
+        [NetworkProtocol(1)] public static partial class Protocol { }
+        [NetworkMessage(1, "a", 1, NetworkLane.Control)] public partial struct A<T> { public uint Value; }
+        """, "NETGEN001");
 }
 Console.WriteLine($"All {tests.Length} Network codec generator tests passed.");
 
@@ -147,6 +218,25 @@ static void AssertNoGeneratorErrors(Generation generation)
 {
     Diagnostic[] errors = generation.Diagnostics.Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
     if (errors.Length != 0) throw new InvalidOperationException(string.Join("\n", errors.AsEnumerable()));
+}
+
+static void AssertNoCompilationErrors(Generation generation)
+{
+    AssertNoGeneratorErrors(generation);
+    Diagnostic[] errors = generation.Compilation.GetDiagnostics()
+        .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
+    if (errors.Length != 0) throw new InvalidOperationException(string.Join("\n", errors.AsEnumerable()));
+}
+
+static void AssertExecutableProbe(Generation generation, string typeName)
+{
+    AssertNoCompilationErrors(generation);
+    using var stream = new MemoryStream();
+    Microsoft.CodeAnalysis.Emit.EmitResult emitted = generation.Compilation.Emit(stream);
+    if (!emitted.Success) throw new InvalidOperationException(string.Join("\n", emitted.Diagnostics));
+    System.Reflection.Assembly assembly = System.Reflection.Assembly.Load(stream.ToArray());
+    bool passed = (bool)assembly.GetType(typeName)!.GetMethod("Run")!.Invoke(null, null)!;
+    if (!passed) throw new InvalidOperationException($"Generated probe '{typeName}' failed.");
 }
 
 static void Contains(string source, string value)

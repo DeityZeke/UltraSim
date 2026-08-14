@@ -1,7 +1,8 @@
 # UltraSim Network kernel
 
 Status: N0.0 contracts, N0.1 game projection/OfflineDirect, N0.2 bounded kernel
-foundations, and N0.3 secure reliable ProtocolLoopback are accepted. Remote
+foundations, and N0.3 secure reliable ProtocolLoopback plus adversarial acceptance
+hardening are accepted. Remote
 Admission/UI begins at N0.4; real transport remains N0.5.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
@@ -37,7 +38,7 @@ Identity is explicit and non-interchangeable:
 | `ConnectionId` | Network | Server-created transport slot plus reuse generation; neither durable nor client-chosen. |
 | `SecurityEpoch` | Network | Key/replay lifetime within one connection. |
 | `PacketNumber` | Network | Authenticated datagram sequence; admitted data packet numbers are referenced separately by transport-delivery ACKs. |
-| `LaneSequence` | Network | Per-connection delivery-lane sequence domain. |
+| `LaneSequence` | Network | Reliable ordering is lane-scoped; N0.3 unreliable sequencing/coalescing is isolated per message family. Deeper game-defined sub-stream keys remain N0.6 work. |
 | `StateEpoch` | Projection/protocol seam | One coherent canonical projection generation. |
 | `ReplicationEntityId` | Canonical projection | Dense generational identity shared by all recipients within one `StateEpoch`. |
 | `ParticipantId` | Game contracts | Server-created game/session participant; not defined by this kernel. |
@@ -69,8 +70,11 @@ all connections released, rings drained, and packet tokens returned.
 
 `NetworkCodecGenerator` emits exact fixed-width measure/write/read codecs and an
 immutable manifest from `[NetworkProtocol]` and `[NetworkMessage]`. Generated
-read/write operations stage their cursor and publish it only after the complete
-message succeeds. Primitive integer representation is canonical and checked-build
+measure/write operations reject invalid enum values locally, and read/write
+operations stage their cursor and publish it only after the complete message
+succeeds. Protocol and message declarations must be public, top-level,
+non-generic, and partial; generated codec references and hint identities are fully
+namespace-safe. Primitive integer representation is canonical and checked-build
 signed values are bit-preserving; booleans accept only `0`/`1`; non-flags enums
 accept declared values while flags enums accept only combinations within their
 declared bit mask; exact readers reject trailing bytes. The lower-level reader additionally rejects non-minimal varints,
@@ -110,22 +114,31 @@ The bounded delivery machine provides:
 
 - independent 64-packet authenticated-replay and transport-delivery windows;
 - reliable ordered Control, Event, and Bulk retention with ACK-driven release;
-- unreliable sequenced Input, OwnerState, and WorldState coalescing;
+- unreliable sequenced Input, OwnerState, and WorldState coalescing isolated per
+  message family;
 - disposable unordered delivery;
 - MTU-bounded fragmentation/reassembly;
-- deterministic step-clock RTT/RTO, congestion-window/backoff, and pump budgets;
+- deterministic step-clock RTT/RTO, congestion-window/backoff, and independent
+  inbound/outbound pump budgets;
 - authenticated fail-closed security-epoch advancement;
 - zero warmed managed allocation for normal secure delivery.
 
 The loopback cookie uses a fixed path token and protocol time uses deterministic
 steps. N0.5 binds cookies to real endpoint/path identity and expiry and maps timing
-to a real monotonic clock. N0.6 supplies game-specific input redundancy/expiry;
+to a real monotonic clock. N0.3 does not implement time-based packet pacing; real
+pacing is N0.5 transport policy. N0.6 supplies game-specific input redundancy/expiry;
 N0.7 supplies full recipient fairness and scheduling.
 
 N0.3 remains single-owner. The N0.2 SPSC ring proves token transport and the packet
 pool proves single-owner packet memory independently; cross-thread packet-memory
 handoff is not claimed. N0.5 must admit per-owner pools or one transactional
 ownership-transfer-plus-publication primitive before a socket worker touches buffers.
+The N0.2 and N0.3 ownership implementations remain deliberately independent proofs
+until N0.5 either integrates them or removes the redundant path.
+
+Reliable-head, ACK-record, and deterministic-datagram selection still use bounded
+linear scans. They are acceptable at admitted N0.3 capacities; N0.7/N0.10 scale
+measurements decide whether another index is earned.
 
 An N0.3 ACK is specifically a **transport-delivery ACK**: the remote protocol peer
 authenticated the packet and admitted its reliable payload into bounded receive or
@@ -181,6 +194,22 @@ N0.2 admits warmed pool/ring/codec/framing/datagram operations. N0.3 additionall
 admits normal secure encode/encrypt/send/decrypt/replay/lane delivery as zero managed
 allocation. Cold handshake and hostile authentication failures are bounded but are
 not claimed as zero-allocation profiles. Socket submission remains later.
+
+`NetworkProtocolSnapshot.ReservedBytes` reports peer-owned managed-array payload
+and both directional master-secret copies. It excludes CLR object/array headers
+and opaque cryptography-provider state. The preconstruction limits API is therefore
+explicitly an estimate, not total process memory.
+
+The N0.3 acceptance-hardening run (25 isolated iterations, 10K default operations)
+reported 28.162 µs mean / 28.484 µs p95 for unreliable state, 28.923 / 29.137
+µs for reliable Control, and 34.901 / 35.196 µs for 4 KiB reliable Bulk,
+with 0 B timed allocation. Against the immutable replay-hardened N0.3 baseline,
+means are about 9.3%, 10.5%, and 10.1% slower respectively. This is retained as
+an explicit correctness cost rather than silently replacing the earlier performance
+reference: the hardened path adds whole-window liveness bookkeeping and independent
+message-family state. Impairment convergence remains identical (2,162 steps, 131
+retransmissions, 15 authentication failures), and N0.5 must remeasure when the
+real ownership/transport path replaces proof-stage loopback machinery.
 
 ## Evidence admission
 
@@ -254,7 +283,19 @@ bounded lane semantics. The N0.3 standalone baseline is not mislabeled as a rati
 - duplicated authentic ciphertext is replay-rejected even while reliable delivery is blocked;
 - replay, ACK, retransmission, RTT/RTO, congestion, sequencing, fragmentation,
   receive backpressure, and epoch rotation pass deterministic impairment tests;
+- complete congestion-window and complete ACK-window loss make progress, including
+  a configured one-packet congestion window;
+- authenticated unreliable capacity drops advance their message-family stale floor,
+  while unrelated unreliable families retain independent pending/sequence state;
+- inbound flood is bounded independently and cannot prevent outbound Control/ACK work;
 - normal warmed secure delivery allocates zero managed bytes.
+
+The N0.3 recovery invariant is:
+
+> No bounded resource exhaustion, complete packet-window loss, stale packet
+> history, invalid generated value, sequence exhaustion, or malformed oracle input
+> may leave protocol/projection state unable to make progress through its documented
+> recovery action.
 
 Run the focused gate:
 

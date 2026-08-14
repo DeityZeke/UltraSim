@@ -54,6 +54,8 @@ public sealed class OfflineDirectGameProjection
         ArgumentNullException.ThrowIfNull(source);
         if (!frame.StateEpoch.IsValid || frame.BaselineRevision == 0 || frame.DeltaCount != 0)
             return OfflineProjectionApplyStatus.InvalidDelta;
+        if (!FramesEqual(source.GetLastFrame(), frame))
+            return OfflineProjectionApplyStatus.InvalidDelta;
         GameProjectionSnapshot sourceSnapshot = source.GetSnapshot();
         if (sourceSnapshot.EntityCount > _stagingEntities.Length ||
             sourceSnapshot.ParticipantCount > _stagingParticipants.Length)
@@ -129,6 +131,8 @@ public sealed class OfflineDirectGameProjection
             _frameSequence == ulong.MaxValue ||
             frame.FrameSequence != _frameSequence + 1)
             return OfflineProjectionApplyStatus.BaselineRequired;
+        if (!FramesEqual(source.GetLastFrame(), frame))
+            return OfflineProjectionApplyStatus.InvalidDelta;
         if (frame.DeltaCount != deltas.Length)
             return OfflineProjectionApplyStatus.InvalidDelta;
         GameProjectionSnapshot sourceSnapshot = source.GetSnapshot();
@@ -199,6 +203,19 @@ public sealed class OfflineDirectGameProjection
         int participantCount = source.CopyParticipants(_stagingParticipants);
         if (entityCount != sourceSnapshot.EntityCount || participantCount != sourceSnapshot.ParticipantCount)
             return OfflineProjectionApplyStatus.InvalidDelta;
+        Array.Clear(_packedEntities);
+        int authoritativeCount = source.CopyEntities(_packedEntities);
+        if (authoritativeCount != entityCount)
+            return OfflineProjectionApplyStatus.InvalidDelta;
+        for (int index = 0; index < authoritativeCount; index++)
+        {
+            GameProjectedEntity authoritative = _packedEntities[index];
+            if (!authoritative.Entity.IsValid || authoritative.Entity.Index >= _stagingEntities.Length ||
+                !EntitiesEqual(_stagingEntities[authoritative.Entity.Index], authoritative))
+            {
+                return OfflineProjectionApplyStatus.InvalidDelta;
+            }
+        }
         (_entities, _stagingEntities) = (_stagingEntities, _entities);
         (_participants, _stagingParticipants) = (_stagingParticipants, _participants);
         Array.Clear(_stagingParticipants);
@@ -311,12 +328,32 @@ public sealed class OfflineDirectGameProjection
             GameProjectionParticipant participant = _participants[index];
             Mix(ref hash, participant.Participant.Value);
             Mix(ref hash, Pack(participant.ControlledEntity));
+            Mix(ref hash, participant.ServerGenerationId);
         }
         return hash;
     }
 
     private static ulong Pack(ReplicationEntityId id) =>
         ((ulong)id.Generation << 32) | id.Index;
+
+    private static bool EntitiesEqual(in GameProjectedEntity left, in GameProjectedEntity right) =>
+        left.Entity == right.Entity &&
+        left.HasSimulationState == right.HasSimulationState &&
+        left.SimulationState.TickMarker == right.SimulationState.TickMarker;
+
+    private static bool FramesEqual(in GameProjectionFrame left, in GameProjectionFrame right) =>
+        left.StateEpoch == right.StateEpoch &&
+        left.ServerGenerationId == right.ServerGenerationId &&
+        left.SimulationTick == right.SimulationTick &&
+        left.BaselineRevision == right.BaselineRevision &&
+        left.PreviousFrameSequence == right.PreviousFrameSequence &&
+        left.FrameSequence == right.FrameSequence &&
+        left.NextDeltaSequence == right.NextDeltaSequence &&
+        left.DeltaCount == right.DeltaCount &&
+        left.LifecycleOldestSequence == right.LifecycleOldestSequence &&
+        left.LifecycleNextSequence == right.LifecycleNextSequence &&
+        left.ApplicationEventOldestSequence == right.ApplicationEventOldestSequence &&
+        left.ApplicationEventNextSequence == right.ApplicationEventNextSequence;
 
     private static void Mix(ref ulong hash, ulong value)
     {

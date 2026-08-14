@@ -45,6 +45,7 @@ public sealed class GameProjectionService : IDisposable
     private readonly GameSimulationCommand[] _commandScratch;
     private readonly ParticipantId[] _participantScratch;
     private readonly Dictionary<ParticipantId, ParticipantState> _participants;
+    private readonly int _participantMapCapacity;
     private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _captureOperation;
     private readonly ServerGenerationStateOperation<GameGenerationState, GameProjectionCaptureResult> _rebuildOperation;
     private readonly ServerGenerationStateOperation<GameGenerationState, IngressCommit> _ingressPublisher;
@@ -77,6 +78,19 @@ public sealed class GameProjectionService : IDisposable
     private int _ingressAcceptedCount;
 
     internal Action<GameProjectionFaultPoint>? FaultInjector { get; set; }
+
+    internal void SetSequenceStateForTest(
+        ulong frameSequence,
+        ulong nextDeltaSequence,
+        ulong lifecycleNextSequence,
+        ulong lifecycleOverwritten)
+    {
+        EnsureOperational();
+        _frameSequence = frameSequence;
+        _nextDeltaSequence = nextDeltaSequence;
+        _lifecycleNextSequence = lifecycleNextSequence;
+        _lifecycleOverwritten = lifecycleOverwritten;
+    }
 
     public GameProjectionService(
         ServerGameFacet runtime,
@@ -113,6 +127,7 @@ public sealed class GameProjectionService : IDisposable
         _commandScratch = new GameSimulationCommand[limits.AuthoritativeInputCapacity];
         _participantScratch = new ParticipantId[limits.MaximumParticipants];
         _participants = new Dictionary<ParticipantId, ParticipantState>(limits.MaximumParticipants);
+        _participantMapCapacity = _participants.EnsureCapacity(limits.MaximumParticipants);
         _captureOperation = CaptureInsideCallback;
         _rebuildOperation = RebuildInsideCallback;
         _ingressPublisher = PublishIngressInsideCallback;
@@ -230,6 +245,8 @@ public sealed class GameProjectionService : IDisposable
         ulong oldest = unchecked(_lifecycleNextSequence - (ulong)_lifecycleCount);
         if (nextSequence < oldest)
             return new(GameProjectionHistoryReadStatus.HistoryLost, 0, nextSequence, oldest, _lifecycleNextSequence);
+        if (nextSequence > _lifecycleNextSequence)
+            return new(GameProjectionHistoryReadStatus.FutureSequence, 0, nextSequence, oldest, _lifecycleNextSequence);
         ulong pending = unchecked(_lifecycleNextSequence - nextSequence);
         if (pending == 0)
             return new(GameProjectionHistoryReadStatus.NoData, 0, nextSequence, oldest, _lifecycleNextSequence);
@@ -271,6 +288,9 @@ public sealed class GameProjectionService : IDisposable
         ulong oldest = unchecked(_applicationNextSequence - (ulong)_applicationCount);
         if (nextSequence < oldest)
             return new(GameProjectionHistoryReadStatus.HistoryLost, 0, nextSequence, oldest, _applicationNextSequence);
+        if (nextSequence > _applicationNextSequence)
+            return new(GameProjectionHistoryReadStatus.FutureSequence, 0, nextSequence, oldest,
+                _applicationNextSequence);
         ulong pending = unchecked(_applicationNextSequence - nextSequence);
         if (pending == 0)
             return new(GameProjectionHistoryReadStatus.NoData, 0, nextSequence, oldest, _applicationNextSequence);
@@ -433,14 +453,14 @@ public sealed class GameProjectionService : IDisposable
                     "ECS lifecycle history was overwritten before canonical capture.");
             }
             if (lifecycle.RemainingCount != 0)
-                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                return CaptureResyncFailure(
                     "One capture interval exceeded its lifecycle scratch capacity.");
 
             ChangeCursor stagedChangeCursor = _changeCursor;
             var visitor = new ChangedVisitor(_changedScratch);
             int changedRows = state.Replication.ExecuteChanges(world, ref stagedChangeCursor, ref visitor);
             if (visitor.Overflowed)
-                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                return CaptureResyncFailure(
                     "One capture interval exceeded its changed-row scratch capacity.");
 
             BeginWorkingSet();
@@ -448,13 +468,16 @@ public sealed class GameProjectionService : IDisposable
             for (int index = 0; index < lifecycle.Count; index++)
             {
                 if (!TryStageLifecycle(world, state, _lifecycleScratch[index], ref deltaCount, out string? error))
-                    return Failure(GameProjectionCaptureStatus.CapacityExceeded, error!);
+                    return CaptureResyncFailure(error!);
             }
             for (int index = 0; index < visitor.Count; index++)
             {
                 if (!TryStageValue(world, visitor.Values[index], ref deltaCount, out string? error))
-                    return Failure(GameProjectionCaptureStatus.CapacityExceeded, error!);
+                    return CaptureResyncFailure(error!);
             }
+
+            if (!TryPreflightCaptureCommit(deltaCount, out string? sequenceError))
+                return Failure(GameProjectionCaptureStatus.CapacityExceeded, sequenceError!);
 
             FaultInjector?.Invoke(GameProjectionFaultPoint.BeforeCaptureCommit);
             CommitWorkingSet(deltaCount);
@@ -771,6 +794,37 @@ public sealed class GameProjectionService : IDisposable
         _lastDeltaCount = deltaCount;
     }
 
+    private bool TryPreflightCaptureCommit(int deltaCount, out string? error)
+    {
+        if (_frameSequence == ulong.MaxValue)
+        {
+            error = "The projection frame sequence space is exhausted.";
+            return false;
+        }
+        if ((ulong)deltaCount > ulong.MaxValue - _nextDeltaSequence)
+        {
+            error = "The projection delta sequence space is exhausted.";
+            return false;
+        }
+
+        int lifecycleFacts = 0;
+        for (int index = 0; index < deltaCount; index++)
+            if (_stagedIsLifecycle[index]) lifecycleFacts++;
+        if ((ulong)lifecycleFacts > ulong.MaxValue - _lifecycleNextSequence)
+        {
+            error = "The projection lifecycle sequence space is exhausted.";
+            return false;
+        }
+        long overwritten = Math.Max(0L, (long)_lifecycleCount + lifecycleFacts - _lifecycleHistory.Length);
+        if ((ulong)overwritten > ulong.MaxValue - _lifecycleOverwritten)
+        {
+            error = "The projection lifecycle overwrite counter is exhausted.";
+            return false;
+        }
+        error = null;
+        return true;
+    }
+
     private void AppendLifecycle(in GameProjectionLifecycleFact fact)
     {
         int index;
@@ -877,6 +931,12 @@ public sealed class GameProjectionService : IDisposable
     private GameProjectionCaptureResult Failure(GameProjectionCaptureStatus status, string message) =>
         new(status, CreateFrame(_frameSequence, _frameSequence, _lastDeltaCount, 0), 0, 0, message);
 
+    private GameProjectionCaptureResult CaptureResyncFailure(string message)
+    {
+        _rebuildRequired = true;
+        return Failure(GameProjectionCaptureStatus.CaptureResyncRequired, message);
+    }
+
     private GameProjectionFrame CreateFrame(ulong previous, ulong current, int deltas, ulong tick) => new(
         _stateEpoch,
         _generationId,
@@ -934,7 +994,8 @@ public sealed class GameProjectionService : IDisposable
         (long)_applicationEvents.Length * Unsafe.SizeOf<GameApplicationEvent>() +
         (long)_inputs.Length * Unsafe.SizeOf<GameAuthoritativeInput>() +
         (long)_commandScratch.Length * Unsafe.SizeOf<GameSimulationCommand>() +
-        (long)_participantScratch.Length * Unsafe.SizeOf<ParticipantId>());
+        (long)_participantScratch.Length * Unsafe.SizeOf<ParticipantId>() +
+        (long)_participantMapCapacity * (sizeof(int) + Unsafe.SizeOf<ParticipantMapEntryEstimate>()));
 
     private static void CopyRing<T>(
         T[] source,
@@ -972,6 +1033,15 @@ public sealed class GameProjectionService : IDisposable
         internal GameProjectionParticipant Binding;
         internal ulong LastAcceptedInputSequence;
     }
+
+    // Mirrors the current Dictionary<TKey,TValue> entry payload for reserved-byte
+    // diagnostics. CLR object/array headers remain intentionally outside the
+    // payload reservation contract.
+    private readonly record struct ParticipantMapEntryEstimate(
+        uint HashCode,
+        int Next,
+        ParticipantId Key,
+        ParticipantState Value);
 
     private struct BaselineVisitor : IReadChunkJob<GameSimulationState>
     {

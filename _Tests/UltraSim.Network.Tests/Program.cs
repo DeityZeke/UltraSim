@@ -59,6 +59,20 @@ static void LaneTableIsExhaustiveAndSemanticallyDistinct()
     Equal(NetworkLaneContracts.Count, lanes.Length);
     foreach (NetworkLane lane in lanes)
         Equal(lane, NetworkLaneContracts.Get(lane).Lane);
+    ReadOnlySpan<NetworkLane> priority = NetworkLaneContracts.PriorityOrder;
+    Equal(NetworkLaneContracts.Count, priority.Length);
+    uint seen = 0;
+    byte previousPriority = 0;
+    for (int index = 0; index < priority.Length; index++)
+    {
+        uint bit = 1U << (int)priority[index];
+        False((seen & bit) != 0);
+        seen |= bit;
+        byte currentPriority = NetworkLaneContracts.Get(priority[index]).Priority;
+        if (index != 0) True(previousPriority <= currentPriority);
+        previousPriority = currentPriority;
+    }
+    Equal((1U << NetworkLaneContracts.Count) - 1, seen);
 
     NetworkLaneContract control = NetworkLaneContracts.Get(NetworkLane.Control);
     NetworkLaneContract input = NetworkLaneContracts.Get(NetworkLane.Input);

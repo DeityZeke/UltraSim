@@ -4,7 +4,7 @@ using UltraSim.Network;
 internal static class N03ProtocolTests
 {
     private static readonly NetworkProtocolLimits s_limits = new(
-        16, 16, 4_096, 32, 256, 16, 2, 64, 4, 32);
+        16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32);
     private static readonly DeterministicDatagramLimits s_datagrams = new(256, 512);
     private static readonly NetworkProtocolManifest s_manifest = CreateManifest();
 
@@ -13,7 +13,11 @@ internal static class N03ProtocolTests
         Run("HandshakeUsesCookiePinnedIdentityAndProtocolAgreement", HandshakeUsesCookiePinnedIdentityAndProtocolAgreement);
         Run("SecureOuterFramingIsCanonicalAndExact", SecureOuterFramingIsCanonicalAndExact);
         Run("ReliableLanesSurviveLossDuplicationCorruptionAndReorder", ReliableLanesSurviveImpairment);
+        Run("ReliableDeliveryRecoversAfterWholeWindowLoss", ReliableDeliveryRecoversAfterWholeWindowLoss);
+        Run("ReliableDeliveryRecoversAfterWholeWindowAckLoss", ReliableDeliveryRecoversAfterWholeWindowAckLoss);
         Run("UnreliableLanesApplySequencingAndCoalescing", UnreliableLanesApplySequencingAndCoalescing);
+        Run("UnreliableMessageFamiliesOwnIndependentStreams", UnreliableMessageFamiliesOwnIndependentStreams);
+        Run("SequencedCapacityDropAdvancesStaleFloor", SequencedCapacityDropAdvancesStaleFloor);
         Run("BulkFragmentationReassemblesExactlyAtSmallMtu", BulkFragmentationReassemblesExactly);
         Run("ReplayAndAuthenticationRejectBeforePublication", ReplayAndAuthenticationRejectBeforePublication);
         Run("AuthenticatedReplayIsIndependentFromDeliveryBackpressure", AuthenticatedReplayIsIndependentFromDeliveryBackpressure);
@@ -21,6 +25,7 @@ internal static class N03ProtocolTests
         Run("ReceiveBackpressureRetainsReliableMessage", ReceiveBackpressureRetainsReliableMessage);
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
+        Run("InboundBudgetCannotStarveOutboundControl", InboundBudgetCannotStarveOutboundControl);
         Run("AbortiveShutdownIsBalancedAndIdempotent", AbortiveShutdownIsBalancedAndIdempotent);
         Run("N03WarmedSecureDeliveryAllocatesZero", WarmedSecureDeliveryAllocatesZero);
     }
@@ -102,6 +107,74 @@ internal static class N03ProtocolTests
         True(client.ReliableAcknowledgements >= 3);
     }
 
+    private static void ReliableDeliveryRecoversAfterWholeWindowLoss()
+    {
+        var datagrams = new DeterministicDatagramLimits(64, 256);
+        NetworkProtocolLimits limits = s_limits with
+        {
+            InitialCongestionWindowPackets = 4,
+            MaximumCongestionWindowPackets = 4,
+            MinimumRetransmissionSteps = 2,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, datagrams);
+        byte[] payload = Enumerable.Range(0, 700).Select(static value => unchecked((byte)value)).ToArray();
+        Equal(NetworkQueueStatus.Accepted, pair.Sender.TryQueue(Id(NetworkLane.Bulk), payload));
+        pair.Sender.Emit(0);
+        Equal(4, pair.Sender.GetSnapshot().InFlightPackets);
+        Equal(4, Drain(pair.Link.B)); // Lose the complete initial congestion window.
+
+        // Keep losing complete retry windows for several RTOs. Timeout discovery must
+        // continue even while the prior flight filled the congestion window.
+        for (ulong step = 1; step <= 8; step++)
+        {
+            pair.Sender.Emit(step);
+            _ = Drain(pair.Link.B);
+        }
+        True(pair.Sender.GetSnapshot().ReliableRetransmissions >= 4);
+
+        Drive(pair, 9, () => pair.Receiver.ReceivedQueued == 1, 128);
+        AssertReceive(pair.Receiver, NetworkLane.Bulk, payload);
+        Drive(pair, 137, () => pair.Sender.ReliableQueued == 0, 128);
+    }
+
+    private static void ReliableDeliveryRecoversAfterWholeWindowAckLoss()
+    {
+        var datagrams = new DeterministicDatagramLimits(64, 256);
+        NetworkProtocolLimits limits = s_limits with
+        {
+            InitialCongestionWindowPackets = 4,
+            MaximumCongestionWindowPackets = 4,
+            MinimumRetransmissionSteps = 2,
+        };
+        using RawPeerPair pair = new(s_manifest, limits, datagrams);
+        byte[] payload = Enumerable.Range(0, 700).Select(static value => unchecked((byte)(value * 17))).ToArray();
+        Equal(NetworkQueueStatus.Accepted, pair.Sender.TryQueue(Id(NetworkLane.Bulk), payload));
+        pair.Sender.Emit(0);
+        pair.Receiver.ProcessInbound(0);
+        Equal(1, pair.Receiver.ReceivedQueued);
+        pair.Receiver.Emit(0);
+        True(Drain(pair.Link.A) > 0); // Lose the ACK covering the entire flight.
+        Equal(4, pair.Sender.GetSnapshot().InFlightPackets);
+
+        Drive(pair, 1, () => pair.Sender.ReliableQueued == 0, 128);
+        Equal(1, pair.Receiver.ReceivedQueued);
+        AssertReceive(pair.Receiver, NetworkLane.Bulk, payload);
+        True(pair.Sender.GetSnapshot().ReliableRetransmissions > 0);
+
+        NetworkProtocolLimits onePacket = limits with
+        {
+            InitialCongestionWindowPackets = 1,
+            MaximumCongestionWindowPackets = 1,
+        };
+        using RawPeerPair single = new(s_manifest, onePacket, datagrams);
+        Equal(NetworkQueueStatus.Accepted,
+            single.Sender.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 1 }));
+        single.Sender.Emit(0);
+        Equal(1, Drain(single.Link.B));
+        single.Sender.Emit(2);
+        Equal(1, single.Sender.GetSnapshot().CongestionWindowPackets);
+    }
+
     private static void UnreliableLanesApplySequencingAndCoalescing()
     {
         using ProtocolLoopback loopback = Create(new(77, 0, 500, 0, 7));
@@ -127,6 +200,54 @@ internal static class N03ProtocolTests
         Equal(9UL, seen[NetworkLane.OwnerState]);
         Equal(9UL, seen[NetworkLane.WorldState]);
         Equal(99UL, seen[NetworkLane.Disposable]);
+    }
+
+    private static void UnreliableMessageFamiliesOwnIndependentStreams()
+    {
+        NetworkMessageDescriptor[] descriptors = s_manifest.Messages.ToArray();
+        Array.Resize(ref descriptors, descriptors.Length + 1);
+        var secondId = new NetworkMessageId(100);
+        descriptors[^1] = new(secondId, "n0.3.test.OwnerVitals", 1,
+            NetworkLane.OwnerState, 4_096, 9_999);
+        NetworkProtocolManifest manifest = NetworkProtocolManifest.Create(3, descriptors);
+        True(ProtocolLoopback.TryCreate(s_limits, s_datagrams, default,
+            out ProtocolLoopback? created, out _, manifest));
+        using ProtocolLoopback loopback = created!;
+        byte[] transform = { 1, 2 };
+        byte[] vitals = { 9, 8, 7 };
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), transform));
+        Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(secondId, vitals));
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 2, 1_000);
+
+        var delivered = new Dictionary<NetworkMessageId, byte[]>();
+        while (loopback.Server.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+        {
+            Equal(0UL, message.LaneSequence.Value);
+            delivered.Add(message.MessageId, payload.ToArray());
+            True(loopback.Server.TryConsumeReceived());
+        }
+        True(delivered[Id(NetworkLane.OwnerState)].AsSpan().SequenceEqual(transform));
+        True(delivered[secondId].AsSpan().SequenceEqual(vitals));
+    }
+
+    private static void SequencedCapacityDropAdvancesStaleFloor()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumReceivedMessages = 1 };
+        using RawPeerPair pair = new(s_manifest, limits, s_datagrams);
+        NetworkMessageId message = Id(NetworkLane.OwnerState);
+
+        pair.InjectData(message, NetworkLane.OwnerState, sequence: 8, packet: 0, stackalloc byte[] { 8 });
+        Equal(1, pair.Receiver.ReceivedQueued);
+        pair.InjectData(message, NetworkLane.OwnerState, sequence: 10, packet: 1, stackalloc byte[] { 10 });
+        Equal(1UL, pair.Receiver.GetSnapshot().CapacityDrops);
+        AssertReceive(pair.Receiver, NetworkLane.OwnerState, stackalloc byte[] { 8 });
+
+        pair.InjectData(message, NetworkLane.OwnerState, sequence: 9, packet: 2, stackalloc byte[] { 9 });
+        Equal(0, pair.Receiver.ReceivedQueued);
+        Equal(1UL, pair.Receiver.GetSnapshot().SequencedDrops);
+        pair.InjectData(message, NetworkLane.OwnerState, sequence: 11, packet: 3, stackalloc byte[] { 11 });
+        AssertReceive(pair.Receiver, NetworkLane.OwnerState, stackalloc byte[] { 11 });
     }
 
     private static void BulkFragmentationReassemblesExactly()
@@ -350,6 +471,29 @@ internal static class N03ProtocolTests
         Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Control), payload));
     }
 
+    private static void InboundBudgetCannotStarveOutboundControl()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumInboundPacketsPerPump = 2 };
+        var link = new DeterministicDatagramLink(s_datagrams);
+        byte[] secret = Enumerable.Range(1, 32).Select(static value => (byte)value).ToArray();
+        using var receiver = new NetworkProtocolPeer(
+            link.B, s_manifest, limits, s_datagrams, new ConnectionId(9, 1),
+            new SecurityEpoch(1), secret, sendsClientToServer: false);
+        CryptographicOperations.ZeroMemory(secret);
+        ReadOnlySpan<byte> malformed = stackalloc byte[] { 0xFF };
+        for (int index = 0; index < 10; index++)
+            Equal(DatagramSendStatus.Accepted, link.A.TrySend(malformed));
+        Equal(NetworkQueueStatus.Accepted,
+            receiver.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 7 }));
+
+        receiver.ProcessInbound(0);
+        Equal(2UL, receiver.GetSnapshot().AuthenticationFailures);
+        Equal(8, link.GetSnapshot().PendingAToB);
+        receiver.Emit(0);
+        byte[] outbound = new byte[s_datagrams.MaximumDatagramBytes];
+        True(link.A.TryReceive(outbound, out _));
+    }
+
     private static void WarmedSecureDeliveryAllocatesZero()
     {
         using ProtocolLoopback loopback = Create();
@@ -409,6 +553,28 @@ internal static class N03ProtocolTests
 
     private static NetworkMessageId Id(NetworkLane lane) => new((ushort)((int)lane + 1));
 
+    private static int Drain(DeterministicDatagramEndpoint endpoint)
+    {
+        byte[] scratch = new byte[s_datagrams.MaximumDatagramBytes];
+        int count = 0;
+        while (endpoint.TryReceive(scratch, out _)) count++;
+        return count;
+    }
+
+    private static void Drive(RawPeerPair pair, ulong firstStep, Func<bool> complete, int maximumSteps)
+    {
+        for (ulong step = firstStep; step < firstStep + unchecked((ulong)maximumSteps); step++)
+        {
+            if (complete()) return;
+            pair.Sender.ProcessInbound(step);
+            pair.Receiver.ProcessInbound(step);
+            pair.Sender.Emit(step);
+            pair.Receiver.Emit(step);
+            pair.Link.Advance();
+        }
+        throw new InvalidOperationException("Raw protocol peers did not converge.");
+    }
+
     private static void Drive(ProtocolLoopback loopback, Func<bool> complete, int maximumSteps)
     {
         for (int step = 0; step < maximumSteps; step++)
@@ -465,5 +631,61 @@ internal static class N03ProtocolTests
         try { action(); }
         catch (TException) { return; }
         throw new InvalidOperationException($"Expected {typeof(TException).Name}.");
+    }
+
+    private sealed class RawPeerPair : IDisposable
+    {
+        private readonly byte[] _masterSecret;
+        private readonly ConnectionId _connection = new(13, 5);
+        private readonly SecurityEpoch _epoch = new(1);
+        private readonly NetworkProtocolManifest _manifest;
+
+        internal RawPeerPair(
+            NetworkProtocolManifest manifest,
+            NetworkProtocolLimits limits,
+            DeterministicDatagramLimits datagrams)
+        {
+            _manifest = manifest;
+            _masterSecret = Enumerable.Range(1, 32).Select(static value => (byte)(value * 3)).ToArray();
+            Link = new DeterministicDatagramLink(datagrams);
+            Sender = new NetworkProtocolPeer(
+                Link.A, manifest, limits, datagrams, _connection, _epoch, _masterSecret,
+                sendsClientToServer: true);
+            Receiver = new NetworkProtocolPeer(
+                Link.B, manifest, limits, datagrams, _connection, _epoch, _masterSecret,
+                sendsClientToServer: false);
+        }
+
+        internal DeterministicDatagramLink Link { get; }
+        internal NetworkProtocolPeer Sender { get; }
+        internal NetworkProtocolPeer Receiver { get; }
+
+        internal void InjectData(
+            NetworkMessageId messageId,
+            NetworkLane lane,
+            ulong sequence,
+            ulong packet,
+            ReadOnlySpan<byte> payload)
+        {
+            True(_manifest.TryGet(messageId, out NetworkMessageDescriptor descriptor));
+            Span<byte> plaintext = stackalloc byte[NetworkProtocolDataHeader.EncodedBytes + payload.Length];
+            var writer = new NetworkPacketWriter(plaintext);
+            var header = new NetworkDataFrameHeader(
+                lane, messageId, descriptor.Version, new LaneSequence(sequence),
+                0, 1, payload.Length, checked((ushort)payload.Length));
+            True(NetworkDataFrameCodec.TryWrite(ref writer, header));
+            True(writer.TryWriteBytes(payload));
+            byte[] datagram = CreateAuthenticatedDatagram(
+                _masterSecret, _connection, _epoch, new PacketNumber(packet), writer.WrittenSpan);
+            Equal(DatagramSendStatus.Accepted, Link.A.TrySend(datagram));
+            Receiver.ProcessInbound(packet);
+        }
+
+        public void Dispose()
+        {
+            Sender.Dispose();
+            Receiver.Dispose();
+            CryptographicOperations.ZeroMemory(_masterSecret);
+        }
     }
 }

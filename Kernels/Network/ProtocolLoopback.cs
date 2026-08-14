@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Runtime.CompilerServices;
 
 namespace UltraSim.Network;
 
@@ -180,17 +181,6 @@ public sealed class ProtocolLoopback : IDisposable
 /// <summary>One bounded endpoint of the secure N0.3 protocol.</summary>
 public sealed class NetworkProtocolPeer : IDisposable
 {
-    private static readonly NetworkLane[] s_priorityOrder =
-    {
-        NetworkLane.Control,
-        NetworkLane.Input,
-        NetworkLane.Event,
-        NetworkLane.OwnerState,
-        NetworkLane.WorldState,
-        NetworkLane.Bulk,
-        NetworkLane.Disposable,
-    };
-
     private readonly int _ownerThreadId;
     private readonly DeterministicDatagramEndpoint _endpoint;
     private readonly NetworkProtocolManifest _manifest;
@@ -206,12 +196,11 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly ulong[] _lastSentSteps;
     private readonly int[] _reliableFree;
     private readonly SentPacketRecord[] _sentPackets;
-    private readonly bool[] _unreliablePending;
-    private readonly OutgoingMessage[] _unreliable;
+    private readonly UnreliableStreamState[] _unreliableStreams;
+    private readonly int[] _unreliableHeads;
     private readonly byte[] _unreliablePayloads;
-    private readonly ulong[] _nextSendSequences;
-    private readonly ulong[] _nextReceiveSequences;
-    private readonly bool[] _receiveSequenceInitialized;
+    private readonly ulong[] _nextReliableSendSequences;
+    private readonly ulong[] _nextReliableReceiveSequences;
     private readonly ReassemblyState[] _reassembly;
     private readonly byte[] _reassemblyPayloads;
     private readonly NetworkDeliveredMessage[] _received;
@@ -241,6 +230,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _smoothedRtt;
     private ulong _rttVariation;
     private ulong _rto;
+    private ulong _nextLossCheckStep = ulong.MaxValue;
+    private int _nextLossDeadlineCount;
     private bool _disposed;
 
     internal NetworkProtocolPeer(
@@ -271,12 +262,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         for (int index = 0; index < _reliableFree.Length; index++) _reliableFree[index] = _reliableFree.Length - 1 - index;
         _reliableFreeCount = _reliableFree.Length;
         _sentPackets = new SentPacketRecord[limits.SentPacketCapacity];
-        _unreliablePending = new bool[NetworkLaneContracts.Count];
-        _unreliable = new OutgoingMessage[NetworkLaneContracts.Count];
-        _unreliablePayloads = new byte[checked(NetworkLaneContracts.Count * limits.MaximumMessageBytes)];
-        _nextSendSequences = new ulong[NetworkLaneContracts.Count];
-        _nextReceiveSequences = new ulong[NetworkLaneContracts.Count];
-        _receiveSequenceInitialized = new bool[NetworkLaneContracts.Count];
+        _unreliableStreams = new UnreliableStreamState[manifest.Count];
+        _unreliableHeads = new int[NetworkLaneContracts.Count];
+        Array.Fill(_unreliableHeads, -1);
+        _unreliablePayloads = new byte[checked(manifest.Count * limits.MaximumMessageBytes)];
+        _nextReliableSendSequences = new ulong[NetworkLaneContracts.Count];
+        _nextReliableReceiveSequences = new ulong[NetworkLaneContracts.Count];
         _reassembly = new ReassemblyState[NetworkLaneContracts.Count];
         _reassemblyPayloads = new byte[checked(NetworkLaneContracts.Count * limits.MaximumMessageBytes)];
         _received = new NetworkDeliveredMessage[limits.MaximumReceivedMessages];
@@ -292,7 +283,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     public NetworkQueueStatus TryQueue(NetworkMessageId messageId, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();
-        if (!_manifest.TryGet(messageId, out NetworkMessageDescriptor descriptor))
+        if (!_manifest.TryGet(messageId, out NetworkMessageDescriptor descriptor, out int messageSlot))
             return NetworkQueueStatus.InvalidDescriptor;
         if (payload.Length > descriptor.MaximumEncodedBytes || payload.Length > _limits.MaximumMessageBytes)
             return NetworkQueueStatus.MessageTooLarge;
@@ -302,7 +293,9 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (fragmentCount > _limits.MaximumFragmentsPerMessage || (fragmentCount > 1 && !lane.AllowsFragmentation))
             return NetworkQueueStatus.MessageTooLarge;
         int laneIndex = (int)descriptor.Lane;
-        ulong sequence = _nextSendSequences[laneIndex];
+        ulong sequence = lane.Delivery == NetworkDeliveryGuarantee.Reliable
+            ? _nextReliableSendSequences[laneIndex]
+            : _unreliableStreams[messageSlot].NextSendSequence;
         if (sequence == ulong.MaxValue) return NetworkQueueStatus.SequenceExhausted;
 
         if (lane.Delivery == NetworkDeliveryGuarantee.Reliable)
@@ -318,12 +311,20 @@ public sealed class NetworkProtocolPeer : IDisposable
         }
         else
         {
-            payload.CopyTo(UnreliablePayload(descriptor.Lane));
-            _unreliable[laneIndex] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
+            ref UnreliableStreamState stream = ref _unreliableStreams[messageSlot];
+            payload.CopyTo(UnreliablePayload(messageSlot));
+            stream.Message = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
                 new LaneSequence(sequence), payload.Length, 1, 0);
-            _unreliablePending[laneIndex] = true;
+            if (!stream.Pending &&
+                (_unreliableHeads[laneIndex] < 0 || messageSlot < _unreliableHeads[laneIndex]))
+            {
+                _unreliableHeads[laneIndex] = messageSlot;
+            }
+            stream.Pending = true;
+            stream.NextSendSequence = sequence + 1;
         }
-        _nextSendSequences[laneIndex] = sequence + 1;
+        if (lane.Delivery == NetworkDeliveryGuarantee.Reliable)
+            _nextReliableSendSequences[laneIndex] = sequence + 1;
         return NetworkQueueStatus.Accepted;
     }
 
@@ -382,21 +383,23 @@ public sealed class NetworkProtocolPeer : IDisposable
     internal void ProcessInbound(ulong step)
     {
         EnsureOperational();
-        while (_endpoint.TryReceive(_wireScratch, out int length))
+        int budget = _limits.MaximumInboundPacketsPerPump;
+        while (budget-- > 0 && _endpoint.TryReceive(_wireScratch, out int length))
             ProcessDatagram(_wireScratch.AsSpan(0, length), step);
     }
 
     internal void Emit(ulong step)
     {
         EnsureOperational();
+        if (_inFlight != 0) ProcessExpiredFlights(step);
         int budget = _limits.MaximumPacketsPerPump;
         if (_ackPending && budget != 0 && TryEmitAcknowledgement()) budget--;
 
         while (budget > 0 && _inFlight < _congestionWindow)
         {
-            if (!TrySelectNext(step, out int reliableSlot, out ushort fragment, out NetworkLane unreliableLane)) break;
+            if (!TrySelectNext(out int reliableSlot, out ushort fragment, out int unreliableSlot)) break;
             bool reliable = reliableSlot >= 0;
-            if (!TryEmitData(reliableSlot, fragment, unreliableLane, step, reliable)) break;
+            if (!TryEmitData(reliableSlot, fragment, unreliableSlot, step, reliable)) break;
             budget--;
         }
     }
@@ -404,7 +407,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     public NetworkProtocolSnapshot GetSnapshot()
     {
         EnsureOperational();
-        long reserved = _limits.EstimateReservedPayloadBytes(_datagramLimits);
+        long reserved = CalculateReservedBytes();
         return new(true, _sendCryptography.Epoch, _receiveCryptography.Epoch,
             _sentPacketsCount, _receivedPacketsCount, _authenticationFailures, _replayRejections,
             _retransmissions, _acknowledgements, _sequencedDrops, _capacityDrops,
@@ -430,29 +433,39 @@ public sealed class NetworkProtocolPeer : IDisposable
         NetworkSecureDatagramFraming.MaximumPlaintextBytes(_datagramLimits.MaximumDatagramBytes) -
         NetworkProtocolDataHeader.EncodedBytes;
 
-    private bool TrySelectNext(ulong step, out int reliableSlot, out ushort fragment, out NetworkLane unreliableLane)
+    private bool TrySelectNext(out int reliableSlot, out ushort fragment, out int unreliableSlot)
     {
-        foreach (NetworkLane lane in s_priorityOrder)
+        foreach (NetworkLane lane in NetworkLaneContracts.PriorityOrder)
         {
             int selected = FindReliableHead(lane);
-            if (selected >= 0 && TryFindDueFragment(selected, step, out fragment))
+            if (selected >= 0 && TryFindDueFragment(selected, out fragment))
             {
                 reliableSlot = selected;
-                unreliableLane = default;
+                unreliableSlot = -1;
                 return true;
             }
-            if (_unreliablePending[(int)lane])
+            int pending = FindUnreliablePending(lane);
+            if (pending >= 0)
             {
                 reliableSlot = -1;
                 fragment = 0;
-                unreliableLane = lane;
+                unreliableSlot = pending;
                 return true;
             }
         }
         reliableSlot = -1;
         fragment = 0;
-        unreliableLane = default;
+        unreliableSlot = -1;
         return false;
+    }
+
+    private int FindUnreliablePending(NetworkLane lane) => _unreliableHeads[(int)lane];
+
+    private int FindNextUnreliablePending(NetworkLane lane)
+    {
+        for (int index = 0; index < _unreliableStreams.Length; index++)
+            if (_unreliableStreams[index].Pending && _unreliableStreams[index].Message.Lane == lane) return index;
+        return -1;
     }
 
     private int FindReliableHead(NetworkLane lane)
@@ -471,7 +484,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         return selected;
     }
 
-    private bool TryFindDueFragment(int slot, ulong step, out ushort fragment)
+    private bool TryFindDueFragment(int slot, out ushort fragment)
     {
         OutgoingMessage message = _reliable[slot];
         Span<ulong> sent = _lastSentSteps.AsSpan(slot * _limits.MaximumFragmentsPerMessage,
@@ -482,26 +495,20 @@ public sealed class NetworkProtocolPeer : IDisposable
             if ((message.AcknowledgedMask & bit) != 0) continue;
             ulong marker = sent[index];
             if (marker == 0) { fragment = index; return true; }
-            ulong last = marker - 1;
-            if (step - last >= _rto)
-            {
-                RetireSentRecords(slot, index, lost: true);
-                _retransmissions++;
-                fragment = index;
-                return true;
-            }
         }
         fragment = 0;
         return false;
     }
 
-    private bool TryEmitData(int reliableSlot, ushort fragmentIndex, NetworkLane unreliableLane,
+    private bool TryEmitData(int reliableSlot, ushort fragmentIndex, int unreliableSlot,
         ulong step, bool reliable)
     {
-        OutgoingMessage message = reliable ? _reliable[reliableSlot] : _unreliable[(int)unreliableLane];
+        OutgoingMessage message = reliable
+            ? _reliable[reliableSlot]
+            : _unreliableStreams[unreliableSlot].Message;
         ReadOnlySpan<byte> payload = reliable
             ? ReliablePayload(reliableSlot)[..message.Length]
-            : UnreliablePayload(unreliableLane)[..message.Length];
+            : UnreliablePayload(unreliableSlot)[..message.Length];
         int fragmentPayload = FragmentPayloadBytes;
         int offset = reliable ? fragmentIndex * fragmentPayload : 0;
         int length = reliable ? Math.Min(fragmentPayload, message.Length - offset) : message.Length;
@@ -513,23 +520,40 @@ public sealed class NetworkProtocolPeer : IDisposable
             !writer.TryWriteBytes(payload.Slice(offset, length)))
             throw new InvalidOperationException("A validated protocol frame exceeded its fixed plaintext buffer.");
 
+        int reservedSentRecord = reliable ? FindFreeSentRecord() : -1;
+        if (reliable && reservedSentRecord < 0) return false;
+
         if (!TryEncryptAndSend(NetworkSecureDatagramKind.Data, writer.WrittenSpan,
                 out PacketNumber packet, out DatagramSendStatus status)) return false;
         if (status is DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment)
         {
             if (reliable)
             {
-                int record = FindFreeSentRecord();
-                if (record < 0) throw new InvalidOperationException("Sent-packet capacity was not reserved before emission.");
-                _sentPackets[record] = new(true, packet.Value, reliableSlot, fragmentIndex, step);
+                _sentPackets[reservedSentRecord] = new(
+                    packet.Value, step, reliableSlot, checked((uint)_rto), fragmentIndex, true);
+                ulong deadline = _sentPackets[reservedSentRecord].DeadlineStep;
+                if (_nextLossCheckStep != 0)
+                {
+                    if (deadline < _nextLossCheckStep)
+                    {
+                        _nextLossCheckStep = deadline;
+                        _nextLossDeadlineCount = 1;
+                    }
+                    else if (deadline == _nextLossCheckStep)
+                    {
+                        _nextLossDeadlineCount++;
+                    }
+                }
                 _lastSentSteps[reliableSlot * _limits.MaximumFragmentsPerMessage + fragmentIndex] = step + 1;
                 _inFlight++;
             }
             else
             {
-                _unreliablePending[(int)unreliableLane] = false;
-                UnreliablePayload(unreliableLane).Clear();
-                _unreliable[(int)unreliableLane] = default;
+                ref UnreliableStreamState stream = ref _unreliableStreams[unreliableSlot];
+                stream.Pending = false;
+                stream.Message = default;
+                UnreliablePayload(unreliableSlot).Clear();
+                _unreliableHeads[(int)message.Lane] = FindNextUnreliablePending(message.Lane);
             }
             return true;
         }
@@ -560,12 +584,6 @@ public sealed class NetworkProtocolPeer : IDisposable
         out PacketNumber packet, out DatagramSendStatus status)
     {
         if (_nextPacketNumber == ulong.MaxValue)
-        {
-            packet = default;
-            status = DatagramSendStatus.CapacityExceeded;
-            return false;
-        }
-        if (kind == NetworkSecureDatagramKind.Data && FindFreeSentRecord() < 0)
         {
             packet = default;
             status = DatagramSendStatus.CapacityExceeded;
@@ -657,7 +675,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             header.MessageLength > _limits.MaximumMessageBytes ||
             header.FragmentCount > _limits.MaximumFragmentsPerMessage ||
             !reader.TryReadBytes(header.FragmentLength, out ReadOnlySpan<byte> fragment) || !reader.IsComplete ||
-            !_manifest.TryGet(header.MessageId, out NetworkMessageDescriptor descriptor) ||
+            !_manifest.TryGet(header.MessageId, out NetworkMessageDescriptor descriptor, out int messageSlot) ||
             descriptor.Version != header.MessageVersion || descriptor.Lane != header.Lane ||
             header.MessageLength > descriptor.MaximumEncodedBytes)
             return NetworkDeliveryAdmission.Invalid;
@@ -671,15 +689,21 @@ public sealed class NetworkProtocolPeer : IDisposable
             return NetworkDeliveryAdmission.Invalid;
 
         NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
-        int laneIndex = (int)header.Lane;
         if (contract.Delivery == NetworkDeliveryGuarantee.Reliable)
             return ProcessReliableFragment(header, fragment, offset);
 
-        if (contract.Order == NetworkDeliveryOrder.Sequenced && _receiveSequenceInitialized[laneIndex] &&
-            header.LaneSequence.Value <= _nextReceiveSequences[laneIndex])
+        ref UnreliableStreamState unreliableStream = ref _unreliableStreams[messageSlot];
+        if (contract.Order == NetworkDeliveryOrder.Sequenced &&
+            unreliableStream.ReceiveSequenceInitialized &&
+            header.LaneSequence.Value <= unreliableStream.LastReceiveSequence)
         {
             _sequencedDrops++;
             return NetworkDeliveryAdmission.Admitted;
+        }
+        if (contract.Order == NetworkDeliveryOrder.Sequenced)
+        {
+            unreliableStream.ReceiveSequenceInitialized = true;
+            unreliableStream.LastReceiveSequence = header.LaneSequence.Value;
         }
         if (_receivedFreeCount == 0)
         {
@@ -687,11 +711,6 @@ public sealed class NetworkProtocolPeer : IDisposable
             return NetworkDeliveryAdmission.Admitted;
         }
         EnqueueReceived(header.Lane, header.MessageId, header.MessageVersion, header.LaneSequence, fragment);
-        if (contract.Order == NetworkDeliveryOrder.Sequenced)
-        {
-            _receiveSequenceInitialized[laneIndex] = true;
-            _nextReceiveSequences[laneIndex] = header.LaneSequence.Value;
-        }
         return NetworkDeliveryAdmission.Admitted;
     }
 
@@ -701,7 +720,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         int offset)
     {
         int laneIndex = (int)header.Lane;
-        ulong expected = _nextReceiveSequences[laneIndex];
+        ulong expected = _nextReliableReceiveSequences[laneIndex];
         if (header.LaneSequence.Value < expected) return NetworkDeliveryAdmission.Admitted;
         if (header.LaneSequence.Value > expected) return NetworkDeliveryAdmission.Deferred;
         ref ReassemblyState state = ref _reassembly[laneIndex];
@@ -730,8 +749,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             ReassemblyPayload(header.Lane)[..header.MessageLength]);
         ReassemblyPayload(header.Lane).Clear();
         state = default;
-        _nextReceiveSequences[laneIndex] = expected + 1;
-        _receiveSequenceInitialized[laneIndex] = true;
+        _nextReliableReceiveSequences[laneIndex] = expected + 1;
         return NetworkDeliveryAdmission.Admitted;
     }
 
@@ -756,6 +774,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             if (!record.Active || record.PacketNumber != packet) continue;
             _sentPackets[index] = default;
             if (_inFlight > 0) _inFlight--;
+            TrackRemovedDeadline(record.DeadlineStep);
             ulong sample = Math.Max(1, step - record.SentStep);
             UpdateRtt(sample);
             if ((uint)record.MessageSlot < (uint)_reliable.Length && _reliable[record.MessageSlot].Active)
@@ -805,22 +824,70 @@ public sealed class NetworkProtocolPeer : IDisposable
         }
     }
 
-    private void RetireSentRecords(int messageSlot, ushort fragment, bool lost)
+    private void ProcessExpiredFlights(ulong step)
     {
-        bool found = false;
+        if (_inFlight == 0)
+        {
+            _nextLossCheckStep = ulong.MaxValue;
+            _nextLossDeadlineCount = 0;
+            return;
+        }
+        if (_nextLossCheckStep != 0 && step < _nextLossCheckStep) return;
+
+        bool detectedLoss = false;
+        ulong nextCheck = ulong.MaxValue;
+        int nextCheckCount = 0;
+        for (int index = 0; index < _sentPackets.Length; index++)
+        {
+            SentPacketRecord record = _sentPackets[index];
+            if (!record.Active) continue;
+            if (step < record.DeadlineStep)
+            {
+                if (record.DeadlineStep < nextCheck)
+                {
+                    nextCheck = record.DeadlineStep;
+                    nextCheckCount = 1;
+                }
+                else if (record.DeadlineStep == nextCheck)
+                {
+                    nextCheckCount++;
+                }
+                continue;
+            }
+            RetireSentRecords(record.MessageSlot, record.FragmentIndex);
+            _lastSentSteps[record.MessageSlot * _limits.MaximumFragmentsPerMessage + record.FragmentIndex] = 0;
+            _retransmissions++;
+            detectedLoss = true;
+        }
+        _nextLossCheckStep = _inFlight == 0 ? ulong.MaxValue : nextCheck;
+        _nextLossDeadlineCount = _inFlight == 0 ? 0 : nextCheckCount;
+        if (!detectedLoss) return;
+        _congestionWindow = Math.Clamp(_congestionWindow / 2, 1, _limits.MaximumCongestionWindowPackets);
+        _congestionAckCredit = 0;
+        _rto = Math.Min((ulong)_limits.MaximumRetransmissionSteps, Math.Max(_rto + 1, _rto * 2));
+    }
+
+    private void RetireSentRecords(int messageSlot, ushort fragment)
+    {
         for (int index = 0; index < _sentPackets.Length; index++)
         {
             SentPacketRecord record = _sentPackets[index];
             if (!record.Active || record.MessageSlot != messageSlot || record.FragmentIndex != fragment) continue;
             _sentPackets[index] = default;
             if (_inFlight > 0) _inFlight--;
-            found = true;
+            TrackRemovedDeadline(record.DeadlineStep);
         }
-        if (lost && found)
+    }
+
+    private void TrackRemovedDeadline(ulong deadline)
+    {
+        if (deadline != _nextLossCheckStep) return;
+        if (_nextLossDeadlineCount > 0) _nextLossDeadlineCount--;
+        if (_nextLossDeadlineCount == 0 && _inFlight != 0) _nextLossCheckStep = 0;
+        if (_inFlight == 0)
         {
-            _congestionWindow = Math.Max(2, _congestionWindow / 2);
-            _congestionAckCredit = 0;
-            _rto = Math.Min((ulong)_limits.MaximumRetransmissionSteps, Math.Max(_rto + 1, _rto * 2));
+            _nextLossCheckStep = ulong.MaxValue;
+            _nextLossDeadlineCount = 0;
         }
     }
 
@@ -834,7 +901,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private void FreeReliable(int slot)
     {
         for (ushort fragment = 0; fragment < _reliable[slot].FragmentCount; fragment++)
-            RetireSentRecords(slot, fragment, lost: false);
+            RetireSentRecords(slot, fragment);
         ReliablePayload(slot).Clear();
         _lastSentSteps.AsSpan(slot * _limits.MaximumFragmentsPerMessage,
             _limits.MaximumFragmentsPerMessage).Clear();
@@ -856,12 +923,33 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private Span<byte> ReliablePayload(int slot) =>
         _reliablePayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
-    private Span<byte> UnreliablePayload(NetworkLane lane) =>
-        _unreliablePayloads.AsSpan((int)lane * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+    private Span<byte> UnreliablePayload(int messageSlot) =>
+        _unreliablePayloads.AsSpan(messageSlot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
     private Span<byte> ReassemblyPayload(NetworkLane lane) =>
         _reassemblyPayloads.AsSpan((int)lane * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
     private Span<byte> ReceivedPayload(int slot) =>
         _receivedPayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+
+    private long CalculateReservedBytes() => checked(
+        (long)_wireScratch.Length +
+        _plaintextScratch.Length +
+        (long)_reliable.Length * Unsafe.SizeOf<OutgoingMessage>() +
+        _reliablePayloads.Length +
+        (long)_lastSentSteps.Length * sizeof(ulong) +
+        (long)_reliableFree.Length * sizeof(int) +
+        (long)_sentPackets.Length * Unsafe.SizeOf<SentPacketRecord>() +
+        (long)_unreliableStreams.Length * Unsafe.SizeOf<UnreliableStreamState>() +
+        (long)_unreliableHeads.Length * sizeof(int) +
+        _unreliablePayloads.Length +
+        (long)_nextReliableSendSequences.Length * sizeof(ulong) +
+        (long)_nextReliableReceiveSequences.Length * sizeof(ulong) +
+        (long)_reassembly.Length * Unsafe.SizeOf<ReassemblyState>() +
+        _reassemblyPayloads.Length +
+        (long)_received.Length * Unsafe.SizeOf<NetworkDeliveredMessage>() +
+        _receivedPayloads.Length +
+        (long)_receivedFree.Length * sizeof(int) +
+        (long)_receivedQueue.Length * sizeof(int) +
+        64L);
 
     private void EnsureOperational()
     {
@@ -885,12 +973,27 @@ public sealed class NetworkProtocolPeer : IDisposable
         ushort FragmentCount,
         ulong AcknowledgedMask);
 
+    private struct UnreliableStreamState
+    {
+        internal OutgoingMessage Message;
+        internal ulong NextSendSequence;
+        internal ulong LastReceiveSequence;
+        internal bool Pending;
+        internal bool ReceiveSequenceInitialized;
+    }
+
     private readonly record struct SentPacketRecord(
-        bool Active,
         ulong PacketNumber,
+        ulong SentStep,
         int MessageSlot,
+        uint TimeoutSteps,
         ushort FragmentIndex,
-        ulong SentStep);
+        bool Active)
+    {
+        internal ulong DeadlineStep => SentStep > ulong.MaxValue - TimeoutSteps
+            ? ulong.MaxValue
+            : SentStep + TimeoutSteps;
+    }
 
     private readonly record struct ReassemblyState(
         bool Active,

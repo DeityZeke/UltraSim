@@ -115,6 +115,14 @@ public sealed class NetworkProtocolManifest
 
     public bool TryGet(NetworkMessageId id, out NetworkMessageDescriptor descriptor)
     {
+        return TryGet(id, out descriptor, out _);
+    }
+
+    internal bool TryGet(
+        NetworkMessageId id,
+        out NetworkMessageDescriptor descriptor,
+        out int messageSlot)
+    {
         int low = 0;
         int high = _byId.Length - 1;
         while (low <= high)
@@ -122,11 +130,17 @@ public sealed class NetworkProtocolManifest
             int middle = low + ((high - low) >> 1);
             NetworkMessageDescriptor candidate = _byId[middle];
             int comparison = candidate.Id.CompareTo(id);
-            if (comparison == 0) { descriptor = candidate; return true; }
+            if (comparison == 0)
+            {
+                descriptor = candidate;
+                messageSlot = middle;
+                return true;
+            }
             if (comparison < 0) low = middle + 1;
             else high = middle - 1;
         }
         descriptor = default;
+        messageSlot = -1;
         return false;
     }
 

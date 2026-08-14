@@ -59,9 +59,15 @@ A capture reads complete committed ECS state only after a Runtime step. It stage
 all lifecycle and changed-value work, then publishes canonical slots and advances
 cursors together. Before commit:
 
-- scratch/capacity exhaustion returns `CapacityExceeded` without cursor advance;
+- capture-interval scratch/delta overflow returns `CaptureResyncRequired`, leaves
+  cursors unacknowledged, marks the projection rebuild-required, and can make
+  progress through an explicit baseline rebuild;
+- terminal configured/identity capacity exhaustion returns `CapacityExceeded`
+  without partial publication;
 - lost ECS lifecycle history returns `LifecycleResyncRequired` and requires a
   baseline;
+- frame, delta, lifecycle, and overwrite sequence domains are preflighted before
+  canonical slots or histories publish;
 - an expected rebuild never escapes the trusted Runtime callback;
 - an unexpected derived-state exception is caught inside the callback and faults
   the projection, not authoritative Runtime.
@@ -79,8 +85,10 @@ rejects without mutation until a consumer-safe prefix is discarded.
 ## OfflineDirect
 
 `OfflineDirectGameProjection` is the packet-free semantic oracle. Baselines and
-frames stage into fixed private arrays and publish only after complete epoch,
-frame, sequence, entity, participant, and capacity validation. It receives no ECS
+frames stage into fixed private arrays and publish only after the supplied frame
+exactly equals the source's current frame and staged entity/participant state
+exactly equals current canonical truth. It also validates epoch, sequence, and
+capacity. It receives no ECS
 world or runtime entity authority. Its canonical hash and `NetworkSemanticTrace`
 are the reference meaning later ProtocolLoopback and UDP paths must reproduce.
 
@@ -105,18 +113,24 @@ The focused executable proves:
 - bounded input and duplicate-sequence rejection;
 - same-tick post-graph add/remove/destroy capture;
 - rapid membership folding and ordered lifecycle history;
-- transactional capacity failure and cursor non-acknowledgement;
+- recoverable interval overflow, cursor non-acknowledgement, and explicit baseline repair;
+- sequence-domain exhaustion preflight before any projection publication;
+- future history cursors return `FutureSequence` rather than throwing;
 - lifecycle overflow/resync and explicit rebuild;
 - same-generation repair preserves `StateEpoch`, retained application events,
   baseline sequencing, and canonical identity reuse generations;
 - excess participant capacity rejects that participant without poisoning capture;
 - derived projection fault containment;
 - bounded independent application events;
-- atomic invalid-frame rejection;
+- atomic malicious frame/state-payload rejection against exact canonical truth;
 - accountless invalidation and durable account-backed rebind across generation
   replacement;
 - deterministic canonical hash/semantic trace;
 - zero warmed caller-thread allocation for tick + capture + OfflineDirect apply.
+
+Projection `ReservedBytes` includes fixed-array payload plus the reserved participant
+map bucket/entry payload. It excludes CLR object/array headers and is not a total
+managed-process-memory claim.
 
 It also exposed and fixed a scheduler regression in which a second-tick typed
 structural `Add<T>` copied payload before opening the canonical command-buffer

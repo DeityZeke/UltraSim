@@ -878,7 +878,7 @@ Tests:
 - multiple isolated Network runtimes;
 - zero warmed allocation for admitted pool/ring/codec/framing profiles.
 
-### N0.3 — Secure protocol over ProtocolLoopback — accepted
+### N0.3 — Secure protocol over ProtocolLoopback — accepted after adversarial hardening
 
 Implemented as a single-owner bounded topology. A stateless HMAC cookie precedes
 connection allocation and ECDH work. Ephemeral P-256 ECDH is authenticated by a
@@ -889,6 +889,12 @@ reliable ordered retention, sequenced latest delivery, fragmentation/reassembly,
 RTT/RTO, congestion backoff, pump budgets, and authenticated epoch advancement
 run across deterministic datagrams.
 
+Acceptance hardening makes timeout discovery independent of congestion-window
+admission, separates inbound and outbound budgets, advances unreliable stale floors
+even when latest-state delivery is capacity-dropped, and isolates unreliable
+pending/sequence state per message family. Generic game-defined sub-stream identity
+is deliberately deferred until N0.6 provides an actual input/state requirement.
+
 The loopback cookie binds a fixed path token; endpoint binding and expiry are N0.5.
 The deterministic protocol clock uses steps; N0.5 supplies real monotonic time.
 N0.3 authenticates the server endpoint, not the game principal. Input redundancy
@@ -898,9 +904,14 @@ N0.2's SPSC token ring and single-owner packet pool remain independent proofs.
 Cross-thread packet-memory handoff is not claimed. N0.5 must admit a transactional
 ownership/handoff model before transport workers share packet buffers.
 
+N0.3 has congestion-window/backoff behavior but no real time-based pacing. N0.5
+owns pacing on a monotonic transport clock. Bounded linear record/datagram scans
+remain admitted proof-stage machinery until N0.7/N0.10 scale evidence earns a
+different representation.
+
 Deliver cookie/anti-amplification, authenticated key exchange/encryption,
 packet/replay windows, ACK ranges, RTT/RTO, reliable Control/Event/Bulk,
-sequenced Input/State, admitted fragmentation, congestion/pacing foundation,
+sequenced Input/State, admitted fragmentation, congestion/backoff foundation,
 and deterministic impairment.
 
 Tests cover every lane under loss, duplication, reorder, delay, burst loss,

@@ -20,6 +20,8 @@ var tests = new (string Name, Action Body)[]
     ("GenerationReplacementRebuildsEpochAndInvalidatesAccountlessAuthority", GenerationReplacementRebuildsEpoch),
     ("GenerationReplacementRebindsDurableAdmissionAuthority", GenerationReplacementRebindsDurableAdmission),
     ("ApplicationEventsAreIndependentBoundedFacts", ApplicationEventsAreIndependentBoundedFacts),
+    ("FutureHistoryCursorsRejectWithoutThrowing", FutureHistoryCursorsRejectWithoutThrowing),
+    ("CaptureSequenceDomainsPreflightBeforeCommit", CaptureSequenceDomainsPreflightBeforeCommit),
     ("OfflineDirectRejectsInvalidFramesAtomically", OfflineDirectRejectsInvalidFramesAtomically),
     ("CanonicalProjectionAndSemanticTraceAreDeterministic", CanonicalProjectionAndTraceAreDeterministic),
 };
@@ -212,11 +214,13 @@ static void CapacityAndUnexpectedFailuresRemainContained()
     fixture.Admission.JoinAccountless(new ParticipantId(41));
     fixture.Admission.JoinAccountless(new ParticipantId(42));
     GameProjectionCaptureResult overflow = projection.CaptureAfterTick();
-    Check.Equal(GameProjectionCaptureStatus.CapacityExceeded, overflow.Status);
+    Check.Equal(GameProjectionCaptureStatus.CaptureResyncRequired, overflow.Status);
+    Check.True(overflow.RequiresBaseline);
     Check.Equal(0, projection.GetSnapshot().EntityCount);
     Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
-    // A repeated failure proves the uncommitted source cursor was not advanced.
-    Check.Equal(GameProjectionCaptureStatus.CapacityExceeded, projection.CaptureAfterTick().Status);
+    Check.Equal(GameProjectionCaptureStatus.RebuildRequired, projection.CaptureAfterTick().Status);
+    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, projection.RebuildBaseline().Status);
+    Check.Equal(2, projection.GetSnapshot().EntityCount);
 
     using var faultFixture = new Fixture(GameRuntimeProfile.Networked, 0x9502, 64);
     faultFixture.Admission.JoinAccountless(new ParticipantId(43));
@@ -352,6 +356,55 @@ static void ApplicationEventsAreIndependentBoundedFacts()
     Check.Equal(OfflineProjectionApplyStatus.Success, offline.ApplyApplicationEvents(events));
     projection.DiscardApplicationEventsThrough(read.NextSequence);
     Check.True(projection.TryPublishApplicationEvent(participant, 3, 30, 300, out _));
+}
+
+static void FutureHistoryCursorsRejectWithoutThrowing()
+{
+    using var fixture = new Fixture(GameRuntimeProfile.Networked, 0x9702, 64);
+    using var projection = fixture.CreateProjection();
+    Check.True(projection.RebuildBaseline().Succeeded);
+    Span<GameProjectionLifecycleFact> lifecycle = stackalloc GameProjectionLifecycleFact[1];
+    GameProjectionHistoryReadResult lifecycleFuture = projection.ReadLifecycle(1, lifecycle);
+    Check.Equal(GameProjectionHistoryReadStatus.FutureSequence, lifecycleFuture.Status);
+    Check.Equal(0, lifecycleFuture.Count);
+    Check.Equal(0UL, lifecycleFuture.NextPublishedSequence);
+
+    Span<GameApplicationEvent> events = stackalloc GameApplicationEvent[1];
+    GameProjectionHistoryReadResult eventFuture = projection.ReadApplicationEvents(1, events);
+    Check.Equal(GameProjectionHistoryReadStatus.FutureSequence, eventFuture.Status);
+    Check.Equal(0, eventFuture.Count);
+    Check.Equal(0UL, eventFuture.NextPublishedSequence);
+}
+
+static void CaptureSequenceDomainsPreflightBeforeCommit()
+{
+    VerifySequenceExhaustion(frame: ulong.MaxValue, delta: 0, lifecycle: 0, overwritten: 0, 0x9703);
+    VerifySequenceExhaustion(frame: 0, delta: ulong.MaxValue, lifecycle: 0, overwritten: 0, 0x9704);
+    VerifySequenceExhaustion(frame: 0, delta: 0, lifecycle: ulong.MaxValue, overwritten: 0, 0x9705);
+
+    static void VerifySequenceExhaustion(
+        ulong frame,
+        ulong delta,
+        ulong lifecycle,
+        ulong overwritten,
+        ulong worldIdentity)
+    {
+        using var fixture = new Fixture(GameRuntimeProfile.Networked, worldIdentity, 64);
+        using var projection = fixture.CreateProjection();
+        Check.True(projection.RebuildBaseline().Succeeded);
+        fixture.Admission.JoinAccountless(new ParticipantId(55));
+        projection.SetSequenceStateForTest(frame, delta, lifecycle, overwritten);
+        GameProjectionSnapshot before = projection.GetSnapshot();
+        fixture.Runtime.Tick();
+        GameProjectionCaptureResult rejected = projection.CaptureAfterTick();
+        Check.Equal(GameProjectionCaptureStatus.CapacityExceeded, rejected.Status);
+        Check.False(projection.IsFaulted);
+        GameProjectionSnapshot after = projection.GetSnapshot();
+        Check.Equal(before.EntityCount, after.EntityCount);
+        Check.Equal(before.FrameSequence, after.FrameSequence);
+        Check.Equal(before.LifecycleOverwrittenCount, after.LifecycleOverwrittenCount);
+        Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
+    }
 }
 
 static void GenerationReplacementRebindsDurableAdmission()
@@ -490,6 +543,34 @@ static void OfflineDirectRejectsInvalidFramesAtomically()
     Check.Equal(OfflineProjectionApplyStatus.BaselineRequired,
         offline.ApplyFrame(projection, invalid, ReadOnlySpan<GameProjectionDelta>.Empty));
     Check.Equal(before, offline.GetSnapshot());
+
+    fixture.Runtime.Tick();
+    GameProjectionCaptureResult capture = projection.CaptureAfterTick();
+    Span<GameProjectionDelta> deltas = stackalloc GameProjectionDelta[64];
+    int count = projection.CopyLastFrameDeltas(deltas);
+    Check.True(count > 0);
+    GameProjectionDelta original = deltas[0];
+    deltas[0] = original with
+    {
+        SimulationState = new GameSimulationState
+        {
+            TickMarker = original.SimulationState.TickMarker + 1,
+        },
+    };
+    Check.Equal(OfflineProjectionApplyStatus.InvalidDelta,
+        offline.ApplyFrame(projection, capture.Frame, deltas[..count]));
+    Check.Equal(before, offline.GetSnapshot());
+    deltas[0] = original;
+
+    GameProjectionFrame alteredHistory = capture.Frame with
+    {
+        LifecycleNextSequence = capture.Frame.LifecycleNextSequence + 1,
+    };
+    Check.Equal(OfflineProjectionApplyStatus.InvalidDelta,
+        offline.ApplyFrame(projection, alteredHistory, deltas[..count]));
+    Check.Equal(before, offline.GetSnapshot());
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyFrame(projection, capture.Frame, deltas[..count]));
 }
 
 static void CanonicalProjectionAndTraceAreDeterministic()

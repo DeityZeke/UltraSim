@@ -87,6 +87,11 @@ public static class NetworkLaneContracts
     /// <summary>Gets the number of admitted semantic lanes.</summary>
     public const int Count = 7;
 
+    private static readonly NetworkLane[] s_priorityOrder = CreatePriorityOrder();
+
+    /// <summary>Gets every lane once in canonical scheduling-priority order.</summary>
+    public static ReadOnlySpan<NetworkLane> PriorityOrder => s_priorityOrder;
+
     /// <summary>Gets the fixed contract for <paramref name="lane"/>.</summary>
     /// <param name="lane">The admitted semantic lane.</param>
     /// <returns>The immutable lane contract.</returns>
@@ -109,4 +114,27 @@ public static class NetworkLaneContracts
             NetworkDeliveryOrder.None, NetworkRetentionPolicy.Disposable, 5, false),
         _ => throw new ArgumentOutOfRangeException(nameof(lane), lane, "Unknown network lane."),
     };
+
+    private static NetworkLane[] CreatePriorityOrder()
+    {
+        var lanes = new NetworkLane[Count];
+        for (int index = 0; index < lanes.Length; index++) lanes[index] = (NetworkLane)index;
+        for (int index = 1; index < lanes.Length; index++)
+        {
+            NetworkLane lane = lanes[index];
+            byte priority = Get(lane).Priority;
+            int insertion = index;
+            while (insertion > 0)
+            {
+                NetworkLane previous = lanes[insertion - 1];
+                NetworkLaneContract previousContract = Get(previous);
+                if (previousContract.Priority < priority ||
+                    (previousContract.Priority == priority && previous < lane)) break;
+                lanes[insertion] = previous;
+                insertion--;
+            }
+            lanes[insertion] = lane;
+        }
+        return lanes;
+    }
 }

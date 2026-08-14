@@ -60,10 +60,11 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
             return;
         }
         INamedTypeSymbol protocolSymbol = protocols[0].Symbol;
-        if (!protocolSymbol.IsStatic || protocolSymbol.ContainingType is not null || !IsPartial(protocolSymbol))
+        if (!protocolSymbol.IsStatic || protocolSymbol.ContainingType is not null || !IsPartial(protocolSymbol) ||
+            protocolSymbol.DeclaredAccessibility != Accessibility.Public || protocolSymbol.Arity != 0)
         {
             context.ReportDiagnostic(Diagnostic.Create(InvalidDeclaration, protocolSymbol.Locations.FirstOrDefault(),
-                $"Protocol '{protocolSymbol.Name}' must be a top-level static partial class."));
+                $"Protocol '{protocolSymbol.Name}' must be a public, non-generic, top-level static partial class."));
             return;
         }
 
@@ -81,8 +82,9 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
         if (messages.Count == 0) return;
 
         foreach (Message message in messages)
-            context.AddSource($"{message.Symbol.Name}.NetworkCodec.g.cs", SourceText.From(EmitCodec(message), Encoding.UTF8));
-        context.AddSource($"{protocolSymbol.Name}.NetworkManifest.g.cs",
+            context.AddSource($"{HintStem(message.Symbol)}.NetworkCodec.g.cs",
+                SourceText.From(EmitCodec(message), Encoding.UTF8));
+        context.AddSource($"{HintStem(protocolSymbol)}.NetworkManifest.g.cs",
             SourceText.From(EmitManifest(protocolSymbol, protocols[0].Version, messages), Encoding.UTF8));
     }
 
@@ -94,10 +96,11 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
     {
         message = default!;
         if (symbol.TypeKind != TypeKind.Struct || symbol.ContainingType is not null || !IsPartial(symbol) ||
-            symbol.DeclaringSyntaxReferences.Length != 1)
+            symbol.DeclaringSyntaxReferences.Length != 1 ||
+            symbol.DeclaredAccessibility != Accessibility.Public || symbol.Arity != 0)
         {
             context.ReportDiagnostic(Diagnostic.Create(InvalidDeclaration, symbol.Locations.FirstOrDefault(),
-                $"Network message '{symbol.Name}' must be one top-level partial struct declaration."));
+                $"Network message '{symbol.Name}' must be one public, non-generic, top-level partial struct declaration."));
             return false;
         }
         ushort id = Convert.ToUInt16(attribute.ConstructorArguments[0].Value, CultureInfo.InvariantCulture);
@@ -206,15 +209,16 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
             .Append(", (global::UltraSim.Network.NetworkLane)").Append(message.Lane)
             .Append(", EncodedSize, ").Append(fingerprint).Append("UL);\n\n")
             .Append("    public static bool TryMeasure(in ").Append(type).Append(" value, out int bytes)\n")
-            .Append("    { bytes = EncodedSize; return true; }\n\n")
+            .Append("    {\n");
+        AppendWriteValidation(source, message.Fields, "        ", "bytes = 0; return false;");
+        source.Append("        bytes = EncodedSize;\n        return true;\n    }\n\n")
             .Append("    public static bool TryWrite(ref global::UltraSim.Network.NetworkPacketWriter writer, in ")
-            .Append(type).Append(" value)\n    {\n        var staged = writer;\n");
+            .Append(type).Append(" value)\n    {\n");
+        AppendWriteValidation(source, message.Fields, "        ", "return false;");
+        source.Append("        var staged = writer;\n");
         foreach (Field field in message.Fields)
         {
-            string value = field.Conversion is null ? $"value.{field.Name}" : $"({UnderlyingCast(field)})value.{field.Name}";
-            if (field.Writer == "TryWriteByte" && (field.Type == "sbyte" || field.Type == "global::System.SByte" ||
-                field.Conversion is not null))
-                value = $"unchecked((byte)value.{field.Name})";
+            string value = WriteValue(field);
             source.Append("        if (!staged.").Append(field.Writer).Append('(').Append(value).Append(")) return false;\n");
         }
         source.Append("        writer = staged;\n        return true;\n    }\n\n")
@@ -258,7 +262,7 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
             .Append("        global::UltraSim.Network.NetworkProtocolManifest.Create(").Append(version)
             .Append(", new global::UltraSim.Network.NetworkMessageDescriptor[]\n        {\n");
         foreach (Message message in messages)
-            source.Append("            ").Append(message.Symbol.Name).Append("Codec.Descriptor,\n");
+            source.Append("            ").Append(CodecType(message.Symbol)).Append(".Descriptor,\n");
         source.Append("        });\n\n    public static global::UltraSim.Network.NetworkProtocolManifest Manifest => s_manifest;\n}\n");
         return source.ToString();
     }
@@ -269,6 +273,52 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
         "TryWriteInt32" => "int", "TryWriteUInt32" => "uint", "TryWriteInt64" => "long",
         "TryWriteUInt64" => "ulong", _ => field.Type,
     };
+
+    private static string WriteValue(Field field)
+    {
+        string value = field.Conversion is null
+            ? $"value.{field.Name}"
+            : $"({UnderlyingCast(field)})value.{field.Name}";
+        if (field.Writer == "TryWriteByte" &&
+            (field.Type == "sbyte" || field.Type == "global::System.SByte" || field.Conversion is not null))
+        {
+            value = $"unchecked((byte)value.{field.Name})";
+        }
+        return value;
+    }
+
+    private static void AppendWriteValidation(
+        StringBuilder source,
+        IReadOnlyList<Field> fields,
+        string indent,
+        string failure)
+    {
+        foreach (Field field in fields)
+        {
+            if (field.Validation is null) continue;
+            string raw = $"unchecked((ulong)({WriteValue(field)}))";
+            source.Append(indent).Append("if (").Append(field.Validation.Replace("raw", raw))
+                .Append(") { ").Append(failure).Append(" }\n");
+        }
+    }
+
+    private static string CodecType(INamedTypeSymbol symbol) => symbol.ContainingNamespace.IsGlobalNamespace
+        ? $"global::{symbol.Name}Codec"
+        : $"global::{symbol.ContainingNamespace.ToDisplayString()}.{symbol.Name}Codec";
+
+    private static string HintStem(INamedTypeSymbol symbol)
+    {
+        string identity = symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var safe = new StringBuilder(identity.Length + 17);
+        ulong hash = 14695981039346656037UL;
+        foreach (char character in identity)
+        {
+            hash = unchecked((hash ^ character) * 1099511628211UL);
+            if (safe.Length < 120)
+                safe.Append(char.IsLetterOrDigit(character) ? character : '_');
+        }
+        return safe.Append('_').Append(hash.ToString("X16", CultureInfo.InvariantCulture)).ToString();
+    }
 
     private static string ReaderType(string reader) => reader switch
     {

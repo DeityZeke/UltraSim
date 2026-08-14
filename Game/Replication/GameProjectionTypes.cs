@@ -48,6 +48,11 @@ public enum GameProjectionCaptureStatus : byte
     LifecycleResyncRequired = 5,
     RebuildRequired = 6,
     Faulted = 7,
+    /// <summary>
+    /// The ECS cursors remain unacknowledged, but the bounded capture interval no
+    /// longer fits this projection. Rebuild a baseline before capturing again.
+    /// </summary>
+    CaptureResyncRequired = 8,
 }
 
 public enum GameProjectionDeltaKind : byte
@@ -93,6 +98,8 @@ public enum GameProjectionHistoryReadStatus : byte
     NoData = 0,
     Success = 1,
     HistoryLost = 2,
+    /// <summary>The requested cursor is ahead of the producer's published sequence.</summary>
+    FutureSequence = 3,
 }
 
 public readonly record struct GameProjectionHistoryReadResult(
@@ -117,7 +124,11 @@ public readonly record struct GameProjectionFrame(
     ulong ApplicationEventOldestSequence,
     ulong ApplicationEventNextSequence);
 
-/// <summary>Cold diagnostics for the currently published canonical projection.</summary>
+/// <summary>
+/// Cold diagnostics for the currently published canonical projection.
+/// <see cref="ReservedBytes"/> includes fixed arrays and the reserved participant
+/// map bucket/entry payload; CLR object/array headers are excluded.
+/// </summary>
 public readonly record struct GameProjectionSnapshot(
     StateEpoch StateEpoch,
     ulong ServerGenerationId,
@@ -143,7 +154,8 @@ public readonly record struct GameProjectionCaptureResult(
 {
     public bool Succeeded => Status is GameProjectionCaptureStatus.Success or GameProjectionCaptureStatus.BaselineRebuilt;
     public bool RequiresBaseline => Status is GameProjectionCaptureStatus.BaselineRebuilt or
-        GameProjectionCaptureStatus.LifecycleResyncRequired or GameProjectionCaptureStatus.RebuildRequired;
+        GameProjectionCaptureStatus.LifecycleResyncRequired or GameProjectionCaptureStatus.RebuildRequired or
+        GameProjectionCaptureStatus.CaptureResyncRequired;
 }
 
 /// <summary>One non-coalescible game fact retained independently from projection lifecycle.</summary>
