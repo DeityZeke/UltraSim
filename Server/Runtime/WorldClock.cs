@@ -380,6 +380,11 @@ internal sealed class WorldClock
         if (_simulationTick == ulong.MaxValue)
             throw new InvalidOperationException("The simulation tick counter reached its terminal value.");
 
+        // Do not multiply WorldTimeRate by the 3.6e12-quanta-per-second base.
+        // The per-step value is decomposed first: whole microseconds are at most
+        // 1,000,000 and fractional quanta are below 3,600,000. Multiplying either
+        // term by the supported int WorldTimeRate therefore remains inside Int64,
+        // including int.MaxValue; checked addition still protects accumulated time.
         long totalFractionQuanta = checked(
             _stepFractionQuantaPerWorldRate * _options.WorldTimeRate +
             _worldTimeFractionQuanta);

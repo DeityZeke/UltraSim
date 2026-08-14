@@ -24,8 +24,10 @@ Delta      = elapsed simulation time represented by a step
 Frequency  = host execution policy that determines Delta
 ```
 
-`SystemSchedule.PeriodTicks` remains step-relative. Time-relative game behavior
-uses `DeltaSeconds`, authoritative world time, or a game-owned accumulator.
+`SystemSchedule.PeriodTicks` remains step-relative. Continuous integration uses
+`DeltaSeconds`. Exact deadlines, timers, persisted temporal facts, and
+cross-cadence comparisons use authoritative fixed-point/world time rather than
+repeatedly accumulating floating-point delta.
 
 ## Clock representation and persistence
 
@@ -37,6 +39,14 @@ that exactly divides the 3,600,000,000,000-quanta-per-second time base. This
 includes the required 20/30/40/50/60 Hz set and many common additional rates.
 Unsupported rates reject explicitly; no floating-point authoritative time or
 silent rounding is used.
+
+The hot advancement path does not form the potentially overflowing product
+`WorldTimeRate * WorldTimeQuantaPerSecond`. It first decomposes one step into at
+most 1,000,000 whole microseconds per rate unit and fewer than 3,600,000
+fractional quanta per rate unit. Both products remain within `Int64` even at
+`WorldTimeRate = int.MaxValue`; checked accumulation still rejects terminal
+world-time overflow. A permanent test compares a maximum-rate step at every
+supported frequency through 1,000 Hz against an `Int128` oracle.
 
 Clock artifact format v2 is 38 bytes and persists:
 
@@ -78,8 +88,12 @@ The permanent focused gates prove:
 - differing step counts and period-10 scheduler invocation counts at each rate;
 - matching time-relative quarter-second behavior and accumulated delta;
 - exact 7x world-time advancement across the full frequency matrix;
+- maximum `int` world-time rate advancement at every supported frequency
+  against an `Int128` oracle;
 - a live 0.5 seconds at 60 Hz followed by 0.5 seconds at 30 Hz;
 - live `60 -> 50 -> 40 -> 30 -> 20 -> 60` changes without publication;
+- 30 Hz/4x host policy surviving ordinary whole-generation replacement and
+  restored-generation publication;
 - deliberate host-residue reset at a switch;
 - fixed-policy and unsupported-frequency transactional rejection;
 - owner-thread, game-callback, simulation, publication, and reconciliation

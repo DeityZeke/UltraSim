@@ -21,9 +21,11 @@ var tests = new (string Name, Action Body)[]
     ("GenerationOwnedGameStatePublishesAndRetiresAtomically", GenerationOwnedGameStatePublishesAndRetiresAtomically),
     ("PublicationFailureIsTerminalAfterRootSwap", PublicationFailureIsTerminalAfterRootSwap),
     ("FixedWorldClockIsDeterministicAndSnapshotRestores", FixedWorldClockIsDeterministicAndSnapshotRestores),
+    ("MaximumWorldTimeRateUsesOverflowSafeFixedPointDecomposition", MaximumWorldTimeRateUsesOverflowSafeFixedPointDecomposition),
     ("PlaybackChangesHostReachTimeNotTickMeaning", PlaybackChangesHostReachTimeNotTickMeaning),
     ("CadenceMatrixPreservesElapsedSimulationMeaning", CadenceMatrixPreservesElapsedSimulationMeaning),
     ("VariableCadencePreservesAuthorityAndResetsHostResidue", VariableCadencePreservesAuthorityAndResetsHostResidue),
+    ("LiveCadenceSurvivesReplacementAndRestoredPublication", LiveCadenceSurvivesReplacementAndRestoredPublication),
     ("CadenceChangesRejectTransactionallyAtUnsafeBoundaries", CadenceChangesRejectTransactionallyAtUnsafeBoundaries),
     ("WarmedRuntimeTickAllocatesZeroManagedBytes", WarmedRuntimeTickAllocatesZeroManagedBytes),
     ("RuntimeWrapperBenchmarkIsCaptured", RuntimeWrapperBenchmarkIsCaptured),
@@ -494,6 +496,36 @@ static void CadenceMatrixPreservesElapsedSimulationMeaning()
     }
 }
 
+static void MaximumWorldTimeRateUsesOverflowSafeFixedPointDecomposition()
+{
+    const int worldTimeRate = int.MaxValue;
+    int supportedFrequencies = 0;
+    for (int frequency = 1;
+         frequency <= WorldClockOptions.MaximumSimulationFrequencyHz;
+         frequency++)
+    {
+        if (!WorldClockOptions.IsSupportedSimulationFrequency(frequency))
+            continue;
+
+        supportedFrequencies++;
+        var clock = new WorldClock(new WorldClockOptions(
+            simulationFrequencyHz: frequency,
+            worldTimeRate: worldTimeRate));
+        clock.AdvanceSimulationTick();
+
+        Int128 expectedQuanta =
+            (Int128)(WorldClockOptions.WorldTimeQuantaPerSecond / frequency) * worldTimeRate;
+        WorldClockSnapshot snapshot = clock.CaptureSnapshot();
+        Assert.Equal(checked((long)(expectedQuanta /
+            WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond)), snapshot.WorldTimeMicroseconds);
+        Assert.Equal(checked((int)(expectedQuanta %
+            WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond)), snapshot.WorldTimeFractionQuanta);
+        Assert.Equal(1UL, snapshot.SimulationTick);
+    }
+
+    Assert.True(supportedFrequencies > 0);
+}
+
 static void VariableCadencePreservesAuthorityAndResetsHostResidue()
 {
     const int worldTimeRate = 7;
@@ -640,6 +672,56 @@ static void CadenceChangesRejectTransactionallyAtUnsafeBoundaries()
     Assert.Equal(ServerRuntimeState.Running, runtime.State);
     runtime.Tick();
     Assert.Equal(1UL, runtime.SimulationTick);
+}
+
+static void LiveCadenceSurvivesReplacementAndRestoredPublication()
+{
+    var composition = new EmptyComposition();
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            CreateWorldOptions(),
+            WorldClockOptions.Default,
+            allowVariablePlayback: true,
+            allowVariableSimulationFrequency: true));
+    runtime.Initialize();
+    runtime.Start();
+    runtime.SetPlaybackRate(4);
+    runtime.SetSimulationFrequency(30);
+    runtime.Tick();
+
+    ulong firstGeneration = runtime.ActiveGenerationId;
+    runtime.ReplaceGeneration();
+    Assert.True(runtime.ActiveGenerationId != firstGeneration);
+    Assert.Equal(30, runtime.SimulationFrequencyHz);
+    Assert.Near(1d / 30d, runtime.SimulationDeltaSeconds, 0d);
+    Assert.Equal(4, runtime.PlaybackRate);
+
+    // Ordinary replacement intentionally creates fresh authoritative state,
+    // but the active host cadence/playback policy must remain intact.
+    Assert.Equal(0UL, runtime.SimulationTick);
+    runtime.Tick();
+    PersistentWorldClockState restoredState =
+        runtime.CurrentGeneration.Clock.CapturePersistentState();
+    EcsWorld prepared = CreatePreparedWorld(composition.Schema);
+    ulong replacementGeneration = runtime.ActiveGenerationId;
+    Assert.True(runtime.Game.TryPublishPreparedGeneration(
+        prepared,
+        preparedGameState: null,
+        restoredState,
+        out ulong publishedGeneration));
+
+    Assert.True(publishedGeneration != replacementGeneration);
+    Assert.Equal(publishedGeneration, runtime.ActiveGenerationId);
+    Assert.Equal(30, runtime.SimulationFrequencyHz);
+    Assert.Near(1d / 30d, runtime.SimulationDeltaSeconds, 0d);
+    Assert.Equal(4, runtime.PlaybackRate);
+    Assert.Equal(restoredState.SimulationTick, runtime.SimulationTick);
+    Assert.Equal(restoredState.WorldTimeMicroseconds, runtime.WorldTimeMicroseconds);
+    PersistentWorldClockState publishedState =
+        runtime.CurrentGeneration.Clock.CapturePersistentState();
+    Assert.Equal(restoredState.WorldTimeRate, publishedState.WorldTimeRate);
+    Assert.Equal(restoredState.WorldTimeFractionQuanta, publishedState.WorldTimeFractionQuanta);
 }
 
 static void PlaybackChangesHostReachTimeNotTickMeaning()
@@ -795,6 +877,17 @@ static EcsWorld CreateDirectWorld(TestComposition composition)
         new SystemDefinition("test.simulation.tick", SystemStage.WorldSim,
             executionPolicy: SystemExecutionPolicy.Serial),
         new TickSystem(composition.CreateCounter(0), composition.RangeCount));
+    world.Seal();
+    world.Initialize();
+    world.BeginRun();
+    return world;
+}
+
+static EcsWorld CreatePreparedWorld(ComponentSchema schema)
+{
+    var world = new EcsWorld(schema, CreateWorldOptions());
+    _ = world.RegisterArchetype(
+        ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
     world.Seal();
     world.Initialize();
     world.BeginRun();

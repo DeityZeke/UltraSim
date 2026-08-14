@@ -95,11 +95,12 @@ change sealed topology.
 This cadence is strictly step-relative. `PeriodTicks = 10` means every ten ECS
 ticks, regardless of whether Runtime is driving those steps at 20 or 60 Hz.
 `Tick(delta)` supplies the elapsed simulation seconds represented by the current
-step through every scheduler context. Time-relative gameplay must use that delta,
-authoritative world time, or a game-owned accumulator rather than treating tick
-identity as elapsed wall/simulation time. Authoritative frequency selection and
-optional live changes remain Runtime/host policy; ECS does not own a cadence
-controller.
+step through every scheduler context. Continuous integration uses that delta.
+Exact deadlines, persisted temporal facts, and cross-cadence comparisons use the
+authoritative fixed-point/world clock rather than repeatedly accumulating
+floating-point delta. Tick identity must not be treated as elapsed
+wall/simulation time. Authoritative frequency selection and optional live
+changes remain Runtime/host policy; ECS does not own a cadence controller.
 
 `Tick(delta)` consumes external commands before systems, freezes topology while
 the graph executes, merges graph output, applies it at the post barrier, then

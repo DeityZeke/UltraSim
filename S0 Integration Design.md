@@ -372,10 +372,12 @@ normal regression gate pass.
 
 `SystemSchedule.PeriodTicks` and `StartOffset` remain deliberate step cadence.
 For example, period 10 means every ten authoritative steps, not every ten
-milliseconds. Cooldowns, movement, needs, AI intervals, and other time-relative
-gameplay use `DeltaSeconds`, authoritative world time, or a game-owned time
-accumulator. The S0 `TickMarker` is an explicitly step-relative diagnostic, not
-a template for elapsed-time gameplay.
+milliseconds. Continuous integration such as movement uses `DeltaSeconds`.
+Exact deadlines, cooldown completion timestamps, persisted temporal facts, and
+cross-cadence comparisons use authoritative fixed-point/world time rather than
+repeatedly accumulating `double`. A game-owned accumulator is appropriate only
+when its precision and persistence contract are explicit. The S0 `TickMarker`
+is a step-relative diagnostic, not a template for elapsed-time gameplay.
 
 Runtime cadence changes are disabled by default. A server can opt in at cold
 construction and then request a supported frequency only at an idle owner-thread
