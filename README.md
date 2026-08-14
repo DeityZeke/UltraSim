@@ -45,7 +45,8 @@ per-step behavior is an explicit documented choice.
   structural/lifecycle/content/persistence mechanisms.
 - `Kernels/Network*` — dependency-clean identity/lane contracts, fixed connection
   and packet ownership, generated codecs/manifests, canonical framing, and
-  deterministic datagrams; secure protocol/transport are later checkpoints.
+  deterministic datagrams plus the secure reliable ProtocolLoopback; real socket
+  transport remains a later checkpoint.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, and semantic port.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
 - `Client/*` — retained client projection and Godot presentation.

@@ -115,6 +115,8 @@ The focused executable proves:
 - rapid membership folding and ordered lifecycle history;
 - recoverable interval overflow, cursor non-acknowledgement, and explicit baseline repair;
 - sequence-domain exhaustion preflight before any projection publication;
+- checked-build-safe scratch-generation rollover that clears stale working-set
+  stamps before reusing generation 1;
 - future history cursors return `FutureSequence` rather than throwing;
 - lifecycle overflow/resync and explicit rebuild;
 - same-generation repair preserves `StateEpoch`, retained application events,

@@ -211,6 +211,14 @@ message-family state. Impairment convergence remains identical (2,162 steps, 131
 retransmissions, 15 authentication failures), and N0.5 must remeasure when the
 real ownership/transport path replaces proof-stage loopback machinery.
 
+The final observation is preserved separately as
+[`network-n0.3-secure-protocol-corrective-hardening-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.3-secure-protocol-corrective-hardening-2026-08-14.json).
+It does not overwrite or normalize the
+[`replay-hardened`](../../_Benchmarks/Baselines/network-n0.3-secure-protocol-replay-hardened-2026-08-14.json)
+performance reference. N0.3 is accepted and frozen after this adversarial
+hardening; N0.4 must measure the complete application path before any further
+protocol micro-optimization is considered.
+
 ## Evidence admission
 
 `UltraSim.Network.ComparisonCore` freezes four evidence classes:

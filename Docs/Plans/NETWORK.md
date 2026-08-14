@@ -909,6 +909,11 @@ owns pacing on a monotonic transport clock. Bounded linear record/datagram scans
 remain admitted proof-stage machinery until N0.7/N0.10 scale evidence earns a
 different representation.
 
+N0.3 is frozen after corrective hardening. Its final machine-readable observation
+is additional immutable evidence rather than a replacement for the earlier
+replay-hardened performance reference. Application-level N0.4 evidence decides
+whether protocol CPU is material before any further N0.3 micro-optimization.
+
 Deliver cookie/anti-amplification, authenticated key exchange/encryption,
 packet/replay windows, ACK ranges, RTT/RTO, reliable Control/Event/Bulk,
 sequenced Input/State, admitted fragmentation, congestion/backoff foundation,

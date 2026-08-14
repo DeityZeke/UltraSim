@@ -92,6 +92,12 @@ public sealed class GameProjectionService : IDisposable
         _lifecycleOverwritten = lifecycleOverwritten;
     }
 
+    internal void SetWorkingStampForTest(uint workingStamp)
+    {
+        EnsureOperational();
+        _workingStamp = workingStamp;
+    }
+
     public GameProjectionService(
         ServerGameFacet runtime,
         AdmissionService admission,
@@ -740,10 +746,15 @@ public sealed class GameProjectionService : IDisposable
     private void BeginWorkingSet()
     {
         _touchedCount = 0;
-        _workingStamp++;
-        if (_workingStamp != 0) return;
-        Array.Clear(_workingStamps);
-        _workingStamp = 1;
+        if (_workingStamp == uint.MaxValue)
+        {
+            Array.Clear(_workingStamps);
+            _workingStamp = 1;
+        }
+        else
+        {
+            _workingStamp++;
+        }
     }
 
     private ref GameProjectedEntity GetWorkingEntity(uint index)

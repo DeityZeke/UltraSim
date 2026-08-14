@@ -22,6 +22,7 @@ var tests = new (string Name, Action Body)[]
     ("ApplicationEventsAreIndependentBoundedFacts", ApplicationEventsAreIndependentBoundedFacts),
     ("FutureHistoryCursorsRejectWithoutThrowing", FutureHistoryCursorsRejectWithoutThrowing),
     ("CaptureSequenceDomainsPreflightBeforeCommit", CaptureSequenceDomainsPreflightBeforeCommit),
+    ("WorkingSetStampRolloverIsExplicitInCheckedBuild", WorkingSetStampRolloverIsExplicitInCheckedBuild),
     ("OfflineDirectRejectsInvalidFramesAtomically", OfflineDirectRejectsInvalidFramesAtomically),
     ("CanonicalProjectionAndSemanticTraceAreDeterministic", CanonicalProjectionAndTraceAreDeterministic),
 };
@@ -405,6 +406,50 @@ static void CaptureSequenceDomainsPreflightBeforeCommit()
         Check.Equal(before.LifecycleOverwrittenCount, after.LifecycleOverwrittenCount);
         Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
     }
+}
+
+static void WorkingSetStampRolloverIsExplicitInCheckedBuild()
+{
+    using var fixture = new Fixture(GameRuntimeProfile.Networked, 0x9706, 64);
+    ParticipantId participant = new(56);
+    Check.True(fixture.Admission.JoinAccountless(participant).IsEntered);
+    using var projection = fixture.CreateProjection();
+    Check.True(projection.SynchronizeParticipant(participant));
+    GameProjectionCaptureResult baseline = projection.RebuildBaseline();
+    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, baseline.Status);
+    var offline = new OfflineDirectGameProjection(64, 8, 128);
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyBaseline(projection, baseline.Frame));
+    Span<GameProjectionDelta> deltas = stackalloc GameProjectionDelta[64];
+
+    // Leave generation-1 stamps behind so rollover must clear them before
+    // generation 1 is reused for the same canonical entity.
+    fixture.Runtime.Tick();
+    GameProjectionCaptureResult first = projection.CaptureAfterTick();
+    Check.Equal(GameProjectionCaptureStatus.Success, first.Status);
+    int firstCount = projection.CopyLastFrameDeltas(deltas);
+    Check.True(firstCount > 0);
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyFrame(projection, first.Frame, deltas[..firstCount]));
+
+    projection.SetWorkingStampForTest(uint.MaxValue);
+    fixture.Runtime.Tick();
+    GameProjectionCaptureResult rollover = projection.CaptureAfterTick();
+    Check.Equal(GameProjectionCaptureStatus.Success, rollover.Status);
+    int rolloverCount = projection.CopyLastFrameDeltas(deltas);
+    Check.True(rolloverCount > 0);
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyFrame(projection, rollover.Frame, deltas[..rolloverCount]));
+
+    fixture.Runtime.Tick();
+    GameProjectionCaptureResult following = projection.CaptureAfterTick();
+    Check.Equal(GameProjectionCaptureStatus.Success, following.Status);
+    int followingCount = projection.CopyLastFrameDeltas(deltas);
+    Check.True(followingCount > 0);
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyFrame(projection, following.Frame, deltas[..followingCount]));
+    Check.False(projection.IsFaulted);
+    Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
 }
 
 static void GenerationReplacementRebindsDurableAdmission()
