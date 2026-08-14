@@ -1,8 +1,8 @@
 # Game replication
 
 Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accepted.
-N0.2 packet/framing foundations are accepted below this layer; delivery, security,
-reliability, and sockets remain later N0 checkpoints.
+N0.3 secure reliable ProtocolLoopback is accepted below this layer; remote game
+binding begins at N0.4 and recipient scheduling remains N0.7 work.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -137,5 +137,6 @@ dotnet run --project _Tests/UltraSim.Game.Replication.Tests -c Release
 dotnet run --project _Benchmarks/UltraSim.Game.ReplicationBenchmarks -c Release
 ```
 
-N0.2 is accepted in the Network kernel. N0.3 consumes this projection and the
-deterministic datagram endpoint to establish secure reliable protocol semantics.
+N0.3 consumes this projection through secure reliable loopback without moving
+authority into Network. N0.4 binds the existing Admission/UI application semantics
+to that protocol.

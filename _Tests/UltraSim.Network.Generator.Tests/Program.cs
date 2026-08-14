@@ -6,6 +6,7 @@ using UltraSim.Network.Generators;
 var tests = new (string Name, Action Body)[]
 {
     ("ValidProtocolGeneratesExactCodecAndManifest", ValidProtocolGeneratesExactCodecAndManifest),
+    ("SignedValuesRoundTripUnderCheckedOverflow", SignedValuesRoundTripUnderCheckedOverflow),
     ("DuplicateMessageIdReportsNETGEN003", DuplicateMessageIdReports),
     ("DuplicateCanonicalKeyReportsNETGEN003", DuplicateCanonicalKeyReports),
     ("UnsupportedFieldReportsNETGEN002", UnsupportedFieldReports),
@@ -14,6 +15,59 @@ foreach ((string name, Action body) in tests)
 {
     body();
     Console.WriteLine($"PASS {name}");
+}
+
+static void SignedValuesRoundTripUnderCheckedOverflow()
+{
+    Generation generation = Generate("""
+        using System;
+        using UltraSim.Network;
+        namespace SignedFixture;
+        public enum SByteMode : sbyte { Negative = -1, Positive = 1 }
+        public enum ShortMode : short { Negative = -2, Positive = 2 }
+        public enum IntMode : int { Negative = -3, Positive = 3 }
+        public enum LongMode : long { Negative = -4, Positive = 4 }
+        [NetworkProtocol(1)] public static partial class Protocol { }
+        [NetworkMessage(1, "signed", 1, NetworkLane.Control)]
+        public partial struct SignedMessage
+        {
+            public sbyte Byte;
+            public SByteMode SByteMode;
+            public ShortMode ShortMode;
+            public IntMode IntMode;
+            public LongMode LongMode;
+        }
+        public static class Probe
+        {
+            public static bool Run()
+            {
+                var value = new SignedMessage
+                {
+                    Byte = sbyte.MinValue,
+                    SByteMode = SByteMode.Negative,
+                    ShortMode = ShortMode.Negative,
+                    IntMode = IntMode.Negative,
+                    LongMode = LongMode.Negative,
+                };
+                Span<byte> bytes = stackalloc byte[SignedMessageCodec.EncodedSize];
+                return SignedMessageCodec.TryWriteExact(bytes, in value) &&
+                    SignedMessageCodec.TryReadExact(bytes, out SignedMessage decoded) &&
+                    decoded.Byte == value.Byte && decoded.SByteMode == value.SByteMode &&
+                    decoded.ShortMode == value.ShortMode && decoded.IntMode == value.IntMode &&
+                    decoded.LongMode == value.LongMode;
+            }
+        }
+        """);
+    AssertNoGeneratorErrors(generation);
+    Diagnostic[] errors = generation.Compilation.GetDiagnostics()
+        .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
+    if (errors.Length != 0) throw new InvalidOperationException(string.Join("\n", errors.AsEnumerable()));
+    using var stream = new MemoryStream();
+    Microsoft.CodeAnalysis.Emit.EmitResult emitted = generation.Compilation.Emit(stream);
+    if (!emitted.Success) throw new InvalidOperationException(string.Join("\n", emitted.Diagnostics));
+    System.Reflection.Assembly assembly = System.Reflection.Assembly.Load(stream.ToArray());
+    bool passed = (bool)assembly.GetType("SignedFixture.Probe")!.GetMethod("Run")!.Invoke(null, null)!;
+    if (!passed) throw new InvalidOperationException("The signed checked-build codec did not round-trip.");
 }
 Console.WriteLine($"All {tests.Length} Network codec generator tests passed.");
 
@@ -79,7 +133,7 @@ static Generation Generate(string source)
     references.Add(MetadataReference.CreateFromFile(typeof(NetworkProtocolAttribute).Assembly.Location));
     CSharpCompilation compilation = CSharpCompilation.Create(
         "NetworkGeneratorFixture", new[] { tree }, references,
-        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, checkOverflow: true));
     GeneratorDriver driver = CSharpGeneratorDriver.Create(
         generators: new[] { new NetworkCodecGenerator().AsSourceGenerator() },
         parseOptions: parseOptions);

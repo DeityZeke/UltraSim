@@ -1,0 +1,49 @@
+{
+  "Workload": "network-n0.3-secure-reliable-protocol-v1",
+  "TimestampUtc": "2026-08-14T21:11:51.6667595+00:00",
+  "RuntimeVersion": "8.0.29",
+  "ProcessorCount": 16,
+  "Warmups": 4,
+  "Iterations": 25,
+  "DefaultOperationsPerIteration": 10000,
+  "ProtocolFingerprint": 10426651901246522153,
+  "Scenarios": [
+    {
+      "Name": "secure-unreliable-state-round-trip",
+      "PayloadBytes": 32,
+      "MeanNanosecondsPerOperation": 25820.123708000003,
+      "P50NanosecondsPerOperation": 25807.6512,
+      "P95NanosecondsPerOperation": 25995.7286,
+      "MaximumNanosecondsPerOperation": 26018.4874,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 1593080
+    },
+    {
+      "Name": "secure-reliable-control-round-trip",
+      "PayloadBytes": 32,
+      "MeanNanosecondsPerOperation": 26457.053072000002,
+      "P50NanosecondsPerOperation": 26372.8822,
+      "P95NanosecondsPerOperation": 26882.1908,
+      "MaximumNanosecondsPerOperation": 27281.6483,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 1593080
+    },
+    {
+      "Name": "secure-reliable-bulk-4096",
+      "PayloadBytes": 4096,
+      "MeanNanosecondsPerOperation": 32375.924600000006,
+      "P50NanosecondsPerOperation": 32312.587,
+      "P95NanosecondsPerOperation": 32732.713,
+      "MaximumNanosecondsPerOperation": 33620.316,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 4220716
+    }
+  ],
+  "ImpairmentEvidence": {
+    "Messages": 100,
+    "ProtocolSteps": 2162,
+    "Retransmissions": 131,
+    "AuthenticationFailures": 15,
+    "ReplayRejections": 15
+  }
+}

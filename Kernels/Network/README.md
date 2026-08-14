@@ -1,8 +1,8 @@
 # UltraSim Network kernel
 
-Status: N0.0 contracts, N0.1 game projection/OfflineDirect, and N0.2 bounded
-kernel foundations are accepted. Secure delivery/reliability begins at N0.3;
-real transport remains later.
+Status: N0.0 contracts, N0.1 game projection/OfflineDirect, N0.2 bounded kernel
+foundations, and N0.3 secure reliable ProtocolLoopback are accepted. Remote
+Admission/UI begins at N0.4; real transport remains N0.5.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -50,7 +50,7 @@ If bandwidth measurement later earns one, it is only an encoding of
 
 ## N0.2 bounded kernel
 
-`NetworkKernelLimits` owns the complete initial reservation profile. One isolated
+`NetworkKernelLimits` owns one peer-kernel reservation profile. One isolated
 `NetworkKernel` binds a collision-checked protocol manifest to:
 
 - a fixed generational `NetworkConnectionTable` with explicit state transitions,
@@ -58,8 +58,10 @@ If bandwidth measurement later earns one, it is only an encoding of
 - a fixed packet/slab pool whose `PacketBufferToken` proves slot generation and
   current stage ownership;
 - bounded producer-owned ingress/egress rings;
-- strict canonical big-endian readers, writers, and 32-byte packet framing;
-- a deterministic fixed-capacity datagram pair for protocol work before sockets.
+- strict canonical big-endian readers, writers, and 32-byte packet framing.
+
+The deterministic two-peer topology owns separate `DeterministicDatagramLimits`;
+its slots are not charged to either peer kernel.
 
 Capacity exhaustion returns before mutation. Stale, foreign, double-returned,
 wrong-owner, or post-reuse packet tokens cannot access memory. Shutdown requires
@@ -68,17 +70,53 @@ all connections released, rings drained, and packet tokens returned.
 `NetworkCodecGenerator` emits exact fixed-width measure/write/read codecs and an
 immutable manifest from `[NetworkProtocol]` and `[NetworkMessage]`. Generated
 read/write operations stage their cursor and publish it only after the complete
-message succeeds. Primitive integer representation is canonical; booleans accept
-only `0`/`1`; generated enums accept only declared values; exact readers reject
-trailing bytes. The lower-level reader additionally rejects non-minimal varints,
+message succeeds. Primitive integer representation is canonical and checked-build
+signed values are bit-preserving; booleans accept only `0`/`1`; non-flags enums
+accept declared values while flags enums accept only combinations within their
+declared bit mask; exact readers reject trailing bytes. The lower-level reader additionally rejects non-minimal varints,
 malformed UTF-8, unpaired UTF-16 during encoding, and caller limits before exposing
 text bytes. Dynamic text/object allocation is not part of the admitted N0.2 hot
 codec profile.
 
 `DeterministicDatagramLink` is an in-memory datagram endpoint, not a protocol. It
 applies stateless loss/duplication/corruption/delay decisions to fixed slots and
-makes capacity failure transactional. N0.3 runs production delivery/security
-semantics across this endpoint.
+makes capacity failure transactional. N0.3 runs secure delivery semantics across
+this endpoint.
+
+## N0.3 secure reliable ProtocolLoopback
+
+`ProtocolLoopback` runs the complete admitted protocol between two bounded peers.
+Cold connection setup uses a stateless HMAC-SHA256 cookie before allocation or
+ECDH work, ephemeral P-256 ECDH, a pinned P-256 server signature over the complete
+transcript, HKDF-SHA256, and client/server secret-possession proofs. It authenticates
+the server endpoint, not an account or game identity; that remains N0.4 application
+work above the secure Control lane.
+
+Established datagrams use AES-256-GCM with a 128-bit tag. The canonical outer
+header is associated data. Directional keys are distinct and the nonce domain is
+`SecurityEpoch + PacketNumber`. Authentication and complete frame validation occur
+before replay, acknowledgement, lane, reassembly, epoch, or delivery state publishes.
+
+The bounded delivery machine provides:
+
+- a 64-packet replay/acknowledgement window;
+- reliable ordered Control, Event, and Bulk retention with ACK-driven release;
+- unreliable sequenced Input, OwnerState, and WorldState coalescing;
+- disposable unordered delivery;
+- MTU-bounded fragmentation/reassembly;
+- deterministic step-clock RTT/RTO, congestion-window/backoff, and pump budgets;
+- authenticated fail-closed security-epoch advancement;
+- zero warmed managed allocation for normal secure delivery.
+
+The loopback cookie uses a fixed path token and protocol time uses deterministic
+steps. N0.5 binds cookies to real endpoint/path identity and expiry and maps timing
+to a real monotonic clock. N0.6 supplies game-specific input redundancy/expiry;
+N0.7 supplies full recipient fairness and scheduling.
+
+N0.3 remains single-owner. The N0.2 SPSC ring proves token transport and the packet
+pool proves single-owner packet memory independently; cross-thread packet-memory
+handoff is not claimed. N0.5 must admit per-owner pools or one transactional
+ownership-transfer-plus-publication primitive before a socket worker touches buffers.
 
 ## Lane contracts
 
@@ -124,10 +162,10 @@ The N0.0 allocation profile is explicit:
 | Hot/warmed | identity value operations, lane lookup, trace append/digest, impairment decision | zero managed allocation |
 | Cold/setup | trace capacity construction, evidence-profile strings/results, test/report setup | managed allocation allowed and reported separately |
 
-N0.2 admits warmed pool rent/transfer/return, ring enqueue/dequeue, fixed generated
-codec/framing, connection reuse, and deterministic datagram send/receive as zero
-managed-allocation profiles. Security, reliability, fragmentation, scheduling,
-and socket submission must earn their own promises later.
+N0.2 admits warmed pool/ring/codec/framing/datagram operations. N0.3 additionally
+admits normal secure encode/encrypt/send/decrypt/replay/lane delivery as zero managed
+allocation. Cold handshake and hostile authentication failures are bounded but are
+not claimed as zero-allocation profiles. Socket submission remains later.
 
 ## Evidence admission
 
@@ -171,12 +209,11 @@ Representations and ownership not carried forward:
 - historical benchmark numbers are not accepted V3 comparisons merely because
   both implementations use words such as loopback, latest, or reliable.
 
-There is no honest end-to-end V2/V3 Network ratio at N0.0 because V3 does not yet
-have a protocol. Primitive codec, loopback protocol, secure delivery, and real
-application comparisons become eligible only when the corresponding N0 checkpoint
-exists under an equivalent evidence profile.
+There is still no accepted end-to-end V2/V3 Network ratio. N0.3 has a real secure
+loopback protocol, but no reviewed V2 profile performs the same authenticated,
+bounded lane semantics. The N0.3 standalone baseline is not mislabeled as a ratio.
 
-## N0.0–N0.2 gates
+## N0.0–N0.3 gates
 
 - production kernel has zero project dependencies;
 - generational connection and canonical replication identities are fixed width;
@@ -193,6 +230,13 @@ exists under an equivalent evidence profile.
   manifest ID/key collisions, varints, and UTF forms are adversarially tested;
 - multiple kernel/connection instances remain isolated;
 - admitted pool/ring/codec/framing/datagram profiles allocate zero after warmup.
+- signed primitive and signed-enum codecs round-trip under checked overflow;
+- protocol fingerprints include protocol version;
+- cookies gate allocation and pinned-server key exchange;
+- authentication rejects corruption before state publication;
+- replay, ACK, retransmission, RTT/RTO, congestion, sequencing, fragmentation,
+  receive backpressure, and epoch rotation pass deterministic impairment tests;
+- normal warmed secure delivery allocates zero managed bytes.
 
 Run the focused gate:
 
@@ -201,9 +245,10 @@ dotnet run --project _Tests/UltraSim.Network.Tests -c Release
 dotnet run --project _Tests/UltraSim.Network.Generator.Tests -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.ProtocolBenchmarks -c Release
 ```
 
 N0.1 is implemented by [Game replication](../../Game/Replication/README.md).
-N0.3 is next: authenticated secure protocol, replay/ACK/reliability, lane delivery,
-fragmentation, congestion/pacing foundations, and impairment validation over the
-deterministic datagram endpoint.
+N0.4 is next: remote game authentication, Admission, CharacterSelect, Inventory,
+and the existing UI semantic protocol through ProtocolLoopback.

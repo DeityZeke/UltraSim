@@ -1,5 +1,33 @@
 namespace UltraSim.Network;
 
+/// <summary>Fixed reservation owned by one deterministic two-peer datagram topology.</summary>
+public readonly record struct DeterministicDatagramLimits(int SlotCapacity, int MaximumDatagramBytes)
+{
+    public static DeterministicDatagramLimits Default => new(4_096, 1_472);
+
+    internal void Validate()
+    {
+        if (SlotCapacity is <= 0 or > 16_777_216)
+            throw new ArgumentOutOfRangeException(nameof(SlotCapacity));
+        if (MaximumDatagramBytes is <= 0 or > ushort.MaxValue)
+            throw new ArgumentOutOfRangeException(nameof(MaximumDatagramBytes));
+        _ = checked((long)SlotCapacity * MaximumDatagramBytes * 2L);
+    }
+
+    /// <summary>Returns known two-direction payload and metadata bytes, excluding CLR object headers.</summary>
+    public long EstimateReservedPayloadBytes()
+    {
+        Validate();
+        return checked(2L * SlotCapacity *
+            (MaximumDatagramBytes + DatagramSlotMetadata.EstimatedBytes + sizeof(int)));
+    }
+}
+
+internal static class DatagramSlotMetadata
+{
+    internal const int EstimatedBytes = sizeof(int) * 3 + sizeof(ulong) * 2 + sizeof(byte);
+}
+
 public enum DatagramSendStatus : byte
 {
     Accepted = 0,
@@ -35,13 +63,19 @@ public sealed class DeterministicDatagramLink
         int slotCapacity,
         int maximumDatagramBytes,
         NetworkImpairmentOptions impairment = default)
+        : this(new DeterministicDatagramLimits(slotCapacity, maximumDatagramBytes), impairment)
     {
-        if (slotCapacity <= 0) throw new ArgumentOutOfRangeException(nameof(slotCapacity));
-        if (maximumDatagramBytes is <= 0 or > ushort.MaxValue)
-            throw new ArgumentOutOfRangeException(nameof(maximumDatagramBytes));
+    }
+
+    public DeterministicDatagramLink(
+        DeterministicDatagramLimits limits,
+        NetworkImpairmentOptions impairment = default)
+    {
+        limits.Validate();
         _ownerThreadId = Environment.CurrentManagedThreadId;
-        _aToB = new Direction(slotCapacity, maximumDatagramBytes);
-        _bToA = new Direction(slotCapacity, maximumDatagramBytes);
+        Limits = limits;
+        _aToB = new Direction(limits.SlotCapacity, limits.MaximumDatagramBytes);
+        _bToA = new Direction(limits.SlotCapacity, limits.MaximumDatagramBytes);
         _impairment = new DeterministicNetworkImpairment(impairment);
         A = new DeterministicDatagramEndpoint(this, sendsAToB: true);
         B = new DeterministicDatagramEndpoint(this, sendsAToB: false);
@@ -49,6 +83,7 @@ public sealed class DeterministicDatagramLink
 
     public DeterministicDatagramEndpoint A { get; }
     public DeterministicDatagramEndpoint B { get; }
+    public DeterministicDatagramLimits Limits { get; }
 
     public void Advance()
     {

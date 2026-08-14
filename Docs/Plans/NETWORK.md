@@ -1,8 +1,9 @@
 # Network V3: N0 remote-authority implementation plan
 
 Status: active forward plan. N0.0 contract/evidence, N0.1 canonical game
-projection/OfflineDirect, and N0.2 bounded Network kernel foundations are
-accepted. N0.3 secure reliable protocol over deterministic datagrams is next.
+projection/OfflineDirect, N0.2 bounded Network kernel foundations, and N0.3
+secure reliable protocol over deterministic datagrams are accepted. N0.4 remote
+Admission/UI over ProtocolLoopback is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -857,7 +858,24 @@ Tests:
 - multiple isolated Network runtimes;
 - zero warmed allocation for admitted pool/ring/codec/framing profiles.
 
-### N0.3 — Secure protocol over ProtocolLoopback
+### N0.3 — Secure protocol over ProtocolLoopback — accepted
+
+Implemented as a single-owner bounded topology. A stateless HMAC cookie precedes
+connection allocation and ECDH work. Ephemeral P-256 ECDH is authenticated by a
+pinned P-256 server signature; HKDF-SHA256 derives directional AES-256-GCM epoch
+keys. Canonical authenticated outer framing, a 64-packet replay/ACK window,
+reliable ordered retention, sequenced latest delivery, fragmentation/reassembly,
+RTT/RTO, congestion backoff, pump budgets, and authenticated epoch advancement
+run across deterministic datagrams.
+
+The loopback cookie binds a fixed path token; endpoint binding and expiry are N0.5.
+The deterministic protocol clock uses steps; N0.5 supplies real monotonic time.
+N0.3 authenticates the server endpoint, not the game principal. Input redundancy
+is N0.6 and full recipient fairness is N0.7.
+
+N0.2's SPSC token ring and single-owner packet pool remain independent proofs.
+Cross-thread packet-memory handoff is not claimed. N0.5 must admit a transactional
+ownership/handoff model before transport workers share packet buffers.
 
 Deliver cookie/anti-amplification, authenticated key exchange/encryption,
 packet/replay windows, ACK ranges, RTT/RTO, reliable Control/Event/Bulk,

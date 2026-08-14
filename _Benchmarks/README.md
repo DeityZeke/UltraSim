@@ -35,14 +35,15 @@ when those systems exist.
 | `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
+| `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
 
-Network N0.0 has no protocol performance benchmark because there is not yet an
-honest V2/V3 protocol equivalent. N0.1 adds game-projection/OfflineDirect evidence;
-N0.2 adds fixed-runtime kernel micro evidence. Neither is a protocol ratio. Network
-ratios become eligible only as matching later checkpoints exist.
+Network N0.1 adds game-projection/OfflineDirect evidence, N0.2 adds fixed-runtime
+kernel micro evidence, and N0.3 adds a standalone secure ProtocolLoopback baseline.
+None is mislabeled as a V2/V3 protocol ratio. Ratios become eligible only when an
+equivalent reviewed profile exists.
 
 ## Running
 

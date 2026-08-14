@@ -23,9 +23,11 @@ internal static class N02FoundationTests
         NetworkKernelLimits limits = NetworkKernelLimits.Default;
         True(limits.EstimateReservedPayloadBytes() > 0);
         Throws<ArgumentOutOfRangeException>(() => _ = (limits with { MaximumConnections = 0 }).EstimateReservedPayloadBytes());
-        Throws<ArgumentOutOfRangeException>(() => _ = (limits with { MaximumDatagramBytes = limits.PacketBufferBytes + 1 }).EstimateReservedPayloadBytes());
+        var datagrams = DeterministicDatagramLimits.Default;
+        True(datagrams.EstimateReservedPayloadBytes() > 0);
+        Throws<ArgumentOutOfRangeException>(() => _ = (datagrams with { MaximumDatagramBytes = 0 }).EstimateReservedPayloadBytes());
 
-        var small = new NetworkKernelLimits(2, 4, 256, 4, 4, 4, 256, 1);
+        var small = new NetworkKernelLimits(2, 4, 256, 4, 4, 2);
         using var first = new NetworkKernel(small);
         using var second = new NetworkKernel(small);
         True(first.Connections.TryOpenValidated(out ConnectionId firstConnection));
@@ -250,6 +252,8 @@ internal static class N02FoundationTests
             RequestedVersion = 1,
             RequestManifest = true,
             PreferredLane = NetworkLane.Input,
+            SignedDelta = sbyte.MinValue,
+            SignedMode = SignedProtocolProbe.Negative,
         };
         True(ProtocolProbeMessageCodec.TryMeasure(in value, out int measured));
         Equal(ProtocolProbeMessageCodec.EncodedSize, measured);
@@ -271,10 +275,14 @@ internal static class N02FoundationTests
         Span<byte> trailing = stackalloc byte[ProtocolProbeMessageCodec.EncodedSize + 1];
         exact.CopyTo(trailing);
         False(ProtocolProbeMessageCodec.TryReadExact(trailing, out _));
-        exact[^2] = 2;
+        exact[14] = 2;
         False(ProtocolProbeMessageCodec.TryReadExact(exact, out _));
-        exact[^2] = 1;
-        exact[^1] = byte.MaxValue;
+        exact[14] = 1;
+        exact[15] = byte.MaxValue;
+        False(ProtocolProbeMessageCodec.TryReadExact(exact, out _));
+        exact[15] = (byte)NetworkLane.Input;
+        exact[17] = 0;
+        exact[18] = 0;
         False(ProtocolProbeMessageCodec.TryReadExact(exact, out _));
     }
 
@@ -290,6 +298,8 @@ internal static class N02FoundationTests
         Throws<ArgumentException>(() => NetworkProtocolManifest.Create(1, new[] { descriptor, duplicateId }));
         NetworkMessageDescriptor duplicateKey = descriptor with { Id = new NetworkMessageId(2) };
         Throws<ArgumentException>(() => NetworkProtocolManifest.Create(1, new[] { descriptor, duplicateKey }));
+        NetworkProtocolManifest nextVersion = NetworkProtocolManifest.Create(2, new[] { descriptor });
+        False(manifest.Fingerprint == nextVersion.Fingerprint);
     }
 
     private static void DatagramEndpointIsBoundedAndReproducible()
@@ -331,6 +341,8 @@ internal static class N02FoundationTests
             RequestedVersion = 1,
             RequestManifest = true,
             PreferredLane = NetworkLane.Control,
+            SignedDelta = -1,
+            SignedMode = SignedProtocolProbe.Negative,
         };
         Span<byte> receive = stackalloc byte[256];
         True(pool.TryRent(PacketBufferOwner.Application, out PacketBufferToken warm));

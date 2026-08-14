@@ -157,16 +157,21 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
             if (numericValues.Length == 0) { writer = reader = string.Empty; bytes = 0; return false; }
             bool flags = enumeration.GetAttributes().Any(attribute =>
                 attribute.AttributeClass?.ToDisplayString() == "System.FlagsAttribute");
+            int encodedBits = encoded.SpecialType is SpecialType.System_SByte or SpecialType.System_Byte ? 8 :
+                encoded.SpecialType is SpecialType.System_Int16 or SpecialType.System_UInt16 ? 16 :
+                encoded.SpecialType is SpecialType.System_Int32 or SpecialType.System_UInt32 ? 32 : 64;
+            ulong encodedMask = encodedBits == 64 ? ulong.MaxValue : (1UL << encodedBits) - 1;
+            for (int index = 0; index < numericValues.Length; index++) numericValues[index] &= encodedMask;
             if (flags)
             {
                 ulong mask = 0;
                 foreach (ulong numericValue in numericValues) mask |= numericValue;
-                validation = $"(raw & ~{mask.ToString(CultureInfo.InvariantCulture)}UL) != 0";
+                validation = $"((raw & {encodedMask.ToString(CultureInfo.InvariantCulture)}UL) & ~{mask.ToString(CultureInfo.InvariantCulture)}UL) != 0";
             }
             else
             {
                 validation = string.Join(" && ", numericValues.Select(value =>
-                    $"raw != {value.ToString(CultureInfo.InvariantCulture)}UL"));
+                    $"(raw & {encodedMask.ToString(CultureInfo.InvariantCulture)}UL) != {value.ToString(CultureInfo.InvariantCulture)}UL"));
             }
         }
         switch (encoded.SpecialType)
@@ -207,6 +212,9 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
         foreach (Field field in message.Fields)
         {
             string value = field.Conversion is null ? $"value.{field.Name}" : $"({UnderlyingCast(field)})value.{field.Name}";
+            if (field.Writer == "TryWriteByte" && (field.Type == "sbyte" || field.Type == "global::System.SByte" ||
+                field.Conversion is not null))
+                value = $"unchecked((byte)value.{field.Name})";
             source.Append("        if (!staged.").Append(field.Writer).Append('(').Append(value).Append(")) return false;\n");
         }
         source.Append("        writer = staged;\n        return true;\n    }\n\n")
@@ -219,7 +227,7 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
             source.Append("        if (!staged.").Append(field.Reader).Append("(out ").Append(rawType)
                 .Append(" raw").Append(index).Append(")) { value = default; return false; }\n");
             if (field.Validation is not null)
-                source.Append("        if (").Append(field.Validation.Replace("raw", $"(ulong)raw{index}"))
+                source.Append("        if (").Append(field.Validation.Replace("raw", $"unchecked((ulong)raw{index})"))
                     .Append(") { value = default; return false; }\n");
         }
         source.Append("        value = new ").Append(type).Append("\n        {\n");
@@ -227,7 +235,7 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
         {
             Field field = message.Fields[index];
             source.Append("            ").Append(field.Name).Append(" = ")
-                .Append(field.Conversion is null ? $"raw{index}" : $"({field.Type})raw{index}").Append(",\n");
+                .Append(ReadConversion(field, index)).Append(",\n");
         }
         source.Append("        };\n        reader = staged;\n        return true;\n    }\n\n")
             .Append("    public static bool TryWriteExact(global::System.Span<byte> destination, in ").Append(type)
@@ -268,6 +276,14 @@ public sealed class NetworkCodecGenerator : IIncrementalGenerator
         "TryReadUInt16" => "ushort", "TryReadInt32" => "int", "TryReadUInt32" => "uint",
         "TryReadInt64" => "long", "TryReadUInt64" => "ulong", _ => throw new InvalidOperationException(),
     };
+
+    private static string ReadConversion(Field field, int index)
+    {
+        if (field.Type is "sbyte" or "global::System.SByte") return $"unchecked((sbyte)raw{index})";
+        if (field.Conversion is not null && field.Reader == "TryReadByte")
+            return $"unchecked(({field.Type})(sbyte)raw{index})";
+        return field.Conversion is null ? $"raw{index}" : $"({field.Type})raw{index}";
+    }
 
     private static AttributeData? FindAttribute(INamedTypeSymbol symbol, string name) =>
         symbol.GetAttributes().FirstOrDefault(attribute => attribute.AttributeClass?.ToDisplayString() == name);

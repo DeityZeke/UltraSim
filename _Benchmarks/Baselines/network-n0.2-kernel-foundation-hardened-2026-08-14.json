@@ -1,0 +1,57 @@
+{
+  "Workload": "network-n0.2-kernel-foundation-v1",
+  "TimestampUtc": "2026-08-14T21:16:18.2286416+00:00",
+  "RuntimeVersion": "8.0.29",
+  "ProcessorCount": 16,
+  "Warmups": 4,
+  "Iterations": 25,
+  "OperationsPerIteration": 100000,
+  "ProtocolFingerprint": 4867496781289885167,
+  "Scenarios": [
+    {
+      "Name": "generated-codec-round-trip",
+      "MeanNanosecondsPerOperation": 35.855450000000005,
+      "P50NanosecondsPerOperation": 35.80386,
+      "P95NanosecondsPerOperation": 36.19596,
+      "MaximumNanosecondsPerOperation": 36.31347,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 5000050000
+    },
+    {
+      "Name": "packet-pool-owner-cycle",
+      "MeanNanosecondsPerOperation": 30.1483708,
+      "P50NanosecondsPerOperation": 30.13342,
+      "P95NanosecondsPerOperation": 30.35382,
+      "MaximumNanosecondsPerOperation": 30.39122,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 12742320
+    },
+    {
+      "Name": "producer-ring-cycle",
+      "MeanNanosecondsPerOperation": 9.7561244,
+      "P50NanosecondsPerOperation": 9.68081,
+      "P95NanosecondsPerOperation": 9.81681,
+      "MaximumNanosecondsPerOperation": 11.62419,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 5000050000
+    },
+    {
+      "Name": "deterministic-datagram-cycle",
+      "MeanNanosecondsPerOperation": 31.662892799999998,
+      "P50NanosecondsPerOperation": 31.63051,
+      "P95NanosecondsPerOperation": 32.76199,
+      "MaximumNanosecondsPerOperation": 33.20499,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 15942320
+    },
+    {
+      "Name": "connection-open-close-reuse",
+      "MeanNanosecondsPerOperation": 21.1933608,
+      "P50NanosecondsPerOperation": 21.1781,
+      "P95NanosecondsPerOperation": 21.3165,
+      "MaximumNanosecondsPerOperation": 21.4869,
+      "MaximumAllocatedBytes": 0,
+      "Checksum": 216262968656
+    }
+  ]
+}

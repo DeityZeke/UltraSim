@@ -33,7 +33,10 @@ Useful current anchors can be located by their embedded workload or filename:
 - `network-n0.1-game-projection-100k-*` — canonical changed-state capture and
   packet-free OfflineDirect semantic-apply evidence;
 - `network-n0.2-kernel-foundation-*` — fixed-runtime generated codec, packet pool,
-  producer ring, deterministic datagram, and connection reuse evidence;
+  producer ring, deterministic datagram, and connection reuse evidence; the
+  `hardened` artifact includes checked signed codecs and the versioned fingerprint;
+- `network-n0.3-secure-protocol-*` — fixed-runtime secure/reliable loopback delivery,
+  fragmentation, and impaired convergence evidence;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

@@ -104,8 +104,7 @@ derived/application indexes when their ownership and scale are explicit.
 - `_V2`: frozen historical/reference implementation, compiled only by explicit
   comparison projects.
 
-Network V3 is the active major layer. Its N0.0 kernel/evidence foundation and
-N0.1 game-owned canonical projection/OfflineDirect and N0.2 dependency-clean
-connection/packet/ring/framing/codec/datagram foundations are implemented. Secure
-reliable protocol begins at N0.3. The remaining checkpoints are in
+Network V3 is the active major layer. N0.0 evidence, N0.1 game-owned canonical
+projection/OfflineDirect, N0.2 bounded byte foundations, and N0.3 secure reliable
+ProtocolLoopback are implemented. Remote Admission/UI begins at N0.4. The remaining checkpoints are in
 [`Plans/NETWORK.md`](Plans/NETWORK.md).

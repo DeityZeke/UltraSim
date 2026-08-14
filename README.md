@@ -7,9 +7,9 @@ protocol and Godot renderer, concrete game composition, Accounting, Admission,
 Inventory, and the completed S0 end-to-end integration slice.
 
 Network V3 is the active major implementation milestone. N0.0's contracts,
-N0.1's canonical game projection/OfflineDirect oracle, and N0.2's bounded packet,
-connection, ring, framing, generated-codec, and deterministic-datagram foundations
-are implemented. Secure reliable protocol work is next.
+N0.1's canonical game projection/OfflineDirect oracle, N0.2's bounded byte/kernel
+foundation, and N0.3's secure reliable ProtocolLoopback are implemented. Remote
+Admission/UI is next.
 
 ## Design
 

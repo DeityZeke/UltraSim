@@ -89,6 +89,7 @@ public sealed class NetworkProtocolManifest
         var copy = descriptors.ToArray();
         Array.Sort(copy, static (left, right) => left.Id.CompareTo(right.Id));
         ulong fingerprint = 14695981039346656037UL;
+        Mix(ref fingerprint, version);
         NetworkMessageDescriptor previous = default;
         for (int index = 0; index < copy.Length; index++)
         {
@@ -137,6 +138,12 @@ public static partial class CoreNetworkProtocol
 {
 }
 
+public enum SignedProtocolProbe : short
+{
+    Negative = -1,
+    Positive = 1,
+}
+
 /// <summary>Small generated-codec probe that freezes the primitive wire contract before N0.3.</summary>
 [NetworkMessage(1, "ultrasim.network.protocol-probe", 1, NetworkLane.Control)]
 public partial struct ProtocolProbeMessage : IEquatable<ProtocolProbeMessage>
@@ -146,12 +153,15 @@ public partial struct ProtocolProbeMessage : IEquatable<ProtocolProbeMessage>
     public ushort RequestedVersion;
     public bool RequestManifest;
     public NetworkLane PreferredLane;
+    public sbyte SignedDelta;
+    public SignedProtocolProbe SignedMode;
 
     public readonly bool Equals(ProtocolProbeMessage other) =>
         Nonce == other.Nonce && CapabilityHash == other.CapabilityHash &&
         RequestedVersion == other.RequestedVersion && RequestManifest == other.RequestManifest &&
-        PreferredLane == other.PreferredLane;
+        PreferredLane == other.PreferredLane && SignedDelta == other.SignedDelta &&
+        SignedMode == other.SignedMode;
     public readonly override bool Equals(object? obj) => obj is ProtocolProbeMessage other && Equals(other);
     public readonly override int GetHashCode() => HashCode.Combine(
-        Nonce, CapabilityHash, RequestedVersion, RequestManifest, PreferredLane);
+        Nonce, CapabilityHash, RequestedVersion, RequestManifest, PreferredLane, SignedDelta, SignedMode);
 }

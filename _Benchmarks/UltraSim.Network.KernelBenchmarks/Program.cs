@@ -113,6 +113,8 @@ internal sealed class CodecScenario : IKernelBenchmarkScenario
         RequestedVersion = 1,
         RequestManifest = true,
         PreferredLane = NetworkLane.Control,
+        SignedDelta = -1,
+        SignedMode = SignedProtocolProbe.Negative,
     };
 
     public ulong Run(int operations)

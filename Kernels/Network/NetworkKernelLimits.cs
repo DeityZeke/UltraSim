@@ -9,12 +9,10 @@ public readonly record struct NetworkKernelLimits(
     int PacketBufferBytes,
     int InboundRingCapacity,
     int OutboundRingCapacity,
-    int DatagramSlotCount,
-    int MaximumDatagramBytes,
     int MaximumProtocolMessages)
 {
     public static NetworkKernelLimits Default => new(
-        1_024, 4_096, 1_472, 4_096, 4_096, 4_096, 1_472, 256);
+        1_024, 4_096, 1_472, 4_096, 4_096, 256);
 
     internal void Validate()
     {
@@ -28,15 +26,10 @@ public readonly record struct NetworkKernelLimits(
             throw new ArgumentOutOfRangeException(nameof(InboundRingCapacity));
         if (OutboundRingCapacity is <= 0 or > 16_777_216)
             throw new ArgumentOutOfRangeException(nameof(OutboundRingCapacity));
-        if (DatagramSlotCount is <= 0 or > 16_777_216)
-            throw new ArgumentOutOfRangeException(nameof(DatagramSlotCount));
-        if (MaximumDatagramBytes is < 1 or > ushort.MaxValue || MaximumDatagramBytes > PacketBufferBytes)
-            throw new ArgumentOutOfRangeException(nameof(MaximumDatagramBytes));
         if (MaximumProtocolMessages is <= 0 or > ushort.MaxValue)
             throw new ArgumentOutOfRangeException(nameof(MaximumProtocolMessages));
 
         _ = checked((long)PacketBufferCount * PacketBufferBytes);
-        _ = checked((long)DatagramSlotCount * MaximumDatagramBytes * 2L);
         _ = checked((long)MaximumConnections * NetworkLaneContracts.Count * sizeof(ulong));
     }
 
@@ -49,12 +42,6 @@ public readonly record struct NetworkKernelLimits(
             (long)PacketBufferCount * (sizeof(uint) + sizeof(byte) + sizeof(int)) +
             (long)MaximumConnections * (sizeof(uint) + sizeof(byte) + sizeof(uint) + sizeof(int)) +
             (long)MaximumConnections * NetworkLaneContracts.Count * sizeof(ulong) +
-            (long)(InboundRingCapacity + OutboundRingCapacity) * Unsafe.SizeOf<PacketBufferToken>() +
-            2L * DatagramSlotCount * (MaximumDatagramBytes + DatagramSlotMetadata.EstimatedBytes));
+            (long)(InboundRingCapacity + OutboundRingCapacity) * Unsafe.SizeOf<PacketBufferToken>());
     }
-}
-
-internal static class DatagramSlotMetadata
-{
-    internal const int EstimatedBytes = sizeof(int) * 3 + sizeof(ulong) * 2 + sizeof(byte);
 }
