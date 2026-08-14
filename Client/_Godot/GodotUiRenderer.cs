@@ -11,7 +11,7 @@ public interface IGodotUiAssetResolver
 }
 
 /// <summary>
-/// Minimal S0.4 Godot adapter. Godot controls stay entirely in this project;
+/// Minimal Godot UI adapter. Godot controls stay entirely in this project;
 /// Kernels/UI and Client/Core remain renderer-neutral.
 /// </summary>
 public sealed class GodotUiRenderer : IUiRenderer

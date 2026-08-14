@@ -3,6 +3,7 @@ using UltraSim.Game.Inventory;
 
 namespace UltraSim.Game.Composition;
 
+/// <summary>Stable canonical identities of the concrete game's compiled content fixtures.</summary>
 public static class GamePrefabKeys
 {
     public static readonly PrefabKey Character = new("game.character.default");

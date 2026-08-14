@@ -6,11 +6,13 @@ using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Persistence;
 
+/// <summary>Expected whole-game save outcome; failures leave active authority unchanged.</summary>
 public readonly record struct GameSaveResult(
     bool Succeeded,
     SaveSetManifest? Manifest,
     Exception? Failure);
 
+/// <summary>Expected staged-load/publication outcome and new generation identity when successful.</summary>
 public readonly record struct GameLoadResult(
     bool Succeeded,
     ulong GenerationId,

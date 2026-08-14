@@ -6,6 +6,7 @@ namespace UltraSim.ECS;
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property, AllowMultiple = false)]
 public sealed class PersistenceEntityReferenceAttribute : Attribute;
 
+/// <summary>Stable 128-bit identity of one canonical persistence schema/codec contract.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = 16)]
 public readonly struct PersistenceSchemaFingerprint : IEquatable<PersistenceSchemaFingerprint>
 {

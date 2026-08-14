@@ -2,6 +2,7 @@ using UltraSim.ECS;
 
 namespace UltraSim.Game.Inventory;
 
+/// <summary>Expected authoritative outcome of one inventory mutation attempt.</summary>
 public enum InventoryMutationStatus : byte
 {
     Accepted = 0,
@@ -20,6 +21,7 @@ public enum InventoryMutationStatus : byte
     ItemPolicyViolation = 13,
 }
 
+/// <summary>Authoritative mutation result plus affected runtime entities for immediate projection.</summary>
 public readonly record struct InventoryMutationResult(
     InventoryMutationStatus Status,
     Entity Item,
@@ -29,6 +31,7 @@ public readonly record struct InventoryMutationResult(
     public bool Accepted => Status == InventoryMutationStatus.Accepted;
 }
 
+/// <summary>Generation-local inventory projection row paired with durable identity and content provenance.</summary>
 public readonly record struct InventoryItemView(
     Entity Entity,
     PersistentEntityId PersistentId,
@@ -37,6 +40,7 @@ public readonly record struct InventoryItemView(
     InventoryEquipSlot EquipSlot,
     int Quantity);
 
+/// <summary>Generation-owned capability exposing the derived Inventory state paired with its ECS world.</summary>
 public interface IInventoryGenerationStateProvider
 {
     InventoryGenerationState Inventory { get; }

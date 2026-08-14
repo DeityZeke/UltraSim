@@ -3,7 +3,7 @@ using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.UI;
 
-/// <summary>Small local cold-open fixture for manually running S0.4 in Godot.</summary>
+/// <summary>Small local cold-open fixture for manually exercising the Godot renderer.</summary>
 public partial class S04Demo : Control
 {
     private UiClientRuntime _client = null!;

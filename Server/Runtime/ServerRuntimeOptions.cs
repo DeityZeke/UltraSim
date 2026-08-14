@@ -30,10 +30,13 @@ public sealed class ServerRuntimeOptions
         AllowVariableSimulationFrequency = allowVariableSimulationFrequency;
     }
 
+    /// <summary>Gets the fixed ECS world/scheduler capacity policy used for every generation.</summary>
     public EcsWorldOptions WorldOptions { get; }
 
+    /// <summary>Gets cold clock/rate/step-limit policy; live cadence is read from <see cref="ServerRuntime"/>.</summary>
     public WorldClockOptions ClockOptions { get; }
 
+    /// <summary>Gets whether explicit owner-thread playback changes are admitted.</summary>
     public bool AllowVariablePlayback { get; }
 
     /// <summary>

@@ -281,6 +281,8 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
+    /// <summary>Builds, prepares, and publishes the first private generation on the owner thread.</summary>
+    /// <remarks>A failure before or during initial publication terminally faults this Runtime.</remarks>
     public void Initialize()
     {
         EnsureOwnerThread();
@@ -302,6 +304,7 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
+    /// <summary>Transitions an initialized Runtime to running without replacing its generation.</summary>
     public void Start()
     {
         EnsureOwnerThread();
@@ -421,6 +424,7 @@ public sealed class ServerRuntime : IDisposable
         }
     }
 
+    /// <summary>Stops automatic simulation admission while retaining the current generation until disposal.</summary>
     public void Stop()
     {
         EnsureOwnerThread();
@@ -431,6 +435,7 @@ public sealed class ServerRuntime : IDisposable
         _state = ServerRuntimeState.Stopped;
     }
 
+    /// <summary>Retires the active generation and releases Runtime-owned resources on the owner thread.</summary>
     public void Dispose()
     {
         EnsureOwnerThread();

@@ -27,7 +27,7 @@ public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
     public const long WorldTimeQuantaPerSecond =
         1_000_000L * WorldTimeFractionQuantaPerMicrosecond;
     // A 1:1 default is mechanism-neutral. Games may deliberately configure
-    // accelerated world time (the S0 fixture uses 24x), but Runtime must not
+    // accelerated world time (the integration fixture uses 24x), but Runtime must not
     // encode that game policy as its default.
     public const int DefaultWorldTimeRate = 1;
     public const int DefaultPlaybackRate = 1;

@@ -6,6 +6,7 @@ using System.Text;
 
 namespace UltraSim.ECS;
 
+/// <summary>One capture's nonzero sequence, timestamp, and bounded persistent-system payload policy.</summary>
 public readonly struct PersistenceCaptureOptions
 {
     public PersistenceCaptureOptions(ulong snapshotSequence, long captureUnixMilliseconds = 0,
@@ -22,6 +23,7 @@ public readonly struct PersistenceCaptureOptions
     public int MaximumSystemStateBytes { get; }
 }
 
+/// <summary>Owned immutable canonical snapshot bytes plus identity, count, and digest metadata.</summary>
 public sealed class PersistenceSnapshotArtifact
 {
     private readonly byte[] _bytes;
@@ -69,6 +71,7 @@ public sealed class PersistenceWorldCapture : IDisposable
     public void Dispose() => _model = null;
 }
 
+/// <summary>Phase timing and logical-size report for one completed world capture.</summary>
 public readonly struct PersistenceCaptureReport
 {
     internal PersistenceCaptureReport(long collectTicks, long encodeTicks, long checksumTicks,
@@ -94,6 +97,7 @@ public readonly struct PersistenceCaptureReport
     public TimeSpan ChecksumTime => Stopwatch.GetElapsedTime(0, ChecksumTicks);
 }
 
+/// <summary>Owner-bound whole-world capture API with separable authority collection and detached encoding.</summary>
 public static class EcsPersistence
 {
     public static PersistenceSnapshotArtifact Capture(

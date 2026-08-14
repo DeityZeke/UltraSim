@@ -5,6 +5,7 @@ using UltraSim.UI;
 
 namespace UltraSim.Game.Admission;
 
+/// <summary>Current presentation/authority stage of one participant admission session.</summary>
 public enum AdmissionStage : byte
 {
     WaitingForCharacter = 0,
@@ -12,6 +13,7 @@ public enum AdmissionStage : byte
     Rejected = 2,
 }
 
+/// <summary>Expected fail-closed reason that an admission or character action was rejected.</summary>
 public enum AdmissionRejection : byte
 {
     None = 0,
@@ -78,7 +80,7 @@ public sealed class AdmissionOptions
 }
 
 /// <summary>
-/// S0.5 admission service. It supports accountless instant entry and an
+/// Authoritative admission service supporting accountless instant entry and an
 /// account-backed CharacterSelect flow over the same active ServerRuntime.
 /// </summary>
 /// <remarks>

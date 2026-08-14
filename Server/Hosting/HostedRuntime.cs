@@ -2,7 +2,7 @@ using UltraSim.Server.Runtime;
 
 namespace UltraSim.Server.Hosting;
 
-/// <summary>Shared thin lifecycle adapter used by the two S0.2 host shells.</summary>
+/// <summary>Shared thin lifecycle adapter used by internal and headless host shells.</summary>
 internal sealed class HostedRuntime : IDisposable
 {
     private readonly HostCapabilities _capabilities;

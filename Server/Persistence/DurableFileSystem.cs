@@ -3,6 +3,8 @@ using Microsoft.Win32.SafeHandles;
 
 namespace UltraSim.Server.Persistence;
 
+/// <summary>Injectable filesystem operations required by crash-durable save-set publication.</summary>
+/// <remarks>Implementations must preserve the flush/rename semantics implied by each operation.</remarks>
 public interface IDurableFileSystem
 {
     void CreateDirectory(string path);
@@ -23,6 +25,7 @@ public interface IDurableFileSystem
     void ReplaceFile(string source, string destination);
 }
 
+/// <summary>Windows/Linux/macOS filesystem implementation with file and directory durability barriers.</summary>
 public sealed class DurableFileSystem : IDurableFileSystem
 {
     public void CreateDirectory(string path) => Directory.CreateDirectory(path);

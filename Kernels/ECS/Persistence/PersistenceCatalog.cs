@@ -109,6 +109,7 @@ public sealed class PersistenceCatalogBuilder
     }
 }
 
+/// <summary>Immutable reflection-free binding of the current schema to codecs and compatibility policy.</summary>
 public sealed class PersistenceCatalog
 {
     private readonly IBoundPersistenceCodec?[] _current;
@@ -160,15 +161,18 @@ public sealed class PersistenceCatalog
         _derived.TryGetValue(id, out reconstructor!);
 }
 
+/// <summary>Base failure for persistence validation, compatibility, capture, or restore.</summary>
 public class PersistenceException : Exception
 {
     public PersistenceException(string message) : base(message) { }
     public PersistenceException(string message, Exception inner) : base(message, inner) { }
 }
+/// <summary>Signals malformed, noncanonical, capacity-invalid, or internally inconsistent state.</summary>
 public sealed class PersistenceValidationException : PersistenceException
 {
     public PersistenceValidationException(string message) : base(message) { }
 }
+/// <summary>Signals a well-formed artifact that the current schema/catalog cannot interpret exactly.</summary>
 public sealed class PersistenceCompatibilityException : PersistenceException
 {
     public PersistenceCompatibilityException(string message) : base(message) { }

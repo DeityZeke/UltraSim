@@ -502,6 +502,7 @@ public sealed class UiClientRuntime
     }
 }
 
+/// <summary>Read-only diagnostic identity and sequence for one retained client view.</summary>
 public readonly record struct UiViewInfo(
     UiViewInstanceId Instance,
     UiDefinitionCacheKey CacheKey,

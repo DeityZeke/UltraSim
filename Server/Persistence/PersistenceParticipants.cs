@@ -2,30 +2,48 @@ using UltraSim.ECS;
 
 namespace UltraSim.Server.Persistence;
 
+/// <summary>Common logical identity and timestamp shared by every participant in one save set.</summary>
 public readonly record struct SaveSetContext(ulong Sequence, long UnixMilliseconds);
 
+/// <summary>Captures and prepares one bounded named artifact in a coordinated save set.</summary>
+/// <remarks>
+/// Capture occurs inside the caller's frozen authority epoch. The returned
+/// capture owns immutable state so encoding can continue after that epoch ends.
+/// Prepare must not mutate active authority.
+/// </remarks>
 public interface ISaveSetParticipant
 {
+    /// <summary>Gets the stable unique manifest/artifact key.</summary>
     string Key { get; }
+    /// <summary>Gets the hard encoded artifact bound enforced while writing and reading.</summary>
     long MaximumArtifactBytes => Array.MaxLength;
+    /// <summary>Captures immutable participant state from the common epoch.</summary>
     ICapturedSaveSetParticipant Capture(in SaveSetContext context);
+    /// <summary>Parses untrusted artifact bytes into private staged state.</summary>
     IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context);
 }
 
 /// <summary>Owned participant state from one common epoch; encoding occurs after that epoch is released.</summary>
 public interface ICapturedSaveSetParticipant : IDisposable
 {
+    /// <summary>Gets the participant key that must match its registration.</summary>
     string Key { get; }
+    /// <summary>Writes the owned immutable artifact into the coordinator's bounded stream.</summary>
     void WriteArtifact(Stream destination);
 }
 
+/// <summary>Private staged participant state in the resolve/validate load phases.</summary>
 public interface IPreparedLoadParticipant : IDisposable
 {
+    /// <summary>Gets the participant key that must match its registration.</summary>
     string Key { get; }
+    /// <summary>Resolves durable references only against admitted staged/external providers.</summary>
     void Resolve(IPersistentEntityResolver resolver);
+    /// <summary>Performs all remaining failure-prone validation before publication.</summary>
     void Validate();
 }
 
+/// <summary>Resolves one complete persistent world/entity key to staged or admitted immutable authority.</summary>
 public interface IPersistentEntityResolver
 {
     bool TryResolve(PersistentEntityKey key, out object? value);
@@ -135,8 +153,10 @@ public sealed class PreparedLoadGeneration : IDisposable
     }
 }
 
+/// <summary>Selects strict-current loading or classified fallback to the newest complete valid generation.</summary>
 public enum SaveSetRecoveryMode : byte { StrictCurrent = 0, CurrentThenNewestComplete = 1 }
 
+/// <summary>Deterministic crash-injection boundaries in durable save publication.</summary>
 public enum SaveSetFaultPoint : byte
 {
     None = 0,
@@ -150,6 +170,7 @@ public enum SaveSetFaultPoint : byte
     AfterCurrentPointerRename,
 }
 
+/// <summary>Test capability invoked at named durable-publication boundaries.</summary>
 public interface ISaveSetFaultInjector
 {
     void Reach(SaveSetFaultPoint point, string path);

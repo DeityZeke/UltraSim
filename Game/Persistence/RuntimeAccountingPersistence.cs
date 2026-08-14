@@ -18,7 +18,7 @@ internal readonly record struct LoadAttemptResult(
     Exception? Failure);
 
 /// <summary>
-/// S0.6 compatibility bridge joining only ECS and Accounting.
+/// Narrow compatibility bridge joining only ECS and Accounting.
 /// </summary>
 [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 internal sealed class RuntimeAccountingPersistence

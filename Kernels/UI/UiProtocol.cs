@@ -72,6 +72,7 @@ public readonly record struct UiDefinitionFamilyKey(
     ushort ProtocolVersion,
     UiDefinitionKey DefinitionKey);
 
+/// <summary>Semantic list mutation applied within one model-delta sequence.</summary>
 public enum UiListDeltaKind : byte
 {
     Replace = 0,
@@ -80,6 +81,7 @@ public enum UiListDeltaKind : byte
     Remove = 3,
 }
 
+/// <summary>One scalar slot replacement in an atomic model delta.</summary>
 public readonly struct UiScalarSlotPatch
 {
     public UiScalarSlotPatch(UiSlotId slot, UiValue value)
@@ -94,6 +96,7 @@ public readonly struct UiScalarSlotPatch
     public UiValue Value { get; }
 }
 
+/// <summary>One full-list or row-granular mutation for a compiled list slot.</summary>
 public readonly struct UiListPatch
 {
     private readonly UiListRow[]? _rows;
@@ -141,6 +144,7 @@ public readonly struct UiListPatch
         new(slot, UiListDeltaKind.Remove, rowId, default, Array.Empty<UiListRow>());
 }
 
+/// <summary>One enabled/visible state replacement for a compiled action.</summary>
 public readonly struct UiActionStatePatch
 {
     public UiActionStatePatch(UiActionId action, UiActionState state)
@@ -279,6 +283,7 @@ public sealed class UiModelDelta
     }
 }
 
+/// <summary>Cold open carrying an exact compiled definition and cloned initial model.</summary>
 public readonly struct UiOpenView
 {
     private readonly UiModel _model;
@@ -312,6 +317,7 @@ public readonly struct UiOpenView
         throw new InvalidOperationException("The cold-open model is not initialized.");
 }
 
+/// <summary>Hot open referencing a definition revision already admitted to the client cache.</summary>
 public readonly struct UiHotOpenView
 {
     private readonly UiModel _model;
@@ -340,6 +346,7 @@ public readonly struct UiHotOpenView
         throw new InvalidOperationException("The hot-open model is not initialized.");
 }
 
+/// <summary>Sequence-bearing atomic model update for one retained view instance.</summary>
 public readonly struct UiUpdateView
 {
     public UiUpdateView(UiViewInstanceId instance, UiModelDelta delta)
@@ -355,6 +362,7 @@ public readonly struct UiUpdateView
     public UiModelDelta Delta { get; }
 }
 
+/// <summary>Request to close one retained client view instance.</summary>
 public readonly struct UiCloseView
 {
     public UiCloseView(UiViewInstanceId instance)
@@ -378,6 +386,7 @@ public interface IUiSemanticPort
     void UnbindActions(UiViewInstanceId instance);
 }
 
+/// <summary>Renderer-owned opaque lifetime handle; only its creating renderer may interpret it.</summary>
 public interface IUiRenderHandle
 {
 }
@@ -403,6 +412,8 @@ public readonly struct UiModelView
         throw new InvalidOperationException("The UI model view is not initialized.");
 }
 
+/// <summary>Client-side presentation boundary over immutable compiled definitions and model snapshots.</summary>
+/// <remarks>Renderer exceptions terminally fault the owning client runtime because external controls may be partial.</remarks>
 public interface IUiRenderer
 {
     IUiRenderHandle Create(
@@ -422,6 +433,7 @@ public interface IUiRenderer
     void Close(IUiRenderHandle handle);
 }
 
+/// <summary>Signals that a view targets a definition family superseded by a newer exact revision.</summary>
 public sealed class UiViewSupersededException : InvalidOperationException
 {
     public UiViewSupersededException(UiDefinitionFamilyKey family)

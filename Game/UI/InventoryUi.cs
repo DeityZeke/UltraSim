@@ -5,6 +5,7 @@ using UltraSim.UI;
 
 namespace UltraSim.Game.UI;
 
+/// <summary>Compiled Inventory view definition and typed binding identities.</summary>
 public static class InventoryUi
 {
     private static readonly Contract _contract = CreateContract();
@@ -69,6 +70,7 @@ public static class InventoryUi
         UiActionId Equip);
 }
 
+/// <summary>Stable definition-cache identity used by the Inventory server workflow.</summary>
 public readonly record struct InventoryUiOptions(
     string ServerIdentity = "local-server",
     string CompositionIdentity = "game-composition",
@@ -83,6 +85,7 @@ public readonly record struct InventoryUiOptions(
     }
 }
 
+/// <summary>Expected result of opening an authoritative Inventory view session.</summary>
 public readonly record struct InventoryUiOpenResult(
     bool Succeeded,
     UiViewInstanceId View,

@@ -3,7 +3,7 @@ using UltraSim.Client.Core;
 using UltraSim.Client.Godot;
 using UltraSim.UI;
 
-/// <summary>Executable headless acceptance for S0.4 native control behavior.</summary>
+/// <summary>Executable headless acceptance for native Godot control behavior.</summary>
 public partial class S04HeadlessAcceptance : Control
 {
     public override void _Ready()

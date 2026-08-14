@@ -3,16 +3,19 @@ using System.Runtime.CompilerServices;
 
 namespace UltraSim.ECS;
 
+/// <summary>Cold compatibility hook that reconstructs one explicitly registered historical runtime shape.</summary>
 public interface IPersistenceShapeMigrator
 {
     void Migrate(PersistenceShapeMigrationContext context);
 }
 
+/// <summary>Rebuilds a declared derived component after persisted values and references are available.</summary>
 public interface IPersistenceDerivedReconstructor
 {
     void Reconstruct(PersistenceReconstructionContext context);
 }
 
+/// <summary>Read-only historical encoded column exposed only to an admitted shape migrator.</summary>
 public readonly struct PersistenceSavedColumn
 {
     internal PersistenceSavedColumn(uint persistenceId, ushort version, int encodedSize, ReadOnlyMemory<byte> bytes)
@@ -29,6 +32,7 @@ public readonly struct PersistenceSavedColumn
     }
 }
 
+/// <summary>Read-only historical enable bitplane exposed only to an admitted shape migrator.</summary>
 public readonly struct PersistenceSavedEnablePlane
 {
     internal PersistenceSavedEnablePlane(uint persistenceId, int rowCount, ReadOnlyMemory<byte> bits)
@@ -43,6 +47,7 @@ public readonly struct PersistenceSavedEnablePlane
     }
 }
 
+/// <summary>Validated staging-world entities and typed read/write operations for derived reconstruction.</summary>
 public class PersistenceReconstructionContext
 {
     private readonly EcsWorld _world;
@@ -75,6 +80,7 @@ public class PersistenceReconstructionContext
     }
 }
 
+/// <summary>Derived reconstruction context extended with the explicit historical columns/enable planes.</summary>
 public sealed class PersistenceShapeMigrationContext : PersistenceReconstructionContext
 {
     private readonly PersistenceSavedColumn[] _columns;

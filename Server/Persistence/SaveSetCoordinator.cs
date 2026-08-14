@@ -7,6 +7,12 @@ using UltraSim.ECS;
 
 namespace UltraSim.Server.Persistence;
 
+/// <summary>Coordinates bounded participant capture, staged restore, and crash-durable save-set publication.</summary>
+/// <remarks>
+/// One exclusive writer lease serializes publication. Capture and prepare are
+/// private-state phases; callers publish a validated <see cref="PreparedLoadGeneration"/>
+/// exactly once through their authoritative root.
+/// </remarks>
 public sealed class SaveSetCoordinator
 {
     private const int MaximumManifestBytes = 1024 * 1024;
@@ -483,7 +489,10 @@ internal sealed class BoundedWriteStream : Stream
     }
 }
 
+/// <summary>Canonical manifest entry for one bounded participant artifact.</summary>
 public sealed record SaveSetArtifact(string Key, string FileName, long ByteCount, string Sha256);
+
+/// <summary>Complete save-set commit metadata published only after every artifact is durable.</summary>
 public sealed record SaveSetManifest(int FormatVersion, ulong Sequence, long UnixMilliseconds, SaveSetArtifact[] Artifacts);
 
 [JsonSerializable(typeof(SaveSetManifest))]

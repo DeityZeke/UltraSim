@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
 string root = FindRepositoryRoot();
@@ -6,6 +7,8 @@ VerificationOptions options = VerificationOptions.Parse(args);
 
 VerifyArchitecture(root);
 Console.WriteLine("PASS active project dependency boundaries");
+VerifyDocumentation(root);
+Console.WriteLine("PASS documentation architecture and links");
 
 if (options.ArchitectureOnly)
     return 0;
@@ -148,6 +151,175 @@ static void VerifyArchitecture(string root)
     }
 }
 
+static void VerifyDocumentation(string root)
+{
+    string[] rootMarkdown = Directory.EnumerateFiles(root, "*.md", SearchOption.TopDirectoryOnly)
+        .Select(path => Path.GetFileName(path))
+        .OrderBy(static path => path, StringComparer.Ordinal)
+        .ToArray();
+    string[] allowedRootMarkdown = ["README.md"];
+    if (!rootMarkdown.SequenceEqual(allowedRootMarkdown, StringComparer.Ordinal))
+    {
+        throw new InvalidOperationException(
+            "Root Markdown is restricted to the landing page. Put current contracts under Docs/ or the owning " +
+            "subsystem; put unfinished work under Docs/Plans; use git for completed reports.\n" +
+            $"Expected: {string.Join(", ", allowedRootMarkdown)}\nActual: {string.Join(", ", rootMarkdown)}");
+    }
+
+    string[] activeDocuments =
+    [
+        "README.md",
+        "Docs/README.md",
+        "Docs/ARCHITECTURE.md",
+        "Docs/RUNTIME.md",
+        "Docs/PERSISTENCE.md",
+        "Docs/UI.md",
+        "Docs/GAME.md",
+        "Docs/Plans/NETWORK.md",
+        "Kernels/ECS/README.md",
+        "Kernels/ECS/EXECUTION.md",
+        "Kernels/ECS/SCHEDULER.md",
+        "Kernels/ECS/STRUCTURAL.md",
+        "Kernels/ECS/CONTENT.md",
+        "Kernels/ECS/LIFECYCLE.md",
+        "Kernels/ECS/PERSISTENCE.md",
+        "_Benchmarks/README.md",
+        "_Benchmarks/Baselines/README.md",
+        "_Benchmarks/ECS_V2_V3_COMPARISON.md",
+        "_Benchmarks/ECS_EXTREME_SPHERE_STRESS.md",
+        "_Tools/LocalAI/README.md",
+    ];
+    foreach (string document in activeDocuments)
+    {
+        string fullPath = Path.Combine(root, document.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(fullPath))
+            throw new InvalidOperationException($"Canonical documentation '{document}' is missing.");
+        VerifyRelativeMarkdownLinks(root, document, fullPath);
+    }
+
+    var navigation = new Dictionary<string, string[]>(StringComparer.Ordinal)
+    {
+        ["README.md"] = ["Docs/README.md"],
+        ["Docs/README.md"] =
+        [
+            "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
+            "Docs/Plans/NETWORK.md", "Kernels/ECS/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
+        ],
+        ["Kernels/ECS/README.md"] =
+        [
+            "Kernels/ECS/EXECUTION.md", "Kernels/ECS/SCHEDULER.md", "Kernels/ECS/STRUCTURAL.md",
+            "Kernels/ECS/CONTENT.md", "Kernels/ECS/LIFECYCLE.md", "Kernels/ECS/PERSISTENCE.md",
+        ],
+        ["_Benchmarks/README.md"] =
+        [
+            "_Benchmarks/Baselines/README.md", "_Benchmarks/ECS_V2_V3_COMPARISON.md",
+            "_Benchmarks/ECS_EXTREME_SPHERE_STRESS.md",
+        ],
+    };
+    foreach ((string parent, string[] children) in navigation)
+    {
+        string text = File.ReadAllText(Path.Combine(root, parent.Replace('/', Path.DirectorySeparatorChar)));
+        foreach (string child in children)
+        {
+            string fileName = Path.GetFileName(child);
+            if (!text.Contains(fileName, StringComparison.Ordinal))
+                throw new InvalidOperationException($"Documentation map '{parent}' does not link '{child}'.");
+        }
+    }
+
+    string[] staleSentinels =
+    [
+        "V3 lifecycle publication is not implemented yet",
+        "nominal 16 ms / 62.5 Hz",
+        "ECS_NEXT_DESIGN.md",
+        "S0 Integration Design.md",
+    ];
+    foreach (string document in activeDocuments)
+    {
+        string text = File.ReadAllText(Path.Combine(root, document.Replace('/', Path.DirectorySeparatorChar)));
+        foreach (string sentinel in staleSentinels)
+        {
+            if (text.Contains(sentinel, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Stale documentation claim '{sentinel}' appears in '{document}'.");
+        }
+    }
+
+    string[] productionRoots = ["Kernels", "Server", "Client", "Game"];
+    string[] documentationErrors =
+    [
+        "CS1570", "CS1572", "CS1573", "CS1574", "CS1580", "CS1581", "CS1584", "CS1587",
+        "CS1711", "CS1734", "CS1735",
+    ];
+    foreach (string projectPath in productionRoots
+        .SelectMany(folder => Directory.EnumerateFiles(Path.Combine(root, folder), "*.csproj", SearchOption.AllDirectories)))
+    {
+        string relative = Relative(root, projectPath);
+        XDocument project = XDocument.Load(projectPath, LoadOptions.SetLineInfo);
+        bool generateDocumentation = project.Descendants("GenerateDocumentationFile")
+            .Any(element => string.Equals(element.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase));
+        if (!generateDocumentation)
+            throw new InvalidOperationException($"Production project '{relative}' must emit an XML documentation file.");
+        bool suppressesMissingTrivia = project.Descendants("NoWarn")
+            .Any(element => element.Value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Contains("CS1591", StringComparer.OrdinalIgnoreCase));
+        if (!suppressesMissingTrivia)
+        {
+            throw new InvalidOperationException(
+                $"Production project '{relative}' must state the current intentional CS1591 policy. " +
+                "Semantic public contracts are audited manually; generated/trivial member boilerplate remains suppressed.");
+        }
+        string[] warningsAsErrors = project.Descendants("WarningsAsErrors")
+            .SelectMany(element => element.Value.Split(';',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .ToArray();
+        string[] missingDocumentationErrors = documentationErrors
+            .Where(code => !warningsAsErrors.Contains(code, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+        if (missingDocumentationErrors.Length != 0)
+        {
+            throw new InvalidOperationException(
+                $"Production project '{relative}' must fail malformed or inconsistent XML documentation. " +
+                $"Missing WarningsAsErrors: {string.Join(", ", missingDocumentationErrors)}");
+        }
+    }
+}
+
+static void VerifyRelativeMarkdownLinks(string root, string relativeDocument, string fullPath)
+{
+    string text = File.ReadAllText(fullPath);
+    var links = Regex.Matches(text, @"!?\[[^\]\r\n]*\]\((?<target>[^)\r\n]+)\)", RegexOptions.CultureInvariant);
+    foreach (Match match in links)
+    {
+        string target = match.Groups["target"].Value.Trim();
+        if (target.Length >= 2 && target[0] == '<' && target[^1] == '>')
+            target = target[1..^1];
+        if (target.Length == 0 || target[0] == '#' || target.StartsWith("/", StringComparison.Ordinal) ||
+            Uri.TryCreate(target, UriKind.Absolute, out _))
+        {
+            continue;
+        }
+        int fragment = target.IndexOf('#');
+        if (fragment >= 0) target = target[..fragment];
+        int query = target.IndexOf('?');
+        if (query >= 0) target = target[..query];
+        target = Uri.UnescapeDataString(target.Trim());
+        if (target.Length == 0)
+            continue;
+        string documentDirectory = Path.GetDirectoryName(fullPath)!;
+        string resolved = Path.GetFullPath(Path.Combine(documentDirectory,
+            target.Replace('/', Path.DirectorySeparatorChar)));
+        string containedPrefix = Path.GetFullPath(root) + Path.DirectorySeparatorChar;
+        if (!resolved.StartsWith(containedPrefix, StringComparison.Ordinal) &&
+            !string.Equals(resolved, Path.GetFullPath(root), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Repository-relative link escapes the repository in '{relativeDocument}': {target}");
+        }
+        if (!File.Exists(resolved) && !Directory.Exists(resolved))
+            throw new InvalidOperationException($"Broken relative link in '{relativeDocument}': {target}");
+    }
+}
+
 static string FindRepositoryRoot()
 {
     foreach (string start in new[] { Environment.CurrentDirectory, AppContext.BaseDirectory })
@@ -155,7 +327,8 @@ static string FindRepositoryRoot()
         DirectoryInfo? directory = new(Path.GetFullPath(start));
         while (directory is not null)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "S0 Integration Design.md")) &&
+            if (File.Exists(Path.Combine(directory.FullName, "README.md")) &&
+                File.Exists(Path.Combine(directory.FullName, "Docs", "README.md")) &&
                 Directory.Exists(Path.Combine(directory.FullName, "Kernels")))
                 return directory.FullName;
             directory = directory.Parent;

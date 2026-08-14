@@ -1,6 +1,6 @@
 namespace UltraSim.Server.Hosting;
 
-/// <summary>Severity used by the one S0.2 host diagnostics capability.</summary>
+/// <summary>Severity used by the host diagnostics capability.</summary>
 public enum HostLogLevel : byte
 {
     Trace = 0,
@@ -10,7 +10,7 @@ public enum HostLogLevel : byte
 }
 
 /// <summary>
-/// Explicit, typed host output capability consumed by S0.2.
+/// Explicit, typed host output capability.
 /// </summary>
 /// <remarks>
 /// This is intentionally a sink rather than a general service lookup mechanism.
@@ -23,7 +23,7 @@ public interface IHostLogSink
 }
 
 /// <summary>
-/// Cold host capabilities. S0.2 currently consumes only optional diagnostics.
+/// Cold host capabilities; a missing diagnostics sink is valid.
 /// </summary>
 public readonly struct HostCapabilities
 {

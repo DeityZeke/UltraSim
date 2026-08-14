@@ -85,7 +85,8 @@ internal sealed record SimulationOptions(
         DirectoryInfo? current = new(AppContext.BaseDirectory);
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current.FullName, "ECS_NEXT_DESIGN.md")) &&
+            if (File.Exists(Path.Combine(current.FullName, "README.md")) &&
+                File.Exists(Path.Combine(current.FullName, "Docs", "README.md")) &&
                 Directory.Exists(Path.Combine(current.FullName, "Kernels", "ECS")))
                 return current.FullName;
             current = current.Parent;

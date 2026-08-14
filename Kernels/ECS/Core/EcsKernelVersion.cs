@@ -2,7 +2,8 @@ namespace UltraSim.ECS;
 
 /// <summary>
 /// Cold tooling identity for the active ECS engineering checkpoint. This is not
-/// yet a public API compatibility contract; see ECS_VERSIONING.md.
+/// a public API compatibility contract; see the version/evidence section in the
+/// ECS README.
 /// </summary>
 internal static class EcsKernelVersion
 {

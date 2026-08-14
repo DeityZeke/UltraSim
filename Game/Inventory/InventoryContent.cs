@@ -51,7 +51,7 @@ public readonly record struct InventoryItemDefinition
         if ((allowedEquipSlots & ~InventoryEquipSlots.MainHand) != 0)
             throw new ArgumentOutOfRangeException(nameof(allowedEquipSlots));
         if (allowedEquipSlots != InventoryEquipSlots.None && maximumQuantity != 1)
-            throw new ArgumentException("Equippable S0 items must be non-stackable.", nameof(maximumQuantity));
+            throw new ArgumentException("Equippable inventory items must be non-stackable.", nameof(maximumQuantity));
 
         Handle = handle;
         Key = key;
@@ -133,7 +133,7 @@ public static class InventoryContent
         if ((allowedEquipSlots & ~InventoryEquipSlots.MainHand) != 0)
             throw new ArgumentOutOfRangeException(nameof(allowedEquipSlots));
         if (allowedEquipSlots != InventoryEquipSlots.None && maximumQuantity != 1)
-            throw new ArgumentException("Equippable S0 items must be non-stackable.", nameof(maximumQuantity));
+            throw new ArgumentException("Equippable inventory items must be non-stackable.", nameof(maximumQuantity));
 
         var prefab = content.Define(key);
         prefab.With(new InventoryItem

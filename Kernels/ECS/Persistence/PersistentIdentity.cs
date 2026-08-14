@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace UltraSim.ECS;
 
+/// <summary>Stable durable world identity; unlike <see cref="WorldId"/>, it survives process/runtime replacement.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = 8)]
 public readonly struct PersistentWorldId : IEquatable<PersistentWorldId>, IComparable<PersistentWorldId>
 {
@@ -21,6 +22,7 @@ public readonly struct PersistentWorldId : IEquatable<PersistentWorldId>, ICompa
     public static bool operator !=(PersistentWorldId left, PersistentWorldId right) => !left.Equals(right);
 }
 
+/// <summary>Stable durable entity identity unique only within one <see cref="PersistentWorldId"/>.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = 8)]
 public readonly struct PersistentEntityId : IEquatable<PersistentEntityId>, IComparable<PersistentEntityId>
 {
@@ -40,6 +42,7 @@ public readonly struct PersistentEntityId : IEquatable<PersistentEntityId>, ICom
     public static bool operator !=(PersistentEntityId left, PersistentEntityId right) => !left.Equals(right);
 }
 
+/// <summary>Complete cross-world durable entity key combining world and entity identity.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 8, Size = 16)]
 public readonly struct PersistentEntityKey : IEquatable<PersistentEntityKey>
 {
@@ -57,6 +60,7 @@ public readonly struct PersistentEntityKey : IEquatable<PersistentEntityKey>
     public override int GetHashCode() => HashCode.Combine(World, Entity);
 }
 
+/// <summary>Dense snapshot-local entity-reference ordinal; the maximum value represents null.</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4, Size = 4)]
 public readonly struct SaveEntityOrdinal : IEquatable<SaveEntityOrdinal>
 {
@@ -69,6 +73,7 @@ public readonly struct SaveEntityOrdinal : IEquatable<SaveEntityOrdinal>
     public override int GetHashCode() => unchecked((int)Value);
 }
 
+/// <summary>Cold world persistence identity and durable allocator high-water state.</summary>
 public readonly struct PersistenceIdentityOptions : IEquatable<PersistenceIdentityOptions>
 {
     public PersistenceIdentityOptions(PersistentWorldId worldId, ulong allocatorHighWater = 0)

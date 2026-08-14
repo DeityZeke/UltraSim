@@ -7,13 +7,14 @@ using UltraSim.Server.Runtime;
 
 namespace UltraSim.Game.Composition;
 
+/// <summary>Private candidate world and derived content/index state prepared before generation publication.</summary>
 public readonly record struct GameStaging(
     EcsWorld World,
     InventoryGenerationState Inventory,
     GameContent Content,
     ComponentLookup<GameSimulationState> SimulationLookup);
 
-/// <summary>Concrete S0 game composition: one schema, content set, and root.</summary>
+/// <summary>Concrete game composition owning one schema, content set, and generation-state root.</summary>
 public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEntityBinder
 {
     private readonly ConditionalWeakTable<EcsWorld, GameContent> _contentByWorld = new();

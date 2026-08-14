@@ -5,6 +5,7 @@ using System.Text;
 
 namespace UltraSim.ECS;
 
+/// <summary>Hard preflight ceilings for untrusted artifacts, logical counts, payload, and temporary memory.</summary>
 public readonly struct PersistenceLimits
 {
     public PersistenceLimits(long maximumArtifactBytes, int maximumEntities, int maximumShapes,
@@ -34,6 +35,7 @@ public readonly struct PersistenceLimits
         ComponentSchema.MaximumComponentCount, 1_000_000, 1_250_000_000, 2_000_000_000);
 }
 
+/// <summary>Restore limits, current chunk layout, and bounded diagnostic policy.</summary>
 public readonly struct PersistenceRestoreOptions
 {
     public PersistenceRestoreOptions(PersistenceLimits limits, ChunkLayoutOptions chunkLayout,
@@ -50,6 +52,7 @@ public readonly struct PersistenceRestoreOptions
     public int MaximumDiagnostics { get; }
 }
 
+/// <summary>One current canonical archetype shape and capacity required by a staged restore.</summary>
 public sealed class PersistenceRestoreShapeRequirement
 {
     internal PersistenceRestoreShapeRequirement(ComponentId[] components, int entityCount, int maximumChunks)
@@ -59,6 +62,7 @@ public sealed class PersistenceRestoreShapeRequirement
     public int MaximumChunks { get; }
 }
 
+/// <summary>Validated staging-world requirements produced before any authoritative publication.</summary>
 public sealed class PersistenceRestoreRequirements
 {
     private readonly PersistenceRestoreShapeRequirement[] _shapes;
@@ -82,6 +86,7 @@ public sealed class PersistenceRestoreRequirements
     public PersistenceIdentityOptions IdentityOptions => new(PersistentWorldId, AllocatorHighWater);
 }
 
+/// <summary>Phase timing, logical counts, and compatibility actions for one successful restore.</summary>
 public readonly struct PersistenceRestoreReport
 {
     internal PersistenceRestoreReport(long parse, long preflight, long construct, long allocate, long hydrate,
@@ -102,6 +107,7 @@ public readonly struct PersistenceRestoreReport
     public int DroppedComponentCount { get; }
 }
 
+/// <summary>Single-use validated restore plan that constructs only a caller-supplied private staging world.</summary>
 public sealed class PersistenceRestorePlan
 {
     private readonly ParsedSnapshot _snapshot;
@@ -249,6 +255,7 @@ public sealed class PersistenceRestorePlan
     }
 }
 
+/// <summary>Strict preflight and staged full-world restoration entry points.</summary>
 public static partial class EcsPersistenceRestore
 {
     public static PersistenceRestorePlan Preflight(ReadOnlyMemory<byte> artifact, PersistenceCatalog catalog,
