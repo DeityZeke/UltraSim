@@ -258,7 +258,7 @@ Keep these domains explicit and non-interchangeable:
 
 ```text
 ConnectionId             transport/session slot and generation
-SecurityEpoch            key/replay lifetime
+SecurityEpoch            directional key/authenticated-replay lifetime
 ParticipantId            stable game-side participant identity
 ServerGenerationId       active authority root identity
 StateEpoch               one published world projection lifetime
@@ -267,7 +267,7 @@ WireEntityAlias          optional connection-relative compact encoding
 ClientEntitySlot         client-local projection storage identity
 PersistentEntityKey      durable world + entity identity
 UiViewInstanceId         retained UI interaction lifetime
-PacketNumber             datagram acknowledgement/replay domain
+PacketNumber             authenticated datagram identity; admitted data may be transport-ACKed
 LaneSequence             per-delivery-contract order/version domain
 ```
 
@@ -501,6 +501,26 @@ Parsing is canonical and fail-closed:
 - data is not applied before authentication, integrity, replay, epoch, and
   semantic validation;
 - decoder failure cannot publish partial client or authority state.
+
+Authentication, transport delivery, and application knowledge are separate:
+
+```text
+AuthenticatedReplayWindow
+    successful AEAD packet-number fact
+    commits even when bounded reliable admission defers delivery
+
+TransportDeliveryAckWindow
+    data admitted into bounded receive/reassembly state
+    drives packet ACK ranges and sender fragment release
+
+application/baseline acknowledgement
+    higher semantic proof defined by the owning message contract
+```
+
+A delivery-blocked reliable packet is not transport-ACKed. Its exact ciphertext is
+still replay-rejected, while the retained semantic fragment may be retransmitted under
+a fresh packet number. A transport-delivery ACK never by itself means that gameplay
+executed, UI rendered, a baseline committed, or recipient-known state advanced.
 
 Compact encoding is earned through measured traffic: field masks, deltas,
 quantized transforms, recipient-relative short identity, and shared cohort
@@ -863,7 +883,8 @@ Tests:
 Implemented as a single-owner bounded topology. A stateless HMAC cookie precedes
 connection allocation and ECDH work. Ephemeral P-256 ECDH is authenticated by a
 pinned P-256 server signature; HKDF-SHA256 derives directional AES-256-GCM epoch
-keys. Canonical authenticated outer framing, a 64-packet replay/ACK window,
+keys. Canonical authenticated outer framing, independent 64-packet authenticated-
+replay and transport-delivery ACK windows,
 reliable ordered retention, sequenced latest delivery, fragmentation/reassembly,
 RTT/RTO, congestion backoff, pump budgets, and authenticated epoch advancement
 run across deterministic datagrams.
@@ -883,7 +904,8 @@ sequenced Input/State, admitted fragmentation, congestion/pacing foundation,
 and deterministic impairment.
 
 Tests cover every lane under loss, duplication, reorder, delay, burst loss,
-wrap, MTU edges, tamper, replay, key change, and shutdown.
+wrap, MTU edges, associated-header/ciphertext/tag tamper, authenticated invalid
+frames, replay during delivery backpressure, key change, and shutdown.
 
 Gate: ProtocolLoopback exhibits production delivery/security semantics without
 OS sockets.

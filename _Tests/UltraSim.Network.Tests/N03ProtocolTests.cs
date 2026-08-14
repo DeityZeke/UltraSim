@@ -16,6 +16,8 @@ internal static class N03ProtocolTests
         Run("UnreliableLanesApplySequencingAndCoalescing", UnreliableLanesApplySequencingAndCoalescing);
         Run("BulkFragmentationReassemblesExactlyAtSmallMtu", BulkFragmentationReassemblesExactly);
         Run("ReplayAndAuthenticationRejectBeforePublication", ReplayAndAuthenticationRejectBeforePublication);
+        Run("AuthenticatedReplayIsIndependentFromDeliveryBackpressure", AuthenticatedReplayIsIndependentFromDeliveryBackpressure);
+        Run("AuthenticatedRegionsRejectWithoutStatePublication", AuthenticatedRegionsRejectWithoutStatePublication);
         Run("ReceiveBackpressureRetainsReliableMessage", ReceiveBackpressureRetainsReliableMessage);
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
@@ -155,6 +157,140 @@ internal static class N03ProtocolTests
         True(server.AuthenticationFailures > 0);
         True(server.ReplayRejections > 0);
         Equal(0, server.ReceivedQueued);
+    }
+
+    private static void AuthenticatedReplayIsIndependentFromDeliveryBackpressure()
+    {
+        NetworkProtocolLimits limits = s_limits with { MaximumReceivedMessages = 1 };
+        using ProtocolLoopback loopback = Create(new(0xA11CE, 0, 1_000, 0, 0), s_datagrams, limits);
+        byte[] first = { 1 };
+        byte[] blocked = { 2 };
+
+        Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Event), first));
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 1, 1_000);
+        Drive(loopback, () => loopback.Client.ReliableQueued == 0, 1_000);
+
+        NetworkProtocolSnapshot before = loopback.Server.GetSnapshot();
+        Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Event), blocked));
+        loopback.Pump(); // Emit the packet and its forced duplicate.
+        loopback.Pump(); // Authenticate one copy, defer delivery, and reject the duplicate as replay.
+
+        NetworkProtocolSnapshot deferred = loopback.Server.GetSnapshot();
+        Equal(before.CapacityDrops + 1, deferred.CapacityDrops);
+        Equal(before.ReplayRejections + 1, deferred.ReplayRejections);
+        Equal(1, loopback.Server.ReceivedQueued);
+        Equal(1, loopback.Client.ReliableQueued);
+
+        AssertReceive(loopback.Server, NetworkLane.Event, first);
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 1, 1_000);
+        AssertReceive(loopback.Server, NetworkLane.Event, blocked);
+        Drive(loopback, () => loopback.Client.ReliableQueued == 0, 1_000);
+    }
+
+    private static void AuthenticatedRegionsRejectWithoutStatePublication()
+    {
+        var link = new DeterministicDatagramLink(s_datagrams);
+        byte[] masterSecret = Enumerable.Range(1, 32).Select(static value => (byte)value).ToArray();
+        var connection = new ConnectionId(7, 3);
+        var epoch = new SecurityEpoch(1);
+        using var sender = new NetworkProtocolPeer(
+            link.A, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: true);
+        using var receiver = new NetworkProtocolPeer(
+            link.B, s_manifest, s_limits, s_datagrams, connection, epoch, masterSecret,
+            sendsClientToServer: false);
+        byte[] authenticatedInvalid = CreateAuthenticatedDatagram(
+            masterSecret, connection, epoch, new PacketNumber(1), stackalloc byte[] { 0xFF });
+        CryptographicOperations.ZeroMemory(masterSecret);
+
+        byte[] expected = { 4, 8, 15, 16, 23, 42 };
+        Equal(NetworkQueueStatus.Accepted, sender.TryQueue(Id(NetworkLane.Event), expected));
+        sender.Emit(0);
+        byte[] original = new byte[s_datagrams.MaximumDatagramBytes];
+        True(link.B.TryReceive(original, out int originalLength));
+        Array.Resize(ref original, originalLength);
+        True(NetworkSecureDatagramFraming.TryReadExact(original, out NetworkSecureDatagramHeader header,
+            out _, out ReadOnlySpan<byte> ciphertext, out _));
+        True(ciphertext.Length > 0);
+
+        byte[] headerTamper = (byte[])original.Clone();
+        var headerWriter = new NetworkPacketWriter(
+            headerTamper.AsSpan(0, NetworkSecureDatagramFraming.HeaderBytes));
+        True(NetworkSecureDatagramFraming.TryWriteHeader(ref headerWriter,
+            header with { PacketNumber = new PacketNumber(header.PacketNumber.Value + 1) }));
+        True(NetworkSecureDatagramFraming.TryReadExact(headerTamper, out _, out _, out _, out _));
+
+        byte[] ciphertextTamper = (byte[])original.Clone();
+        ciphertextTamper[NetworkSecureDatagramFraming.HeaderBytes] ^= 0x40;
+        byte[] tagTamper = (byte[])original.Clone();
+        tagTamper[^1] ^= 0x80;
+
+        AssertAuthenticationFailureWithoutPublication(link, receiver, headerTamper, 1);
+        AssertAuthenticationFailureWithoutPublication(link, receiver, ciphertextTamper, 2);
+        AssertAuthenticationFailureWithoutPublication(link, receiver, tagTamper, 3);
+
+        NetworkProtocolSnapshot beforeInvalid = receiver.GetSnapshot();
+        Equal(DatagramSendStatus.Accepted, link.A.TrySend(authenticatedInvalid));
+        Equal(DatagramSendStatus.Accepted, link.A.TrySend(authenticatedInvalid));
+        receiver.ProcessInbound(0);
+        NetworkProtocolSnapshot afterInvalid = receiver.GetSnapshot();
+        Equal(beforeInvalid.AuthenticationFailures, afterInvalid.AuthenticationFailures);
+        Equal(beforeInvalid.ReplayRejections + 1, afterInvalid.ReplayRejections);
+        Equal(beforeInvalid.ReceivedPackets, afterInvalid.ReceivedPackets);
+        Equal(beforeInvalid.ReceivedQueued, afterInvalid.ReceivedQueued);
+        Equal(beforeInvalid.ReceiveSecurityEpoch, afterInvalid.ReceiveSecurityEpoch);
+
+        Equal(DatagramSendStatus.Accepted, link.A.TrySend(original));
+        receiver.ProcessInbound(0);
+        AssertReceive(receiver, NetworkLane.Event, expected);
+        NetworkProtocolSnapshot accepted = receiver.GetSnapshot();
+        Equal(1UL, accepted.ReceivedPackets);
+        Equal(3UL, accepted.AuthenticationFailures);
+        Equal(1UL, accepted.ReplayRejections);
+        Equal(epoch, accepted.ReceiveSecurityEpoch);
+    }
+
+    private static byte[] CreateAuthenticatedDatagram(
+        ReadOnlySpan<byte> masterSecret,
+        ConnectionId connection,
+        SecurityEpoch epoch,
+        PacketNumber packet,
+        ReadOnlySpan<byte> plaintext)
+    {
+        byte[] datagram = new byte[
+            NetworkSecureDatagramFraming.HeaderBytes + plaintext.Length + NetworkSecureDatagramFraming.TagBytes];
+        var header = new NetworkSecureDatagramHeader(
+            s_manifest.Version, connection, epoch, packet, NetworkSecureDatagramKind.Data,
+            checked((ushort)plaintext.Length));
+        var writer = new NetworkPacketWriter(datagram.AsSpan(0, NetworkSecureDatagramFraming.HeaderBytes));
+        True(NetworkSecureDatagramFraming.TryWriteHeader(ref writer, header));
+        using var cryptography = new NetworkDirectionalCryptography(
+            masterSecret, clientToServer: true, epoch);
+        cryptography.Encrypt(packet, plaintext,
+            datagram.AsSpan(NetworkSecureDatagramFraming.HeaderBytes, plaintext.Length),
+            datagram.AsSpan(NetworkSecureDatagramFraming.HeaderBytes + plaintext.Length,
+                NetworkSecureDatagramFraming.TagBytes),
+            datagram.AsSpan(0, NetworkSecureDatagramFraming.HeaderBytes));
+        return datagram;
+    }
+
+    private static void AssertAuthenticationFailureWithoutPublication(
+        DeterministicDatagramLink link,
+        NetworkProtocolPeer receiver,
+        ReadOnlySpan<byte> datagram,
+        ulong expectedFailures)
+    {
+        NetworkProtocolSnapshot before = receiver.GetSnapshot();
+        Equal(DatagramSendStatus.Accepted, link.A.TrySend(datagram));
+        receiver.ProcessInbound(0);
+        NetworkProtocolSnapshot after = receiver.GetSnapshot();
+        Equal(expectedFailures, after.AuthenticationFailures);
+        Equal(before.ReplayRejections, after.ReplayRejections);
+        Equal(before.ReceivedPackets, after.ReceivedPackets);
+        Equal(before.ReceivedQueued, after.ReceivedQueued);
+        Equal(before.CapacityDrops, after.CapacityDrops);
+        Equal(before.SequencedDrops, after.SequencedDrops);
+        Equal(before.ReceiveSecurityEpoch, after.ReceiveSecurityEpoch);
     }
 
     private static void ReceiveBackpressureRetainsReliableMessage()

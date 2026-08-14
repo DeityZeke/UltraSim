@@ -36,7 +36,7 @@ Identity is explicit and non-interchangeable:
 | --- | --- | --- |
 | `ConnectionId` | Network | Server-created transport slot plus reuse generation; neither durable nor client-chosen. |
 | `SecurityEpoch` | Network | Key/replay lifetime within one connection. |
-| `PacketNumber` | Network | Datagram acknowledgement/replay sequence domain. |
+| `PacketNumber` | Network | Authenticated datagram sequence; admitted data packet numbers are referenced separately by transport-delivery ACKs. |
 | `LaneSequence` | Network | Per-connection delivery-lane sequence domain. |
 | `StateEpoch` | Projection/protocol seam | One coherent canonical projection generation. |
 | `ReplicationEntityId` | Canonical projection | Dense generational identity shared by all recipients within one `StateEpoch`. |
@@ -94,12 +94,21 @@ work above the secure Control lane.
 
 Established datagrams use AES-256-GCM with a 128-bit tag. The canonical outer
 header is associated data. Directional keys are distinct and the nonce domain is
-`SecurityEpoch + PacketNumber`. Authentication and complete frame validation occur
-before replay, acknowledgement, lane, reassembly, epoch, or delivery state publishes.
+`SecurityEpoch + PacketNumber`. Exact outer framing and AEAD authentication precede
+all inner protocol processing. A successful authentication commits the packet number
+to a security replay window even if bounded semantic admission must defer the data.
+Malformed outer framing or unauthenticated bytes publish neither replay, epoch, lane,
+reassembly, acknowledgement, nor delivery state.
+
+Authentication replay and transport delivery are deliberately separate facts. A
+second window contains only data packets admitted into bounded delivery/reassembly
+machinery and alone drives ACK ranges. If reliable admission is blocked, the packet
+is replay-protected but not ACKed; the sender retains the semantic fragment and
+retransmits it under a fresh `PacketNumber`.
 
 The bounded delivery machine provides:
 
-- a 64-packet replay/acknowledgement window;
+- independent 64-packet authenticated-replay and transport-delivery windows;
 - reliable ordered Control, Event, and Bulk retention with ACK-driven release;
 - unreliable sequenced Input, OwnerState, and WorldState coalescing;
 - disposable unordered delivery;
@@ -117,6 +126,12 @@ N0.3 remains single-owner. The N0.2 SPSC ring proves token transport and the pac
 pool proves single-owner packet memory independently; cross-thread packet-memory
 handoff is not claimed. N0.5 must admit per-owner pools or one transactional
 ownership-transfer-plus-publication primitive before a socket worker touches buffers.
+
+An N0.3 ACK is specifically a **transport-delivery ACK**: the remote protocol peer
+authenticated the packet and admitted its reliable payload into bounded receive or
+reassembly state. It does not prove that game logic executed, UI state rendered, a
+baseline was applied, or recipient-known projection state advanced. Those stronger
+proofs remain distinct application/baseline contracts in later slices.
 
 ## Lane contracts
 
@@ -234,6 +249,9 @@ bounded lane semantics. The N0.3 standalone baseline is not mislabeled as a rati
 - protocol fingerprints include protocol version;
 - cookies gate allocation and pinned-server key exchange;
 - authentication rejects corruption before state publication;
+- authenticated replay is independent from transport-delivery ACK state;
+- header-associated-data, ciphertext, and tag tampering publish no protocol state;
+- duplicated authentic ciphertext is replay-rejected even while reliable delivery is blocked;
 - replay, ACK, retransmission, RTT/RTO, congestion, sequencing, fragmentation,
   receive backpressure, and epoch rotation pass deterministic impairment tests;
 - normal warmed secure delivery allocates zero managed bytes.

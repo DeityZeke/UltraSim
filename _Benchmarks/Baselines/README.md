@@ -36,7 +36,8 @@ Useful current anchors can be located by their embedded workload or filename:
   producer ring, deterministic datagram, and connection reuse evidence; the
   `hardened` artifact includes checked signed codecs and the versioned fingerprint;
 - `network-n0.3-secure-protocol-*` — fixed-runtime secure/reliable loopback delivery,
-  fragmentation, and impaired convergence evidence;
+  fragmentation, and impaired convergence evidence; the `replay-hardened` artifact
+  separates authenticated packet replay from transport-delivery acknowledgement;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

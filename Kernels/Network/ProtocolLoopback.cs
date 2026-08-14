@@ -232,7 +232,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _acknowledgements;
     private ulong _sequencedDrops;
     private ulong _capacityDrops;
-    private NetworkReplayWindow _replay;
+    private NetworkPacketWindow _authenticatedPackets;
+    private NetworkPacketWindow _transportDeliveries;
     private bool _ackPending;
     private int _inFlight;
     private int _congestionWindow;
@@ -537,7 +538,7 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private bool TryEmitAcknowledgement()
     {
-        if (!_replay.TryGetAcknowledgement(out ulong largest, out ulong mask))
+        if (!_transportDeliveries.TryGetRange(out ulong largest, out ulong mask))
         {
             _ackPending = false;
             return false;
@@ -605,8 +606,9 @@ public sealed class NetworkProtocolPeer : IDisposable
 
         uint receiveEpoch = _receiveCryptography.Epoch.Value;
         bool potentialAdvance = receiveEpoch != uint.MaxValue && header.SecurityEpoch.Value == receiveEpoch + 1;
-        NetworkReplayWindow candidateReplay = potentialAdvance ? default : _replay;
-        if (!candidateReplay.TryPrepare(header.PacketNumber, out NetworkReplayTransition replayTransition))
+        NetworkPacketWindow candidateAuthentication = potentialAdvance ? default : _authenticatedPackets;
+        if (!candidateAuthentication.TryPrepare(header.PacketNumber,
+                out NetworkPacketWindowTransition authenticationTransition))
         {
             _replayRejections++;
             return;
@@ -618,25 +620,37 @@ public sealed class NetworkProtocolPeer : IDisposable
             _authenticationFailures++;
             return;
         }
-        bool accepted = header.Kind switch
-        {
-            NetworkSecureDatagramKind.Data => ProcessData(plaintext),
-            NetworkSecureDatagramKind.Acknowledgement => ProcessAcknowledgement(plaintext, step),
-            _ => false,
-        };
-        if (!accepted) return;
+
+        // Authentication and delivery are distinct facts. An authentic packet number is
+        // consumed even when bounded semantic admission must defer it; reliable retry uses
+        // a fresh packet number and remains unacknowledged until that retry is admitted.
         if (advanced)
         {
             if (!_receiveCryptography.CommitAdvance(header.SecurityEpoch))
                 throw new InvalidOperationException("An authenticated next security epoch could not be committed.");
-            _replay.Reset();
+            _authenticatedPackets.Reset();
+            _transportDeliveries.Reset();
+            _ackPending = false;
         }
-        _replay.Commit(replayTransition);
+        _authenticatedPackets.Commit(authenticationTransition);
+
+        if (header.Kind == NetworkSecureDatagramKind.Acknowledgement)
+        {
+            if (ProcessAcknowledgement(plaintext, step)) _receivedPacketsCount++;
+            return;
+        }
+
+        NetworkDeliveryAdmission admission = ProcessData(plaintext);
+        if (admission != NetworkDeliveryAdmission.Admitted) return;
+        if (!_transportDeliveries.TryPrepare(header.PacketNumber,
+                out NetworkPacketWindowTransition deliveryTransition))
+            throw new InvalidOperationException("An authenticated admitted packet could not enter the delivery window.");
+        _transportDeliveries.Commit(deliveryTransition);
         _receivedPacketsCount++;
-        if (header.Kind == NetworkSecureDatagramKind.Data) _ackPending = true;
+        _ackPending = true;
     }
 
-    private bool ProcessData(ReadOnlySpan<byte> plaintext)
+    private NetworkDeliveryAdmission ProcessData(ReadOnlySpan<byte> plaintext)
     {
         var reader = new NetworkPacketReader(plaintext);
         if (!NetworkDataFrameCodec.TryRead(ref reader, out NetworkDataFrameHeader header) ||
@@ -646,7 +660,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             !_manifest.TryGet(header.MessageId, out NetworkMessageDescriptor descriptor) ||
             descriptor.Version != header.MessageVersion || descriptor.Lane != header.Lane ||
             header.MessageLength > descriptor.MaximumEncodedBytes)
-            return false;
+            return NetworkDeliveryAdmission.Invalid;
 
         int fragmentPayload = FragmentPayloadBytes;
         int offset = header.FragmentIndex * fragmentPayload;
@@ -654,7 +668,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (offset < 0 || offset > header.MessageLength || expectedLength != header.FragmentLength ||
             (header.FragmentCount > 1 && !NetworkLaneContracts.Get(header.Lane).AllowsFragmentation) ||
             header.FragmentCount != Math.Max(1, (header.MessageLength + fragmentPayload - 1) / fragmentPayload))
-            return false;
+            return NetworkDeliveryAdmission.Invalid;
 
         NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
         int laneIndex = (int)header.Lane;
@@ -665,12 +679,12 @@ public sealed class NetworkProtocolPeer : IDisposable
             header.LaneSequence.Value <= _nextReceiveSequences[laneIndex])
         {
             _sequencedDrops++;
-            return true;
+            return NetworkDeliveryAdmission.Admitted;
         }
         if (_receivedFreeCount == 0)
         {
             _capacityDrops++;
-            return true;
+            return NetworkDeliveryAdmission.Admitted;
         }
         EnqueueReceived(header.Lane, header.MessageId, header.MessageVersion, header.LaneSequence, fragment);
         if (contract.Order == NetworkDeliveryOrder.Sequenced)
@@ -678,15 +692,18 @@ public sealed class NetworkProtocolPeer : IDisposable
             _receiveSequenceInitialized[laneIndex] = true;
             _nextReceiveSequences[laneIndex] = header.LaneSequence.Value;
         }
-        return true;
+        return NetworkDeliveryAdmission.Admitted;
     }
 
-    private bool ProcessReliableFragment(in NetworkDataFrameHeader header, ReadOnlySpan<byte> fragment, int offset)
+    private NetworkDeliveryAdmission ProcessReliableFragment(
+        in NetworkDataFrameHeader header,
+        ReadOnlySpan<byte> fragment,
+        int offset)
     {
         int laneIndex = (int)header.Lane;
         ulong expected = _nextReceiveSequences[laneIndex];
-        if (header.LaneSequence.Value < expected) return true;
-        if (header.LaneSequence.Value > expected) return false;
+        if (header.LaneSequence.Value < expected) return NetworkDeliveryAdmission.Admitted;
+        if (header.LaneSequence.Value > expected) return NetworkDeliveryAdmission.Deferred;
         ref ReassemblyState state = ref _reassembly[laneIndex];
         if (!state.Active)
             state = new(true, header.MessageId, header.MessageVersion, header.LaneSequence,
@@ -694,7 +711,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         else if (state.MessageId != header.MessageId || state.MessageVersion != header.MessageVersion ||
             state.Sequence != header.LaneSequence || state.FragmentCount != header.FragmentCount ||
             state.MessageLength != header.MessageLength)
-            return false;
+            return NetworkDeliveryAdmission.Invalid;
 
         ulong bit = 1UL << header.FragmentIndex;
         if ((state.ReceivedMask & bit) == 0)
@@ -703,11 +720,11 @@ public sealed class NetworkProtocolPeer : IDisposable
             state = state with { ReceivedMask = state.ReceivedMask | bit };
         }
         ulong completeMask = header.FragmentCount == 64 ? ulong.MaxValue : (1UL << header.FragmentCount) - 1;
-        if (state.ReceivedMask != completeMask) return true;
+        if (state.ReceivedMask != completeMask) return NetworkDeliveryAdmission.Admitted;
         if (_receivedFreeCount == 0)
         {
             _capacityDrops++;
-            return false;
+            return NetworkDeliveryAdmission.Deferred;
         }
         EnqueueReceived(header.Lane, header.MessageId, header.MessageVersion, header.LaneSequence,
             ReassemblyPayload(header.Lane)[..header.MessageLength]);
@@ -715,7 +732,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         state = default;
         _nextReceiveSequences[laneIndex] = expected + 1;
         _receiveSequenceInitialized[laneIndex] = true;
-        return true;
+        return NetworkDeliveryAdmission.Admitted;
     }
 
     private bool ProcessAcknowledgement(ReadOnlySpan<byte> plaintext, ulong step)
@@ -883,4 +900,11 @@ public sealed class NetworkProtocolPeer : IDisposable
         ushort FragmentCount,
         int MessageLength,
         ulong ReceivedMask);
+
+    private enum NetworkDeliveryAdmission : byte
+    {
+        Invalid = 0,
+        Deferred = 1,
+        Admitted = 2,
+    }
 }

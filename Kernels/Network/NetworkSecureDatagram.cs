@@ -5,6 +5,7 @@ namespace UltraSim.Network;
 public enum NetworkSecureDatagramKind : byte
 {
     Data = 1,
+    // Packet-level transport delivery evidence; never application/baseline proof.
     Acknowledgement = 2,
 }
 
@@ -192,15 +193,16 @@ internal sealed class NetworkDirectionalCryptography : IDisposable
     }
 }
 
-internal readonly record struct NetworkReplayTransition(bool Initialized, ulong Largest, ulong Mask);
+internal readonly record struct NetworkPacketWindowTransition(bool Initialized, ulong Largest, ulong Mask);
 
-internal struct NetworkReplayWindow
+// The caller assigns the meaning: authenticated packet history or admitted-data ACK history.
+internal struct NetworkPacketWindow
 {
     private bool _initialized;
     private ulong _largest;
     private ulong _mask;
 
-    internal bool TryPrepare(PacketNumber packet, out NetworkReplayTransition transition)
+    internal bool TryPrepare(PacketNumber packet, out NetworkPacketWindowTransition transition)
     {
         ulong value = packet.Value;
         if (!_initialized)
@@ -224,10 +226,10 @@ internal struct NetworkReplayWindow
         return true;
     }
 
-    internal void Commit(in NetworkReplayTransition transition) =>
+    internal void Commit(in NetworkPacketWindowTransition transition) =>
         (_initialized, _largest, _mask) = (transition.Initialized, transition.Largest, transition.Mask);
 
-    internal bool TryGetAcknowledgement(out ulong largest, out ulong mask)
+    internal bool TryGetRange(out ulong largest, out ulong mask)
     {
         largest = _largest;
         mask = _mask;
