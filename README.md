@@ -52,6 +52,8 @@ Tick is step identity, delta is elapsed simulation time, fixed
 saving host's frequency, and runtime cadence changes are opt-in and owner-bound.
 Normal performance validation remains fixed 60 Hz, 1x playback, with cadence
 changes/adaptation off. No automatic adaptive controller was added.
+Per-time simulation behavior must prove its intended meaning at multiple fixed
+cadences; per-step behavior must be an explicit documented choice.
 
 The post-acceptance classification keeps S0 accepted: real transport remains a
 Network V3 milestone; `Game/UI` is the intentional server-side game workflow

@@ -394,6 +394,13 @@ host's simulation frequency, playback, or host elapsed residue. A save produced
 at one supported cadence can therefore load exactly at another while the ECS
 scheduler tick and Runtime tick remain equal.
 
+Permanent system-authoring rule: behavior defined per unit of time must use the
+appropriate elapsed or authoritative fixed-point time and prove its intended
+meaning at multiple fixed cadences. Behavior defined per simulation step may use
+tick cadence only as a deliberate, documented choice. This rule applies to
+movement, physics, needs, combat, AI, and every later simulation domain; hidden
+`1 / 60` assumptions are acceptance failures.
+
 No adaptive controller exists in S0. A future opt-in controller may request this
 Runtime capability after explicit fidelity/load-shedding policy, but it lives
 above Runtime. Network replication, rendering, physics/substeps, and AI fidelity

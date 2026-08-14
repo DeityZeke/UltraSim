@@ -238,7 +238,7 @@ internal sealed class WorldClock
 {
     public const long WorldTimeUnitsPerSecond = 1_000_000;
 
-    private readonly WorldClockOptions _options;
+    private readonly WorldClockOptions _initialOptions;
     private int _simulationFrequencyHz;
     private double _fixedStepSeconds;
     private long _stepWholeMicrosecondsPerWorldRate;
@@ -254,12 +254,16 @@ internal sealed class WorldClock
         if (!options.IsValid)
             throw new ArgumentException("World clock options are invalid or default initialized.", nameof(options));
 
-        _options = options;
+        _initialOptions = options;
         ApplySimulationFrequency(options.SimulationFrequencyHz, resetHostResidue: false);
         _playbackRate = options.InitialPlaybackRate;
     }
 
-    public WorldClockOptions Options => _options;
+    /// <summary>
+    /// Gets the cold construction policy. Live cadence and playback are exposed
+    /// separately by <see cref="SimulationFrequencyHz"/> and <see cref="PlaybackRate"/>.
+    /// </summary>
+    public WorldClockOptions InitialOptions => _initialOptions;
 
     public ulong SimulationTick => _simulationTick;
 
@@ -274,21 +278,21 @@ internal sealed class WorldClock
     /// <summary>Captures the authoritative clock fields without host-time residue.</summary>
     public WorldClockSnapshot CaptureSnapshot() => new(
         _simulationFrequencyHz,
-        _options.WorldTimeRate,
+        _initialOptions.WorldTimeRate,
         _simulationTick,
         _worldTimeMicroseconds,
         _worldTimeFractionQuanta,
         _playbackRate);
 
     internal PersistentWorldClockState CapturePersistentState() => new(
-        _options.WorldTimeRate,
+        _initialOptions.WorldTimeRate,
         _simulationTick,
         _worldTimeMicroseconds,
         _worldTimeFractionQuanta);
 
     internal void RestorePersistentState(PersistentWorldClockState state)
     {
-        if (state.WorldTimeRate != _options.WorldTimeRate)
+        if (state.WorldTimeRate != _initialOptions.WorldTimeRate)
         {
             throw new ArgumentException(
                 "The persistent clock state belongs to a different world-time-rate configuration.",
@@ -305,7 +309,7 @@ internal sealed class WorldClock
     /// <remarks>In-flight host elapsed time is intentionally discarded.</remarks>
     internal void RestoreSnapshot(WorldClockSnapshot snapshot)
     {
-        if (snapshot.WorldTimeRate != _options.WorldTimeRate ||
+        if (snapshot.WorldTimeRate != _initialOptions.WorldTimeRate ||
             !WorldClockOptions.IsSupportedSimulationFrequency(snapshot.SimulationFrequencyHz))
         {
             throw new ArgumentException("The clock snapshot contains an unsupported clock configuration.", nameof(snapshot));
@@ -341,11 +345,11 @@ internal sealed class WorldClock
 
         ulong denominator = (ulong)TimeSpan.TicksPerSecond;
         ulong steps = nextAccumulator / denominator;
-        if (steps > (ulong)_options.MaximumSimulationStepsPerAdvance)
+        if (steps > (ulong)_initialOptions.MaximumSimulationStepsPerAdvance)
         {
             throw new InvalidOperationException(
                 $"Host elapsed time requested {steps} simulation steps, exceeding the configured limit " +
-                $"of {_options.MaximumSimulationStepsPerAdvance}.");
+                $"of {_initialOptions.MaximumSimulationStepsPerAdvance}.");
         }
 
         _hostAccumulatorNumerator = nextAccumulator % denominator;
@@ -386,10 +390,10 @@ internal sealed class WorldClock
         // term by the supported int WorldTimeRate therefore remains inside Int64,
         // including int.MaxValue; checked addition still protects accumulated time.
         long totalFractionQuanta = checked(
-            _stepFractionQuantaPerWorldRate * _options.WorldTimeRate +
+            _stepFractionQuantaPerWorldRate * _initialOptions.WorldTimeRate +
             _worldTimeFractionQuanta);
         long wholeMicroseconds = checked(
-            _stepWholeMicrosecondsPerWorldRate * _options.WorldTimeRate +
+            _stepWholeMicrosecondsPerWorldRate * _initialOptions.WorldTimeRate +
             totalFractionQuanta / WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond);
         _worldTimeFractionQuanta = checked((int)(totalFractionQuanta %
             WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond));

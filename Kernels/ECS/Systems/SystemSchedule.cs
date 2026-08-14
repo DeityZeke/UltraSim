@@ -8,8 +8,10 @@ namespace UltraSim.ECS;
 /// tick zero. Dependencies order due invocations but do not force a dependency to
 /// run on a tick where its own cadence is not due. This is step cadence:
 /// <c>PeriodTicks = 10</c> means every ten authoritative simulation steps, not
-/// every ten milliseconds. Time-relative behavior belongs in
-/// <c>DeltaSeconds</c>, authoritative world time, or a game-owned accumulator.
+/// every ten milliseconds. Continuous integration belongs in
+/// <c>DeltaSeconds</c>; exact deadlines and persisted temporal facts belong in
+/// authoritative fixed-point/world time. Per-time behavior must be proven at
+/// multiple fixed cadences. Per-step behavior must be an explicit design choice.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4, Size = 16)]
 public readonly struct SystemSchedule : IEquatable<SystemSchedule>

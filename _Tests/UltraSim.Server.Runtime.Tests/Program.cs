@@ -688,6 +688,8 @@ static void LiveCadenceSurvivesReplacementAndRestoredPublication()
     runtime.Start();
     runtime.SetPlaybackRate(4);
     runtime.SetSimulationFrequency(30);
+    Assert.Equal(60, runtime.CurrentGeneration.Clock.InitialOptions.SimulationFrequencyHz);
+    Assert.Equal(30, runtime.CurrentGeneration.Clock.SimulationFrequencyHz);
     runtime.Tick();
 
     ulong firstGeneration = runtime.ActiveGenerationId;
@@ -696,6 +698,7 @@ static void LiveCadenceSurvivesReplacementAndRestoredPublication()
     Assert.Equal(30, runtime.SimulationFrequencyHz);
     Assert.Near(1d / 30d, runtime.SimulationDeltaSeconds, 0d);
     Assert.Equal(4, runtime.PlaybackRate);
+    Assert.Equal(60, runtime.CurrentGeneration.Clock.InitialOptions.SimulationFrequencyHz);
 
     // Ordinary replacement intentionally creates fresh authoritative state,
     // but the active host cadence/playback policy must remain intact.

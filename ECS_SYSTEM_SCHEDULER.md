@@ -101,6 +101,9 @@ authoritative fixed-point/world clock rather than repeatedly accumulating
 floating-point delta. Tick identity must not be treated as elapsed
 wall/simulation time. Authoritative frequency selection and optional live
 changes remain Runtime/host policy; ECS does not own a cadence controller.
+The acceptance rule is that per-time behavior proves its intended meaning at
+multiple fixed cadences, while per-step behavior uses tick cadence only as an
+explicit documented choice.
 
 `Tick(delta)` consumes external commands before systems, freezes topology while
 the graph executes, merges graph output, applies it at the post barrier, then

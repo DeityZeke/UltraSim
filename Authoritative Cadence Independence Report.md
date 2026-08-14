@@ -178,6 +178,22 @@ Adaptive cadence may trade temporal resolution for overload survival only when
 explicitly enabled by deployment policy; it may never conceal a fixed-rate
 regression.
 
+The permanent gameplay/system acceptance rule is:
+
+```text
+Behavior defined per unit of time
+    -> use elapsed/fixed-point time as appropriate
+    -> prove equivalent meaning at multiple fixed cadences
+
+Behavior defined per simulation step
+    -> tick cadence is allowed only as a deliberate documented choice
+```
+
+This is the regression gate against hidden `1 / 60` assumptions in movement,
+physics, needs, combat, AI, and future simulation domains. It does not require
+every implementation to be bit-identical when its numerical contract says
+otherwise, but the intended cross-cadence semantics must be explicit and tested.
+
 ## Verdict
 
 Cadence independence is now a proven engine capability. Adaptive cadence remains
