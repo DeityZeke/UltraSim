@@ -29,6 +29,13 @@ reports live in git history. Accepted measurements live in immutable JSON under
   - [lifecycle publication](../Kernels/ECS/LIFECYCLE.md)
   - [persistence](../Kernels/ECS/PERSISTENCE.md)
 
+## Network
+
+- [Network kernel foundation](../Kernels/Network/README.md) — N0.0 identity,
+  lane, deterministic trace/impairment, V2 archaeology, and evidence contracts.
+- [Network V3 active plan](Plans/NETWORK.md) — N0.1 through the complete remote
+  authority/client vertical.
+
 ## Evidence and tools
 
 - [Benchmark methodology](../_Benchmarks/README.md)
@@ -38,8 +45,9 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  It starts from the accepted S0 boundaries and cadence-independent Runtime; it
-  does not treat completed ECS or S0 plans as unfinished work.
+  N0.0 is accepted; N0.1 starts from the accepted S0 boundaries and
+  cadence-independent Runtime without treating completed ECS or S0 plans as
+  unfinished work.
 
 ## Source-of-truth hierarchy
 

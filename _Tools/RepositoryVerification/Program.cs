@@ -24,6 +24,7 @@ string[] testProjects =
     "_Tests/UltraSim.Server.Runtime.Tests/UltraSim.Server.Runtime.Tests.csproj",
     "_Tests/UltraSim.Server.Hosting.Tests/UltraSim.Server.Hosting.Tests.csproj",
     "_Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj",
+    "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
     "_Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj",
     "_Tests/UltraSim.Game.Admission.Tests/UltraSim.Game.Admission.Tests.csproj",
@@ -68,6 +69,7 @@ static void VerifyArchitecture(string root)
         ["Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj"] = [],
         ["Kernels/ECS/UltraSim.ECS.csproj"] =
             ["Kernels/ECS.Generators/UltraSim.ECS.Generators.csproj"],
+        ["Kernels/Network/UltraSim.Network.csproj"] = [],
         ["Kernels/UI/UltraSim.UI.csproj"] = [],
         ["Server/Persistence/UltraSim.Server.Persistence.csproj"] =
             ["Kernels/ECS/UltraSim.ECS.csproj"],
@@ -183,6 +185,7 @@ static void VerifyDocumentation(string root)
         "Kernels/ECS/CONTENT.md",
         "Kernels/ECS/LIFECYCLE.md",
         "Kernels/ECS/PERSISTENCE.md",
+        "Kernels/Network/README.md",
         "_Benchmarks/README.md",
         "_Benchmarks/Baselines/README.md",
         "_Benchmarks/ECS_V2_V3_COMPARISON.md",
@@ -203,7 +206,8 @@ static void VerifyDocumentation(string root)
         ["Docs/README.md"] =
         [
             "Docs/ARCHITECTURE.md", "Docs/RUNTIME.md", "Docs/PERSISTENCE.md", "Docs/UI.md", "Docs/GAME.md",
-            "Docs/Plans/NETWORK.md", "Kernels/ECS/README.md", "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
+            "Docs/Plans/NETWORK.md", "Kernels/ECS/README.md", "Kernels/Network/README.md",
+            "_Benchmarks/README.md", "_Tools/LocalAI/README.md",
         ],
         ["Kernels/ECS/README.md"] =
         [

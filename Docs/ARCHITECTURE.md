@@ -93,6 +93,8 @@ derived/application indexes when their ownership and scale are explicit.
 ## Current project groups
 
 - `Kernels/ECS*`: ECS runtime and source generators.
+- `Kernels/Network`: dependency-clean Network V3 identities, lane contracts,
+  deterministic evidence controls, and eventually protocol/transport mechanisms.
 - `Kernels/UI`: neutral view/model/action protocol.
 - `Server/Runtime`, `Server/Hosting`, `Server/Persistence`: authority,
   deployment, and durable save-set mechanics.
@@ -102,5 +104,5 @@ derived/application indexes when their ownership and scale are explicit.
 - `_V2`: frozen historical/reference implementation, compiled only by explicit
   comparison projects.
 
-The next major missing layer is Network V3. Its current contract is in
-[`Plans/NETWORK.md`](Plans/NETWORK.md).
+Network V3 is the active major layer. Its N0.0 kernel/evidence foundation is
+implemented; the remaining checkpoints are in [`Plans/NETWORK.md`](Plans/NETWORK.md).

@@ -32,9 +32,15 @@ when those systems exist.
 | `UltraSim.ECS.SimulationSlice0` | Simulation-shaped public-consumer workload. |
 | `UltraSim.ECS.ExtremeSphere*` | CPU and Godot MultiMesh extreme-scale stress. |
 | `UltraSim.ECS.BitmapExperiment*` | Retained experimental storage oracle; not production ECS. |
+| `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
+
+Network N0.0 has no protocol performance benchmark because there is not yet an
+honest V2/V3 protocol equivalent. Its focused tests validate deterministic trace,
+impairment, lane/identity contracts, zero warmed trace allocation, and comparison
+admission. Network ratios become eligible only as matching later checkpoints exist.
 
 ## Running
 

@@ -6,8 +6,9 @@ very large persistent worlds. The current repository contains the accepted ECS
 protocol and Godot renderer, concrete game composition, Accounting, Admission,
 Inventory, and the completed S0 end-to-end integration slice.
 
-Network V3 is the next major implementation milestone. It is planned, not yet
-implemented.
+Network V3 is the active major implementation milestone. Its N0.0 dependency,
+identity, lane, deterministic-evidence, and comparison foundation is implemented;
+canonical game projection and OfflineDirect capture are next.
 
 ## Design
 
@@ -41,6 +42,8 @@ per-step behavior is an explicit documented choice.
 
 - `Kernels/ECS*` — generated schema/query APIs, packed ECS, scheduler,
   structural/lifecycle/content/persistence mechanisms.
+- `Kernels/Network` — dependency-clean N0.0 identity, lane, deterministic trace,
+  impairment, and evidence contracts; protocol/transport are later checkpoints.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, and semantic port.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
 - `Client/*` — retained client projection and Godot presentation.
@@ -84,6 +87,7 @@ Start with the [documentation map](Docs/README.md).
 - [UI and client projection](Docs/UI.md)
 - [Game composition](Docs/GAME.md)
 - [ECS](Kernels/ECS/README.md)
+- [Network kernel foundation](Kernels/Network/README.md)
 - [Benchmark methodology](_Benchmarks/README.md)
 - [Network V3 active plan](Docs/Plans/NETWORK.md)
 

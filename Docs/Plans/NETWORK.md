@@ -1,6 +1,7 @@
 # Network V3: N0 remote-authority implementation plan
 
-Status: active forward plan. Network V3 is not implemented.
+Status: active forward plan. N0.0 contract/evidence foundation is implemented;
+N0.1 canonical game projection and OfflineDirect capture is next.
 
 This plan starts from accepted ECS 3.4.1, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -259,7 +260,9 @@ SecurityEpoch            key/replay lifetime
 ParticipantId            stable game-side participant identity
 ServerGenerationId       active authority root identity
 StateEpoch               one published world projection lifetime
-NetworkEntityId          recipient/session projection identity
+ReplicationEntityId      canonical dense generational identity within StateEpoch
+WireEntityAlias          optional connection-relative compact encoding
+ClientEntitySlot         client-local projection storage identity
 PersistentEntityKey      durable world + entity identity
 UiViewInstanceId         retained UI interaction lifetime
 PacketNumber             datagram acknowledgement/replay domain
@@ -268,8 +271,12 @@ LaneSequence             per-delivery-contract order/version domain
 
 Runtime `Entity`, chunk row, archetype ID, pointer, and Godot instance ID never
 cross the wire. Persistent identity is interpreted with its world identity.
-Network entity bindings include epoch/generation protection so reuse cannot
-create ABA.
+`ReplicationEntityId` is connection-independent: every recipient normally
+refers to the same canonical replicated entity within one `StateEpoch`. It is
+rebuilt when that epoch changes. `WireEntityAlias` is optional and may be added
+only when bandwidth evidence earns per-connection aliasing; it cannot redefine
+canonical identity. `ClientEntitySlot` is private client storage. Every binding
+includes epoch/generation protection so reuse cannot create ABA.
 
 Do not add a public `RecipientId` for N0. Remote binding is:
 
@@ -300,6 +307,34 @@ new ServerGeneration publishes
 
 Network consumes Admission's reconciliation rather than duplicating
 account/character rebinding.
+
+## Host and Network pump order
+
+Freeze the owner orchestration loop before protocol work:
+
+```text
+sample monotonic time
+    -> receive completions / inbound datagrams
+    -> authenticate and decode into bounded connection-owned ingress
+    -> owner drain and game validation
+    -> publish accepted work to the authoritative input arena
+    -> execute 0..N complete ServerRuntime simulation steps
+    -> capture canonical projection (never mid-step)
+    -> update interest and recipient pending state
+    -> schedule lanes and assemble packets
+    -> bounded transport handoff
+    -> socket submission
+```
+
+`ServerRuntime.Tick(TimeSpan)` may execute zero, one, or several complete steps
+during host catch-up. Projection capture need not run after every step: changed
+values may coalesce after several completed steps, while lifecycle history and
+explicit game-event retention preserve facts that cannot coalesce. Lifecycle
+capacity therefore includes the maximum admitted steps and structural facts
+between captures, including catch-up and host stalls.
+
+Ingress, catch-up, capture, assembly, and transport handoff all have explicit
+budgets. Network never observes or captures a partially executed step.
 
 ## Connection and application state machines
 
@@ -332,13 +367,36 @@ A connection may remain cryptographically healthy while the participant is
 waiting for a character, temporarily resynchronizing, or detached from world
 authority.
 
-Network is the second real trusted-identity producer. At the remote Admission
-phase, replace the local-fixture-shaped `TrustedLocalIdentity` with a bounded
-provider-scoped identity such as `TrustedIdentity { Provider, Subject }`.
-Security/authentication produces a trusted principal; Accounting owns mapping
-that principal to an account. Network never owns password or account policy.
-This change must include persistence/version compatibility rather than an
-unreviewed rename.
+Transport security and game authentication are separate:
+
+```text
+Network handshake/security
+    -> authenticated and integrity-protected channel/session
+
+game authentication over reliable Control
+    -> verifies account/platform credential or token
+    -> TrustedIdentity { Provider, Subject }
+
+Accounting
+    -> TrustedIdentity -> Account
+
+Admission
+    -> Account -> durable Character -> current Entity
+```
+
+A cryptographically established channel does not imply account trust. Network
+is the second real trusted-identity source, so the remote Admission phase
+replaces the local-fixture-shaped `TrustedLocalIdentity` with a bounded
+provider-scoped identity. Network never owns password or account policy. This
+change includes persistence/version compatibility rather than an unreviewed
+rename.
+
+`ParticipantId` is server-created game/session identity: never client-chosen,
+never an account ID, and never durable entity identity. It may survive a
+generation replacement with a healthy connection. Reconnect policy may create
+a new participant or explicitly reattach an existing application session from
+trusted account/durable facts; possession of an old numeric value proves
+nothing.
 
 ## UI and authoritative application semantics
 
@@ -397,15 +455,20 @@ client receives a reliable authoritative clock anchor containing at least:
 
 ```text
 StateEpoch
-SimulationTick
+SimulationClockRevision
+EffectiveFromSimulationTick
 exact step duration / simulation frequency
 authoritative world-time state required by gameplay
 ```
 
-The replication bridge may detect cadence change at capture; a new Runtime
-event is not presumed necessary. Clients never derive time as `tick * 1/60`.
-Time-defined input expiry and gameplay deadlines remain time-defined rather than
-being silently reinterpreted as a count of 60 Hz steps.
+Owner/world samples carry the applicable `SimulationClockRevision` or remain
+staged until that revision is known. For an idle-boundary frequency change after
+completed tick `N`, the new cadence is effective from step `N+1`. This makes
+Control-versus-State reordering safe under 60→30→60 changes. The replication
+bridge may detect cadence change at capture; a new Runtime event is not presumed
+necessary. Clients never derive time as `tick * 1/60`. Time-defined input
+expiry and gameplay deadlines remain time-defined rather than being silently
+reinterpreted as a count of 60 Hz steps.
 
 ## Persistence boundary
 
@@ -451,7 +514,7 @@ Freeze semantic delivery before packet layout:
 | Input | unreliable sequenced with bounded redundancy and time-defined expiry |
 | OwnerState | sequenced latest/keyframe; high priority; correction/ack aware |
 | WorldState | sequenced latest, coalesced, baseline aware |
-| Event | reliable ordered application and lifecycle facts |
+| Event | reliable ordered application facts whose intermediate occurrence matters |
 | Bulk | reliable segmented and isolated from realtime/control |
 | Disposable | optional unreliable cosmetic state with explicit expiry |
 
@@ -460,8 +523,26 @@ invent a separate transport. Each message family declares ordering,
 reliability, supersession, expiry, priority, recovery, fragmentation admission,
 and backpressure.
 
-Loss may delay, supersede, or trigger recovery only according to that contract.
-An event cannot silently become latest state. Latest state cannot grow an
+Projection lifecycle and application events are not the same log:
+
+```text
+ECS lifecycle evidence
+    -> update canonical Game/Replication truth
+    -> derive Spawn / Enter / Leave / Despawn / projection-shape operations
+    -> ordered/versioned within bounded projection history
+    -> baseline/resnapshot recovery is allowed
+
+application event
+    -> intermediate fact matters (purchase, trade, quest, chat, etc.)
+    -> reliable ordered/idempotent as declared
+    -> overflow cannot silently become a baseline unless that application
+       contract explicitly defines equivalence
+```
+
+An ECS `ComponentAdded` need not become a wire message if it only changes the
+canonical replicated shape/state. Loss may delay, supersede, or trigger recovery
+only according to the declared projection/application contract. An application
+event cannot silently become latest state. Latest state cannot grow an
 unbounded reliable backlog.
 
 ## Transport, security, and connection protocol
@@ -513,6 +594,25 @@ Game/Replication owns canonical semantic state, explicit game events, and
 game-specific relevance. It is rebuilt from authority and remains independent
 of packet, socket, and connection layout.
 
+Projection capture is derived observation, not authority. Expected capacity,
+history, and resync outcomes remain contained inside the Runtime game callback
+as explicit results:
+
+```text
+expected capacity/history failure
+    -> no cursor acknowledgement
+    -> mark projection rebuild/resync required
+    -> keep authority healthy
+
+unexpected derived-projection failure
+    -> fault/detach the projection subsystem as policy requires
+    -> do not escape merely because derived state failed
+```
+
+An exception crosses `ServerGameFacet` only if authority itself may have been
+mutated or compromised. N0.1 first proves contained result semantics; it does
+not pre-emptively add a `ServerObservationFacet`.
+
 ### Latest state
 
 Pending tables retain the newest authoritative version until eligible and
@@ -528,11 +628,14 @@ successful bounded handoff  -> queued/sent bookkeeping
 acknowledged/applied proof  -> recipient-known state
 ```
 
-### Lifecycle and events
+### Projection lifecycle and application events
 
-Create/destroy/add/remove/bind/unbind and independent game events have explicit
-ordered retention and resync policy. Value change and lifecycle are not
-conflated. Tombstones protect against delayed prior-epoch state.
+Raw ECS create/destroy/add/remove facts update canonical projection truth.
+Derived spawn/enter/leave/despawn/bind/unbind operations have bounded ordered
+retention and baseline recovery. Independent application events retain their
+own declared facts and overflow policy. Value change, projection lifecycle, and
+application events are not conflated. Tombstones protect against delayed
+prior-epoch state.
 
 ### Interest
 
@@ -565,7 +668,7 @@ validates and stages complete semantic operations. One client apply barrier
 publishes coherent state to presentation/UI.
 
 Initial join, AOI expansion, reconnect, lifecycle/history loss, and generation
-replacement use an atomic baseline:
+replacement use an atomic baseline over an explicitly declared target:
 
 ```text
 PREPARE private candidate
@@ -578,6 +681,22 @@ The live client projection does not mutate while fragments arrive. Deltas and
 events outside the admitted epoch are rejected or buffered within fixed limits.
 Baseline acknowledgement advances recipient-known state only after complete
 client admission.
+
+Target scope is intentional:
+
+```text
+initial world entry / StateEpoch replacement
+    -> complete relevant projection candidate
+
+AOI expansion / one state-family repair
+    -> atomic candidate for that declared region/family/scope
+
+unrelated live scopes
+    -> continue normally
+```
+
+Walking into one region does not require replacing an enormous unrelated client
+projection merely because baseline commit is atomic.
 
 Prediction/reconciliation is introduced only for selected movement semantics
 with a deterministic oracle. Observer interpolation uses presentation time and
@@ -617,8 +736,8 @@ N0.0   contract, dependency shape, and evidence freeze
 N0.1   canonical game projection/capture + OfflineDirect oracle
 N0.2   Network kernel capacity, identity, pools, and generated codecs
 N0.3   secure reliable protocol over ProtocolLoopback
-N0.4   real UDP transport/session runtime
-N0.5   remote Admission + server-defined UI vertical
+N0.4   remote Admission + server-defined UI through ProtocolLoopback
+N0.5   real UDP transport/session runtime using that application vertical
 N0.6   authoritative input + owner/world replication vertical
 N0.7   AOI, pending-state scheduler, and cohort fanout
 N0.8   atomic baseline, recovery, reconnect, and generation replacement
@@ -629,7 +748,11 @@ N0.10  scale, sharding, measured specialization, and acceptance
 Each checkpoint ends with executable semantics, bounds, failure behavior,
 allocation evidence, and a decision before the next layer is admitted.
 
-### N0.0 — Contract and evidence freeze
+### N0.0 — Contract and evidence freeze — accepted
+
+Implemented in `Kernels/Network`, its canonical README, the focused Network test
+project, and the comparison evidence core. This checkpoint intentionally contains
+no packet, security, reliability, transport, or game-replication implementation.
 
 Deliver:
 
@@ -669,6 +792,10 @@ Tests:
 - every committed create/destroy/add/remove is captured;
 - same-tick post-graph structural changes are not missed;
 - cursor failure does not acknowledge;
+- expected projection capacity/history outcomes remain contained results and do
+  not terminally fault Runtime;
+- unexpected derived-state failure faults/detaches projection without escaping
+  the authority callback unless authority was compromised;
 - lifecycle overflow requests resync;
 - create/destroy and rapid add/remove between captures have defined canonical
   folding semantics;
@@ -714,27 +841,19 @@ wrap, MTU edges, tamper, replay, key change, and shutdown.
 Gate: ProtocolLoopback exhibits production delivery/security semantics without
 OS sockets.
 
-### N0.4 — Real UDP transport/session runtime
-
-Deliver persistent UDP receive/send ownership, bounded endpoint/pre-auth state,
-path validation, timeout/drain, cleanup, and localhost production transport.
-
-Tests cover abrupt peer/server disappearance, spoofing, migration if admitted,
-reconnect with delayed packets, pre-auth saturation, outstanding-send shutdown,
-and exact session/pool balance after churn.
-
-Gate: ProtocolLoopback and localhost UDP produce the same normalized
-protocol/application trace.
-
-### N0.5 — Remote Admission and UI
+### N0.4 — Remote Admission and UI over ProtocolLoopback
 
 Deliver:
 
 - `RemoteUiSemanticPort` and matching client bridge using existing UI semantics;
 - provider-scoped trusted identity and Accounting compatibility;
-- game application binding above the established connection;
+- game authentication/application binding above the secure connection;
 - remote CharacterSelect, Play, Inventory, action, delta, cache, detach, and
-  resnapshot flows.
+  resnapshot flows through the complete ProtocolLoopback stack;
+- deterministic client shutdown: detach the remote semantic source, close or
+  detach remote views, release renderer handles best-effort under a defined
+  fault policy, and apply an explicit definition-cache retention policy;
+- reconnect from one coherent client session state.
 
 Required scenario:
 
@@ -744,13 +863,29 @@ Required scenario:
 4. open Inventory;
 5. split Bread and receive exactly `Update + Add`;
 6. equip the sword and receive exactly `Remove`;
-7. close/reopen using exact definition-cache identity.
+7. close/reopen using exact definition-cache identity;
+8. disconnect/dispose and prove deterministic view/renderer cleanup.
 
 Tests include stale/duplicate actions, list/row provenance, lost UI messages,
-reconnect, bounds, unauthenticated action, and Bulk starvation resistance.
+reconnect, bounds, unauthenticated action, client disposal, and Bulk starvation
+resistance.
 
-Gate: an existing V3 game workflow runs remotely without moving its authority
-into Network.
+Gate: an existing V3 game workflow runs remotely through the complete protocol
+without moving its authority into Network.
+
+### N0.5 — Real UDP transport/session runtime
+
+Deliver persistent UDP receive/send ownership, bounded endpoint/pre-auth state,
+path validation, timeout/drain, cleanup, and localhost production transport.
+Run the exact N0.4 Admission/UI scenario through UDP; synthetic transport traffic
+is not the acceptance workload.
+
+Tests cover abrupt peer/server disappearance, spoofing, migration if admitted,
+reconnect with delayed packets, pre-auth saturation, outstanding-send shutdown,
+client cleanup, and exact session/pool balance after churn.
+
+Gate: ProtocolLoopback and localhost UDP produce the same normalized
+protocol/application trace for the real application vertical.
 
 ### N0.6 — Authoritative input and replicated world state
 
@@ -760,8 +895,9 @@ dense generational slots, lifecycle visibility, reliable cadence/clock anchor,
 and minimal measured prediction/reconciliation where real movement requires it.
 
 Tests include stale/duplicate/future input, lost stop, prior-epoch state, entity
-reuse, 60→30→60 cadence change, exact final authority parity, and input ACK
-remaining independent from owner correction.
+reuse, clock Control/State reordering, 60→30→60 cadence change effective from
+the declared tick/revision, exact final authority parity, and input ACK remaining
+independent from owner correction.
 
 Gate: one controlled entity remains semantically correct under loss.
 
@@ -906,12 +1042,15 @@ N0 is accepted only when:
 - untrusted bytes cannot escape bounds or publish partial state;
 - authority and client projection remain separate in every topology;
 - capture occurs once after structural authority commits;
+- host pump order admits 0..N complete steps and never captures mid-step;
 - slow recipients retain no ECS cursor/history ownership;
 - lifecycle capacity and every Network memory surface are planned explicitly;
 - lanes preserve declared loss/order/supersession/recovery semantics;
 - sent and known state remain distinct;
-- baseline, lifecycle, event, reconnect, and generation replacement are
-  deterministic;
+- canonical replication identity is connection-independent within one epoch;
+- projection lifecycle, application events, and latest state remain distinct;
+- baseline target scope, lifecycle, events, reconnect, and generation
+  replacement are deterministic;
 - Admission/UI and one real controlled simulation flow work remotely;
 - persistence restores authority while Network reconstructs projection;
 - localhost UDP and impairment tests pass Debug and Release;
