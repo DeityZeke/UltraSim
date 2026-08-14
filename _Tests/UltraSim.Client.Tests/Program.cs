@@ -21,6 +21,7 @@ var tests = new (string Name, Action Body)[]
     ("DeltaValidationIsDefinitionBoundBeforeCloning", DeltaValidationIsDefinitionBoundBeforeCloning),
     ("CacheIdentityAndDefaultOperationsReject", CacheIdentityAndDefaultOperationsReject),
     ("ClosedInstanceIdsDoNotPermitActionAba", ClosedInstanceIdsDoNotPermitActionAba),
+    ("ClientRetainedDefinitionsAndViewsAreBounded", ClientRetainedDefinitionsAndViewsAreBounded),
     ("ClientPerformanceBaselinesAreCaptured", ClientPerformanceBaselinesAreCaptured),
 };
 
@@ -424,6 +425,13 @@ static void CacheIdentityAndDefaultOperationsReject()
         definition.Key,
         definition.Version,
         definition.Hash));
+    Assert.Throws<ArgumentException>(() => new UiDefinitionCacheKey(
+        "server\uD800",
+        "composition",
+        1,
+        definition.Key,
+        definition.Version,
+        definition.Hash));
 
     var client = new UiClientRuntime(new MemoryRenderer());
     var link = new LocalSemanticLink(client);
@@ -447,6 +455,27 @@ static void ClosedInstanceIdsDoNotPermitActionAba()
     UiViewInstanceId generated = link.OpenHotView(new UiHotOpenView(
         key, CreateModel(definition, "next")));
     Assert.Equal((ulong)51, generated.Value);
+}
+
+static void ClientRetainedDefinitionsAndViewsAreBounded()
+{
+    CompiledUiDefinition first = CreateDefinition(800);
+    var client = new UiClientRuntime(
+        new MemoryRenderer(),
+        new UiClientLimits(MaximumCachedDefinitionFamilies: 1, MaximumOpenViews: 1));
+    var link = new LocalSemanticLink(client);
+    UiDefinitionCacheKey firstKey = CreateCacheKey(first);
+    UiViewInstanceId firstView = link.OpenView(new UiOpenView(
+        firstKey, first, CreateModel(first, "First")));
+    Assert.Throws<InvalidOperationException>(() => link.OpenHotView(new UiHotOpenView(
+        firstKey, CreateModel(first, "Second"))));
+    Assert.True(link.CloseView(new UiCloseView(firstView)));
+
+    var source = new UiDefinitionBuilder("client.other");
+    source.AddCanvas(_ => { });
+    CompiledUiDefinition second = UiDefinitionCompiler.Compile(source);
+    Assert.Throws<InvalidOperationException>(() => link.OpenView(new UiOpenView(
+        CreateCacheKey(second), second, new UiModel(second))));
 }
 
 static void ClientPerformanceBaselinesAreCaptured()
@@ -632,6 +661,7 @@ static UiModel CreateModel(CompiledUiDefinition definition, string title)
     var model = new UiModel(definition);
     model.SetText(definition.Bindings.RequireSlot("title"), title);
     model.SetBoolean(definition.Bindings.RequireSlot("enabled"), true);
+    model.ReplaceRows(definition.Bindings.RequireSlot("rows"), [Row(7, "Target")]);
     return model;
 }
 

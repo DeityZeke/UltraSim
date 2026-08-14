@@ -215,12 +215,19 @@ managed allocation. Focused 31-sample create controls verified that the cold
 durable-identity creation hook does not retain the initial experimental hot-path
 regression in non-persistent worlds.
 
-`s0.8-integrated-acceptance-2026-08-13.json` is the accepted first complete S0
-integration capture. It records account-backed InternalHost save/diverge/restore
-and HeadlessHost canonical parity, accountless admission/persistence, artifact
-size, capture pause, save/load caller allocation, and a 21-sample alternating
-direct-ECS/InternalHost tick control over 4,096 scheduled rows. The integrated
-tick path allocates zero warmed bytes and measured a 1.031x hosted/direct ratio
-on the acceptance machine. This is an architecture/regression fixture, not a
-cross-machine performance claim; full interpretation is in
-`../../S0.8 Acceptance Report.md`.
+`s0.8-integrated-acceptance-2026-08-13.json` is immutable historical evidence
+from the first S0 integration capture, but it is superseded rather than accepted
+for regression. Its two-participant save and canonical oracle omitted
+authoritative Runtime clock state, so it could not detect restoration of ECS at
+tick 12 with the active host clock still at tick 19.
+
+`s0.8-integrated-acceptance-hardened-2026-08-14.json` is the accepted corrected
+S0 baseline for workload `ultrasim-s0.8-integrated-acceptance-v2`. It records
+account-backed InternalHost save/diverge/restore and fresh HeadlessHost parity
+over ECS + Accounting + authoritative Clock, accountless replacement policy,
+session rebinding, artifact size, detached durable latency, owner-thread capture
+pause, save/load allocation, and a 21-sample alternating paired-median
+direct-ECS/InternalHost tick control over 4,096 scheduled rows. The accepted run
+allocates zero warmed tick bytes and measured a 1.019x hosted/direct ratio. This
+is an architecture/regression fixture, not a cross-machine performance claim;
+full interpretation is in `../../S0.8 Acceptance Report.md`.

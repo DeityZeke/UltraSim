@@ -22,6 +22,8 @@ var tests = new (string Name, Action Body)[]
     ("DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous", DefinitionKeysAndAnySlotsRemainBoundedAndUnambiguous),
     ("MixedLayoutAndElementSiblingOrderIsPreserved", MixedLayoutAndElementSiblingOrderIsPreserved),
     ("ListRowActionsHaveExplicitContext", ListRowActionsHaveExplicitContext),
+    ("RowActionsRequireListProvenanceAndExistingRows", RowActionsRequireListProvenanceAndExistingRows),
+    ("DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode", DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode),
 };
 
 foreach ((string name, Action body) in tests)
@@ -302,10 +304,15 @@ static void ActionAvailabilityIsDynamicAndPrepared()
     UiModel model = new(definition);
     UiActionId select = definition.Bindings.RequireAction("select");
     UiActionId close = definition.Bindings.RequireAction("close");
+    model.ReplaceRows(
+        definition.Bindings.RequireSlot("rows"),
+        [new UiListRow(new UiRowId(99), ReadOnlySpan<UiValue>.Empty)]);
     var request = new UiActionRequest(
         new UiViewInstanceId(42), definition.Handle, select, new UiRowId(99));
 
     model.ValidateAction(request);
+    Assert.Throws<InvalidOperationException>(() => model.ValidateAction(
+        new UiActionRequest(new UiViewInstanceId(42), definition.Handle, select, new UiRowId(100))));
     model.SetActionState(select, new UiActionState(false, "Not available."));
     Assert.Equal("Not available.", model.GetActionState(select).UnavailableReason);
     Assert.Throws<InvalidOperationException>(() => model.ValidateAction(request));
@@ -550,6 +557,56 @@ static void ListRowActionsHaveExplicitContext()
         "button", rowAction, label,
         UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 20))));
     Assert.Throws<InvalidDataException>(() => UiDefinitionCompiler.Compile(buttonWithContext));
+}
+
+static void RowActionsRequireListProvenanceAndExistingRows()
+{
+    var builder = new UiDefinitionBuilder("row-provenance");
+    UiSlotReference firstRows = builder.DeclareSlot("first", UiSlotValueKind.List);
+    UiSlotReference secondRows = builder.DeclareSlot("second", UiSlotValueKind.List);
+    UiActionReference select = builder.DeclareAction("select", acceptsRowContext: true);
+    builder.AddCanvas(canvas => canvas.AddVertical("lists", flow =>
+    {
+        flow.AddList("first-list", firstRows, select);
+        flow.AddList("second-list", secondRows, select);
+    }, UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 100, 100))));
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder);
+    UiModel model = new(definition);
+    UiSlotId first = definition.Prepare(firstRows);
+    UiSlotId second = definition.Prepare(secondRows);
+    UiActionId action = definition.Prepare(select);
+    model.ReplaceRows(first, [new UiListRow(new UiRowId(1), ReadOnlySpan<UiValue>.Empty)]);
+    model.ReplaceRows(second, [new UiListRow(new UiRowId(2), ReadOnlySpan<UiValue>.Empty)]);
+    UiCompiledElement firstElement = definition.Elements.ToArray().Single(element => element.Slot == first);
+    UiCompiledElement secondElement = definition.Elements.ToArray().Single(element => element.Slot == second);
+
+    model.ValidateAction(new UiActionRequest(
+        new UiViewInstanceId(1), definition.Handle, action, new UiRowId(1), source: firstElement.Id));
+    Assert.Throws<InvalidOperationException>(() => model.ValidateAction(new UiActionRequest(
+        new UiViewInstanceId(1), definition.Handle, action, new UiRowId(1), source: secondElement.Id)));
+    Assert.Throws<InvalidOperationException>(() => model.ValidateAction(new UiActionRequest(
+        new UiViewInstanceId(1), definition.Handle, action, new UiRowId(1))));
+}
+
+static void DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode()
+{
+    string malformed = new(new[] { '\uD800' });
+    Assert.Throws<ArgumentException>(() => UiValue.FromText(malformed));
+    Assert.Throws<ArgumentException>(() => _ = new UiDefinitionKey("bad-" + malformed));
+    Assert.Throws<ArgumentOutOfRangeException>(() => UiValue.FromText(
+        new string('x', UiValue.MaximumTextCharacters + 1)));
+    Assert.Throws<ArgumentOutOfRangeException>(() => _ = new UiListRow(
+        new UiRowId(1), new UiValue[UiListRow.MaximumValues + 1]));
+
+    var limited = new UiDefinitionBuilder("t");
+    UiSlotReference text = limited.DeclareSlot("text", UiSlotValueKind.Text);
+    limited.AddCanvas(canvas => canvas.AddText(
+        "label", text, UiChildLayout.Canvas(new UiCanvasPlacement(0, 0, 10, 10))));
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(
+        limited, new UiCompileLimits(maximumTextCharacters: 64));
+    UiModel model = new(definition);
+    Assert.Throws<InvalidDataException>(() => model.SetText(
+        definition.Prepare(text), new string('x', 65)));
 }
 
 static UiDefinitionBuilder CreateMixedOrderFixture(bool layoutLast)

@@ -48,6 +48,8 @@ public partial class S04HeadlessAcceptance : Control
                     horizontal.AddTextInput("input", title, editAction);
                     horizontal.AddButton("button", closeAction, title);
                 });
+                vertical.AddToggle("display-toggle", enabled);
+                vertical.AddTextInput("display-input", title);
                 vertical.AddImage("image", "missing.test.asset");
                 vertical.AddOverlay("overlay", overlay =>
                 {
@@ -57,8 +59,9 @@ public partial class S04HeadlessAcceptance : Control
                 vertical.AddScroll(
                     "scroll",
                     scroll => scroll.AddText("scroll-title", title),
-                    flow: new UiFlowOptions(padding: new UiPadding(2, 3, 4, 5)));
-            }, UiChildLayout.Canvas(new UiCanvasPlacement(10, 10, 300, 220, zOrder: 1)));
+                    flow: new UiFlowOptions(spacing: 9, padding: new UiPadding(2, 3, 4, 5)));
+            }, UiChildLayout.Canvas(new UiCanvasPlacement(10, 10, 300, 220, zOrder: 1)),
+                new UiFlowOptions(spacing: 7));
         });
 
         CompiledUiDefinition definition = UiDefinitionCompiler.Compile(builder);
@@ -88,6 +91,8 @@ public partial class S04HeadlessAcceptance : Control
         VBoxContainer list = FindDescendant<VBoxContainer>(root, "Element_rows");
         CheckBox toggle = FindDescendant<CheckBox>(root, "Element_toggle");
         LineEdit input = FindDescendant<LineEdit>(root, "Element_input");
+        LineEdit displayInput = FindDescendant<LineEdit>(root, "Element_display-input");
+        CheckBox displayToggle = FindDescendant<CheckBox>(root, "Element_display-toggle");
         Button button = FindDescendant<Button>(root, "Element_button");
         _ = FindDescendant<TextureRect>(root, "Element_image");
         Panel background = FindDescendant<Panel>(root, "Element_background");
@@ -106,6 +111,14 @@ public partial class S04HeadlessAcceptance : Control
             "Overlay child did not receive shared full bounds.");
         Expect(scroll.FindChild("ScrollPadding_scroll", recursive: false, owned: false) is MarginContainer,
             "Scroll padding was not retained inside the scroll content host.");
+        VBoxContainer scrollContent = FindDescendant<VBoxContainer>(root, "ScrollContent_scroll");
+        Expect(content.GetThemeConstant("separation") == 7 &&
+            scrollContent.GetThemeConstant("separation") == 9,
+            "Flow spacing was not applied to ordinary and scroll content hosts.");
+        Expect(background.ThemeTypeVariation == "surface",
+            "Compiled StyleRole was not consumed by the native renderer.");
+        Expect(!displayInput.Editable && displayToggle.Disabled,
+            "Display-only inputs remained locally editable.");
 
         link.UpdateView(new UiUpdateView(instance, new UiModelDelta(
             definition.Handle,
@@ -142,6 +155,8 @@ public partial class S04HeadlessAcceptance : Control
         UiActionRequest rowAction = submitted.GetValueOrDefault();
         Expect(rowAction.Action == definition.Prepare(selectAction) && rowAction.Row == new UiRowId(1),
             "Native list row submitted the wrong action or row identity.");
+        Expect(rowAction.Source.IsValid,
+            "Native list-row action omitted compiled source provenance.");
 
         link.UpdateView(new UiUpdateView(instance, new UiModelDelta(
             definition.Handle,

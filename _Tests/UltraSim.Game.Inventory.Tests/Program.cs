@@ -20,11 +20,14 @@ var tests = new (string Name, Action Body)[]
     ("OwnerlessWorldContainerIsFirstClass", OwnerlessWorldContainerIsFirstClass),
     ("MoveSplitEquipAreAtomicAndPolicyDriven", MoveSplitEquipAreAtomicAndPolicyDriven),
     ("PackedChildPoolRepairsDonorLinks", PackedChildPoolRepairsDonorLinks),
+    ("PackedChildPoolRandomizedDonorRepairMatchesEcsTruth", PackedChildPoolRandomizedDonorRepairMatchesEcsTruth),
     ("FailedRebuildPreservesPublishedIndex", FailedRebuildPreservesPublishedIndex),
     ("MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity", MostlyEmptyContainersDoNotReserveTheoreticalChildCapacity),
     ("AccountingAdmissionAndInventoryShareGameGeneration", AccountingAdmissionAndInventoryShareGameGeneration),
     ("InventoryUiPublishesGranularRowDeltas", InventoryUiPublishesGranularRowDeltas),
     ("InventoryUiRejectsCrossWorldDurableIdentityAba", InventoryUiRejectsCrossWorldDurableIdentityAba),
+    ("InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit", InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit),
+    ("InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection", InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection),
     ("InventoryPersistsAndRebuildsAfterGenerationSwap", InventoryPersistsAndRebuildsAfterGenerationSwap),
     ("EquippedRelationshipPersistsAndReindexes", EquippedRelationshipPersistsAndReindexes),
     ("FailedInventoryRebuildDoesNotPublishCandidate", FailedInventoryRebuildDoesNotPublishCandidate),
@@ -194,17 +197,101 @@ static void PackedChildPoolRepairsDonorLinks()
         Assert.True(state.TryCreateItem(world, pouch, game.Content.Bread, 2, out Entity donor));
         Assert.True(state.Index.TryGetLocation(middle, out InventoryLocation removedBefore));
         Assert.True(state.Index.TryGetLocation(donor, out InventoryLocation donorBefore));
-        Assert.True(donorBefore.ChildNode > removedBefore.ChildNode);
+        Assert.Equal(pouch, removedBefore.Parent);
+        Assert.Equal(pouch, donorBefore.Parent);
 
         Assert.True(state.DestroyItem(world, middle).Accepted);
 
         Assert.True(state.Index.TryGetLocation(donor, out InventoryLocation donorAfter));
-        Assert.Equal(removedBefore.ChildNode, donorAfter.ChildNode);
+        Assert.Equal(pouch, donorAfter.Parent);
+        Assert.Equal(InventoryEquipSlot.None, donorAfter.EquipSlot);
         Assert.SequenceEqual(new[] { first, donor }, state.Index.GetItems(pouch).ToArray());
         Assert.True(state.Move(world, donor, pouch, fixture.Backpack).Accepted);
         Assert.SequenceEqual(new[] { first }, state.Index.GetItems(pouch).ToArray());
         return true;
     });
+}
+
+static void PackedChildPoolRandomizedDonorRepairMatchesEcsTruth()
+{
+    using Fixture fixture = CreateFixture();
+    fixture.Use((world, _, game) =>
+    {
+        InventoryGenerationState state = game.Inventory;
+        var containers = new List<Entity> { fixture.Backpack };
+        for (int index = 0; index < 3; index++)
+        {
+            Assert.True(state.TryCreateContainer(
+                world, game.Content.WorldChest, capacity: 16, out Entity container));
+            containers.Add(container);
+        }
+        var items = state.Index.GetItems(fixture.Backpack).ToArray().ToList();
+        for (int index = 0; index < 32; index++)
+        {
+            Entity destination = containers[1 + (index % 3)];
+            Assert.True(state.TryCreateItem(world, destination, game.Content.Bread, 1, out Entity item));
+            items.Add(item);
+        }
+
+        var random = new Random(0x50707);
+        for (int operation = 0; operation < 5_000; operation++)
+        {
+            if (items.Count != 0 && random.Next(5) == 0)
+            {
+                int itemIndex = random.Next(items.Count);
+                Entity item = items[itemIndex];
+                if (state.DestroyItem(world, item).Accepted)
+                    items.RemoveAt(itemIndex);
+            }
+            else if (items.Count < 48 && random.Next(4) == 0)
+            {
+                Entity destination = containers[random.Next(containers.Count)];
+                if (state.TryCreateItem(world, destination, game.Content.Bread, 1, out Entity created))
+                    items.Add(created);
+            }
+            else if (items.Count != 0)
+            {
+                Entity item = items[random.Next(items.Count)];
+                InventoryItem value = ReadItem(world, state, item);
+                if (value.EquipSlot == InventoryEquipSlot.None)
+                {
+                    Entity destination = containers[random.Next(containers.Count)];
+                    InventoryMutationResult ignored = state.Move(
+                        world, item, value.Parent, destination);
+                }
+            }
+
+            if ((operation & 31) == 0)
+                AssertInventoryIndexMatchesTruth(world, state, containers, items);
+        }
+        AssertInventoryIndexMatchesTruth(world, state, containers, items);
+        return true;
+    });
+}
+
+static void AssertInventoryIndexMatchesTruth(
+    EcsWorld world,
+    InventoryGenerationState state,
+    IReadOnlyList<Entity> containers,
+    IReadOnlyList<Entity> items)
+{
+    var indexed = new HashSet<Entity>();
+    foreach (Entity container in containers)
+    {
+        foreach (Entity item in state.Index.GetItems(container))
+        {
+            Assert.True(indexed.Add(item));
+            InventoryItem value = ReadItem(world, state, item);
+            Assert.Equal(container, value.Parent);
+            Assert.Equal(InventoryEquipSlot.None, value.EquipSlot);
+            Assert.True(state.Index.TryGetLocation(item, out InventoryLocation location));
+            Assert.Equal(container, location.Parent);
+        }
+    }
+    Assert.Equal(items.Count, state.Index.ItemCount);
+    Assert.Equal(items.Count, indexed.Count);
+    foreach (Entity item in items)
+        Assert.True(indexed.Contains(item));
 }
 
 static void FailedRebuildPreservesPublishedIndex()
@@ -287,7 +374,7 @@ static void AccountingAdmissionAndInventoryShareGameGeneration()
     var renderer = new MemoryRenderer();
     var client = new UiClientRuntime(renderer);
     var link = new LocalSemanticLink(client);
-    using var admissionUi = new LocalAdmissionUiPort(link);
+    using var admissionUi = new LocalUiSemanticPort(link);
     using var admission = new AdmissionService(fixture.Runtime.Game, fixture.Composition, admissionUi);
     AdmissionResult waiting = admission.JoinAccountBacked(
         new ParticipantId(7007), new TrustedLocalIdentity("alice-local"));
@@ -401,12 +488,59 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
     }
 }
 
+static void InventoryUiDeliveryFailureDetachesAfterAuthoritativeCommit()
+{
+    using Fixture fixture = CreateFixture();
+    var client = new UiClientRuntime(new MemoryRenderer());
+    var link = new LocalSemanticLink(client);
+    using var port = new FaultingInventoryUiPort(link);
+    using var controller = new InventoryUiController(fixture.Runtime.Game, port);
+    int presentationFaults = 0;
+    InventoryMutationResult completed = default;
+    controller.PresentationFaulted += _ => presentationFaults++;
+    controller.MutationCompleted += result => completed = result;
+    InventoryUiOpenResult opened = controller.Open(fixture.Backpack);
+    UiRowId bread = FindRow(client.GetRows(opened.View, InventoryUi.Items), "Bread");
+    client.SubmitAction(opened.View, InventoryUi.Select, bread);
+    port.ThrowOnUpdate = true;
+
+    client.SubmitAction(opened.View, InventoryUi.Split);
+
+    Assert.True(completed.Accepted);
+    Assert.Equal(3, fixture.Use((_, _, game) => game.Inventory.Index.ItemCount));
+    Assert.Equal(0, controller.OpenViewCount);
+    Assert.Equal(0, client.OpenViewCount);
+    Assert.Equal(1, presentationFaults);
+}
+
+static void InventoryUiDoesNotConvertTerminalRuntimeFaultToDomainRejection()
+{
+    using Fixture fixture = CreateFixture();
+    var client = new UiClientRuntime(new MemoryRenderer());
+    var link = new LocalSemanticLink(client);
+    using var port = new RecordingInventoryUiPort(link);
+    using var controller = new InventoryUiController(fixture.Runtime.Game, port);
+    int completions = 0;
+    controller.MutationCompleted += _ => completions++;
+    InventoryUiOpenResult opened = controller.Open(fixture.Backpack);
+    UiRowId bread = FindRow(client.GetRows(opened.View, InventoryUi.Items), "Bread");
+    client.SubmitAction(opened.View, InventoryUi.Select, bread);
+    fixture.Use((_, _, game) => { game.Inventory.Dispose(); return true; });
+
+    Assert.Throws<ObjectDisposedException>(() =>
+        client.SubmitAction(opened.View, InventoryUi.Split));
+
+    Assert.Equal(ServerRuntimeState.Faulted, fixture.Runtime.State);
+    Assert.Equal(0, completions);
+}
+
 static void InventoryPersistsAndRebuildsAfterGenerationSwap()
 {
     using Fixture fixture = CreateFixture();
     GameSaveResult save = fixture.Persistence.TrySave(new SaveSetContext(1, 1), static capture => capture());
-    Assert.True(save.Succeeded);
-    Assert.Equal(2, save.Manifest!.Artifacts.Length);
+    if (!save.Succeeded)
+        throw new InvalidOperationException("The game save failed.", save.Failure);
+    Assert.Equal(3, save.Manifest!.Artifacts.Length);
     EcsWorld oldWorld = fixture.CurrentWorld;
     Assert.True(fixture.Use((world, _, game) => game.Inventory.Equip(
         world, fixture.Sword, fixture.Backpack, fixture.Character, InventoryEquipSlot.MainHand).Accepted));
@@ -731,18 +865,21 @@ sealed class Fixture : IDisposable
     }
 }
 
-sealed class RecordingInventoryUiPort : IInventoryUiPort, IDisposable
+sealed class RecordingInventoryUiPort : IUiSemanticPort, IDisposable
 {
     private readonly LocalSemanticLink _link;
+    private readonly Dictionary<UiViewInstanceId, Action<UiActionRequest>> _actions = [];
 
-    internal RecordingInventoryUiPort(LocalSemanticLink link) => _link = link;
+    internal RecordingInventoryUiPort(LocalSemanticLink link)
+    {
+        _link = link;
+        _link.ActionSubmitted += Forward;
+    }
     internal UiListDeltaKind[] LastListKinds { get; private set; } = [];
 
-    public event Action<UiActionRequest>? ActionSubmitted
-    {
-        add => _link.ActionSubmitted += value;
-        remove => _link.ActionSubmitted -= value;
-    }
+    public void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler) =>
+        _actions.Add(instance, handler);
+    public void UnbindActions(UiViewInstanceId instance) => _actions.Remove(instance);
 
     public UiViewInstanceId OpenView(UiOpenView operation) => _link.OpenView(operation);
     public UiViewInstanceId OpenHotView(UiHotOpenView operation) => _link.OpenHotView(operation);
@@ -752,7 +889,42 @@ sealed class RecordingInventoryUiPort : IInventoryUiPort, IDisposable
         _link.UpdateView(operation);
     }
     public bool CloseView(UiCloseView operation) => _link.CloseView(operation);
-    public void Dispose() { }
+    public void Dispose() { _link.ActionSubmitted -= Forward; _actions.Clear(); }
+    private void Forward(UiActionRequest request)
+    {
+        if (_actions.TryGetValue(request.Instance, out Action<UiActionRequest>? handler)) handler(request);
+    }
+}
+
+sealed class FaultingInventoryUiPort : IUiSemanticPort, IDisposable
+{
+    private readonly LocalSemanticLink _link;
+    private readonly Dictionary<UiViewInstanceId, Action<UiActionRequest>> _actions = [];
+
+    internal FaultingInventoryUiPort(LocalSemanticLink link)
+    {
+        _link = link;
+        _link.ActionSubmitted += Forward;
+    }
+    internal bool ThrowOnUpdate { get; set; }
+
+    public void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler) =>
+        _actions.Add(instance, handler);
+    public void UnbindActions(UiViewInstanceId instance) => _actions.Remove(instance);
+
+    public UiViewInstanceId OpenView(UiOpenView operation) => _link.OpenView(operation);
+    public UiViewInstanceId OpenHotView(UiHotOpenView operation) => _link.OpenHotView(operation);
+    public void UpdateView(UiUpdateView operation)
+    {
+        if (ThrowOnUpdate) throw new InvalidOperationException("Injected UI delivery failure.");
+        _link.UpdateView(operation);
+    }
+    public bool CloseView(UiCloseView operation) => _link.CloseView(operation);
+    public void Dispose() { _link.ActionSubmitted -= Forward; _actions.Clear(); }
+    private void Forward(UiActionRequest request)
+    {
+        if (_actions.TryGetValue(request.Instance, out Action<UiActionRequest>? handler)) handler(request);
+    }
 }
 
 sealed class InventoryBenchmarkFixture : IDisposable

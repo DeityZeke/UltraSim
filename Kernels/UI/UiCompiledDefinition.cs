@@ -272,6 +272,7 @@ public sealed class CompiledUiDefinition
             throw new InvalidOperationException("A UI action requires a valid view instance ID.");
 
         UiActionDefinition action = GetAction(request.Action);
+        UiCompiledElement source = ResolveActionSource(request.Action, request.Source);
         if (action.AcceptsRowContext != request.Row.IsValid)
         {
             throw new InvalidOperationException(
@@ -284,6 +285,11 @@ public sealed class CompiledUiDefinition
             throw new InvalidOperationException(
                 $"This UI action requires {action.InputKind} input, but received {request.Input.Kind}.");
         }
+        if (request.Input.Kind == UiValueKind.Text &&
+            request.Input.Text!.Length > Limits.MaximumTextCharacters)
+        {
+            throw new InvalidOperationException("The UI action input exceeds the compiled text limit.");
+        }
 
         if (model is not null)
         {
@@ -291,7 +297,52 @@ public sealed class CompiledUiDefinition
                 throw new InvalidOperationException("The action model does not match the retained UI definition.");
             if (!model.GetActionState(request.Action).Enabled)
                 throw new InvalidOperationException("The requested UI action is currently unavailable.");
+            if (action.AcceptsRowContext)
+            {
+                if (source.Kind != UiElementKind.List || !source.Slot.IsValid)
+                    throw new InvalidOperationException("A row action must originate from a compiled list element.");
+                bool found = false;
+                foreach (UiListRow row in model.GetRows(source.Slot))
+                {
+                    if (row.Id == request.Row)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                    throw new InvalidOperationException("The requested row does not exist in its source list.");
+            }
         }
+    }
+
+    private UiCompiledElement ResolveActionSource(UiActionId action, UiElementId requested)
+    {
+        if (requested.IsValid)
+        {
+            if (requested.Value >= _elements.Length)
+                throw new InvalidOperationException("The UI action source element is outside the compiled definition.");
+            UiCompiledElement element = _elements[requested.Value];
+            if (element.Action != action)
+                throw new InvalidOperationException("The UI action is not bound to its claimed source element.");
+            return element;
+        }
+
+        UiCompiledElement match = default;
+        bool found = false;
+        foreach (UiCompiledElement element in _elements)
+        {
+            if (element.Action != action)
+                continue;
+            if (found)
+                throw new InvalidOperationException(
+                    "The UI action is bound to multiple elements and requires explicit source provenance.");
+            match = element;
+            found = true;
+        }
+        if (!found)
+            throw new InvalidOperationException("The UI action has no compiled source element.");
+        return match;
     }
 }
 
@@ -603,6 +654,7 @@ public static class UiDefinitionCompiler
 
         if (!float.IsFinite(source.Flow.Spacing) || source.Flow.Spacing < 0 ||
             (uint)source.Flow.Sizing > (uint)UiSizing.Fill ||
+            source.Flow.Sizing == UiSizing.Fixed ||
             (uint)source.Flow.Alignment > (uint)UiAlignment.Stretch ||
             !IsValidPadding(source.Flow.Padding))
         {
@@ -639,6 +691,7 @@ public static class UiDefinitionCompiler
     private static void ValidatePlacement(UiChildLayout placement, bool parentIsCanvas, UiLayoutKind childKind)
     {
         if ((uint)placement.Sizing > (uint)UiSizing.Fill ||
+            (!placement.HasCanvasPlacement && placement.Sizing == UiSizing.Fixed) ||
             (uint)placement.Alignment > (uint)UiAlignment.Stretch)
         {
             throw new InvalidDataException($"UI child '{childKind}' has invalid flow placement options.");
@@ -673,12 +726,28 @@ public static class UiDefinitionCompiler
     {
         if (string.IsNullOrWhiteSpace(key) || key.Trim().Length > UiDefinitionKey.MaximumLength)
             throw new InvalidDataException($"The UI {kind} key is missing or exceeds the source-key limit.");
+        try
+        {
+            UiText.ValidateUnicode(key, nameof(key));
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException($"The UI {kind} key contains malformed Unicode.", exception);
+        }
     }
 
     private static void AddText(ref int total, string? value, UiCompileLimits limits)
     {
         if (string.IsNullOrEmpty(value))
             return;
+        try
+        {
+            UiText.ValidateUnicode(value, nameof(value));
+        }
+        catch (ArgumentException exception)
+        {
+            throw new InvalidDataException("The UI source text contains malformed Unicode.", exception);
+        }
         if (value.Length > limits.MaximumTextCharacters - total)
             throw new InvalidDataException("The UI source text limit was exceeded.");
         total += value.Length;

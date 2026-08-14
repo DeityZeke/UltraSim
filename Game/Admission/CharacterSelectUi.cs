@@ -41,9 +41,9 @@ public static class CharacterSelectUi
         CompiledUiDefinition definition = UiDefinitionCompiler.Compile(source);
         return new Contract(
             definition,
-            definition.Bindings.RequireSlot("title"),
-            definition.Bindings.RequireSlot("characters"),
-            definition.Bindings.RequireAction("play"));
+            definition.Prepare(title),
+            definition.Prepare(characters),
+            definition.Prepare(play));
     }
 
     private sealed record Contract(

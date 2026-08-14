@@ -23,124 +23,155 @@ public sealed class SaveSetCoordinator
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         _root = Path.GetFullPath(root);
         _generations = Path.Combine(_root, "generations");
-        Directory.CreateDirectory(_generations);
         _files = files ?? new DurableFileSystem();
         _faults = faults;
+        _files.CreateDirectory(_generations);
     }
 
     /// <summary>Captures all participants inside one caller-owned frozen logical epoch.</summary>
     public SaveSetManifest Save(IReadOnlyList<ISaveSetParticipant> participants, in SaveSetContext context,
         Action<Action> captureBoundary)
     {
-        using IDisposable writerLease = AcquireWriterLease();
-        CleanupAbandonedPending();
-        EnsureForwardSequence(context.Sequence);
-        string pending = Path.Combine(_generations, context.Sequence.ToString("D20") + ".pending");
-        try
-        {
-            return SaveUnderLease(participants, context, captureBoundary);
-        }
-        catch
-        {
-            if (Directory.Exists(pending)) Directory.Delete(pending, recursive: true);
-            throw;
-        }
+        using CapturedSaveSet captured = Capture(participants, context, captureBoundary);
+        return Publish(captured);
     }
 
-    private SaveSetManifest SaveUnderLease(IReadOnlyList<ISaveSetParticipant> participants, in SaveSetContext context,
+    /// <summary>Captures immutable participant-owned state and releases the authority boundary.</summary>
+    public CapturedSaveSet Capture(
+        IReadOnlyList<ISaveSetParticipant> participants,
+        in SaveSetContext context,
         Action<Action> captureBoundary)
     {
         ArgumentNullException.ThrowIfNull(participants);
         ArgumentNullException.ThrowIfNull(captureBoundary);
         if (context.Sequence == 0) throw new ArgumentOutOfRangeException(nameof(context));
         ValidateParticipants(participants);
-        string pending = Path.Combine(_generations, context.Sequence.ToString("D20") + ".pending");
-        string complete = Path.Combine(_generations, context.Sequence.ToString("D20"));
-        if (Directory.Exists(pending) || Directory.Exists(complete))
-            throw new IOException("The requested save-set generation already exists.");
-        Directory.CreateDirectory(pending);
-        Reach(SaveSetFaultPoint.AfterPendingDirectory, pending);
-        var artifacts = new SaveSetArtifact[participants.Count];
-        var captured = new ICapturedSaveSetParticipant?[participants.Count];
+        var captured = new CapturedSaveSetParticipant[participants.Count];
+        int count = 0;
+        bool capturedEpoch = false;
         SaveSetContext captureContext = context;
         try
         {
-            bool capturedEpoch = false;
             captureBoundary(() =>
             {
-                if (capturedEpoch) throw new InvalidOperationException("The save-set capture boundary invoked its epoch action more than once.");
+                if (capturedEpoch)
+                    throw new InvalidOperationException("The save-set capture boundary invoked its epoch action more than once.");
                 capturedEpoch = true;
                 for (int index = 0; index < participants.Count; index++)
                 {
-                    ICapturedSaveSetParticipant capture = participants[index].Capture(captureContext) ??
-                        throw new IOException($"Participant '{participants[index].Key}' returned no captured state.");
-                    if (!StringComparer.Ordinal.Equals(capture.Key, participants[index].Key))
+                    ISaveSetParticipant participant = participants[index];
+                    ICapturedSaveSetParticipant capture = participant.Capture(captureContext) ??
+                        throw new IOException($"Participant '{participant.Key}' returned no captured state.");
+                    if (!StringComparer.Ordinal.Equals(capture.Key, participant.Key))
                     {
                         capture.Dispose();
                         throw new IOException("Captured participant identity differs from its registered key.");
                     }
-                    captured[index] = capture;
+                    captured[count++] = new CapturedSaveSetParticipant(
+                        participant.Key, participant.MaximumArtifactBytes, capture);
                 }
             });
             if (!capturedEpoch)
                 throw new InvalidOperationException("The save-set capture boundary did not invoke its epoch action.");
-            for (int index = 0; index < participants.Count; index++)
+            return new CapturedSaveSet(context, captured);
+        }
+        catch
+        {
+            for (int index = 0; index < count; index++)
+                captured[index].Capture.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Encodes and durably publishes an already captured save set.</summary>
+    public SaveSetManifest Publish(CapturedSaveSet captured)
+    {
+        ArgumentNullException.ThrowIfNull(captured);
+        SaveSetContext context = captured.Context;
+        CapturedSaveSetParticipant[] participants = captured.TakeParticipants();
+        string pending = Path.Combine(_generations, context.Sequence.ToString("D20") + ".pending");
+        string complete = Path.Combine(_generations, context.Sequence.ToString("D20"));
+        try
+        {
+            using IDisposable writerLease = AcquireWriterLease();
+            CleanupAbandonedPending();
+            EnsureForwardSequence(context.Sequence);
+            if (_files.DirectoryExists(pending) || _files.DirectoryExists(complete))
+                throw new IOException("The requested save-set generation already exists.");
+            _files.CreateDirectory(pending);
+            Reach(SaveSetFaultPoint.AfterPendingDirectory, pending);
+            var artifacts = new SaveSetArtifact[participants.Length];
+            for (int index = 0; index < participants.Length; index++)
             {
-                ISaveSetParticipant participant = participants[index];
+                CapturedSaveSetParticipant participant = participants[index];
                 string name = participant.Key + ".bin";
                 string path = Path.Combine(pending, name);
                 long length;
+                byte[] digest;
                 using (Stream stream = _files.CreateDurableFile(path))
                 {
-                    using (var bounded = new BoundedWriteStream(stream, participant.MaximumArtifactBytes, leaveOpen: true))
-                        captured[index]!.WriteArtifact(bounded);
+                    using var algorithm = SHA256.Create();
+                    using var hashing = new CryptoStream(
+                        stream, algorithm, CryptoStreamMode.Write, leaveOpen: true);
+                    using (var bounded = new BoundedWriteStream(
+                        hashing, participant.MaximumArtifactBytes, leaveOpen: true))
+                    {
+                        participant.Capture.WriteArtifact(bounded);
+                    }
+                    hashing.FlushFinalBlock();
                     _files.FlushFile(stream);
                     length = stream.Length;
                     if (length < 0 || length > participant.MaximumArtifactBytes || length > Array.MaxLength)
                         throw new IOException($"Participant '{participant.Key}' exceeded its configured artifact bound.");
+                    digest = algorithm.Hash ??
+                        throw new IOException($"Participant '{participant.Key}' produced no artifact digest.");
                 }
-                byte[] digest;
-                using (Stream read = _files.OpenRead(path)) digest = SHA256.HashData(read);
                 artifacts[index] = new SaveSetArtifact(participant.Key, name, length, Convert.ToHexString(digest));
                 Reach(SaveSetFaultPoint.AfterParticipantFile, path);
             }
+            Array.Sort(artifacts, static (left, right) => StringComparer.Ordinal.Compare(left.Key, right.Key));
+            var manifest = new SaveSetManifest(1, context.Sequence, context.UnixMilliseconds, artifacts);
+            string manifestPath = Path.Combine(pending, ManifestName);
+            using (Stream stream = _files.CreateDurableFile(manifestPath))
+            {
+                JsonSerializer.Serialize(stream, manifest, SaveSetJsonContext.Default.SaveSetManifest);
+                _files.FlushFile(stream);
+            }
+            Reach(SaveSetFaultPoint.AfterManifestFile, manifestPath);
+            _files.FlushDirectory(pending);
+            Reach(SaveSetFaultPoint.AfterPendingDirectoryFlush, pending);
+            _files.MoveDirectory(pending, complete);
+            Reach(SaveSetFaultPoint.AfterGenerationRename, complete);
+            _files.FlushDirectory(_generations);
+            Reach(SaveSetFaultPoint.AfterGenerationDirectoryFlush, _generations);
+
+            string pointerTemp = Path.Combine(_root, CurrentName + ".tmp." + context.Sequence.ToString("D20"));
+            using (Stream stream = _files.CreateDurableFile(pointerTemp))
+            {
+                byte[] pointer = Encoding.ASCII.GetBytes(context.Sequence.ToString("D20") + "\n");
+                stream.Write(pointer);
+                _files.FlushFile(stream);
+            }
+            Reach(SaveSetFaultPoint.AfterCurrentPointerFile, pointerTemp);
+            _files.ReplaceFile(pointerTemp, Path.Combine(_root, CurrentName));
+            Reach(SaveSetFaultPoint.AfterCurrentPointerRename, Path.Combine(_root, CurrentName));
+            _files.FlushDirectory(_root);
+            return manifest;
+        }
+        catch
+        {
+            if (_files.DirectoryExists(pending)) _files.DeleteDirectory(pending, recursive: true);
+            throw;
         }
         finally
         {
-            foreach (ICapturedSaveSetParticipant? capture in captured) capture?.Dispose();
+            foreach (CapturedSaveSetParticipant participant in participants)
+                participant.Capture.Dispose();
         }
-        Array.Sort(artifacts, static (left, right) => StringComparer.Ordinal.Compare(left.Key, right.Key));
-        var manifest = new SaveSetManifest(1, context.Sequence, context.UnixMilliseconds, artifacts);
-        string manifestPath = Path.Combine(pending, ManifestName);
-        using (Stream stream = _files.CreateDurableFile(manifestPath))
-        {
-            JsonSerializer.Serialize(stream, manifest, SaveSetJsonContext.Default.SaveSetManifest);
-            _files.FlushFile(stream);
-        }
-        Reach(SaveSetFaultPoint.AfterManifestFile, manifestPath);
-        _files.FlushDirectory(pending);
-        Reach(SaveSetFaultPoint.AfterPendingDirectoryFlush, pending);
-        _files.MoveDirectory(pending, complete);
-        Reach(SaveSetFaultPoint.AfterGenerationRename, complete);
-        _files.FlushDirectory(_generations);
-        Reach(SaveSetFaultPoint.AfterGenerationDirectoryFlush, _generations);
-
-        string pointerTemp = Path.Combine(_root, CurrentName + ".tmp." + context.Sequence.ToString("D20"));
-        using (Stream stream = _files.CreateDurableFile(pointerTemp))
-        {
-            byte[] pointer = Encoding.ASCII.GetBytes(context.Sequence.ToString("D20") + "\n");
-            stream.Write(pointer);
-            _files.FlushFile(stream);
-        }
-        Reach(SaveSetFaultPoint.AfterCurrentPointerFile, pointerTemp);
-        _files.ReplaceFile(pointerTemp, Path.Combine(_root, CurrentName));
-        Reach(SaveSetFaultPoint.AfterCurrentPointerRename, Path.Combine(_root, CurrentName));
-        _files.FlushDirectory(_root);
-        return manifest;
     }
 
     public PreparedLoadGeneration PrepareLoad(IReadOnlyList<ISaveSetParticipant> participants,
-        IPersistentEntityResolver resolver, SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
+        IExternalPersistentEntityResolver resolver, SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
     {
         ArgumentNullException.ThrowIfNull(participants); ArgumentNullException.ThrowIfNull(resolver);
         ValidateParticipants(participants);
@@ -156,10 +187,10 @@ public sealed class SaveSetCoordinator
     }
 
     private PreparedLoadGeneration PrepareGeneration(string directory, IReadOnlyList<ISaveSetParticipant> participants,
-        IPersistentEntityResolver resolver)
+        IExternalPersistentEntityResolver resolver)
     {
         string manifestPath = Path.Combine(directory, ManifestName);
-        long manifestLength = new FileInfo(manifestPath).Length;
+        long manifestLength = _files.GetFileLength(manifestPath);
         if (manifestLength <= 0 || manifestLength > MaximumManifestBytes)
             throw new InvalidDataException("Save-set manifest size is outside its configured bound.");
         SaveSetManifest manifest;
@@ -175,9 +206,9 @@ public sealed class SaveSetCoordinator
             throw new InvalidDataException("Save-set manifest participant count is inconsistent.");
         var artifactKeys = new HashSet<string>(StringComparer.Ordinal);
         var artifactFiles = new HashSet<string>(StringComparer.Ordinal);
-        foreach (SaveSetArtifact artifact in manifest.Artifacts)
+        foreach (SaveSetArtifact? artifact in manifest.Artifacts)
         {
-            if (!IsKey(artifact.Key) || artifact.FileName != artifact.Key + ".bin" ||
+            if (artifact is null || !IsKey(artifact.Key) || artifact.FileName != artifact.Key + ".bin" ||
                 artifact.ByteCount < 0 || string.IsNullOrEmpty(artifact.Sha256) || artifact.Sha256.Length != 64 ||
                 !artifactKeys.Add(artifact.Key) || !artifactFiles.Add(artifact.FileName))
                 throw new InvalidDataException("Save-set manifest artifact directory is invalid or duplicated.");
@@ -193,7 +224,7 @@ public sealed class SaveSetCoordinator
                 if (!artifactByKey.TryGetValue(participant.Key, out SaveSetArtifact? artifact))
                     throw new InvalidDataException($"Manifest has no artifact for participant '{participant.Key}'.");
                 string path = ResolveContained(directory, artifact.FileName);
-                long physicalLength = new FileInfo(path).Length;
+                long physicalLength = _files.GetFileLength(path);
                 if (physicalLength != artifact.ByteCount || physicalLength > participant.MaximumArtifactBytes ||
                     physicalLength > Array.MaxLength)
                     throw new InvalidDataException($"Artifact size is invalid for participant '{participant.Key}'.");
@@ -226,17 +257,17 @@ public sealed class SaveSetCoordinator
     {
         string pointer = Path.Combine(_root, CurrentName);
         string? currentPath = null;
-        if (File.Exists(pointer))
+        if (_files.FileExists(pointer))
         {
             try
             {
-                var info = new FileInfo(pointer);
-                if (info.Length is <= 0 or > 64) throw new InvalidDataException("CURRENT pointer size is invalid.");
-                string current = File.ReadAllText(pointer).Trim();
+                long pointerLength = _files.GetFileLength(pointer);
+                if (pointerLength is <= 0 or > 64) throw new InvalidDataException("CURRENT pointer size is invalid.");
+                string current = _files.ReadAllText(pointer).Trim();
                 if (current.Length != 20 || current.Any(static character => character is < '0' or > '9') || current == new string('0', 20))
                     throw new InvalidDataException("CURRENT pointer is malformed.");
                 currentPath = ResolveContained(_generations, current);
-                if (!Directory.Exists(currentPath))
+                if (!_files.DirectoryExists(currentPath))
                 {
                     currentPath = null;
                     if (mode == SaveSetRecoveryMode.StrictCurrent) throw new InvalidDataException("CURRENT generation is absent.");
@@ -254,7 +285,7 @@ public sealed class SaveSetCoordinator
         }
         if (mode == SaveSetRecoveryMode.CurrentThenNewestComplete)
         {
-            foreach (string directory in Directory.EnumerateDirectories(_generations)
+            foreach (string directory in _files.EnumerateDirectories(_generations, "*")
                 .Where(static path => !path.EndsWith(".pending", StringComparison.Ordinal))
                 .OrderByDescending(static path => path, StringComparer.Ordinal))
                 if (currentPath is null || !StringComparer.Ordinal.Equals(directory, currentPath)) yield return directory;
@@ -288,12 +319,12 @@ public sealed class SaveSetCoordinator
 
     private sealed class PreparedParticipantResolver : IPersistentEntityResolver
     {
-        private readonly IPersistentEntityResolver _fallback;
+        private readonly IExternalPersistentEntityResolver _fallback;
         private readonly IPreparedLoadParticipant[] _participants;
         private readonly int _count;
 
         internal PreparedParticipantResolver(
-            IPersistentEntityResolver fallback,
+            IExternalPersistentEntityResolver fallback,
             IPreparedLoadParticipant[] participants,
             int count)
         {
@@ -308,6 +339,13 @@ public sealed class SaveSetCoordinator
             // cannot accidentally resolve to an old active-world object.
             for (int index = 0; index < _count; index++)
             {
+                if (_participants[index] is IPreparedPersistentEntityNamespace owner && owner.Owns(key))
+                {
+                    if (_participants[index] is IPreparedPersistentEntityResolver ownedProvider)
+                        return ownedProvider.TryResolve(key, out value);
+                    value = null;
+                    return false;
+                }
                 if (_participants[index] is IPreparedPersistentEntityResolver provider &&
                     provider.TryResolve(key, out value))
                 {
@@ -327,8 +365,7 @@ public sealed class SaveSetCoordinator
         {
             try
             {
-                return new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None,
-                    1, FileOptions.WriteThrough);
+                return _files.AcquireExclusiveFile(path);
             }
             catch (IOException) when (Stopwatch.GetElapsedTime(started) < TimeSpan.FromSeconds(30))
             {
@@ -339,17 +376,17 @@ public sealed class SaveSetCoordinator
 
     private void CleanupAbandonedPending()
     {
-        foreach (string abandoned in Directory.EnumerateDirectories(_generations, "*.pending"))
-            Directory.Delete(abandoned, recursive: true);
-        foreach (string pointer in Directory.EnumerateFiles(_root, CurrentName + ".tmp.*"))
-            File.Delete(pointer);
+        foreach (string abandoned in _files.EnumerateDirectories(_generations, "*.pending"))
+            _files.DeleteDirectory(abandoned, recursive: true);
+        foreach (string pointer in _files.EnumerateFiles(_root, CurrentName + ".tmp.*"))
+            _files.DeleteFile(pointer);
     }
 
     private void EnsureForwardSequence(ulong sequence)
     {
         if (sequence == 0) throw new ArgumentOutOfRangeException(nameof(sequence));
         ulong greatest = 0;
-        foreach (string directory in Directory.EnumerateDirectories(_generations))
+        foreach (string directory in _files.EnumerateDirectories(_generations, "*"))
         {
             string name = Path.GetFileName(directory);
             if (name.Length == 20 && ulong.TryParse(name, out ulong candidate) && candidate > greatest)
@@ -367,6 +404,7 @@ internal sealed class BoundedWriteStream : Stream
     private readonly Stream _inner;
     private readonly long _maximumLength;
     private readonly bool _leaveOpen;
+    private long _position;
 
     internal BoundedWriteStream(Stream inner, long maximumLength, bool leaveOpen)
     {
@@ -379,39 +417,20 @@ internal sealed class BoundedWriteStream : Stream
     }
 
     public override bool CanRead => false;
-    public override bool CanSeek => _inner.CanSeek;
+    public override bool CanSeek => false;
     public override bool CanWrite => true;
-    public override long Length => _inner.Length;
+    public override long Length => _position;
     public override long Position
     {
-        get => _inner.Position;
-        set
-        {
-            EnsureLength(value);
-            _inner.Position = value;
-        }
+        get => _position;
+        set => throw new NotSupportedException();
     }
 
     public override void Flush() => _inner.Flush();
     public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
     public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-    public override long Seek(long offset, SeekOrigin origin)
-    {
-        long destination = origin switch
-        {
-            SeekOrigin.Begin => offset,
-            SeekOrigin.Current => checked(_inner.Position + offset),
-            SeekOrigin.End => checked(_inner.Length + offset),
-            _ => throw new ArgumentOutOfRangeException(nameof(origin)),
-        };
-        EnsureLength(destination);
-        return _inner.Seek(offset, origin);
-    }
-    public override void SetLength(long value)
-    {
-        EnsureLength(value);
-        _inner.SetLength(value);
-    }
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
     public override void Write(byte[] buffer, int offset, int count)
     {
         ArgumentNullException.ThrowIfNull(buffer);
@@ -452,7 +471,11 @@ internal sealed class BoundedWriteStream : Stream
         base.Dispose(disposing);
     }
 
-    private void EnsureWrite(int count) => EnsureLength(checked(_inner.Position + count));
+    private void EnsureWrite(int count)
+    {
+        EnsureLength(checked(_position + count));
+        _position += count;
+    }
     private void EnsureLength(long length)
     {
         if (length < 0 || length > _maximumLength)

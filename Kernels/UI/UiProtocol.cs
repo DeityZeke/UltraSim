@@ -1,6 +1,4 @@
-using UltraSim.UI;
-
-namespace UltraSim.Client.Core;
+namespace UltraSim.UI;
 
 /// <summary>Exact cache identity for one server/composition UI definition revision.</summary>
 public readonly record struct UiDefinitionCacheKey
@@ -23,6 +21,8 @@ public readonly record struct UiDefinitionCacheKey
             throw new ArgumentOutOfRangeException(nameof(serverIdentity));
         if (normalizedComposition.Length > MaximumIdentityLength)
             throw new ArgumentOutOfRangeException(nameof(compositionIdentity));
+        UiText.ValidateUnicode(normalizedServer, nameof(serverIdentity));
+        UiText.ValidateUnicode(normalizedComposition, nameof(compositionIdentity));
         if (protocolVersion == 0)
             throw new ArgumentOutOfRangeException(nameof(protocolVersion));
         if (!definitionKey.IsValid)
@@ -367,6 +367,17 @@ public readonly struct UiCloseView
     public UiViewInstanceId Instance { get; }
 }
 
+/// <summary>Renderer-neutral semantic UI transport used by game policy and client bridges.</summary>
+public interface IUiSemanticPort
+{
+    UiViewInstanceId OpenView(UiOpenView operation);
+    UiViewInstanceId OpenHotView(UiHotOpenView operation);
+    void UpdateView(UiUpdateView operation);
+    bool CloseView(UiCloseView operation);
+    void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler);
+    void UnbindActions(UiViewInstanceId instance);
+}
+
 public interface IUiRenderHandle
 {
 }
@@ -376,7 +387,7 @@ public readonly struct UiModelView
 {
     private readonly UiModel? _model;
 
-    internal UiModelView(UiModel model) => _model = model;
+    public UiModelView(UiModel model) => _model = model ?? throw new ArgumentNullException(nameof(model));
 
     public bool IsValid => _model is not null;
 
@@ -423,9 +434,9 @@ public sealed class UiViewSupersededException : InvalidOperationException
 /// </summary>
 public sealed class UiClientRuntimeFaultedException : InvalidOperationException
 {
-    internal UiClientRuntimeFaultedException(string operation, Exception innerException)
+    public UiClientRuntimeFaultedException(string operation, Exception innerException)
         : base($"The UI client runtime faulted while the renderer was executing '{operation}'.", innerException) { }
 
-    internal UiClientRuntimeFaultedException(Exception innerException)
+    public UiClientRuntimeFaultedException(Exception innerException)
         : base("The UI client runtime is terminally faulted.", innerException) { }
 }

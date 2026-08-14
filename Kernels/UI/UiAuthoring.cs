@@ -78,8 +78,16 @@ public sealed class UiDefinitionBuilder
             parentPlacement: default,
             flow: default,
             canvas: options);
-        configure(new UiCanvasBuilder(this, root));
         _root = root;
+        try
+        {
+            configure(new UiCanvasBuilder(this, root));
+        }
+        catch
+        {
+            _root = null;
+            throw;
+        }
     }
 
     internal UiSourceLayoutNode? Root => _root;
@@ -103,7 +111,9 @@ public sealed class UiDefinitionBuilder
     internal static void ValidateSourceKey(string value, string parameterName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
-        if (value.Trim().Length > UiDefinitionKey.MaximumLength)
+        string normalized = value.Trim();
+        UiText.ValidateUnicode(normalized, parameterName);
+        if (normalized.Length > UiDefinitionKey.MaximumLength)
         {
             throw new ArgumentOutOfRangeException(
                 parameterName,
@@ -214,6 +224,13 @@ public abstract class UiContainerBuilder
 
     public void AddTextInput(
         string key,
+        UiSlotReference slot,
+        UiChildLayout placement = default) =>
+        AddElement(new UiSourceElement(UiElementKind.TextInput, key, placement, null, null,
+            slot, default));
+
+    public void AddTextInput(
+        string key,
         string slotKey,
         string actionKey,
         UiChildLayout placement = default) =>
@@ -231,6 +248,13 @@ public abstract class UiContainerBuilder
     public void AddToggle(string key, string slotKey, UiChildLayout placement = default) =>
         AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, null, null,
             slotKey, actionKey: null));
+
+    public void AddToggle(
+        string key,
+        UiSlotReference slot,
+        UiChildLayout placement = default) =>
+        AddElement(new UiSourceElement(UiElementKind.Toggle, key, placement, null, null,
+            slot, default));
 
     public void AddToggle(
         string key,

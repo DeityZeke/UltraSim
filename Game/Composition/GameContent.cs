@@ -103,10 +103,13 @@ public sealed class GameContent : IInventoryContentCatalog
         character.With(new GameCharacter { Marker = 1 });
         character.With(new GameSimulationState { TickMarker = 0 });
         character.DisplayName("Character");
-        _ = InventoryContent.DefineContainer(content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);
-        _ = InventoryContent.DefineContainer(content, GamePrefabKeys.WorldChest, "World Chest", 64, hasOwner: false);
-        _ = InventoryContent.DefineItem(content, GamePrefabKeys.Bread, "Bread", maximumQuantity: 20);
-        _ = InventoryContent.DefineItem(
+        InventoryContainerAuthoring backpackSource = InventoryContent.DefineContainer(
+            content, GamePrefabKeys.Backpack, "Backpack", 8, hasOwner: true);
+        InventoryContainerAuthoring chestSource = InventoryContent.DefineContainer(
+            content, GamePrefabKeys.WorldChest, "World Chest", 64, hasOwner: false);
+        InventoryItemAuthoring breadSource = InventoryContent.DefineItem(
+            content, GamePrefabKeys.Bread, "Bread", maximumQuantity: 20);
+        InventoryItemAuthoring swordSource = InventoryContent.DefineItem(
             content,
             GamePrefabKeys.IronSword,
             "Iron Sword",
@@ -114,17 +117,18 @@ public sealed class GameContent : IInventoryContentCatalog
             InventoryEquipSlots.MainHand);
         // Third item deliberately proves content expansion without changing
         // InventoryGenerationState or InventoryIndex.
-        _ = InventoryContent.DefineItem(content, GamePrefabKeys.Apple, "Apple", maximumQuantity: 10);
+        InventoryItemAuthoring appleSource = InventoryContent.DefineItem(
+            content, GamePrefabKeys.Apple, "Apple", maximumQuantity: 10);
 
         CompiledPrefabCatalog compiled = content.Compile(world, options);
-        InventoryItemDefinition bread = BindItem(compiled, GamePrefabKeys.Bread, 20, InventoryEquipSlots.None);
-        InventoryItemDefinition sword = BindItem(compiled, GamePrefabKeys.IronSword, 1, InventoryEquipSlots.MainHand);
-        InventoryItemDefinition apple = BindItem(compiled, GamePrefabKeys.Apple, 10, InventoryEquipSlots.None);
+        InventoryItemDefinition bread = BindItem(compiled, breadSource);
+        InventoryItemDefinition sword = BindItem(compiled, swordSource);
+        InventoryItemDefinition apple = BindItem(compiled, appleSource);
         return new GameContent(
             compiled,
             compiled.GetHandle(GamePrefabKeys.Character),
-            BindContainer(compiled, GamePrefabKeys.Backpack, hasOwner: true),
-            BindContainer(compiled, GamePrefabKeys.WorldChest, hasOwner: false),
+            BindContainer(compiled, backpackSource),
+            BindContainer(compiled, chestSource),
             bread,
             sword,
             apple);
@@ -132,31 +136,28 @@ public sealed class GameContent : IInventoryContentCatalog
 
     private static InventoryContainerDefinition BindContainer(
         CompiledPrefabCatalog catalog,
-        PrefabKey key,
-        bool hasOwner)
+        InventoryContainerAuthoring source)
     {
-        PrefabHandle handle = catalog.GetHandle(key);
+        PrefabHandle handle = catalog.GetHandle(source.Key);
         CompiledPrefabInfo info = catalog.GetInfo(handle);
         return new InventoryContainerDefinition(
             handle,
-            key,
-            info.DisplayName ?? key.Value,
-            hasOwner);
+            source.Key,
+            info.DisplayName ?? source.DisplayName,
+            source.HasOwner);
     }
 
     private static InventoryItemDefinition BindItem(
         CompiledPrefabCatalog catalog,
-        PrefabKey key,
-        int maximumQuantity,
-        InventoryEquipSlots slots)
+        InventoryItemAuthoring source)
     {
-        PrefabHandle handle = catalog.GetHandle(key);
+        PrefabHandle handle = catalog.GetHandle(source.Key);
         CompiledPrefabInfo info = catalog.GetInfo(handle);
         return new InventoryItemDefinition(
             handle,
-            key,
-            info.DisplayName ?? key.Value,
-            maximumQuantity,
-            slots);
+            source.Key,
+            info.DisplayName ?? source.DisplayName,
+            source.MaximumQuantity,
+            source.AllowedEquipSlots);
     }
 }

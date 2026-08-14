@@ -1,0 +1,68 @@
+{
+  "Workload": "ultrasim-s0.8-integrated-acceptance-v2",
+  "CapturedAtUtc": "2026-08-14T07:00:29.8245612+00:00",
+  "Runtime": "8.0.29",
+  "LogicalProcessorCount": 16,
+  "Tests": [
+    {
+      "Name": "AccountBackedInternalToHeadlessCanonicalRoundTrip",
+      "Passed": true,
+      "TotalNanoseconds": 253282685,
+      "Metrics": {
+        "CanonicalHash": "DD1323C54CF34C606236F9B1F7BB3E2A153CBA0BDCF0C426C53C4652E73FD5E7",
+        "SaveMeanNanoseconds": 47751705,
+        "LoadMeanNanoseconds": 42588861,
+        "CapturePauseNanoseconds": 10474187,
+        "SaveAllocatedBytes": 14960,
+        "LoadAllocatedBytes": 581176,
+        "ArtifactBytes": 1811,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "ECS\u002BAccounting\u002BClock; owner-thread immutable capture then durable worker publication; cold CharacterSelect/Inventory; row deltas; staged restore; session rebind; Internal/Headless generation parity."
+      }
+    },
+    {
+      "Name": "AccountlessAdmissionAndPersistence",
+      "Passed": true,
+      "TotalNanoseconds": 3069952,
+      "Metrics": {
+        "CanonicalHash": "C54772756B92B53D48D55124D1820AAE0F39CCFB62609664B9101A89C6D054E7",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 780,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "Accountless admission used no account records; the composition\u0027s declared empty Accounting and authoritative Clock participants remained round-trippable."
+      }
+    },
+    {
+      "Name": "WarmedRuntimeTickHasNoAllocationAndBoundedWrapperTax",
+      "Passed": true,
+      "TotalNanoseconds": 175420889,
+      "Metrics": {
+        "CanonicalHash": "45988E768B9D6F24869CA6D0A9D5257EA97BC3EF852BC05817354081DE7DEC10",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 0,
+        "DirectTickMeanNanoseconds": 13404.739025297618,
+        "HostedTickMeanNanoseconds": 13168.99962797619,
+        "HostedTickP95Nanoseconds": 32512.2109375,
+        "TickWrapperRatio": 1.016644509138568,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "21 alternating paired A/B samples; ratio is paired median; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread."
+      }
+    }
+  ]
+}

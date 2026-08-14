@@ -17,10 +17,12 @@ var tests = new (string Name, Action Body)[]
     ("HotReopenFailureLeavesNoStaleViewMapping", HotReopenFailureLeavesNoStaleViewMapping),
     ("PlayableEntityCannotBindTwoParticipants", PlayableEntityCannotBindTwoParticipants),
     ("AccountingRejectsAmbiguousSlotsLinksAndForeignThreads", AccountingRejectsAmbiguousSlotsLinksAndForeignThreads),
-    ("LocalAdmissionUiPortDetachesOnDispose", LocalAdmissionUiPortDetachesOnDispose),
+    ("LocalUiSemanticPortDetachesOnDispose", LocalUiSemanticPortDetachesOnDispose),
     ("AdmissionDisposeAttemptsEveryOpenView", AdmissionDisposeAttemptsEveryOpenView),
     ("AdmissionConfigurationRejectionsAreExplicit", AdmissionConfigurationRejectionsAreExplicit),
     ("UnownedCharacterRowRejectsAndClosesSelector", UnownedCharacterRowRejectsAndClosesSelector),
+    ("PlayReauthorizesIdentityAndCurrentAccountStatus", PlayReauthorizesIdentityAndCurrentAccountStatus),
+    ("CloseFailureAfterEntryDoesNotUndoAuthority", CloseFailureAfterEntryDoesNotUndoAuthority),
     ("AdmissionIsOwnerThreadBound", AdmissionIsOwnerThreadBound),
 };
 
@@ -63,7 +65,7 @@ static void AccountBackedCharacterSelectUsesRealUiAndBindsPersistentEntity()
     var renderer = new NoopRenderer();
     var client = new UiClientRuntime(renderer);
     var link = new LocalSemanticLink(client);
-    using var ui = new LocalAdmissionUiPort(link);
+    using var ui = new LocalUiSemanticPort(link);
     using var service = new AdmissionService(runtime.Game, composition, ui);
 
     Entity persistentEntity = CreatePersistentPlayable(runtime, composition, new ParticipantId(1));
@@ -133,7 +135,7 @@ static void ForeignAndMissingDurableReferencesRejectEntry()
 
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
-    using var ui = new LocalAdmissionUiPort(link);
+    using var ui = new LocalUiSemanticPort(link);
     using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(3), identity);
     ReadOnlySpan<UiListRow> rows = client.GetRows(waiting.CharacterSelectView, CharacterSelectUi.Characters);
@@ -172,7 +174,7 @@ static void EmptyCharacterSelectDisablesPlayDynamically()
     runtime.Start();
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
-    using var ui = new LocalAdmissionUiPort(link);
+    using var ui = new LocalUiSemanticPort(link);
     using var service = new AdmissionService(runtime.Game, composition, ui);
 
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(4), identity);
@@ -282,7 +284,7 @@ static void PlayableEntityCannotBindTwoParticipants()
     accounting.AddCharacter(composition.CreateCharacterRecord(new AccountId(44), 44, "Shared"));
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
-    using var ui = new LocalAdmissionUiPort(link);
+    using var ui = new LocalUiSemanticPort(link);
     using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult first = service.JoinAccountBacked(new ParticipantId(44), identity);
     AdmissionResult second = service.JoinAccountBacked(new ParticipantId(45), identity);
@@ -312,6 +314,12 @@ static void AccountingRejectsAmbiguousSlotsLinksAndForeignThreads()
     accounting.AddCharacter(Character(3, account, 2, key3));
     Assert.Throws<ArgumentOutOfRangeException>(() => accounting.AddAccount(
         new AccountRecord(new AccountId(51), (AccountStatus)99)));
+    string malformed = new(new[] { '\uD800' });
+    Assert.Throws<ArgumentException>(() => _ = new TrustedLocalIdentity(malformed));
+    Assert.Throws<ArgumentException>(() => _ = new CharacterRecord(
+        new CharacterId(99), account, 9, malformed,
+        new PrefabKey("characters/malformed"),
+        new PersistentEntityKey(new PersistentWorldId(1), new PersistentEntityId(99))));
     Assert.Equal(3, accounting.CharacterCount);
 
     Exception? observed = null;
@@ -325,14 +333,13 @@ static void AccountingRejectsAmbiguousSlotsLinksAndForeignThreads()
     Assert.True(observed is InvalidOperationException);
 }
 
-static void LocalAdmissionUiPortDetachesOnDispose()
+static void LocalUiSemanticPortDetachesOnDispose()
 {
     CompiledUiDefinition definition = CharacterSelectUi.Definition;
     var client = new UiClientRuntime(new NoopRenderer());
     var link = new LocalSemanticLink(client);
-    var port = new LocalAdmissionUiPort(link);
+    var port = new LocalUiSemanticPort(link);
     int forwarded = 0;
-    port.ActionSubmitted += _ => forwarded++;
     var model = new UiModel(definition);
     model.SetText(CharacterSelectUi.Title, "Detached");
     model.ReplaceRows(CharacterSelectUi.Characters, new[]
@@ -343,6 +350,7 @@ static void LocalAdmissionUiPortDetachesOnDispose()
         new UiDefinitionCacheKey("local", "detach", 1, definition.Key, definition.Version, definition.Hash),
         definition,
         model));
+    port.BindActions(view, _ => forwarded++);
     port.Dispose();
 
     Assert.Throws<InvalidOperationException>(() => client.SubmitAction(
@@ -434,17 +442,91 @@ static void UnownedCharacterRowRejectsAndClosesSelector()
     using var runtime = CreateRuntime(composition, accounting);
     runtime.Initialize();
     runtime.Start();
-    var client = new UiClientRuntime(new NoopRenderer());
-    var link = new LocalSemanticLink(client);
-    using var ui = new LocalAdmissionUiPort(link);
+    var ui = new FaultingUiPort();
     using var service = new AdmissionService(runtime.Game, composition, ui);
     AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(80), identity);
 
-    client.SubmitAction(waiting.CharacterSelectView, CharacterSelectUi.Play, new UiRowId(81));
+    // Bypass the normal client model validation to prove the authoritative
+    // endpoint still rejects a forged row that was never projected.
+    ui.Submit(new UiActionRequest(
+        waiting.CharacterSelectView,
+        CharacterSelectUi.Definition.Handle,
+        CharacterSelectUi.Play,
+        new UiRowId(81)));
 
     Assert.True(service.TryGetSession(waiting.Participant, out AdmissionResult result));
     Assert.Equal(AdmissionRejection.CharacterNotOwned, result.Rejection);
-    Assert.Equal(0, client.OpenViewCount);
+    Assert.Equal(1, ui.CloseCount);
+}
+
+static void PlayReauthorizesIdentityAndCurrentAccountStatus()
+{
+    var composition = new AdmissionComposition();
+    var accounting = new AccountingStore();
+    var account = new AccountId(82);
+    var identity = new TrustedLocalIdentity("reauthorize-account");
+    accounting.AddAccount(new AccountRecord(account));
+    accounting.BindTrustedIdentity(identity, account);
+    using var runtime = CreateRuntime(composition, accounting);
+    runtime.Initialize();
+    runtime.Start();
+    Entity playable = CreatePersistentPlayable(runtime, composition, new ParticipantId(82));
+    CharacterRecord character = composition.CreateCharacterRecord(account, 82, "Reauth");
+    accounting.AddCharacter(character);
+    var ui = new FaultingUiPort();
+    using var service = new AdmissionService(runtime.Game, composition, ui);
+    AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(82), identity);
+    Assert.True(waiting.IsWaitingForCharacter);
+    Assert.True(accounting.TrySetAccountStatus(account, AccountStatus.Disabled));
+
+    ui.Submit(new UiActionRequest(
+        waiting.CharacterSelectView,
+        CharacterSelectUi.Definition.Handle,
+        CharacterSelectUi.Play,
+        new UiRowId(character.CharacterId.Value)));
+
+    Assert.True(service.TryGetSession(waiting.Participant, out AdmissionResult rejected));
+    Assert.Equal(AdmissionRejection.AccountDisabled, rejected.Rejection);
+    Assert.True(runtime.Game.TryUseActiveGeneration((world, _) => world.IsAlive(playable), out bool alive) && alive);
+}
+
+static void CloseFailureAfterEntryDoesNotUndoAuthority()
+{
+    var composition = new AdmissionComposition();
+    var accounting = new AccountingStore();
+    var account = new AccountId(83);
+    var identity = new TrustedLocalIdentity("close-failure-account");
+    accounting.AddAccount(new AccountRecord(account));
+    accounting.BindTrustedIdentity(identity, account);
+    using var runtime = CreateRuntime(composition, accounting);
+    runtime.Initialize();
+    runtime.Start();
+    Entity playable = CreatePersistentPlayable(runtime, composition, new ParticipantId(83));
+    CharacterRecord character = composition.CreateCharacterRecord(account, 83, "Closer");
+    accounting.AddCharacter(character);
+    var ui = new FaultingUiPort { ThrowOnClose = true };
+    using var service = new AdmissionService(runtime.Game, composition, ui);
+    int presentationFaults = 0;
+    int enteredNotifications = 0;
+    int observerFaults = 0;
+    service.PresentationFaulted += _ => presentationFaults++;
+    service.Entered += _ => throw new InvalidOperationException("observer");
+    service.Entered += _ => enteredNotifications++;
+    service.ObserverFaulted += _ => observerFaults++;
+    AdmissionResult waiting = service.JoinAccountBacked(new ParticipantId(83), identity);
+
+    ui.Submit(new UiActionRequest(
+        waiting.CharacterSelectView,
+        CharacterSelectUi.Definition.Handle,
+        CharacterSelectUi.Play,
+        new UiRowId(character.CharacterId.Value)));
+
+    Assert.True(service.TryGetSession(waiting.Participant, out AdmissionResult entered));
+    Assert.True(entered.IsEntered);
+    Assert.Equal(playable, entered.Entity);
+    Assert.Equal(1, presentationFaults);
+    Assert.Equal(1, enteredNotifications);
+    Assert.Equal(1, observerFaults);
 }
 
 static void AdmissionIsOwnerThreadBound()
@@ -609,11 +691,10 @@ sealed class NoopRenderer : IUiRenderer
     private sealed class Handle : IUiRenderHandle { }
 }
 
-sealed class FaultingUiPort : IAdmissionUiPort
+sealed class FaultingUiPort : IUiSemanticPort
 {
     private ulong _nextView = 1;
-
-    public event Action<UiActionRequest>? ActionSubmitted;
+    private readonly Dictionary<UiViewInstanceId, Action<UiActionRequest>> _actions = [];
 
     public UiViewInstanceId FixedView { get; set; } = new(1);
 
@@ -626,6 +707,10 @@ sealed class FaultingUiPort : IAdmissionUiPort
     public bool UseSequentialViews { get; set; }
 
     public int CloseCount { get; private set; }
+
+    public void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler) =>
+        _actions.Add(instance, handler);
+    public void UnbindActions(UiViewInstanceId instance) => _actions.Remove(instance);
 
     public UiViewInstanceId OpenView(UiOpenView operation)
     {
@@ -651,7 +736,10 @@ sealed class FaultingUiPort : IAdmissionUiPort
         return true;
     }
 
-    public void Submit(UiActionRequest request) => ActionSubmitted?.Invoke(request);
+    public void Submit(UiActionRequest request)
+    {
+        if (_actions.TryGetValue(request.Instance, out Action<UiActionRequest>? handler)) handler(request);
+    }
 }
 
 static class Assert

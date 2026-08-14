@@ -11,6 +11,9 @@ var tests = new (string Name, Action Body)[]
     ("HostSurfaceDoesNotExposeGenerationReplacement", HostSurfaceDoesNotExposeGenerationReplacement),
     ("GameFacetIsCallbackScopedRunningAndOwnerBound", GameFacetIsCallbackScopedRunningAndOwnerBound),
     ("GameFacetFailureTerminallyFaultsRuntime", GameFacetFailureTerminallyFaultsRuntime),
+    ("GameFacetRejectsReentrantControlWithoutDisposingBorrowedRoot", GameFacetRejectsReentrantControlWithoutDisposingBorrowedRoot),
+    ("ReentrantPublicationRejectsAndReclaimsPrivateCandidate", ReentrantPublicationRejectsAndReclaimsPrivateCandidate),
+    ("GenerationPublicationObserversAreIsolated", GenerationPublicationObserversAreIsolated),
     ("OwnerThreadBoundaryRejectsForeignHostControl", OwnerThreadBoundaryRejectsForeignHostControl),
     ("InvalidElapsedRejectsTransactionallyWithoutFaulting", InvalidElapsedRejectsTransactionallyWithoutFaulting),
     ("FailedReplacementLeavesActiveGenerationUnchanged", FailedReplacementLeavesActiveGenerationUnchanged),
@@ -149,6 +152,85 @@ static void GameFacetFailureTerminallyFaultsRuntime()
 
     Assert.Equal(ServerRuntimeState.Faulted, runtime.State);
     Assert.Throws<InvalidOperationException>(() => runtime.Tick());
+}
+
+static void GameFacetRejectsReentrantControlWithoutDisposingBorrowedRoot()
+{
+    using var runtime = new ServerRuntime(new EmptyComposition(), new ServerRuntimeOptions(
+        CreateWorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    EcsWorld borrowed = runtime.CurrentGeneration.EcsWorld;
+
+    Assert.Throws<InvalidOperationException>(() => runtime.Game.TryUseActiveGeneration<int>(
+        (_, _) =>
+        {
+            runtime.Dispose();
+            return 1;
+        },
+        out _));
+
+    Assert.Equal(ServerRuntimeState.Faulted, runtime.State);
+    Assert.False(borrowed.IsDisposed);
+}
+
+static void ReentrantPublicationRejectsAndReclaimsPrivateCandidate()
+{
+    var composition = new EmptyComposition();
+    using var runtime = new ServerRuntime(composition, new ServerRuntimeOptions(
+        CreateWorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    EcsWorld active = runtime.CurrentGeneration.EcsWorld;
+    var prepared = new EcsWorld(composition.Schema, CreateWorldOptions());
+    _ = prepared.RegisterArchetype(ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
+    prepared.Seal();
+    prepared.Initialize();
+    prepared.BeginRun();
+    var state = new GenerationStateProbe(99);
+
+    Assert.Throws<InvalidOperationException>(() => runtime.Game.TryUseActiveGeneration<int>(
+        (_, _) =>
+        {
+            runtime.Game.TryPublishPreparedGeneration(prepared, state, out _);
+            return 1;
+        },
+        out _));
+
+    Assert.Equal(ServerRuntimeState.Faulted, runtime.State);
+    Assert.False(active.IsDisposed);
+    Assert.True(prepared.IsDisposed);
+    Assert.True(state.IsDisposed);
+}
+
+static void GenerationPublicationObserversAreIsolated()
+{
+    using var runtime = new ServerRuntime(new EmptyComposition(), new ServerRuntimeOptions(
+        CreateWorldOptions(), WorldClockOptions.Default));
+    runtime.Initialize();
+    runtime.Start();
+    int successfulObserver = 0;
+    int reconciledObserver = 0;
+    int observerFaults = 0;
+    runtime.Game.GenerationPublished += _ => throw new InvalidOperationException("observer");
+    runtime.Game.GenerationPublished += _ => runtime.Stop();
+    runtime.Game.GenerationPublished += _ =>
+    {
+        Assert.True(runtime.Game.TryUseActiveGeneration(
+            static (_, generationId) => generationId,
+            out ulong active));
+        Assert.True(active > 0);
+        reconciledObserver++;
+    };
+    runtime.Game.GenerationPublished += _ => successfulObserver++;
+    runtime.Game.ObserverFaulted += _ => observerFaults++;
+
+    runtime.ReplaceGeneration();
+
+    Assert.Equal(ServerRuntimeState.Running, runtime.State);
+    Assert.Equal(1, successfulObserver);
+    Assert.Equal(1, reconciledObserver);
+    Assert.Equal(2, observerFaults);
 }
 
 static void OwnerThreadBoundaryRejectsForeignHostControl()
@@ -348,6 +430,16 @@ static void FixedWorldClockIsDeterministicAndSnapshotRestores()
     Assert.Throws<ArgumentException>(() => restoredClock.Restore(new WorldClockSnapshot(
         simulationFrequencyHz: 60, worldTimeRate: 24, simulationTick: 1,
         worldTimeMicroseconds: 1, worldTimeRemainder: 60, playbackRate: 1)));
+
+    var persistent = new PersistentWorldClockState(
+        simulationFrequencyHz: 60,
+        worldTimeRate: 24,
+        simulationTick: 17,
+        worldTimeMicroseconds: 6_800_001,
+        worldTimeRemainder: 37);
+    restoredClock.RestorePersistent(persistent);
+    Assert.Equal(persistent, restoredClock.PersistentState);
+    Assert.Equal(WorldClockOptions.DefaultPlaybackRate, restoredClock.Snapshot.PlaybackRate);
 }
 
 static void PlaybackChangesHostReachTimeNotTickMeaning()
@@ -692,5 +784,9 @@ sealed class WorldClockForTest
 
     public WorldClockSnapshot Snapshot => _clock.CaptureSnapshot();
 
+    public PersistentWorldClockState PersistentState => _clock.CapturePersistentState();
+
     public void Restore(WorldClockSnapshot snapshot) => _clock.RestoreSnapshot(snapshot);
+
+    public void RestorePersistent(PersistentWorldClockState state) => _clock.RestorePersistentState(state);
 }

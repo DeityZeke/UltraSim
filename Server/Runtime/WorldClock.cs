@@ -80,10 +80,11 @@ public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
     public static bool operator !=(WorldClockOptions left, WorldClockOptions right) => !left.Equals(right);
 }
 
-/// <summary>Persistable authoritative portion of a generation's world clock.</summary>
+/// <summary>Diagnostic snapshot of a generation's authoritative clock plus host playback.</summary>
 /// <remarks>
-/// S0.1 defines and validates this value contract. Durable save-set ownership is
-/// installed later with the real multi-participant persistence integration.
+/// This diagnostic snapshot also includes host playback. Durable game saves
+/// use <see cref="PersistentWorldClockState"/>, which deliberately excludes
+/// host execution policy.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
@@ -139,6 +140,57 @@ public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
     public static bool operator !=(WorldClockSnapshot left, WorldClockSnapshot right) => !left.Equals(right);
 }
 
+/// <summary>The durable, host-independent portion of one authoritative world clock.</summary>
+/// <remarks>
+/// Playback rate and accumulated host elapsed time are deliberately excluded:
+/// they are execution policy of the loading host, not saved world state.
+/// </remarks>
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public readonly struct PersistentWorldClockState : IEquatable<PersistentWorldClockState>
+{
+    public PersistentWorldClockState(
+        int simulationFrequencyHz,
+        int worldTimeRate,
+        ulong simulationTick,
+        long worldTimeMicroseconds,
+        long worldTimeRemainder)
+    {
+        if (simulationFrequencyHz <= 0)
+            throw new ArgumentOutOfRangeException(nameof(simulationFrequencyHz));
+        if (worldTimeRate <= 0)
+            throw new ArgumentOutOfRangeException(nameof(worldTimeRate));
+        if (worldTimeMicroseconds < 0)
+            throw new ArgumentOutOfRangeException(nameof(worldTimeMicroseconds));
+        if (worldTimeRemainder < 0 || worldTimeRemainder >= simulationFrequencyHz)
+            throw new ArgumentOutOfRangeException(nameof(worldTimeRemainder));
+
+        SimulationFrequencyHz = simulationFrequencyHz;
+        WorldTimeRate = worldTimeRate;
+        SimulationTick = simulationTick;
+        WorldTimeMicroseconds = worldTimeMicroseconds;
+        WorldTimeRemainder = worldTimeRemainder;
+    }
+
+    public int SimulationFrequencyHz { get; }
+    public int WorldTimeRate { get; }
+    public ulong SimulationTick { get; }
+    public long WorldTimeMicroseconds { get; }
+    public long WorldTimeRemainder { get; }
+
+    public bool Equals(PersistentWorldClockState other) =>
+        SimulationFrequencyHz == other.SimulationFrequencyHz &&
+        WorldTimeRate == other.WorldTimeRate &&
+        SimulationTick == other.SimulationTick &&
+        WorldTimeMicroseconds == other.WorldTimeMicroseconds &&
+        WorldTimeRemainder == other.WorldTimeRemainder;
+
+    public override bool Equals(object? obj) => obj is PersistentWorldClockState other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(
+        SimulationFrequencyHz, WorldTimeRate, SimulationTick, WorldTimeMicroseconds, WorldTimeRemainder);
+    public static bool operator ==(PersistentWorldClockState left, PersistentWorldClockState right) => left.Equals(right);
+    public static bool operator !=(PersistentWorldClockState left, PersistentWorldClockState right) => !left.Equals(right);
+}
+
 /// <summary>
 /// Mutable, generation-owned simulation and world-time clock.
 /// </summary>
@@ -188,6 +240,29 @@ internal sealed class WorldClock
         _worldTimeMicroseconds,
         _worldTimeRemainder,
         _playbackRate);
+
+    internal PersistentWorldClockState CapturePersistentState() => new(
+        _options.SimulationFrequencyHz,
+        _options.WorldTimeRate,
+        _simulationTick,
+        _worldTimeMicroseconds,
+        _worldTimeRemainder);
+
+    internal void RestorePersistentState(PersistentWorldClockState state)
+    {
+        if (state.SimulationFrequencyHz != _options.SimulationFrequencyHz ||
+            state.WorldTimeRate != _options.WorldTimeRate)
+        {
+            throw new ArgumentException(
+                "The persistent clock state belongs to a different fixed clock configuration.",
+                nameof(state));
+        }
+
+        _simulationTick = state.SimulationTick;
+        _worldTimeMicroseconds = state.WorldTimeMicroseconds;
+        _worldTimeRemainder = state.WorldTimeRemainder;
+        _hostAccumulatorNumerator = 0;
+    }
 
     /// <summary>Restores a snapshot produced for the same clock configuration.</summary>
     /// <remarks>In-flight host elapsed time is intentionally discarded.</remarks>

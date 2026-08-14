@@ -30,6 +30,39 @@ public sealed class ServerGameFacet
 
     internal ServerGameFacet(ServerRuntime runtime) => _runtime = runtime;
 
+    /// <summary>Raised after a replacement root is fully published and the previous root is retired.</summary>
+    public event Action<ulong>? GenerationPublished;
+
+    /// <summary>Reports isolated failures from non-authoritative publication observers.</summary>
+    public event Action<Exception>? ObserverFaulted;
+
+    internal void NotifyGenerationPublished(ulong generationId)
+    {
+        Action<ulong>? observers = GenerationPublished;
+        if (observers is null)
+            return;
+        foreach (Action<ulong> observer in observers.GetInvocationList().Cast<Action<ulong>>())
+        {
+            try { observer(generationId); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                NotifyObserverFault(exception);
+            }
+        }
+    }
+
+    private void NotifyObserverFault(Exception exception)
+    {
+        Action<Exception>? observers = ObserverFaulted;
+        if (observers is null)
+            return;
+        foreach (Action<Exception> observer in observers.GetInvocationList().Cast<Action<Exception>>())
+        {
+            try { observer(exception); }
+            catch (Exception nested) when (nested is not OutOfMemoryException) { }
+        }
+    }
+
     /// <summary>
     /// Runs one trusted game operation when Runtime is running.
     /// </summary>
@@ -68,6 +101,10 @@ public sealed class ServerGameFacet
         return _runtime.TryUseActiveGeneration(operation, out result);
     }
 
+    /// <summary>Captures the host-independent authoritative world-clock state.</summary>
+    public bool TryCapturePersistentClockState(out PersistentWorldClockState state) =>
+        _runtime.TryCapturePersistentClockState(out state);
+
     /// <summary>
     /// Publishes a fully prepared ECS world and opaque game-owned state through
     /// the same active generation root used by normal Runtime replacements.
@@ -84,6 +121,23 @@ public sealed class ServerGameFacet
         out ulong generationId)
     {
         ArgumentNullException.ThrowIfNull(preparedWorld);
-        return _runtime.TryPublishPreparedGeneration(preparedWorld, preparedGameState, out generationId);
+        return _runtime.TryPublishPreparedGeneration(
+            preparedWorld, preparedGameState, persistentClockState: null, out generationId);
+    }
+
+    /// <summary>Publishes a prepared generation with explicitly restored authoritative clock state.</summary>
+    /// <remarks>
+    /// Playback rate remains host policy and is retained from the current host.
+    /// This operation must run outside every active-generation callback.
+    /// </remarks>
+    public bool TryPublishPreparedGeneration(
+        EcsWorld preparedWorld,
+        object? preparedGameState,
+        PersistentWorldClockState persistentClockState,
+        out ulong generationId)
+    {
+        ArgumentNullException.ThrowIfNull(preparedWorld);
+        return _runtime.TryPublishPreparedGeneration(
+            preparedWorld, preparedGameState, persistentClockState, out generationId);
     }
 }

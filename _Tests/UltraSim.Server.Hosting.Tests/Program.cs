@@ -280,10 +280,15 @@ static void HostWrapperBenchmarkIsCaptured()
 
     double directMean = directSamples.Average();
     double hostedMean = hostedSamples.Average();
-    double ratio = hostedMean / Math.Max(1d, directMean);
+    double[] pairedRatios = directSamples.Zip(
+        hostedSamples,
+        static (directSample, hostedSample) => hostedSample / Math.Max(1d, directSample)).ToArray();
+    Array.Sort(pairedRatios);
+    double ratio = pairedRatios[pairedRatios.Length / 2];
     double deltaPerTick = (hostedMean - directMean) / ticksPerSample;
     Assert.Equal(directComposition.Counter.Value, hostedComposition.Counter.Value);
     Assert.Equal(direct.SimulationTick, hosted.SimulationTick);
+    Assert.True(ratio <= 1.05);
     Console.WriteLine(
         $"BASELINE S0.2 samples={samples} ticks_per_sample={ticksPerSample} " +
         $"direct_runtime_mean={directMean:F0}ns direct_runtime_p95={Percentile95(directSamples):F0}ns " +

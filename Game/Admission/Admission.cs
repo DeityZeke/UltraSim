@@ -1,4 +1,3 @@
-using UltraSim.Client.Core;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
 using UltraSim.Server.Runtime;
@@ -32,6 +31,7 @@ public enum AdmissionRejection : byte
     InvalidCharacterSelectAction = 14,
     PlayableAlreadyBound = 15,
     InvalidSessionStage = 16,
+    GenerationReplaced = 17,
 }
 
 /// <summary>Outcome or retained state of one admission attempt.</summary>
@@ -51,80 +51,6 @@ public readonly record struct AdmissionResult(
     public bool IsRejected => Stage == AdmissionStage.Rejected;
 
     public bool IsWaitingForCharacter => Stage == AdmissionStage.WaitingForCharacter;
-}
-
-/// <summary>Semantic UI operations required by account-backed admission.</summary>
-public interface IAdmissionUiPort
-{
-    event Action<UiActionRequest>? ActionSubmitted;
-
-    UiViewInstanceId OpenView(UiOpenView operation);
-
-    UiViewInstanceId OpenHotView(UiHotOpenView operation);
-
-    void UpdateView(UiUpdateView operation);
-
-    bool CloseView(UiCloseView operation);
-}
-
-/// <summary>Adapter from the S0.4 local semantic link to Admission's UI port.</summary>
-public sealed class LocalAdmissionUiPort : IAdmissionUiPort, IDisposable
-{
-    private readonly LocalSemanticLink _link;
-    private bool _disposed;
-
-    public LocalAdmissionUiPort(LocalSemanticLink link)
-    {
-        _link = link ?? throw new ArgumentNullException(nameof(link));
-        _link.ActionSubmitted += ForwardAction;
-    }
-
-    public event Action<UiActionRequest>? ActionSubmitted;
-
-    public UiViewInstanceId OpenView(UiOpenView operation)
-    {
-        EnsureOperational();
-        return _link.OpenView(operation);
-    }
-
-    public UiViewInstanceId OpenHotView(UiHotOpenView operation)
-    {
-        EnsureOperational();
-        return _link.OpenHotView(operation);
-    }
-
-    public void UpdateView(UiUpdateView operation)
-    {
-        EnsureOperational();
-        _link.UpdateView(operation);
-    }
-
-    public bool CloseView(UiCloseView operation)
-    {
-        EnsureOperational();
-        return _link.CloseView(operation);
-    }
-
-    public void Dispose()
-    {
-        if (_disposed)
-            return;
-        _disposed = true;
-        _link.ActionSubmitted -= ForwardAction;
-        ActionSubmitted = null;
-    }
-
-    private void ForwardAction(UiActionRequest request)
-    {
-        if (!_disposed)
-            ActionSubmitted?.Invoke(request);
-    }
-
-    private void EnsureOperational()
-    {
-        if (_disposed)
-            throw new ObjectDisposedException(nameof(LocalAdmissionUiPort));
-    }
 }
 
 /// <summary>Stable identity used for exact CharacterSelect definition caching.</summary>
@@ -164,7 +90,7 @@ public sealed class AdmissionService : IDisposable
 {
     private readonly ServerGameFacet _runtime;
     private readonly IAdmissionEntityBinder _binder;
-    private readonly IAdmissionUiPort? _ui;
+    private readonly IUiSemanticPort? _ui;
     private readonly UiDefinitionCacheKey _characterSelectCacheKey;
     private readonly Dictionary<ParticipantId, Session> _sessions = [];
     private readonly Dictionary<UiViewInstanceId, ParticipantId> _characterSelectViews = [];
@@ -174,7 +100,7 @@ public sealed class AdmissionService : IDisposable
     public AdmissionService(
         ServerGameFacet runtime,
         IAdmissionEntityBinder binder,
-        IAdmissionUiPort? ui = null,
+        IUiSemanticPort? ui = null,
         AdmissionOptions? options = null)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
@@ -189,13 +115,15 @@ public sealed class AdmissionService : IDisposable
             CharacterSelectUi.Definition.Version,
             CharacterSelectUi.Definition.Hash);
         _ownerThreadId = Environment.CurrentManagedThreadId;
-        if (_ui is not null)
-            _ui.ActionSubmitted += HandleAction;
+        _runtime.GenerationPublished += HandleGenerationPublished;
     }
 
     public event Action<AdmissionResult>? Entered;
 
     public event Action<AdmissionResult>? Rejected;
+
+    /// <summary>Reports isolated failures from non-authoritative observers.</summary>
+    public event Action<Exception>? ObserverFaulted;
 
     public int SessionCount
     {
@@ -223,7 +151,14 @@ public sealed class AdmissionService : IDisposable
                     entity.IsValid &&
                     entity.World == world.Id &&
                     world.IsAlive(entity);
-                return new WorldBindingResult(created, entity, generationId);
+                PersistentEntityKey persistentKey = default;
+                if (created)
+                {
+                    persistentKey = new PersistentEntityKey(
+                        world.PersistentWorldId,
+                        world.GetOrAssignPersistentId(entity));
+                }
+                return new WorldBindingResult(created, entity, persistentKey, generationId);
             },
             out WorldBindingResult binding))
         {
@@ -245,11 +180,12 @@ public sealed class AdmissionService : IDisposable
         {
             Stage = AdmissionStage.Entered,
             Entity = binding.Entity,
+            ControlledEntity = binding.PersistentKey,
             GenerationId = binding.GenerationId,
         };
         _sessions.Add(participant, session);
         AdmissionResult result = session.Snapshot();
-        Entered?.Invoke(result);
+        NotifyObservers(Entered, result);
         return result;
     }
 
@@ -328,14 +264,23 @@ public sealed class AdmissionService : IDisposable
         }
         if (!view.IsValid || _characterSelectViews.ContainsKey(view))
         {
+            TryCloseUnownedView(view);
             return RejectNew(participant, AdmissionRejection.UiUnavailable,
                 "CharacterSelect returned an invalid or already-owned view instance.");
+        }
+        try { _ui.BindActions(view, HandleAction); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            TryCloseUnownedView(view);
+            return RejectNew(participant, AdmissionRejection.UiUnavailable,
+                $"CharacterSelect action routing could not be bound: {exception.Message}");
         }
 
         var session = new Session(participant)
         {
             Stage = AdmissionStage.WaitingForCharacter,
             AccountId = account.AccountId,
+            TrustedIdentity = trustedIdentity,
             GenerationId = selection.GenerationId,
             CharacterSelectView = view,
         };
@@ -372,7 +317,8 @@ public sealed class AdmissionService : IDisposable
             (_, generationId, provider) =>
             {
                 AccountingStore accounting = provider.Accounting;
-                if (!accounting.TryGetAccount(session.AccountId, out AccountRecord account))
+                if (!accounting.TryResolveAccount(session.TrustedIdentity, out AccountRecord account) ||
+                    account.AccountId != session.AccountId)
                     return AccountSelection.Missing(generationId);
                 return new AccountSelection(
                     account,
@@ -397,18 +343,10 @@ public sealed class AdmissionService : IDisposable
             UiViewInstanceId oldView = session.CharacterSelectView;
             _characterSelectViews.Remove(oldView);
             session.CharacterSelectView = UiViewInstanceId.Invalid;
-            try
-            {
-                if (!_ui.CloseView(new UiCloseView(oldView)))
-                {
-                    return RejectExisting(session, AdmissionRejection.UiUnavailable,
-                        "The previous CharacterSelect view was no longer open.");
-                }
-            }
-            catch (Exception exception) when (exception is not OutOfMemoryException)
+            if (!TryReleaseView(oldView, out Exception? releaseFailure))
             {
                 return RejectExisting(session, AdmissionRejection.UiUnavailable,
-                    $"The previous CharacterSelect view could not close: {exception.Message}");
+                    $"The previous CharacterSelect view could not detach: {releaseFailure!.Message}");
             }
         }
 
@@ -434,8 +372,16 @@ public sealed class AdmissionService : IDisposable
         }
         if (!view.IsValid || _characterSelectViews.ContainsKey(view))
         {
+            TryCloseUnownedView(view);
             return RejectExisting(session, AdmissionRejection.UiUnavailable,
                 "CharacterSelect returned an invalid or already-owned view instance.");
+        }
+        try { _ui.BindActions(view, HandleAction); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            TryCloseUnownedView(view);
+            return RejectExisting(session, AdmissionRejection.UiUnavailable,
+                $"CharacterSelect action routing could not be bound: {exception.Message}");
         }
         session.Stage = AdmissionStage.WaitingForCharacter;
         session.GenerationId = selection.GenerationId;
@@ -451,6 +397,7 @@ public sealed class AdmissionService : IDisposable
         EnsureOperational();
         if (_sessions.TryGetValue(participant, out Session? session))
         {
+            ReconcileSession(session);
             result = session.Snapshot();
             return true;
         }
@@ -465,23 +412,17 @@ public sealed class AdmissionService : IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        _runtime.GenerationPublished -= HandleGenerationPublished;
         Exception? firstFailure = null;
         if (_ui is not null)
         {
-            _ui.ActionSubmitted -= HandleAction;
             UiViewInstanceId[] openViews = _characterSelectViews.Keys.ToArray();
             _characterSelectViews.Clear();
             _sessions.Clear();
             foreach (UiViewInstanceId view in openViews)
             {
-                try
-                {
-                    _ui.CloseView(new UiCloseView(view));
-                }
-                catch (Exception exception) when (exception is not OutOfMemoryException)
-                {
-                    firstFailure ??= exception;
-                }
+                if (!TryReleaseView(view, out Exception? releaseFailure))
+                    firstFailure ??= releaseFailure;
             }
         }
         else
@@ -489,6 +430,11 @@ public sealed class AdmissionService : IDisposable
             _characterSelectViews.Clear();
             _sessions.Clear();
         }
+
+        Entered = null;
+        Rejected = null;
+        PresentationFaulted = null;
+        ObserverFaulted = null;
 
         if (firstFailure is not null)
             throw new InvalidOperationException("Admission disposal could not close every UI view.", firstFailure);
@@ -534,6 +480,19 @@ public sealed class AdmissionService : IDisposable
             (world, generationId, provider) =>
             {
                 AccountingStore accounting = provider.Accounting;
+                if (!accounting.TryResolveAccount(session.TrustedIdentity, out AccountRecord currentAccount) ||
+                    currentAccount.AccountId != session.AccountId)
+                {
+                    return CharacterResolution.Reject(
+                        AdmissionRejection.TrustedIdentityUnknown,
+                        "The trusted identity no longer resolves to this admission account.");
+                }
+                if (!currentAccount.IsEnabled)
+                {
+                    return CharacterResolution.Reject(
+                        AdmissionRejection.AccountDisabled,
+                        "The admission account is now disabled.");
+                }
                 if (!accounting.TryGetCharacter(characterId, out character) ||
                     character.AccountId != session.AccountId)
                 {
@@ -564,6 +523,7 @@ public sealed class AdmissionService : IDisposable
 
         session.Stage = AdmissionStage.Entered;
         session.Entity = resolution.Entity;
+        session.ControlledEntity = character.PersistentEntityKey;
         session.CharacterId = character.CharacterId;
         session.GenerationId = resolution.GenerationId;
         session.Rejection = AdmissionRejection.None;
@@ -571,8 +531,9 @@ public sealed class AdmissionService : IDisposable
         UiViewInstanceId completedView = session.CharacterSelectView;
         _characterSelectViews.Remove(completedView);
         session.CharacterSelectView = UiViewInstanceId.Invalid;
-        _ui!.CloseView(new UiCloseView(completedView));
-        Entered?.Invoke(session.Snapshot());
+        if (!TryReleaseView(completedView, out Exception? releaseFailure))
+            NotifyPresentationFault(releaseFailure!);
+        NotifyObservers(Entered, session.Snapshot());
     }
 
     private UiModel CreateCharacterSelectModel(
@@ -665,7 +626,7 @@ public sealed class AdmissionService : IDisposable
             UiViewInstanceId.Invalid,
             rejection,
             message);
-        Rejected?.Invoke(result);
+        NotifyObservers(Rejected, result);
         return result;
     }
 
@@ -683,11 +644,145 @@ public sealed class AdmissionService : IDisposable
             UiViewInstanceId rejectedView = session.CharacterSelectView;
             _characterSelectViews.Remove(rejectedView);
             session.CharacterSelectView = UiViewInstanceId.Invalid;
-            _ui?.CloseView(new UiCloseView(rejectedView));
+            if (!TryReleaseView(rejectedView, out Exception? releaseFailure))
+                NotifyPresentationFault(releaseFailure!);
         }
         AdmissionResult result = session.Snapshot();
-        Rejected?.Invoke(result);
+        NotifyObservers(Rejected, result);
         return result;
+    }
+
+    private void HandleGenerationPublished(ulong generationId)
+    {
+        if (_disposed)
+            return;
+        foreach (Session session in _sessions.Values.ToArray())
+            ReconcileSession(session);
+    }
+
+    private void ReconcileSession(Session session)
+    {
+        if (session.Stage == AdmissionStage.Rejected)
+            return;
+
+        // Accountless sessions have no durable authorization record. Their ECS
+        // identity may exist in a restored world, but authority to control it
+        // cannot be reconstructed, so replacement explicitly invalidates them.
+        if (!session.AccountId.IsValid)
+        {
+            if (_runtime.TryUseActiveGeneration(static (_, generationId) => generationId, out ulong active) &&
+                active != session.GenerationId)
+            {
+                RejectExisting(session, AdmissionRejection.GenerationReplaced,
+                    "The accountless admission session expired when authority was replaced.");
+            }
+            return;
+        }
+
+        if (!_runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, CharacterResolution>(
+            (world, generationId, provider) =>
+            {
+                AccountingStore accounting = provider.Accounting;
+                if (!accounting.TryResolveAccount(session.TrustedIdentity, out AccountRecord account) ||
+                    account.AccountId != session.AccountId)
+                {
+                    return CharacterResolution.Reject(
+                        AdmissionRejection.TrustedIdentityUnknown,
+                        "The trusted identity no longer authorizes this session.");
+                }
+                if (!account.IsEnabled)
+                    return CharacterResolution.Reject(AdmissionRejection.AccountDisabled, "The admission account is disabled.");
+                if (session.Stage == AdmissionStage.WaitingForCharacter)
+                    return new CharacterResolution(Entity.Null, generationId, AdmissionRejection.None, null);
+                if (!accounting.TryGetCharacter(session.CharacterId, out CharacterRecord character) ||
+                    character.AccountId != account.AccountId)
+                {
+                    return CharacterResolution.Reject(
+                        AdmissionRejection.CharacterNotOwned,
+                        "The controlled character is no longer owned by this account.");
+                }
+                return ResolveCharacter(world, generationId, character);
+            },
+            out CharacterResolution resolution))
+        {
+            RejectExisting(session, AdmissionRejection.AccountingUnavailable,
+                "The replacement generation does not provide Accounting.");
+            return;
+        }
+
+        if (resolution.Rejection != AdmissionRejection.None)
+        {
+            RejectExisting(session, resolution.Rejection, resolution.Message!);
+            return;
+        }
+
+        session.GenerationId = resolution.GenerationId;
+        if (session.Stage == AdmissionStage.Entered)
+            session.Entity = resolution.Entity;
+    }
+
+    private void TryCloseUnownedView(UiViewInstanceId view)
+    {
+        if (!view.IsValid || _ui is null)
+            return;
+        if (!TryReleaseView(view, out Exception? releaseFailure))
+            NotifyPresentationFault(releaseFailure!);
+    }
+
+    private bool TryReleaseView(UiViewInstanceId view, out Exception? failure)
+    {
+        failure = null;
+        if (_ui is null || !view.IsValid)
+            return true;
+        try { _ui.UnbindActions(view); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            failure = exception;
+        }
+        try
+        {
+            if (!_ui.CloseView(new UiCloseView(view)))
+            {
+                failure ??= new InvalidOperationException(
+                    $"CharacterSelect view {view.Value} was no longer open during cleanup.");
+            }
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            failure ??= exception;
+        }
+        return failure is null;
+    }
+
+    public event Action<Exception>? PresentationFaulted;
+
+    private void NotifyPresentationFault(Exception exception) =>
+        NotifyObservers(PresentationFaulted, exception);
+
+    private void NotifyObservers<T>(Action<T>? observers, T value)
+    {
+        if (observers is null)
+            return;
+        foreach (Action<T> observer in observers.GetInvocationList().Cast<Action<T>>())
+        {
+            try { observer(value); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                NotifyObserverFault(exception);
+            }
+        }
+    }
+
+    private void NotifyObserverFault(Exception failure)
+    {
+        Action<Exception>? observers = ObserverFaulted;
+        if (observers is null)
+            return;
+        foreach (Action<Exception> observer in observers.GetInvocationList().Cast<Action<Exception>>())
+        {
+            try { observer(failure); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
     }
 
     private void EnsureOperational()
@@ -703,7 +798,11 @@ public sealed class AdmissionService : IDisposable
             throw new InvalidOperationException("Admission is bound to its creating owner thread.");
     }
 
-    private readonly record struct WorldBindingResult(bool Success, Entity Entity, ulong GenerationId);
+    private readonly record struct WorldBindingResult(
+        bool Success,
+        Entity Entity,
+        PersistentEntityKey PersistentKey,
+        ulong GenerationId);
 
     private readonly record struct AccountSelection(
         AccountRecord Account,
@@ -734,6 +833,10 @@ public sealed class AdmissionService : IDisposable
         public AdmissionStage Stage { get; set; }
 
         public Entity Entity { get; set; }
+
+        public PersistentEntityKey ControlledEntity { get; set; }
+
+        public TrustedLocalIdentity TrustedIdentity { get; set; }
 
         public AccountId AccountId { get; set; }
 

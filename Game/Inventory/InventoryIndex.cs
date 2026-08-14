@@ -27,10 +27,22 @@ public readonly record struct InventoryLimits(
 }
 
 /// <summary>One indexed item relationship reconstructed from ECS truth.</summary>
-public readonly record struct InventoryLocation(
-    Entity Parent,
-    InventoryEquipSlot EquipSlot,
-    int ChildNode = -1);
+public readonly record struct InventoryLocation
+{
+    public InventoryLocation(Entity parent, InventoryEquipSlot equipSlot)
+        : this(parent, equipSlot, -1) { }
+
+    internal InventoryLocation(Entity parent, InventoryEquipSlot equipSlot, int childNode)
+    {
+        Parent = parent;
+        EquipSlot = equipSlot;
+        ChildNode = childNode;
+    }
+
+    public Entity Parent { get; init; }
+    public InventoryEquipSlot EquipSlot { get; init; }
+    internal int ChildNode { get; init; }
+}
 
 /// <summary>Bounded index accounting with separately stated managed exclusions.</summary>
 public readonly record struct InventoryIndexSnapshot(

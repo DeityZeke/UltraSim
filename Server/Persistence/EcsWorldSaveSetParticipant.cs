@@ -5,7 +5,7 @@ namespace UltraSim.Server.Persistence;
 /// <summary>Engine-neutral whole-world ECS participant for one save-set generation.</summary>
 public sealed class EcsWorldSaveSetParticipant : ISaveSetParticipant
 {
-    private readonly EcsWorld _source;
+    private readonly EcsWorld? _source;
     private readonly PersistenceCatalog _catalog;
     private readonly PersistenceRestoreOptions _restoreOptions;
     private readonly Func<PersistenceRestoreRequirements, EcsWorld> _stagingWorldFactory;
@@ -25,15 +25,34 @@ public sealed class EcsWorldSaveSetParticipant : ISaveSetParticipant
         Key = key;
     }
 
+    /// <summary>Creates a restore-only participant with no live-world authority.</summary>
+    public EcsWorldSaveSetParticipant(
+        PersistenceCatalog catalog,
+        PersistenceRestoreOptions restoreOptions,
+        Func<PersistenceRestoreRequirements, EcsWorld> stagingWorldFactory,
+        string key = "world")
+    {
+        _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
+        _restoreOptions = restoreOptions;
+        _stagingWorldFactory = stagingWorldFactory ?? throw new ArgumentNullException(nameof(stagingWorldFactory));
+        if (string.IsNullOrEmpty(key)) throw new ArgumentException("A save-set participant key is required.", nameof(key));
+        Key = key;
+    }
+
     public string Key { get; }
     public long MaximumArtifactBytes => _restoreOptions.Limits.MaximumArtifactBytes;
     public PersistenceCaptureReport LastCaptureReport { get; private set; }
 
-    public ICapturedSaveSetParticipant Capture(in SaveSetContext context) => new CapturedEcsWorldParticipant(
-        Key,
-        EcsPersistence.BeginCapture(_source, _catalog,
-            new PersistenceCaptureOptions(context.Sequence, context.UnixMilliseconds)),
-        report => LastCaptureReport = report);
+    public ICapturedSaveSetParticipant Capture(in SaveSetContext context)
+    {
+        EcsWorld source = _source ??
+            throw new InvalidOperationException("A restore-only ECS participant cannot capture a save.");
+        return new CapturedEcsWorldParticipant(
+            Key,
+            EcsPersistence.BeginCapture(source, _catalog,
+                new PersistenceCaptureOptions(context.Sequence, context.UnixMilliseconds)),
+            report => LastCaptureReport = report);
+    }
 
     public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context)
     {
@@ -69,7 +88,8 @@ internal sealed class CapturedEcsWorldParticipant : ICapturedSaveSetParticipant
 }
 
 /// <summary>Prepared ECS staging generation. The publishing host takes ownership exactly once.</summary>
-public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant, IPreparedPersistentEntityResolver
+public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant,
+    IPreparedPersistentEntityResolver, IPreparedPersistentEntityNamespace
 {
     private PersistenceRestorePlan? _plan;
     private readonly Func<PersistenceRestoreRequirements, EcsWorld> _stagingWorldFactory;
@@ -104,6 +124,9 @@ public sealed class PreparedEcsWorldParticipant : IPreparedLoadParticipant, IPre
         value = null;
         return false;
     }
+
+    public bool Owns(PersistentEntityKey key) =>
+        _world is not null && key.IsValid && key.World == _world.PersistentWorldId;
 
     public void Resolve(IPersistentEntityResolver resolver)
     {

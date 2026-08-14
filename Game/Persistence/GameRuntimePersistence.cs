@@ -50,8 +50,143 @@ public sealed class GameRuntimePersistence
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(captureBoundary);
-        SaveSetManifest? manifest = null;
-        Exception? failure = null;
+        if (!TryCapture(context, captureBoundary, out CapturedSaveSet? captured, out Exception? failure))
+            return new GameSaveResult(false, null, failure);
+        CapturedSaveSet ownedCapture = captured!;
+        using (ownedCapture)
+        {
+            try
+            {
+                return new GameSaveResult(true, _coordinator.Publish(ownedCapture), null);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                return new GameSaveResult(false, null, exception);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Captures under brief owner-thread authority, then performs encoding and
+    /// crash-durable publication without holding the active generation lease.
+    /// </summary>
+    public Task<GameSaveResult> TrySaveAsync(
+        SaveSetContext context,
+        Action<Action> captureBoundary,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureOwnerThread();
+        ArgumentNullException.ThrowIfNull(captureBoundary);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!TryCapture(context, captureBoundary, out CapturedSaveSet? captured, out Exception? failure))
+            return Task.FromResult(new GameSaveResult(false, null, failure));
+        CapturedSaveSet ownedCapture = captured!;
+
+        return Task.Run(() =>
+        {
+            using (ownedCapture)
+            {
+                try
+                {
+                    return new GameSaveResult(true, _coordinator.Publish(ownedCapture), null);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    return new GameSaveResult(false, null, exception);
+                }
+            }
+        });
+    }
+
+    public GameLoadResult TryLoad(SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
+    {
+        EnsureOwnerThread();
+        GameStaging? staging = null;
+        EcsWorld? stagedWorld = null;
+        AccountingStore? stagedAccounting = null;
+        GameGenerationState? candidate = null;
+        bool publicationAttempted = false;
+        try
+        {
+            var ecsParticipant = new EcsWorldSaveSetParticipant(
+                _composition.PersistenceCatalog,
+                _restoreOptions,
+                requirements =>
+                {
+                    GameStaging value = CreateStaging(requirements);
+                    staging = value;
+                    return value.World;
+                });
+            var accountingParticipant = new AccountingSaveSetParticipant(_accountingOptions);
+            var clockParticipant = new WorldClockSaveSetParticipant();
+            using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
+                [ecsParticipant, accountingParticipant, clockParticipant],
+                EmptyResolver.Instance,
+                recoveryMode);
+            PreparedEcsWorldParticipant ecs = prepared.Participants.OfType<PreparedEcsWorldParticipant>().Single();
+            PreparedAccountingParticipant accounting = prepared.Participants.OfType<PreparedAccountingParticipant>().Single();
+            PreparedWorldClockParticipant clock = prepared.Participants.OfType<PreparedWorldClockParticipant>().Single();
+            stagedWorld = ecs.TakeWorld();
+            if (stagedWorld.TickCount != clock.State.SimulationTick)
+                throw new PersistenceValidationException(
+                    "The restored ECS scheduler tick disagrees with authoritative world-clock state.");
+            GameStaging built = staging ??
+                throw new InvalidOperationException("The game staging factory did not produce state.");
+            built.Inventory.Rebuild(stagedWorld);
+            stagedAccounting = accounting.TakeStore();
+            candidate = new GameGenerationState(
+                stagedAccounting, built.Inventory, built.Content, built.SimulationLookup);
+
+            ulong publishedGeneration = 0;
+            prepared.Commit(_ =>
+            {
+                publicationAttempted = true;
+                if (!_runtime.TryPublishPreparedGeneration(
+                    stagedWorld, candidate, clock.State, out publishedGeneration))
+                {
+                    throw new InvalidOperationException("The prepared game generation was not published.");
+                }
+            });
+            return new GameLoadResult(true, publishedGeneration, null);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (!publicationAttempted)
+            {
+                if (candidate is not null)
+                {
+                    candidate.Dispose();
+                    stagedAccounting = null;
+                    staging = null;
+                }
+                else
+                {
+                    stagedAccounting?.Dispose();
+                    staging?.Inventory.Dispose();
+                }
+                if (stagedWorld is not null && !stagedWorld.IsDisposed)
+                    stagedWorld.Dispose();
+            }
+            return new GameLoadResult(false, 0, exception);
+        }
+    }
+
+    private bool TryCapture(
+        in SaveSetContext context,
+        Action<Action> captureBoundary,
+        out CapturedSaveSet? captured,
+        out Exception? failure)
+    {
+        CapturedSaveSet? localCaptured = null;
+        Exception? localFailure = null;
+        captured = null;
+        failure = null;
+        if (!_runtime.TryCapturePersistentClockState(out PersistentWorldClockState clockState))
+        {
+            failure = new InvalidOperationException("Game persistence requires a running game generation.");
+            return false;
+        }
+
         SaveSetContext saveContext = context;
         bool ran = _runtime.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
             (world, _, game) =>
@@ -59,17 +194,16 @@ public sealed class GameRuntimePersistence
                 try
                 {
                     var ecs = new EcsWorldSaveSetParticipant(
-                        world,
-                        _composition.PersistenceCatalog,
-                        _restoreOptions,
+                        world, _composition.PersistenceCatalog, _restoreOptions,
                         requirements => CreateStaging(requirements).World);
                     var accounting = new AccountingSaveSetParticipant(game.Accounting, _accountingOptions);
-                    manifest = _coordinator.Save([ecs, accounting], saveContext, captureBoundary);
+                    var clock = new WorldClockSaveSetParticipant(clockState);
+                    localCaptured = _coordinator.Capture([ecs, accounting, clock], saveContext, captureBoundary);
                     return true;
                 }
                 catch (Exception exception) when (exception is not OutOfMemoryException)
                 {
-                    failure = exception;
+                    localFailure = exception;
                     return false;
                 }
             },
@@ -77,97 +211,11 @@ public sealed class GameRuntimePersistence
         if (!ran)
         {
             failure = new InvalidOperationException("Game persistence requires a running game generation.");
-            return new GameSaveResult(false, null, failure);
+            return false;
         }
-        return new GameSaveResult(succeeded, manifest, failure);
-    }
-
-    public GameLoadResult TryLoad(SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
-    {
-        EnsureOwnerThread();
-        Exception? failure = null;
-        ulong publishedGeneration = 0;
-        bool ran = _runtime.TryUseActiveGeneration<IGameGenerationStateProvider, bool>(
-            (world, _, game) =>
-            {
-                GameStaging? staging = null;
-                EcsWorld? stagedWorld = null;
-                AccountingStore? stagedAccounting = null;
-                GameGenerationState? candidate = null;
-                bool transferred = false;
-                try
-                {
-                    var ecsParticipant = new EcsWorldSaveSetParticipant(
-                        world,
-                        _composition.PersistenceCatalog,
-                        _restoreOptions,
-                        requirements =>
-                        {
-                            GameStaging value = CreateStaging(requirements);
-                            staging = value;
-                            return value.World;
-                        });
-                    var accountingParticipant = new AccountingSaveSetParticipant(
-                        game.Accounting,
-                        _accountingOptions);
-                    using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
-                        [ecsParticipant, accountingParticipant],
-                        EmptyResolver.Instance,
-                        recoveryMode);
-                    PreparedEcsWorldParticipant ecs = prepared.Participants
-                        .OfType<PreparedEcsWorldParticipant>()
-                        .Single();
-                    PreparedAccountingParticipant accounting = prepared.Participants
-                        .OfType<PreparedAccountingParticipant>()
-                        .Single();
-                    stagedWorld = ecs.TakeWorld();
-                    GameStaging built = staging ??
-                        throw new InvalidOperationException("The game staging factory did not produce state.");
-                    built.Inventory.Rebuild(stagedWorld);
-                    stagedAccounting = accounting.TakeStore();
-                    candidate = new GameGenerationState(
-                        stagedAccounting,
-                        built.Inventory,
-                        built.Content,
-                        built.SimulationLookup);
-
-                    prepared.Commit(_ =>
-                    {
-                        transferred = true;
-                        if (!_runtime.TryPublishPreparedGeneration(stagedWorld, candidate, out publishedGeneration))
-                            throw new InvalidOperationException("The prepared game generation was not published.");
-                    });
-                    return true;
-                }
-                catch (Exception exception) when (exception is not OutOfMemoryException)
-                {
-                    if (!transferred)
-                    {
-                        if (candidate is not null)
-                        {
-                            candidate.Dispose();
-                            stagedAccounting = null;
-                            staging = null;
-                        }
-                        else
-                        {
-                            stagedAccounting?.Dispose();
-                            staging?.Inventory.Dispose();
-                        }
-                        if (stagedWorld is not null && !stagedWorld.IsDisposed)
-                            stagedWorld.Dispose();
-                    }
-                    failure = exception;
-                    return false;
-                }
-            },
-            out bool succeeded);
-        if (!ran)
-        {
-            failure = new InvalidOperationException("Game persistence requires a running game generation.");
-            return new GameLoadResult(false, 0, failure);
-        }
-        return new GameLoadResult(succeeded, succeeded ? publishedGeneration : 0, failure);
+        captured = localCaptured;
+        failure = localFailure;
+        return succeeded;
     }
 
     private GameStaging CreateStaging(PersistenceRestoreRequirements requirements) =>
@@ -179,7 +227,7 @@ public sealed class GameRuntimePersistence
             throw new InvalidOperationException("Game persistence is bound to its creating owner thread.");
     }
 
-    private sealed class EmptyResolver : IPersistentEntityResolver
+    private sealed class EmptyResolver : IExternalPersistentEntityResolver
     {
         internal static readonly EmptyResolver Instance = new();
 

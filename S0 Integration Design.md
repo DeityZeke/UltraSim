@@ -1,7 +1,7 @@
 UltraSim Integrated S0 Design
 
-Status: Accepted integration milestone
-Date: 2026-08-13
+Status: Accepted integration milestone after S0 acceptance hardening
+Date: 2026-08-14
 Baseline: ECS 3.4.1 persistence-hardening baseline
 Purpose: Move V3 from individually proven subsystems into one small, real, authoritative runtime without rebuilding V2 Server wholesale or reopening generic kernel design without evidence.
 
@@ -38,6 +38,9 @@ S0 completion summary
 [x] S0.7 — Game-owned ECS inventory vertical + generic Gump UI
 
 [x] S0.8 — Integrated end-to-end acceptance scenario and baselines
+
+[x] S0 acceptance hardening — generation coherence, authority/presentation,
+durable clock, recovery, UI protocol, and acceptance-oracle corrections
 
 S0 is accepted only when S0.0 through S0.8 are all accepted.
 
@@ -1030,9 +1033,12 @@ The host-facing Runtime API exposes lifecycle control and bounded status, not th
 mutable generation root or an unconditional public replacement operation.
 Replacement remains a controlled internal seam for later staged persistence.
 
-`WorldClockSnapshot` establishes the persistable tick/world-time contract in
-S0.1. Installation into a real durable multi-participant save set remains S0.6;
-an in-memory snapshot round trip must not be described as durable persistence.
+`WorldClockSnapshot` establishes the diagnostic tick/world-time contract in
+S0.1. Durable saves use `PersistentWorldClockState`, which includes simulation
+tick, world time, rational remainder, and fixed clock configuration while
+deliberately excluding host playback and host elapsed residue. The accepted
+whole-game save set installs this as its own `clock` participant; an in-memory
+snapshot round trip must not be described as durable persistence.
 
 World-time rate defaults are mechanism-neutral. The 24x rate below is an explicit
 test/game configuration, not Runtime's default game policy.
@@ -1547,9 +1553,10 @@ Accepted S0.5 invariants
   prefab provenance, and durable entity linkage. Character IDs, per-account
   slots, and persistent entity links are unambiguous; transform, health, and
   inventory remain exclusively ECS truth.
-- `LocalAdmissionUiPort` has explicit lifetime and detaches its S0.4 event
-  forwarding when disposed. Admission disposal attempts every open view even
-  when one close fails.
+- The accepted neutral `LocalUiSemanticPort` has explicit lifetime and detaches
+  its S0.4 forwarding when disposed. Each view binds exactly one Admission or
+  Inventory authority endpoint. Admission disposal attempts every open view
+  even when one unbind/close fails.
 
 Here, "without core runtime changes" means neither admission policy changes
 the Runtime lifecycle, generation model, or embeds game/account semantics in
@@ -1569,6 +1576,10 @@ ECS participant remains authoritative for world entities/components.
 Accounting becomes a real save-set participant.
 
 Both are captured under one save-set sequence/common epoch contract.
+
+The complete game integration additionally captures authoritative clock state
+under that epoch. Playback speed remains loading-host policy and is not durable
+world state.
 
 Inventory is not a separate participant in S0 because its authoritative state is ECS.
 
@@ -1754,8 +1765,9 @@ Accepted S0.7 invariants
   persistent world before resolving compact row IDs, preventing cross-world
   durable-identity ABA. Accepted Split publishes `Update + Add`; accepted Equip
   publishes `Remove`; neither sends a full list `Replace` or close/reopen.
-- ECS save/load is the only inventory persistence path. The save set contains
-  `world` and `accounting` artifacts but no Inventory artifact. A staged restore
+- ECS save/load is the only inventory persistence path. Inventory adds no
+  artifact; the complete game save set contains `world`, `accounting`, and
+  authoritative `clock` artifacts. A staged restore
   resolves runtime entity references, rebuilds and validates `InventoryIndex`,
   combines it with prepared Accounting/content in `GameGenerationState`, and
   publishes the whole aggregate once;
@@ -1906,7 +1918,7 @@ The account-backed executable performs the complete scenario above:
 - durable Alice selection and entry;
 - row-granular `Update + Add` Split and `Remove` Equip deltas;
 - twelve deterministic hosted simulation ticks;
-- one real `world + accounting` save-set generation;
+- one real `world + accounting + clock` save-set generation;
 - visible post-save entity/inventory/simulation divergence;
 - staged ECS restore, durable-reference resolution, derived Inventory rebuild,
   validation, and one `GameGenerationState` publication;
@@ -1927,16 +1939,46 @@ reconciliation, and preservation of the existing native root across deltas.
 Game/server dependencies exist only in this test project; the production Godot
 wrapper remains a renderer over Client.Core/UI.
 
-The old `RuntimeAccountingPersistence` bridge remains hidden from normal
-IntelliSense solely for S0.6 regression evidence. `GameRuntimePersistence` is
-the only forward whole-game integration path because it reconstructs derived
-domains and publishes the full composition root.
+The old `RuntimeAccountingPersistence` bridge is internal and reachable only by
+the S0.6 regression assembly. `GameRuntimePersistence` is the only production
+whole-game integration path because it reconstructs derived domains and
+publishes the full composition root.
 
-UI protocol/model types still physically live under Client/Core while game UI
-workflows consume them on the server side. S0 proves the semantics but does not
-pretend the package ownership is final. Before Network V3 freezes a wire-facing
-contract, move shared semantic UI operations into a neutral protocol/contracts
-assembly if server/client packaging pressure confirms the need.
+UI definition/model/protocol types now live in the neutral `Kernels/UI`
+assembly. `Client/Core` owns only the local in-process adapter/runtime. Game
+Admission and Inventory depend on the neutral semantic port, not the client
+assembly. Each open view binds exactly one authoritative action endpoint;
+observers cannot participate in authority dispatch ordering.
+
+18.2 Accepted S0 hardening contract
+
+The post-S0 adversarial audit established these permanent rules:
+
+- one published generation is ECS + authoritative clock + complete game state;
+- load prepares and validates all three outside any lease on the old root, then
+  publishes once and disposes the old root only after the lease is gone;
+- Runtime rejects lifecycle/publication reentrancy. Publication observers may
+  perform one callback-scoped reconciliation against the new root, but cannot
+  tick, stop, dispose, republish, or nest authority;
+- account-backed Admission retains durable identity and reauthorizes/rebinds on
+  replacement; accountless sessions are explicitly invalidated;
+- save is owner-thread immutable capture followed by detached durable encoding,
+  hashing, flush, rename, and pointer publication. Capture pause and total save
+  latency are separate measurements;
+- exceptions escaping trusted game authority remain terminal. A presentation
+  failure after an accepted mutation cannot roll back authority; the affected
+  UI session detaches and must reopen/resnapshot;
+- prepared participants resolve only against staged namespaces or explicitly
+  declared immutable external authority, never the active generation being
+  replaced;
+- durable filesystem behavior is abstracted and supports Windows, Linux, and
+  macOS directory durability primitives;
+- semantic UI requests include source-element provenance, row actions validate
+  current row existence in that source list, display-only controls are native
+  read-only, and renderer layout/style semantics are either implemented or
+  rejected during compilation;
+- string boundaries reject malformed UTF-16 before hashing or persistence, and
+  definition/view/text/row bounds are explicit.
 
 19. S0 performance and allocation gates
 
@@ -2303,7 +2345,7 @@ Account-backed Admission selects a character through a real server-driven Gump.
 
 Character ownership resolves by PersistentEntityKey into the active generation.
 
-ECS + Accounting save/load through one real save-set transaction.
+ECS + Accounting + authoritative clock save/load through one real save-set transaction.
 
 Candidate load is fully prepared/resolved/validated before one generation-root publication.
 
@@ -2317,7 +2359,9 @@ Inventory persists through ECS without a duplicate inventory artifact.
 
 Inventory Gump updates through model deltas without close/reopen refresh.
 
-Save -> mutate -> restore returns the saved semantic state and invalidates old runtime handles.
+Save -> mutate -> restore returns the saved semantic state, simulation tick,
+world time/remainder, and invalidates old runtime handles while retaining host
+playback policy.
 
 CharacterSelect/Inventory definitions can reopen through hot cache after restore when still compatible.
 

@@ -37,7 +37,13 @@ S0.8 — the deterministic hosted admission/UI/inventory/simulation/save/restore
 acceptance slice — is accepted in
 [`S0.8 Acceptance Report.md`](S0.8%20Acceptance%20Report.md). This completes the
 Integrated S0 milestone with canonical InternalHost/HeadlessHost parity and a
-native Godot acceptance using the exact game UI definitions.
+native Godot acceptance using the exact game UI definitions. The 2026-08-14
+acceptance-hardening pass additionally makes the persisted generation
+`ECS + Accounting/game state + authoritative clock`, moves shared UI protocol
+types into neutral `Kernels/UI`, rejects runtime publication/lifecycle
+reentrancy, rebinds or invalidates Admission sessions on replacement, separates
+owner-thread capture pause from detached durable save latency, and makes
+post-commit presentation failures detach rather than misreport authority.
 
 ## Current executable slices
 

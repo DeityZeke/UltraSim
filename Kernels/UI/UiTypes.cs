@@ -73,6 +73,7 @@ public readonly struct UiDefinitionKey : IEquatable<UiDefinitionKey>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
         string normalized = value.Trim();
+        UiText.ValidateUnicode(normalized, nameof(value));
         if (normalized.Length > MaximumLength)
             throw new ArgumentOutOfRangeException(nameof(value), $"A UI definition key is limited to {MaximumLength} characters.");
         Value = normalized;
@@ -423,6 +424,10 @@ public readonly struct UiFlowOptions : IEquatable<UiFlowOptions>
             throw new ArgumentOutOfRangeException(nameof(spacing));
         if ((uint)sizing > (uint)UiSizing.Fill)
             throw new ArgumentOutOfRangeException(nameof(sizing));
+        if (sizing == UiSizing.Fixed)
+            throw new ArgumentException(
+                "Fixed flow sizing requires explicit dimensions and is not part of UI-0; use Canvas placement.",
+                nameof(sizing));
         if ((uint)alignment > (uint)UiAlignment.Stretch)
             throw new ArgumentOutOfRangeException(nameof(alignment));
         Spacing = UiFloat.Canonicalize(spacing);
@@ -568,6 +573,10 @@ public readonly struct UiChildLayout : IEquatable<UiChildLayout>
     {
         if ((uint)sizing > (uint)UiSizing.Fill)
             throw new ArgumentOutOfRangeException(nameof(sizing));
+        if (sizing == UiSizing.Fixed)
+            throw new ArgumentException(
+                "Fixed flow sizing requires explicit dimensions and is not part of UI-0; use Canvas placement.",
+                nameof(sizing));
         if ((uint)alignment > (uint)UiAlignment.Stretch)
             throw new ArgumentOutOfRangeException(nameof(alignment));
         return new UiChildLayout(sizing, alignment, false, default);
@@ -615,6 +624,7 @@ public readonly struct UiCanvasOptions : IEquatable<UiCanvasOptions>
 /// <summary>Immutable scalar model value.</summary>
 public readonly struct UiValue : IEquatable<UiValue>
 {
+    public const int MaximumTextCharacters = 1_048_576;
     private UiValue(UiValueKind kind, string? text, double number, bool boolean)
     {
         Kind = kind;
@@ -633,6 +643,9 @@ public readonly struct UiValue : IEquatable<UiValue>
     public static UiValue FromText(string value)
     {
         ArgumentNullException.ThrowIfNull(value);
+        if (value.Length > MaximumTextCharacters)
+            throw new ArgumentOutOfRangeException(nameof(value));
+        UiText.ValidateUnicode(value, nameof(value));
         return new UiValue(UiValueKind.Text, value, 0, false);
     }
 
@@ -658,12 +671,15 @@ public readonly struct UiValue : IEquatable<UiValue>
 /// <summary>Immutable dynamic row for a List/Repeater model slot.</summary>
 public readonly struct UiListRow : IEquatable<UiListRow>
 {
+    public const int MaximumValues = 256;
     private readonly UiValue[] _values;
 
     public UiListRow(UiRowId id, ReadOnlySpan<UiValue> values)
     {
         if (!id.IsValid)
             throw new ArgumentException("A list row requires a valid row ID.", nameof(id));
+        if (values.Length > MaximumValues)
+            throw new ArgumentOutOfRangeException(nameof(values));
         _values = values.ToArray();
         Id = id;
     }
@@ -672,7 +688,9 @@ public readonly struct UiListRow : IEquatable<UiListRow>
 
     public ReadOnlySpan<UiValue> Values => _values ?? ReadOnlySpan<UiValue>.Empty;
 
-    public UiListRow Clone() => new(Id, Values);
+    // Rows are immutable: the backing cell array is private and exposed only
+    // through ReadOnlySpan, so snapshots can structurally share it safely.
+    public UiListRow Clone() => this;
 
     public bool Equals(UiListRow other)
     {
@@ -698,6 +716,12 @@ public readonly struct UiActionState : IEquatable<UiActionState>
     {
         if (enabled && !string.IsNullOrEmpty(unavailableReason))
             throw new ArgumentException("An enabled action cannot have an unavailable reason.", nameof(unavailableReason));
+        if (unavailableReason is not null)
+        {
+            if (unavailableReason.Length > UiValue.MaximumTextCharacters)
+                throw new ArgumentOutOfRangeException(nameof(unavailableReason));
+            UiText.ValidateUnicode(unavailableReason, nameof(unavailableReason));
+        }
         Enabled = enabled;
         UnavailableReason = unavailableReason;
     }
@@ -726,7 +750,8 @@ public readonly struct UiActionRequest
         UiActionId action,
         UiRowId row = default,
         UiValue input = default,
-        ulong clientSequence = 0)
+        ulong clientSequence = 0,
+        UiElementId? source = null)
     {
         Instance = instance;
         Definition = definition;
@@ -734,6 +759,7 @@ public readonly struct UiActionRequest
         Row = row;
         Input = input;
         ClientSequence = clientSequence;
+        Source = source ?? UiElementId.Invalid;
     }
 
     public UiViewInstanceId Instance { get; }
@@ -742,6 +768,27 @@ public readonly struct UiActionRequest
     public UiRowId Row { get; }
     public UiValue Input { get; }
     public ulong ClientSequence { get; }
+    public UiElementId Source { get; }
+}
+
+internal static class UiText
+{
+    internal static void ValidateUnicode(string value, string parameterName)
+    {
+        for (int index = 0; index < value.Length; index++)
+        {
+            char current = value[index];
+            if (char.IsHighSurrogate(current))
+            {
+                if (++index >= value.Length || !char.IsLowSurrogate(value[index]))
+                    throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
+            }
+            else if (char.IsLowSurrogate(current))
+            {
+                throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
+            }
+        }
+    }
 }
 
 /// <summary>Immutable validation/allocation limits for untrusted definitions/models.</summary>

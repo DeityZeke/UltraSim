@@ -19,6 +19,7 @@ public sealed class ServerRuntime : IDisposable
     private ServerGeneration? _currentGeneration;
     private ulong _nextGenerationId = 1;
     private ServerRuntimeState _state = ServerRuntimeState.Created;
+    private RuntimeOperation _operation;
 
     public ServerRuntime(IServerComposition composition, ServerRuntimeOptions options)
     {
@@ -74,9 +75,13 @@ public sealed class ServerRuntime : IDisposable
             return false;
         }
 
+        RuntimeOperation previousOperation = EnterGameCallback(nameof(TryUseActiveGeneration));
+        ServerGeneration borrowed = _currentGeneration;
+        _operation = RuntimeOperation.GameCallback;
         try
         {
-            result = operation(_currentGeneration.EcsWorld, _currentGeneration.GenerationId);
+            result = operation(borrowed.EcsWorld, borrowed.GenerationId);
+            EnsureBorrowedGenerationUnchanged(borrowed);
             return true;
         }
         catch
@@ -84,8 +89,13 @@ public sealed class ServerRuntime : IDisposable
             // A trusted game callback may already have mutated the active ECS.
             // Its failure therefore has the same terminal policy as a failed
             // simulation step: there is no provable rollback boundary.
-            _state = ServerRuntimeState.Faulted;
+            if (_state == ServerRuntimeState.Running)
+                _state = ServerRuntimeState.Faulted;
             throw;
+        }
+        finally
+        {
+            _operation = previousOperation;
         }
     }
 
@@ -103,37 +113,50 @@ public sealed class ServerRuntime : IDisposable
             return false;
         }
 
+        RuntimeOperation previousOperation = EnterGameCallback(nameof(TryUseActiveGeneration));
+        ServerGeneration borrowed = _currentGeneration;
+        _operation = RuntimeOperation.GameCallback;
         try
         {
             result = operation(
-                _currentGeneration.EcsWorld,
-                _currentGeneration.GenerationId,
+                borrowed.EcsWorld,
+                borrowed.GenerationId,
                 gameState);
+            EnsureBorrowedGenerationUnchanged(borrowed);
             return true;
         }
         catch
         {
-            _state = ServerRuntimeState.Faulted;
+            if (_state == ServerRuntimeState.Running)
+                _state = ServerRuntimeState.Faulted;
             throw;
+        }
+        finally
+        {
+            _operation = previousOperation;
         }
     }
 
     internal bool TryPublishPreparedGeneration(
         EcsWorld preparedWorld,
         object? preparedGameState,
+        PersistentWorldClockState? persistentClockState,
         out ulong generationId)
     {
         EnsureOwnerThread();
-        EnsureRunning(nameof(TryPublishPreparedGeneration));
         ArgumentNullException.ThrowIfNull(preparedWorld);
-        if (ReferenceEquals(preparedWorld, _currentGeneration!.EcsWorld))
+        if (_currentGeneration is not null && ReferenceEquals(preparedWorld, _currentGeneration.EcsWorld))
             throw new InvalidOperationException("The active ECS world cannot be published as its own replacement.");
-        if (preparedGameState is not null && ReferenceEquals(preparedGameState, _currentGeneration.GameState))
+        if (_currentGeneration is not null && preparedGameState is not null &&
+            ReferenceEquals(preparedGameState, _currentGeneration.GameState))
             throw new InvalidOperationException("Active game state cannot be published as its own replacement.");
 
         ServerGeneration? candidate = null;
         try
         {
+            EnsureRunning(nameof(TryPublishPreparedGeneration));
+            EnsureIdleOperation(nameof(TryPublishPreparedGeneration));
+            ServerGeneration active = _currentGeneration!;
             if (preparedWorld.OwnerThreadId != _ownerThreadId)
                 throw new InvalidOperationException("A prepared ECS world belongs to a different owner thread.");
             if (!preparedWorld.IsRunning || !preparedWorld.HasScheduler)
@@ -143,14 +166,27 @@ public sealed class ServerRuntime : IDisposable
             if (_nextGenerationId == ulong.MaxValue)
                 throw new InvalidOperationException("The server generation identity space is exhausted.");
 
-            WorldClockSnapshot clockSnapshot = _currentGeneration.Clock.CaptureSnapshot();
+            int playbackRate = active.Clock.PlaybackRate;
+            PersistentWorldClockState clockState = persistentClockState ??
+                active.Clock.CapturePersistentState();
             candidate = new ServerGeneration(
                 _nextGenerationId,
                 preparedWorld,
                 new WorldClock(_options.ClockOptions),
                 preparedGameState);
-            candidate.Clock.RestoreSnapshot(clockSnapshot);
-            PublishCandidate(candidate);
+            candidate.Clock.RestorePersistentState(clockState);
+            candidate.Clock.SetPlaybackRate(playbackRate);
+            _operation = RuntimeOperation.Publication;
+            try
+            {
+                PublishCandidate(candidate);
+                _operation = RuntimeOperation.PublicationNotification;
+                Game.NotifyGenerationPublished(candidate.GenerationId);
+            }
+            finally
+            {
+                _operation = RuntimeOperation.None;
+            }
             generationId = candidate.GenerationId;
             _nextGenerationId++;
             return true;
@@ -164,8 +200,23 @@ public sealed class ServerRuntime : IDisposable
                 DisposePreparedGeneration(preparedWorld, preparedGameState);
             else if (!candidate.IsPublished)
                 candidate.Dispose();
+            else
+                _state = ServerRuntimeState.Faulted;
             throw;
         }
+    }
+
+    internal bool TryCapturePersistentClockState(out PersistentWorldClockState state)
+    {
+        EnsureOwnerThread();
+        if (_state != ServerRuntimeState.Running || _currentGeneration is null)
+        {
+            state = default;
+            return false;
+        }
+        EnsureIdleOperation(nameof(TryCapturePersistentClockState));
+        state = _currentGeneration.Clock.CapturePersistentState();
+        return true;
     }
 
     /// <summary>Identity of the currently active authoritative generation.</summary>
@@ -211,6 +262,7 @@ public sealed class ServerRuntime : IDisposable
     public void Initialize()
     {
         EnsureOwnerThread();
+        EnsureIdleOperation(nameof(Initialize));
         EnsureState(ServerRuntimeState.Created, nameof(Initialize));
 
         try
@@ -231,6 +283,7 @@ public sealed class ServerRuntime : IDisposable
     public void Start()
     {
         EnsureOwnerThread();
+        EnsureIdleOperation(nameof(Start));
         EnsureState(ServerRuntimeState.Initialized, nameof(Start));
         _state = ServerRuntimeState.Running;
     }
@@ -240,6 +293,7 @@ public sealed class ServerRuntime : IDisposable
     {
         EnsureOwnerThread();
         EnsureRunning(nameof(Tick));
+        EnsureIdleOperation(nameof(Tick));
         ExecuteSimulationStep();
     }
 
@@ -252,6 +306,7 @@ public sealed class ServerRuntime : IDisposable
     {
         EnsureOwnerThread();
         EnsureRunning(nameof(Tick));
+        EnsureIdleOperation(nameof(Tick));
 
         // Host elapsed validation and step-count calculation are transactional
         // expected-input work. They must reject before simulation state changes
@@ -266,6 +321,7 @@ public sealed class ServerRuntime : IDisposable
     public void SetPlaybackRate(int playbackRate)
     {
         EnsureOwnerThread();
+        EnsureIdleOperation(nameof(SetPlaybackRate));
         if (_state is not (ServerRuntimeState.Initialized or ServerRuntimeState.Running))
             throw new InvalidOperationException(
                 $"SetPlaybackRate is invalid while the runtime is {_state}.");
@@ -283,13 +339,21 @@ public sealed class ServerRuntime : IDisposable
     {
         EnsureOwnerThread();
         EnsureRunning(nameof(ReplaceGeneration));
+        EnsureIdleOperation(nameof(ReplaceGeneration));
         if (_nextGenerationId == ulong.MaxValue)
             throw new InvalidOperationException("The server generation identity space is exhausted.");
 
         ServerGeneration candidate = BuildPreparedCandidate(_nextGenerationId);
         try
         {
-            PublishCandidate(candidate);
+            _operation = RuntimeOperation.Publication;
+            try
+            {
+                PublishCandidate(candidate);
+                _operation = RuntimeOperation.PublicationNotification;
+                Game.NotifyGenerationPublished(candidate.GenerationId);
+            }
+            finally { _operation = RuntimeOperation.None; }
             _nextGenerationId++;
         }
         catch
@@ -299,6 +363,8 @@ public sealed class ServerRuntime : IDisposable
             // pre-publication failure is still private and must be reclaimed.
             if (!candidate.IsPublished)
                 candidate.Dispose();
+            else
+                _state = ServerRuntimeState.Faulted;
             throw;
         }
     }
@@ -306,6 +372,7 @@ public sealed class ServerRuntime : IDisposable
     public void Stop()
     {
         EnsureOwnerThread();
+        EnsureIdleOperation(nameof(Stop));
         if (_state == ServerRuntimeState.Stopped)
             return;
         EnsureState(ServerRuntimeState.Running, nameof(Stop));
@@ -315,6 +382,7 @@ public sealed class ServerRuntime : IDisposable
     public void Dispose()
     {
         EnsureOwnerThread();
+        EnsureIdleOperation(nameof(Dispose));
         if (_state == ServerRuntimeState.Disposed)
             return;
 
@@ -394,6 +462,7 @@ public sealed class ServerRuntime : IDisposable
 
     private void ExecuteSimulationStep()
     {
+        _operation = RuntimeOperation.SimulationStep;
         try
         {
             _currentGeneration!.TickSimulationStep();
@@ -402,6 +471,10 @@ public sealed class ServerRuntime : IDisposable
         {
             _state = ServerRuntimeState.Faulted;
             throw;
+        }
+        finally
+        {
+            _operation = RuntimeOperation.None;
         }
     }
 
@@ -439,6 +512,28 @@ public sealed class ServerRuntime : IDisposable
             throw new InvalidOperationException($"{operation} is invalid while the runtime is {_state}.");
     }
 
+    private void EnsureIdleOperation(string operation)
+    {
+        if (_operation != RuntimeOperation.None)
+            throw new InvalidOperationException(
+                $"{operation} cannot run reentrantly during {_operation}.");
+    }
+
+    private RuntimeOperation EnterGameCallback(string operation)
+    {
+        if (_operation is not (RuntimeOperation.None or RuntimeOperation.PublicationNotification))
+            throw new InvalidOperationException(
+                $"{operation} cannot run reentrantly during {_operation}.");
+        return _operation;
+    }
+
+    private void EnsureBorrowedGenerationUnchanged(ServerGeneration borrowed)
+    {
+        if (!ReferenceEquals(_currentGeneration, borrowed) || borrowed.IsDisposed)
+            throw new InvalidOperationException(
+                "The active generation changed while callback-scoped authority was borrowed.");
+    }
+
     private ServerGeneration GetActiveGeneration()
     {
         if (_state == ServerRuntimeState.Disposed)
@@ -462,5 +557,14 @@ public sealed class ServerRuntime : IDisposable
             throw new InvalidOperationException(
                 "ServerRuntime is single-owner; host control must remain on its construction thread.");
         }
+    }
+
+    private enum RuntimeOperation : byte
+    {
+        None = 0,
+        GameCallback = 1,
+        SimulationStep = 2,
+        Publication = 3,
+        PublicationNotification = 4,
     }
 }

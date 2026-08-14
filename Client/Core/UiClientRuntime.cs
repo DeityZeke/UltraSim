@@ -2,12 +2,29 @@ using UltraSim.UI;
 
 namespace UltraSim.Client.Core;
 
+/// <summary>Bounded client-side retained UI cache and view policy.</summary>
+public readonly record struct UiClientLimits(
+    int MaximumCachedDefinitionFamilies = 1_024,
+    int MaximumOpenViews = 1_024)
+{
+    public static UiClientLimits Default => new(1_024, 1_024);
+
+    internal void Validate()
+    {
+        if (MaximumCachedDefinitionFamilies <= 0)
+            throw new ArgumentOutOfRangeException(nameof(MaximumCachedDefinitionFamilies));
+        if (MaximumOpenViews <= 0)
+            throw new ArgumentOutOfRangeException(nameof(MaximumOpenViews));
+    }
+}
+
 /// <summary>
 /// Client-local registry, exact definition cache, and sequence-aware model applier.
 /// </summary>
 public sealed class UiClientRuntime
 {
     private readonly IUiRenderer _renderer;
+    private readonly UiClientLimits _limits;
     private readonly Dictionary<UiDefinitionCacheKey, CompiledUiDefinition> _definitions = [];
     private readonly Dictionary<UiDefinitionFamilyKey, UiDefinitionCacheKey> _currentDefinitions = [];
     private readonly Dictionary<UiViewInstanceId, UiViewState> _views = [];
@@ -17,10 +34,13 @@ public sealed class UiClientRuntime
     private Exception? _fault;
     private bool _rendererExecuting;
 
-    public UiClientRuntime(IUiRenderer renderer)
+    public UiClientRuntime(IUiRenderer renderer, UiClientLimits limits = default)
     {
         ArgumentNullException.ThrowIfNull(renderer);
+        if (limits == default) limits = UiClientLimits.Default;
+        limits.Validate();
         _renderer = renderer;
+        _limits = limits;
         _ownerThreadId = Environment.CurrentManagedThreadId;
     }
 
@@ -64,17 +84,22 @@ public sealed class UiClientRuntime
     {
         EnsureOperational();
         operation.CacheKey.Validate(operation.Definition);
-        UiModel model = operation.CloneModel();
+        UiModel model = operation.SnapshotModel();
         if (!ReferenceEquals(model.Definition, operation.Definition))
             throw new InvalidOperationException("The opening model does not match the compiled definition.");
 
         UiDefinitionFamilyKey family = operation.CacheKey.Family;
         UiDefinitionCacheKey? superseded = GetSupersededDefinition(operation.CacheKey);
+        bool newFamily = !_currentDefinitions.ContainsKey(family);
+        if (newFamily && _currentDefinitions.Count >= _limits.MaximumCachedDefinitionFamilies)
+            throw new InvalidOperationException("The retained UI definition-family limit was reached.");
         (UiViewInstanceId instance, bool generated) = SelectInstance(
             operation.Instance,
             superseded.HasValue ? family : null);
         if (superseded.HasValue)
             Supersede(family, superseded.Value);
+        if (_views.Count >= _limits.MaximumOpenViews)
+            throw new InvalidOperationException("The retained UI view limit was reached.");
         IUiRenderHandle handle = CreateRendererHandle(instance, operation.Definition, model);
 
         _definitions[operation.CacheKey] = operation.Definition;
@@ -103,9 +128,11 @@ public sealed class UiClientRuntime
             throw new KeyNotFoundException("The exact UI definition is not present in the client cache.");
         }
         operation.CacheKey.Validate(definition);
-        UiModel model = operation.CloneModel();
+        UiModel model = operation.SnapshotModel();
         if (!ReferenceEquals(model.Definition, definition))
             throw new InvalidOperationException("The opening model does not match the cached definition.");
+        if (_views.Count >= _limits.MaximumOpenViews)
+            throw new InvalidOperationException("The retained UI view limit was reached.");
 
         (UiViewInstanceId instance, bool generated) = SelectInstance(operation.Instance);
         IUiRenderHandle handle = CreateRendererHandle(instance, definition, model);
@@ -189,7 +216,8 @@ public sealed class UiClientRuntime
         UiActionId action,
         UiRowId row = default,
         UiValue input = default,
-        ulong clientSequence = 0)
+        ulong clientSequence = 0,
+        UiElementId? source = null)
     {
         EnsureOperational();
         UiViewState view = GetViewState(instance);
@@ -199,7 +227,8 @@ public sealed class UiClientRuntime
             action,
             row,
             input,
-            clientSequence);
+            clientSequence,
+            source);
         SubmitActionFromRenderer(request);
     }
 
@@ -296,25 +325,16 @@ public sealed class UiClientRuntime
         foreach (UiScalarSlotPatch patch in delta.ScalarSlots)
             model.Set(patch.Slot, patch.Value);
 
-        foreach (UiListPatch patch in delta.Lists)
+        ReadOnlySpan<UiListPatch> listPatches = delta.Lists;
+        Span<byte> processedSlots = definition.SlotCount <= 1_024
+            ? stackalloc byte[definition.SlotCount]
+            : new byte[definition.SlotCount];
+        foreach (UiListPatch patch in listPatches)
         {
-            switch (patch.Kind)
-            {
-                case UiListDeltaKind.Replace:
-                    model.ReplaceRows(patch.Slot, patch.Rows);
-                    break;
-                case UiListDeltaKind.Add:
-                    ApplyRowAdd(model, patch);
-                    break;
-                case UiListDeltaKind.Update:
-                    ApplyRowUpdate(model, patch);
-                    break;
-                case UiListDeltaKind.Remove:
-                    ApplyRowRemove(model, patch);
-                    break;
-                default:
-                    throw new InvalidDataException("Unsupported UI list delta kind.");
-            }
+            if (processedSlots[patch.Slot.Value] != 0)
+                continue;
+            processedSlots[patch.Slot.Value] = 1;
+            ApplyListPatches(model, patch.Slot, listPatches);
         }
 
         foreach (UiActionStatePatch patch in delta.Actions)
@@ -325,39 +345,53 @@ public sealed class UiClientRuntime
             throw new InvalidOperationException("The UI update definition does not match the compiled definition.");
     }
 
-    private static void ApplyRowAdd(UiModel model, UiListPatch patch)
+    private static void ApplyListPatches(
+        UiModel model,
+        UiSlotId slot,
+        ReadOnlySpan<UiListPatch> patches)
     {
-        UiListRow[] current = model.GetRows(patch.Slot).ToArray();
-        if (current.Any(row => row.Id == patch.RowId))
-            throw new InvalidDataException($"The UI list row '{patch.RowId.Value}' already exists.");
-        var next = new UiListRow[current.Length + 1];
-        current.CopyTo(next, 0);
-        next[^1] = patch.Row.Clone();
-        model.ReplaceRows(patch.Slot, next);
-    }
+        int matchingCount = 0;
+        UiListPatch only = default;
+        foreach (UiListPatch patch in patches)
+        {
+            if (patch.Slot != slot)
+                continue;
+            matchingCount++;
+            only = patch;
+        }
+        if (matchingCount == 1 && only.Kind == UiListDeltaKind.Replace)
+        {
+            model.ReplaceRows(slot, only.Rows);
+            return;
+        }
 
-    private static void ApplyRowUpdate(UiModel model, UiListPatch patch)
-    {
-        UiListRow[] next = model.GetRows(patch.Slot).ToArray();
-        int index = Array.FindIndex(next, row => row.Id == patch.RowId);
-        if (index < 0)
-            throw new InvalidDataException($"The UI list row '{patch.RowId.Value}' does not exist.");
-        next[index] = patch.Row.Clone();
-        model.ReplaceRows(patch.Slot, next);
-    }
-
-    private static void ApplyRowRemove(UiModel model, UiListPatch patch)
-    {
-        UiListRow[] current = model.GetRows(patch.Slot).ToArray();
-        int index = Array.FindIndex(current, row => row.Id == patch.RowId);
-        if (index < 0)
-            throw new InvalidDataException($"The UI list row '{patch.RowId.Value}' does not exist.");
-        var next = new UiListRow[current.Length - 1];
-        if (index > 0)
-            Array.Copy(current, 0, next, 0, index);
-        if (index < current.Length - 1)
-            Array.Copy(current, index + 1, next, index, current.Length - index - 1);
-        model.ReplaceRows(patch.Slot, next);
+        var rows = model.GetRows(slot).ToArray().ToList();
+        foreach (UiListPatch patch in patches)
+        {
+            if (patch.Slot != slot)
+                continue;
+            int index = rows.FindIndex(row => row.Id == patch.RowId);
+            switch (patch.Kind)
+            {
+                case UiListDeltaKind.Add when index < 0:
+                    rows.Add(patch.Row);
+                    break;
+                case UiListDeltaKind.Update when index >= 0:
+                    rows[index] = patch.Row;
+                    break;
+                case UiListDeltaKind.Remove when index >= 0:
+                    rows.RemoveAt(index);
+                    break;
+                case UiListDeltaKind.Add:
+                    throw new InvalidDataException($"The UI list row '{patch.RowId.Value}' already exists.");
+                case UiListDeltaKind.Update:
+                case UiListDeltaKind.Remove:
+                    throw new InvalidDataException($"The UI list row '{patch.RowId.Value}' does not exist.");
+                default:
+                    throw new InvalidDataException("Unsupported UI list delta kind.");
+            }
+        }
+        model.ReplaceRows(slot, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(rows));
     }
 
     private sealed class UiViewState

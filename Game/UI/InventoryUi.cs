@@ -1,4 +1,3 @@
-using UltraSim.Client.Core;
 using UltraSim.ECS;
 using UltraSim.Game.Inventory;
 using UltraSim.Server.Runtime;
@@ -48,14 +47,14 @@ public static class InventoryUi
         CompiledUiDefinition definition = UiDefinitionCompiler.Compile(source);
         return new Contract(
             definition,
-            definition.Bindings.RequireSlot("title"),
-            definition.Bindings.RequireSlot("items"),
-            definition.Bindings.RequireSlot("status"),
-            definition.Bindings.RequireSlot("split-label"),
-            definition.Bindings.RequireSlot("equip-label"),
-            definition.Bindings.RequireAction("select"),
-            definition.Bindings.RequireAction("split"),
-            definition.Bindings.RequireAction("equip"));
+            definition.Prepare(title),
+            definition.Prepare(items),
+            definition.Prepare(status),
+            definition.Prepare(splitLabel),
+            definition.Prepare(equipLabel),
+            definition.Prepare(select),
+            definition.Prepare(split),
+            definition.Prepare(equip));
     }
 
     private sealed record Contract(
@@ -68,15 +67,6 @@ public static class InventoryUi
         UiActionId Select,
         UiActionId Split,
         UiActionId Equip);
-}
-
-public interface IInventoryUiPort
-{
-    event Action<UiActionRequest>? ActionSubmitted;
-    UiViewInstanceId OpenView(UiOpenView operation);
-    UiViewInstanceId OpenHotView(UiHotOpenView operation);
-    void UpdateView(UiUpdateView operation);
-    bool CloseView(UiCloseView operation);
 }
 
 public readonly record struct InventoryUiOptions(
@@ -105,7 +95,7 @@ public readonly record struct InventoryUiOpenResult(
 public sealed class InventoryUiController : IDisposable
 {
     private readonly ServerGameFacet _runtime;
-    private readonly IInventoryUiPort _ui;
+    private readonly IUiSemanticPort _ui;
     private readonly UiDefinitionCacheKey _cacheKey;
     private readonly Dictionary<UiViewInstanceId, Session> _sessions = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -113,7 +103,7 @@ public sealed class InventoryUiController : IDisposable
 
     public InventoryUiController(
         ServerGameFacet runtime,
-        IInventoryUiPort ui,
+        IUiSemanticPort ui,
         InventoryUiOptions options = default)
     {
         _runtime = runtime ?? throw new ArgumentNullException(nameof(runtime));
@@ -131,11 +121,12 @@ public sealed class InventoryUiController : IDisposable
             InventoryUi.Definition.Key,
             InventoryUi.Definition.Version,
             InventoryUi.Definition.Hash);
-        _ui.ActionSubmitted += HandleAction;
     }
 
     public int OpenViewCount { get { EnsureOperational(); return _sessions.Count; } }
     public event Action<InventoryMutationResult>? MutationCompleted;
+    public event Action<Exception>? PresentationFaulted;
+    public event Action<Exception>? ObserverFaulted;
 
     public InventoryUiOpenResult Open(Entity container) => OpenCore(container, hot: false);
     public InventoryUiOpenResult OpenHot(Entity container) => OpenCore(container, hot: true);
@@ -145,9 +136,26 @@ public sealed class InventoryUiController : IDisposable
         EnsureOperational();
         if (!_sessions.ContainsKey(instance))
             return false;
-        if (!_ui.CloseView(new UiCloseView(instance)))
+        bool closed;
+        try { closed = _ui.CloseView(new UiCloseView(instance)); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            _sessions.Remove(instance);
+            TryUnbindDetached(instance);
+            NotifyObservers(PresentationFaulted, exception);
             return false;
-        return _sessions.Remove(instance);
+        }
+        if (!closed)
+        {
+            _sessions.Remove(instance);
+            TryUnbindDetached(instance);
+            NotifyObservers(PresentationFaulted, new InvalidOperationException(
+                $"Inventory view {instance.Value} was no longer open during cleanup."));
+            return false;
+        }
+        _sessions.Remove(instance);
+        TryUnbindDetached(instance);
+        return true;
     }
 
     private InventoryUiOpenResult OpenCore(Entity container, bool hot)
@@ -159,11 +167,20 @@ public sealed class InventoryUiController : IDisposable
         UiModel model = CreateModel(projection.Items, projection.Title, "Ready");
         UiViewInstanceId instance = hot
             ? _ui.OpenHotView(new UiHotOpenView(_cacheKey, model, sequence: 1))
-            : _ui.OpenView(new UiOpenView(_cacheKey, InventoryUi.Definition, model));
+            : _ui.OpenView(new UiOpenView(_cacheKey, InventoryUi.Definition, model, sequence: 1));
         if (!instance.IsValid)
             throw new InvalidOperationException("The inventory UI port returned an invalid view ID.");
         if (_sessions.ContainsKey(instance))
+        {
+            TryCloseDetached(instance);
             throw new InvalidOperationException("The inventory UI port returned an already-owned view ID.");
+        }
+        try { _ui.BindActions(instance, HandleAction); }
+        catch
+        {
+            TryCloseDetached(instance);
+            throw;
+        }
         _sessions.Add(instance, new Session(instance, projection.Container, model, sequence: 1));
         return new InventoryUiOpenResult(true, instance, "Inventory opened.");
     }
@@ -187,9 +204,7 @@ public sealed class InventoryUiController : IDisposable
             "The inventory action did not complete.");
         UiListPatch[] listPatches = Array.Empty<UiListPatch>();
         bool staleWorld = false;
-        try
-        {
-            bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, bool>(
+        bool ran = _runtime.TryUseActiveGeneration<IInventoryGenerationStateProvider, bool>(
                 (world, _, provider) =>
                 {
                     if (world.PersistentWorldId != session.Container.World)
@@ -274,40 +289,31 @@ public sealed class InventoryUiController : IDisposable
                     return true;
                 },
                 out bool completed);
-            if (!ran)
-            {
-                result = new InventoryMutationResult(
-                    InventoryMutationStatus.RuntimeWorldMismatch,
-                    Entity.Null,
-                    Entity.Null,
-                    "The inventory generation is no longer active.");
-            }
-            else if (!completed)
-            {
-                result = new InventoryMutationResult(
-                    InventoryMutationStatus.InvariantViolation,
-                    Entity.Null,
-                    Entity.Null,
-                    "The inventory action did not complete.");
-            }
+        if (!ran)
+        {
+            result = new InventoryMutationResult(
+                InventoryMutationStatus.RuntimeWorldMismatch,
+                Entity.Null,
+                Entity.Null,
+                "The inventory generation is no longer active.");
         }
-        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        else if (!completed)
         {
             result = new InventoryMutationResult(
                 InventoryMutationStatus.InvariantViolation,
                 Entity.Null,
                 Entity.Null,
-                "The inventory action was rejected: " + exception.Message);
+                "The inventory action did not complete.");
         }
 
         if (staleWorld)
         {
-            _ = Close(request.Instance);
-            MutationCompleted?.Invoke(result);
+            DetachSession(session, new InvalidOperationException(result.Message));
+            NotifyObservers(MutationCompleted, result);
             return;
         }
         PublishResult(session, result, listPatches);
-        MutationCompleted?.Invoke(result);
+        NotifyObservers(MutationCompleted, result);
     }
 
     private void HandleSelection(Session session, UiRowId row)
@@ -369,7 +375,15 @@ public sealed class InventoryUiController : IDisposable
             [new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status))],
             listPatches,
             actions);
-        _ui.UpdateView(new UiUpdateView(session.Instance, delta));
+        try
+        {
+            _ui.UpdateView(new UiUpdateView(session.Instance, delta));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            DetachSession(session, exception);
+            return;
+        }
         session.Sequence = sequence;
         session.Model.SetText(InventoryUi.Status, status);
         ApplyListPatches(session.Model, listPatches);
@@ -389,7 +403,15 @@ public sealed class InventoryUiController : IDisposable
             sequence,
             [new UiScalarSlotPatch(InventoryUi.Status, UiValue.FromText(status))],
             actions: actions);
-        _ui.UpdateView(new UiUpdateView(session.Instance, delta));
+        try
+        {
+            _ui.UpdateView(new UiUpdateView(session.Instance, delta));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            DetachSession(session, exception);
+            return;
+        }
         session.Sequence = sequence;
         session.Model.SetText(InventoryUi.Status, status);
         SetActionState(session.Model, enableActions);
@@ -483,6 +505,65 @@ public sealed class InventoryUiController : IDisposable
         model.SetActionState(InventoryUi.Equip, state);
     }
 
+    private void DetachSession(Session session, Exception failure)
+    {
+        _sessions.Remove(session.Instance);
+        TryUnbindDetached(session.Instance);
+        TryCloseDetached(session.Instance);
+        NotifyObservers(PresentationFaulted, failure);
+    }
+
+    private void TryUnbindDetached(UiViewInstanceId instance)
+    {
+        if (!instance.IsValid)
+            return;
+        try { _ui.UnbindActions(instance); }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            NotifyObservers(PresentationFaulted, exception);
+        }
+    }
+
+    private void TryCloseDetached(UiViewInstanceId instance)
+    {
+        if (!instance.IsValid)
+            return;
+        try
+        {
+            _ = _ui.CloseView(new UiCloseView(instance));
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            NotifyObservers(PresentationFaulted, exception);
+        }
+    }
+
+    private void NotifyObservers<T>(Action<T>? observers, T value)
+    {
+        if (observers is null)
+            return;
+        foreach (Action<T> observer in observers.GetInvocationList().Cast<Action<T>>())
+        {
+            try { observer(value); }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                NotifyObserverFault(exception);
+            }
+        }
+    }
+
+    private void NotifyObserverFault(Exception failure)
+    {
+        Action<Exception>? observers = ObserverFaulted;
+        if (observers is null)
+            return;
+        foreach (Action<Exception> observer in observers.GetInvocationList().Cast<Action<Exception>>())
+        {
+            try { observer(failure); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+        }
+    }
+
     private void EnsureOperational()
     {
         if (_disposed)
@@ -498,12 +579,16 @@ public sealed class InventoryUiController : IDisposable
         if (Environment.CurrentManagedThreadId != _ownerThreadId)
             throw new InvalidOperationException("Inventory UI is bound to its creating owner thread.");
         _disposed = true;
-        _ui.ActionSubmitted -= HandleAction;
         Exception? firstFailure = null;
         foreach (UiViewInstanceId instance in _sessions.Keys.ToArray())
         {
             try
             {
+                try { _ui.UnbindActions(instance); }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    firstFailure ??= exception;
+                }
                 if (!_ui.CloseView(new UiCloseView(instance)))
                     firstFailure ??= new InvalidOperationException($"The inventory UI port did not close view {instance.Value}.");
             }
@@ -514,6 +599,8 @@ public sealed class InventoryUiController : IDisposable
         }
         _sessions.Clear();
         MutationCompleted = null;
+        PresentationFaulted = null;
+        ObserverFaulted = null;
         if (firstFailure is not null)
             throw new InvalidOperationException("Inventory UI disposal could not close every view.", firstFailure);
     }

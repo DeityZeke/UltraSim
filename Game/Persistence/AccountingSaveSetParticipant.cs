@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Collections.ObjectModel;
 using System.Text;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
@@ -49,7 +50,8 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
 {
     private const uint Magic = 0x43415355; // "USAC" in little-endian order.
     private const ushort FormatVersion = 1;
-    private readonly AccountingStore _source;
+    private static readonly UTF8Encoding StrictUtf8 = new(false, true);
+    private readonly AccountingStore? _source;
     private readonly AccountingPersistenceOptions _options;
 
     public AccountingSaveSetParticipant(
@@ -64,6 +66,17 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
         Key = key;
     }
 
+    /// <summary>Creates a restore-only Accounting participant.</summary>
+    public AccountingSaveSetParticipant(
+        AccountingPersistenceOptions? options = null,
+        string key = "accounting")
+    {
+        _options = options ?? new AccountingPersistenceOptions();
+        if (string.IsNullOrEmpty(key))
+            throw new ArgumentException("A save-set participant key is required.", nameof(key));
+        Key = key;
+    }
+
     public string Key { get; }
 
     public long MaximumArtifactBytes => _options.MaximumArtifactBytes;
@@ -72,7 +85,9 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
     {
         if (context.Sequence == 0)
             throw new ArgumentOutOfRangeException(nameof(context));
-        AccountingSnapshot snapshot = _source.CaptureSnapshot();
+        AccountingStore source = _source ??
+            throw new InvalidOperationException("A restore-only Accounting participant cannot capture a save.");
+        AccountingSnapshot snapshot = source.CaptureSnapshot();
         ValidateSnapshotBounds(snapshot);
         return new CapturedAccountingParticipant(Key, context.Sequence, snapshot);
     }
@@ -263,7 +278,16 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
     {
         if (value.Length > maximumCharacters)
             throw new PersistenceValidationException("The Accounting artifact contains an oversized string.");
-        byte[] bytes = Encoding.UTF8.GetBytes(value);
+        byte[] bytes;
+        try
+        {
+            bytes = StrictUtf8.GetBytes(value);
+        }
+        catch (EncoderFallbackException exception)
+        {
+            throw new PersistenceValidationException(
+                $"The Accounting artifact contains invalid UTF-16 text: {exception.Message}");
+        }
         writer.Write(bytes.Length);
         writer.Write(bytes);
     }
@@ -276,11 +300,13 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
     private readonly Dictionary<CharacterId, Entity> _resolvedEntities = [];
     private AccountingStore? _store;
     private bool _taken;
+    private readonly ReadOnlyDictionary<CharacterId, Entity> _resolvedView;
 
     internal PreparedAccountingParticipant(string key, AccountingSnapshot snapshot)
     {
         Key = key;
         _snapshot = snapshot;
+        _resolvedView = new ReadOnlyDictionary<CharacterId, Entity>(_resolvedEntities);
     }
 
     public string Key { get; }
@@ -288,7 +314,7 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
     public AccountingStore Store => _store ??
         throw new InvalidOperationException("The Accounting participant has not completed Resolve.");
 
-    public IReadOnlyDictionary<CharacterId, Entity> ResolvedEntities => _resolvedEntities;
+    public IReadOnlyDictionary<CharacterId, Entity> ResolvedEntities => _resolvedView;
 
     public void Resolve(IPersistentEntityResolver resolver)
     {
@@ -315,6 +341,9 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
             throw new PersistenceValidationException(
                 $"The prepared Accounting state violates a domain invariant: {exception.Message}");
         }
+        // Publish ownership before reference resolution so Dispose can reclaim
+        // a partially resolved candidate if a later durable link is invalid.
+        _store = store;
         foreach (CharacterRecord character in _snapshot.Characters)
         {
             if (!resolver.TryResolve(character.PersistentEntityKey, out object? value) ||
@@ -326,7 +355,6 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
             }
             _resolvedEntities.Add(character.CharacterId, entity);
         }
-        _store = store;
     }
 
     public void Validate()
@@ -352,6 +380,8 @@ public sealed class PreparedAccountingParticipant : IPreparedLoadParticipant
 
     public void Dispose()
     {
+        if (!_taken)
+            _store?.Dispose();
         _store = null;
         _resolvedEntities.Clear();
     }

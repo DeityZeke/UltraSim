@@ -85,10 +85,24 @@ public interface IInventoryContentCatalog
     bool TryGetItem(PrefabKey key, out InventoryItemDefinition definition);
 }
 
+/// <summary>Single cold source of item policy used for prefab data and bound metadata.</summary>
+public readonly record struct InventoryItemAuthoring(
+    PrefabKey Key,
+    string DisplayName,
+    int MaximumQuantity,
+    InventoryEquipSlots AllowedEquipSlots);
+
+/// <summary>Single cold source of container policy used for prefab data and bound metadata.</summary>
+public readonly record struct InventoryContainerAuthoring(
+    PrefabKey Key,
+    string DisplayName,
+    int DefaultCapacity,
+    bool HasOwner);
+
 /// <summary>Reusable Inventory component authoring for game-owned content.</summary>
 public static class InventoryContent
 {
-    public static PrefabBuilder DefineContainer(
+    public static InventoryContainerAuthoring DefineContainer(
         ContentCatalogBuilder content,
         PrefabKey key,
         string displayName,
@@ -103,10 +117,10 @@ public static class InventoryContent
         if (hasOwner)
             prefab.With(new InventoryContainerOwner { Owner = Entity.Null });
         prefab.DisplayName(displayName);
-        return prefab;
+        return new InventoryContainerAuthoring(key, displayName, defaultCapacity, hasOwner);
     }
 
-    public static PrefabBuilder DefineItem(
+    public static InventoryItemAuthoring DefineItem(
         ContentCatalogBuilder content,
         PrefabKey key,
         string displayName,
@@ -133,6 +147,6 @@ public static class InventoryContent
         if (allowedEquipSlots != InventoryEquipSlots.None)
             prefab.With(new InventoryEquipCapability { AllowedSlots = allowedEquipSlots });
         prefab.DisplayName(displayName);
-        return prefab;
+        return new InventoryItemAuthoring(key, displayName, maximumQuantity, allowedEquipSlots);
     }
 }

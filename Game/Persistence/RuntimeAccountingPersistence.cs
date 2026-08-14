@@ -6,13 +6,13 @@ using UltraSim.Server.Runtime;
 namespace UltraSim.Game.Persistence;
 
 /// <summary>Result of a save attempt that did not mutate runtime authority.</summary>
-public readonly record struct SaveAttemptResult(
+internal readonly record struct SaveAttemptResult(
     bool Succeeded,
     SaveSetManifest? Manifest,
     Exception? Failure);
 
 /// <summary>Result of a staged load attempt.</summary>
-public readonly record struct LoadAttemptResult(
+internal readonly record struct LoadAttemptResult(
     bool Succeeded,
     ulong GenerationId,
     Exception? Failure);
@@ -21,7 +21,7 @@ public readonly record struct LoadAttemptResult(
 /// S0.6 compatibility bridge joining only ECS and Accounting.
 /// </summary>
 [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
-public sealed class RuntimeAccountingPersistence
+internal sealed class RuntimeAccountingPersistence
 {
     private readonly ServerGameFacet _runtime;
     private readonly PersistenceCatalog _catalog;
@@ -115,62 +115,47 @@ public sealed class RuntimeAccountingPersistence
         SaveSetRecoveryMode recoveryMode = SaveSetRecoveryMode.StrictCurrent)
     {
         EnsureOwnerThread();
-        Exception? failure = null;
         ulong publishedGeneration = 0;
-        bool ran = _runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, bool>(
-            (world, _, provider) =>
-            {
-                AccountingStore activeAccounting = provider.Accounting;
-                try
-                {
-                    var ecsParticipant = new EcsWorldSaveSetParticipant(
-                        world,
-                        _catalog,
-                        _restoreOptions,
-                        _stagingWorldFactory);
-                    var accountingParticipant = new AccountingSaveSetParticipant(
-                        activeAccounting,
-                        _accountingOptions);
-                    using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
-                        [ecsParticipant, accountingParticipant],
-                        EmptyResolver.Instance,
-                        recoveryMode);
-
-                    PreparedEcsWorldParticipant ecs = prepared.Participants
-                        .OfType<PreparedEcsWorldParticipant>()
-                        .Single();
-                    PreparedAccountingParticipant accounting = prepared.Participants
-                        .OfType<PreparedAccountingParticipant>()
-                        .Single();
-                    EcsWorld stagedWorld = ecs.TakeWorld();
-                    AccountingStore stagedAccounting = accounting.TakeStore();
-                    bool publicationSucceeded = false;
-                    prepared.Commit(_ =>
-                    {
-                        publicationSucceeded = _runtime.TryPublishPreparedGeneration(
-                            stagedWorld,
-                            stagedAccounting,
-                            out publishedGeneration);
-                    });
-                    if (!publicationSucceeded)
-                        throw new InvalidOperationException("The prepared generation was not published.");
-                    return true;
-                }
-                catch (Exception exception) when (exception is not OutOfMemoryException)
-                {
-                    failure = exception;
-                    return false;
-                }
-            },
-            out bool succeeded);
-
-        if (!ran)
+        bool publicationAttempted = false;
+        EcsWorld? stagedWorld = null;
+        AccountingStore? stagedAccounting = null;
+        try
         {
-            failure = new InvalidOperationException(
-                "Persistence requires a running ServerRuntime generation with Accounting state.");
-            return new LoadAttemptResult(false, 0, failure);
+            var ecsParticipant = new EcsWorldSaveSetParticipant(
+                _catalog,
+                _restoreOptions,
+                _stagingWorldFactory);
+            var accountingParticipant = new AccountingSaveSetParticipant(_accountingOptions);
+            using PreparedLoadGeneration prepared = _coordinator.PrepareLoad(
+                [ecsParticipant, accountingParticipant],
+                EmptyResolver.Instance,
+                recoveryMode);
+
+            PreparedEcsWorldParticipant ecs = prepared.Participants
+                .OfType<PreparedEcsWorldParticipant>()
+                .Single();
+            PreparedAccountingParticipant accounting = prepared.Participants
+                .OfType<PreparedAccountingParticipant>()
+                .Single();
+            stagedWorld = ecs.TakeWorld();
+            stagedAccounting = accounting.TakeStore();
+            prepared.Commit(_ =>
+            {
+                publicationAttempted = true;
+                if (!_runtime.TryPublishPreparedGeneration(stagedWorld, stagedAccounting, out publishedGeneration))
+                    throw new InvalidOperationException("The prepared generation was not published.");
+            });
+            return new LoadAttemptResult(true, publishedGeneration, null);
         }
-        return new LoadAttemptResult(succeeded, succeeded ? publishedGeneration : 0, failure);
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (!publicationAttempted)
+            {
+                stagedAccounting?.Dispose();
+                stagedWorld?.Dispose();
+            }
+            return new LoadAttemptResult(false, 0, exception);
+        }
     }
 
     private void EnsureOwnerThread()
@@ -179,7 +164,7 @@ public sealed class RuntimeAccountingPersistence
             throw new InvalidOperationException("Runtime persistence is bound to its creating owner thread.");
     }
 
-    private sealed class EmptyResolver : IPersistentEntityResolver
+    private sealed class EmptyResolver : IExternalPersistentEntityResolver
     {
         internal static readonly EmptyResolver Instance = new();
 

@@ -15,7 +15,7 @@ using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-s0.8-integrated-acceptance-v1";
+const string Workload = "ultrasim-s0.8-integrated-acceptance-v2";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
@@ -52,6 +52,7 @@ static TestMetrics AccountBackedRoundTrip()
     {
         using var host = new InternalHost(composition, RuntimeOptions(identity));
         host.Start();
+        host.SetPlaybackRate(2);
         ServerRuntime runtime = host.RuntimeForTesting;
         FixtureKeys keys = PopulateAccountBacked(runtime.Game);
 
@@ -117,6 +118,9 @@ static TestMetrics AccountBackedRoundTrip()
         for (int tick = 0; tick < savedTicks; tick++) host.Tick();
         Expect(ReadSimulation(runtime.Game, keys.Alice).TickMarker == savedTicks,
             "The real scheduled simulation system did not update Alice once per tick.");
+        ulong savedSimulationTick = runtime.SimulationTick;
+        long savedWorldTime = runtime.WorldTimeMicroseconds;
+        string savedCanonical = CaptureCanonical(runtime, keys);
 
         var persistence = new GameRuntimePersistence(
             runtime.Game,
@@ -126,7 +130,8 @@ static TestMetrics AccountBackedRoundTrip()
         long pauseTicks = 0;
         long saveAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         long saveStarted = Stopwatch.GetTimestamp();
-        GameSaveResult saved = persistence.TrySave(
+        long captureCallStarted = Stopwatch.GetTimestamp();
+        Task<GameSaveResult> saveTask = persistence.TrySaveAsync(
             new SaveSetContext(1, 1_700_000_800_001),
             capture =>
             {
@@ -134,21 +139,29 @@ static TestMetrics AccountBackedRoundTrip()
                 capture();
                 pauseTicks += Stopwatch.GetTimestamp() - started;
             });
+        long captureCallTicks = Stopwatch.GetTimestamp() - captureCallStarted;
+        // The immutable capture is now detached: authoritative execution is
+        // legal while encoding, hashing and durable publication run elsewhere.
+        host.Tick();
+        GameSaveResult saved = saveTask.GetAwaiter().GetResult();
+        host.SetPlaybackRate(4);
         long saveTicks = Stopwatch.GetTimestamp() - saveStarted;
         long saveAllocated = GC.GetAllocatedBytesForCurrentThread() - saveAllocatedBefore;
         Expect(saved.Succeeded && saved.Manifest is not null,
             "The account-backed save generation was not accepted.");
-        Expect(saved.Manifest!.Artifacts.Length == 2 &&
+        Expect(saved.Manifest!.Artifacts.Length == 3 &&
             saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "world") &&
-            saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "accounting"),
-            "The game save did not contain the ECS and Accounting participants.");
-        string savedCanonical = CaptureCanonical(runtime.Game, keys);
+            saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "accounting") &&
+            saved.Manifest.Artifacts.Any(static artifact => artifact.Key == "clock"),
+            "The game save did not contain ECS, Accounting, and authoritative clock participants.");
+        Expect(captureCallTicks >= pauseTicks,
+            "The capture-pause measurement exceeded the complete synchronous capture call.");
 
         Entity oldAlice = Resolve(runtime.Game, keys.Alice);
         Entity oldBackpack = Resolve(runtime.Game, keys.Backpack);
         DivergeAfterSave(runtime.Game, keys);
         for (int tick = 0; tick < 7; tick++) host.Tick();
-        string divergentCanonical = CaptureCanonical(runtime.Game, keys, allowMissingItems: true);
+        string divergentCanonical = CaptureCanonical(runtime, keys, allowMissingItems: true);
         Expect(divergentCanonical != savedCanonical,
             "The live generation did not diverge visibly after save.");
 
@@ -159,6 +172,11 @@ static TestMetrics AccountBackedRoundTrip()
         long loadAllocated = GC.GetAllocatedBytesForCurrentThread() - loadAllocatedBefore;
         Expect(loaded.Succeeded && loaded.GenerationId > 1,
             "The staged game generation was not published.");
+        Expect(runtime.SimulationTick == savedSimulationTick &&
+            runtime.WorldTimeMicroseconds == savedWorldTime,
+            "Restore did not recover the authoritative saved clock state.");
+        Expect(runtime.PlaybackRate == 4,
+            "Restore incorrectly replaced current host playback policy with save-time policy.");
         Entity restoredAlice = Resolve(runtime.Game, keys.Alice);
         Entity restoredBackpack = Resolve(runtime.Game, keys.Backpack);
         Expect(restoredAlice != oldAlice && restoredAlice.World != oldAlice.World,
@@ -167,9 +185,12 @@ static TestMetrics AccountBackedRoundTrip()
             "The restored Backpack reused the old runtime entity identity.");
         Expect(IsNotAlive(runtime.Game, oldAlice) && IsNotAlive(runtime.Game, oldBackpack),
             "Old-generation entity handles resolved in the replacement world.");
-        string restoredCanonical = CaptureCanonical(runtime.Game, keys);
+        string restoredCanonical = CaptureCanonical(runtime, keys);
         Expect(restoredCanonical == savedCanonical,
             "The restored logical game state differs from the accepted save state.");
+        Expect(admission.TryGetSession(aliceParticipant, out AdmissionResult rebound) &&
+            rebound.IsEntered && rebound.Entity == restoredAlice,
+            "The entered admission session did not rebind to the replacement generation.");
 
         int hotBefore = ui.HotOpenCount;
         AdmissionResult hotSelector = admission.ReopenCharacterSelect(retainedSelector);
@@ -204,7 +225,12 @@ static TestMetrics AccountBackedRoundTrip()
             new SaveSetCoordinator(root));
         GameLoadResult headlessLoaded = headlessPersistence.TryLoad();
         Expect(headlessLoaded.Succeeded, "HeadlessHost could not load the accepted save generation.");
-        string headlessCanonical = CaptureCanonical(headless.RuntimeForTesting.Game, keys);
+        Expect(headless.SimulationTick == savedSimulationTick &&
+            headless.WorldTimeMicroseconds == savedWorldTime,
+            "A fresh HeadlessHost did not restore the saved authoritative clock.");
+        Expect(headless.PlaybackRate == 1,
+            "A fresh HeadlessHost inherited save-time playback policy.");
+        string headlessCanonical = CaptureCanonical(headless.RuntimeForTesting, keys);
         Expect(headlessCanonical == restoredCanonical,
             "InternalHost and HeadlessHost produced different canonical logical state.");
         headless.Shutdown();
@@ -216,7 +242,7 @@ static TestMetrics AccountBackedRoundTrip()
             CanonicalHash: restoredCanonical,
             SaveMeanNanoseconds: ToNanoseconds(saveTicks),
             LoadMeanNanoseconds: ToNanoseconds(loadTicks),
-            CapturePauseNanoseconds: ToNanoseconds(pauseTicks),
+            CapturePauseNanoseconds: ToNanoseconds(captureCallTicks),
             SaveAllocatedBytes: saveAllocated,
             LoadAllocatedBytes: loadAllocated,
             ArtifactBytes: artifactBytes,
@@ -225,7 +251,7 @@ static TestMetrics AccountBackedRoundTrip()
             HostedTickP95Nanoseconds: 0,
             TickWrapperRatio: 0,
             TimedTickAllocatedBytes: 0,
-            Notes: "ECS+Accounting; cold CharacterSelect/Inventory; row deltas; staged restore; hot reopen; Internal/Headless canonical parity.");
+            Notes: "ECS+Accounting+Clock; owner-thread immutable capture then durable worker publication; cold CharacterSelect/Inventory; row deltas; staged restore; session rebind; Internal/Headless generation parity.");
     }
     finally
     {
@@ -276,6 +302,9 @@ static TestMetrics AccountlessRoundTrip()
             "Accountless restore did not recover scheduled component state.");
         Expect(GetAccountingCounts(runtime.Game) == (0, 0),
             "Accountless restore invented Accounting state.");
+        Expect(admission.TryGetSession(entered.Participant, out AdmissionResult invalidated) &&
+            invalidated.Rejection == AdmissionRejection.GenerationReplaced,
+            "An accountless admission session retained a stale generation-local entity after restore.");
         host.Shutdown();
 
         return new TestMetrics(
@@ -283,7 +312,7 @@ static TestMetrics AccountlessRoundTrip()
             0, 0, 0, 0, 0,
             save.Manifest?.Artifacts.Sum(static artifact => artifact.ByteCount) ?? 0,
             0, 0, 0, 0, 0,
-            "Accountless admission used no account records; the composition's declared empty Accounting participant remained round-trippable.");
+            "Accountless admission used no account records; the composition's declared empty Accounting and authoritative Clock participants remained round-trippable.");
     }
     finally
     {
@@ -354,18 +383,19 @@ static TestMetrics RuntimeTickBenchmark()
             }
         }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+        double[] pairedRatios = directSamples.Zip(
+            hostedSamples,
+            static (direct, hosted) => hosted / Math.Max(1d, direct)).ToArray();
+        Array.Sort(pairedRatios);
         Array.Sort(directSamples);
         Array.Sort(hostedSamples);
         double directMean = directSamples.Average();
         double hostedMean = hostedSamples.Average();
         double hostedP95 = Percentile(hostedSamples, 0.95);
-        double ratio = hostedMean / directMean;
+        double ratio = Percentile(pairedRatios, 0.50);
         Expect(allocated == 0, $"Warmed direct/hosted ticks allocated {allocated} caller bytes.");
-        // The design's 2-5% line is an investigation trigger rather than an
-        // artificial microbenchmark acceptance threshold. A sustained 15% tax
-        // on this 4K-row fixture is large enough to reject the wrapper shape.
-        Expect(ratio <= 1.15,
-            $"The hosted runtime wrapper tax was {ratio:P1}, exceeding the bounded acceptance margin.");
+        Expect(ratio <= 1.05,
+            $"The paired-median hosted runtime wrapper tax was {ratio:P1}, exceeding the 5% acceptance margin.");
 
         host.Stop();
         return new TestMetrics(
@@ -376,7 +406,7 @@ static TestMetrics RuntimeTickBenchmark()
             hostedP95,
             ratio,
             allocated,
-            "21 alternating A/B samples; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread.");
+            "21 alternating paired A/B samples; ratio is paired median; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread.");
     }
     finally
     {
@@ -442,15 +472,19 @@ static void DivergeAfterSave(ServerGameFacet runtime, FixtureKeys keys)
 }
 
 static string CaptureCanonical(
-    ServerGameFacet runtime,
+    ServerRuntime runtime,
     FixtureKeys keys,
     bool allowMissingItems = false)
 {
-    Expect(runtime.TryUseActiveGeneration<IGameGenerationStateProvider, string>(
+    ulong simulationTick = runtime.SimulationTick;
+    long worldTime = runtime.WorldTimeMicroseconds;
+    Expect(runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, string>(
         (world, _, game) =>
         {
             var text = new StringBuilder(512);
-            text.Append("world=").Append(world.PersistentWorldId.Value);
+            text.Append("tick=").Append(simulationTick)
+                .Append("|world-time=").Append(worldTime)
+                .Append("|world=").Append(world.PersistentWorldId.Value);
             Entity alice = ResolveInWorld(world, keys.Alice);
             Expect(game.TryReadSimulationState(world, alice, out GameSimulationState simulation),
                 "Alice has no simulation state.");
@@ -593,7 +627,8 @@ static ServerRuntimeOptions RuntimeOptions(
     PersistenceIdentityOptions identity,
     int capacity = 512) => new(
     UltraSimGameComposition.CreateWorldOptions(capacity, identity),
-    new WorldClockOptions(simulationFrequencyHz: 60, worldTimeRate: 24));
+    new WorldClockOptions(simulationFrequencyHz: 60, worldTimeRate: 24),
+    allowVariablePlayback: true);
 
 static PersistenceRestoreOptions RestoreOptions() => new(
     new PersistenceLimits(
@@ -708,9 +743,10 @@ sealed class NullHostLogSink : IHostLogSink
     public void Write(HostLogLevel level, string message) { }
 }
 
-sealed class RecordingUiPort : IAdmissionUiPort, IInventoryUiPort, IDisposable
+sealed class RecordingUiPort : IUiSemanticPort, IDisposable
 {
     private readonly LocalSemanticLink _link;
+    private readonly Dictionary<UiViewInstanceId, Action<UiActionRequest>> _actions = [];
     private bool _disposed;
 
     internal RecordingUiPort(LocalSemanticLink link)
@@ -723,7 +759,9 @@ sealed class RecordingUiPort : IAdmissionUiPort, IInventoryUiPort, IDisposable
     internal int HotOpenCount { get; private set; }
     internal UiListDeltaKind[] LastListKinds { get; private set; } = [];
 
-    public event Action<UiActionRequest>? ActionSubmitted;
+    public void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler) =>
+        _actions.Add(instance, handler);
+    public void UnbindActions(UiViewInstanceId instance) => _actions.Remove(instance);
 
     public UiViewInstanceId OpenView(UiOpenView operation)
     {
@@ -752,10 +790,13 @@ sealed class RecordingUiPort : IAdmissionUiPort, IInventoryUiPort, IDisposable
         if (_disposed) return;
         _disposed = true;
         _link.ActionSubmitted -= Forward;
-        ActionSubmitted = null;
+        _actions.Clear();
     }
 
-    private void Forward(UiActionRequest request) => ActionSubmitted?.Invoke(request);
+    private void Forward(UiActionRequest request)
+    {
+        if (_actions.TryGetValue(request.Instance, out Action<UiActionRequest>? handler)) handler(request);
+    }
 }
 
 sealed class RecordingRenderer : IUiRenderer

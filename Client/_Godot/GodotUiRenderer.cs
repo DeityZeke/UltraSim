@@ -67,6 +67,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
     private readonly Dictionary<UiLayoutNodeId, Control> _layoutHosts = [];
     private readonly Dictionary<UiElementId, Control> _elements = [];
     private readonly Dictionary<UiElementId, UiCompiledElement> _elementDefinitions = [];
+    private readonly Dictionary<UiSlotId, List<UiElementId>> _elementsBySlot = [];
+    private readonly Dictionary<UiActionId, List<UiElementId>> _elementsByAction = [];
     private readonly Dictionary<UiElementId, VBoxContainer> _lists = [];
     private readonly Dictionary<UiElementId, Dictionary<UiRowId, Control>> _listRows = [];
     private readonly Dictionary<UiActionId, UiActionState> _actionStates = [];
@@ -103,24 +105,25 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
         {
             foreach (UiScalarSlotPatch patch in delta.ScalarSlots)
             {
-                foreach ((UiElementId id, UiCompiledElement element) in _elementDefinitions)
+                if (!_elementsBySlot.TryGetValue(patch.Slot, out List<UiElementId>? targets))
+                    continue;
+                foreach (UiElementId id in targets)
                 {
-                    if (element.Slot == patch.Slot)
-                    {
-                        if (element.Kind == UiElementKind.List)
-                            RebuildList(id, model, submitAction);
-                        else
-                            UpdateElement(id, element, model);
-                    }
+                    UiCompiledElement element = _elementDefinitions[id];
+                    if (element.Kind == UiElementKind.List)
+                        RebuildList(id, model, submitAction);
+                    else
+                        UpdateElement(id, element, model);
                 }
             }
 
             foreach (UiListPatch patch in delta.Lists)
             {
-                foreach ((UiElementId id, UiCompiledElement element) in _elementDefinitions)
+                if (!_elementsBySlot.TryGetValue(patch.Slot, out List<UiElementId>? targets))
+                    continue;
+                foreach (UiElementId id in targets)
                 {
-                    if (element.Slot != patch.Slot)
-                        continue;
+                    UiCompiledElement element = _elementDefinitions[id];
                     if (element.Kind == UiElementKind.List)
                         ApplyListPatch(id, patch, model, submitAction);
                     else
@@ -130,11 +133,9 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
 
             foreach (UiActionStatePatch patch in delta.Actions)
             {
-                foreach ((UiElementId id, UiCompiledElement element) in _elementDefinitions)
-                {
-                    if (element.Action == patch.Action)
+                if (_elementsByAction.TryGetValue(patch.Action, out List<UiElementId>? targets))
+                    foreach (UiElementId id in targets)
                         UpdateActionState(id, patch.State);
-                }
             }
         }
         finally
@@ -205,6 +206,18 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
                 host.AddChild(control);
                 _elements.Add(element.Id, control);
                 _elementDefinitions.Add(element.Id, element);
+                if (element.Slot.IsValid)
+                {
+                    if (!_elementsBySlot.TryGetValue(element.Slot, out List<UiElementId>? slots))
+                        _elementsBySlot.Add(element.Slot, slots = []);
+                    slots.Add(element.Id);
+                }
+                if (element.Action.IsValid)
+                {
+                    if (!_elementsByAction.TryGetValue(element.Action, out List<UiElementId>? actions))
+                        _elementsByAction.Add(element.Action, actions = []);
+                    actions.Add(element.Id);
+                }
                 if (element.Action.IsValid)
                     UpdateActionState(element.Id, model.GetActionState(element.Action));
                 if (element.Kind == UiElementKind.List && control is VBoxContainer list)
@@ -239,6 +252,7 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
                 Name = $"ScrollContent_{node.Key}",
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             };
+            content.AddThemeConstantOverride("separation", checked((int)MathF.Round(node.Flow.Spacing)));
             UiPadding scrollPadding = node.Flow.Padding;
             if (scrollPadding.Left == 0 && scrollPadding.Top == 0 &&
                 scrollPadding.Right == 0 && scrollPadding.Bottom == 0)
@@ -292,9 +306,18 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             _ => throw new InvalidDataException($"Unsupported UI element '{element.Kind}'."),
         };
         control.Name = $"Element_{element.Key}";
+        if (!string.IsNullOrEmpty(element.StyleRole))
+            control.ThemeTypeVariation = element.StyleRole;
         UpdateElementValue(control, element, model);
         if (element.Action.IsValid)
             ConnectAction(control, element, submitAction);
+        else
+        {
+            if (control is LineEdit displayText)
+                displayText.Editable = false;
+            if (control is CheckBox displayToggle)
+                displayToggle.Disabled = true;
+        }
         return control;
     }
 
@@ -347,7 +370,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             _definition.Handle,
             element.Action,
             row,
-            input));
+            input,
+            source: element.Id));
     }
 
     private void UpdateElement(UiElementId id, UiCompiledElement element, UiModelView model)
@@ -560,6 +584,8 @@ public sealed class GodotUiRenderHandle : IUiRenderHandle
             control.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
             return;
         }
+        if (!placement.HasCanvasPlacement && placement.Equals(default(UiChildLayout)))
+            placement = UiChildLayout.Flow(parentNode.Flow.Sizing, parentNode.Flow.Alignment);
         ApplyPlacement(control, placement);
         ApplyFlowFlags(control, placement);
     }

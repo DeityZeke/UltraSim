@@ -69,6 +69,7 @@ public readonly struct TrustedLocalIdentity : IEquatable<TrustedLocalIdentity>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
         string normalized = value.Trim();
+        ValidateUnicode(normalized, nameof(value));
         if (normalized.Length > MaximumLength)
             throw new ArgumentOutOfRangeException(nameof(value));
         Value = normalized;
@@ -90,6 +91,23 @@ public readonly struct TrustedLocalIdentity : IEquatable<TrustedLocalIdentity>
     public static bool operator ==(TrustedLocalIdentity left, TrustedLocalIdentity right) => left.Equals(right);
 
     public static bool operator !=(TrustedLocalIdentity left, TrustedLocalIdentity right) => !left.Equals(right);
+
+    internal static void ValidateUnicode(string value, string parameterName)
+    {
+        for (int index = 0; index < value.Length; index++)
+        {
+            char current = value[index];
+            if (char.IsHighSurrogate(current))
+            {
+                if (++index >= value.Length || !char.IsLowSurrogate(value[index]))
+                    throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
+            }
+            else if (char.IsLowSurrogate(current))
+            {
+                throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
+            }
+        }
+    }
 }
 
 public enum AccountStatus : byte
@@ -126,6 +144,7 @@ public readonly record struct CharacterRecord
             throw new ArgumentOutOfRangeException(nameof(slot));
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
         string normalizedName = displayName.Trim();
+        TrustedLocalIdentity.ValidateUnicode(normalizedName, nameof(displayName));
         if (normalizedName.Length > 128)
             throw new ArgumentOutOfRangeException(nameof(displayName));
         if (!prefabKey.IsValid)
@@ -170,21 +189,30 @@ public sealed class AccountingSnapshot
         IReadOnlyList<AccountRecord> accounts,
         IReadOnlyList<CharacterRecord> characters,
         IReadOnlyList<TrustedIdentityBinding> trustedIdentities)
+        : this(
+            accounts?.ToArray() ?? throw new ArgumentNullException(nameof(accounts)),
+            characters?.ToArray() ?? throw new ArgumentNullException(nameof(characters)),
+            trustedIdentities?.ToArray() ?? throw new ArgumentNullException(nameof(trustedIdentities))) { }
+
+    private AccountingSnapshot(
+        AccountRecord[] accounts,
+        CharacterRecord[] characters,
+        TrustedIdentityBinding[] trustedIdentities)
     {
-        ArgumentNullException.ThrowIfNull(accounts);
-        ArgumentNullException.ThrowIfNull(characters);
-        ArgumentNullException.ThrowIfNull(trustedIdentities);
-        AccountRecord[] accountCopy = accounts.ToArray();
-        CharacterRecord[] characterCopy = characters.ToArray();
-        TrustedIdentityBinding[] identityCopy = trustedIdentities.ToArray();
-        Array.Sort(accountCopy, static (left, right) => left.AccountId.CompareTo(right.AccountId));
-        Array.Sort(characterCopy, static (left, right) => left.CharacterId.CompareTo(right.CharacterId));
-        Array.Sort(identityCopy, static (left, right) =>
+        Array.Sort(accounts, static (left, right) => left.AccountId.CompareTo(right.AccountId));
+        Array.Sort(characters, static (left, right) => left.CharacterId.CompareTo(right.CharacterId));
+        Array.Sort(trustedIdentities, static (left, right) =>
             StringComparer.Ordinal.Compare(left.Identity.Value, right.Identity.Value));
-        Accounts = Array.AsReadOnly(accountCopy);
-        Characters = Array.AsReadOnly(characterCopy);
-        TrustedIdentities = Array.AsReadOnly(identityCopy);
+        Accounts = Array.AsReadOnly(accounts);
+        Characters = Array.AsReadOnly(characters);
+        TrustedIdentities = Array.AsReadOnly(trustedIdentities);
     }
+
+    internal static AccountingSnapshot TakeOwnership(
+        AccountRecord[] accounts,
+        CharacterRecord[] characters,
+        TrustedIdentityBinding[] trustedIdentities) =>
+        new(accounts, characters, trustedIdentities);
 
     public IReadOnlyList<AccountRecord> Accounts { get; }
 
@@ -302,6 +330,17 @@ public sealed class AccountingStore : IAccountingGenerationStateProvider, IDispo
         return _accounts.TryGetValue(accountId, out account);
     }
 
+    public bool TrySetAccountStatus(AccountId accountId, AccountStatus status)
+    {
+        EnsureOperational();
+        if (status is not (AccountStatus.Disabled or AccountStatus.Enabled))
+            throw new ArgumentOutOfRangeException(nameof(status));
+        if (!_accounts.ContainsKey(accountId))
+            return false;
+        _accounts[accountId] = new AccountRecord(accountId, status);
+        return true;
+    }
+
     public bool TryGetCharacter(CharacterId characterId, out CharacterRecord character)
     {
         EnsureOperational();
@@ -348,7 +387,7 @@ public sealed class AccountingStore : IAccountingGenerationStateProvider, IDispo
         TrustedIdentityBinding[] identities = _trustedIdentities
             .Select(static pair => new TrustedIdentityBinding(pair.Key, pair.Value))
             .ToArray();
-        return new AccountingSnapshot(accounts, characters, identities);
+        return AccountingSnapshot.TakeOwnership(accounts, characters, identities);
     }
 
     /// <summary>Builds an isolated store from a validated durable snapshot.</summary>

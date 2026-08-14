@@ -55,6 +55,8 @@ public sealed class UiModel
             return;
         }
 
+        ValidateDynamicValue(value);
+
         UiSlotValueKind actual = ToSlotValueKind(value.Kind);
         if (definition.ValueKind != UiSlotValueKind.Any && definition.ValueKind != actual)
         {
@@ -99,6 +101,8 @@ public sealed class UiModel
                 throw new InvalidDataException("A UI model row requires a valid row ID.");
             if (!ids.Add(row.Id))
                 throw new InvalidDataException($"Duplicate UI model row ID '{row.Id.Value}'.");
+            foreach (UiValue value in row.Values)
+                ValidateDynamicValue(value);
             copy[index] = row.Clone();
         }
 
@@ -139,4 +143,13 @@ public sealed class UiModel
         UiValueKind.Boolean => UiSlotValueKind.Boolean,
         _ => UiSlotValueKind.Any,
     };
+
+    private void ValidateDynamicValue(UiValue value)
+    {
+        if (value.Kind == UiValueKind.Text &&
+            value.Text!.Length > _definition.Limits.MaximumTextCharacters)
+        {
+            throw new InvalidDataException("The UI model text limit was exceeded.");
+        }
+    }
 }

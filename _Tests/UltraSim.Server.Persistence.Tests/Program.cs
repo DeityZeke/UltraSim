@@ -25,6 +25,8 @@ MalformedCurrentFallsBackOnlyInCompatibleMode();
 PreparedParticipantKeyMustMatch();
 CompatibleRecoveryDoesNotHideImplementationFailures();
 ConcurrentWritersCannotMoveCurrentBackward();
+CapturedStateIsDisposedWhenPublicationPreflightFails();
+StagedNamespaceCannotFallBackToExternalAuthority();
 EcsSnapshotSequenceMustMatchSaveSet();
 ProcessTerminationLeavesRecoverableGeneration();
 Console.WriteLine("All save-set transaction tests passed.");
@@ -308,6 +310,48 @@ static void ConcurrentWritersCannotMoveCurrentBackward()
     finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
 }
 
+static void CapturedStateIsDisposedWhenPublicationPreflightFails()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var participant = new FakeParticipant("world", "first");
+        var coordinator = new SaveSetCoordinator(root);
+        coordinator.Save([participant], new SaveSetContext(1, 1), action => action());
+        using CapturedSaveSet captured = coordinator.Capture(
+            [participant], new SaveSetContext(1, 2), action => action());
+        FakeCapture owned = participant.LastCapture ?? throw new InvalidOperationException("No capture was produced.");
+        try
+        {
+            coordinator.Publish(captured);
+            throw new InvalidOperationException("A non-advancing save sequence was accepted.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("does not advance", StringComparison.Ordinal)) { }
+        if (!owned.Disposed)
+            throw new InvalidOperationException("Publication preflight failure leaked captured participant ownership.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
+static void StagedNamespaceCannotFallBackToExternalAuthority()
+{
+    string root = Path.Combine(Path.GetTempPath(), "ultrasim-save-set-" + Guid.NewGuid().ToString("N"));
+    try
+    {
+        var world = new PersistentWorldId(0x9933);
+        var key = new PersistentEntityKey(world, new PersistentEntityId(7));
+        var owner = new NamespaceParticipant("owner", world);
+        var consumer = new ResolvingParticipant("consumer", key);
+        var coordinator = new SaveSetCoordinator(root);
+        coordinator.Save([owner, consumer], new SaveSetContext(1, 1), action => action());
+        using PreparedLoadGeneration prepared = coordinator.PrepareLoad(
+            [owner, consumer], new ExternalResolver(key, new object()));
+        if (consumer.LastPrepared?.Resolved == true)
+            throw new InvalidOperationException("A missing staged entity fell through to external authority.");
+    }
+    finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
+}
+
 static void EcsSnapshotSequenceMustMatchSaveSet()
 {
     ComponentSchema schema = ComponentSchema.Create(new SchemaId(0x88, 0x88),
@@ -383,10 +427,11 @@ sealed class FakeParticipant : ISaveSetParticipant
     internal Exception? PrepareException { get; set; }
     public long MaximumArtifactBytes => ArtifactBound;
     internal FakePrepared? LastPrepared { get; private set; }
+    internal FakeCapture? LastCapture { get; private set; }
     public ICapturedSaveSetParticipant Capture(in SaveSetContext context)
     {
         OnCapture?.Invoke();
-        return new FakeCapture(Key, Encoding.UTF8.GetBytes(Value), OnWrite);
+        return LastCapture = new FakeCapture(Key, Encoding.UTF8.GetBytes(Value), OnWrite);
     }
     public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context)
     {
@@ -402,6 +447,7 @@ sealed class FakeCapture : ICapturedSaveSetParticipant
     private readonly Action? _onWrite;
     internal FakeCapture(string key, byte[] bytes, Action? onWrite) { Key = key; _bytes = bytes; _onWrite = onWrite; }
     public string Key { get; }
+    internal bool Disposed { get; private set; }
     public void WriteArtifact(Stream destination)
     {
         byte[] bytes = _bytes ?? throw new InvalidOperationException("capture already consumed");
@@ -409,7 +455,66 @@ sealed class FakeCapture : ICapturedSaveSetParticipant
         destination.Write(bytes);
         _bytes = null;
     }
-    public void Dispose() => _bytes = null;
+    public void Dispose() { _bytes = null; Disposed = true; }
+}
+
+sealed class NamespaceParticipant : ISaveSetParticipant
+{
+    private readonly PersistentWorldId _world;
+    internal NamespaceParticipant(string key, PersistentWorldId world) { Key = key; _world = world; }
+    public string Key { get; }
+    public ICapturedSaveSetParticipant Capture(in SaveSetContext context) =>
+        new FakeCapture(Key, [1], null);
+    public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context) =>
+        new NamespacePrepared(Key, _world);
+}
+
+sealed class NamespacePrepared : IPreparedLoadParticipant,
+    IPreparedPersistentEntityResolver, IPreparedPersistentEntityNamespace
+{
+    private readonly PersistentWorldId _world;
+    internal NamespacePrepared(string key, PersistentWorldId world) { Key = key; _world = world; }
+    public string Key { get; }
+    public bool Owns(PersistentEntityKey key) => key.World == _world;
+    public bool TryResolve(PersistentEntityKey key, out object? value) { value = null; return false; }
+    public void Resolve(IPersistentEntityResolver resolver) { }
+    public void Validate() { }
+    public void Dispose() { }
+}
+
+sealed class ResolvingParticipant : ISaveSetParticipant
+{
+    private readonly PersistentEntityKey _key;
+    internal ResolvingParticipant(string key, PersistentEntityKey entityKey) { Key = key; _key = entityKey; }
+    public string Key { get; }
+    internal ResolvingPrepared? LastPrepared { get; private set; }
+    public ICapturedSaveSetParticipant Capture(in SaveSetContext context) =>
+        new FakeCapture(Key, [1], null);
+    public IPreparedLoadParticipant Prepare(ReadOnlyMemory<byte> artifact, in SaveSetContext context) =>
+        LastPrepared = new ResolvingPrepared(Key, _key);
+}
+
+sealed class ResolvingPrepared : IPreparedLoadParticipant
+{
+    private readonly PersistentEntityKey _key;
+    internal ResolvingPrepared(string key, PersistentEntityKey entityKey) { Key = key; _key = entityKey; }
+    public string Key { get; }
+    internal bool Resolved { get; private set; }
+    public void Resolve(IPersistentEntityResolver resolver) => Resolved = resolver.TryResolve(_key, out _);
+    public void Validate() { }
+    public void Dispose() { }
+}
+
+sealed class ExternalResolver : IExternalPersistentEntityResolver
+{
+    private readonly PersistentEntityKey _key;
+    private readonly object _value;
+    internal ExternalResolver(PersistentEntityKey key, object value) { _key = key; _value = value; }
+    public bool TryResolve(PersistentEntityKey key, out object? value)
+    {
+        value = key.Equals(_key) ? _value : null;
+        return value is not null;
+    }
 }
 
 sealed class FakePrepared : IPreparedLoadParticipant
@@ -423,7 +528,7 @@ sealed class FakePrepared : IPreparedLoadParticipant
     public void Dispose() => Disposed = true;
 }
 
-sealed class EmptyResolver : IPersistentEntityResolver
+sealed class EmptyResolver : IExternalPersistentEntityResolver
 {
     internal static readonly EmptyResolver Instance = new();
     public bool TryResolve(PersistentEntityKey key, out object? value) { value = null; return false; }

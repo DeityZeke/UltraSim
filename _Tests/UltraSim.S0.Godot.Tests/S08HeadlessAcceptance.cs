@@ -166,9 +166,10 @@ public partial class S08HeadlessAcceptance : Control
 
     private readonly record struct Fixture(Entity Alice, Entity Backpack);
 
-    private sealed class NativeUiPort : IAdmissionUiPort, IInventoryUiPort, IDisposable
+    private sealed class NativeUiPort : IUiSemanticPort, IDisposable
     {
         private readonly LocalSemanticLink _link;
+        private readonly Dictionary<UiViewInstanceId, Action<UiActionRequest>> _actions = [];
 
         internal NativeUiPort(LocalSemanticLink link)
         {
@@ -176,7 +177,9 @@ public partial class S08HeadlessAcceptance : Control
             _link.ActionSubmitted += Forward;
         }
 
-        public event Action<UiActionRequest>? ActionSubmitted;
+        public void BindActions(UiViewInstanceId instance, Action<UiActionRequest> handler) =>
+            _actions.Add(instance, handler);
+        public void UnbindActions(UiViewInstanceId instance) => _actions.Remove(instance);
 
         public UiViewInstanceId OpenView(UiOpenView operation) => _link.OpenView(operation);
         public UiViewInstanceId OpenHotView(UiHotOpenView operation) => _link.OpenHotView(operation);
@@ -186,9 +189,12 @@ public partial class S08HeadlessAcceptance : Control
         public void Dispose()
         {
             _link.ActionSubmitted -= Forward;
-            ActionSubmitted = null;
+            _actions.Clear();
         }
 
-        private void Forward(UiActionRequest request) => ActionSubmitted?.Invoke(request);
+        private void Forward(UiActionRequest request)
+        {
+            if (_actions.TryGetValue(request.Instance, out Action<UiActionRequest>? handler)) handler(request);
+        }
     }
 }
