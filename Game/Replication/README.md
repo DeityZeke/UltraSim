@@ -1,8 +1,21 @@
 # Game replication
 
 Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accepted.
-Packet framing, delivery, security, connection state, and sockets remain later N0
-checkpoints.
+N0.2 packet/framing foundations are accepted below this layer; delivery, security,
+reliability, and sockets remain later N0 checkpoints.
+
+Same-generation projection repair and authoritative generation replacement are
+different boundaries. Replacement creates a new `StateEpoch`, resets canonical
+replication identity, and invalidates old generation-local application facts.
+Lifecycle-history repair retains the existing `StateEpoch`, increments an explicit
+baseline revision, preserves surviving replication identities/generations, advances
+identity generations for missed slot reuse, and retains independently acknowledged
+application events. A state baseline can repair projection lifecycle; it cannot
+silently discard or recreate a non-coalescible application event.
+
+Participant capacity is non-poisoning. An excess Admission session is excluded
+from the bounded projection and can be rejected by the future remote admission
+boundary; it does not freeze capture for already admitted participants.
 
 `Game/Replication` is the game-owned seam between committed authoritative state
 and Network delivery. It depends on the concrete game composition and Runtime;
@@ -94,6 +107,9 @@ The focused executable proves:
 - rapid membership folding and ordered lifecycle history;
 - transactional capacity failure and cursor non-acknowledgement;
 - lifecycle overflow/resync and explicit rebuild;
+- same-generation repair preserves `StateEpoch`, retained application events,
+  baseline sequencing, and canonical identity reuse generations;
+- excess participant capacity rejects that participant without poisoning capture;
 - derived projection fault containment;
 - bounded independent application events;
 - atomic invalid-frame rejection;
@@ -121,5 +137,5 @@ dotnet run --project _Tests/UltraSim.Game.Replication.Tests -c Release
 dotnet run --project _Benchmarks/UltraSim.Game.ReplicationBenchmarks -c Release
 ```
 
-N0.2 is next: dependency-clean Network kernel capacities, generational connection
-state, packet/slab ownership, bounded rings, strict framing, and generated codecs.
+N0.2 is accepted in the Network kernel. N0.3 consumes this projection and the
+deterministic datagram endpoint to establish secure reliable protocol semantics.

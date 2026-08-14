@@ -54,6 +54,7 @@ public sealed class GameProjectionService : IDisposable
     private StateEpoch _stateEpoch;
     private ulong _nextStateEpoch = 1;
     private ulong _generationId;
+    private ulong _baselineRevision;
     private ulong _frameSequence;
     private GameProjectionFrame _lastFrame;
     private ulong _nextDeltaSequence;
@@ -69,7 +70,6 @@ public sealed class GameProjectionService : IDisposable
     private int _applicationCount;
     private ulong _applicationNextSequence;
     private int _inputCount;
-    private bool _participantCapacityExceeded;
     private bool _rebuildRequired;
     private Exception? _fault;
     private bool _disposed;
@@ -147,8 +147,6 @@ public sealed class GameProjectionService : IDisposable
         EnsureOperational();
         if (_fault is not null)
             return Failure(GameProjectionCaptureStatus.Faulted, _fault.Message);
-        if (_participantCapacityExceeded)
-            return Failure(GameProjectionCaptureStatus.CapacityExceeded, "The participant projection capacity was exceeded.");
         if (_rebuildRequired)
             return Failure(GameProjectionCaptureStatus.RebuildRequired, "The projection requires an explicit baseline rebuild.");
 
@@ -387,6 +385,7 @@ public sealed class GameProjectionService : IDisposable
         return new(
             _stateEpoch,
             _generationId,
+            _baselineRevision,
             _frameSequence,
             _entityCount,
             bound,
@@ -491,9 +490,13 @@ public sealed class GameProjectionService : IDisposable
             if (world.GetLifecycleHistorySnapshot().Capacity == 0)
                 return Failure(GameProjectionCaptureStatus.ReplicationNotConfigured,
                     "The network profile requires ECS lifecycle history.");
-            if (_nextStateEpoch == ulong.MaxValue)
+            bool generationChanged = !_stateEpoch.IsValid || generationId != _generationId;
+            if (generationChanged && _nextStateEpoch == ulong.MaxValue)
                 return Failure(GameProjectionCaptureStatus.CapacityExceeded,
                     "The projection StateEpoch identity space is exhausted.");
+            if (!generationChanged && _baselineRevision == ulong.MaxValue)
+                return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                    "The projection baseline revision space is exhausted.");
 
             Array.Clear(_baselineHasSimulation);
             var baseline = new BaselineVisitor(_baselineSimulation, _baselineHasSimulation);
@@ -509,35 +512,63 @@ public sealed class GameProjectionService : IDisposable
             }
             LifecycleCursor lifecycleCursor = world.CaptureLifecycleCursorFromNow();
             ChangeCursor changeCursor = world.CreateChangeCursorFromNow();
-            FaultInjector?.Invoke(GameProjectionFaultPoint.BeforeBaselineCommit);
 
-            Array.Clear(_runtimeGenerations);
-            Array.Clear(_replicationGenerations);
-            Array.Clear(_entities);
-            _entityCount = 0;
+            Array.Clear(_workingRuntimeGenerations);
+            Array.Clear(_workingEntities);
+            if (generationChanged) Array.Clear(_workingReplicationGenerations);
+            else _replicationGenerations.CopyTo(_workingReplicationGenerations, 0);
             for (int index = 0; index < count; index++)
             {
                 Entity entity = _baselineEntities[index];
                 uint slot = entity.Index;
-                var id = new ReplicationEntityId(slot, 1);
-                _runtimeGenerations[slot] = entity.Generation;
-                _replicationGenerations[slot] = 1;
-                _entities[slot] = new GameProjectedEntity(
-                    id,
+                uint replicationGeneration;
+                if (generationChanged)
+                {
+                    replicationGeneration = 1;
+                }
+                else if (_runtimeGenerations[slot] == entity.Generation && _entities[slot].Entity.IsValid)
+                {
+                    replicationGeneration = _replicationGenerations[slot];
+                }
+                else
+                {
+                    uint previous = _replicationGenerations[slot];
+                    if (previous == uint.MaxValue)
+                        return Failure(GameProjectionCaptureStatus.CapacityExceeded,
+                            "A canonical replication identity generation was exhausted.");
+                    replicationGeneration = previous + 1;
+                }
+                _workingRuntimeGenerations[slot] = entity.Generation;
+                _workingReplicationGenerations[slot] = replicationGeneration;
+                _workingEntities[slot] = new GameProjectedEntity(
+                    new ReplicationEntityId(slot, replicationGeneration),
                     _baselineHasSimulation[slot],
                     _baselineSimulation[slot]);
-                _entityCount++;
             }
+            FaultInjector?.Invoke(GameProjectionFaultPoint.BeforeBaselineCommit);
+
+            _workingRuntimeGenerations.CopyTo(_runtimeGenerations, 0);
+            _workingReplicationGenerations.CopyTo(_replicationGenerations, 0);
+            _workingEntities.CopyTo(_entities, 0);
+            _entityCount = count;
             _baselineEntities.AsSpan(0, count).Clear();
             _generationId = generationId;
-            _stateEpoch = new StateEpoch(_nextStateEpoch++);
+            if (generationChanged)
+            {
+                _stateEpoch = new StateEpoch(_nextStateEpoch++);
+                _baselineRevision = 1;
+                _nextDeltaSequence = 0;
+                ClearApplicationEvents();
+            }
+            else
+            {
+                _baselineRevision++;
+            }
             _lifecycleCursor = lifecycleCursor;
             _changeCursor = changeCursor;
             _frameSequence = 0;
-            _nextDeltaSequence = 0;
             _lastDeltaCount = 0;
             ClearLifecycleHistory();
-            ClearApplicationEvents();
             _rebuildRequired = false;
             _fault = null;
             GameProjectionFrame frame = CreateFrame(0, 0, 0, world.TickCount);
@@ -837,7 +868,6 @@ public sealed class GameProjectionService : IDisposable
         if (!_participants.TryGetValue(result.Participant, out ParticipantState state) &&
             _participants.Count == _limits.MaximumParticipants)
         {
-            _participantCapacityExceeded = true;
             return;
         }
         state.Session = result;
@@ -851,8 +881,10 @@ public sealed class GameProjectionService : IDisposable
         _stateEpoch,
         _generationId,
         tick,
+        _baselineRevision,
         previous,
         current,
+        _nextDeltaSequence,
         deltas,
         unchecked(_lifecycleNextSequence - (ulong)_lifecycleCount),
         _lifecycleNextSequence,

@@ -1,0 +1,104 @@
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using UltraSim.Network;
+using UltraSim.Network.Generators;
+
+var tests = new (string Name, Action Body)[]
+{
+    ("ValidProtocolGeneratesExactCodecAndManifest", ValidProtocolGeneratesExactCodecAndManifest),
+    ("DuplicateMessageIdReportsNETGEN003", DuplicateMessageIdReports),
+    ("DuplicateCanonicalKeyReportsNETGEN003", DuplicateCanonicalKeyReports),
+    ("UnsupportedFieldReportsNETGEN002", UnsupportedFieldReports),
+};
+foreach ((string name, Action body) in tests)
+{
+    body();
+    Console.WriteLine($"PASS {name}");
+}
+Console.WriteLine($"All {tests.Length} Network codec generator tests passed.");
+
+static void ValidProtocolGeneratesExactCodecAndManifest()
+{
+    Generation generation = Generate("""
+        using UltraSim.Network;
+        namespace Fixture;
+        [System.Flags] public enum Options : byte { None = 0, A = 1, B = 2 }
+        [NetworkProtocol(3)] public static partial class Protocol { }
+        [NetworkMessage(7, "fixture.sample", 2, NetworkLane.Input)]
+        public partial struct Sample
+        {
+            public ulong Sequence;
+            public int Delta;
+            public bool Active;
+            public Options Flags;
+        }
+        """);
+    AssertNoGeneratorErrors(generation);
+    Diagnostic[] errors = generation.Compilation.GetDiagnostics()
+        .Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
+    if (errors.Length != 0) throw new InvalidOperationException(string.Join("\n", errors.AsEnumerable()));
+    Contains(generation.Source, "public const int EncodedSize = 14;");
+    Contains(generation.Source, "TryWriteExact");
+    Contains(generation.Source, "TryReadExact");
+    Contains(generation.Source, "NetworkProtocolManifest.Create(3");
+}
+
+static void DuplicateMessageIdReports() => AssertDiagnostic("""
+    using UltraSim.Network;
+    [NetworkProtocol(1)] public static partial class Protocol { }
+    [NetworkMessage(1, "a", 1, NetworkLane.Control)] public partial struct A { public uint Value; }
+    [NetworkMessage(1, "b", 1, NetworkLane.Control)] public partial struct B { public uint Value; }
+    """, "NETGEN003");
+
+static void DuplicateCanonicalKeyReports() => AssertDiagnostic("""
+    using UltraSim.Network;
+    [NetworkProtocol(1)] public static partial class Protocol { }
+    [NetworkMessage(1, "same", 1, NetworkLane.Control)] public partial struct A { public uint Value; }
+    [NetworkMessage(2, "same", 1, NetworkLane.Control)] public partial struct B { public uint Value; }
+    """, "NETGEN003");
+
+static void UnsupportedFieldReports() => AssertDiagnostic("""
+    using UltraSim.Network;
+    [NetworkProtocol(1)] public static partial class Protocol { }
+    [NetworkMessage(1, "bad", 1, NetworkLane.Control)] public partial struct Bad { public string Value; }
+    """, "NETGEN002");
+
+static void AssertDiagnostic(string source, string id)
+{
+    Generation generation = Generate(source);
+    if (!generation.Diagnostics.Any(diagnostic => diagnostic.Id == id))
+        throw new InvalidOperationException($"Expected {id}; got {string.Join(", ", generation.Diagnostics.Select(static d => d.Id))}.");
+}
+
+static Generation Generate(string source)
+{
+    CSharpParseOptions parseOptions = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Latest);
+    SyntaxTree tree = CSharpSyntaxTree.ParseText(source, parseOptions);
+    var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
+        .Select(static path => MetadataReference.CreateFromFile(path)).Cast<MetadataReference>().ToList();
+    references.Add(MetadataReference.CreateFromFile(typeof(NetworkProtocolAttribute).Assembly.Location));
+    CSharpCompilation compilation = CSharpCompilation.Create(
+        "NetworkGeneratorFixture", new[] { tree }, references,
+        new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+    GeneratorDriver driver = CSharpGeneratorDriver.Create(
+        generators: new[] { new NetworkCodecGenerator().AsSourceGenerator() },
+        parseOptions: parseOptions);
+    driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out Compilation output, out _);
+    GeneratorDriverRunResult result = driver.GetRunResult();
+    string generated = string.Join("\n", result.GeneratedTrees.Select(static generatedTree => generatedTree.ToString()));
+    return new Generation(output, result.Diagnostics, generated);
+}
+
+static void AssertNoGeneratorErrors(Generation generation)
+{
+    Diagnostic[] errors = generation.Diagnostics.Where(static diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
+    if (errors.Length != 0) throw new InvalidOperationException(string.Join("\n", errors.AsEnumerable()));
+}
+
+static void Contains(string source, string value)
+{
+    if (!source.Contains(value, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Generated source did not contain '{value}'.\n{source}");
+}
+
+internal readonly record struct Generation(Compilation Compilation, IReadOnlyList<Diagnostic> Diagnostics, string Source);

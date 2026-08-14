@@ -23,7 +23,9 @@ foreach ((string name, Action body) in tests)
     Console.WriteLine($"PASS {name}");
 }
 
-Console.WriteLine($"All {tests.Length} Network N0.0 tests passed.");
+N02FoundationTests.RunAll();
+
+Console.WriteLine($"All {tests.Length} Network N0.0 tests and Network N0.2 foundation tests passed.");
 
 static void ConnectionIdentityIsGenerationalAndFixedWidth()
 {

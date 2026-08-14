@@ -22,6 +22,7 @@ public sealed class OfflineDirectGameProjection
     private readonly NetworkSemanticTrace _trace;
     private StateEpoch _stateEpoch;
     private ulong _generationId;
+    private ulong _baselineRevision;
     private ulong _frameSequence;
     private ulong _nextDeltaSequence;
     private ulong _nextApplicationEventSequence;
@@ -51,7 +52,7 @@ public sealed class OfflineDirectGameProjection
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(source);
-        if (!frame.StateEpoch.IsValid || frame.DeltaCount != 0)
+        if (!frame.StateEpoch.IsValid || frame.BaselineRevision == 0 || frame.DeltaCount != 0)
             return OfflineProjectionApplyStatus.InvalidDelta;
         GameProjectionSnapshot sourceSnapshot = source.GetSnapshot();
         if (sourceSnapshot.EntityCount > _stagingEntities.Length ||
@@ -61,6 +62,7 @@ public sealed class OfflineDirectGameProjection
         }
         if (sourceSnapshot.StateEpoch != frame.StateEpoch ||
             sourceSnapshot.ServerGenerationId != frame.ServerGenerationId ||
+            sourceSnapshot.BaselineRevision != frame.BaselineRevision ||
             sourceSnapshot.FrameSequence != frame.FrameSequence)
         {
             return OfflineProjectionApplyStatus.InvalidDelta;
@@ -80,6 +82,15 @@ public sealed class OfflineDirectGameProjection
         }
 
         int participantCount = source.CopyParticipants(_stagingParticipants);
+        bool sameEpoch = _stateEpoch.IsValid && _stateEpoch == frame.StateEpoch;
+        ulong nextApplicationEventSequence = sameEpoch
+            ? _nextApplicationEventSequence
+            : frame.ApplicationEventOldestSequence;
+        if (nextApplicationEventSequence < frame.ApplicationEventOldestSequence ||
+            nextApplicationEventSequence > frame.ApplicationEventNextSequence)
+        {
+            return OfflineProjectionApplyStatus.BaselineRequired;
+        }
         (_entities, _stagingEntities) = (_stagingEntities, _entities);
         Array.Clear(_stagingEntities);
         (_participants, _stagingParticipants) = (_stagingParticipants, _participants);
@@ -88,9 +99,10 @@ public sealed class OfflineDirectGameProjection
         _entityCount = entityCount;
         _stateEpoch = frame.StateEpoch;
         _generationId = frame.ServerGenerationId;
+        _baselineRevision = frame.BaselineRevision;
         _frameSequence = frame.FrameSequence;
-        _nextDeltaSequence = 0;
-        _nextApplicationEventSequence = frame.ApplicationEventOldestSequence;
+        _nextDeltaSequence = frame.NextDeltaSequence;
+        _nextApplicationEventSequence = nextApplicationEventSequence;
         _trace.Clear();
         _trace.TryAppend(new NetworkSemanticTraceEntry(
             NetworkSemanticTraceKind.BaselineCommitted,
@@ -112,6 +124,7 @@ public sealed class OfflineDirectGameProjection
         ArgumentNullException.ThrowIfNull(source);
         if (frame.StateEpoch != _stateEpoch ||
             frame.ServerGenerationId != _generationId ||
+            frame.BaselineRevision != _baselineRevision ||
             frame.PreviousFrameSequence != _frameSequence ||
             _frameSequence == ulong.MaxValue ||
             frame.FrameSequence != _frameSequence + 1)
@@ -121,6 +134,7 @@ public sealed class OfflineDirectGameProjection
         GameProjectionSnapshot sourceSnapshot = source.GetSnapshot();
         if (sourceSnapshot.StateEpoch != frame.StateEpoch ||
             sourceSnapshot.ServerGenerationId != frame.ServerGenerationId ||
+            sourceSnapshot.BaselineRevision != frame.BaselineRevision ||
             sourceSnapshot.FrameSequence != frame.FrameSequence)
         {
             return OfflineProjectionApplyStatus.InvalidDelta;
@@ -130,7 +144,6 @@ public sealed class OfflineDirectGameProjection
         {
             return OfflineProjectionApplyStatus.CapacityExceeded;
         }
-
         _entities.CopyTo(_stagingEntities, 0);
         int entityCount = _entityCount;
         ulong expectedSequence = _nextDeltaSequence;
@@ -180,6 +193,8 @@ public sealed class OfflineDirectGameProjection
                     return OfflineProjectionApplyStatus.InvalidDelta;
             }
         }
+        if (expectedSequence != frame.NextDeltaSequence)
+            return OfflineProjectionApplyStatus.InvalidDelta;
 
         int participantCount = source.CopyParticipants(_stagingParticipants);
         if (entityCount != sourceSnapshot.EntityCount || participantCount != sourceSnapshot.ParticipantCount)
@@ -263,6 +278,7 @@ public sealed class OfflineDirectGameProjection
         return new(
             _stateEpoch,
             _generationId,
+            _baselineRevision,
             _frameSequence,
             _entityCount,
             _participantCount,

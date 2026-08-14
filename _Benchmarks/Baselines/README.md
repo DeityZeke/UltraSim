@@ -32,6 +32,8 @@ Useful current anchors can be located by their embedded workload or filename:
   Runtime/game/persistence/cadence gate;
 - `network-n0.1-game-projection-100k-*` — canonical changed-state capture and
   packet-free OfflineDirect semantic-apply evidence;
+- `network-n0.2-kernel-foundation-*` — fixed-runtime generated codec, packet pool,
+  producer ring, deterministic datagram, and connection reuse evidence;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

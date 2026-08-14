@@ -3,6 +3,7 @@ using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Replication;
+using UltraSim.Network;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
@@ -12,7 +13,9 @@ var tests = new (string Name, Action Body)[]
     ("BaselineAndOfflineDirectPublishCanonicalTruth", BaselineAndOfflineDirectPublishCanonicalTruth),
     ("ChangedConsumersIngressAndWarmedCaptureAreIndependentAndBounded", ChangedConsumersIngressAndAllocation),
     ("PostGraphLifecycleAndRapidMembershipChangesAreCaptured", PostGraphLifecycleAndRapidMembershipChanges),
+    ("SameEpochSlotReuseAdvancesReplicationGeneration", SameEpochSlotReuseAdvancesReplicationGeneration),
     ("CapacityAndUnexpectedProjectionFailuresRemainContained", CapacityAndUnexpectedFailuresRemainContained),
+    ("ParticipantCapacityRejectsExcessWithoutPoisoningProjection", ParticipantCapacityRejectsWithoutPoisoning),
     ("LifecycleHistoryOverflowRequiresBaseline", LifecycleHistoryOverflowRequiresBaseline),
     ("GenerationReplacementRebuildsEpochAndInvalidatesAccountlessAuthority", GenerationReplacementRebuildsEpoch),
     ("GenerationReplacementRebindsDurableAdmissionAuthority", GenerationReplacementRebindsDurableAdmission),
@@ -231,6 +234,54 @@ static void CapacityAndUnexpectedFailuresRemainContained()
     Check.Equal(ServerRuntimeState.Running, faultFixture.Runtime.State);
 }
 
+static void ParticipantCapacityRejectsWithoutPoisoning()
+{
+    using var fixture = new Fixture(GameRuntimeProfile.Networked, 0x9503, 64);
+    using var projection = new GameProjectionService(
+        fixture.Runtime.Game,
+        fixture.Admission,
+        new GameReplicationLimits(64, 1, 64, 128, 64, 8, 8));
+    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, projection.RebuildBaseline().Status);
+    ParticipantId admitted = new(44);
+    ParticipantId excess = new(45);
+    Check.True(fixture.Admission.JoinAccountless(admitted).IsEntered);
+    Check.True(fixture.Admission.JoinAccountless(excess).IsEntered);
+    Check.True(projection.SynchronizeParticipant(admitted));
+    Check.False(projection.SynchronizeParticipant(excess));
+    GameProjectionCaptureResult capture = projection.CaptureAfterTick();
+    Check.True(capture.Succeeded);
+    Check.Equal(1, projection.GetSnapshot().ParticipantCount);
+    Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
+}
+
+static void SameEpochSlotReuseAdvancesReplicationGeneration()
+{
+    using var fixture = new Fixture(GameRuntimeProfile.Networked, 0x9504, 64);
+    using var projection = fixture.CreateProjection();
+    GameProjectionCaptureResult baseline = projection.RebuildBaseline();
+    Entity first = default;
+    Check.True(fixture.Runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>(
+        (world, _, game) => world.TryInstantiate(game.Content.Character, out first), out bool created));
+    Check.True(created);
+    Check.True(projection.CaptureAfterTick().Succeeded);
+    Span<GameProjectedEntity> entities = stackalloc GameProjectedEntity[2];
+    Check.Equal(1, projection.CopyEntities(entities));
+    ReplicationEntityId firstProjection = entities[0].Entity;
+
+    Entity replacement = default;
+    Check.True(fixture.Runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>(
+        (world, _, game) => world.TryDestroy(first) &&
+            world.TryInstantiate(game.Content.Character, out replacement), out bool replaced));
+    Check.True(replaced);
+    Check.Equal(first.Index, replacement.Index);
+    GameProjectionCaptureResult capture = projection.CaptureAfterTick();
+    Check.True(capture.Succeeded);
+    Check.Equal(baseline.Frame.StateEpoch, capture.Frame.StateEpoch);
+    Check.Equal(1, projection.CopyEntities(entities));
+    Check.Equal(firstProjection.Index, entities[0].Entity.Index);
+    Check.Equal(firstProjection.Generation + 1, entities[0].Entity.Generation);
+}
+
 static void LifecycleHistoryOverflowRequiresBaseline()
 {
     const int population = UltraSimGameComposition.NetworkLifecycleRecordCapacity + 1;
@@ -239,7 +290,18 @@ static void LifecycleHistoryOverflowRequiresBaseline()
         fixture.Runtime.Game,
         fixture.Admission,
         new GameReplicationLimits(population + 16, 8, population + 8, population + 8, 32, 8, 8));
-    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, projection.RebuildBaseline().Status);
+    GameProjectionCaptureResult baseline = projection.RebuildBaseline();
+    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, baseline.Status);
+    var offline = new OfflineDirectGameProjection(population + 16, 8, 64);
+    Check.Equal(OfflineProjectionApplyStatus.Success, offline.ApplyBaseline(projection, baseline.Frame));
+    ParticipantId participant = new(46);
+    Check.True(projection.TryPublishApplicationEvent(participant, 1, 10, 100, out _));
+    Span<GameApplicationEvent> eventScratch = stackalloc GameApplicationEvent[2];
+    GameProjectionHistoryReadResult firstRead = projection.ReadApplicationEvents(0, eventScratch[..1]);
+    Check.Equal(GameProjectionHistoryReadStatus.Success, firstRead.Status);
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyApplicationEvents(eventScratch[..firstRead.Count]));
+    Check.True(projection.TryPublishApplicationEvent(participant, 2, 20, 200, out GameApplicationEvent retained));
     Check.True(fixture.Runtime.Game.TryUseActiveGeneration<GameGenerationState, bool>(
         (world, generationId, game) =>
         {
@@ -252,8 +314,18 @@ static void LifecycleHistoryOverflowRequiresBaseline()
     Check.Equal(GameProjectionCaptureStatus.LifecycleResyncRequired, overflow.Status);
     Check.True(overflow.RequiresBaseline);
     Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
-    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, projection.RebuildBaseline().Status);
+    GameProjectionCaptureResult repaired = projection.RebuildBaseline();
+    Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, repaired.Status);
+    Check.Equal(baseline.Frame.StateEpoch, repaired.Frame.StateEpoch);
+    Check.True(repaired.Frame.BaselineRevision > baseline.Frame.BaselineRevision);
     Check.Equal(population, projection.GetSnapshot().EntityCount);
+    GameProjectionHistoryReadResult retainedRead = projection.ReadApplicationEvents(firstRead.NextSequence, eventScratch);
+    Check.Equal(GameProjectionHistoryReadStatus.Success, retainedRead.Status);
+    Check.Equal(1, retainedRead.Count);
+    Check.Equal(retained, eventScratch[0]);
+    Check.Equal(OfflineProjectionApplyStatus.Success, offline.ApplyBaseline(projection, repaired.Frame));
+    Check.Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyApplicationEvents(eventScratch[..retainedRead.Count]));
 }
 
 static void ApplicationEventsAreIndependentBoundedFacts()
@@ -409,8 +481,10 @@ static void OfflineDirectRejectsInvalidFramesAtomically()
         baseline.Frame.StateEpoch,
         baseline.Frame.ServerGenerationId,
         baseline.Frame.SimulationTick,
+        baseline.Frame.BaselineRevision,
         99,
         100,
+        baseline.Frame.NextDeltaSequence,
         0,
         0, 0, 0, 0);
     Check.Equal(OfflineProjectionApplyStatus.BaselineRequired,

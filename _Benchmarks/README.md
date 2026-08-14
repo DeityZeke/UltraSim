@@ -34,14 +34,15 @@ when those systems exist.
 | `UltraSim.ECS.BitmapExperiment*` | Retained experimental storage oracle; not production ECS. |
 | `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
+| `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
 
 Network N0.0 has no protocol performance benchmark because there is not yet an
-honest V2/V3 protocol equivalent. N0.1 adds game-projection/OfflineDirect evidence,
-but it is not a protocol ratio. Network ratios become eligible only as matching
-later checkpoints exist.
+honest V2/V3 protocol equivalent. N0.1 adds game-projection/OfflineDirect evidence;
+N0.2 adds fixed-runtime kernel micro evidence. Neither is a protocol ratio. Network
+ratios become eligible only as matching later checkpoints exist.
 
 ## Running
 
@@ -53,6 +54,8 @@ dotnet run --project _Benchmarks/UltraSim.ECS.Comparison -c Release
 dotnet run --project _Benchmarks/UltraSim.ECS.Persistence -c Release
 dotnet run --project _Benchmarks/UltraSim.ECS.SimulationSlice0 -c Release -- --mode both
 dotnet run --project _Benchmarks/UltraSim.Game.ReplicationBenchmarks -c Release
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 ```
 
 Each executable's `--help`/argument parser is the source of truth for filters,

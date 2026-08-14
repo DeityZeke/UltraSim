@@ -6,10 +6,10 @@ very large persistent worlds. The current repository contains the accepted ECS
 protocol and Godot renderer, concrete game composition, Accounting, Admission,
 Inventory, and the completed S0 end-to-end integration slice.
 
-Network V3 is the active major implementation milestone. N0.0's dependency,
-identity, lane, deterministic-evidence, and comparison foundation plus N0.1's
-canonical game projection and OfflineDirect oracle are implemented. Bounded
-packet/codec foundations are next.
+Network V3 is the active major implementation milestone. N0.0's contracts,
+N0.1's canonical game projection/OfflineDirect oracle, and N0.2's bounded packet,
+connection, ring, framing, generated-codec, and deterministic-datagram foundations
+are implemented. Secure reliable protocol work is next.
 
 ## Design
 
@@ -43,8 +43,9 @@ per-step behavior is an explicit documented choice.
 
 - `Kernels/ECS*` — generated schema/query APIs, packed ECS, scheduler,
   structural/lifecycle/content/persistence mechanisms.
-- `Kernels/Network` — dependency-clean N0.0 identity, lane, deterministic trace,
-  impairment, and evidence contracts; protocol/transport are later checkpoints.
+- `Kernels/Network*` — dependency-clean identity/lane contracts, fixed connection
+  and packet ownership, generated codecs/manifests, canonical framing, and
+  deterministic datagrams; secure protocol/transport are later checkpoints.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, and semantic port.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
 - `Client/*` — retained client projection and Godot presentation.

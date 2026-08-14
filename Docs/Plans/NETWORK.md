@@ -1,8 +1,8 @@
 # Network V3: N0 remote-authority implementation plan
 
-Status: active forward plan. N0.0 contract/evidence foundation is implemented;
-N0.1 canonical game projection and OfflineDirect capture is accepted. N0.2
-bounded Network kernel foundations is next.
+Status: active forward plan. N0.0 contract/evidence, N0.1 canonical game
+projection/OfflineDirect, and N0.2 bounded Network kernel foundations are
+accepted. N0.3 secure reliable protocol over deterministic datagrams is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -822,7 +822,20 @@ Tests:
 
 Gate: authority becomes complete client-semantic truth without Network existing.
 
-### N0.2 — Network kernel foundations
+### N0.2 — Network kernel foundations — accepted
+
+Implemented as a dependency-clean runtime kernel plus compile-time codec generator:
+fixed `NetworkKernelLimits`; isolated connection tables and kernel roots;
+generation-protected packet ownership; producer-owned rings; canonical big-endian
+reader/writer/framing; a collision-checked generated protocol manifest and exact
+primitive codec; and a fixed deterministic datagram link consuming the N0.0
+impairment oracle. N0.2 deliberately contains no security, ACK/retransmission,
+game messages, UI, or sockets.
+
+N0.1 hardening completed before this seam was frozen: same-generation repair uses
+a baseline revision without changing `StateEpoch`, retains application events,
+preserves or advances canonical entity generations correctly, and does not poison
+the projection when one excess participant is excluded.
 
 Deliver:
 

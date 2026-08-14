@@ -33,9 +33,9 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 ## Network
 
-- [Network kernel foundation](../Kernels/Network/README.md) — N0.0 identity,
-  lane, deterministic trace/impairment, V2 archaeology, and evidence contracts.
-- [Network V3 active plan](Plans/NETWORK.md) — N0.2 through the complete remote
+- [Network kernel foundation](../Kernels/Network/README.md) — N0.0 contracts and
+  N0.2 capacities, identities, packet ownership, framing, codecs, and datagrams.
+- [Network V3 active plan](Plans/NETWORK.md) — N0.3 through the complete remote
   authority/client vertical.
 
 ## Evidence and tools
@@ -47,8 +47,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  N0.0 and N0.1 are accepted; N0.2 starts from the bounded canonical game
-  projection without treating completed ECS or S0 plans as unfinished work.
+  N0.0 through N0.2 are accepted; N0.3 starts from the bounded canonical game
+  projection and dependency-clean datagram kernel without reopening ECS or S0.
 
 ## Source-of-truth hierarchy
 

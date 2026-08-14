@@ -107,8 +107,10 @@ public readonly record struct GameProjectionFrame(
     StateEpoch StateEpoch,
     ulong ServerGenerationId,
     ulong SimulationTick,
+    ulong BaselineRevision,
     ulong PreviousFrameSequence,
     ulong FrameSequence,
+    ulong NextDeltaSequence,
     int DeltaCount,
     ulong LifecycleOldestSequence,
     ulong LifecycleNextSequence,
@@ -119,6 +121,7 @@ public readonly record struct GameProjectionFrame(
 public readonly record struct GameProjectionSnapshot(
     StateEpoch StateEpoch,
     ulong ServerGenerationId,
+    ulong BaselineRevision,
     ulong FrameSequence,
     int EntityCount,
     int ParticipantCount,
@@ -194,6 +197,7 @@ public enum OfflineProjectionApplyStatus : byte
 public readonly record struct OfflineProjectionSnapshot(
     StateEpoch StateEpoch,
     ulong ServerGenerationId,
+    ulong BaselineRevision,
     ulong FrameSequence,
     int EntityCount,
     int ParticipantCount,
