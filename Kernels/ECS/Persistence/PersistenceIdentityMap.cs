@@ -26,6 +26,7 @@ internal sealed class PersistenceIdentityMap
 
     internal PersistentWorldId WorldId { get; }
     internal ulong AllocatorHighWater => _highWater;
+    internal int RegisteredPrefabKeyCount => _prefabKeys.Count;
     internal long ReservedBytes => checked(
         (long)_ids.Length * sizeof(ulong) +
         (long)_generations.Length * sizeof(uint) +

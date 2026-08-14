@@ -38,7 +38,8 @@ public static class ComparisonCatalog
         AddUnsupported(descriptors, "structural.deferred-token-chain", "Create/transition/destroy deferred token chain", "Structural", 10_000, "V2 deferred creates do not return same-barrier tokens.");
         AddUnsupported(descriptors, "structural.typed-add-payload", "Typed add payload playback", "Structural", 10_000, "V3 supports bounded typed add/replacement payloads, but no equivalent canonical V2 workload has been admitted.");
         AddUnsupported(descriptors, "structural.capacity-failure", "Bounded structural capacity failure", "Structural", 10_000, "V2 structural storage grows dynamically and has no equivalent fixed-capacity result.");
-        AddUnsupported(descriptors, "lifecycle.streams", "Created/added/removed/destroyed lifecycle streams", "Lifecycle", 50_000, "V3 lifecycle publication is not implemented yet.");
+        AddUnsupported(descriptors, "lifecycle.streams", "Created/added/removed/destroyed lifecycle streams", "Lifecycle", 50_000,
+            "V3 publishes a globally ordered bounded lifecycle stream with independent success-only cursors; V2 has no admitted equivalent contract.");
         Add(descriptors, "scheduler.serial-tick", "Serial scheduled 1R1W tick", "Scheduler",
             MeasurementBoundary.EndToEnd, ComparisonStrength.Direct, 10_000, 10_000, 16,
             "Run one warmed scheduled Position-read/Velocity-write system serially for one measured tick.",

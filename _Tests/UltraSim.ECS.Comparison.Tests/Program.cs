@@ -9,6 +9,7 @@ var tests = new (string Name, Action Execute)[]
     ("Matching reports become comparable", MatchingReportsBecomeComparable),
     ("State mismatch suppresses trustworthy comparison", StateMismatchIsVisible),
     ("Unsupported parity remains visible", UnsupportedParityRemainsVisible),
+    ("Lifecycle unsupported metadata reflects current V3", LifecycleMetadataReflectsCurrentV3),
     ("Descriptor mismatch is rejected", DescriptorMismatchIsRejected),
     ("Runtime mismatch is rejected", RuntimeMismatchIsRejected),
     ("Saved baseline reports V2 control and V3 movement", SavedBaselineReportsBothGenerations),
@@ -117,6 +118,20 @@ static void UnsupportedParityRemainsVisible()
         MakeReport("V2", unsupported),
         MakeReport("V3", unsupported));
     Equal("unsupported", Single(report.Results).Status);
+}
+
+static void LifecycleMetadataReflectsCurrentV3()
+{
+    ScenarioDescriptor descriptor = ComparisonCatalog.CreateDescriptors()
+        .Single(static value => value.Id == "lifecycle.streams");
+    True(descriptor.Strength == ComparisonStrength.Unsupported,
+        "Lifecycle parity should remain explicitly unsupported against V2.");
+    True(descriptor.SemanticContract.Contains("V3 publishes", StringComparison.Ordinal),
+        "Lifecycle metadata does not describe the current V3 publication contract.");
+    True(descriptor.SemanticContract.Contains("V2 has no admitted equivalent", StringComparison.Ordinal),
+        "Lifecycle metadata does not explain the actual V2 comparison gap.");
+    True(!descriptor.SemanticContract.Contains("not implemented", StringComparison.OrdinalIgnoreCase),
+        "Lifecycle metadata still claims that V3 publication is absent.");
 }
 
 static void DescriptorMismatchIsRejected()

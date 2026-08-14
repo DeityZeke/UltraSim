@@ -33,6 +33,23 @@ public sealed partial class EcsWorld
         return _core.PersistenceIdentities.TryResolve(id, out entity);
     }
 
+    /// <summary>Gets the number of distinct prefab provenance keys retained by this world.</summary>
+    /// <remarks>
+    /// Keys originate from the immutable compiled content catalog or the finite
+    /// restored snapshot table. A key may remain registered after its final live
+    /// entity is destroyed so provenance hashes never become ambiguous. The
+    /// associated CLR dictionary/string overhead is intentionally excluded from
+    /// <see cref="WorldReservedPayloadSnapshot"/> fixed-array byte accounting.
+    /// </remarks>
+    public int RegisteredPrefabKeyCount
+    {
+        get
+        {
+            EnsureRuntimeAccess();
+            return _core.PersistenceIdentities.RegisteredPrefabKeyCount;
+        }
+    }
+
     public bool TryGetPrefabProvenance(Entity entity, out PrefabKey key)
     {
         EnsureRuntimeAccess();

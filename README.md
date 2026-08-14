@@ -45,6 +45,24 @@ reentrancy, rebinds or invalidates Admission sessions on replacement, separates
 owner-thread capture pause from detached durable save latency, and makes
 post-commit presentation failures detach rather than misreport authority.
 
+The post-acceptance classification keeps S0 accepted: real transport remains a
+Network V3 milestone; `Game/UI` is the intentional server-side game workflow
+layer over neutral `Kernels/UI`; generated scheduling remains chunk-partitioned;
+and `_V2` is compiled only by explicit comparison projects. The live comparison
+catalog now accurately describes implemented V3 lifecycle publication.
+
+Run the canonical repository verifier from any working directory:
+
+```bash
+./verify.sh --all-configurations
+```
+
+The verifier runs architecture dependency assertions first, then every active
+engine-neutral executable gate, the S0 Godot headless acceptance (when the known
+Godot binary or `ULTRASIM_GODOT` is available), and `git diff --check`. Use
+`./verify.sh --architecture-only` for the fast dependency-boundary gate or
+`./verify.sh --skip-godot` on a machine without Godot.
+
 ## Current executable slices
 
 Build and run the ECS runtime and generator tests:

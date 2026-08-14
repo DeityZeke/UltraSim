@@ -51,6 +51,24 @@ Documentation is evidence of intent, not proof of implementation. When sources d
 5. historical baselines and old design documents;
 6. recollected results that no longer have an artifact.
 
+### 1.1 Integrated S0 handoff
+
+Integrated S0 intentionally proves the trusted in-process semantic path and is
+not a production transport. Network V3 must preserve the same authority/client
+semantic boundary while adding the missing remote failure model. Its acceptance
+matrix must explicitly cover:
+
+- process-separated server and client ownership;
+- packet serialization canonicality and cross-version compatibility;
+- loss, duplication, arbitrary reordering, delay, and wraparound;
+- reconnect, stale-session traffic, and server disappearance;
+- exactly-once or explicitly idempotent UI/action application as appropriate;
+- bounded queues/backpressure and cleanup after partial delivery;
+- parity between OfflineDirect, protocol loopback, and localhost UDP at their
+  declared common semantic boundary.
+
+These are Network V3 deliverables, not defects in the accepted S0 local link.
+
 ## 2. Generation Names and Comparison Policy
 
 The repository contains three useful network generations or reference bands:

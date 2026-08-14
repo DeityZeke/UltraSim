@@ -147,6 +147,33 @@ zero allocation. The artifact now also reports section bytes, ordinal/generation
 scratch, durable-ID map ownership, restore-plan temporary memory, and staging-
 world known payload.
 
+The opt-in capacity-sensitivity mode keeps 100K entities live while comparing a
+100K-capacity control with an 8M-capacity sparse world. It sweeps 1%, 10%, and
+100% non-null persistent entity references, runs three warmups plus 21 samples,
+and should be captured in both case orders with tiering/ReadyToRun disabled:
+
+```bash
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 dotnet run --project \
+  _Benchmarks/UltraSim.ECS.Persistence/UltraSim.ECS.Persistence.csproj \
+  -c Release -- --sparse-capacity --capacity=8000000 --live=100000 \
+  --warmups=3 --iterations=21
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 dotnet run --project \
+  _Benchmarks/UltraSim.ECS.Persistence/UltraSim.ECS.Persistence.csproj \
+  -c Release -- --sparse-capacity --capacity=8000000 --live=100000 \
+  --warmups=3 --iterations=21 --reverse
+```
+
+The 2026-08-14 provisional forward/reverse controls agree on the representation
+cost. The two capacity maps grow from `0.8 MB` total to `64 MB`; total capture
+allocation grows from about `20.05 MB` to `83.25 MB` (`4.15x`). Fixed persistent-
+identity mapping grows from `3.05 MB` to `227.11 MB` because that runtime storage
+is itself capacity-bounded. After warmup, capture is about `29.83–30.36 ms` for
+the full-capacity control and `30.87–32.82 ms` across sparse cases. Reference
+density has little stable effect compared with capacity, and every recapture is
+canonical. This is meaningful memory evidence, but only a modest timing penalty;
+retain the direct arrays until a live-sized hash/high-water alternative proves a
+better total CPU/memory trade rather than optimizing from inspection.
+
 There is no honest current-V2 full persistence benchmark. The old V2 permanent
 `PersistenceView` row measures seeding/view construction rather than
 capture/encode/restore. Historical archived save/load results are retained as

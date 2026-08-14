@@ -3,6 +3,12 @@ using System.Buffers.Binary;
 using System.Text.Json;
 using UltraSim.ECS;
 
+if (args.Contains("--sparse-capacity", StringComparer.Ordinal))
+{
+    PersistenceCapacitySensitivityProgram.Run(args);
+    return;
+}
+
 int[] populations = args.Length == 0 ? [100_000, 1_000_000] : args.Select(int.Parse).ToArray();
 var results = new List<PersistenceScaleResult>();
 foreach (int population in populations)

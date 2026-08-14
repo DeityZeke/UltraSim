@@ -1980,6 +1980,41 @@ The post-S0 adversarial audit established these permanent rules:
 - string boundaries reject malformed UTF-16 before hashing or persistence, and
   definition/view/text/row bounds are explicit.
 
+18.3 Post-acceptance scope and implementation classification
+
+The final S0 audit did not reopen acceptance. It distinguished current defects
+from deliberately deferred subsystems and representation questions:
+
+- `LocalSemanticLink` is the accepted in-process semantic path, not a network
+  transport. Loss, duplication, reordering, reconnect, process separation,
+  serialization compatibility, and remote disappearance belong to Network V3.
+- `Game/UI` owns game-specific server-side definitions and authoritative UI
+  workflows. Neutral definitions/models/actions/ports remain in `Kernels/UI`;
+  client rendering/state remain in `Client/Core` and `Client/_Godot`. A workflow
+  using `ServerGameFacet` is therefore intentional authority composition, not a
+  client dependency.
+- Runtime prefab provenance is drawn from one immutable compiled catalog plus a
+  finite restored key table. Arbitrary external key injection is not supported.
+  Retained-key count is diagnostic; a future hot-content vocabulary must define
+  a new bound and reclamation contract.
+- `TrySaveAsync` cancellation is pre-capture admission only. Once the immutable
+  save set transfers into persistence ownership, durable publication runs to a
+  normal success/failure result rather than deliberately abandoning a partial
+  transaction.
+- Generated scheduler work partitions by chunks. A one-chunk query has one
+  schedulable unit regardless of row count; within-chunk row partitioning would
+  be a distinct future execution strategy, not an `Auto` threshold correction.
+- `_V2` is compiled only by explicit comparison/archaeology projects. It is not
+  a dependency of the active V3 runtime, game, client, server, or Godot surface.
+- Comparison allocation reports distinguish caller-thread allocation from
+  separately instrumented V3 scheduler-worker allocation. Frozen V2 worker
+  allocation is unknown where that runtime exposes no equivalent counter.
+
+Remaining measured candidates do not block S0: sparse-capacity persistence maps,
+Godot cold parent/child adjacency, deterministic client-runtime shutdown for the
+future connection lifecycle, and any mechanical large-file split justified by a
+specific invariant rather than line count.
+
 19. S0 performance and allocation gates
 
 S0 is primarily architectural, but integration must not conceal obvious regressions.

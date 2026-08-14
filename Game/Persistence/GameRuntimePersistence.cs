@@ -70,6 +70,15 @@ public sealed class GameRuntimePersistence
     /// Captures under brief owner-thread authority, then performs encoding and
     /// crash-durable publication without holding the active generation lease.
     /// </summary>
+    /// <remarks>
+    /// Cancellation is a pre-capture admission signal. It is observed before
+    /// authoritative snapshot ownership transfers to persistence. Once capture
+    /// begins, the owned save set is published to completion (or fails normally)
+    /// so cancellation cannot deliberately abandon a half-written transaction.
+    /// </remarks>
+    /// <exception cref="OperationCanceledException">
+    /// The token was canceled before authoritative capture began.
+    /// </exception>
     public Task<GameSaveResult> TrySaveAsync(
         SaveSetContext context,
         Action<Action> captureBoundary,

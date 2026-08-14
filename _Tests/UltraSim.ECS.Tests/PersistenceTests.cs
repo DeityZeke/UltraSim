@@ -638,6 +638,7 @@ internal static class PersistenceTests
         Assert.Equal(external, value.Value);
         Assert.True(restored.TryGetPrefabProvenance(restoredEntity, out PrefabKey provenance));
         Assert.Equal(missingPrefab, provenance);
+        Assert.Equal(1, restored.RegisteredPrefabKeyCount);
     }
 
     private static void AdversarialContractsAreEnforced()

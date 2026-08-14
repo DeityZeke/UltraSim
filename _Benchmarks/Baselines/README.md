@@ -9,6 +9,13 @@ Do not overwrite an accepted artifact. Create a newly dated file when the
 protocol, host, runtime, measurement policy, or intentionally accepted V3 state
 changes. The orchestrator enforces this for `--accept-baseline`.
 
+Historical joined artifacts preserve the descriptor text that was true—or was
+recorded—when they were accepted. In particular, several pre-correction files
+say V3 lifecycle publication was absent. Do not rewrite those immutable JSON
+files. The live comparison catalog now states the actual reason the row remains
+unsupported: V3 has a globally ordered bounded independent-cursor lifecycle
+contract and frozen V2 has no admitted equivalent.
+
 For an ordinary future regression capture:
 
 ```bash

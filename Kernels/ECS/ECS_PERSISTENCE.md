@@ -142,6 +142,22 @@ zero-allocation operation, and the measured peak/allocation report is part of th
 accepted evidence. Persistence is a cold checkpoint path; the ordinary warmed ECS
 tick remains allocation-free.
 
+Two capture maps are deliberately sized to configured entity capacity: one maps
+runtime slots to save ordinals and one validates generations. This buys direct
+O(1) reference encoding, but a sparse world pays approximately eight bytes per
+configured slot during capture even when few slots are alive. The opt-in
+`UltraSim.ECS.Persistence --sparse-capacity` benchmark records the 8M-capacity /
+100K-live crossover at low, normal, and dense reference populations before any
+live-sized hash or high-water-sized alternative is admitted.
+
+Prefab provenance text is not an open-ended runtime input in 3.4.1. Keys come
+from the immutable compiled content catalog or the finite restored snapshot key
+table; there is no public arbitrary-key mutation API. A registered key may remain
+after its last entity dies. `EcsWorld.RegisteredPrefabKeyCount` exposes that cold
+retention, while the CLR dictionary/string overhead remains outside fixed-array
+reserved-byte accounting. Hot/reloadable authoring must revisit this bound before
+it may introduce an evolving runtime vocabulary.
+
 ## Host save-set transaction
 
 `Server/Persistence` provides the engine-neutral coordinator contract:
@@ -166,9 +182,11 @@ select strict `CURRENT` or the newest complete compatible generation. `.pending`
 directories are never load candidates.
 
 Save writers acquire one cross-process root lease before cleaning abandoned
-pending state, selecting a forward-only sequence, capturing, and publishing.
-Concurrent coordinators therefore cannot delete another active writer's staging
-directory or move `CURRENT` backward. Ordinary in-process failures remove their
+pending state, selecting a forward-only sequence, encoding, and publishing an
+already owned capture. Concurrent coordinators may capture independently, but
+only the lease holder may touch the save-set directory; therefore one writer
+cannot delete another active writer's staging directory or move `CURRENT`
+backward. Ordinary in-process failures remove their
 private pending generation; process termination leaves it for the next exclusive
 writer to clean.
 
@@ -185,9 +203,10 @@ cannot be retried. Fault-injection tests cover
 every durability boundary and require recovery to expose either the previous
 complete generation or the new complete generation—never a hybrid.
 
-`DurableFileSystem` supplies the platform durability adapter. Linux and macOS
-directory fsync are implemented; unsupported platforms must provide an adapter
-rather than silently claiming crash durability.
+`DurableFileSystem` supplies the platform durability adapter. Linux/macOS use
+directory `fsync`; Windows opens directory handles with backup semantics and
+flushes them through the Win32 durability primitive. Other platforms fail closed
+and must provide an adapter rather than silently claiming crash durability.
 
 ## Untrusted input and failure policy
 
