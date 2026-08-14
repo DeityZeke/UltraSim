@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Kernels/ECS/UltraSim.ECS.csproj" />
+    <ProjectReference Include="../../Kernels/UI/UltraSim.UI.csproj" />
+    <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="../Accounting/UltraSim.Game.Accounting.csproj" />
+    <ProjectReference Include="../Persistence/UltraSim.Game.Persistence.csproj" />
+    <ProjectReference Include="../../Server/Persistence/UltraSim.Server.Persistence.csproj" />
+    <ProjectReference Include="../../Server/Runtime/UltraSim.Server.Runtime.csproj" />
+  </ItemGroup>
+</Project>

@@ -35,7 +35,7 @@ S0 completion summary
 
 [x] S0.6 — Real ECS + Accounting transactional persistence integration
 
-[ ] S0.7 — Game-owned ECS inventory vertical + generic Gump UI
+[x] S0.7 — Game-owned ECS inventory vertical + generic Gump UI
 
 [ ] S0.8 — Integrated end-to-end acceptance scenario and baselines
 
@@ -1713,6 +1713,42 @@ UI reopened after restore shows saved inventory state.
 Exit gate
 
 A real game subsystem has successfully used ECS, Runtime, UI, Admission/Accounting, and Persistence without being promoted into a generic kernel merely because V2 had a generalized implementation.
+
+Accepted S0.7 invariants
+
+- Inventory truth is limited to game-owned ECS components: character marker,
+  container ownership/capacity, and item parent/kind/equipment/quantity. There
+  is no generic Inventory kernel and no Inventory persistence participant. The
+  canonical character/container/item fixtures are instantiated from compiled
+  content prefabs with stable keys and preserved prefab provenance.
+- `InventoryIndex` is generation-owned, bounded, and derived. Normal container
+  enumeration uses packed indexed child lists with O(1) donor repair; a full ECS
+  scan is reserved for rebuild. Stable UI order is a persistent-ID projection,
+  not a physical-list invariant. `MaximumItems` bounds both indexed item count
+  and aggregate reserved child slots, while explicit snapshots report limits,
+  live counts, and reserved slots. Rebuild validates ownership, capacity, item
+  state, containment, and unique equipment slots transactionally before
+  swapping the derived maps.
+- Creation, Move, Split, Equip, and destruction preflight expected failures and
+  commit ECS plus index state as one game-domain mutation. Rejections preserve
+  ECS liveness, change version, and index state; stale entities, missing
+  containers/characters, invalid kinds/quantities, reservation/capacity limits,
+  occupied slots, and duplicate/loss paths are explicit outcomes. Raw ECS
+  topology mutation is not a second supported Inventory write path.
+- The inventory Gump uses the generic compiled UI definition, `UiModel`, and
+  `UiModelDelta` path. One item list supplies row selection to separate
+  Split/Equip controls. Sessions retain persistent IDs; rows are projected from
+  ECS/index truth; accepted mutations publish list/scalar deltas without
+  close/reopen; rejected/stale selections publish explicit status responses.
+- The game publishes one aggregate Accounting + Inventory root through the
+  opaque Runtime generation slot. Admission and persistence consume game-owned
+  capability interfaces rather than adding domain APIs to Runtime.
+- ECS save/load is the only inventory persistence path. The save set contains
+  `world` and `accounting` artifacts but no Inventory artifact. A staged restore
+  resolves runtime entity references, rebuilds and validates `InventoryIndex`,
+  combines it with prepared Accounting, and publishes the whole aggregate once;
+  old ECS handles become stale and the restored inventory reopens through the
+  hot client UI path.
 
 18. S0.8 — Integrated acceptance scenario
 

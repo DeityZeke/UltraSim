@@ -317,9 +317,10 @@ public sealed class AdmissionService : IDisposable
             return RejectNew(participant, AdmissionRejection.RuntimeNotRunning,
                 "Admission requires a running ServerRuntime.");
         }
-        if (!_runtime.TryUseActiveGeneration<AccountingStore, AccountSelection>(
-            (_, generationId, accounting) =>
+        if (!_runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, AccountSelection>(
+            (_, generationId, provider) =>
             {
+                AccountingStore accounting = provider.Accounting;
                 if (!accounting.TryResolveAccount(trustedIdentity, out AccountRecord account))
                     return AccountSelection.Missing(generationId);
                 return new AccountSelection(
@@ -412,9 +413,10 @@ public sealed class AdmissionService : IDisposable
             return RejectExisting(session, AdmissionRejection.RuntimeNotRunning,
                 "Admission requires a running ServerRuntime.");
         }
-        if (!_runtime.TryUseActiveGeneration<AccountingStore, AccountSelection>(
-            (_, generationId, accounting) =>
+        if (!_runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, AccountSelection>(
+            (_, generationId, provider) =>
             {
+                AccountingStore accounting = provider.Accounting;
                 if (!accounting.TryGetAccount(session.AccountId, out AccountRecord account))
                     return AccountSelection.Missing(generationId);
                 return new AccountSelection(
@@ -573,9 +575,10 @@ public sealed class AdmissionService : IDisposable
                 "Admission requires a running ServerRuntime.");
             return;
         }
-        if (!_runtime.TryUseActiveGeneration<AccountingStore, CharacterResolution>(
-            (world, generationId, accounting) =>
+        if (!_runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, CharacterResolution>(
+            (world, generationId, provider) =>
             {
+                AccountingStore accounting = provider.Accounting;
                 if (!accounting.TryGetCharacter(characterId, out character) ||
                     character.AccountId != session.AccountId)
                 {

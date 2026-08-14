@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <AssemblyName>UltraSim.Game.Inventory.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Game/Inventory/UltraSim.Game.Inventory.csproj" />
+    <ProjectReference Include="../../Game/Accounting/UltraSim.Game.Accounting.csproj" />
+    <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
+    <ProjectReference Include="../../Game/Persistence/UltraSim.Game.Persistence.csproj" />
+  </ItemGroup>
+</Project>

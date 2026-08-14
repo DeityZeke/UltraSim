@@ -194,10 +194,20 @@ public sealed class AccountingSnapshot
 }
 
 /// <summary>
+/// Capability implemented by generation roots that own Accounting state.
+/// This keeps the runtime root opaque while allowing game-owned aggregate
+/// roots to compose Accounting with ECS-derived services.
+/// </summary>
+public interface IAccountingGenerationStateProvider
+{
+    AccountingStore Accounting { get; }
+}
+
+/// <summary>
 /// Stable game-owned account store. It is intentionally a domain collection,
 /// not a second ECS or a duplicate gameplay-state root.
 /// </summary>
-public sealed class AccountingStore : IDisposable
+public sealed class AccountingStore : IAccountingGenerationStateProvider, IDisposable
 {
     private readonly Dictionary<AccountId, AccountRecord> _accounts = [];
     private readonly Dictionary<CharacterId, CharacterRecord> _characters = [];
@@ -206,6 +216,8 @@ public sealed class AccountingStore : IDisposable
     private readonly HashSet<PersistentEntityKey> _persistentCharacters = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _disposed;
+
+    AccountingStore IAccountingGenerationStateProvider.Accounting => this;
 
     public int AccountCount
     {

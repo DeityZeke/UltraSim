@@ -53,8 +53,8 @@ public sealed class RuntimeAccountingPersistence
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(operation);
-        return _runtime.TryUseActiveGeneration<AccountingStore, TResult>(
-            (_, _, accounting) => operation(accounting),
+        return _runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, TResult>(
+            (_, _, provider) => operation(provider.Accounting),
             out result);
     }
 
@@ -72,9 +72,10 @@ public sealed class RuntimeAccountingPersistence
         SaveSetContext saveContext = context;
         SaveSetManifest? manifest = null;
         Exception? failure = null;
-        bool ran = _runtime.TryUseActiveGeneration<AccountingStore, bool>(
-            (world, _, accounting) =>
+        bool ran = _runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, bool>(
+            (world, _, provider) =>
             {
+                AccountingStore accounting = provider.Accounting;
                 try
                 {
                     ISaveSetParticipant ecs = new EcsWorldSaveSetParticipant(
@@ -117,9 +118,10 @@ public sealed class RuntimeAccountingPersistence
         EnsureOwnerThread();
         Exception? failure = null;
         ulong publishedGeneration = 0;
-        bool ran = _runtime.TryUseActiveGeneration<AccountingStore, bool>(
-            (world, _, activeAccounting) =>
+        bool ran = _runtime.TryUseActiveGeneration<IAccountingGenerationStateProvider, bool>(
+            (world, _, provider) =>
             {
+                AccountingStore activeAccounting = provider.Accounting;
                 try
                 {
                     var ecsParticipant = new EcsWorldSaveSetParticipant(
