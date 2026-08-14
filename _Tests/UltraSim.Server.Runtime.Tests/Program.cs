@@ -22,6 +22,9 @@ var tests = new (string Name, Action Body)[]
     ("PublicationFailureIsTerminalAfterRootSwap", PublicationFailureIsTerminalAfterRootSwap),
     ("FixedWorldClockIsDeterministicAndSnapshotRestores", FixedWorldClockIsDeterministicAndSnapshotRestores),
     ("PlaybackChangesHostReachTimeNotTickMeaning", PlaybackChangesHostReachTimeNotTickMeaning),
+    ("CadenceMatrixPreservesElapsedSimulationMeaning", CadenceMatrixPreservesElapsedSimulationMeaning),
+    ("VariableCadencePreservesAuthorityAndResetsHostResidue", VariableCadencePreservesAuthorityAndResetsHostResidue),
+    ("CadenceChangesRejectTransactionallyAtUnsafeBoundaries", CadenceChangesRejectTransactionallyAtUnsafeBoundaries),
     ("WarmedRuntimeTickAllocatesZeroManagedBytes", WarmedRuntimeTickAllocatesZeroManagedBytes),
     ("RuntimeWrapperBenchmarkIsCaptured", RuntimeWrapperBenchmarkIsCaptured),
 };
@@ -95,6 +98,8 @@ static void HostSurfaceDoesNotExposeGenerationReplacement()
     Assert.True(typeof(ServerRuntime).GetMethod("ReplaceGeneration", publicInstance) is null);
     Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.ActiveGenerationId), publicInstance) is not null);
     Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.SimulationTick), publicInstance) is not null);
+    Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.SimulationFrequencyHz), publicInstance) is not null);
+    Assert.True(typeof(ServerRuntime).GetMethod(nameof(ServerRuntime.SetSimulationFrequency), publicInstance) is not null);
     Assert.True(typeof(ServerRuntime).GetProperty(nameof(ServerRuntime.Game), publicInstance) is not null);
     Assert.True(typeof(ServerGameFacet).GetProperty("World", publicInstance) is null);
     Assert.True(typeof(ServerGenerationBuilder).GetMethod("RestoreClockSnapshot", publicInstance) is null);
@@ -425,21 +430,216 @@ static void FixedWorldClockIsDeterministicAndSnapshotRestores()
     Assert.Equal(snapshot.SimulationTick, restoredClock.Snapshot.SimulationTick);
     Assert.Equal(snapshot.WorldTimeMicroseconds, restoredClock.Snapshot.WorldTimeMicroseconds);
     Assert.Throws<ArgumentException>(() => restoredClock.Restore(new WorldClockSnapshot(
-        simulationFrequencyHz: 30, worldTimeRate: 24, simulationTick: 1,
-        worldTimeMicroseconds: 1, worldTimeRemainder: 0, playbackRate: 1)));
-    Assert.Throws<ArgumentException>(() => restoredClock.Restore(new WorldClockSnapshot(
         simulationFrequencyHz: 60, worldTimeRate: 24, simulationTick: 1,
-        worldTimeMicroseconds: 1, worldTimeRemainder: 60, playbackRate: 1)));
+        worldTimeMicroseconds: 1,
+        worldTimeFractionQuanta: WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond,
+        playbackRate: 1)));
+
+    restoredClock.Restore(new WorldClockSnapshot(
+        simulationFrequencyHz: 30, worldTimeRate: 24, simulationTick: 1,
+        worldTimeMicroseconds: 1, worldTimeFractionQuanta: 17, playbackRate: 1));
+    Assert.Equal(30, restoredClock.Snapshot.SimulationFrequencyHz);
 
     var persistent = new PersistentWorldClockState(
-        simulationFrequencyHz: 60,
         worldTimeRate: 24,
         simulationTick: 17,
         worldTimeMicroseconds: 6_800_001,
-        worldTimeRemainder: 37);
+        worldTimeFractionQuanta: 37);
     restoredClock.RestorePersistent(persistent);
     Assert.Equal(persistent, restoredClock.PersistentState);
     Assert.Equal(WorldClockOptions.DefaultPlaybackRate, restoredClock.Snapshot.PlaybackRate);
+}
+
+static void CadenceMatrixPreservesElapsedSimulationMeaning()
+{
+    int[] frequencies = [20, 30, 40, 50, 60];
+    const int elapsedSeconds = 120;
+    const int worldTimeRate = 7;
+    int? canonicalIntervals = null;
+    long? canonicalWorldTime = null;
+
+    foreach (int frequency in frequencies)
+    {
+        var composition = new CadenceComposition();
+        using var runtime = new ServerRuntime(
+            composition,
+            new ServerRuntimeOptions(
+                CreateWorldOptions(),
+                new WorldClockOptions(
+                    simulationFrequencyHz: frequency,
+                    worldTimeRate: worldTimeRate,
+                    maximumSimulationStepsPerAdvance: 100_000)));
+        runtime.Initialize();
+        runtime.Start();
+
+        int steps = runtime.Tick(TimeSpan.FromSeconds(elapsedSeconds));
+        WorldClockSnapshot snapshot = runtime.CurrentGeneration.Clock.CaptureSnapshot();
+        CadenceState state = composition.State;
+
+        Assert.Equal(frequency * elapsedSeconds, steps);
+        Assert.Equal((ulong)steps, runtime.SimulationTick);
+        Assert.Equal(steps, state.Steps);
+        Assert.Equal(steps / 10, state.PeriodTenRuns);
+        Assert.Equal(elapsedSeconds * 4, state.QuarterSecondEvents);
+        Assert.Near(1d / frequency, state.LastDeltaSeconds, 1e-15);
+        Assert.Near(elapsedSeconds, state.ElapsedSeconds, 1e-9);
+        Assert.Equal((long)elapsedSeconds * worldTimeRate * WorldClock.WorldTimeUnitsPerSecond,
+            snapshot.WorldTimeMicroseconds);
+        Assert.Equal(0, snapshot.WorldTimeFractionQuanta);
+
+        canonicalIntervals ??= state.QuarterSecondEvents;
+        canonicalWorldTime ??= snapshot.WorldTimeMicroseconds;
+        Assert.Equal(canonicalIntervals.Value, state.QuarterSecondEvents);
+        Assert.Equal(canonicalWorldTime.Value, snapshot.WorldTimeMicroseconds);
+    }
+}
+
+static void VariableCadencePreservesAuthorityAndResetsHostResidue()
+{
+    const int worldTimeRate = 7;
+    var composition = new CadenceComposition();
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            CreateWorldOptions(),
+            new WorldClockOptions(simulationFrequencyHz: 60, worldTimeRate: worldTimeRate),
+            allowVariablePlayback: true,
+            allowVariableSimulationFrequency: true));
+    runtime.Initialize();
+    runtime.Start();
+    runtime.SetPlaybackRate(2);
+
+    ulong generationId = runtime.ActiveGenerationId;
+    for (int step = 0; step < 30; step++)
+        runtime.Tick();
+    runtime.SetSimulationFrequency(30);
+    for (int step = 0; step < 15; step++)
+        runtime.Tick();
+    Assert.Equal(45UL, runtime.SimulationTick);
+    Assert.Near(1d, composition.State.ElapsedSeconds, 1e-12);
+    Assert.Equal(7L * WorldClock.WorldTimeUnitsPerSecond, runtime.WorldTimeMicroseconds);
+    Assert.Equal(generationId, runtime.ActiveGenerationId);
+
+    // Create host residue, then prove the cadence boundary discards it.
+    Assert.Equal(0, runtime.Tick(TimeSpan.FromMilliseconds(5)));
+    WorldClockSnapshot beforeChange = runtime.CurrentGeneration.Clock.CaptureSnapshot();
+    runtime.SetSimulationFrequency(20);
+    Assert.Equal(20, runtime.SimulationFrequencyHz);
+    Assert.Near(0.05d, runtime.SimulationDeltaSeconds, 0d);
+    Assert.Equal(beforeChange.SimulationTick, runtime.SimulationTick);
+    Assert.Equal(beforeChange.WorldTimeMicroseconds, runtime.WorldTimeMicroseconds);
+    Assert.Equal(beforeChange.WorldTimeFractionQuanta,
+        runtime.CurrentGeneration.Clock.CaptureSnapshot().WorldTimeFractionQuanta);
+    Assert.Equal(2, runtime.PlaybackRate);
+    Assert.Equal(0, runtime.Tick(TimeSpan.FromMilliseconds(18)));
+
+    Int128 expectedQuanta = (Int128)WorldClockOptions.WorldTimeQuantaPerSecond * worldTimeRate;
+    foreach ((int frequency, int steps) in new[]
+    {
+        (20, 1), (60, 13), (50, 11), (40, 9), (30, 7), (20, 5), (60, 3),
+    })
+    {
+        runtime.SetSimulationFrequency(frequency);
+        for (int step = 0; step < steps; step++)
+            runtime.Tick();
+        expectedQuanta +=
+            (Int128)(WorldClockOptions.WorldTimeQuantaPerSecond / frequency) *
+            worldTimeRate * steps;
+        Assert.Equal(frequency, runtime.SimulationFrequencyHz);
+        Assert.Near(1d / frequency, composition.State.LastDeltaSeconds, 1e-15);
+    }
+
+    WorldClockSnapshot final = runtime.CurrentGeneration.Clock.CaptureSnapshot();
+    Assert.Equal(94UL, final.SimulationTick);
+    Assert.Equal(2, final.PlaybackRate);
+    Assert.Equal(checked((long)(expectedQuanta /
+        WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond)), final.WorldTimeMicroseconds);
+    Assert.Equal(checked((int)(expectedQuanta %
+        WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond)), final.WorldTimeFractionQuanta);
+    Assert.Equal(15_715_000L, final.WorldTimeMicroseconds);
+    Assert.Equal(0, final.WorldTimeFractionQuanta);
+    Assert.Equal(94, composition.State.Steps);
+    Assert.Equal(generationId, runtime.ActiveGenerationId);
+}
+
+static void CadenceChangesRejectTransactionallyAtUnsafeBoundaries()
+{
+    using (var fixedRuntime = CreateRuntime(new TestComposition()))
+    {
+        fixedRuntime.Initialize();
+        fixedRuntime.Start();
+        Assert.Throws<InvalidOperationException>(() => fixedRuntime.SetSimulationFrequency(20));
+        Assert.Equal(60, fixedRuntime.SimulationFrequencyHz);
+        Assert.Equal(0UL, fixedRuntime.SimulationTick);
+        fixedRuntime.Tick();
+        Assert.Equal(1UL, fixedRuntime.SimulationTick);
+        Assert.Equal(ServerRuntimeState.Running, fixedRuntime.State);
+    }
+
+    var composition = new CadenceComposition();
+    using var runtime = new ServerRuntime(
+        composition,
+        new ServerRuntimeOptions(
+            CreateWorldOptions(),
+            WorldClockOptions.Default,
+            allowVariableSimulationFrequency: true));
+    runtime.Initialize();
+    runtime.SetSimulationFrequency(50);
+    runtime.Start();
+    Assert.Throws<ArgumentOutOfRangeException>(() => runtime.SetSimulationFrequency(11));
+    Assert.Equal(50, runtime.SimulationFrequencyHz);
+    Assert.Equal(ServerRuntimeState.Running, runtime.State);
+
+    Exception? foreignFailure = null;
+    var thread = new Thread(() =>
+    {
+        try { runtime.SetSimulationFrequency(40); }
+        catch (Exception exception) { foreignFailure = exception; }
+    });
+    thread.Start();
+    thread.Join();
+    Assert.True(foreignFailure is InvalidOperationException);
+    Assert.Equal(50, runtime.SimulationFrequencyHz);
+
+    Assert.True(runtime.Game.TryUseActiveGeneration(
+        (_, _) =>
+        {
+            Assert.Throws<InvalidOperationException>(() => runtime.SetSimulationFrequency(40));
+            return true;
+        },
+        out bool callbackRejected));
+    Assert.True(callbackRejected);
+    Assert.Equal(ServerRuntimeState.Running, runtime.State);
+
+    composition.State.OnExecute = () =>
+    {
+        Assert.Throws<InvalidOperationException>(() => runtime.SetSimulationFrequency(40));
+        composition.State.ReentrantSimulationRejected = true;
+    };
+    runtime.Tick();
+    composition.State.OnExecute = null;
+    Assert.True(composition.State.ReentrantSimulationRejected);
+    Assert.Equal(50, runtime.SimulationFrequencyHz);
+
+    bool publicationRejected = false;
+    bool reconciliationRejected = false;
+    runtime.OptionsForTesting.PublicationBoundaryHook = (_, _) =>
+    {
+        Assert.Throws<InvalidOperationException>(() => runtime.SetSimulationFrequency(40));
+        publicationRejected = true;
+    };
+    runtime.Game.GenerationPublished += _ =>
+    {
+        Assert.Throws<InvalidOperationException>(() => runtime.SetSimulationFrequency(40));
+        reconciliationRejected = true;
+    };
+    runtime.ReplaceGeneration();
+    Assert.True(publicationRejected);
+    Assert.True(reconciliationRejected);
+    Assert.Equal(50, runtime.SimulationFrequencyHz);
+    Assert.Equal(ServerRuntimeState.Running, runtime.State);
+    runtime.Tick();
+    Assert.Equal(1UL, runtime.SimulationTick);
 }
 
 static void PlaybackChangesHostReachTimeNotTickMeaning()
@@ -533,7 +733,8 @@ static void RuntimeWrapperBenchmarkIsCaptured()
     Assert.Equal(directWorld.TickCount, runtime.SimulationTick);
 
     Console.WriteLine(
-        $"BASELINE S0.1 samples={samples} ticks_per_sample={ticksPerSample} " +
+        $"BASELINE S0.1 cadence=60Hz cadence_changes=off adaptive=off playback=1x " +
+        $"samples={samples} ticks_per_sample={ticksPerSample} " +
         $"direct_mean={directMean:F0}ns direct_p95={Percentile95(directSamples):F0}ns " +
         $"runtime_mean={runtimeMean:F0}ns runtime_p95={Percentile95(runtimeSamples):F0}ns " +
         $"wrapper_ratio={ratio:F3} delta_per_tick={deltaPerTick:F2}ns");
@@ -638,6 +839,12 @@ static class Assert
     {
         if (value)
             throw new InvalidOperationException("Expected false.");
+    }
+
+    public static void Near(double expected, double actual, double tolerance)
+    {
+        if (Math.Abs(expected - actual) > tolerance)
+            throw new InvalidOperationException($"Expected {expected:R} +/- {tolerance:R}, got {actual:R}.");
     }
 }
 
@@ -771,6 +978,84 @@ struct TickJob : IRangeJob
             _counter.Value++;
         _counter.LastTick = context.Tick;
     }
+}
+
+sealed class CadenceComposition : IServerComposition
+{
+    public ComponentSchema Schema { get; } = ComponentSchema.Create(
+        new SchemaId(0x51, 0x04), ReadOnlySpan<ComponentRegistration>.Empty);
+
+    public CadenceState State { get; } = new();
+
+    public void Configure(ServerGenerationBuilder generation)
+    {
+        _ = generation.World.RegisterArchetype(
+            ReadOnlySpan<ComponentId>.Empty, ChunkLayoutOptions.KiB16, 1);
+        generation.World.RegisterRangeSystem<CadenceSystem, CadenceJob>(
+            new SystemDefinition("test.cadence.elapsed", SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Serial),
+            new CadenceSystem(State));
+        generation.World.RegisterRangeSystem<PeriodCadenceSystem, PeriodCadenceJob>(
+            new SystemDefinition(
+                "test.cadence.step-period",
+                SystemStage.WorldSim,
+                schedule: new SystemSchedule(periodTicks: 10),
+                executionPolicy: SystemExecutionPolicy.Serial),
+            new PeriodCadenceSystem(State));
+    }
+}
+
+sealed class CadenceState
+{
+    public int Steps;
+    public int QuarterSecondEvents;
+    public int PeriodTenRuns;
+    public double ElapsedSeconds;
+    public double LastDeltaSeconds;
+    public Action? OnExecute;
+    public bool ReentrantSimulationRejected;
+}
+
+sealed class CadenceSystem : IRangeSystemRuntime<CadenceJob>
+{
+    private readonly CadenceState _state;
+
+    public CadenceSystem(CadenceState state) => _state = state;
+    public int GetRangeCount(in SystemPrepareContext context) => 1;
+    public CadenceJob Prepare(in SystemPrepareContext context) => new(_state);
+}
+
+struct CadenceJob : IRangeJob
+{
+    private readonly CadenceState _state;
+
+    public CadenceJob(CadenceState state) => _state = state;
+
+    public void Execute(in SystemJobContext context, int start, int count)
+    {
+        _state.OnExecute?.Invoke();
+        _state.Steps++;
+        _state.LastDeltaSeconds = context.DeltaSeconds;
+        _state.ElapsedSeconds += context.DeltaSeconds;
+        _state.QuarterSecondEvents = checked((int)Math.Floor((_state.ElapsedSeconds + 1e-10) * 4d));
+    }
+}
+
+sealed class PeriodCadenceSystem : IRangeSystemRuntime<PeriodCadenceJob>
+{
+    private readonly CadenceState _state;
+
+    public PeriodCadenceSystem(CadenceState state) => _state = state;
+    public int GetRangeCount(in SystemPrepareContext context) => 1;
+    public PeriodCadenceJob Prepare(in SystemPrepareContext context) => new(_state);
+}
+
+readonly struct PeriodCadenceJob : IRangeJob
+{
+    private readonly CadenceState _state;
+
+    public PeriodCadenceJob(CadenceState state) => _state = state;
+    public void Execute(in SystemJobContext context, int start, int count) => _state.PeriodTenRuns++;
 }
 
 sealed class WorldClockForTest

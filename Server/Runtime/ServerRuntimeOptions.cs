@@ -8,7 +8,8 @@ public sealed class ServerRuntimeOptions
     public ServerRuntimeOptions(
         EcsWorldOptions worldOptions,
         WorldClockOptions clockOptions,
-        bool allowVariablePlayback = false)
+        bool allowVariablePlayback = false,
+        bool allowVariableSimulationFrequency = false)
     {
         if (!worldOptions.IsValid)
             throw new ArgumentException("ECS world options are invalid or default initialized.", nameof(worldOptions));
@@ -26,6 +27,7 @@ public sealed class ServerRuntimeOptions
         WorldOptions = worldOptions;
         ClockOptions = clockOptions;
         AllowVariablePlayback = allowVariablePlayback;
+        AllowVariableSimulationFrequency = allowVariableSimulationFrequency;
     }
 
     public EcsWorldOptions WorldOptions { get; }
@@ -33,6 +35,12 @@ public sealed class ServerRuntimeOptions
     public WorldClockOptions ClockOptions { get; }
 
     public bool AllowVariablePlayback { get; }
+
+    /// <summary>
+    /// Allows explicit owner-thread cadence changes at an idle Runtime boundary.
+    /// False by default for fixed authoritative servers and benchmark baselines.
+    /// </summary>
+    public bool AllowVariableSimulationFrequency { get; }
 
     internal Action<ServerGeneration, ServerGeneration?>? PublicationBoundaryHook { get; set; }
 }

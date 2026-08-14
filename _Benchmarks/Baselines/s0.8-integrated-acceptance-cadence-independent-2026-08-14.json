@@ -1,0 +1,88 @@
+{
+  "Workload": "ultrasim-s0.8-integrated-acceptance-v3",
+  "CapturedAtUtc": "2026-08-14T15:01:10.4384237+00:00",
+  "Runtime": "8.0.29",
+  "LogicalProcessorCount": 16,
+  "Tests": [
+    {
+      "Name": "AccountBackedInternalToHeadlessCanonicalRoundTrip",
+      "Passed": true,
+      "TotalNanoseconds": 267007233,
+      "Metrics": {
+        "CanonicalHash": "DD1323C54CF34C606236F9B1F7BB3E2A153CBA0BDCF0C426C53C4652E73FD5E7",
+        "SaveMeanNanoseconds": 50100770,
+        "LoadMeanNanoseconds": 44570730,
+        "CapturePauseNanoseconds": 11064751,
+        "SaveAllocatedBytes": 14936,
+        "LoadAllocatedBytes": 568832,
+        "ArtifactBytes": 1807,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "ECS\u002BAccounting\u002BClock; owner-thread immutable capture then durable worker publication; cold CharacterSelect/Inventory; row deltas; staged restore; session rebind; Internal/Headless generation parity."
+      }
+    },
+    {
+      "Name": "AccountlessAdmissionAndPersistence",
+      "Passed": true,
+      "TotalNanoseconds": 3292997,
+      "Metrics": {
+        "CanonicalHash": "C54772756B92B53D48D55124D1820AAE0F39CCFB62609664B9101A89C6D054E7",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 776,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "Accountless admission used no account records; the composition\u0027s declared empty Accounting and authoritative Clock participants remained round-trippable."
+      }
+    },
+    {
+      "Name": "AuthoritativeClockRoundTripsAcrossHostCadences",
+      "Passed": true,
+      "TotalNanoseconds": 3315596,
+      "Metrics": {
+        "CanonicalHash": "0282DE43E6422964BD701BC3D4382678BBE86B6590A921B2B51B6FDC47FBF4FD",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 776,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "Full ECS\u002BAccounting\u002BClock save/load at 60-\u003E20 and 20-\u003E60 Hz; host cadence remained local policy and fixed-point clock state remained exact."
+      }
+    },
+    {
+      "Name": "WarmedRuntimeTickHasNoAllocationAndBoundedWrapperTax",
+      "Passed": true,
+      "TotalNanoseconds": 251966620,
+      "Metrics": {
+        "CanonicalHash": "45988E768B9D6F24869CA6D0A9D5257EA97BC3EF852BC05817354081DE7DEC10",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 0,
+        "DirectTickMeanNanoseconds": 20101.43675595238,
+        "HostedTickMeanNanoseconds": 20552.681547619046,
+        "HostedTickP95Nanoseconds": 33602.8046875,
+        "TickWrapperRatio": 1.021737969067423,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "21 alternating paired A/B samples; ratio is paired median; fixed 60 Hz, cadence changes/adaptive off, playback 1x; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread."
+      }
+    }
+  ]
+}

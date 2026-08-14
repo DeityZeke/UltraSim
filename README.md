@@ -45,6 +45,14 @@ reentrancy, rebinds or invalidates Admission sessions on replacement, separates
 owner-thread capture pause from detached durable save latency, and makes
 post-commit presentation failures detach rather than misreport authority.
 
+The subsequent authoritative-cadence hardening is accepted in
+[`Authoritative Cadence Independence Report.md`](Authoritative%20Cadence%20Independence%20Report.md).
+Tick is step identity, delta is elapsed simulation time, fixed
+20/30/40/50/60 Hz are valid host policies, durable time is independent of the
+saving host's frequency, and runtime cadence changes are opt-in and owner-bound.
+Normal performance validation remains fixed 60 Hz, 1x playback, with cadence
+changes/adaptation off. No automatic adaptive controller was added.
+
 The post-acceptance classification keeps S0 accepted: real transport remains a
 Network V3 milestone; `Game/UI` is the intentional server-side game workflow
 layer over neutral `Kernels/UI`; generated scheduling remains chunk-partitioned;

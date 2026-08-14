@@ -167,6 +167,7 @@ public sealed class ServerRuntime : IDisposable
                 throw new InvalidOperationException("The server generation identity space is exhausted.");
 
             int playbackRate = active.Clock.PlaybackRate;
+            int simulationFrequencyHz = active.Clock.SimulationFrequencyHz;
             PersistentWorldClockState clockState = persistentClockState ??
                 active.Clock.CapturePersistentState();
             candidate = new ServerGeneration(
@@ -174,6 +175,7 @@ public sealed class ServerRuntime : IDisposable
                 preparedWorld,
                 new WorldClock(_options.ClockOptions),
                 preparedGameState);
+            candidate.Clock.SetSimulationFrequency(simulationFrequencyHz);
             candidate.Clock.RestorePersistentState(clockState);
             candidate.Clock.SetPlaybackRate(playbackRate);
             _operation = RuntimeOperation.Publication;
@@ -246,6 +248,26 @@ public sealed class ServerRuntime : IDisposable
         {
             EnsureOwnerThread();
             return GetActiveGeneration().Clock.WorldTimeMicroseconds;
+        }
+    }
+
+    /// <summary>Current host-selected fixed-step cadence.</summary>
+    public int SimulationFrequencyHz
+    {
+        get
+        {
+            EnsureOwnerThread();
+            return GetActiveGeneration().Clock.SimulationFrequencyHz;
+        }
+    }
+
+    /// <summary>Elapsed simulation seconds supplied to the next ECS step.</summary>
+    public double SimulationDeltaSeconds
+    {
+        get
+        {
+            EnsureOwnerThread();
+            return GetActiveGeneration().Clock.FixedStepSeconds;
         }
     }
 
@@ -332,6 +354,36 @@ public sealed class ServerRuntime : IDisposable
     }
 
     /// <summary>
+    /// Changes the fixed-step cadence at an explicit idle owner boundary.
+    /// </summary>
+    /// <remarks>
+    /// The operation preserves authoritative tick, world time, fractional
+    /// time, playback, ECS state, and game state. Any partial host elapsed-time
+    /// residue is discarded deliberately; future elapsed time is interpreted
+    /// only under the new cadence. Cadence is host execution policy and is not
+    /// restored from a durable save.
+    /// </remarks>
+    public void SetSimulationFrequency(int simulationFrequencyHz)
+    {
+        EnsureOwnerThread();
+        EnsureIdleOperation(nameof(SetSimulationFrequency));
+        if (_state is not (ServerRuntimeState.Initialized or ServerRuntimeState.Running))
+        {
+            throw new InvalidOperationException(
+                $"SetSimulationFrequency is invalid while the runtime is {_state}.");
+        }
+        if (!_options.AllowVariableSimulationFrequency)
+        {
+            throw new InvalidOperationException(
+                "This runtime uses a fixed simulation frequency. Variable cadence must be opted in at construction.");
+        }
+
+        // WorldClock validates before mutating, so an unsupported cadence is a
+        // transactional expected-input rejection rather than a Runtime fault.
+        _currentGeneration!.Clock.SetSimulationFrequency(simulationFrequencyHz);
+    }
+
+    /// <summary>
     /// Builds and validates a private replacement, then publishes it with one
     /// active-root assignment.
     /// </summary>
@@ -405,7 +457,10 @@ public sealed class ServerRuntime : IDisposable
             new WorldClock(_options.ClockOptions));
 
         if (_currentGeneration is not null)
+        {
             builder.Clock.SetPlaybackRate(_currentGeneration.Clock.PlaybackRate);
+            builder.Clock.SetSimulationFrequency(_currentGeneration.Clock.SimulationFrequencyHz);
+        }
 
         ServerGeneration? candidate = null;
         try

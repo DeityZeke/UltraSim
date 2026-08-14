@@ -15,12 +15,13 @@ using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
-const string Workload = "ultrasim-s0.8-integrated-acceptance-v2";
+const string Workload = "ultrasim-s0.8-integrated-acceptance-v3";
 string? output = ReadOption(args, "--output");
 
 var results = new List<TestResult>();
 Run("AccountBackedInternalToHeadlessCanonicalRoundTrip", AccountBackedRoundTrip, results);
 Run("AccountlessAdmissionAndPersistence", AccountlessRoundTrip, results);
+Run("AuthoritativeClockRoundTripsAcrossHostCadences", AuthoritativeClockRoundTripsAcrossHostCadences, results);
 Run("WarmedRuntimeTickHasNoAllocationAndBoundedWrapperTax", RuntimeTickBenchmark, results);
 
 var report = new AcceptanceResult(
@@ -320,6 +321,107 @@ static TestMetrics AccountlessRoundTrip()
     }
 }
 
+static TestMetrics AuthoritativeClockRoundTripsAcrossHostCadences()
+{
+    string root = TempRoot("cross-cadence-clock");
+    var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x80_0004));
+    try
+    {
+        var sourceComposition = new UltraSimGameComposition(new InventoryLimits(8, 16, 4));
+        using var source = new InternalHost(
+            sourceComposition,
+            RuntimeOptions(identity, frequencyHz: 60, worldTimeRate: 7));
+        source.Start();
+        Expect(source.RuntimeForTesting.Game.TryUseActiveGeneration<IGameGenerationStateProvider, PersistentEntityId>(
+            (world, _, game) =>
+            {
+                if (!world.TryInstantiate(game.Content.Character, out Entity character))
+                    throw new InvalidOperationException("Cross-cadence character creation failed.");
+                return world.GetOrAssignPersistentId(character);
+            },
+            out PersistentEntityId characterId),
+            "Cross-cadence character bootstrap did not run.");
+        source.Tick();
+        PersistentWorldClockState at60 = CapturePersistentClock(source.RuntimeForTesting);
+        Expect(at60.SimulationTick == 1 &&
+            at60.WorldTimeMicroseconds == 116_666 &&
+            at60.WorldTimeFractionQuanta == 2_400_000,
+            "The 60 Hz source did not produce the expected exact fractional world time.");
+        var sourcePersistence = new GameRuntimePersistence(
+            source.RuntimeForTesting.Game,
+            sourceComposition,
+            RestoreOptions(),
+            new SaveSetCoordinator(root));
+        GameSaveResult firstSave = sourcePersistence.TrySave(
+            new SaveSetContext(1, 1_700_000_800_004),
+            static capture => capture());
+        Expect(firstSave.Succeeded, "The 60 Hz source save failed.");
+
+        var at20Composition = new UltraSimGameComposition(new InventoryLimits(8, 16, 4));
+        using var at20Host = new HeadlessHost(
+            at20Composition,
+            RuntimeOptions(identity, frequencyHz: 20, worldTimeRate: 7),
+            new HostCapabilities(new NullHostLogSink()));
+        at20Host.Start();
+        var at20Persistence = new GameRuntimePersistence(
+            at20Host.RuntimeForTesting.Game,
+            at20Composition,
+            RestoreOptions(),
+            new SaveSetCoordinator(root));
+        Expect(at20Persistence.TryLoad().Succeeded, "The 20 Hz host could not load the 60 Hz save.");
+        Expect(at20Host.SimulationFrequencyHz == 20,
+            "Restore replaced the 20 Hz host cadence with the save producer cadence.");
+        Expect(CapturePersistentClock(at20Host.RuntimeForTesting) == at60,
+            "60 -> 20 Hz restore changed authoritative clock state.");
+        Expect(ReadSimulation(at20Host.RuntimeForTesting.Game, characterId).TickMarker == 1,
+            "60 -> 20 Hz restore changed durable ECS/game state.");
+
+        at20Host.Tick();
+        PersistentWorldClockState after20Step = CapturePersistentClock(at20Host.RuntimeForTesting);
+        Expect(after20Step.SimulationTick == 2 &&
+            after20Step.WorldTimeMicroseconds == 466_666 &&
+            after20Step.WorldTimeFractionQuanta == 2_400_000,
+            "The restored clock did not advance exactly at 20 Hz.");
+        Expect(ReadSimulation(at20Host.RuntimeForTesting.Game, characterId).TickMarker == 2,
+            "The restored ECS/game state did not execute the next 20 Hz step.");
+        GameSaveResult secondSave = at20Persistence.TrySave(
+            new SaveSetContext(2, 1_700_000_800_005),
+            static capture => capture());
+        Expect(secondSave.Succeeded, "The 20 Hz source save failed.");
+
+        var at60Composition = new UltraSimGameComposition(new InventoryLimits(8, 16, 4));
+        using var at60Host = new HeadlessHost(
+            at60Composition,
+            RuntimeOptions(identity, frequencyHz: 60, worldTimeRate: 7),
+            new HostCapabilities(new NullHostLogSink()));
+        at60Host.Start();
+        var at60Persistence = new GameRuntimePersistence(
+            at60Host.RuntimeForTesting.Game,
+            at60Composition,
+            RestoreOptions(),
+            new SaveSetCoordinator(root));
+        Expect(at60Persistence.TryLoad().Succeeded, "The 60 Hz host could not load the 20 Hz save.");
+        Expect(at60Host.SimulationFrequencyHz == 60,
+            "Restore replaced the 60 Hz host cadence with the save producer cadence.");
+        Expect(CapturePersistentClock(at60Host.RuntimeForTesting) == after20Step,
+            "20 -> 60 Hz restore changed authoritative clock state.");
+        Expect(ReadSimulation(at60Host.RuntimeForTesting.Game, characterId).TickMarker == 2,
+            "20 -> 60 Hz restore changed durable ECS/game state.");
+
+        return new TestMetrics(
+            HashText($"{after20Step.SimulationTick}:{after20Step.WorldTimeMicroseconds}:" +
+                $"{after20Step.WorldTimeFractionQuanta}"),
+            0, 0, 0, 0, 0,
+            secondSave.Manifest?.Artifacts.Sum(static artifact => artifact.ByteCount) ?? 0,
+            0, 0, 0, 0, 0,
+            "Full ECS+Accounting+Clock save/load at 60->20 and 20->60 Hz; host cadence remained local policy and fixed-point clock state remained exact.");
+    }
+    finally
+    {
+        if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+    }
+}
+
 static TestMetrics RuntimeTickBenchmark()
 {
     const int population = 4_096;
@@ -357,6 +459,8 @@ static TestMetrics RuntimeTickBenchmark()
             out bool populated) && populated,
             "Hosted benchmark population failed.");
 
+        // Intentional fixed-60 performance control. Variable/adaptive cadence
+        // is disabled in both paths so cadence cannot conceal a regression.
         Action directTick = () => direct.World.Tick(1d / 60d);
         Action hostedTick = host.Tick;
 
@@ -406,7 +510,7 @@ static TestMetrics RuntimeTickBenchmark()
             hostedP95,
             ratio,
             allocated,
-            "21 alternating paired A/B samples; ratio is paired median; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread.");
+            "21 alternating paired A/B samples; ratio is paired median; fixed 60 Hz, cadence changes/adaptive off, playback 1x; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread.");
     }
     finally
     {
@@ -598,6 +702,13 @@ static PersistentEntityId GetPersistentId(ServerGameFacet runtime, Entity entity
     return id;
 }
 
+static PersistentWorldClockState CapturePersistentClock(ServerRuntime runtime)
+{
+    Expect(runtime.Game.TryCapturePersistentClockState(out PersistentWorldClockState state),
+        "The active persistent clock state could not be captured.");
+    return state;
+}
+
 static Entity Resolve(ServerGameFacet runtime, PersistentEntityId id)
 {
     Expect(runtime.TryUseActiveGeneration(
@@ -625,9 +736,11 @@ static bool IsNotAlive(ServerGameFacet runtime, Entity entity)
 
 static ServerRuntimeOptions RuntimeOptions(
     PersistenceIdentityOptions identity,
-    int capacity = 512) => new(
+    int capacity = 512,
+    int frequencyHz = 60,
+    int worldTimeRate = 24) => new(
     UltraSimGameComposition.CreateWorldOptions(capacity, identity),
-    new WorldClockOptions(simulationFrequencyHz: 60, worldTimeRate: 24),
+    new WorldClockOptions(simulationFrequencyHz: frequencyHz, worldTimeRate: worldTimeRate),
     allowVariablePlayback: true);
 
 static PersistenceRestoreOptions RestoreOptions() => new(

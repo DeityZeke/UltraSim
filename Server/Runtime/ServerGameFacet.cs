@@ -127,8 +127,9 @@ public sealed class ServerGameFacet
 
     /// <summary>Publishes a prepared generation with explicitly restored authoritative clock state.</summary>
     /// <remarks>
-    /// Playback rate remains host policy and is retained from the current host.
-    /// This operation must run outside every active-generation callback.
+    /// Playback rate and simulation frequency remain host policy and are
+    /// retained from the current host. This operation must run outside every
+    /// active-generation callback.
     /// </remarks>
     public bool TryPublishPreparedGeneration(
         EcsWorld preparedWorld,

@@ -12,6 +12,7 @@ var tests = new (string Name, Action Body)[]
     ("AccountingArtifactIsDeterministic", AccountingArtifactIsDeterministic),
     ("AccountingArtifactBoundsAndCanonicalEncodingAreStrict", AccountingArtifactBoundsAndCanonicalEncodingAreStrict),
     ("DuplicateDurableCharacterLinkIsRejected", DuplicateDurableCharacterLinkIsRejected),
+    ("ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState", ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState),
     ("RealRuntimeSaveLoadPublishesEcsAndAccountingTogether", RealRuntimeSaveLoadPublishesEcsAndAccountingTogether),
     ("SaveRestoreRecaptureIsCanonical", SaveRestoreRecaptureIsCanonical),
     ("MissingCharacterEntityLeavesActiveGenerationUntouched", MissingCharacterEntityLeavesActiveGenerationUntouched),
@@ -135,6 +136,46 @@ static void DuplicateDurableCharacterLinkIsRejected()
         Capture(participant, new SaveSetContext(7, 700)),
         new SaveSetContext(7, 700));
     Assert.Throws<PersistenceValidationException>(unresolved.Validate);
+}
+
+static void ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState()
+{
+    var context = new SaveSetContext(71, 7_100);
+    var state = new PersistentWorldClockState(
+        worldTimeRate: 7,
+        simulationTick: 123,
+        worldTimeMicroseconds: 45_678,
+        worldTimeFractionQuanta: 2_400_000);
+    var participant = new WorldClockSaveSetParticipant(state);
+    byte[] current = Capture(participant, context);
+    Assert.Equal(38, current.Length);
+    Assert.Equal((ushort)2, BinaryPrimitives.ReadUInt16LittleEndian(current.AsSpan(4)));
+    using (var prepared = (PreparedWorldClockParticipant)new WorldClockSaveSetParticipant().Prepare(current, context))
+        Assert.Equal(state, prepared.State);
+
+    byte[] legacy = BuildLegacyClockArtifact(
+        context.Sequence,
+        simulationFrequencyHz: 60,
+        worldTimeRate: 7,
+        simulationTick: 123,
+        worldTimeMicroseconds: 45_678,
+        worldTimeRemainder: 37);
+    using (var prepared = (PreparedWorldClockParticipant)new WorldClockSaveSetParticipant().Prepare(legacy, context))
+    {
+        Assert.Equal(2_220_000, prepared.State.WorldTimeFractionQuanta);
+        Assert.Equal(123UL, prepared.State.SimulationTick);
+        Assert.Equal(7, prepared.State.WorldTimeRate);
+    }
+
+    byte[] inexactLegacy = BuildLegacyClockArtifact(
+        context.Sequence,
+        simulationFrequencyHz: 7,
+        worldTimeRate: 1,
+        simulationTick: 1,
+        worldTimeMicroseconds: 0,
+        worldTimeRemainder: 1);
+    Assert.Throws<PersistenceCompatibilityException>(() =>
+        new WorldClockSaveSetParticipant().Prepare(inexactLegacy, context));
 }
 
 static void RealRuntimeSaveLoadPublishesEcsAndAccountingTogether()
@@ -428,6 +469,26 @@ static byte[] BuildAccountingArtifact(
     }
     writer.Flush();
     return stream.ToArray();
+}
+
+static byte[] BuildLegacyClockArtifact(
+    ulong sequence,
+    int simulationFrequencyHz,
+    int worldTimeRate,
+    ulong simulationTick,
+    long worldTimeMicroseconds,
+    int worldTimeRemainder)
+{
+    byte[] bytes = new byte[42];
+    BinaryPrimitives.WriteUInt32LittleEndian(bytes, 0x4B434C55);
+    BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(4), 1);
+    BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(6), sequence);
+    BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(14), simulationFrequencyHz);
+    BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(18), worldTimeRate);
+    BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(22), simulationTick);
+    BinaryPrimitives.WriteInt64LittleEndian(bytes.AsSpan(30), worldTimeMicroseconds);
+    BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(38), worldTimeRemainder);
+    return bytes;
 }
 
 static void WriteString(BinaryWriter writer, string value)

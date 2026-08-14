@@ -46,6 +46,7 @@ public readonly struct SystemPrepareContext
     }
 
     public ulong Tick { get; }
+    /// <summary>Elapsed simulation seconds represented by this authoritative step.</summary>
     public double DeltaSeconds { get; }
     public SystemId SystemId { get; }
     public bool IsManual { get; }
@@ -76,6 +77,7 @@ public readonly struct SystemCompleteContext
     }
 
     public ulong Tick { get; }
+    /// <summary>Elapsed simulation seconds represented by this authoritative step.</summary>
     public double DeltaSeconds { get; }
     public SystemId SystemId { get; }
     public int Rows { get; }
@@ -122,6 +124,7 @@ public readonly struct SystemJobContext
 
     public SystemId SystemId { get; }
     public ulong Tick { get; }
+    /// <summary>Elapsed simulation seconds represented by this authoritative step.</summary>
     public double DeltaSeconds { get; }
     public int ParticipantIndex => _participant;
     public int LogicalWorkOrdinal => _logicalWorkOrdinal;

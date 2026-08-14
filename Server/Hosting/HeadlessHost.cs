@@ -37,6 +37,10 @@ public sealed class HeadlessHost : IDisposable
 
     public long WorldTimeMicroseconds => _host.Runtime.WorldTimeMicroseconds;
 
+    public int SimulationFrequencyHz => _host.Runtime.SimulationFrequencyHz;
+
+    public double SimulationDeltaSeconds => _host.Runtime.SimulationDeltaSeconds;
+
     public int PlaybackRate => _host.Runtime.PlaybackRate;
 
     public void Start() => _host.Start();
@@ -46,6 +50,9 @@ public sealed class HeadlessHost : IDisposable
     public int Tick(TimeSpan hostElapsed) => _host.Tick(hostElapsed);
 
     public void SetPlaybackRate(int playbackRate) => _host.SetPlaybackRate(playbackRate);
+
+    public void SetSimulationFrequency(int simulationFrequencyHz) =>
+        _host.SetSimulationFrequency(simulationFrequencyHz);
 
     /// <summary>
     /// Drives a deterministic fixed-step headless run until completion or

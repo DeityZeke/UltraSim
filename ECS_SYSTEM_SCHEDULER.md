@@ -92,6 +92,15 @@ tick. Optional automatic staggering is deterministic, opt-in, capped, and exclud
 manual, Movement, and Combat systems. Runtime schedule/enabled changes do not
 change sealed topology.
 
+This cadence is strictly step-relative. `PeriodTicks = 10` means every ten ECS
+ticks, regardless of whether Runtime is driving those steps at 20 or 60 Hz.
+`Tick(delta)` supplies the elapsed simulation seconds represented by the current
+step through every scheduler context. Time-relative gameplay must use that delta,
+authoritative world time, or a game-owned accumulator rather than treating tick
+identity as elapsed wall/simulation time. Authoritative frequency selection and
+optional live changes remain Runtime/host policy; ECS does not own a cadence
+controller.
+
 `Tick(delta)` consumes external commands before systems, freezes topology while
 the graph executes, merges graph output, applies it at the post barrier, then
 increments the tick. Commands recorded during one tick therefore cannot alter

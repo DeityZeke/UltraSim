@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace UltraSim.Server.Runtime;
 
 /// <summary>
-/// Fixed, deterministic clock configuration for one server generation.
+/// Deterministic initial clock configuration for one server generation.
 /// </summary>
 /// <remarks>
 /// <see cref="WorldTimeRate"/> is a dimensionless simulation rate. It does not
@@ -13,6 +13,19 @@ namespace UltraSim.Server.Runtime;
 public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
 {
     public const int DefaultSimulationFrequencyHz = 60;
+    public const int MaximumSimulationFrequencyHz = 1_000;
+    /// <summary>
+    /// Fixed fractional world-time units in one microsecond.
+    /// </summary>
+    /// <remarks>
+    /// This denominator is an authoritative format constant, not a simulation
+    /// frequency. It makes common server cadences, including 20/30/40/50/60 Hz,
+    /// exactly representable without making saved time depend on the host that
+    /// produced it.
+    /// </remarks>
+    public const int WorldTimeFractionQuantaPerMicrosecond = 3_600_000;
+    public const long WorldTimeQuantaPerSecond =
+        1_000_000L * WorldTimeFractionQuantaPerMicrosecond;
     // A 1:1 default is mechanism-neutral. Games may deliberately configure
     // accelerated world time (the S0 fixture uses 24x), but Runtime must not
     // encode that game policy as its default.
@@ -26,8 +39,7 @@ public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
         int initialPlaybackRate = DefaultPlaybackRate,
         int maximumSimulationStepsPerAdvance = DefaultMaximumSimulationStepsPerAdvance)
     {
-        if (simulationFrequencyHz <= 0)
-            throw new ArgumentOutOfRangeException(nameof(simulationFrequencyHz));
+        ValidateSimulationFrequency(simulationFrequencyHz, nameof(simulationFrequencyHz));
         if (worldTimeRate <= 0)
             throw new ArgumentOutOfRangeException(nameof(worldTimeRate));
         if (initialPlaybackRate <= 0)
@@ -56,7 +68,7 @@ public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
     public int MaximumSimulationStepsPerAdvance { get; }
 
     public bool IsValid =>
-        SimulationFrequencyHz > 0 &&
+        IsSupportedSimulationFrequency(SimulationFrequencyHz) &&
         WorldTimeRate > 0 &&
         InitialPlaybackRate > 0 &&
         MaximumSimulationStepsPerAdvance > 0;
@@ -78,6 +90,26 @@ public readonly struct WorldClockOptions : IEquatable<WorldClockOptions>
     public static bool operator ==(WorldClockOptions left, WorldClockOptions right) => left.Equals(right);
 
     public static bool operator !=(WorldClockOptions left, WorldClockOptions right) => !left.Equals(right);
+
+    /// <summary>
+    /// Reports whether a cadence belongs to the bounded exact-time domain.
+    /// </summary>
+    public static bool IsSupportedSimulationFrequency(int simulationFrequencyHz) =>
+        simulationFrequencyHz > 0 &&
+        simulationFrequencyHz <= MaximumSimulationFrequencyHz &&
+        WorldTimeQuantaPerSecond % simulationFrequencyHz == 0;
+
+    internal static void ValidateSimulationFrequency(int simulationFrequencyHz, string parameterName)
+    {
+        if (!IsSupportedSimulationFrequency(simulationFrequencyHz))
+        {
+            throw new ArgumentOutOfRangeException(
+                parameterName,
+                simulationFrequencyHz,
+                $"Simulation frequency must be at most {MaximumSimulationFrequencyHz} Hz and exactly divide " +
+                $"the authoritative {WorldTimeQuantaPerSecond}-quanta-per-second time base.");
+        }
+    }
 }
 
 /// <summary>Diagnostic snapshot of a generation's authoritative clock plus host playback.</summary>
@@ -94,14 +126,14 @@ public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
         int worldTimeRate,
         ulong simulationTick,
         long worldTimeMicroseconds,
-        long worldTimeRemainder,
+        int worldTimeFractionQuanta,
         int playbackRate)
     {
         SimulationFrequencyHz = simulationFrequencyHz;
         WorldTimeRate = worldTimeRate;
         SimulationTick = simulationTick;
         WorldTimeMicroseconds = worldTimeMicroseconds;
-        WorldTimeRemainder = worldTimeRemainder;
+        WorldTimeFractionQuanta = worldTimeFractionQuanta;
         PlaybackRate = playbackRate;
     }
 
@@ -113,7 +145,11 @@ public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
 
     public long WorldTimeMicroseconds { get; }
 
-    public long WorldTimeRemainder { get; }
+    /// <summary>
+    /// Fractional microsecond in the fixed
+    /// <see cref="WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond"/> time base.
+    /// </summary>
+    public int WorldTimeFractionQuanta { get; }
 
     public int PlaybackRate { get; }
 
@@ -122,7 +158,7 @@ public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
         WorldTimeRate == other.WorldTimeRate &&
         SimulationTick == other.SimulationTick &&
         WorldTimeMicroseconds == other.WorldTimeMicroseconds &&
-        WorldTimeRemainder == other.WorldTimeRemainder &&
+        WorldTimeFractionQuanta == other.WorldTimeFractionQuanta &&
         PlaybackRate == other.PlaybackRate;
 
     public override bool Equals(object? obj) => obj is WorldClockSnapshot other && Equals(other);
@@ -132,7 +168,7 @@ public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
         WorldTimeRate,
         SimulationTick,
         WorldTimeMicroseconds,
-        WorldTimeRemainder,
+        WorldTimeFractionQuanta,
         PlaybackRate);
 
     public static bool operator ==(WorldClockSnapshot left, WorldClockSnapshot right) => left.Equals(right);
@@ -142,51 +178,49 @@ public readonly struct WorldClockSnapshot : IEquatable<WorldClockSnapshot>
 
 /// <summary>The durable, host-independent portion of one authoritative world clock.</summary>
 /// <remarks>
-/// Playback rate and accumulated host elapsed time are deliberately excluded:
-/// they are execution policy of the loading host, not saved world state.
+/// Playback rate, simulation frequency, and accumulated host elapsed time are
+/// deliberately excluded: they are execution policy of the loading host, not
+/// saved world state. The fractional unit has one fixed format-wide denominator.
 /// </remarks>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public readonly struct PersistentWorldClockState : IEquatable<PersistentWorldClockState>
 {
     public PersistentWorldClockState(
-        int simulationFrequencyHz,
         int worldTimeRate,
         ulong simulationTick,
         long worldTimeMicroseconds,
-        long worldTimeRemainder)
+        int worldTimeFractionQuanta)
     {
-        if (simulationFrequencyHz <= 0)
-            throw new ArgumentOutOfRangeException(nameof(simulationFrequencyHz));
         if (worldTimeRate <= 0)
             throw new ArgumentOutOfRangeException(nameof(worldTimeRate));
         if (worldTimeMicroseconds < 0)
             throw new ArgumentOutOfRangeException(nameof(worldTimeMicroseconds));
-        if (worldTimeRemainder < 0 || worldTimeRemainder >= simulationFrequencyHz)
-            throw new ArgumentOutOfRangeException(nameof(worldTimeRemainder));
+        if (worldTimeFractionQuanta < 0 ||
+            worldTimeFractionQuanta >= WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond)
+        {
+            throw new ArgumentOutOfRangeException(nameof(worldTimeFractionQuanta));
+        }
 
-        SimulationFrequencyHz = simulationFrequencyHz;
         WorldTimeRate = worldTimeRate;
         SimulationTick = simulationTick;
         WorldTimeMicroseconds = worldTimeMicroseconds;
-        WorldTimeRemainder = worldTimeRemainder;
+        WorldTimeFractionQuanta = worldTimeFractionQuanta;
     }
 
-    public int SimulationFrequencyHz { get; }
     public int WorldTimeRate { get; }
     public ulong SimulationTick { get; }
     public long WorldTimeMicroseconds { get; }
-    public long WorldTimeRemainder { get; }
+    public int WorldTimeFractionQuanta { get; }
 
     public bool Equals(PersistentWorldClockState other) =>
-        SimulationFrequencyHz == other.SimulationFrequencyHz &&
         WorldTimeRate == other.WorldTimeRate &&
         SimulationTick == other.SimulationTick &&
         WorldTimeMicroseconds == other.WorldTimeMicroseconds &&
-        WorldTimeRemainder == other.WorldTimeRemainder;
+        WorldTimeFractionQuanta == other.WorldTimeFractionQuanta;
 
     public override bool Equals(object? obj) => obj is PersistentWorldClockState other && Equals(other);
     public override int GetHashCode() => HashCode.Combine(
-        SimulationFrequencyHz, WorldTimeRate, SimulationTick, WorldTimeMicroseconds, WorldTimeRemainder);
+        WorldTimeRate, SimulationTick, WorldTimeMicroseconds, WorldTimeFractionQuanta);
     public static bool operator ==(PersistentWorldClockState left, PersistentWorldClockState right) => left.Equals(right);
     public static bool operator !=(PersistentWorldClockState left, PersistentWorldClockState right) => !left.Equals(right);
 }
@@ -195,7 +229,7 @@ public readonly struct PersistentWorldClockState : IEquatable<PersistentWorldClo
 /// Mutable, generation-owned simulation and world-time clock.
 /// </summary>
 /// <remarks>
-/// World time uses integer microseconds plus a bounded rational remainder. Host
+/// World time uses integer microseconds plus a fixed fractional unit. Host
 /// elapsed time is accumulated as integer <see cref="TimeSpan.Ticks"/> and is
 /// only used to decide how many fixed simulation steps to execute. Playback rate
 /// therefore changes how quickly tick N is reached, never the meaning of tick N.
@@ -205,11 +239,14 @@ internal sealed class WorldClock
     public const long WorldTimeUnitsPerSecond = 1_000_000;
 
     private readonly WorldClockOptions _options;
-    private readonly double _fixedStepSeconds;
+    private int _simulationFrequencyHz;
+    private double _fixedStepSeconds;
+    private long _stepWholeMicrosecondsPerWorldRate;
+    private long _stepFractionQuantaPerWorldRate;
     private ulong _hostAccumulatorNumerator;
     private ulong _simulationTick;
     private long _worldTimeMicroseconds;
-    private long _worldTimeRemainder;
+    private int _worldTimeFractionQuanta;
     private int _playbackRate;
 
     internal WorldClock(WorldClockOptions options)
@@ -218,7 +255,7 @@ internal sealed class WorldClock
             throw new ArgumentException("World clock options are invalid or default initialized.", nameof(options));
 
         _options = options;
-        _fixedStepSeconds = 1d / options.SimulationFrequencyHz;
+        ApplySimulationFrequency(options.SimulationFrequencyHz, resetHostResidue: false);
         _playbackRate = options.InitialPlaybackRate;
     }
 
@@ -228,62 +265,63 @@ internal sealed class WorldClock
 
     public long WorldTimeMicroseconds => _worldTimeMicroseconds;
 
+    public int SimulationFrequencyHz => _simulationFrequencyHz;
+
     public int PlaybackRate => _playbackRate;
 
     public double FixedStepSeconds => _fixedStepSeconds;
 
     /// <summary>Captures the authoritative clock fields without host-time residue.</summary>
     public WorldClockSnapshot CaptureSnapshot() => new(
-        _options.SimulationFrequencyHz,
+        _simulationFrequencyHz,
         _options.WorldTimeRate,
         _simulationTick,
         _worldTimeMicroseconds,
-        _worldTimeRemainder,
+        _worldTimeFractionQuanta,
         _playbackRate);
 
     internal PersistentWorldClockState CapturePersistentState() => new(
-        _options.SimulationFrequencyHz,
         _options.WorldTimeRate,
         _simulationTick,
         _worldTimeMicroseconds,
-        _worldTimeRemainder);
+        _worldTimeFractionQuanta);
 
     internal void RestorePersistentState(PersistentWorldClockState state)
     {
-        if (state.SimulationFrequencyHz != _options.SimulationFrequencyHz ||
-            state.WorldTimeRate != _options.WorldTimeRate)
+        if (state.WorldTimeRate != _options.WorldTimeRate)
         {
             throw new ArgumentException(
-                "The persistent clock state belongs to a different fixed clock configuration.",
+                "The persistent clock state belongs to a different world-time-rate configuration.",
                 nameof(state));
         }
 
         _simulationTick = state.SimulationTick;
         _worldTimeMicroseconds = state.WorldTimeMicroseconds;
-        _worldTimeRemainder = state.WorldTimeRemainder;
+        _worldTimeFractionQuanta = state.WorldTimeFractionQuanta;
         _hostAccumulatorNumerator = 0;
     }
 
-    /// <summary>Restores a snapshot produced for the same clock configuration.</summary>
+    /// <summary>Restores a diagnostic snapshot with a supported cadence and matching world-time rate.</summary>
     /// <remarks>In-flight host elapsed time is intentionally discarded.</remarks>
     internal void RestoreSnapshot(WorldClockSnapshot snapshot)
     {
-        if (snapshot.SimulationFrequencyHz != _options.SimulationFrequencyHz ||
-            snapshot.WorldTimeRate != _options.WorldTimeRate)
+        if (snapshot.WorldTimeRate != _options.WorldTimeRate ||
+            !WorldClockOptions.IsSupportedSimulationFrequency(snapshot.SimulationFrequencyHz))
         {
-            throw new ArgumentException("The clock snapshot belongs to a different fixed clock configuration.", nameof(snapshot));
+            throw new ArgumentException("The clock snapshot contains an unsupported clock configuration.", nameof(snapshot));
         }
         if (snapshot.WorldTimeMicroseconds < 0 ||
-            snapshot.WorldTimeRemainder < 0 ||
-            snapshot.WorldTimeRemainder >= _options.SimulationFrequencyHz ||
+            snapshot.WorldTimeFractionQuanta < 0 ||
+            snapshot.WorldTimeFractionQuanta >= WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond ||
             snapshot.PlaybackRate <= 0)
         {
             throw new ArgumentException("The clock snapshot contains invalid state.", nameof(snapshot));
         }
 
+        SetSimulationFrequency(snapshot.SimulationFrequencyHz);
         _simulationTick = snapshot.SimulationTick;
         _worldTimeMicroseconds = snapshot.WorldTimeMicroseconds;
-        _worldTimeRemainder = snapshot.WorldTimeRemainder;
+        _worldTimeFractionQuanta = snapshot.WorldTimeFractionQuanta;
         _playbackRate = snapshot.PlaybackRate;
         _hostAccumulatorNumerator = 0;
     }
@@ -298,7 +336,7 @@ internal sealed class WorldClock
 
         ulong scaledHostTicks = checked((ulong)hostElapsed.Ticks *
             (ulong)_playbackRate *
-            (ulong)_options.SimulationFrequencyHz);
+            (ulong)_simulationFrequencyHz);
         ulong nextAccumulator = checked(_hostAccumulatorNumerator + scaledHostTicks);
 
         ulong denominator = (ulong)TimeSpan.TicksPerSecond;
@@ -321,17 +359,50 @@ internal sealed class WorldClock
         _playbackRate = playbackRate;
     }
 
+    /// <summary>
+    /// Changes host simulation cadence while preserving authoritative time.
+    /// In-flight host elapsed residue is deliberately discarded at the policy
+    /// boundary so elapsed time cannot be interpreted under two frequencies.
+    /// </summary>
+    internal void SetSimulationFrequency(int simulationFrequencyHz)
+    {
+        WorldClockOptions.ValidateSimulationFrequency(
+            simulationFrequencyHz,
+            nameof(simulationFrequencyHz));
+        if (simulationFrequencyHz == _simulationFrequencyHz)
+            return;
+
+        ApplySimulationFrequency(simulationFrequencyHz, resetHostResidue: true);
+    }
+
     internal void AdvanceSimulationTick()
     {
         if (_simulationTick == ulong.MaxValue)
             throw new InvalidOperationException("The simulation tick counter reached its terminal value.");
 
-        long numerator = checked(_worldTimeRemainder +
-            checked((long)_options.WorldTimeRate * WorldTimeUnitsPerSecond));
-        long wholeUnits = numerator / _options.SimulationFrequencyHz;
-        long remainder = numerator % _options.SimulationFrequencyHz;
-        _worldTimeMicroseconds = checked(_worldTimeMicroseconds + wholeUnits);
-        _worldTimeRemainder = remainder;
+        long totalFractionQuanta = checked(
+            _stepFractionQuantaPerWorldRate * _options.WorldTimeRate +
+            _worldTimeFractionQuanta);
+        long wholeMicroseconds = checked(
+            _stepWholeMicrosecondsPerWorldRate * _options.WorldTimeRate +
+            totalFractionQuanta / WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond);
+        _worldTimeFractionQuanta = checked((int)(totalFractionQuanta %
+            WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond));
+        _worldTimeMicroseconds = checked(_worldTimeMicroseconds + wholeMicroseconds);
         _simulationTick++;
+    }
+
+    private void ApplySimulationFrequency(int simulationFrequencyHz, bool resetHostResidue)
+    {
+        _simulationFrequencyHz = simulationFrequencyHz;
+        _fixedStepSeconds = 1d / simulationFrequencyHz;
+        long stepQuantaPerWorldRate =
+            WorldClockOptions.WorldTimeQuantaPerSecond / simulationFrequencyHz;
+        _stepWholeMicrosecondsPerWorldRate = stepQuantaPerWorldRate /
+            WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond;
+        _stepFractionQuantaPerWorldRate = stepQuantaPerWorldRate %
+            WorldClockOptions.WorldTimeFractionQuantaPerMicrosecond;
+        if (resetHostResidue)
+            _hostAccumulatorNumerator = 0;
     }
 }

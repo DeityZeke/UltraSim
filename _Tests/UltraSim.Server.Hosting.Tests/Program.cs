@@ -126,6 +126,8 @@ static void InternalAndHeadlessProduceIdenticalCanonicalState()
     Assert.Equal(internalHost.ActiveGenerationId, headlessHost.ActiveGenerationId);
     Assert.Equal(internalHost.SimulationTick, headlessHost.SimulationTick);
     Assert.Equal(internalHost.WorldTimeMicroseconds, headlessHost.WorldTimeMicroseconds);
+    Assert.Equal(internalHost.SimulationFrequencyHz, headlessHost.SimulationFrequencyHz);
+    Assert.Equal(internalHost.SimulationDeltaSeconds, headlessHost.SimulationDeltaSeconds);
     Assert.Equal(internalComposition.Counter.Value, headlessComposition.Counter.Value);
     Assert.Equal(internalComposition.Counter.LastTick, headlessComposition.Counter.LastTick);
 }
@@ -290,7 +292,8 @@ static void HostWrapperBenchmarkIsCaptured()
     Assert.Equal(direct.SimulationTick, hosted.SimulationTick);
     Assert.True(ratio <= 1.05);
     Console.WriteLine(
-        $"BASELINE S0.2 samples={samples} ticks_per_sample={ticksPerSample} " +
+        $"BASELINE S0.2 cadence=60Hz cadence_changes=off adaptive=off playback=1x " +
+        $"samples={samples} ticks_per_sample={ticksPerSample} " +
         $"direct_runtime_mean={directMean:F0}ns direct_runtime_p95={Percentile95(directSamples):F0}ns " +
         $"internal_host_mean={hostedMean:F0}ns internal_host_p95={Percentile95(hostedSamples):F0}ns " +
         $"wrapper_ratio={ratio:F3} delta_per_tick={deltaPerTick:F2}ns");

@@ -9,6 +9,11 @@ Do not overwrite an accepted artifact. Create a newly dated file when the
 protocol, host, runtime, measurement policy, or intentionally accepted V3 state
 changes. The orchestrator enforces this for `--accept-baseline`.
 
+Unless an artifact explicitly declares a cadence experiment, accepted runtime
+and simulation performance baselines use fixed 60 Hz, 1x playback, runtime
+cadence changes off, and adaptive cadence off. Lowering cadence is not an
+allowed way to satisfy a normal regression gate.
+
 Historical joined artifacts preserve the descriptor text that was true—or was
 recorded—when they were accepted. In particular, several pre-correction files
 say V3 lifecycle publication was absent. Do not rewrite those immutable JSON
@@ -238,3 +243,13 @@ direct-ECS/InternalHost tick control over 4,096 scheduled rows. The accepted run
 allocates zero warmed tick bytes and measured a 1.019x hosted/direct ratio. This
 is an architecture/regression fixture, not a cross-machine performance claim;
 full interpretation is in `../../S0.8 Acceptance Report.md`.
+
+`s0.8-integrated-acceptance-cadence-independent-2026-08-14.json` advances the
+integrated protocol to `ultrasim-s0.8-integrated-acceptance-v3`. It retains the
+same account-backed and accountless canonical hashes, adds a real persisted
+character to exact 60->20 and 20->60 Hz `world + accounting + clock` round
+trips, records the frequency-independent clock-v2 artifact, and keeps the
+loading host's cadence as local policy. Its performance row explicitly uses
+fixed 60 Hz, 1x playback, runtime cadence changes off, and adaptive cadence off;
+timed tick allocation remains zero. Full interpretation is in
+`../../Authoritative Cadence Independence Report.md`.

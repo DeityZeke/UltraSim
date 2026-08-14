@@ -1,5 +1,30 @@
 # UltraSim Next Benchmarks
 
+## Authoritative cadence disclosure
+
+Normal development and performance validation uses a fixed 60 Hz authoritative
+cadence, 1x playback, and runtime/adaptive cadence changes disabled. This is the
+uncompromised baseline: a workload that misses its budget is allowed to fall
+behind and may not silently lower cadence to make a gate pass. Every future
+serious simulation result should disclose:
+
+```text
+authoritative cadence: 60 Hz
+runtime cadence changes: OFF
+adaptive cadence: OFF
+playback: 1x
+```
+
+No automatic adaptive controller exists today. A future adaptive-degradation
+stress class is separate from fixed-60 torture/regression tests and must never
+be compared as if it were the same workload policy.
+
+The accepted cadence-independence integration artifact is
+[`Baselines/s0.8-integrated-acceptance-cadence-independent-2026-08-14.json`](Baselines/s0.8-integrated-acceptance-cadence-independent-2026-08-14.json).
+It adds exact 60->20 and 20->60 Hz durable round trips while retaining a fixed-60
+performance control. Interpretation lives in
+[`../Authoritative Cadence Independence Report.md`](../Authoritative%20Cadence%20Independence%20Report.md).
+
 Future cross-generation validation, canonical final-state hashing, effective-byte
 throughput, and scheduler-crossover requirements are recorded in
 [`ECS_NEXT_BENCHMARK_RECOMMENDATIONS.md`](ECS_NEXT_BENCHMARK_RECOMMENDATIONS.md).

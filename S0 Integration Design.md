@@ -342,6 +342,62 @@ host elapsed/fixed step
 
 ServerRuntime must not become another work scheduler.
 
+4.4 Frozen authoritative cadence contract
+
+Cadence independence is an engine capability; adaptive cadence is optional
+deployment policy.
+
+The permanent distinction is:
+
+```text
+SimulationTick
+    authoritative step/order identity
+
+SimulationDelta
+    elapsed simulation time represented by this step
+
+SimulationFrequency
+    host/Runtime execution policy that determines SimulationDelta
+```
+
+In short: **tick is identity, delta is time, frequency determines delta.** Never
+infer elapsed time from tick count unless step-relative behavior is explicitly
+intended.
+
+Fixed 20, 30, 40, 50, and 60 Hz are valid configurations. Fixed 60 Hz at 1x
+playback, with Runtime cadence changes disabled and automatic adaptation off,
+is the default development and performance-validation baseline. If a workload
+cannot sustain it, it falls behind; lowering cadence may not silently make a
+normal regression gate pass.
+
+`SystemSchedule.PeriodTicks` and `StartOffset` remain deliberate step cadence.
+For example, period 10 means every ten authoritative steps, not every ten
+milliseconds. Cooldowns, movement, needs, AI intervals, and other time-relative
+gameplay use `DeltaSeconds`, authoritative world time, or a game-owned time
+accumulator. The S0 `TickMarker` is an explicitly step-relative diagnostic, not
+a template for elapsed-time gameplay.
+
+Runtime cadence changes are disabled by default. A server can opt in at cold
+construction and then request a supported frequency only at an idle owner-thread
+boundary. A successful request preserves the active generation, ECS/game state,
+simulation tick, exact world time/fraction, and playback policy. The next ECS
+step receives the new delta. Non-authoritative host elapsed residue is discarded
+at the switch so it is never interpreted under two frequencies. Foreign-thread,
+callback, simulation, publication, and reconciliation requests reject before
+mutation.
+
+Durable clock state contains tick, world-time rate, integer microseconds, and a
+fixed frequency-independent fractional quantum. It does not contain the saving
+host's simulation frequency, playback, or host elapsed residue. A save produced
+at one supported cadence can therefore load exactly at another while the ECS
+scheduler tick and Runtime tick remain equal.
+
+No adaptive controller exists in S0. A future opt-in controller may request this
+Runtime capability after explicit fidelity/load-shedding policy, but it lives
+above Runtime. Network replication, rendering, physics/substeps, and AI fidelity
+have independent future cadence policies; none is implicitly coupled to the
+authoritative server step rate.
+
 5. UI-0 conceptual contract
 
 UI is included in S0 because Admission and later Inventory/client integration will otherwise invent temporary presentation contracts that must be replaced later.
@@ -1033,12 +1089,16 @@ The host-facing Runtime API exposes lifecycle control and bounded status, not th
 mutable generation root or an unconditional public replacement operation.
 Replacement remains a controlled internal seam for later staged persistence.
 
-`WorldClockSnapshot` establishes the diagnostic tick/world-time contract in
-S0.1. Durable saves use `PersistentWorldClockState`, which includes simulation
-tick, world time, rational remainder, and fixed clock configuration while
-deliberately excluding host playback and host elapsed residue. The accepted
-whole-game save set installs this as its own `clock` participant; an in-memory
-snapshot round trip must not be described as durable persistence.
+`WorldClockSnapshot` establishes the diagnostic tick/world-time/host-policy
+contract in S0.1. Durable saves use `PersistentWorldClockState`, which includes
+simulation tick, world-time rate, integer world time, and a fixed
+frequency-independent fractional quantum while deliberately excluding host
+simulation frequency, playback, and elapsed residue. The accepted whole-game
+save set installs this as its own `clock` participant; an in-memory snapshot
+round trip must not be described as durable persistence. Clock artifact v2
+freezes this representation. Version 1 remains readable when its
+frequency-relative remainder converts exactly; an inexact legacy fraction is
+rejected rather than rounded or reinterpreted.
 
 World-time rate defaults are mechanism-neutral. The 24x rate below is an explicit
 test/game configuration, not Runtime's default game policy.
@@ -1955,6 +2015,9 @@ observers cannot participate in authority dispatch ordering.
 The post-S0 adversarial audit established these permanent rules:
 
 - one published generation is ECS + authoritative clock + complete game state;
+- authoritative cadence is host policy, durable time is frequency-independent,
+  and cross-frequency load preserves exact tick/time while using the loading
+  host's configured cadence;
 - load prepares and validates all three outside any lease on the old root, then
   publishes once and disposes the old root only after the lease is gone;
 - Runtime rejects lifecycle/publication reentrancy. Publication observers may

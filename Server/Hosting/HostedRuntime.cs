@@ -55,6 +55,11 @@ internal sealed class HostedRuntime : IDisposable
         Runtime.SetPlaybackRate(playbackRate);
     }
 
+    internal void SetSimulationFrequency(int simulationFrequencyHz)
+    {
+        Runtime.SetSimulationFrequency(simulationFrequencyHz);
+    }
+
     internal void Stop()
     {
         ServerRuntimeState state = Runtime.State;
