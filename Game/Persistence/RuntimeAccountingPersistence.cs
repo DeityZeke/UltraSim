@@ -18,10 +18,9 @@ public readonly record struct LoadAttemptResult(
     Exception? Failure);
 
 /// <summary>
-/// Game-owned bridge joining the real ServerRuntime, ECS save participant, and
-/// Accounting save participant. Runtime remains unaware of all Accounting
-/// types; only this bridge transfers the prepared game state at publication.
+/// S0.6 compatibility bridge joining only ECS and Accounting.
 /// </summary>
+[System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
 public sealed class RuntimeAccountingPersistence
 {
     private readonly ServerGameFacet _runtime;

@@ -125,7 +125,11 @@ public sealed class GameRuntimePersistence
                         throw new InvalidOperationException("The game staging factory did not produce state.");
                     built.Inventory.Rebuild(stagedWorld);
                     stagedAccounting = accounting.TakeStore();
-                    candidate = new GameGenerationState(stagedAccounting, built.Inventory, built.Content);
+                    candidate = new GameGenerationState(
+                        stagedAccounting,
+                        built.Inventory,
+                        built.Content,
+                        built.SimulationLookup);
 
                     prepared.Commit(_ =>
                     {

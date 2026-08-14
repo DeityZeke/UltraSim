@@ -68,7 +68,11 @@ static void GameAggregateRejectsCrossWorldFeatureState()
     try
     {
         Assert.Throws<ArgumentException>(() =>
-            _ = new GameGenerationState(accounting, first.Inventory, second.Content));
+            _ = new GameGenerationState(
+                accounting,
+                first.Inventory,
+                second.Content,
+                first.SimulationLookup));
     }
     finally
     {
@@ -358,7 +362,11 @@ static void InventoryUiRejectsCrossWorldDurableIdentityAba()
         Assert.True(staging.World.TryGetPersistentId(sword, out PersistentEntityId newSwordId));
         Assert.Equal(oldSword.Value, newSwordId.Value);
 
-        candidate = new GameGenerationState(new AccountingStore(), staging.Inventory, staging.Content);
+        candidate = new GameGenerationState(
+            new AccountingStore(),
+            staging.Inventory,
+            staging.Content,
+            staging.SimulationLookup);
         Assert.True(fixture.Runtime.Game.TryPublishPreparedGeneration(
             staging.World, candidate, out _));
         transferred = true;

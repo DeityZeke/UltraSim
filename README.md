@@ -33,6 +33,11 @@ domains now require one schema, content catalog, generation root, and
 persistence publication boundary. `Game/Contracts` keeps the narrow Admission
 policy seam free of UI/client dependencies. Later slices extend the composition
 root rather than making a feature project own the game around it.
+S0.8 — the deterministic hosted admission/UI/inventory/simulation/save/restore
+acceptance slice — is accepted in
+[`S0.8 Acceptance Report.md`](S0.8%20Acceptance%20Report.md). This completes the
+Integrated S0 milestone with canonical InternalHost/HeadlessHost parity and a
+native Godot acceptance using the exact game UI definitions.
 
 ## Current executable slices
 
@@ -68,6 +73,15 @@ dotnet run --project \
 dotnet run --project \
   _Tests/UltraSim.Game.Inventory.Tests/UltraSim.Game.Inventory.Tests.csproj \
   -c Release
+dotnet run --project \
+  _Tests/UltraSim.S0.Integration.Tests/UltraSim.S0.Integration.Tests.csproj \
+  -c Release
+dotnet build \
+  _Tests/UltraSim.S0.Godot.Tests/UltraSim.S0.Godot.Tests.csproj \
+  -c Debug
+'/mnt/data/Programs/Godot v4.7.1 Mono/Godot_v4.7.1-stable_mono_linux.x86_64' \
+  --headless --path _Tests/UltraSim.S0.Godot.Tests \
+  --scene res://S08HeadlessAcceptance.tscn
 ```
 
 ECS 3.4.1 full-world persistence is specified in

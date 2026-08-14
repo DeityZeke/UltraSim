@@ -214,3 +214,13 @@ zero canonical/contract mismatches, nine unsupported rows, and zero timed V3
 managed allocation. Focused 31-sample create controls verified that the cold
 durable-identity creation hook does not retain the initial experimental hot-path
 regression in non-persistent worlds.
+
+`s0.8-integrated-acceptance-2026-08-13.json` is the accepted first complete S0
+integration capture. It records account-backed InternalHost save/diverge/restore
+and HeadlessHost canonical parity, accountless admission/persistence, artifact
+size, capture pause, save/load caller allocation, and a 21-sample alternating
+direct-ECS/InternalHost tick control over 4,096 scheduled rows. The integrated
+tick path allocates zero warmed bytes and measured a 1.031x hosted/direct ratio
+on the acceptance machine. This is an architecture/regression fixture, not a
+cross-machine performance claim; full interpretation is in
+`../../S0.8 Acceptance Report.md`.

@@ -1,0 +1,68 @@
+{
+  "Workload": "ultrasim-s0.8-integrated-acceptance-v1",
+  "CapturedAtUtc": "2026-08-14T04:47:36.6092948+00:00",
+  "Runtime": "8.0.29",
+  "LogicalProcessorCount": 16,
+  "Tests": [
+    {
+      "Name": "AccountBackedInternalToHeadlessCanonicalRoundTrip",
+      "Passed": true,
+      "TotalNanoseconds": 247835411,
+      "Metrics": {
+        "CanonicalHash": "BB02C6DABFE3290EA4DA7F4443E60F2B0370707927A8B0318A69DB4C99D9927A",
+        "SaveMeanNanoseconds": 48727753,
+        "LoadMeanNanoseconds": 41623110,
+        "CapturePauseNanoseconds": 10711595,
+        "SaveAllocatedBytes": 531696,
+        "LoadAllocatedBytes": 484320,
+        "ArtifactBytes": 1769,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "ECS\u002BAccounting; cold CharacterSelect/Inventory; row deltas; staged restore; hot reopen; Internal/Headless canonical parity."
+      }
+    },
+    {
+      "Name": "AccountlessAdmissionAndPersistence",
+      "Passed": true,
+      "TotalNanoseconds": 2830688,
+      "Metrics": {
+        "CanonicalHash": "C54772756B92B53D48D55124D1820AAE0F39CCFB62609664B9101A89C6D054E7",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 738,
+        "DirectTickMeanNanoseconds": 0,
+        "HostedTickMeanNanoseconds": 0,
+        "HostedTickP95Nanoseconds": 0,
+        "TickWrapperRatio": 0,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "Accountless admission used no account records; the composition\u0027s declared empty Accounting participant remained round-trippable."
+      }
+    },
+    {
+      "Name": "WarmedRuntimeTickHasNoAllocationAndBoundedWrapperTax",
+      "Passed": true,
+      "TotalNanoseconds": 163585100,
+      "Metrics": {
+        "CanonicalHash": "45988E768B9D6F24869CA6D0A9D5257EA97BC3EF852BC05817354081DE7DEC10",
+        "SaveMeanNanoseconds": 0,
+        "LoadMeanNanoseconds": 0,
+        "CapturePauseNanoseconds": 0,
+        "SaveAllocatedBytes": 0,
+        "LoadAllocatedBytes": 0,
+        "ArtifactBytes": 0,
+        "DirectTickMeanNanoseconds": 12987.713169642857,
+        "HostedTickMeanNanoseconds": 13389.98474702381,
+        "HostedTickP95Nanoseconds": 14479.2578125,
+        "TickWrapperRatio": 1.0309732415650517,
+        "TimedTickAllocatedBytes": 0,
+        "Notes": "21 alternating A/B samples; 4,096 scheduled rows; 256 ticks/sample; all caller/worker execution is serial on the owner thread."
+      }
+    }
+  ]
+}

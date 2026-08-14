@@ -1,0 +1,14 @@
+[application]
+config/name="UltraSim S0.8 Integrated UI Acceptance"
+run/main_scene="res://S08HeadlessAcceptance.tscn"
+
+[display]
+window/size/viewport_width=800
+window/size/viewport_height=600
+
+[dotnet]
+project/assembly_name="UltraSim.S0.Godot.Tests"
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

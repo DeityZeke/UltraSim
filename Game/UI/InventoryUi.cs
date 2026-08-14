@@ -227,10 +227,17 @@ public sealed class InventoryUiController : IDisposable
                     if (request.Action == InventoryUi.Split)
                     {
                         result = state.Split(world, item, container, container, quantity: 1);
-                        if (result.Accepted &&
-                            state.TryProjectItem(world, item, out InventoryItemView source) &&
-                            state.TryProjectItem(world, result.CreatedItem, out InventoryItemView created))
+                        if (result.Accepted)
                         {
+                            if (!state.TryProjectItem(world, item, out InventoryItemView source) ||
+                                !state.TryProjectItem(
+                                    world,
+                                    result.CreatedItem,
+                                    out InventoryItemView created))
+                            {
+                                throw new InvalidOperationException(
+                                    "An accepted inventory split produced an unprojectable result.");
+                            }
                             listPatches =
                             [
                                 UiListPatch.Update(InventoryUi.Items, ToRow(source)),

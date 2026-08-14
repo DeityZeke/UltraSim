@@ -1,0 +1,18 @@
+<Project Sdk="Godot.NET.Sdk/4.7.1">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>UltraSim.S0.Godot.Tests</AssemblyName>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Client/_Godot/UltraSim.Client.Godot.csproj" />
+    <ProjectReference Include="../../Game/Admission/UltraSim.Game.Admission.csproj" />
+    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
+  </ItemGroup>
+</Project>

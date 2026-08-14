@@ -1,7 +1,7 @@
 UltraSim Integrated S0 Design
 
-Status: Proposed integration contract
-Date: 2026-08-12
+Status: Accepted integration milestone
+Date: 2026-08-13
 Baseline: ECS 3.4.1 persistence-hardening baseline
 Purpose: Move V3 from individually proven subsystems into one small, real, authoritative runtime without rebuilding V2 Server wholesale or reopening generic kernel design without evidence.
 
@@ -37,7 +37,7 @@ S0 completion summary
 
 [x] S0.7 — Game-owned ECS inventory vertical + generic Gump UI
 
-[ ] S0.8 — Integrated end-to-end acceptance scenario and baselines
+[x] S0.8 — Integrated end-to-end acceptance scenario and baselines
 
 S0 is accepted only when S0.0 through S0.8 are all accepted.
 
@@ -1887,6 +1887,56 @@ Join directly into a playable entity.
 No account participant is required for the running game's normal operation.
 
 ECS save/load still works under the composition's declared participant set.
+
+18.1 Accepted S0.8 implementation
+
+S0.8 is accepted by the engine-neutral executable
+`_Tests/UltraSim.S0.Integration.Tests` and the test-only native Godot project
+`_Tests/UltraSim.S0.Godot.Tests`.
+
+The concrete composition now installs one minimal generated writable chunk
+system in every fresh, hosted, and staged/restored world. It increments
+`GameSimulationState.TickMarker` once per scheduled tick, proving that the
+integrated flow runs real ECS scheduler work rather than test-side scalar
+mutation.
+
+The account-backed executable performs the complete scenario above:
+
+- cold CharacterSelect and Inventory opens through `LocalSemanticLink`;
+- durable Alice selection and entry;
+- row-granular `Update + Add` Split and `Remove` Equip deltas;
+- twelve deterministic hosted simulation ticks;
+- one real `world + accounting` save-set generation;
+- visible post-save entity/inventory/simulation divergence;
+- staged ECS restore, durable-reference resolution, derived Inventory rebuild,
+  validation, and one `GameGenerationState` publication;
+- stale old runtime entity handles and new runtime identities for the same
+  durable Alice/Backpack identities;
+- exact cached hot reopens after replacement;
+- identical normalized logical hashes after InternalHost and HeadlessHost load.
+
+The accountless executable creates a playable entity and ticks it without
+creating any Account or Character record. The concrete game composition still
+declares its empty Accounting artifact when persistence is requested; ordinary
+accountless admission and simulation do not require or fabricate account state.
+
+The native Godot gate renders the exact production CharacterSelect and
+Inventory definitions. It verifies Alice/Bread/Sword native controls, exact
+definition-cache reopen, `Update + Add` split reconciliation, `Remove` equip
+reconciliation, and preservation of the existing native root across deltas.
+Game/server dependencies exist only in this test project; the production Godot
+wrapper remains a renderer over Client.Core/UI.
+
+The old `RuntimeAccountingPersistence` bridge remains hidden from normal
+IntelliSense solely for S0.6 regression evidence. `GameRuntimePersistence` is
+the only forward whole-game integration path because it reconstructs derived
+domains and publishes the full composition root.
+
+UI protocol/model types still physically live under Client/Core while game UI
+workflows consume them on the server side. S0 proves the semantics but does not
+pretend the package ownership is final. Before Network V3 freezes a wire-facing
+contract, move shared semantic UI operations into a neutral protocol/contracts
+assembly if server/client packaging pressure confirms the need.
 
 19. S0 performance and allocation gates
 

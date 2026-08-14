@@ -10,7 +10,8 @@ namespace UltraSim.Game.Composition;
 public readonly record struct GameStaging(
     EcsWorld World,
     InventoryGenerationState Inventory,
-    GameContent Content);
+    GameContent Content,
+    ComponentLookup<GameSimulationState> SimulationLookup);
 
 /// <summary>Concrete S0 game composition: one schema, content set, and root.</summary>
 public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEntityBinder
@@ -38,10 +39,12 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
     public void Configure(ServerGenerationBuilder generation)
     {
         GameContent content = CompileContent(generation.World);
+        ComponentLookup<GameSimulationState> simulation = PrepareSimulation(generation.World);
         generation.SetGameState(new GameGenerationState(
             new AccountingStore(),
             new InventoryGenerationState(generation.World, content, _inventoryLimits),
-            content));
+            content,
+            simulation));
     }
 
     public GameStaging CreateStaging(
@@ -54,10 +57,12 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         try
         {
             GameContent content = CompileContent(world);
+            ComponentLookup<GameSimulationState> simulation = PrepareSimulation(world);
             return new GameStaging(
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
-                content);
+                content,
+                simulation);
         }
         catch
         {
@@ -75,10 +80,12 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         try
         {
             GameContent content = CompileContent(world);
+            ComponentLookup<GameSimulationState> simulation = PrepareSimulation(world);
             return new GameStaging(
                 world,
                 new InventoryGenerationState(world, content, limits ?? _inventoryLimits),
-                content);
+                content,
+                simulation);
         }
         catch
         {
@@ -125,5 +132,21 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
                 maximumChunksPerNewArchetype: _maximumChunksPerContentArchetype));
         _contentByWorld.Add(world, content);
         return content;
+    }
+
+    private static ComponentLookup<GameSimulationState> PrepareSimulation(EcsWorld world)
+    {
+        WriteJobPlan<GameSimulationState> plan = world.PrepareWriteJob<GameSimulationState>();
+        world.RegisterWriteSystem<
+            GameSimulationState,
+            GameSimulationSystemRuntime,
+            GameSimulationJob>(
+            new SystemDefinition(
+                "game.simulation.tick-marker",
+                SystemStage.WorldSim,
+                executionPolicy: SystemExecutionPolicy.Serial),
+            plan,
+            new GameSimulationSystemRuntime());
+        return world.PrepareLookup<GameSimulationState>();
     }
 }
