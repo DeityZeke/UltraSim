@@ -204,7 +204,7 @@ public sealed class DeterministicDatagramLink
     }
 }
 
-public sealed class DeterministicDatagramEndpoint
+public sealed class DeterministicDatagramEndpoint : INetworkDatagramEndpoint
 {
     private readonly DeterministicDatagramLink _link;
     private readonly bool _sendsAToB;

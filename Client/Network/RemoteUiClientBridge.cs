@@ -197,8 +197,8 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private void ProcessDetach(ReadOnlySpan<byte> payload)
     {
         if (!RemoteSessionDetachMessageCodec.TryReadExact(payload, out RemoteSessionDetachMessage detach) ||
-            detach.ApplicationSessionEpoch == 0 ||
-            (_applicationSessionEpoch != 0 && detach.ApplicationSessionEpoch != _applicationSessionEpoch))
+            detach.ApplicationSessionEpoch == 0 || _applicationSessionEpoch == 0 ||
+            detach.ApplicationSessionEpoch != _applicationSessionEpoch)
             return;
         DetachClient();
     }

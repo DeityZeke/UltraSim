@@ -73,5 +73,5 @@ detach disposes the client runtime, closes renderer handles best-effort, and
 clears definitions, so reconnect begins from a fresh coherent cache/session.
 
 `UiClientRuntime` owns retained client projection and renderer handles and is
-deterministically disposable. N0.5 retains this exact lifecycle while replacing
-only the deterministic datagram topology with real UDP transport ownership.
+deterministically disposable. Accepted N0.5 retains this exact lifecycle while
+replacing only the deterministic datagram topology with real UDP ownership.

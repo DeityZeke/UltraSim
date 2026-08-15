@@ -7,6 +7,8 @@ public enum NetworkSecureDatagramKind : byte
     Data = 1,
     // Packet-level transport delivery evidence; never application/baseline proof.
     Acknowledgement = 2,
+    // Authenticated transport liveness only; carries no application meaning.
+    KeepAlive = 3,
 }
 
 public readonly record struct NetworkSecureDatagramHeader(
@@ -31,7 +33,9 @@ public static class NetworkSecureDatagramFraming
     public static bool TryWriteHeader(ref NetworkPacketWriter writer, in NetworkSecureDatagramHeader header)
     {
         if (header.ProtocolVersion == 0 || !header.Connection.IsValid || !header.SecurityEpoch.IsValid ||
-            header.Kind is not NetworkSecureDatagramKind.Data and not NetworkSecureDatagramKind.Acknowledgement)
+            header.Kind is not NetworkSecureDatagramKind.Data and
+                not NetworkSecureDatagramKind.Acknowledgement and
+                not NetworkSecureDatagramKind.KeepAlive)
             return false;
         NetworkPacketWriter staged = writer;
         if (!staged.TryWriteUInt16(Magic) ||
@@ -67,7 +71,7 @@ public static class NetworkSecureDatagramFraming
             !reader.TryReadUInt32(out uint generation) || generation == 0 ||
             !reader.TryReadUInt32(out uint epoch) || epoch == 0 ||
             !reader.TryReadUInt64(out ulong packet) ||
-            !reader.TryReadByte(out byte kind) || kind is < 1 or > 2 ||
+            !reader.TryReadByte(out byte kind) || kind is < 1 or > 3 ||
             !reader.TryReadByte(out byte reserved) || reserved != 0 ||
             !reader.TryReadUInt16(out ushort length) || !reader.IsComplete ||
             datagram.Length != HeaderBytes + length + TagBytes)

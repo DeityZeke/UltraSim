@@ -2,9 +2,9 @@
 
 Status: active forward plan. N0.0 contract/evidence, N0.1 canonical game
 projection/OfflineDirect, N0.2 bounded Network kernel foundations, N0.3 secure
-reliable protocol over deterministic datagrams, and N0.4 remote Admission/UI
-over ProtocolLoopback are accepted. N0.5 real UDP transport/session ownership
-is next.
+reliable protocol over deterministic datagrams, N0.4 remote Admission/UI over
+ProtocolLoopback, and N0.5 real connected-UDP transport/session ownership are
+accepted. N0.6 authoritative input and replicated world state is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -897,17 +897,20 @@ even when latest-state delivery is capacity-dropped, and isolates unreliable
 pending/sequence state per message family. Generic game-defined sub-stream identity
 is deliberately deferred until N0.6 provides an actual input/state requirement.
 
-The loopback cookie binds a fixed path token; endpoint binding and expiry are N0.5.
-The deterministic protocol clock uses steps; N0.5 supplies real monotonic time.
+The loopback cookie binds a fixed path token and its protocol clock uses
+deterministic steps. N0.5 binds the cookie to the connected client IP/port with
+current/previous expiry buckets and supplies monotonic milliseconds.
 N0.3 authenticates the server endpoint, not the game principal. Input redundancy
 is N0.6 and full recipient fairness is N0.7.
 
 N0.2's SPSC token ring and single-owner packet pool remain independent proofs.
-Cross-thread packet-memory handoff is not claimed. N0.5 must admit a transactional
-ownership/handoff model before transport workers share packet buffers.
+Cross-thread packet-memory handoff is not claimed or needed by N0.5: nonblocking
+socket I/O and both secure peers share one explicit owner thread. A future socket
+worker must still earn a transactional handoff before touching protocol buffers.
 
 N0.3 has congestion-window/backoff behavior but no real time-based pacing. N0.5
-owns pacing on a monotonic transport clock. Bounded linear record/datagram scans
+adds monotonic-clock pacing when RTT/CWND produces a nonzero millisecond interval.
+Bounded linear record/datagram scans
 remain admitted proof-stage machinery until N0.7/N0.10 scale evidence earns a
 different representation.
 
@@ -957,6 +960,12 @@ Tests include stale/duplicate actions, list/row provenance, lost UI messages,
 reconnect, bounds, unauthenticated action, client disposal, and Bulk starvation
 resistance.
 
+Structurally valid wire input is not automatically valid application intent.
+The owning retained UI model validates action identity, source provenance, row
+existence, input contract, and current enabled state before any authoritative
+callback begins. Expected validation failure is contained as rejection; an
+exception after that boundary remains a trusted implementation/authority fault.
+
 Gate: an existing V3 game workflow runs remotely through the complete protocol
 without moving its authority into Network.
 
@@ -978,6 +987,11 @@ Play, Inventory Split/Equip, close, and exact hot reopen. Impairment,
 unauthenticated/stale/duplicate actions, post-commit presentation failure,
 disconnect, and reconnect are executable gates.
 
+The parity oracle captures the complete retained client-semantic state at each
+workflow milestone: view/cache/definition identity, model sequence, every
+scalar/list value, row identity, and action enabled/reason state. Transport
+packet identities and timing remain intentionally outside that oracle.
+
 The focused benchmark is intentionally application-shaped. Cold complete
 workflow setup and established Inventory selection round trips are reported
 separately; allocation includes UI application work and is not mislabeled as a
@@ -985,7 +999,7 @@ Network hot-loop zero-allocation claim. The immutable N0.3 protocol microbaselin
 remains the protocol-mechanism reference. N0.4 does not justify reopening that
 machine before N0.5/N0.6 provide real transport and high-rate state workloads.
 
-### N0.5 — Real UDP transport/session runtime
+### N0.5 — Real UDP transport/session runtime — accepted
 
 Deliver persistent UDP receive/send ownership, bounded endpoint/pre-auth state,
 path validation, timeout/drain, cleanup, and localhost production transport.
@@ -998,6 +1012,44 @@ client cleanup, and exact session/pool balance after churn.
 
 Gate: ProtocolLoopback and localhost UDP produce the same normalized
 protocol/application trace for the real application vertical.
+
+The accepted implementation uses connected nonblocking IPv4 UDP sockets on the
+same owner thread as `NetworkProtocolPeer`. This deliberately removes any hidden
+cross-thread packet-buffer handoff. Socket buffers, datagram size, handshake
+pumps, cookie lifetime, idle timeout, and drain timeout are explicit limits.
+Empty receive polling avoids normal-path `WouldBlock` exceptions and preserves
+the warmed 0-B secure-delivery profile.
+
+The secure handshake crosses the real sockets. Its stateless cookie binds the
+client path and a current/previous monotonic expiry bucket before connection
+allocation and ECDH. Connected socket filtering rejects unrelated paths. Fresh
+reconnect owns fresh socket endpoints and independently derived keys. Prior UI
+and application traffic is additionally fenced by the application-session epoch;
+before authentication, detach messages are ignored rather than selecting an
+arbitrary future epoch.
+
+Graceful shutdown drains reliable retention or reaches its bounded deadline
+before socket close. Authenticated keepalives preserve idle sessions without
+creating application messages; lack of authenticated receive activity reaches
+the idle/drain policy. Permanent gates cover real bidirectional delivery, pinned
+identity failure, spoofed paths, graceful/abrupt cleanup, reconnect isolation,
+pre-auth failure churn, outstanding sends, the exact N0.4 workflow, delayed
+detach fencing, and warmed 0-B secure UDP delivery.
+
+Accepted paired application evidence:
+
+| Scenario | ProtocolLoopback | localhost UDP | UDP / loopback |
+| --- | ---: | ---: | ---: |
+| Complete cold workflow mean | 2.178 ms | 2.368 ms | 1.087x |
+| Established Select mean | 240.457 us | 241.120 us | 1.003x |
+
+These same-process localhost values are not Internet-latency claims. With tiered
+compilation and ReadyToRun disabled, the established application path is at parity;
+the cold path includes real socket creation/handshake and was 8.7% slower in the
+accepted observation. The important result is semantic parity and bounded ownership. Application allocation
+includes UI/game work, while the kernel gate separately proves warmed UDP delivery
+at 0 B. Immutable evidence:
+[`network-n0.5-real-udp-application-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.5-real-udp-application-2026-08-14.json).
 
 ### N0.6 — Authoritative input and replicated world state
 

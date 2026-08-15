@@ -136,6 +136,33 @@ public sealed class UiModel
         _definition.ValidateAction(request, this);
     }
 
+    /// <summary>
+    /// Tries to validate untrusted semantic intent against this retained model.
+    /// </summary>
+    /// <remarks>
+    /// Use this at a server/application boundary before entering authoritative
+    /// game logic. It contains only expected definition, source, row, input,
+    /// and enabled-state rejection. Exceptions raised after successful
+    /// validation remain implementation or authority failures and must not be
+    /// converted into ordinary user rejection.
+    /// </remarks>
+    public bool TryValidateAction(in UiActionRequest request)
+    {
+        try
+        {
+            _definition.ValidateAction(request, this);
+            return true;
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private static UiSlotValueKind ToSlotValueKind(UiValueKind kind) => kind switch
     {
         UiValueKind.Text => UiSlotValueKind.Text,

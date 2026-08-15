@@ -2,8 +2,8 @@
 
 Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accepted.
 N0.3 secure reliable ProtocolLoopback is accepted below this layer; N0.4 remote
-application binding is accepted beside it. Real transport remains N0.5 and
-recipient scheduling remains N0.7 work.
+application binding is accepted beside it. N0.5 carries the same binding over
+real connected localhost UDP; N0.6 input/state and N0.7 recipient scheduling remain.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical

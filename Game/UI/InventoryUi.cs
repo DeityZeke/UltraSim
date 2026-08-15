@@ -193,7 +193,11 @@ public sealed class InventoryUiController : IDisposable
         EnsureOperational();
         if (!_sessions.TryGetValue(request.Instance, out Session? session))
             return;
-        session.Model.ValidateAction(request);
+        // Remote decoders can prove only the action envelope. Definition,
+        // source, row, input, and enabled-state validity belong to this
+        // retained application model and must reject before authority begins.
+        if (!session.Model.TryValidateAction(request))
+            return;
         if (request.Action == InventoryUi.Select)
         {
             HandleSelection(session, request.Row);

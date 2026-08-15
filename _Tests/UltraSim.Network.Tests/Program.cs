@@ -25,8 +25,9 @@ foreach ((string name, Action body) in tests)
 
 N02FoundationTests.RunAll();
 N03ProtocolTests.RunAll();
+N05UdpTransportTests.RunAll();
 
-Console.WriteLine($"All {tests.Length} Network N0.0 tests plus N0.2/N0.3 tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0.0 tests plus N0.2/N0.3/N0.5 tests passed.");
 
 static void ConnectionIdentityIsGenerationalAndFixedWidth()
 {

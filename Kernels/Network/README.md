@@ -1,15 +1,15 @@
 # UltraSim Network kernel
 
 Status: N0.0 contracts, N0.1 game projection/OfflineDirect, N0.2 bounded kernel
-foundations, and N0.3 secure reliable ProtocolLoopback plus adversarial acceptance
-hardening are accepted. Remote
-Admission/UI begins at N0.4; real transport remains N0.5.
+foundations, N0.3 secure reliable ProtocolLoopback, N0.4 remote Admission/UI, and
+N0.5 real connected-UDP transport are accepted. Authoritative input and replicated
+world state begin at N0.6.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
 state, packet ownership, producer-owned rings, canonical framing, generated
-codecs/manifests, and deterministic datagrams. It does not open sockets,
-authenticate accounts, capture game state, or invent an alternate authority.
+codecs/manifests, deterministic datagrams, and owner-thread connected UDP. It does
+not authenticate accounts, capture game state, or invent an alternate authority.
 
 The complete forward plan is [Network V3](../../Docs/Plans/NETWORK.md).
 
@@ -125,16 +125,15 @@ The bounded delivery machine provides:
 
 The loopback cookie uses a fixed path token and protocol time uses deterministic
 steps. N0.5 binds cookies to real endpoint/path identity and expiry and maps timing
-to a real monotonic clock. N0.3 does not implement time-based packet pacing; real
-pacing is N0.5 transport policy. N0.6 supplies game-specific input redundancy/expiry;
+to a real monotonic clock. Monotonic UDP peers pace when RTT/CWND produces a
+nonzero millisecond interval. N0.6 supplies game-specific input redundancy/expiry;
 N0.7 supplies full recipient fairness and scheduling.
 
 N0.3 remains single-owner. The N0.2 SPSC ring proves token transport and the packet
 pool proves single-owner packet memory independently; cross-thread packet-memory
-handoff is not claimed. N0.5 must admit per-owner pools or one transactional
-ownership-transfer-plus-publication primitive before a socket worker touches buffers.
-The N0.2 and N0.3 ownership implementations remain deliberately independent proofs
-until N0.5 either integrates them or removes the redundant path.
+handoff is not claimed. N0.5 keeps socket I/O and protocol buffers on the same
+owner thread, so no handoff exists. A future socket worker must admit per-owner
+pools or one transactional ownership-transfer-plus-publication primitive first.
 
 Reliable-head, ACK-record, and deterministic-datagram selection still use bounded
 linear scans. They are acceptable at admitted N0.3 capacities; N0.7/N0.10 scale
@@ -216,8 +215,29 @@ The final observation is preserved separately as
 It does not overwrite or normalize the
 [`replay-hardened`](../../_Benchmarks/Baselines/network-n0.3-secure-protocol-replay-hardened-2026-08-14.json)
 performance reference. N0.3 is accepted and frozen after this adversarial
-hardening; N0.4 must measure the complete application path before any further
-protocol micro-optimization is considered.
+hardening. N0.4 and N0.5 now measure the complete application path through
+ProtocolLoopback and UDP; neither result justifies reopening N0.3 micro-optimization.
+
+## N0.5 connected UDP transport
+
+`UdpProtocolSession` runs the accepted secure peers across actual connected,
+nonblocking localhost UDP sockets. `UdpProtocolLimits` bounds datagram bytes,
+configured socket buffers, handshake work, cookie lifetime, idle retirement, and
+graceful drain. Socket and protocol state share one owner thread.
+
+The handshake cookie covers the client address/port and a current or immediately
+previous monotonic time bucket. Server pinning, ECDH, transcript signature, secret
+proofs, AEAD, replay, delivery ACK, lanes, fragmentation, and application meaning
+remain the N0.3/N0.4 contracts. Connected-path filtering rejects unrelated source
+endpoints before protocol parsing.
+
+Normal pumping uses monotonic milliseconds for RTT, retransmission, loss discovery,
+and admitted pacing. Empty receives poll readiness rather than allocate a normal
+`SocketException`; the warmed secure UDP delivery test remains 0 B. Drain closes
+the path after reliable retention empties or its deadline expires. Authenticated
+keepalives preserve live idle paths without acquiring application meaning. Fresh reconnects
+own fresh endpoints and independently derived secrets. The accepted topology is a
+same-process localhost proof, not a WAN-latency or socket-worker claim.
 
 ## Evidence admission
 
@@ -317,7 +337,7 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 ```
 
 N0.1 is implemented by [Game replication](../../Game/Replication/README.md).
-N0.4 now binds remote game authentication, Admission, CharacterSelect,
-Inventory, and the existing UI semantics through ProtocolLoopback above this
-dependency-clean kernel. N0.5 replaces only the deterministic datagram topology
-with real UDP/session ownership while retaining the same application vertical.
+N0.4 binds remote game authentication, Admission, CharacterSelect, Inventory,
+and the existing UI semantics through ProtocolLoopback above this dependency-clean
+kernel. Accepted N0.5 replaces only byte transport/session ownership with real
+UDP while retaining the same application vertical and complete client-state oracle.

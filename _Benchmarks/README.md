@@ -37,13 +37,15 @@ when those systems exist.
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |
+| `UltraSim.Network.Application.Tests --benchmark-udp` | N0.5 paired secure ProtocolLoopback/real localhost UDP run of the exact N0.4 application workflow and established Inventory interaction. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
 
 Network N0.1 adds game-projection/OfflineDirect evidence, N0.2 adds fixed-runtime
 kernel micro evidence, N0.3 adds a standalone secure ProtocolLoopback baseline,
-and N0.4 adds application-level semantic parity and interaction evidence.
+N0.4 adds application-level semantic parity and interaction evidence, and N0.5
+changes only byte transport/session ownership while retaining that oracle.
 None is mislabeled as a V2/V3 protocol ratio. Ratios become eligible only when an
 equivalent reviewed profile exists.
 

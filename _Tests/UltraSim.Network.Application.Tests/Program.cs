@@ -23,17 +23,21 @@ internal static class Program
         var tests = new (string Name, Action Body)[]
         {
             ("RemoteWorkflowMatchesOfflineDirect", RemoteWorkflowMatchesOfflineDirect),
+            ("LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect", LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect),
             ("RemoteWorkflowConvergesUnderDeterministicImpairment", RemoteWorkflowConvergesUnderImpairment),
             ("UnauthenticatedApplicationActionHasNoAuthority", UnauthenticatedApplicationActionHasNoAuthority),
             ("AuthenticationCapacityFailureIsContained", AuthenticationCapacityFailureIsContained),
             ("AuthenticationImplementationFailureDetachesWithoutDomainRejection", AuthenticationImplementationFailureDetachesWithoutDomainRejection),
             ("ControlAndCharacterSelectProgressThroughBulkBacklog", ControlAndCharacterSelectProgressThroughBulkBacklog),
             ("DuplicateAndStaleActionsCannotRepeatAuthority", DuplicateAndStaleActionsCannotRepeatAuthority),
+            ("MalformedSemanticActionsAreContainedBeforeAuthority", MalformedSemanticActionsAreContainedBeforeAuthority),
             ("PresentationFailureAfterCommitDoesNotRollbackAuthority", PresentationFailureAfterCommitDoesNotRollbackAuthority),
             ("RejectedHotOpenRecoversThroughColdResnapshot", RejectedHotOpenRecoversThroughColdResnapshot),
             ("DisconnectDisposesRemoteClientProjection", DisconnectDisposesRemoteClientProjection),
             ("DisconnectCleanupContinuesAfterRendererCloseFailure", DisconnectCleanupContinuesAfterRendererCloseFailure),
             ("ReconnectStartsFreshApplicationSession", ReconnectStartsFreshApplicationSession),
+            ("DelayedPriorDetachCannotRetireFreshUdpApplication", DelayedPriorDetachCannotRetireFreshUdpApplication),
+            ("UdpDisconnectDrainsTransportAfterSemanticDetach", UdpDisconnectDrainsTransportAfterSemanticDetach),
         };
 
         foreach ((string name, Action body) in tests)
@@ -41,8 +45,10 @@ internal static class Program
             body();
             Console.WriteLine($"PASS {name}");
         }
-        Console.WriteLine($"All {tests.Length} Network N0.4 application tests passed.");
-        if (args.Contains("--benchmark", StringComparer.Ordinal))
+        Console.WriteLine($"All {tests.Length} Network N0.4/N0.5 application tests passed.");
+        if (args.Contains("--benchmark-udp", StringComparer.Ordinal))
+            RunUdpBenchmark(args);
+        else if (args.Contains("--benchmark", StringComparer.Ordinal))
             RunBenchmark(args);
     }
 
@@ -56,6 +62,19 @@ static void RemoteWorkflowMatchesOfflineDirect()
         "ProtocolLoopback changed the normalized semantic UI trace.");
     Equal(direct.ClientState, remote.ClientState,
         "ProtocolLoopback changed the eventual Client/Core state.");
+}
+
+static void LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect()
+{
+    ScenarioResult direct = RunOfflineDirect();
+    ScenarioResult loopback = RunRemote(default, disconnect: false);
+    ScenarioResult udp = RunRemoteUdp(disconnect: false);
+    Equal(direct.Authority, udp.Authority,
+        "Real UDP changed the authoritative inventory outcome.");
+    Equal(loopback.UiTrace, udp.UiTrace,
+        "Real UDP changed the normalized semantic UI trace.");
+    Equal(direct.ClientState, udp.ClientState,
+        "Real UDP changed complete retained Client/Core state.");
 }
 
 static void RemoteWorkflowConvergesUnderImpairment()
@@ -99,12 +118,61 @@ static void DuplicateAndStaleActionsCannotRepeatAuthority()
     Equal(once, fixture.CaptureAuthority(), "A duplicate UI action repeated an authority mutation.");
 }
 
+static void MalformedSemanticActionsAreContainedBeforeAuthority()
+{
+    using Fixture fixture = Fixture.Create(remote: true, default);
+    fixture.AuthenticateAndEnter();
+    fixture.OpenInventory();
+    string before = fixture.CaptureAuthority();
+    UiRowId bread = fixture.FindInventoryRow("Bread");
+    UiElementId wrongSource = InventoryUi.Definition.Elements.ToArray()
+        .First(static element => element.Action == InventoryUi.Split).Id;
+
+    UiActionRequest[] hostile =
+    [
+        new(fixture.InventoryView, InventoryUi.Definition.Handle,
+            UiActionId.Invalid, clientSequence: 100),
+        new(fixture.InventoryView, InventoryUi.Definition.Handle,
+            InventoryUi.Select, bread, clientSequence: 101, source: wrongSource),
+        new(fixture.InventoryView, InventoryUi.Definition.Handle,
+            InventoryUi.Select, new UiRowId(ulong.MaxValue), clientSequence: 102),
+        new(fixture.InventoryView, InventoryUi.Definition.Handle,
+            InventoryUi.Split, clientSequence: 103),
+        new(fixture.InventoryView, InventoryUi.Definition.Handle,
+            InventoryUi.Split, bread, clientSequence: 104),
+        new(fixture.InventoryView, InventoryUi.Definition.Handle,
+            InventoryUi.Select, bread, UiValue.FromText("wrong"), clientSequence: 105),
+    ];
+
+    foreach (UiActionRequest request in hostile)
+    {
+        fixture.QueueRawAction(request);
+        Equal(RemoteServerApplicationState.Active, fixture.Server!.GetSnapshot().State,
+            "Malformed semantic intent escaped the application boundary.");
+        Equal(before, fixture.CaptureAuthority(),
+            "Malformed semantic intent reached authoritative Inventory state.");
+    }
+
+    // A later well-formed sequence still works, proving the session remains usable.
+    fixture.QueueRawAction(new UiActionRequest(
+        fixture.InventoryView, InventoryUi.Definition.Handle,
+        InventoryUi.Select, bread, clientSequence: 106));
+    fixture.DriveUntil(() =>
+        fixture.Client.GetActionState(fixture.InventoryView, InventoryUi.Split).Enabled);
+    fixture.QueueRawAction(new UiActionRequest(
+        fixture.InventoryView, InventoryUi.Definition.Handle,
+        InventoryUi.Split, clientSequence: 107));
+    fixture.DriveUntil(() => fixture.ClientRowsForTesting() == "Bread|Bread|Iron Sword");
+    True(fixture.CaptureAuthority().Contains("bread:4", StringComparison.Ordinal));
+    True(fixture.CaptureAuthority().Contains("bread:1", StringComparison.Ordinal));
+}
+
 static void ControlAndCharacterSelectProgressThroughBulkBacklog()
 {
     using Fixture fixture = Fixture.Create(remote: true, default);
     byte[] bulk = new byte[15_000];
     for (int index = 0; index < 4; index++)
-        Equal(NetworkQueueStatus.Accepted, fixture.Loopback!.Server.TryQueue(
+        Equal(NetworkQueueStatus.Accepted, fixture.ServerPeer.TryQueue(
             RemoteUiOperationHeaderCodec.Descriptor.Id, bulk));
     fixture.AuthenticateAndEnter();
     Equal(RemoteClientApplicationState.Active, fixture.ClientBridge!.GetSnapshot().State);
@@ -164,11 +232,11 @@ static void UnauthenticatedApplicationActionHasNoAuthority()
     byte[] message = new byte[UltraSimGameProtocol.MaximumMessageBytes];
     True(UltraSimGameProtocol.TryWriteUiAction(
         message, fixture.ApplicationSessionEpoch, semantic.AsSpan(0, semanticBytes), out int messageBytes));
-    Equal(NetworkQueueStatus.Accepted, fixture.Loopback!.Client.TryQueue(
+    Equal(NetworkQueueStatus.Accepted, fixture.ClientPeer.TryQueue(
         RemoteUiActionHeaderCodec.Descriptor.Id, message.AsSpan(0, messageBytes)));
     for (int step = 0; step < 64; step++)
     {
-        fixture.Loopback.Pump();
+        fixture.PumpTransport();
         fixture.ClientBridge!.ProcessReceived();
         fixture.Server!.ProcessReceived();
     }
@@ -218,6 +286,43 @@ static void ReconnectStartsFreshApplicationSession()
         "Reconnect did not establish a fresh application/UI session.");
 }
 
+static void DelayedPriorDetachCannotRetireFreshUdpApplication()
+{
+    using Fixture fixture = Fixture.CreateUdp();
+    var stale = new RemoteSessionDetachMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch - 1,
+    };
+    byte[] payload = new byte[RemoteSessionDetachMessageCodec.EncodedSize];
+    True(RemoteSessionDetachMessageCodec.TryWriteExact(payload, in stale));
+    Equal(NetworkQueueStatus.Accepted,
+        fixture.ServerPeer.TryQueue(RemoteSessionDetachMessageCodec.Descriptor.Id, payload));
+    for (int pump = 0; pump < 64; pump++)
+    {
+        fixture.PumpTransport();
+        fixture.ClientBridge!.ProcessReceived();
+        fixture.Server!.ProcessReceived();
+    }
+    Equal(RemoteClientApplicationState.AwaitingAuthentication,
+        fixture.ClientBridge!.GetSnapshot().State,
+        "A prior-session detach retired a fresh unauthenticated client binding.");
+    fixture.AuthenticateAndEnter();
+    Equal(RemoteClientApplicationState.Active, fixture.ClientBridge.GetSnapshot().State);
+}
+
+static void UdpDisconnectDrainsTransportAfterSemanticDetach()
+{
+    using Fixture fixture = Fixture.CreateUdp();
+    fixture.AuthenticateAndEnter();
+    fixture.OpenInventory();
+    fixture.Server!.Disconnect();
+    fixture.BeginTransportDrain();
+    fixture.DriveUntil(() =>
+        fixture.ClientBridge!.GetSnapshot().State == RemoteClientApplicationState.Detached);
+    fixture.DriveUntil(() => fixture.IsTransportClosed);
+    Equal(0, fixture.Renderer.ActiveHandles);
+}
+
 static void DisconnectCleanupContinuesAfterRendererCloseFailure()
 {
     using Fixture fixture = Fixture.Create(remote: true, default);
@@ -257,14 +362,33 @@ static ScenarioResult RunRemote(NetworkImpairmentOptions impairment, bool discon
     fixture.AuthenticateAndEnter();
     fixture.OpenInventory();
     fixture.SplitAndEquip();
-    fixture.DriveUntil(() => fixture.Loopback!.Client.ReliableQueued == 0 &&
-        fixture.Loopback.Server.ReliableQueued == 0);
+    fixture.DriveUntil(() => fixture.ClientPeer.ReliableQueued == 0 &&
+        fixture.ServerPeer.ReliableQueued == 0);
     ScenarioResult result = fixture.CaptureResult();
     if (disconnect)
     {
         fixture.Server!.Disconnect();
         fixture.DriveUntil(() =>
             fixture.ClientBridge!.GetSnapshot().State == RemoteClientApplicationState.Detached);
+    }
+    return result;
+}
+
+static ScenarioResult RunRemoteUdp(bool disconnect)
+{
+    using Fixture fixture = Fixture.CreateUdp();
+    fixture.AuthenticateAndEnter();
+    fixture.OpenInventory();
+    fixture.SplitAndEquip();
+    fixture.DriveUntil(() => fixture.ClientPeer.ReliableQueued == 0 &&
+        fixture.ServerPeer.ReliableQueued == 0);
+    ScenarioResult result = fixture.CaptureResult();
+    if (disconnect)
+    {
+        fixture.Server!.Disconnect();
+        fixture.BeginTransportDrain();
+        fixture.DriveUntil(() => fixture.ClientBridge!.GetSnapshot().State ==
+            RemoteClientApplicationState.Detached);
     }
     return result;
 }
@@ -363,6 +487,105 @@ static void RunBenchmark(string[] args)
     }
 }
 
+static void RunUdpBenchmark(string[] args)
+{
+    const int samples = 11;
+    _ = RunRemote(default, disconnect: false);
+    _ = RunRemoteUdp(disconnect: false);
+    var loopback = new double[samples];
+    var udp = new double[samples];
+    var udpPumps = new ulong[samples];
+    long coldAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+    for (int sample = 0; sample < samples; sample++)
+    {
+        if ((sample & 1) == 0)
+        {
+            loopback[sample] = MeasureScenario(
+                () => RunRemote(default, disconnect: false), out _);
+            udp[sample] = MeasureScenario(
+                () => RunRemoteUdp(disconnect: false), out ScenarioResult result);
+            udpPumps[sample] = result.ProtocolSteps;
+        }
+        else
+        {
+            udp[sample] = MeasureScenario(
+                () => RunRemoteUdp(disconnect: false), out ScenarioResult result);
+            udpPumps[sample] = result.ProtocolSteps;
+            loopback[sample] = MeasureScenario(
+                () => RunRemote(default, disconnect: false), out _);
+        }
+    }
+    long coldAllocated = GC.GetAllocatedBytesForCurrentThread() - coldAllocatedBefore;
+    Array.Sort(loopback);
+    Array.Sort(udp);
+    Array.Sort(udpPumps);
+
+    using Fixture loopbackFixture = Fixture.Create(remote: true, default);
+    loopbackFixture.AuthenticateAndEnter();
+    loopbackFixture.OpenInventory();
+    using Fixture udpFixture = Fixture.CreateUdp();
+    udpFixture.AuthenticateAndEnter();
+    udpFixture.OpenInventory();
+    loopbackFixture.Renderer.RecordTrace = false;
+    udpFixture.Renderer.RecordTrace = false;
+    loopbackFixture.MeasureSelectionCycles(8);
+    udpFixture.MeasureSelectionCycles(8);
+    const int interactions = 64;
+    var loopbackInteraction = new double[samples];
+    var udpInteraction = new double[samples];
+    long establishedAllocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+    for (int sample = 0; sample < samples; sample++)
+    {
+        if ((sample & 1) == 0)
+        {
+            loopbackInteraction[sample] = loopbackFixture.MeasureSelectionCycles(interactions);
+            udpInteraction[sample] = udpFixture.MeasureSelectionCycles(interactions);
+        }
+        else
+        {
+            udpInteraction[sample] = udpFixture.MeasureSelectionCycles(interactions);
+            loopbackInteraction[sample] = loopbackFixture.MeasureSelectionCycles(interactions);
+        }
+    }
+    long establishedAllocated =
+        GC.GetAllocatedBytesForCurrentThread() - establishedAllocatedBefore;
+    Array.Sort(loopbackInteraction);
+    Array.Sort(udpInteraction);
+    var report = new N05BenchmarkResult(
+        "ultrasim-network-n0.5-real-udp-application-v1",
+        DateTimeOffset.UtcNow,
+        Environment.Version.ToString(),
+        System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        Environment.ProcessorCount,
+        Environment.GetEnvironmentVariable("DOTNET_TieredCompilation") ?? "runtime-default",
+        Environment.GetEnvironmentVariable("DOTNET_ReadyToRun") ?? "runtime-default",
+        samples,
+        loopback.Average(),
+        Percentile(loopback, 0.95),
+        udp.Average(),
+        Percentile(udp, 0.95),
+        udp.Average() / loopback.Average(),
+        udpPumps[udpPumps.Length / 2],
+        coldAllocated,
+        interactions,
+        loopbackInteraction.Average() / interactions,
+        Percentile(loopbackInteraction, 0.95) / interactions,
+        udpInteraction.Average() / interactions,
+        Percentile(udpInteraction, 0.95) / interactions,
+        udpInteraction.Average() / loopbackInteraction.Average(),
+        establishedAllocated,
+        "Same N0.4 application workflow and semantic oracle over secure deterministic ProtocolLoopback versus connected localhost UDP. UDP is single-owner nonblocking socket I/O with monotonic-millisecond RTO. Cold allocation includes fixture, socket, handshake, UI, and application setup; established allocation includes application/UI work and is not a transport-only zero-allocation claim. The kernel suite separately proves warmed secure UDP delivery at 0 B.");
+    string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+    Console.WriteLine(json);
+    int outputIndex = Array.IndexOf(args, "--output");
+    if (outputIndex >= 0 && outputIndex + 1 < args.Length)
+    {
+        string path = Path.GetFullPath(args[outputIndex + 1]);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, json + Environment.NewLine);
+    }
+}
+
 static double MeasureScenario(Func<ScenarioResult> scenario, out ScenarioResult result)
 {
     long started = Stopwatch.GetTimestamp();
@@ -383,14 +606,17 @@ sealed class Fixture : IDisposable
     private readonly LocalUiPort? _localPort;
     private readonly AdmissionService? _localAdmission;
     private InventoryUiController? _inventory;
+    private readonly StringBuilder _clientSemanticCheckpoints = new();
     private bool _disposed;
-    private readonly ulong _initialNetworkStep;
+    private readonly UdpProtocolSession? _udp;
+    private ulong _networkPumps;
 
     private Fixture(
         bool remote,
         NetworkImpairmentOptions impairment,
         NetworkProtocolLimits? protocolLimits = null,
-        RemoteIdentityAuthenticator? authenticator = null)
+        RemoteIdentityAuthenticator? authenticator = null,
+        bool udp = false)
     {
         _remote = remote;
         _composition = new UltraSimGameComposition(
@@ -409,19 +635,32 @@ sealed class Fixture : IDisposable
 
         if (remote)
         {
-            True(ProtocolLoopback.TryCreate(
-                protocolLimits ?? NetworkProtocolLimits.Default,
-                new DeterministicDatagramLimits(2_048, 512),
-                impairment,
-                out ProtocolLoopback? loopback,
-                out _,
-                UltraSimGameProtocol.Manifest));
-            Loopback = loopback!;
-            _initialNetworkStep = Loopback.GetSnapshot().Step;
-            ClientBridge = new RemoteUiClientBridge(Loopback.Client, Client);
+            if (udp)
+            {
+                True(UdpProtocolSession.TryCreate(
+                    protocolLimits ?? NetworkProtocolLimits.Default,
+                    new UdpProtocolLimits(512, 256 * 1024, 256 * 1024,
+                        4_096, 30_000, 30_000, 5_000, 5_000),
+                    out UdpProtocolSession? session,
+                    out _,
+                    UltraSimGameProtocol.Manifest));
+                _udp = session!;
+            }
+            else
+            {
+                True(ProtocolLoopback.TryCreate(
+                    protocolLimits ?? NetworkProtocolLimits.Default,
+                    new DeterministicDatagramLimits(2_048, 512),
+                    impairment,
+                    out ProtocolLoopback? loopback,
+                    out _,
+                    UltraSimGameProtocol.Manifest));
+                Loopback = loopback!;
+            }
+            ClientBridge = new RemoteUiClientBridge(ClientPeer, Client);
             ApplicationSessionEpoch = 77;
             Server = new RemoteGameApplicationSession(
-                Loopback.Server,
+                ServerPeer,
                 _runtime.Game,
                 _composition,
                 authenticator ?? Authenticate,
@@ -439,6 +678,8 @@ sealed class Fixture : IDisposable
     internal RecordingRenderer Renderer { get; }
     internal UiClientRuntime Client { get; }
     internal ProtocolLoopback? Loopback { get; }
+    internal NetworkProtocolPeer ClientPeer => Loopback?.Client ?? _udp!.Client;
+    internal NetworkProtocolPeer ServerPeer => Loopback?.Server ?? _udp!.Server;
     internal RemoteUiClientBridge? ClientBridge { get; }
     internal RemoteGameApplicationSession? Server { get; }
     internal ulong ApplicationSessionEpoch { get; }
@@ -450,6 +691,11 @@ sealed class Fixture : IDisposable
         NetworkProtocolLimits? protocolLimits = null,
         RemoteIdentityAuthenticator? authenticator = null) =>
         new(remote, impairment, protocolLimits, authenticator);
+
+    internal static Fixture CreateUdp(
+        NetworkProtocolLimits? protocolLimits = null,
+        RemoteIdentityAuthenticator? authenticator = null) =>
+        new(remote: true, default, protocolLimits, authenticator, udp: true);
 
     internal void AuthenticateAndEnter()
     {
@@ -474,6 +720,7 @@ sealed class Fixture : IDisposable
         ReadOnlySpan<UiListRow> rows = Client.GetRows(
             waiting.CharacterSelectView, CharacterSelectUi.Characters);
         Equal(1, rows.Length, "CharacterSelect did not contain Alice.");
+        CaptureClientCheckpoint("character-select", waiting.CharacterSelectView);
         Client.SubmitAction(waiting.CharacterSelectView, CharacterSelectUi.Play, rows[0].Id);
         if (_remote)
             DriveUntil(() => admission.TryGetSession(new ParticipantId(41), out AdmissionResult value) &&
@@ -490,6 +737,7 @@ sealed class Fixture : IDisposable
         InventoryView = opened.View;
         if (_remote) DriveUntil(() => Client.OpenViewCount == 1);
         Equal("Bread|Iron Sword", ClientRows());
+        CaptureClientCheckpoint("inventory-open", InventoryView);
     }
 
     internal void SplitAndEquip()
@@ -497,15 +745,19 @@ sealed class Fixture : IDisposable
         UiRowId bread = FindInventoryRow("Bread");
         Client.SubmitAction(InventoryView, InventoryUi.Select, bread);
         if (_remote) DriveUntil(() => Client.GetActionState(InventoryView, InventoryUi.Split).Enabled);
+        CaptureClientCheckpoint("bread-selected", InventoryView);
         Client.SubmitAction(InventoryView, InventoryUi.Split);
         if (_remote) DriveUntil(() => ClientRows() == "Bread|Bread|Iron Sword");
+        CaptureClientCheckpoint("bread-split", InventoryView);
 
         UiRowId sword = FindInventoryRow("Iron Sword");
         Client.SubmitAction(InventoryView, InventoryUi.Select, sword);
         if (_remote) DriveUntil(() => Client.GetActionState(InventoryView, InventoryUi.Equip).Enabled);
+        CaptureClientCheckpoint("sword-selected", InventoryView);
         Client.SubmitAction(InventoryView, InventoryUi.Equip);
         if (_remote) DriveUntil(() => ClientRows() == "Bread|Bread");
         Equal("Bread|Bread", ClientRows());
+        CaptureClientCheckpoint("sword-equipped", InventoryView);
 
         True(_inventory!.Close(InventoryView));
         if (_remote) DriveUntil(() => Client.OpenViewCount == 0);
@@ -514,6 +766,7 @@ sealed class Fixture : IDisposable
         InventoryView = reopened.View;
         if (_remote) DriveUntil(() => Client.OpenViewCount == 1);
         Equal("Bread|Bread", ClientRows());
+        CaptureClientCheckpoint("inventory-hot-reopen", InventoryView);
     }
 
     internal void OpenSecondInventory()
@@ -533,8 +786,25 @@ sealed class Fixture : IDisposable
     internal ScenarioResult CaptureResult() => new(
         CaptureAuthority(),
         Renderer.Trace,
-        ClientRows(),
-        Loopback is null ? 0 : Loopback.GetSnapshot().Step - _initialNetworkStep);
+        _clientSemanticCheckpoints.ToString(),
+        _networkPumps);
+
+    internal string ClientRowsForTesting() => ClientRows();
+
+    internal void QueueRawAction(UiActionRequest request)
+    {
+        if (!_remote) throw new InvalidOperationException("Raw remote intent requires a network transport.");
+        byte[] semantic = new byte[UltraSimGameProtocol.DefaultUiWireLimits.MaximumOperationBytes];
+        True(UiSemanticWireCodec.TryWriteAction(
+            semantic, request, UltraSimGameProtocol.DefaultUiWireLimits, out int semanticBytes));
+        byte[] message = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteUiAction(
+            message, ApplicationSessionEpoch, semantic.AsSpan(0, semanticBytes), out int messageBytes));
+        ulong processed = Server!.GetSnapshot().MessagesProcessed;
+        Equal(NetworkQueueStatus.Accepted, ClientPeer.TryQueue(
+            RemoteUiActionHeaderCodec.Descriptor.Id, message.AsSpan(0, messageBytes)));
+        DriveUntil(() => Server.GetSnapshot().MessagesProcessed > processed);
+    }
 
     internal string CaptureAuthority()
     {
@@ -564,19 +834,30 @@ sealed class Fixture : IDisposable
         for (int step = 0; step < maximumSteps; step++)
         {
             if (complete()) return;
-            Loopback!.Pump();
+            PumpTransport();
             ClientBridge!.ProcessReceived();
             Server!.ProcessReceived();
         }
         throw new InvalidOperationException("The remote application workflow did not converge.");
     }
 
+    internal void PumpTransport()
+    {
+        if (!_remote) return;
+        if (Loopback is not null) Loopback.Pump();
+        else _udp!.Pump();
+        _networkPumps++;
+    }
+
+    internal void BeginTransportDrain() => _udp?.BeginDrain();
+    internal bool IsTransportClosed => _udp?.State == UdpProtocolSessionState.Closed;
+
     internal double MeasureSelectionCycles(int count)
     {
         UiRowId bread = FindInventoryRow("Bread");
         UiRowId sword = FindInventoryRow("Iron Sword");
         if (_remote)
-            DriveUntil(() => Loopback!.Client.ReliableQueued == 0 && Loopback.Server.ReliableQueued == 0);
+            DriveUntil(() => ClientPeer.ReliableQueued == 0 && ServerPeer.ReliableQueued == 0);
         long started = Stopwatch.GetTimestamp();
         for (int index = 0; index < count; index++)
         {
@@ -602,7 +883,9 @@ sealed class Fixture : IDisposable
 
         var renderer = new RecordingRenderer();
         var client = new UiClientRuntime(renderer);
-        using var bridge = new RemoteUiClientBridge(Loopback!.Client, client);
+        if (Loopback is null)
+            throw new InvalidOperationException("The in-place reconnect fixture is specific to ProtocolLoopback.");
+        using var bridge = new RemoteUiClientBridge(Loopback.Client, client);
         using var server = new RemoteGameApplicationSession(
             Loopback.Server,
             _runtime.Game,
@@ -613,7 +896,7 @@ sealed class Fixture : IDisposable
         if (!bridge.TryBeginAuthentication(2, "test", "alice-token")) return false;
         for (int step = 0; step < 50_000; step++)
         {
-            Loopback.Pump();
+            PumpTransport();
             bridge.ProcessReceived();
             server.ProcessReceived();
             if (bridge.GetSnapshot().State == RemoteClientApplicationState.Active &&
@@ -654,6 +937,7 @@ sealed class Fixture : IDisposable
             try { Server?.Dispose(); } catch { }
             try { ClientBridge?.Dispose(); } catch { }
             Loopback?.Dispose();
+            _udp?.Dispose();
         }
         else
         {
@@ -668,6 +952,81 @@ sealed class Fixture : IDisposable
         Client.GetRows(InventoryView, InventoryUi.Items).ToArray()
             .Select(static row => row.Values[0].Text ?? string.Empty)
             .Order(StringComparer.Ordinal));
+
+    private void CaptureClientCheckpoint(string stage, UiViewInstanceId instance)
+    {
+        UiViewInfo view = Client.GetView(instance);
+        UiModel model = Client.SnapshotModel(instance);
+        CompiledUiDefinition definition = model.Definition;
+        StringBuilder text = _clientSemanticCheckpoints;
+        AppendText(text, stage);
+        text.Append("|open=").Append(Client.OpenViewCount)
+            .Append("|cache-count=").Append(Client.CachedDefinitionCount)
+            .Append("|view=").Append(view.Instance.Value)
+            .Append("|sequence=").Append(view.LastSequence)
+            .Append("|handle=").Append(view.Definition.High.ToString("x16"))
+            .Append(view.Definition.Low.ToString("x16"));
+        UiDefinitionCacheKey cache = view.CacheKey;
+        text.Append("|cache=");
+        AppendText(text, cache.ServerIdentity);
+        AppendText(text, cache.CompositionIdentity);
+        text.Append(cache.ProtocolVersion).Append(':');
+        AppendText(text, cache.DefinitionKey.Value);
+        text.Append(cache.DefinitionVersion).Append(':')
+            .Append(cache.DefinitionHash).Append('|');
+
+        foreach (UiSlotDefinition slot in definition.Slots)
+        {
+            text.Append("S").Append(slot.Id.Value).Append(':');
+            AppendText(text, slot.Key);
+            text.Append((byte)slot.ValueKind).Append(':');
+            if (slot.ValueKind == UiSlotValueKind.List)
+            {
+                foreach (UiListRow row in model.GetRows(slot.Id))
+                {
+                    text.Append('R').Append(row.Id.Value).Append('[');
+                    foreach (UiValue value in row.Values) AppendValue(text, value);
+                    text.Append(']');
+                }
+            }
+            else
+            {
+                AppendValue(text, model.Get(slot.Id));
+            }
+            text.Append('|');
+        }
+        foreach (UiActionDefinition action in definition.Actions)
+        {
+            UiActionState state = model.GetActionState(action.Id);
+            text.Append("A").Append(action.Id.Value).Append(':');
+            AppendText(text, action.Key);
+            text.Append(state.Enabled ? '1' : '0').Append(':');
+            AppendText(text, state.UnavailableReason ?? string.Empty);
+            text.Append('|');
+        }
+        text.AppendLine();
+    }
+
+    private static void AppendValue(StringBuilder text, UiValue value)
+    {
+        text.Append((byte)value.Kind).Append(':');
+        switch (value.Kind)
+        {
+            case UiValueKind.Text:
+                AppendText(text, value.Text ?? string.Empty);
+                break;
+            case UiValueKind.Number:
+                text.Append(value.Number.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+                break;
+            case UiValueKind.Boolean:
+                text.Append(value.Boolean ? '1' : '0');
+                break;
+        }
+        text.Append(';');
+    }
+
+    private static void AppendText(StringBuilder text, string value) =>
+        text.Append(value.Length).Append(':').Append(value).Append(';');
 
     private static bool Authenticate(
         string provider,
@@ -765,6 +1124,31 @@ sealed record N04BenchmarkResult(
     double EstablishedProtocolMeanNanosecondsPerInteraction,
     double EstablishedProtocolP95NanosecondsPerInteraction,
     double EstablishedProtocolToDirectRatio,
+    long EstablishedCallerAllocatedBytes,
+    string Notes);
+
+sealed record N05BenchmarkResult(
+    string Workload,
+    DateTimeOffset CapturedAtUtc,
+    string Runtime,
+    string OperatingSystem,
+    int LogicalProcessorCount,
+    string TieredCompilation,
+    string ReadyToRun,
+    int Samples,
+    double ProtocolLoopbackMeanNanoseconds,
+    double ProtocolLoopbackP95Nanoseconds,
+    double LocalhostUdpMeanNanoseconds,
+    double LocalhostUdpP95Nanoseconds,
+    double UdpToLoopbackRatio,
+    ulong UdpPumpsMedian,
+    long ColdCallerAllocatedBytes,
+    int EstablishedInteractionsPerSample,
+    double EstablishedLoopbackMeanNanosecondsPerInteraction,
+    double EstablishedLoopbackP95NanosecondsPerInteraction,
+    double EstablishedUdpMeanNanosecondsPerInteraction,
+    double EstablishedUdpP95NanosecondsPerInteraction,
+    double EstablishedUdpToLoopbackRatio,
     long EstablishedCallerAllocatedBytes,
     string Notes);
 

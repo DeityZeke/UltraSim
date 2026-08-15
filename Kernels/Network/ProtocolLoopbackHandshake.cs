@@ -77,17 +77,74 @@ internal static class ProtocolLoopbackHandshake
         NetworkServerIdentity serverIdentity,
         ReadOnlySpan<byte> trustedServerPublicKey,
         int maximumSteps,
+        out ProtocolHandshakeResult result) =>
+        TryEstablish(
+            link.A,
+            link.B,
+            link.Limits.MaximumDatagramBytes,
+            static () => 1,
+            "protocol-loopback"u8.ToArray(),
+            link.Advance,
+            clientManifest,
+            serverManifest,
+            serverIdentity,
+            trustedServerPublicKey,
+            maximumSteps,
+            out result);
+
+    internal static bool TryEstablishUdp(
+        INetworkDatagramEndpoint client,
+        INetworkDatagramEndpoint server,
+        int maximumDatagramBytes,
+        Func<ulong> cookieTimeBucket,
+        byte[] clientPathBinding,
+        NetworkProtocolManifest clientManifest,
+        NetworkProtocolManifest serverManifest,
+        NetworkServerIdentity serverIdentity,
+        ReadOnlySpan<byte> trustedServerPublicKey,
+        int maximumPumps,
+        out ProtocolHandshakeResult result) =>
+        TryEstablish(
+            client,
+            server,
+            maximumDatagramBytes,
+            cookieTimeBucket,
+            clientPathBinding,
+            static () => Thread.Yield(),
+            clientManifest,
+            serverManifest,
+            serverIdentity,
+            trustedServerPublicKey,
+            maximumPumps,
+            out result);
+
+    private static bool TryEstablish(
+        INetworkDatagramEndpoint clientEndpoint,
+        INetworkDatagramEndpoint serverEndpoint,
+        int maximumDatagramBytes,
+        Func<ulong> cookieTimeBucket,
+        byte[] clientPathBinding,
+        Action advance,
+        NetworkProtocolManifest clientManifest,
+        NetworkProtocolManifest serverManifest,
+        NetworkServerIdentity serverIdentity,
+        ReadOnlySpan<byte> trustedServerPublicKey,
+        int maximumSteps,
         out ProtocolHandshakeResult result)
     {
         if (maximumSteps <= 0) throw new ArgumentOutOfRangeException(nameof(maximumSteps));
+        if (maximumDatagramBytes <= 0) throw new ArgumentOutOfRangeException(nameof(maximumDatagramBytes));
+        ArgumentNullException.ThrowIfNull(cookieTimeBucket);
+        ArgumentNullException.ThrowIfNull(clientPathBinding);
+        ArgumentNullException.ThrowIfNull(advance);
         if (!AesGcm.IsSupported) throw new PlatformNotSupportedException("AES-GCM is required by Network N0.3.");
 
         byte[] clientNonce = RandomNumberGenerator.GetBytes(NonceBytes);
         byte[] cookieKey = RandomNumberGenerator.GetBytes(32);
         byte[] cookie = new byte[CookieBytes];
-        byte[] clientBuffer = new byte[link.Limits.MaximumDatagramBytes];
-        byte[] serverBuffer = new byte[link.Limits.MaximumDatagramBytes];
-        byte[] receive = new byte[link.Limits.MaximumDatagramBytes];
+        byte[] clientBuffer = new byte[maximumDatagramBytes];
+        byte[] serverBuffer = new byte[maximumDatagramBytes];
+        byte[] receive = new byte[maximumDatagramBytes];
         byte[] cookieScratch = new byte[CookieBytes];
         byte[] signatureScratch = new byte[SignatureBytes];
         byte[] proofScratch = new byte[ProofBytes];
@@ -110,6 +167,7 @@ internal static class ProtocolLoopbackHandshake
         ulong challenges = 0;
         ulong validations = 0;
         ulong exchanges = 0;
+        int executedSteps = 0;
         var connections = new NetworkConnectionTable(1);
 
         using ECDiffieHellman clientEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
@@ -124,6 +182,7 @@ internal static class ProtocolLoopbackHandshake
         {
             for (int step = 0; step < maximumSteps && (!clientEstablished || !serverEstablished); step++)
             {
+                executedSteps = step + 1;
                 int clientLength;
                 if (!clientHasCookie)
                     clientLength = WriteClientHello(clientBuffer, clientManifest, clientNonce, clientPublic);
@@ -131,12 +190,12 @@ internal static class ProtocolLoopbackHandshake
                     clientLength = WriteClientKeyExchange(clientBuffer, clientManifest, clientNonce, clientPublic, cookie);
                 else
                     clientLength = WriteFinish(clientBuffer, ClientFinish, connection, epoch, clientMaster!, transcript!);
-                _ = link.A.TrySend(clientBuffer.AsSpan(0, clientLength));
+                _ = clientEndpoint.TrySend(clientBuffer.AsSpan(0, clientLength));
                 clientFlights++;
 
                 DrainServer();
                 DrainClient();
-                link.Advance();
+                advance();
             }
 
             if (!clientEstablished || !serverEstablished || clientMaster is null || serverMaster is null ||
@@ -151,29 +210,39 @@ internal static class ProtocolLoopbackHandshake
             }
 
             result = new(clientMaster, connection, epoch, connections, new(
-                true, checked((int)link.GetSnapshot().Step), clientFlights, serverFlights, invalid,
+                true, executedSteps, clientFlights, serverFlights, invalid,
                 challenges, validations, exchanges, connection, epoch));
             clientMaster = null;
             return true;
 
             void DrainServer()
             {
-                while (link.B.TryReceive(receive, out int length))
+                while (serverEndpoint.TryReceive(receive, out int length))
                 {
                     ReadOnlySpan<byte> datagram = receive.AsSpan(0, length);
                     if (TryReadClientHello(datagram, serverManifest, out ReadOnlySpan<byte> nonce, out ReadOnlySpan<byte> publicKey))
                     {
-                        ComputeCookie(cookieKey, nonce, publicKey, cookieScratch);
+                        ComputeCookie(cookieKey, nonce, publicKey, clientPathBinding,
+                            cookieTimeBucket(), cookieScratch);
                         int response = WriteCookieChallenge(serverBuffer, nonce, cookieScratch);
-                        _ = link.B.TrySend(serverBuffer.AsSpan(0, response));
+                        _ = serverEndpoint.TrySend(serverBuffer.AsSpan(0, response));
                         serverFlights++;
                         challenges++;
                         continue;
                     }
                     if (TryReadClientKeyExchange(datagram, serverManifest, out nonce, out publicKey, out ReadOnlySpan<byte> suppliedCookie))
                     {
-                        ComputeCookie(cookieKey, nonce, publicKey, cookieScratch);
-                        if (!CryptographicOperations.FixedTimeEquals(cookieScratch, suppliedCookie)) { invalid++; continue; }
+                        ulong currentBucket = cookieTimeBucket();
+                        ComputeCookie(cookieKey, nonce, publicKey, clientPathBinding,
+                            currentBucket, cookieScratch);
+                        bool cookieValid = CryptographicOperations.FixedTimeEquals(cookieScratch, suppliedCookie);
+                        if (!cookieValid && currentBucket != 0)
+                        {
+                            ComputeCookie(cookieKey, nonce, publicKey, clientPathBinding,
+                                currentBucket - 1, cookieScratch);
+                            cookieValid = CryptographicOperations.FixedTimeEquals(cookieScratch, suppliedCookie);
+                        }
+                        if (!cookieValid) { invalid++; continue; }
                         validations++;
                         if (!serverHasKey)
                         {
@@ -206,7 +275,7 @@ internal static class ProtocolLoopbackHandshake
                                 continue;
                             }
                         }
-                        _ = link.B.TrySend(serverFlight);
+                        _ = serverEndpoint.TrySend(serverFlight);
                         serverFlights++;
                         continue;
                     }
@@ -222,7 +291,7 @@ internal static class ProtocolLoopbackHandshake
                             serverEstablished = true;
                         }
                         int response = WriteFinish(serverBuffer, ServerFinish, connection, epoch, serverMaster!, transcript!);
-                        _ = link.B.TrySend(serverBuffer.AsSpan(0, response));
+                        _ = serverEndpoint.TrySend(serverBuffer.AsSpan(0, response));
                         serverFlights++;
                         continue;
                     }
@@ -232,7 +301,7 @@ internal static class ProtocolLoopbackHandshake
 
             void DrainClient()
             {
-                while (link.A.TryReceive(receive, out int length))
+                while (clientEndpoint.TryReceive(receive, out int length))
                 {
                     ReadOnlySpan<byte> datagram = receive.AsSpan(0, length);
                     if (!clientHasServerKey && TryReadCookieChallenge(datagram, clientNonce, out ReadOnlySpan<byte> receivedCookie))
@@ -424,17 +493,26 @@ internal static class ProtocolLoopbackHandshake
     }
 
     private static void ComputeCookie(ReadOnlySpan<byte> key, ReadOnlySpan<byte> nonce,
-        ReadOnlySpan<byte> publicKey, Span<byte> cookie)
+        ReadOnlySpan<byte> publicKey, ReadOnlySpan<byte> pathBinding, ulong timeBucket,
+        Span<byte> cookie)
     {
+        const int maximumPathBindingBytes = 256;
+        if (pathBinding.Length > maximumPathBindingBytes)
+            throw new ArgumentOutOfRangeException(nameof(pathBinding));
         Span<byte> hash = stackalloc byte[32];
-        Span<byte> input = stackalloc byte[NonceBytes + 32 + 8];
+        Span<byte> inputBuffer = stackalloc byte[NonceBytes + 32 + 2 + maximumPathBindingBytes + 8];
+        Span<byte> input = inputBuffer[..checked(NonceBytes + 32 + 2 + pathBinding.Length + 8)];
         nonce.CopyTo(input);
         SHA256.HashData(publicKey, hash);
         hash.CopyTo(input[NonceBytes..]);
         var writer = new NetworkPacketWriter(input[(NonceBytes + 32)..]);
-        if (!writer.TryWriteUInt64(1)) throw new InvalidOperationException();
+        if (pathBinding.Length > ushort.MaxValue ||
+            !writer.TryWriteUInt16((ushort)pathBinding.Length) ||
+            !writer.TryWriteBytes(pathBinding) || !writer.TryWriteUInt64(timeBucket))
+            throw new InvalidOperationException("The handshake cookie input is invalid.");
         HMACSHA256.HashData(key, input, hash);
         hash[..CookieBytes].CopyTo(cookie);
+        CryptographicOperations.ZeroMemory(inputBuffer);
         CryptographicOperations.ZeroMemory(hash);
     }
 

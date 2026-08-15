@@ -182,7 +182,7 @@ public sealed class ProtocolLoopback : IDisposable
 public sealed class NetworkProtocolPeer : IDisposable
 {
     private readonly int _ownerThreadId;
-    private readonly DeterministicDatagramEndpoint _endpoint;
+    private readonly INetworkDatagramEndpoint _endpoint;
     private readonly NetworkProtocolManifest _manifest;
     private readonly NetworkProtocolLimits _limits;
     private readonly DeterministicDatagramLimits _datagramLimits;
@@ -232,17 +232,20 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _rto;
     private ulong _nextLossCheckStep = ulong.MaxValue;
     private int _nextLossDeadlineCount;
+    private readonly bool _usesMonotonicPacing;
+    private ulong _nextPacedDataStep;
     private bool _disposed;
 
     internal NetworkProtocolPeer(
-        DeterministicDatagramEndpoint endpoint,
+        INetworkDatagramEndpoint endpoint,
         NetworkProtocolManifest manifest,
         NetworkProtocolLimits limits,
         DeterministicDatagramLimits datagramLimits,
         ConnectionId connection,
         SecurityEpoch epoch,
         ReadOnlySpan<byte> masterSecret,
-        bool sendsClientToServer)
+        bool sendsClientToServer,
+        bool usesMonotonicPacing = false)
     {
         limits.Validate(datagramLimits);
         _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -251,6 +254,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         _limits = limits;
         _datagramLimits = datagramLimits;
         _connection = connection;
+        _usesMonotonicPacing = usesMonotonicPacing;
         _sendCryptography = new(masterSecret, sendsClientToServer, epoch);
         _receiveCryptography = new(masterSecret, !sendsClientToServer, epoch);
         _wireScratch = new byte[datagramLimits.MaximumDatagramBytes];
@@ -380,12 +384,30 @@ public sealed class NetworkProtocolPeer : IDisposable
     internal bool CanRotateSendSecurityEpoch =>
         !_disposed && _reliableCount == 0 && _inFlight == 0 && _sendCryptography.Epoch.Value != uint.MaxValue;
 
-    internal void ProcessInbound(ulong step)
+    internal ulong ReceivedPacketCount => _receivedPacketsCount;
+
+    internal bool TryEmitKeepAlive()
+    {
+        EnsureOperational();
+        return TryEncryptAndSend(
+            NetworkSecureDatagramKind.KeepAlive,
+            ReadOnlySpan<byte>.Empty,
+            out _,
+            out DatagramSendStatus status) &&
+            status is DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment;
+    }
+
+    internal int ProcessInbound(ulong step)
     {
         EnsureOperational();
         int budget = _limits.MaximumInboundPacketsPerPump;
+        int processed = 0;
         while (budget-- > 0 && _endpoint.TryReceive(_wireScratch, out int length))
+        {
             ProcessDatagram(_wireScratch.AsSpan(0, length), step);
+            processed++;
+        }
+        return processed;
     }
 
     internal void Emit(ulong step)
@@ -395,12 +417,24 @@ public sealed class NetworkProtocolPeer : IDisposable
         int budget = _limits.MaximumPacketsPerPump;
         if (_ackPending && budget != 0 && TryEmitAcknowledgement()) budget--;
 
+        if (_usesMonotonicPacing && step < _nextPacedDataStep) return;
+
         while (budget > 0 && _inFlight < _congestionWindow)
         {
             if (!TrySelectNext(out int reliableSlot, out ushort fragment, out int unreliableSlot)) break;
             bool reliable = reliableSlot >= 0;
             if (!TryEmitData(reliableSlot, fragment, unreliableSlot, step, reliable)) break;
             budget--;
+            if (_usesMonotonicPacing && _smoothedRtt != 0)
+            {
+                ulong interval = _smoothedRtt /
+                    checked((ulong)Math.Max(1, _congestionWindow));
+                if (interval != 0)
+                {
+                    _nextPacedDataStep = checked(step + interval);
+                    break;
+                }
+            }
         }
     }
 
@@ -655,6 +689,13 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (header.Kind == NetworkSecureDatagramKind.Acknowledgement)
         {
             if (ProcessAcknowledgement(plaintext, step)) _receivedPacketsCount++;
+            return;
+        }
+
+        if (header.Kind == NetworkSecureDatagramKind.KeepAlive)
+        {
+            if (!plaintext.IsEmpty) return;
+            _receivedPacketsCount++;
             return;
         }
 
