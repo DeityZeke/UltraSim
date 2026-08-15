@@ -14,6 +14,9 @@ public readonly record struct RemoteWorldStateServerSnapshot(
     ulong BaselinesStarted,
     ulong BaselinesApplied,
     ulong BaselinesRejected,
+    ulong BaselinesTimedOut,
+    ulong BaselinesAbandoned,
+    uint ConsecutiveBaselineTimeouts,
     bool BaselineInProgress,
     ulong ActiveBaselineId,
     GameWorldStateBuildStatus LastBuildStatus,
@@ -61,7 +64,15 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     private ulong _baselinesStarted;
     private ulong _baselinesApplied;
     private ulong _baselinesRejected;
+    private ulong _baselinesTimedOut;
+    private ulong _baselinesAbandoned;
+    private uint _consecutiveBaselineTimeouts;
+    private readonly Func<long> _monotonicMilliseconds;
+    private readonly long _baselineTimeoutMilliseconds;
+    private readonly uint _maximumConsecutiveBaselineTimeouts;
     private ulong _nextBaselineId = 1;
+    private ulong _lastBaselineRevision;
+    private ulong _lastBaselineEventFloor;
     private ulong _baselineId;
     private ulong _baselineRevision;
     private ulong _baselineEventFloor;
@@ -74,6 +85,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     private bool _baselineBeginQueued;
     private bool _baselinePrepared;
     private bool _baselineCommitQueued;
+    private long _baselineLastProgressAtMilliseconds;
     private GameWorldStateBuildStatus _lastBuild;
 
     public RemoteWorldStateServer(
@@ -82,7 +94,10 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         ParticipantId participant,
         ulong applicationSessionEpoch,
         int maximumRecordsPerBundle = 32,
-        int maximumBaselineRecords = 4_096)
+        int maximumBaselineRecords = 4_096,
+        long baselineTimeoutMilliseconds = 10_000,
+        uint maximumConsecutiveBaselineTimeouts = 2,
+        Func<long>? monotonicMilliseconds = null)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         _interest = interest ?? throw new ArgumentNullException(nameof(interest));
@@ -92,12 +107,19 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
             throw new ArgumentOutOfRangeException(nameof(maximumRecordsPerBundle));
         if (maximumBaselineRecords <= 0)
             throw new ArgumentOutOfRangeException(nameof(maximumBaselineRecords));
+        if (baselineTimeoutMilliseconds <= 0)
+            throw new ArgumentOutOfRangeException(nameof(baselineTimeoutMilliseconds));
+        if (maximumConsecutiveBaselineTimeouts == 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumConsecutiveBaselineTimeouts));
         _participant = participant;
         _applicationSessionEpoch = applicationSessionEpoch;
         _records = new GameWorldStateRecord[maximumRecordsPerBundle];
         _wireRecords = new RemoteWorldStateRecord[maximumRecordsPerBundle];
         _baselineRecords = new GameWorldStateRecord[maximumBaselineRecords];
         _baselineWireRecords = new RemoteWorldStateRecord[maximumBaselineRecords];
+        _baselineTimeoutMilliseconds = baselineTimeoutMilliseconds;
+        _maximumConsecutiveBaselineTimeouts = maximumConsecutiveBaselineTimeouts;
+        _monotonicMilliseconds = monotonicMilliseconds ?? ReadEnvironmentTickCount64;
     }
 
     /// <summary>
@@ -109,9 +131,13 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     {
         EnsureOwnerThread();
         ArgumentNullException.ThrowIfNull(interest);
-        if (interest.StateEpoch == _interest.StateEpoch)
-            throw new ArgumentException("Replacement interest must own a fresh StateEpoch.", nameof(interest));
+        if (interest.StateEpoch.Value <= _interest.StateEpoch.Value)
+            throw new ArgumentException(
+                "Replacement interest must own a strictly newer StateEpoch.", nameof(interest));
         ClearBaseline();
+        _consecutiveBaselineTimeouts = 0;
+        _lastBaselineRevision = 0;
+        _lastBaselineEventFloor = 0;
         _interest = interest;
         _lastBuild = GameWorldStateBuildStatus.NoData;
     }
@@ -120,6 +146,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     public GameWorldStateBuildStatus TrySchedule(long nowMilliseconds, int byteBudget)
     {
         EnsureOwnerThread();
+        _ = TryExpireBaselineCore();
         if (_baselineId != 0)
             return _lastBuild = GameWorldStateBuildStatus.BaselineInProgress;
         if (nowMilliseconds < 0) return _lastBuild = GameWorldStateBuildStatus.NoData;
@@ -170,7 +197,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     {
         EnsureOwnerThread();
         if (_baselineId != 0) return RemoteWorldBaselineProgressStatus.AlreadyActive;
-        if (baselineRevision == 0 || recordsPerSegment == 0 ||
+        if (baselineRevision == 0 || baselineRevision <= _lastBaselineRevision ||
+            eventFloor < _lastBaselineEventFloor || recordsPerSegment == 0 ||
             recordsPerSegment > UltraSimGameProtocol.MaximumWorldStateRecords)
             return RemoteWorldBaselineProgressStatus.CaptureFailed;
         if (_nextBaselineId == ulong.MaxValue)
@@ -187,6 +215,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         _baselineId = _nextBaselineId++;
         _baselineRevision = baselineRevision;
         _baselineEventFloor = eventFloor;
+        _lastBaselineRevision = baselineRevision;
+        _lastBaselineEventFloor = eventFloor;
         _baselineRelationFloor = _interest.LatestRelationSequence;
         _baselineHash = UltraSimGameProtocol.ComputeWorldBaselineHash(
             _baselineWireRecords.AsSpan(0, _baselineRecordCount));
@@ -194,6 +224,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         _baselineBeginQueued = false;
         _baselinePrepared = false;
         _baselineCommitQueued = false;
+        _baselineLastProgressAtMilliseconds = ReadMonotonicMilliseconds();
         SaturatingIncrement(ref _baselinesStarted);
         return TryProgressBaseline();
     }
@@ -202,6 +233,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     public RemoteWorldBaselineProgressStatus TryProgressBaseline()
     {
         EnsureOwnerThread();
+        if (TryExpireBaselineCore()) return RemoteWorldBaselineProgressStatus.NoBaseline;
         if (_baselineId == 0) return RemoteWorldBaselineProgressStatus.NoBaseline;
         if (!_baselineBeginQueued)
         {
@@ -226,6 +258,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _baselineBeginQueued = true;
+            MarkBaselineProgress();
         }
 
         if (!_baselinePrepared)
@@ -249,6 +282,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _nextBaselineSegment++;
+            MarkBaselineProgress();
         }
 
         if (!_baselineCommitQueued)
@@ -268,8 +302,33 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                     _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
                 return RemoteWorldBaselineProgressStatus.TransportBackpressure;
             _baselineCommitQueued = true;
+            MarkBaselineProgress();
         }
         return RemoteWorldBaselineProgressStatus.CompleteAwaitingApplication;
+    }
+
+    /// <summary>
+    /// Expires an application-stalled baseline at its bounded monotonic deadline.
+    /// No recipient knowledge is advanced. Repeated timeouts eventually mark the
+    /// recipient nonviable rather than allowing infinite restart churn.
+    /// </summary>
+    public bool TryExpireBaseline()
+    {
+        EnsureOwnerThread();
+        return TryExpireBaselineCore();
+    }
+
+    /// <summary>
+    /// Explicitly abandons the active baseline without advancing recipient
+    /// knowledge. The owner may subsequently start a newer recovery attempt.
+    /// </summary>
+    public bool AbandonBaseline()
+    {
+        EnsureOwnerThread();
+        if (_baselineId == 0) return false;
+        SaturatingIncrement(ref _baselinesAbandoned);
+        ClearBaseline();
+        return true;
     }
 
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
@@ -311,6 +370,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         EnsureOwnerThread();
         return new(_queued, _acknowledged, _rejected, _capacityFailures,
             _malformed, _baselinesStarted, _baselinesApplied, _baselinesRejected,
+            _baselinesTimedOut, _baselinesAbandoned, _consecutiveBaselineTimeouts,
             _baselineId != 0, _baselineId, _lastBuild,
             checked(
                 (long)_records.Length * Unsafe.SizeOf<GameWorldStateRecord>() +
@@ -342,18 +402,21 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                 return;
             }
             _baselinePrepared = true;
+            MarkBaselineProgress();
             _ = TryProgressBaseline();
             return;
         }
         if (acknowledgement.Status == RemoteWorldBaselineApplyStatus.Applied)
         {
             if (!_interest.TryAcknowledgeBaseline(
-                    _participant, _baselineRecords.AsSpan(0, _baselineRecordCount)))
+                    _participant, _baselineRecords.AsSpan(0, _baselineRecordCount),
+                    _baselineRelationFloor))
             {
                 SaturatingIncrement(ref _malformed);
                 return;
             }
             SaturatingIncrement(ref _baselinesApplied);
+            _consecutiveBaselineTimeouts = 0;
         }
         else
         {
@@ -380,7 +443,37 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         _baselineBeginQueued = false;
         _baselinePrepared = false;
         _baselineCommitQueued = false;
+        _baselineLastProgressAtMilliseconds = 0;
     }
+
+    private bool TryExpireBaselineCore()
+    {
+        if (_baselineId == 0) return false;
+        long now = ReadMonotonicMilliseconds();
+        if (now - _baselineLastProgressAtMilliseconds < _baselineTimeoutMilliseconds)
+            return false;
+        SaturatingIncrement(ref _baselinesTimedOut);
+        if (_consecutiveBaselineTimeouts != uint.MaxValue)
+            _consecutiveBaselineTimeouts++;
+        ClearBaseline();
+        if (_consecutiveBaselineTimeouts >= _maximumConsecutiveBaselineTimeouts)
+            _interest.MarkRecipientProjectionNonviable(_participant);
+        return true;
+    }
+
+    private void MarkBaselineProgress() =>
+        _baselineLastProgressAtMilliseconds = ReadMonotonicMilliseconds();
+
+    private long ReadMonotonicMilliseconds()
+    {
+        long now = _monotonicMilliseconds();
+        if (now < 0 || (_baselineLastProgressAtMilliseconds != 0 &&
+            now < _baselineLastProgressAtMilliseconds))
+            throw new InvalidOperationException("The baseline monotonic clock moved backwards.");
+        return now;
+    }
+
+    private static long ReadEnvironmentTickCount64() => Environment.TickCount64;
 
     private static RemoteWorldStateRecord ToWire(in GameWorldStateRecord record) => new(
         record.RelationSequence,

@@ -35,9 +35,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Network kernel foundation](../Kernels/Network/README.md) — N0.0 contracts,
   N0.2 bounded bytes, and N0.3 secure reliable ProtocolLoopback.
-- [Network V3 active plan](Plans/NETWORK.md) — accepted N0.8 atomic
-  baseline/recovery and N0.9 onward through the complete remote
-  authority/client vertical.
+- [Network V3 active plan](Plans/NETWORK.md) — accepted N0.9 integrated remote
+  authority/client vertical and N0.10 scale specialization.
 
 ## Evidence and tools
 
@@ -48,9 +47,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  N0.0 through N0.8 are accepted; N0.9 integrates OfflineDirect,
-  ProtocolLoopback, localhost UDP, persistence replacement, reconnect, and
-  listen-host semantics without reopening ECS, Runtime, or game authority.
+  N0.0 through N0.9 are accepted; N0.10 measures scale before admitting
+  connection/assembly shards or transport specializations.
 
 ## Source-of-truth hierarchy
 

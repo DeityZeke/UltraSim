@@ -339,7 +339,14 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             (begin.StateEpoch < _candidateStateEpoch.Value ||
              (begin.StateEpoch == _candidateStateEpoch.Value &&
               begin.BaselineRevision <= _candidateBaselineRevision));
-        if (staleLive || staleCandidate)
+        bool regressiveLiveFloor = begin.StateEpoch == _stateEpoch.Value &&
+            (begin.RelationSequenceFloor < _relationSequenceFloor ||
+             begin.EventFloor < _eventFloor);
+        bool regressiveCandidateFloor = _candidateBaselineId != 0 &&
+            begin.StateEpoch == _candidateStateEpoch.Value &&
+            (begin.RelationSequenceFloor < _candidateRelationSequenceFloor ||
+             begin.EventFloor < _candidateEventFloor);
+        if (staleLive || staleCandidate || regressiveLiveFloor || regressiveCandidateFloor)
         {
             SaturatingIncrement(ref _rejectedBaselines);
             QueueRawBaselineAcknowledgement(in begin, RemoteWorldBaselineApplyStatus.Rejected);

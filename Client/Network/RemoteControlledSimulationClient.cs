@@ -134,6 +134,36 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
             _predictedMarker, _predictedVelocity, _pendingInputCount, _rejected);
     }
 
+    /// <summary>
+    /// Rebinds the connection-local owner projection after a strictly newer
+    /// atomic WorldState baseline commits. Application input sequence identity
+    /// remains connection-relative; old-epoch pending samples are discarded.
+    /// </summary>
+    public void ApplyBaselineEpoch(StateEpoch stateEpoch)
+    {
+        EnsureOwnerThread();
+        if (!stateEpoch.IsValid || (_stateEpoch.IsValid && stateEpoch.Value <= _stateEpoch.Value))
+            throw new ArgumentException("The replacement owner epoch must increase strictly.", nameof(stateEpoch));
+        _stateEpoch = stateEpoch;
+        _clockRevision = 0;
+        _effectiveTick = 0;
+        _frequency = 0;
+        _worldTime = 0;
+        _worldFraction = 0;
+        _pendingInputs.AsSpan(0, _pendingInputCount).Clear();
+        _pendingInputCount = 0;
+        _ownerEntity = default;
+        _ownerPresent = false;
+        _simulationTick = 0;
+        _frameSequence = 0;
+        _authoritativeMarker = 0;
+        _authoritativeVelocity = 0;
+        _predictedMarker = 0;
+        _predictedVelocity = 0;
+        _pendingOwnerState = default;
+        _hasPendingOwnerState = false;
+    }
+
     private bool TryQueuePendingBundle()
     {
         int count = Math.Min(UltraSimGameProtocol.MaximumInputRedundancy, _pendingInputCount);

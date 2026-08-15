@@ -304,10 +304,12 @@ public sealed class GameInterestService
     /// </summary>
     public bool TryAcknowledgeBaseline(
         ParticipantId participant,
-        ReadOnlySpan<GameWorldStateRecord> records)
+        ReadOnlySpan<GameWorldStateRecord> records,
+        ulong relationSequenceFloor)
     {
         EnsureOwnerThread();
-        if (!participant.IsValid || !_recipientMap.TryGetValue(participant, out int recipientIndex))
+        if (!participant.IsValid ||
+            !_recipientMap.TryGetValue(participant, out int recipientIndex))
             return false;
         for (int index = 0; index < records.Length; index++)
         {
@@ -326,6 +328,28 @@ public sealed class GameInterestService
             if (relation.Pending && relation.PendingPresent &&
                 relation.PendingRelationSequence == item.RelationSequence)
                 ClearPending(relationIndex);
+        }
+
+        // A complete-scope baseline also proves that every omitted identity was
+        // absent at the cutoff. Consume tombstone debt at or below that cutoff;
+        // anything published later remains pending.
+        int relationIndexToInspect = _recipients[recipientIndex].RelationHead;
+        while (relationIndexToInspect >= 0)
+        {
+            ref RelationState relation = ref _relations[relationIndexToInspect];
+            int next = relation.RecipientNext;
+            if (relation.Active && relation.Pending && !relation.PendingPresent &&
+                relation.PendingRelationSequence <= relationSequenceFloor)
+            {
+                relation.KnownRelationSequence = Math.Max(
+                    relation.KnownRelationSequence, relation.PendingRelationSequence);
+                relation.KnownCanonicalVersion = relation.PendingCanonicalVersion;
+                relation.KnownPresent = false;
+                ClearPending(relationIndexToInspect);
+                if (!relation.DesiredPresent)
+                    RemoveRelation(relationIndexToInspect);
+            }
+            relationIndexToInspect = next;
         }
         return true;
     }

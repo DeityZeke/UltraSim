@@ -66,6 +66,7 @@ public sealed class RemoteControlledSimulationServer : IRemoteGameProtocolHandle
     private int _lastFrequency;
     private ReplicationEntityId _lastOwnerEntity;
     private RemoteOwnerStateMessage _lastOwnerState;
+    private StateEpoch _publishedStateEpoch;
 
     public RemoteControlledSimulationServer(
         NetworkProtocolPeer peer,
@@ -152,6 +153,15 @@ public sealed class RemoteControlledSimulationServer : IRemoteGameProtocolHandle
         capture = _projection.CaptureAfterTick();
         if (!capture.Succeeded || !_runtime.TryCaptureClockSnapshot(out WorldClockSnapshot clock))
             return false;
+
+        if (_publishedStateEpoch != capture.Frame.StateEpoch)
+        {
+            _publishedStateEpoch = capture.Frame.StateEpoch;
+            _clockRevision = 0;
+            _lastFrequency = 0;
+            _lastOwnerEntity = default;
+            _lastOwnerState = default;
+        }
 
         uint revision = _clockRevision;
         bool cadenceChanged = revision == 0 || clock.SimulationFrequencyHz != _lastFrequency;

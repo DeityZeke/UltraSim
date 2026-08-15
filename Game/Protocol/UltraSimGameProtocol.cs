@@ -39,7 +39,14 @@ public enum RemoteWorldBaselineApplyStatus : byte
     Prepared = 3,
 }
 
-[NetworkProtocol(6)]
+public enum RemoteApplicationEventApplyStatus : byte
+{
+    Applied = 0,
+    Rejected = 1,
+    CapacityExceeded = 2,
+}
+
+[NetworkProtocol(7)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -212,6 +219,29 @@ public partial struct RemoteWorldBaselineAppliedMessage
     public RemoteWorldBaselineApplyStatus Status;
 }
 
+/// <summary>One retained non-coalescible game fact on the reliable Event lane.</summary>
+[NetworkMessage(115, "ultrasim.game.application-event", 1, NetworkLane.Event)]
+public partial struct RemoteApplicationEventMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong Sequence;
+    public ulong ParticipantId;
+    public ushort Kind;
+    public ulong Subject;
+    public ulong PayloadHash;
+}
+
+/// <summary>Application proof that one ordered game fact was committed.</summary>
+[NetworkMessage(116, "ultrasim.game.application-event-applied", 1, NetworkLane.Control)]
+public partial struct RemoteApplicationEventAppliedMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong NextSequence;
+    public RemoteApplicationEventApplyStatus Status;
+}
+
 /// <summary>One complete present or absent dynamic-state operation.</summary>
 public readonly record struct RemoteWorldStateRecord(
     ulong RelationSequence,
@@ -230,7 +260,7 @@ public readonly record struct RemoteWorldStateRecord(
         sizeof(byte) + sizeof(byte) + sizeof(int) * 4;
 }
 
-/// <summary>Accepted game application protocol manifest and bounded dynamic codecs through N0.8.</summary>
+/// <summary>Accepted game application protocol manifest and bounded dynamic codecs through N0.9.</summary>
 public static class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
@@ -245,7 +275,7 @@ public static class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 6,
+        version: 7,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -270,6 +300,8 @@ public static class UltraSimGameProtocol
                 { MaximumEncodedBytes = MaximumMessageBytes },
             RemoteWorldBaselineCommitMessageCodec.Descriptor,
             RemoteWorldBaselineAppliedMessageCodec.Descriptor,
+            RemoteApplicationEventMessageCodec.Descriptor,
+            RemoteApplicationEventAppliedMessageCodec.Descriptor,
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;

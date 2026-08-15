@@ -59,6 +59,10 @@ Useful current anchors can be located by their embedded workload or filename:
 - `network-n0.8-atomic-world-baseline-*` — paired secure ProtocolLoopback/connected
   localhost UDP evidence for one bounded segmented baseline, private atomic client
   publication, application acknowledgement, allocation, and reservation;
+- `network-n0.9-integrated-topology-acceptance-*` — cold rotated-order
+  OfflineDirect/secure ProtocolLoopback/connected localhost UDP evidence with
+  Admission/UI, input, owner/WorldState, Event, durable replacement, fresh-epoch
+  recovery, continued authority, and deterministic shutdown composed at once;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

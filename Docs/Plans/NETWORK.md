@@ -6,8 +6,9 @@ reliable protocol over deterministic datagrams, N0.4 remote Admission/UI over
 ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, N0.6
 bounded authoritative input/owner-state replication, and N0.7 maintained AOI,
 pending state, application knowledge, and shared semantic fanout are accepted.
-N0.8 atomic baseline/recovery, reconnect, and generation replacement are
-accepted. N0.9 integrated topology acceptance is next.
+N0.8 atomic baseline/recovery, reconnect, and generation replacement and N0.9
+integrated topology acceptance are accepted. N0.10 scale and measured
+specialization is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -1331,7 +1332,7 @@ semantic-copy, bundle-byte, relation/edge, allocation, and reservation facts:
 - [`network-n0.7-maintained-interest-fanout64-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-fanout64-2026-08-14.json)
 - [`network-n0.7-hardening-reference-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.7-hardening-reference-2026-08-15.json)
 
-### N0.8 — Atomic baseline and recovery — accepted
+### N0.8 — Atomic baseline and recovery — accepted and hardened
 
 Deliver baseline descriptors/staging, counts/limits/schema/hash, one active
 candidate, post-cutoff state, event floor, cancellation/restart, resnapshot,
@@ -1395,6 +1396,22 @@ For same-epoch repair, the committed relation floor also rejects delayed
 pre-cutoff rows for identities omitted by the new complete scope; omission cannot
 be followed by resurrection from an old unreliable bundle.
 
+The transaction also has a bounded monotonic application lifetime. Progress
+through Begin, Prepared, Bulk, and Commit refreshes its deadline; failure to
+receive a terminal application result abandons the retained cutoff without
+advancing recipient knowledge. A newer attempt may start immediately, while
+repeated stalls reach an explicit recipient-nonviable policy instead of blocking
+WorldState forever. Manual abandonment has the same no-knowledge-advance rule.
+Successful complete-scope acknowledgement consumes both explicitly present rows
+and omitted absence debt at or below the captured relation floor; post-cutoff
+debt remains untouched.
+
+`EventFloor` is carried and committed transactionally in N0.8, but N0.8 does not
+by itself prove an application Event delivery stream. End-to-end post-floor
+event retention, idempotence, and fresh-client omission are N0.9 acceptance
+requirements. A newer same-epoch baseline may never lower either the relation or
+event floor, and replacement projection epochs must increase strictly.
+
 Fresh `StateEpoch` publication rebinds the connection-owned adapter without
 replacing the healthy connection, application epoch, participant, or any durable
 identity. Persistence continues to restore only authority. The permanent gate
@@ -1407,7 +1424,8 @@ rather than reviving old view/projection instances.
 Permanent N0.8 evidence covers private staging, post-cutoff updates, replacement
 epochs, actual durable generation publication, loss/reorder/duplication,
 capacity rejection without partial publication, candidate cancellation/restart,
-delayed prior transactions, and fresh reconnect. The focused 256-entity baseline
+delayed prior transactions, server application timeout/abandonment, monotonic
+epoch/floor rejection, omission-debt consumption, and fresh reconnect. The focused 256-entity baseline
 observation uses eight 32-record segments and 21 alternating paired samples:
 
 - ProtocolLoopback mean: approximately 1.449 ms;
@@ -1420,7 +1438,7 @@ These are cold/recovery latency facts, not a hot per-tick replication target.
 The immutable artifact is
 [`network-n0.8-atomic-world-baseline-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.8-atomic-world-baseline-2026-08-15.json).
 
-### N0.9 — Integrated topology acceptance
+### N0.9 — Integrated topology acceptance — accepted
 
 Run one normalized scenario through OfflineDirect, ProtocolLoopback, and
 localhost UDP: authentication, CharacterSelect, entry, Inventory, simulation,
@@ -1434,7 +1452,57 @@ Also prove listen-host topology: local participant through OfflineDirect and
 remote participant through secure UDP, sharing one Runtime/game without
 simulation migration.
 
+N0.9 also closes the first application Event continuity proof. A real retained
+non-coalescible game event is delivered after the baseline-declared event floor,
+is idempotent under duplicate/reordered delivery, survives resnapshot or epoch
+replacement as policy requires, and is not replayed from pre-floor history to a
+fresh client.
+
 Gate: N0 is functionally complete.
+
+The accepted implementation composes the previously independent controlled,
+WorldState, and Event adapters through one fixed game-owned handler set. This is
+not a general message bus: Network still identifies messages, the game orders a
+bounded number of mutually exclusive owners, and the first owning adapter
+consumes each message. No game policy moved into Network.
+
+Protocol version 7 adds one reliable non-coalescible application Event and its
+separate application acknowledgement. Fresh baseline floors omit prior history;
+post-floor facts remain in `GameProjectionService` until applied, survive
+same-epoch resnapshot, converge under deterministic loss/reorder, and apply
+idempotently. Generation replacement resets generation-local facts and requires
+an explicit new floor. Transport acknowledgement remains weaker than Event
+application acknowledgement.
+
+The normalized three-topology gate keeps Admission/CharacterSelect, Inventory
+Split/Equip/hot reopen, canonical projection, initial and same-epoch baselines,
+Event, complete authoritative input, owner state, maintained WorldState, durable
+save/diverge/restore, fresh `StateEpoch` recovery, continued input, and shutdown
+alive in one scenario. OfflineDirect, secure ProtocolLoopback, and connected
+localhost UDP produce the same authority, complete UI/client state, simulation
+state, relevant projection count, and final Event. Dedicated permanent gates in
+the same suite cover fresh application/WorldState reconnect and delayed prior
+traffic rather than weakening the normalized oracle with transport-specific
+trace identity.
+
+The listen-host gate binds a local direct participant and a remote secure-UDP
+participant into one `ServerRuntime`, proves both participant bindings own the
+same `ServerGenerationId`, and projects the same shared authority without moving
+simulation ownership.
+
+The accepted cold composition observation uses seven rotated-order samples:
+
+- OfflineDirect mean: approximately 0.567 ms;
+- secure ProtocolLoopback mean: approximately 5.354 ms;
+- connected localhost UDP mean: approximately 6.391 ms;
+- UDP/ProtocolLoopback ratio: approximately 1.194x;
+- median cold caller allocation: approximately 1.89 MB direct, 18.39 MB
+  ProtocolLoopback, and 16.15 MB UDP.
+
+These figures include fixture/handshake, UI, persistence I/O, projection
+recovery, and shutdown. They are cold integration evidence, not a hot tick or
+socket-cost claim. The immutable artifact is
+[`network-n0.9-integrated-topology-acceptance-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.9-integrated-topology-acceptance-2026-08-15.json).
 
 ### N0.10 — Scale and measured specialization
 

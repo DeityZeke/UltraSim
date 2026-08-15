@@ -67,6 +67,13 @@ internal static class Program
             ("WorldBaselineCodecIsCanonicalAndTransactional", WorldBaselineCodecIsCanonicalAndTransactional),
             ("WorldBaselineHashFailurePreservesLiveProjection", WorldBaselineHashFailurePreservesLiveProjection),
             ("SameEpochBaselineFloorPreventsOmittedEntityResurrection", SameEpochBaselineFloorPreventsOmittedEntityResurrection),
+            ("WorldBaselineTimeoutCannotBlockRecipientForever", WorldBaselineTimeoutCannotBlockRecipientForever),
+            ("WorldBaselineFloorsAndEpochsAreMonotonic", WorldBaselineFloorsAndEpochsAreMonotonic),
+            ("WorldBaselineConsumesOmittedAbsenceDebt", WorldBaselineConsumesOmittedAbsenceDebt),
+            ("IntegratedN09MatchesOfflineLoopbackAndUdp", IntegratedN09MatchesOfflineLoopbackAndUdp),
+            ("ListenHostSharesOneRuntimeWithoutSimulationMigration", ListenHostSharesOneRuntimeWithoutSimulationMigration),
+            ("ApplicationEventContinuitySurvivesResnapshotAndImpairment", ApplicationEventContinuitySurvivesResnapshotAndImpairment),
+            ("ApplicationEventCapacityFailureIsExplicitlyNonviable", ApplicationEventCapacityFailureIsExplicitlyNonviable),
         };
 
         foreach ((string name, Action body) in tests)
@@ -74,8 +81,10 @@ internal static class Program
             body();
             Console.WriteLine($"PASS {name}");
         }
-        Console.WriteLine($"All {tests.Length} Network N0.4 through N0.8 application tests passed.");
-        if (args.Contains("--benchmark-n08", StringComparer.Ordinal))
+        Console.WriteLine($"All {tests.Length} Network N0.4 through N0.9 application tests passed.");
+        if (args.Contains("--benchmark-n09", StringComparer.Ordinal))
+            RunN09Benchmark(args);
+        else if (args.Contains("--benchmark-n08", StringComparer.Ordinal))
             RunN08Benchmark(args);
         else if (args.Contains("--benchmark-n06", StringComparer.Ordinal))
             RunN06Benchmark(args);
@@ -789,6 +798,608 @@ static void FreshProjectionEpochReplacesClientStateWithoutReconnect()
         default,
         written), payload[..written]));
     Equal(7U, CopySingle(client).Entity.Index);
+}
+
+static void WorldBaselineTimeoutCannotBlockRecipientForever()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    long now = 100;
+    var interest = new GameInterestService(
+        new StateEpoch(0x80A),
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, default, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(1, 1, 1), 1,
+            new ReplicationSpatialPoint(100, 0), GameReplicationHorizon.Far, 0));
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 4,
+        baselineTimeoutMilliseconds: 10, maximumConsecutiveBaselineTimeouts: 2,
+        monotonicMilliseconds: () => now);
+
+    _ = server.TryBeginBaseline(1, recordsPerSegment: 1);
+    RemoteWorldStateServerSnapshot started = server.GetSnapshot();
+    True(started.BaselineInProgress);
+    var prepared = new RemoteWorldBaselineAppliedMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = interest.StateEpoch.Value,
+        BaselineId = started.ActiveBaselineId,
+        BaselineRevision = 1,
+        Status = RemoteWorldBaselineApplyStatus.Prepared,
+    };
+    Span<byte> bytes = stackalloc byte[RemoteWorldBaselineAppliedMessageCodec.EncodedSize];
+    True(RemoteWorldBaselineAppliedMessageCodec.TryWriteExact(bytes, in prepared));
+    True(server.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldBaselineAppliedMessageCodec.Descriptor.Id,
+        RemoteWorldBaselineAppliedMessageCodec.Descriptor.Version, default, bytes.Length), bytes));
+
+    // The client remains transport-live but never returns terminal Applied.
+    now += 11;
+    True(server.TryExpireBaseline());
+    RemoteWorldStateServerSnapshot firstTimeout = server.GetSnapshot();
+    False(firstTimeout.BaselineInProgress);
+    Equal(1UL, firstTimeout.BaselinesTimedOut);
+    Equal(1U, firstTimeout.ConsecutiveBaselineTimeouts);
+    Equal(1, interest.GetSnapshot().PendingRelationCount,
+        "Timing out a baseline advanced recipient application knowledge.");
+
+    RemoteWorldBaselineProgressStatus restarted = server.TryBeginBaseline(2, recordsPerSegment: 1);
+    True(restarted != RemoteWorldBaselineProgressStatus.AlreadyActive &&
+        restarted != RemoteWorldBaselineProgressStatus.CaptureFailed);
+    now += 11;
+    True(server.TryExpireBaseline());
+    Equal(2UL, server.GetSnapshot().BaselinesTimedOut);
+    Equal(1, interest.GetSnapshot().NonviableRecipientCount,
+        "Repeated application stalls did not reach a bounded terminal policy.");
+}
+
+static void WorldBaselineFloorsAndEpochsAreMonotonic()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    var interest = new GameInterestService(
+        new StateEpoch(0x80C),
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, default, 0));
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 4);
+    var older = new GameInterestService(
+        new StateEpoch(0x80B),
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    bool rejectedOlderEpoch = false;
+    try { server.ReplaceInterest(older); }
+    catch (ArgumentException) { rejectedOlderEpoch = true; }
+    True(rejectedOlderEpoch, "A replacement projection epoch moved backwards.");
+    True(server.TryBeginBaseline(1, eventFloor: 7, recordsPerSegment: 1) is
+        RemoteWorldBaselineProgressStatus.AwaitingClientPreparation or
+        RemoteWorldBaselineProgressStatus.Progressed);
+    True(server.AbandonBaseline());
+    Equal(RemoteWorldBaselineProgressStatus.CaptureFailed,
+        server.TryBeginBaseline(1, eventFloor: 7, recordsPerSegment: 1));
+    Equal(RemoteWorldBaselineProgressStatus.CaptureFailed,
+        server.TryBeginBaseline(2, eventFloor: 6, recordsPerSegment: 1));
+
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, interest.StateEpoch,
+        maximumKnownIdentities: 4, maximumActiveEntities: 4,
+        maximumRecordsPerBundle: 2);
+    RemoteWorldStateRecord record = WorldRecord(10, 1, 1, 1, true, 1);
+    SendCompleteBaseline(1, 1, eventFloor: 7, relationFloor: 10, record);
+    RemoteWorldStateClientSnapshot applied = client.GetSnapshot();
+    Equal(1UL, applied.BaselineRevision);
+
+    var regressive = new RemoteWorldBaselineBeginMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = interest.StateEpoch.Value,
+        BaselineId = 2,
+        BaselineRevision = 2,
+        EventFloor = 6,
+        RelationSequenceFloor = 9,
+        SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+        ContentHash = 0,
+        RecordCount = 0,
+        SegmentCount = 0,
+        RecordsPerSegment = 1,
+    };
+    Span<byte> beginBytes = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+    True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(beginBytes, in regressive));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+        RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default, beginBytes.Length), beginBytes));
+    Equal(applied.BaselineRevision, client.GetSnapshot().BaselineRevision);
+    Equal(applied.EventFloor, client.GetSnapshot().EventFloor);
+    Equal(applied.RelationSequenceFloor, client.GetSnapshot().RelationSequenceFloor);
+    False(client.GetSnapshot().BaselineCandidateActive);
+
+    void SendCompleteBaseline(
+        ulong id, ulong revision, ulong eventFloor, ulong relationFloor,
+        RemoteWorldStateRecord value)
+    {
+        var begin = new RemoteWorldBaselineBeginMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = interest.StateEpoch.Value,
+            BaselineId = id,
+            BaselineRevision = revision,
+            EventFloor = eventFloor,
+            RelationSequenceFloor = relationFloor,
+            SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+            ContentHash = UltraSimGameProtocol.ComputeWorldBaselineHash([value]),
+            RecordCount = 1,
+            SegmentCount = 1,
+            RecordsPerSegment = 1,
+        };
+        Span<byte> beginPayload = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(beginPayload, in begin));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default, beginPayload.Length),
+            beginPayload));
+        Span<byte> segment = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+            segment, fixture.ApplicationSessionEpoch, interest.StateEpoch.Value,
+            id, 0, 1, [value], out int segmentBytes));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Bulk, RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Id,
+            RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Version, default, segmentBytes),
+            segment[..segmentBytes]));
+        var commit = new RemoteWorldBaselineCommitMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = interest.StateEpoch.Value,
+            BaselineId = id,
+            BaselineRevision = revision,
+            ContentHash = begin.ContentHash,
+        };
+        Span<byte> commitPayload = stackalloc byte[RemoteWorldBaselineCommitMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineCommitMessageCodec.TryWriteExact(commitPayload, in commit));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineCommitMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineCommitMessageCodec.Descriptor.Version, default, commitPayload.Length),
+            commitPayload));
+    }
+}
+
+static void WorldBaselineConsumesOmittedAbsenceDebt()
+{
+    ParticipantId participant = new(41);
+    var interest = new GameInterestService(
+        new StateEpoch(0x80D),
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, default, 0));
+    var entity = new ReplicationEntityId(1, 1);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(1, 1, 1), 1,
+            new ReplicationSpatialPoint(100, 0), GameReplicationHorizon.Far, 0));
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
+    Equal(GameWorldBaselineCaptureStatus.Success,
+        interest.CopyRecipientBaseline(participant, records, out int count));
+    Equal(1, count);
+    ulong firstFloor = interest.LatestRelationSequence;
+    True(interest.TryAcknowledgeBaseline(participant, records[..count], firstFloor));
+    Equal(GameInterestUpdateStatus.Success, interest.RemoveEntity(entity, 2, 1));
+    Equal(1, interest.GetSnapshot().PendingRelationCount);
+
+    Equal(GameWorldBaselineCaptureStatus.Success,
+        interest.CopyRecipientBaseline(participant, records, out count));
+    Equal(0, count, "An absent entity was included in a complete present-state baseline.");
+    ulong absenceFloor = interest.LatestRelationSequence;
+    True(interest.TryAcknowledgeBaseline(participant, records[..count], absenceFloor));
+    GameInterestSnapshot consumed = interest.GetSnapshot();
+    Equal(0, consumed.PendingRelationCount);
+    Equal(0, consumed.RelationCount,
+        "A baseline-proven omitted absence left redundant tombstone debt behind.");
+
+    var empty = new GameInterestService(
+        new StateEpoch(0x80E),
+        new GameInterestLimits(4, 1, 1_024, 1_024, 8, 4, 2),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        empty.SetRecipientAnchor(participant, default, 0));
+    True(empty.TryAcknowledgeBaseline(
+        participant, ReadOnlySpan<GameWorldStateRecord>.Empty, 0),
+        "A valid empty-world baseline rejected relation floor zero.");
+}
+
+static void IntegratedN09MatchesOfflineLoopbackAndUdp()
+{
+    N09ScenarioResult direct = RunN09Direct();
+    N09ScenarioResult loopback = RunN09Remote(udp: false);
+    N09ScenarioResult udp = RunN09Remote(udp: true);
+    Equal(direct, loopback,
+        $"Secure ProtocolLoopback changed the integrated authoritative/client-semantic outcome. direct={direct}; loopback={loopback}");
+    Equal(direct, udp,
+        $"Connected localhost UDP changed the integrated authoritative/client-semantic outcome. direct={direct}; udp={udp}");
+}
+
+static void ListenHostSharesOneRuntimeWithoutSimulationMigration()
+{
+    using Fixture fixture = Fixture.CreateN06(default, udp: true);
+    fixture.AuthenticateAndEnter();
+    ParticipantId remoteParticipant = new(41);
+    ParticipantId localParticipant = new(42);
+    AdmissionResult local = fixture.Server!.Admission.JoinAccountless(localParticipant);
+    True(local.IsEntered, "The direct listen-host participant did not enter shared authority.");
+
+    using var projection = new GameProjectionService(
+        fixture.ServerGame, fixture.Server.Admission,
+        new GameReplicationLimits(512, 8, 512, 1_024, 1_024, 64, 64));
+    True(projection.SynchronizeParticipant(remoteParticipant));
+    True(projection.SynchronizeParticipant(localParticipant));
+    GameProjectionCaptureResult baseline = projection.RebuildBaseline();
+    True(baseline.Succeeded);
+    var direct = new OfflineDirectGameProjection(512, 8, 64);
+    Equal(OfflineProjectionApplyStatus.Success, direct.ApplyBaseline(projection, baseline.Frame));
+
+    Span<GameProjectionParticipant> participants = stackalloc GameProjectionParticipant[8];
+    Equal(2, projection.CopyParticipants(participants));
+    Equal(participants[0].ServerGenerationId, participants[1].ServerGenerationId,
+        "Listen-host participants were bound to different simulation generations.");
+    Equal(local.GenerationId, participants[0].ServerGenerationId);
+
+    GameInterestService interest = BuildInterestFromProjection(projection, remoteParticipant, 0);
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, remoteParticipant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 8, maximumBaselineRecords: 64);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch,
+        maximumKnownIdentities: 64, maximumActiveEntities: 64,
+        maximumRecordsPerBundle: 8);
+    fixture.Server.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+    _ = server.TryBeginBaseline(baseline.Frame.BaselineRevision, recordsPerSegment: 2);
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 1);
+
+    Span<GameProjectedEntity> entities = stackalloc GameProjectedEntity[64];
+    int entityCount = projection.CopyEntities(entities);
+    int replicated = 0;
+    for (int index = 0; index < entityCount; index++)
+        if (entities[index].HasSimulationState) replicated++;
+    Equal(replicated, client.GetSnapshot().ActiveEntityCount,
+        "Remote UDP projection did not observe the same shared listen-host authority.");
+
+    ulong generation = baseline.Frame.ServerGenerationId;
+    fixture.TickRuntime();
+    GameProjectionCaptureResult tick = projection.CaptureAfterTick();
+    True(tick.Succeeded);
+    Span<GameProjectionDelta> deltas = stackalloc GameProjectionDelta[64];
+    int deltaCount = projection.CopyLastFrameDeltas(deltas);
+    Equal(OfflineProjectionApplyStatus.Success,
+        direct.ApplyFrame(projection, tick.Frame, deltas[..deltaCount]));
+    Equal(generation, tick.Frame.ServerGenerationId,
+        "Serving a remote UDP participant migrated authoritative simulation ownership.");
+}
+
+static void ApplicationEventContinuitySurvivesResnapshotAndImpairment()
+{
+    using Fixture fixture = Fixture.CreateN06(
+        new NetworkImpairmentOptions(0xE7E7_9009, 180, 200, 40, 5));
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    using GameProjectionService projection = fixture.CreateProjection();
+    True(projection.SynchronizeParticipant(participant));
+    GameProjectionCaptureResult original = projection.RebuildBaseline();
+    True(projection.TryPublishApplicationEvent(participant, 1, 10, 100, out _));
+    projection.DiscardApplicationEventsThrough(original.Frame.ApplicationEventNextSequence + 1);
+    GameProjectionCaptureResult fresh = projection.RebuildBaseline();
+    ulong floor = fresh.Frame.ApplicationEventNextSequence;
+    GameInterestService interest = BuildInterestFromProjection(projection, participant, 0);
+    var worldServer = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 8, maximumBaselineRecords: 64);
+    var worldClient = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch,
+        maximumKnownIdentities: 64, maximumActiveEntities: 64,
+        maximumRecordsPerBundle: 8);
+    var eventServer = new RemoteApplicationEventServer(
+        fixture.ServerPeer, projection, fixture.ApplicationSessionEpoch, floor);
+    var eventClient = new RemoteApplicationEventClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch, floor, 4);
+    var serverHandlers = new RemoteGameProtocolComposition(2);
+    serverHandlers.Add(worldServer);
+    serverHandlers.Add(eventServer);
+    var clientHandlers = new RemoteGameProtocolComposition(2);
+    clientHandlers.Add(worldClient);
+    clientHandlers.Add(eventClient);
+    fixture.Server!.BindProtocolHandler(serverHandlers);
+    fixture.ClientBridge!.BindProtocolHandler(clientHandlers);
+    _ = worldServer.TryBeginBaseline(fresh.Frame.BaselineRevision, floor, 2);
+    fixture.DriveUntil(() => worldServer.GetSnapshot().BaselinesApplied == 1, 200_000);
+
+    True(projection.TryPublishApplicationEvent(
+        participant, 2, 20, 200, out GameApplicationEvent expected));
+    GameProjectionCaptureResult repair = projection.RebuildBaseline();
+    _ = worldServer.TryBeginBaseline(repair.Frame.BaselineRevision, eventServer.EventFloor, 2);
+    fixture.DriveUntil(() => worldServer.GetSnapshot().BaselinesApplied == 2, 200_000);
+    Equal(RemoteApplicationEventScheduleStatus.Queued, eventServer.TrySchedule());
+    fixture.DriveUntil(() => eventServer.GetSnapshot().EventsApplied == 1, 200_000);
+
+    Span<RemoteApplicationEventSnapshot> delivered = stackalloc RemoteApplicationEventSnapshot[4];
+    Equal(1, eventClient.CopyEvents(delivered));
+    Equal(expected.Sequence, delivered[0].Sequence);
+    Equal(expected.Kind, delivered[0].Kind);
+    Equal(expected.Subject, delivered[0].Subject);
+    Equal(expected.PayloadHash, delivered[0].PayloadHash);
+
+    // Application delivery is idempotent even if a valid semantic duplicate is
+    // presented above transport replay filtering.
+    var duplicate = new RemoteApplicationEventMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = projection.StateEpoch.Value,
+        Sequence = expected.Sequence,
+        ParticipantId = participant.Value,
+        Kind = expected.Kind,
+        Subject = expected.Subject,
+        PayloadHash = expected.PayloadHash,
+    };
+    Span<byte> payload = stackalloc byte[RemoteApplicationEventMessageCodec.EncodedSize];
+    True(RemoteApplicationEventMessageCodec.TryWriteExact(payload, in duplicate));
+    True(eventClient.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Event, RemoteApplicationEventMessageCodec.Descriptor.Id,
+        RemoteApplicationEventMessageCodec.Descriptor.Version, default, payload.Length), payload));
+    Equal(1, eventClient.CopyEvents(delivered));
+    Equal(1UL, eventClient.GetSnapshot().Duplicates);
+    True(fixture.Loopback!.GetSnapshot().Datagram.Dropped > 0,
+        "The Event recovery proof did not actually encounter deterministic loss.");
+}
+
+static void ApplicationEventCapacityFailureIsExplicitlyNonviable()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    using GameProjectionService projection = fixture.CreateProjection();
+    True(projection.SynchronizeParticipant(participant));
+    GameProjectionCaptureResult baseline = projection.RebuildBaseline();
+    var server = new RemoteApplicationEventServer(
+        fixture.ServerPeer, projection, fixture.ApplicationSessionEpoch,
+        baseline.Frame.ApplicationEventNextSequence);
+    var client = new RemoteApplicationEventClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch,
+        baseline.Frame.ApplicationEventNextSequence, maximumRetainedEvents: 1);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    True(projection.TryPublishApplicationEvent(participant, 1, 1, 1, out _));
+    Equal(RemoteApplicationEventScheduleStatus.Queued, server.TrySchedule());
+    fixture.DriveUntil(() => server.GetSnapshot().EventsApplied == 1);
+    True(projection.TryPublishApplicationEvent(participant, 2, 2, 2, out _));
+    Equal(RemoteApplicationEventScheduleStatus.Queued, server.TrySchedule());
+    fixture.DriveUntil(() => server.GetSnapshot().RecipientNonviable);
+    True(client.GetSnapshot().IsNonviable);
+    Equal(RemoteApplicationEventScheduleStatus.RecipientNonviable, server.TrySchedule());
+    Equal(1, projection.GetSnapshot().RetainedApplicationEvents,
+        "Capacity failure discarded an application event that was never applied.");
+}
+
+static N09ScenarioResult RunN09Direct()
+{
+    using Fixture fixture = Fixture.CreateOfflineNetworked();
+    fixture.AuthenticateAndEnter();
+    fixture.OpenInventory();
+    fixture.SplitAndEquip();
+    ParticipantId participant = new(41);
+    using GameProjectionService projection = fixture.CreateProjection();
+    True(projection.SynchronizeParticipant(participant));
+    GameProjectionCaptureResult first = projection.RebuildBaseline();
+    True(first.Succeeded);
+
+    // A fresh-client floor deliberately omits prior history.
+    True(projection.TryPublishApplicationEvent(participant, 1, 10, 100, out _));
+    projection.DiscardApplicationEventsThrough(first.Frame.ApplicationEventNextSequence + 1);
+    GameProjectionCaptureResult fresh = projection.RebuildBaseline();
+    var offline = new OfflineDirectGameProjection(64, 8, 64);
+    Equal(OfflineProjectionApplyStatus.Success, offline.ApplyBaseline(projection, fresh.Frame));
+
+    // A post-floor non-coalescible fact survives a same-epoch resnapshot.
+    True(projection.TryPublishApplicationEvent(participant, 2, 20, 200, out _));
+    GameProjectionCaptureResult repair = projection.RebuildBaseline();
+    Equal(OfflineProjectionApplyStatus.Success, offline.ApplyBaseline(projection, repair.Frame));
+    ApplyDirectEvents(projection, offline);
+
+    fixture.TickRuntime();
+    ApplyDirectCapture(projection, offline);
+    True(projection.TryEnqueueAuthoritativeInput(new GameAuthoritativeInput(
+        participant, 1, GameSimulationCommandKind.SetInputVelocity, 3)));
+    Equal(GameAuthoritativeIngressStatus.Success, projection.PublishAuthoritativeIngress().Status);
+    fixture.TickRuntime();
+    ApplyDirectCapture(projection, offline);
+
+    _ = fixture.SaveDivergeRestore();
+    GameProjectionCaptureResult restored = projection.RebuildBaseline();
+    Equal(OfflineProjectionApplyStatus.Success, offline.ApplyBaseline(projection, restored.Frame));
+    True(projection.TryPublishApplicationEvent(participant, 3, 30, 300, out _));
+    GameApplicationEvent finalEvent = ApplyDirectEvents(projection, offline);
+    fixture.TickRuntime();
+    ApplyDirectCapture(projection, offline);
+    True(projection.TryEnqueueAuthoritativeInput(new GameAuthoritativeInput(
+        participant, 2, GameSimulationCommandKind.SetInputVelocity, 7)));
+    Equal(GameAuthoritativeIngressStatus.Success, projection.PublishAuthoritativeIngress().Status);
+    fixture.TickRuntime();
+    ApplyDirectCapture(projection, offline);
+
+    GameSimulationState simulation = fixture.ReadAliceSimulation();
+    ScenarioResult ui = fixture.CaptureResult();
+    Span<GameProjectedEntity> projected = stackalloc GameProjectedEntity[64];
+    int projectedCount = projection.CopyEntities(projected);
+    int worldStateCount = 0;
+    for (int index = 0; index < projectedCount; index++)
+        if (projected[index].HasSimulationState) worldStateCount++;
+    return new N09ScenarioResult(
+        ui.Authority, ui.ClientState, simulation.TickMarker, simulation.InputVelocity,
+        worldStateCount,
+        $"{finalEvent.Sequence}:{finalEvent.Kind}:{finalEvent.Subject}:{finalEvent.PayloadHash}");
+}
+
+static N09ScenarioResult RunN09Remote(bool udp)
+{
+    using Fixture fixture = Fixture.CreateN06(default, udp: udp);
+    fixture.AuthenticateAndEnter();
+    fixture.OpenInventory();
+    fixture.SplitAndEquip();
+    ParticipantId participant = new(41);
+    using GameProjectionService projection = fixture.CreateProjection();
+    True(projection.SynchronizeParticipant(participant));
+    GameProjectionCaptureResult first = projection.RebuildBaseline();
+    True(first.Succeeded);
+    True(projection.TryPublishApplicationEvent(participant, 1, 10, 100, out _));
+    projection.DiscardApplicationEventsThrough(first.Frame.ApplicationEventNextSequence + 1);
+    GameProjectionCaptureResult fresh = projection.RebuildBaseline();
+    ulong eventFloor = fresh.Frame.ApplicationEventNextSequence;
+    GameInterestService interest = BuildInterestFromProjection(projection, participant, 0);
+
+    var controlledServer = new RemoteControlledSimulationServer(
+        fixture.ServerPeer, fixture.ServerGame, projection, participant,
+        fixture.ApplicationSessionEpoch);
+    var controlledClient = new RemoteControlledSimulationClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, 64);
+    var worldServer = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 8, maximumBaselineRecords: 64);
+    var worldClient = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch,
+        maximumKnownIdentities: 64, maximumActiveEntities: 64,
+        maximumRecordsPerBundle: 8);
+    var eventServer = new RemoteApplicationEventServer(
+        fixture.ServerPeer, projection, fixture.ApplicationSessionEpoch, eventFloor);
+    var eventClient = new RemoteApplicationEventClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch,
+        eventFloor, 8);
+    var serverHandlers = new RemoteGameProtocolComposition(3);
+    serverHandlers.Add(controlledServer);
+    serverHandlers.Add(worldServer);
+    serverHandlers.Add(eventServer);
+    var clientHandlers = new RemoteGameProtocolComposition(3);
+    clientHandlers.Add(controlledClient);
+    clientHandlers.Add(worldClient);
+    clientHandlers.Add(eventClient);
+    fixture.Server!.BindProtocolHandler(serverHandlers);
+    fixture.ClientBridge!.BindProtocolHandler(clientHandlers);
+
+    _ = worldServer.TryBeginBaseline(
+        fresh.Frame.BaselineRevision, eventFloor, recordsPerSegment: 2);
+    fixture.DriveUntil(() => worldServer.GetSnapshot().BaselinesApplied == 1);
+
+    True(projection.TryPublishApplicationEvent(participant, 2, 20, 200, out _));
+    GameProjectionCaptureResult repair = projection.RebuildBaseline();
+    _ = worldServer.TryBeginBaseline(
+        repair.Frame.BaselineRevision, eventServer.EventFloor, recordsPerSegment: 2);
+    fixture.DriveUntil(() => worldServer.GetSnapshot().BaselinesApplied == 2);
+    Equal(RemoteApplicationEventScheduleStatus.Queued, eventServer.TrySchedule());
+    fixture.DriveUntil(() => eventServer.GetSnapshot().EventsApplied == 1);
+    Equal(1, eventClient.GetSnapshot().RetainedEvents,
+        "A fresh remote client received pre-floor event history.");
+
+    fixture.TickRuntime();
+    True(controlledServer.CaptureAndQueueOwnerState(out _));
+    fixture.DriveUntil(() => controlledClient.GetSnapshot().OwnerPresent);
+    QueueAndApplyVelocity(3);
+    UpdateWorldAndConverge(2, 1);
+
+    _ = fixture.SaveDivergeRestore();
+    GameProjectionCaptureResult restored = projection.RebuildBaseline();
+    StateEpoch restoredEpoch = restored.Frame.StateEpoch;
+    GameInterestService restoredInterest = BuildInterestFromProjection(projection, participant, 2);
+    worldServer.ReplaceInterest(restoredInterest);
+    eventServer.ReplaceProjection(projection, restored.Frame.ApplicationEventNextSequence);
+    _ = worldServer.TryBeginBaseline(
+        restored.Frame.BaselineRevision, eventServer.EventFloor, recordsPerSegment: 2);
+    fixture.DriveUntil(() => worldServer.GetSnapshot().BaselinesApplied == 3);
+    worldClient.GetSnapshot();
+    eventClient.ApplyBaselineFloor(restoredEpoch, eventServer.EventFloor);
+    controlledClient.ApplyBaselineEpoch(restoredEpoch);
+
+    True(projection.TryPublishApplicationEvent(participant, 3, 30, 300, out _));
+    Equal(RemoteApplicationEventScheduleStatus.Queued, eventServer.TrySchedule());
+    fixture.DriveUntil(() => eventServer.GetSnapshot().EventsApplied == 2);
+    fixture.TickRuntime();
+    True(controlledServer.CaptureAndQueueOwnerState(out _));
+    fixture.DriveUntil(() => controlledClient.GetSnapshot().OwnerPresent);
+    QueueAndApplyVelocity(7);
+    interest = restoredInterest;
+    UpdateWorldAndConverge(2, 3);
+
+    Span<RemoteApplicationEventSnapshot> events = stackalloc RemoteApplicationEventSnapshot[8];
+    Equal(1, eventClient.CopyEvents(events),
+        "A new authority epoch retained an obsolete prior-epoch application fact.");
+    RemoteApplicationEventSnapshot finalEvent = events[0];
+    RemoteControlledSimulationClientSnapshot controlled = controlledClient.GetSnapshot();
+    Span<RemoteWorldEntitySnapshot> worldRows = stackalloc RemoteWorldEntitySnapshot[64];
+    int worldCount = worldClient.CopyActiveEntities(worldRows);
+    True(worldCount > 0 && worldRows[0].Entity.IsValid);
+    ScenarioResult ui = fixture.CaptureResult();
+    return new N09ScenarioResult(
+        ui.Authority, ui.ClientState,
+        controlled.AuthoritativeTickMarker, controlled.AuthoritativeInputVelocity,
+        worldCount,
+        $"{finalEvent.Sequence}:{finalEvent.Kind}:{finalEvent.Subject}:{finalEvent.PayloadHash}");
+
+    void QueueAndApplyVelocity(int velocity)
+    {
+        RemoteControlledSimulationClientSnapshot snapshot = controlledClient.GetSnapshot();
+        True(controlledClient.TryQueueInputVelocity(
+            checked(snapshot.SimulationTick + 1),
+            checked(snapshot.WorldTimeMicroseconds + 1_000_000), velocity));
+        ulong target = controlledServer.GetSnapshot().LastQueuedInputSequence + 1;
+        fixture.DriveUntil(() => controlledServer.GetSnapshot().LastQueuedInputSequence >= target);
+        Equal(GameAuthoritativeIngressStatus.Success, controlledServer.PublishInputs().Status);
+        fixture.TickRuntime();
+        True(controlledServer.CaptureAndQueueOwnerState(out _));
+        ulong priorFrame = snapshot.FrameSequence;
+        fixture.DriveUntil(() => controlledClient.GetSnapshot().FrameSequence > priorFrame);
+    }
+
+    void UpdateWorldAndConverge(ulong canonicalVersion, long now)
+    {
+        True(projection.TryGetOwnerState(participant, out GameProjectionOwnerState owner));
+        Equal(GameInterestUpdateStatus.Success,
+            interest.UpsertEntity(owner.Entity, canonicalVersion,
+                new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, now));
+        ulong applied = worldServer.GetSnapshot().ApplicationAcknowledgements;
+        Equal(GameWorldStateBuildStatus.Success, worldServer.TrySchedule(now, 4_096));
+        fixture.DriveUntil(() => worldServer.GetSnapshot().ApplicationAcknowledgements > applied);
+    }
+}
+
+static void ApplyDirectCapture(
+    GameProjectionService projection,
+    OfflineDirectGameProjection offline)
+{
+    GameProjectionCaptureResult capture = projection.CaptureAfterTick();
+    True(capture.Succeeded);
+    Span<GameProjectionDelta> deltas = stackalloc GameProjectionDelta[64];
+    int count = projection.CopyLastFrameDeltas(deltas);
+    Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyFrame(projection, capture.Frame, deltas[..count]));
+}
+
+static GameApplicationEvent ApplyDirectEvents(
+    GameProjectionService projection,
+    OfflineDirectGameProjection offline)
+{
+    ulong cursor = offline.GetSnapshot().NextApplicationEventSequence;
+    Span<GameApplicationEvent> events = stackalloc GameApplicationEvent[8];
+    GameProjectionHistoryReadResult read = projection.ReadApplicationEvents(cursor, events);
+    Equal(GameProjectionHistoryReadStatus.Success, read.Status);
+    Equal(OfflineProjectionApplyStatus.Success,
+        offline.ApplyApplicationEvents(events[..read.Count]));
+    GameApplicationEvent last = events[read.Count - 1];
+    projection.DiscardApplicationEventsThrough(read.NextSequence);
+    return last;
 }
 
 static RemoteWorldEntitySnapshot CopySingle(RemoteWorldStateClient client)
@@ -1943,6 +2554,75 @@ static void RunN08Benchmark(string[] args)
     }
 }
 
+static void RunN09Benchmark(string[] args)
+{
+    const int samples = 7;
+    var direct = new double[samples];
+    var loopback = new double[samples];
+    var udp = new double[samples];
+    var directAllocations = new long[samples];
+    var loopbackAllocations = new long[samples];
+    var udpAllocations = new long[samples];
+    for (int sample = 0; sample < samples; sample++)
+    {
+        int first = sample % 3;
+        for (int offset = 0; offset < 3; offset++)
+        {
+            int topology = (first + offset) % 3;
+            if (topology == 0)
+                direct[sample] = Measure(RunN09Direct, out directAllocations[sample]);
+            else if (topology == 1)
+                loopback[sample] = Measure(() => RunN09Remote(udp: false), out loopbackAllocations[sample]);
+            else
+                udp[sample] = Measure(() => RunN09Remote(udp: true), out udpAllocations[sample]);
+        }
+    }
+    Array.Sort(direct);
+    Array.Sort(loopback);
+    Array.Sort(udp);
+    Array.Sort(directAllocations);
+    Array.Sort(loopbackAllocations);
+    Array.Sort(udpAllocations);
+    var report = new N09BenchmarkResult(
+        "ultrasim-network-n0.9-integrated-topology-acceptance-v1",
+        DateTimeOffset.UtcNow,
+        Environment.Version.ToString(),
+        System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        Environment.ProcessorCount,
+        UltraSimGameProtocol.Manifest.Version,
+        UltraSimGameProtocol.Manifest.Fingerprint,
+        samples,
+        direct.Average(), Percentile(direct, 0.95),
+        loopback.Average(), Percentile(loopback, 0.95),
+        udp.Average(), Percentile(udp, 0.95),
+        loopback.Average() / direct.Average(),
+        udp.Average() / loopback.Average(),
+        directAllocations[samples / 2],
+        loopbackAllocations[samples / 2],
+        udpAllocations[samples / 2],
+        "Cold integrated acceptance workload: Admission/CharacterSelect, Inventory Split/Equip/hot reopen, canonical projection, atomic initial and same-epoch baselines, retained application Event, authoritative input, owner and maintained WorldState, durable save/diverge/restore, fresh StateEpoch baseline, continued input, and deterministic shutdown. Seven rotated-order samples. Allocation is cold caller allocation and is not a warmed hot-path claim; fixed 60 Hz and no adaptive cadence.");
+    string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+    Console.WriteLine(json);
+    int outputIndex = Array.IndexOf(args, "--output");
+    if (outputIndex >= 0 && outputIndex + 1 < args.Length)
+    {
+        string path = Path.GetFullPath(args[outputIndex + 1]);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, json + Environment.NewLine);
+    }
+
+    static double Measure(Func<N09ScenarioResult> scenario, out long allocated)
+    {
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        long started = Stopwatch.GetTimestamp();
+        _ = scenario();
+        double elapsed = (Stopwatch.GetTimestamp() - started) *
+            (1_000_000_000d / Stopwatch.Frequency);
+        allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        return elapsed;
+    }
+}
+
 static double MeasureControlled(Fixture fixture, int cycles)
 {
     long started = Stopwatch.GetTimestamp();
@@ -1985,16 +2665,21 @@ sealed class Fixture : IDisposable
         NetworkProtocolLimits? protocolLimits = null,
         RemoteIdentityAuthenticator? authenticator = null,
         bool udp = false,
-        bool allowVariableCadence = false)
+        bool allowVariableCadence = false,
+        bool networkedRuntime = false)
     {
         _remote = remote;
         _composition = new UltraSimGameComposition(
             new InventoryLimits(32, 128, 32),
-            runtimeProfile: remote ? GameRuntimeProfile.Networked : GameRuntimeProfile.Local);
+            runtimeProfile: remote || networkedRuntime
+                ? GameRuntimeProfile.Networked
+                : GameRuntimeProfile.Local);
         var identity = new PersistenceIdentityOptions(new PersistentWorldId(0x90_0004));
         _host = new InternalHost(_composition, new ServerRuntimeOptions(
             UltraSimGameComposition.CreateWorldOptions(512, identity,
-                remote ? GameRuntimeProfile.Networked : GameRuntimeProfile.Local),
+                remote || networkedRuntime
+                    ? GameRuntimeProfile.Networked
+                    : GameRuntimeProfile.Local),
             WorldClockOptions.Default,
             allowVariableSimulationFrequency: allowVariableCadence));
         _host.Start();
@@ -2062,8 +2747,11 @@ sealed class Fixture : IDisposable
 
     internal GameProjectionService CreateProjection() => new(
         _runtime.Game,
-        Server?.Admission ?? throw new InvalidOperationException("A remote Admission session is required."),
+        Server?.Admission ?? _localAdmission ??
+            throw new InvalidOperationException("An Admission session is required."),
         new GameReplicationLimits(512, 8, 512, 1_024, 1_024, 64, 64));
+
+    internal ServerGameFacet ServerGame => _runtime.Game;
 
     internal static Fixture Create(
         bool remote,
@@ -2076,6 +2764,9 @@ sealed class Fixture : IDisposable
         NetworkProtocolLimits? protocolLimits = null,
         RemoteIdentityAuthenticator? authenticator = null) =>
         new(remote: true, default, protocolLimits, authenticator, udp: true);
+
+    internal static Fixture CreateOfflineNetworked() =>
+        new(remote: false, default, networkedRuntime: true);
 
     internal static Fixture CreateN06(
         NetworkImpairmentOptions impairment,
@@ -2235,7 +2926,8 @@ sealed class Fixture : IDisposable
 
     internal (int TickMarker, int InputVelocity) ReadControlledSimulation()
     {
-        True(Server!.Admission.TryGetSession(new ParticipantId(41), out AdmissionResult entered));
+        AdmissionService admission = Server?.Admission ?? _localAdmission!;
+        True(admission.TryGetSession(new ParticipantId(41), out AdmissionResult entered));
         True(_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameSimulationState>(
             (world, _, game) =>
             {
@@ -2783,6 +3475,13 @@ readonly record struct ScenarioResult(
     string UiTrace,
     string ClientState,
     ulong ProtocolSteps);
+readonly record struct N09ScenarioResult(
+    string Authority,
+    string ClientState,
+    int TickMarker,
+    int InputVelocity,
+    int ProjectedEntityCount,
+    string ApplicationEvent);
 
 sealed record N04BenchmarkResult(
     string Workload,
@@ -2825,6 +3524,28 @@ sealed record N06BenchmarkResult(
     double LocalhostUdpP95NanosecondsPerCycle,
     double UdpToLoopbackRatio,
     long CallerAllocatedBytes,
+    string Notes);
+
+sealed record N09BenchmarkResult(
+    string Workload,
+    DateTimeOffset CapturedAtUtc,
+    string Runtime,
+    string OperatingSystem,
+    int LogicalProcessorCount,
+    ushort ProtocolVersion,
+    ulong ProtocolFingerprint,
+    int Samples,
+    double OfflineDirectMeanNanoseconds,
+    double OfflineDirectP95Nanoseconds,
+    double ProtocolLoopbackMeanNanoseconds,
+    double ProtocolLoopbackP95Nanoseconds,
+    double LocalhostUdpMeanNanoseconds,
+    double LocalhostUdpP95Nanoseconds,
+    double ProtocolLoopbackToDirectRatio,
+    double UdpToProtocolLoopbackRatio,
+    long OfflineDirectMedianCallerAllocatedBytes,
+    long ProtocolLoopbackMedianCallerAllocatedBytes,
+    long LocalhostUdpMedianCallerAllocatedBytes,
     string Notes);
 
 sealed record N08BenchmarkResult(
