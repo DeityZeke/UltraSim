@@ -579,6 +579,24 @@ internal sealed class MovementRampHarness : IRampHarness
         int gen0After = GC.CollectionCount(0);
         int gen1After = GC.CollectionCount(1);
         int gen2After = GC.CollectionCount(2);
+        // Complete a common untimed post-stage settle window so canonical state
+        // is compared after admitted input and async transport have converged.
+        // The performance/allocation window above remains the measured stage.
+        for (int settle = 0; settle < _options.SettleTicks; settle++)
+        {
+            for (int client = 0; client < _clients.Count; client++)
+            {
+                _clients[client].Host.Movement.SendPending();
+                _clients[client].Transport.FlushOutbound();
+            }
+            _clockTicks += 2;
+            _serverHost?.Pump(
+                _clockTicks, _options.TickDeltaSeconds,
+                checked((uint)(stageIndex * 100_000 + measuredTicks + settle + 1)));
+            for (int client = 0; client < _clients.Count; client++)
+                _clients[client].Host.Pump(_clockTicks + 1);
+            WaitForRealtimeTick(ref nextTickDeadline);
+        }
         TickWindowStats stats = new TickWindowStats(tickSamplesMs);
         TickWindowStats serverPumpStats = new TickWindowStats(serverPumpSamplesMs);
         TickWindowStats serverPollStats = new TickWindowStats(serverPollSamplesMs);
@@ -853,7 +871,53 @@ internal sealed class MovementRampHarness : IRampHarness
             OwnerCorrectionMaxPositionError: ownerCorrectionPositionErrorMax,
             OwnerCorrectionAverageVelocityError: ownerCorrectionSamples == 0 ? 0d : ownerCorrectionVelocityErrorSum / ownerCorrectionSamples,
             OwnerCorrectionMaxVelocityError: ownerCorrectionVelocityErrorMax,
-            ObserverStateItems: CountObserverStateItems());
+            ObserverStateItems: CountObserverStateItems(),
+            CanonicalOwnerStateHash: ComputeCanonicalOwnerStateHash(),
+            CanonicalOwnerStates: BuildCanonicalOwnerStates());
+    }
+
+    private string ComputeCanonicalOwnerStateHash()
+    {
+        ulong hash = 14695981039346656037UL;
+        Mix(ref hash, checked((ulong)_clients.Count));
+        for (int index = 0; index < _clients.Count; index++)
+        {
+            ClientMovementStateReceiveResult result = _clients[index].Host.Movement.LastReceiveResult;
+            Mix(ref hash, checked((ulong)index));
+            Mix(ref hash, result.NetworkEntityId);
+            Mix(ref hash, result.LastProcessedInputSequence);
+            Mix(ref hash, BitConverter.SingleToUInt32Bits(result.AuthoritativeState.VelocityX));
+            Mix(ref hash, BitConverter.SingleToUInt32Bits(result.AuthoritativeState.VelocityY));
+        }
+        return hash.ToString("x16", CultureInfo.InvariantCulture);
+
+        static void Mix(ref ulong hash, ulong value)
+        {
+            for (int shift = 0; shift < 64; shift += 8)
+                hash = unchecked((hash ^ (byte)(value >> shift)) * 1099511628211UL);
+        }
+    }
+
+    private JsonArray BuildCanonicalOwnerStates()
+    {
+        var rows = new JsonArray();
+        for (int index = 0; index < _clients.Count; index++)
+        {
+            ClientMovementStateReceiveResult result = _clients[index].Host.Movement.LastReceiveResult;
+            rows.Add(new JsonObject
+            {
+                ["client_index"] = index,
+                ["network_entity_id"] = result.NetworkEntityId,
+                ["last_processed_input_sequence"] = result.LastProcessedInputSequence,
+                ["next_input_sequence"] = _clients[index].Host.Movement.Sequencer.NextSequence,
+                ["pending_input_count"] = _clients[index].Host.Movement.Sequencer.PendingCount,
+                ["position_x_bits"] = BitConverter.SingleToUInt32Bits(result.AuthoritativeState.PositionX),
+                ["position_y_bits"] = BitConverter.SingleToUInt32Bits(result.AuthoritativeState.PositionY),
+                ["velocity_x_bits"] = BitConverter.SingleToUInt32Bits(result.AuthoritativeState.VelocityX),
+                ["velocity_y_bits"] = BitConverter.SingleToUInt32Bits(result.AuthoritativeState.VelocityY),
+            });
+        }
+        return rows;
     }
 
     private bool ShouldSendInputThisTick(ClientHandle client, int tick)
@@ -1026,7 +1090,12 @@ internal sealed class MovementRampHarness : IRampHarness
             if (!ShouldSendInputThisTick(client, (int)clientTick))
                 continue;
 
-            short moveX = (short)(80 + ((int)clientTick + i) % 40);
+            // Keep the comparison workload inside the V2 movement contract's
+            // [-100, 100] input range for arbitrarily long stages.  The old
+            // 80..119 pattern silently turned the tail of each cycle into
+            // rejected hostile input and made cross-generation convergence
+            // depend on stage length.
+            short moveX = (short)(40 + ((int)clientTick + i) % 40);
             short moveY = (short)(20 + (((int)clientTick * 3) + i) % 30);
             var input = new ClientMovementInput(moveX, moveY, (byte)(clientTick & 3));
             ClientMovementState predictedState = client.PredictNextState(input, _options.TickDeltaSeconds);
@@ -2217,7 +2286,9 @@ internal readonly record struct StageResult(
     double OwnerCorrectionMaxPositionError,
     double OwnerCorrectionAverageVelocityError,
     double OwnerCorrectionMaxVelocityError,
-    int ObserverStateItems)
+    int ObserverStateItems,
+    string CanonicalOwnerStateHash,
+    JsonArray CanonicalOwnerStates)
 {
     public double ConnectSuccessRate => ConnectAttempts <= 0 ? 1d : ConnectSuccess / (double)ConnectAttempts;
     public bool TickSloPass => TickP95Ms <= SloTickP95Ms && PendingMaxPerClient <= SloPendingMax;
@@ -2410,6 +2481,8 @@ internal readonly record struct StageResult(
             ["owner_correction_avg_velocity_error"] = Math.Round(OwnerCorrectionAverageVelocityError, 6),
             ["owner_correction_max_velocity_error"] = Math.Round(OwnerCorrectionMaxVelocityError, 6),
             ["observer_state_items"] = ObserverStateItems,
+            ["canonical_owner_state_hash"] = CanonicalOwnerStateHash,
+            ["canonical_owner_states"] = CanonicalOwnerStates.DeepClone(),
         };
     }
 }

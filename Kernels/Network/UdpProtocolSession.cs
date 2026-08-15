@@ -62,6 +62,8 @@ public enum UdpProtocolSessionState : byte
 public readonly record struct UdpDatagramEndpointSnapshot(
     ulong Sent,
     ulong Received,
+    ulong SentBytes,
+    ulong ReceivedBytes,
     ulong CapacityDrops,
     ulong RejectedDatagrams,
     bool IsOpen,
@@ -402,6 +404,8 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
     internal bool SuppressSendsForTesting { get; set; }
     private ulong _sent;
     private ulong _received;
+    private ulong _sentBytes;
+    private ulong _receivedBytes;
     private ulong _capacityDrops;
     private ulong _rejected;
     private SocketError _lastError;
@@ -469,6 +473,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
                 return DatagramSendStatus.CapacityExceeded;
             }
             _sent++;
+            _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
             return DatagramSendStatus.Accepted;
         }
         catch (SocketException exception) when (IsTransient(exception.SocketErrorCode))
@@ -500,6 +505,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
             length = _socket.Receive(destination, SocketFlags.None);
             if (length == 0) return false;
             _received++;
+            _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)length));
             return true;
         }
         catch (SocketException exception) when (exception.SocketErrorCode is
@@ -519,7 +525,8 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
     internal UdpDatagramEndpointSnapshot GetSnapshot()
     {
         EnsureOwnerThread();
-        return new(_sent, _received, _capacityDrops, _rejected, !_disposed, _lastError);
+        return new(_sent, _received, _sentBytes, _receivedBytes,
+            _capacityDrops, _rejected, !_disposed, _lastError);
     }
 
     public void Dispose()
@@ -544,6 +551,9 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
 
     private static bool IsTransient(SocketError error) => error is
         SocketError.WouldBlock or SocketError.IOPending or SocketError.NoBufferSpaceAvailable;
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 
     private void EnsureOwnerThread()
     {

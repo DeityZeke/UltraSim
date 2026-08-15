@@ -16,7 +16,8 @@ baseline/recovery/generation-replacement vertical are implemented. N0.9 now
 accepts the hardened integrated OfflineDirect/secure-loopback/UDP/listen-host
 vertical, including multi-consumer retained application Events, reliable
 baseline cancellation, exact WorldState parity, and durable generation replacement.
-N0.10 scale and measured specialization is next.
+N0.10 has begun with an isolated V2/V3 owner-movement bot comparison and bounded
+pressure/memory telemetry; shared-listener/shard specialization remains evidence-gated.
 
 ## Design
 

@@ -25,7 +25,9 @@ public readonly record struct RemoteApplicationEventServerSnapshot(
     ulong EventsRejected,
     ulong MalformedAcknowledgements,
     ulong ApplicationTimeouts,
-    uint ConsecutiveApplicationTimeouts);
+    uint ConsecutiveApplicationTimeouts,
+    ulong EventRecordsExamined,
+    ulong EventRecordsSkipped);
 
 /// <summary>
 /// Connection-owned adapter from retained game application facts to reliable
@@ -53,6 +55,8 @@ public sealed class RemoteApplicationEventServer : IRemoteGameProtocolHandler, I
     private ulong _rejected;
     private ulong _malformed;
     private ulong _timeouts;
+    private ulong _recordsExamined;
+    private ulong _recordsSkipped;
     private uint _consecutiveTimeouts;
     private long _awaitingSinceMilliseconds;
     private bool _disposed;
@@ -124,7 +128,9 @@ public sealed class RemoteApplicationEventServer : IRemoteGameProtocolHandler, I
             if (read.Status != GameProjectionHistoryReadStatus.Success || read.Count != 1)
                 return RemoteApplicationEventScheduleStatus.BaselineRequired;
             value = _scratch[0];
+            SaturatingIncrement(ref _recordsExamined);
             if (value.Participant == _participant) break;
+            SaturatingIncrement(ref _recordsSkipped);
             _nextSequence = read.NextSequence;
             if (!_projection.TryAdvanceApplicationEventConsumer(_participant, _nextSequence))
             {
@@ -236,7 +242,7 @@ public sealed class RemoteApplicationEventServer : IRemoteGameProtocolHandler, I
         return new(_stateEpoch, _nextSequence, _awaitingApplication
                 ? _outstanding.Sequence : _nextSequence,
             _awaitingApplication, _nonviable, _queued, _applied, _rejected, _malformed,
-            _timeouts, _consecutiveTimeouts);
+            _timeouts, _consecutiveTimeouts, _recordsExamined, _recordsSkipped);
     }
 
     public void Dispose()

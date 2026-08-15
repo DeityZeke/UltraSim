@@ -117,6 +117,9 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
             if (_state is RemoteClientApplicationState.Detached or RemoteClientApplicationState.Faulted)
                 break;
         }
+        if (_state == RemoteClientApplicationState.Active &&
+            _additionalHandler is IRemoteGameProtocolProgressor progressor)
+            _ = progressor.TryProgress();
         return processed;
     }
 

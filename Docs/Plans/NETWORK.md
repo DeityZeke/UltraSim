@@ -1485,6 +1485,13 @@ retry/nonviable policy. Generation replacement resets generation-local facts
 and requires an explicit new floor. Transport acknowledgement remains weaker
 than Event application acknowledgement.
 
+Application Event sequences remain projection-global. A connection receives a
+trusted monotonically increasing participant-filtered subsequence, so gaps mean
+facts for other participants rather than packet loss. Capacity rejection names
+the received global sequence. Duplicate delivery and ordinary owner-pump retry
+cannot leave a stale retained ACK, and baseline cancellation/supersession retires
+the matching pending baseline acknowledgement before a successor begins.
+
 The normalized three-topology gate keeps Admission/CharacterSelect, Inventory
 Split/Equip/hot reopen, canonical projection, initial and same-epoch baselines,
 Event, complete authoritative input, owner state, maintained WorldState, durable
@@ -1525,6 +1532,74 @@ remains immutable historical evidence rather than being normalized or replaced.
 Only after correctness admit connection/assembly shards, worker counts, slab
 backend decisions, syscall batching, homogeneous packet batches, vectorization,
 compression, hot/cold splitting, cache alignment, and snapshot thresholds.
+
+N0.10 begins with a cross-generation measurement instrument, not a production
+specialization. `UltraSim.Network.Comparison` runs frozen V2 and current V3 in
+isolated child processes in both orders over the same deterministic
+`owner_movement` bot script and the 32/64/128/256 stage catalog. The first V3
+topology still owns one connected client/server UDP pair per bot, while V2 owns
+one shared server socket; results are therefore explicitly **provisional
+topology evidence**. Exact normalized owner identity, acknowledged input
+sequence, and velocity are required before any relative row is admitted.
+Arrival-relative position remains a diagnostic rather than a false equality
+claim.
+
+The first instrument reports tick/server/client time, ping and V3 input-to-owner
+acknowledgement latency, deadline misses, allocation/GC, process memory,
+configured socket buffers, protocol reservation, queue/in-flight high water,
+capacity-pressure ticks, retransmission/drop counts, actual V3 UDP bytes, and a
+normalized logical-message-byte count. The latter measures semantic messages
+admitted by the sender; applied counts remain separate so coalescing stays
+visible.
+Unavailable frozen-V2 values remain explicitly zero/unavailable rather than
+being synthesized. V3 also reports the current default per-connection protocol
+reservation estimate beside the deliberately small owner-workload benchmark
+profile. That evidence—not the desire for a flattering scale graph—decides the
+first production capacity specialization.
+
+`spread_mix` and `dense_mix` are catalog names only until both adapters perform
+equivalent observer WorldState/Event semantics and their canonical oracles are
+implemented. The comparison executable rejects them today rather than silently
+running owner-only work under a broader label. Event-ledger examined/skipped,
+minimum-cursor scan entries, and retained high water are now always-available
+N0.10 counters for deciding whether participant-local Event indexing is earned.
+
+The first accepted provisional owner matrix matched canonical state in all eight
+scale/order runs. V2 tick p95 ranged from approximately 0.26 ms at 32 bots to
+1.86 ms at 256; V3 ranged from approximately 0.72–0.80 ms to 5.47–5.61 ms. V3 remained
+inside the 16.667 ms tick budget and reached roughly 20.7 ms input-to-owner ACK
+p95 at 256, but cost stayed about 2.77–3.12x V2 under this topology. That is not a
+kernel or wire-format verdict: it is evidence that per-bot server sockets, peers,
+and pump traversal are now the dominant structural difference worth testing.
+The next scale specialization should therefore be a bounded shared server
+listener/session owner with the same protocol/application semantics, before
+sharding or micro-optimizing crypto/codec instructions.
+
+The occupancy evidence rules out simple capacity exhaustion: the admitted V3
+profile never crossed 50% queue occupancy, reached only one in-flight packet and
+two received messages, and recorded zero capacity drops. A different cliff does
+appear at 256: localhost retransmissions rise from 2, 3–5, and 6–11 at
+32/64/128 to 426–430
+at 256 in the two orders. Together with the ACK-latency increase, this points at
+serial per-session pump traversal and step-based timeout observation—not queue
+size—as the first behavior the shared listener/pump experiment must explain.
+
+Both generations admitted essentially the same normalized logical message
+bytes at each stage (about 1.026 MB at 256). V3 put about 7.51 wire bytes on the
+localhost UDP path per normalized logical byte, including framing, AEAD,
+transport/application acknowledgements, handshake traffic, and retransmission.
+Frozen V2 does not expose physical wire bytes, so this is a V3 amplification
+diagnostic rather than a cross-generation wire ratio.
+
+At 256 bots the admitted owner-workload profile reserved about 5.04 MiB of V3
+protocol payload and configured 16 MiB of socket buffers. Instantiating the
+current general default protocol profile would instead estimate about 3.16 GiB
+of protocol payload for the same connected-pair topology. This earns explicit
+profile specialization, but the benchmark-only profile does not silently change
+production defaults. Frozen V2 requested about 2.01 GiB of socket buffers at
+that scale while observed process working set stayed near 130 MiB, demonstrating
+why configured requests, owned payload, and physical memory remain separate
+metrics.
 
 Protected profiles:
 

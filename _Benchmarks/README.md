@@ -33,6 +33,9 @@ when those systems exist.
 | `UltraSim.ECS.ExtremeSphere*` | CPU and Godot MultiMesh extreme-scale stress. |
 | `UltraSim.ECS.BitmapExperiment*` | Retained experimental storage oracle; not production ECS. |
 | `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
+| `UltraSim.Network.Comparison` | N0.10 isolated V2/V3 bot matrix coordinator; both process orders and provisional-topology reports. |
+| `UltraSim.Network.V2ComparisonAdapter` | Frozen V2 bot-harness child-process adapter and normalized owner-state evidence. |
+| `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected-UDP bot adapter with bounded pressure, memory, wire, and semantic-latency telemetry. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |
 | `UltraSim.Network.KernelBenchmarks` | N0.2 generated codec, packet ownership, ring, deterministic datagram, and connection reuse primitives. |
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
@@ -77,6 +80,10 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release -- \
     --benchmark-n08 --output _Benchmarks/results/network-n0.8-local-run.json
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
+    --clients=32,64,128,256 --stage-ticks=120 --settle-ticks=30 \
+    --output-dir=_Benchmarks/results/network-v2-v3-bot-local
 ```
 
 Each executable's `--help`/argument parser is the source of truth for filters,
@@ -89,6 +96,8 @@ new evidence under a new descriptive name only after review.
 Godot extreme-stress setup and exact controls remain in
 [ECS_EXTREME_SPHERE_STRESS.md](ECS_EXTREME_SPHERE_STRESS.md). Cross-generation
 contract details remain in [ECS_V2_V3_COMPARISON.md](ECS_V2_V3_COMPARISON.md).
+The provisional N0.10 network instrument is documented in
+[NETWORK_V2_V3_BOT_COMPARISON.md](NETWORK_V2_V3_BOT_COMPARISON.md).
 
 ## Comparability
 

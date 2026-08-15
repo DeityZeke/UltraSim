@@ -21,7 +21,7 @@ public readonly record struct RemoteApplicationEventSnapshot(
     ulong PayloadHash);
 
 /// <summary>Bounded idempotent client consumer for retained application facts.</summary>
-public sealed class RemoteApplicationEventClient : IRemoteGameProtocolHandler
+public sealed class RemoteApplicationEventClient : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
@@ -79,15 +79,10 @@ public sealed class RemoteApplicationEventClient : IRemoteGameProtocolHandler
             QueueAcknowledgement(RemoteApplicationEventApplyStatus.Applied, _nextSequence);
             return true;
         }
-        if (value.Sequence != _nextSequence)
-        {
-            SaturatingIncrement(ref _rejected);
-            return true;
-        }
         if (_count == _events.Length)
         {
             _nonviable = true;
-            QueueAcknowledgement(RemoteApplicationEventApplyStatus.CapacityExceeded, _nextSequence);
+            QueueAcknowledgement(RemoteApplicationEventApplyStatus.CapacityExceeded, value.Sequence);
             return true;
         }
         int slot = (_head + _count) % _events.Length;
@@ -95,7 +90,10 @@ public sealed class RemoteApplicationEventClient : IRemoteGameProtocolHandler
             value.Sequence, _stateEpoch, value.ParticipantId,
             value.Kind, value.Subject, value.PayloadHash);
         _count++;
-        _nextSequence++;
+        // The server is the trusted participant filter over one global Event
+        // sequence. A gap therefore represents facts for other participants,
+        // not missing facts for this consumer.
+        _nextSequence = checked(value.Sequence + 1);
         SaturatingIncrement(ref _applied);
         QueueAcknowledgement(RemoteApplicationEventApplyStatus.Applied, _nextSequence);
         return true;
@@ -158,6 +156,8 @@ public sealed class RemoteApplicationEventClient : IRemoteGameProtocolHandler
         return true;
     }
 
+    bool IRemoteGameProtocolProgressor.TryProgress() => TryFlushAcknowledgement();
+
     public RemoteApplicationEventClientSnapshot GetSnapshot()
     {
         EnsureOwnerThread();
@@ -174,13 +174,21 @@ public sealed class RemoteApplicationEventClient : IRemoteGameProtocolHandler
             NextSequence = nextSequence,
             Status = status,
         };
-        if (TryQueueAcknowledgement(in acknowledgement)) return;
-        if (_hasPendingAcknowledgement && !AcknowledgementsEqual(
-                in _pendingAcknowledgement, in acknowledgement))
+        if (_hasPendingAcknowledgement)
         {
-            _nonviable = true;
+            if (!AcknowledgementsEqual(in _pendingAcknowledgement, in acknowledgement))
+            {
+                _nonviable = true;
+                return;
+            }
+            if (TryQueueAcknowledgement(in _pendingAcknowledgement))
+            {
+                _pendingAcknowledgement = default;
+                _hasPendingAcknowledgement = false;
+            }
             return;
         }
+        if (TryQueueAcknowledgement(in acknowledgement)) return;
         _pendingAcknowledgement = acknowledgement;
         _hasPendingAcknowledgement = true;
     }

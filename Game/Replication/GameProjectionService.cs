@@ -71,8 +71,10 @@ public sealed class GameProjectionService : IDisposable
     private ulong _lifecycleOverwritten;
     private int _applicationHead;
     private int _applicationCount;
+    private int _applicationHighWater;
     private ulong _applicationNextSequence;
     private int _applicationEventConsumerCount;
+    private ulong _applicationMinimumCursorScanEntries;
     private int _inputCount;
     private bool _rebuildRequired;
     private Exception? _fault;
@@ -308,6 +310,7 @@ public sealed class GameProjectionService : IDisposable
             _applicationNextSequence++, _stateEpoch, participant, kind, subject, payloadHash);
         _applicationEvents[index] = applicationEvent;
         _applicationCount++;
+        _applicationHighWater = Math.Max(_applicationHighWater, _applicationCount);
         return true;
     }
 
@@ -435,6 +438,9 @@ public sealed class GameProjectionService : IDisposable
 
     private void DiscardApplicationEventsThroughConsumerMinimum()
     {
+        _applicationMinimumCursorScanEntries = SaturatingAdd(
+            _applicationMinimumCursorScanEntries,
+            checked((ulong)_applicationEventConsumerCount));
         ulong minimum = _applicationEventConsumerCursors[0];
         for (int index = 1; index < _applicationEventConsumerCount; index++)
             minimum = Math.Min(minimum, _applicationEventConsumerCursors[index]);
@@ -539,6 +545,9 @@ public sealed class GameProjectionService : IDisposable
             _fault is not null,
             _lifecycleOverwritten,
             _applicationCount,
+            _applicationEventConsumerCount,
+            _applicationHighWater,
+            _applicationMinimumCursorScanEntries,
             _inputCount,
             CalculateReservedBytes());
     }
@@ -1150,6 +1159,9 @@ public sealed class GameProjectionService : IDisposable
         if (destination.Length != first)
             source.AsSpan(0, destination.Length - first).CopyTo(destination[first..]);
     }
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 
     private void EnsureOperational()
     {

@@ -43,6 +43,8 @@ internal static class N05UdpTransportTests
         UdpProtocolSessionSnapshot snapshot = session.GetSnapshot();
         True(snapshot.ClientDatagrams.Sent > 0 && snapshot.ServerDatagrams.Sent > 0);
         True(snapshot.ClientDatagrams.Received > 0 && snapshot.ServerDatagrams.Received > 0);
+        True(snapshot.ClientDatagrams.SentBytes > 0 && snapshot.ServerDatagrams.SentBytes > 0);
+        True(snapshot.ClientDatagrams.ReceivedBytes > 0 && snapshot.ServerDatagrams.ReceivedBytes > 0);
         Equal(UdpProtocolSessionState.Established, snapshot.State);
     }
 

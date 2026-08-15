@@ -147,6 +147,9 @@ public readonly record struct GameProjectionSnapshot(
     bool IsFaulted,
     ulong LifecycleOverwrittenCount,
     int RetainedApplicationEvents,
+    int ApplicationEventConsumers,
+    int RetainedApplicationEventHighWater,
+    ulong ApplicationEventMinimumCursorScanEntries,
     int PendingAuthoritativeInputs,
     long ReservedBytes);
 

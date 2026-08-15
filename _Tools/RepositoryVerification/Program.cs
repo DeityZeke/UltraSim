@@ -26,6 +26,7 @@ string[] testProjects =
     "_Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj",
     "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
     "_Tests/UltraSim.Network.Generator.Tests/UltraSim.Network.Generator.Tests.csproj",
+    "_Tests/UltraSim.Network.Comparison.Tests/UltraSim.Network.Comparison.Tests.csproj",
     "_Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj",
     "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
@@ -221,6 +222,7 @@ static void VerifyDocumentation(string root)
         "_Benchmarks/Baselines/README.md",
         "_Benchmarks/ECS_V2_V3_COMPARISON.md",
         "_Benchmarks/ECS_EXTREME_SPHERE_STRESS.md",
+        "_Benchmarks/NETWORK_V2_V3_BOT_COMPARISON.md",
         "_Tools/LocalAI/README.md",
     ];
     foreach (string document in activeDocuments)
@@ -248,7 +250,7 @@ static void VerifyDocumentation(string root)
         ["_Benchmarks/README.md"] =
         [
             "_Benchmarks/Baselines/README.md", "_Benchmarks/ECS_V2_V3_COMPARISON.md",
-            "_Benchmarks/ECS_EXTREME_SPHERE_STRESS.md",
+            "_Benchmarks/ECS_EXTREME_SPHERE_STRESS.md", "_Benchmarks/NETWORK_V2_V3_BOT_COMPARISON.md",
         ],
     };
     foreach ((string parent, string[] children) in navigation)

@@ -56,7 +56,8 @@ public static class NetworkComparisonContract
             return new(requestedClassification, false, false,
                 "The declared contract has no honest equivalent; report capability only and no ratio.");
 
-        string? mismatch = FindMismatch(left, right);
+        string? mismatch = FindMismatch(left, right,
+            permitTopologyDifference: requestedClassification == NetworkComparisonClass.Provisional);
         if (mismatch is not null)
             return new(NetworkComparisonClass.Unsupported, false, false,
                 $"Evidence profiles differ in {mismatch}; a relative headline is prohibited.");
@@ -66,20 +67,25 @@ public static class NetworkComparisonContract
             NetworkComparisonClass.Direct => new(requestedClassification, true, true,
                 "Equivalent semantic work and measurement profiles admit a direct relative result."),
             NetworkComparisonClass.Provisional => new(requestedClassification, true, true,
-                "Equivalent declared profiles admit a clearly labeled provisional relative result."),
+                "Equivalent observable work admits a provisional relative result while transport topology differs."),
             NetworkComparisonClass.Directional => new(requestedClassification, true, false,
                 "Directional evidence may be reported side by side but not as a headline ratio."),
             _ => throw new ArgumentOutOfRangeException(nameof(requestedClassification)),
         };
     }
 
-    private static string? FindMismatch(NetworkEvidenceProfile left, NetworkEvidenceProfile right)
+    private static string? FindMismatch(
+        NetworkEvidenceProfile left,
+        NetworkEvidenceProfile right,
+        bool permitTopologyDifference)
     {
         if (!StringComparer.Ordinal.Equals(left.WorkloadIdentity, right.WorkloadIdentity)) return "workload identity";
         if (!StringComparer.Ordinal.Equals(left.SemanticContract, right.SemanticContract)) return "semantic contract";
         if (!StringComparer.Ordinal.Equals(left.CapacityProfile, right.CapacityProfile)) return "capacity profile";
         if (!StringComparer.Ordinal.Equals(left.ClockProfile, right.ClockProfile)) return "clock profile";
-        if (!StringComparer.Ordinal.Equals(left.ExecutionTopology, right.ExecutionTopology)) return "execution topology";
+        if (!permitTopologyDifference &&
+            !StringComparer.Ordinal.Equals(left.ExecutionTopology, right.ExecutionTopology))
+            return "execution topology";
         if (!StringComparer.Ordinal.Equals(left.AllocationScope, right.AllocationScope)) return "allocation scope";
         return null;
     }

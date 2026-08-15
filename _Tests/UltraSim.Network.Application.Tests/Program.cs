@@ -76,8 +76,11 @@ internal static class Program
             ("ApplicationEventContinuitySurvivesResnapshotAndImpairment", ApplicationEventContinuitySurvivesResnapshotAndImpairment),
             ("ApplicationEventCapacityFailureIsExplicitlyNonviable", ApplicationEventCapacityFailureIsExplicitlyNonviable),
             ("ApplicationEventConsumersRetainAndFilterIndependently", ApplicationEventConsumersRetainAndFilterIndependently),
+            ("ParticipantFilteredEventSequencesPermitTrustedGlobalGaps", ParticipantFilteredEventSequencesPermitTrustedGlobalGaps),
             ("ApplicationEventWorkingCapacityAndAcknowledgementBackpressureRecover", ApplicationEventWorkingCapacityAndAcknowledgementBackpressureRecover),
+            ("ApplicationEventDuplicateRetryRetiresPendingAcknowledgement", ApplicationEventDuplicateRetryRetiresPendingAcknowledgement),
             ("ApplicationEventApplicationTimeoutIsBounded", ApplicationEventApplicationTimeoutIsBounded),
+            ("BaselineCancellationRetiresPendingAcknowledgement", BaselineCancellationRetiresPendingAcknowledgement),
             ("ControlledEpochRebindClearsAuthorityAndSequenceExhaustsFailClosed", ControlledEpochRebindClearsAuthorityAndSequenceExhaustsFailClosed),
         };
 
@@ -1300,7 +1303,16 @@ static void ApplicationEventConsumersRetainAndFilterIndependently()
         "One consumer discarded an event still owed to another participant.");
     Acknowledge(secondServer, forSecond.Sequence + 1);
     Equal(RemoteApplicationEventScheduleStatus.NoData, firstServer.TrySchedule());
-    Equal(0, projection.GetSnapshot().RetainedApplicationEvents);
+    GameProjectionSnapshot snapshot = projection.GetSnapshot();
+    Equal(0, snapshot.RetainedApplicationEvents);
+    Equal(2, snapshot.ApplicationEventConsumers);
+    Equal(2, snapshot.RetainedApplicationEventHighWater);
+    True(snapshot.ApplicationEventMinimumCursorScanEntries >= 6,
+        "The Event consumer-ledger scan cost was not exposed diagnostically.");
+    Equal(2UL, firstServer.GetSnapshot().EventRecordsExamined);
+    Equal(1UL, firstServer.GetSnapshot().EventRecordsSkipped);
+    Equal(2UL, secondServer.GetSnapshot().EventRecordsExamined);
+    Equal(1UL, secondServer.GetSnapshot().EventRecordsSkipped);
 
     void Acknowledge(RemoteApplicationEventServer server, ulong next)
     {
@@ -1378,6 +1390,194 @@ static void ApplicationEventWorkingCapacityAndAcknowledgementBackpressureRecover
         True(client.TryProcess(new NetworkDeliveredMessage(
             NetworkLane.Event, RemoteApplicationEventMessageCodec.Descriptor.Id,
             RemoteApplicationEventMessageCodec.Descriptor.Version, default, payload.Length), payload));
+    }
+}
+
+static void ParticipantFilteredEventSequencesPermitTrustedGlobalGaps()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId alice = new(41);
+    ParticipantId bob = new(42);
+    True(fixture.Server!.Admission.JoinAccountless(bob).IsEntered);
+    using GameProjectionService projection = fixture.CreateProjection();
+    True(projection.SynchronizeParticipant(alice));
+    True(projection.SynchronizeParticipant(bob));
+    ulong floor = projection.RebuildBaseline().Frame.ApplicationEventNextSequence;
+    using var server = new RemoteApplicationEventServer(
+        fixture.ServerPeer, projection, alice, fixture.ApplicationSessionEpoch, floor);
+    var client = new RemoteApplicationEventClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, alice.Value,
+        projection.StateEpoch, floor, maximumRetainedEvents: 4);
+    fixture.Server.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    True(projection.TryPublishApplicationEvent(alice, 1, 10, 100, out GameApplicationEvent alice0));
+    True(projection.TryPublishApplicationEvent(bob, 2, 20, 200, out GameApplicationEvent bob1));
+    True(projection.TryPublishApplicationEvent(alice, 3, 30, 300, out GameApplicationEvent alice2));
+    Equal(alice0.Sequence + 1, bob1.Sequence);
+    Equal(bob1.Sequence + 1, alice2.Sequence);
+
+    Equal(RemoteApplicationEventScheduleStatus.Queued, server.TrySchedule());
+    fixture.DriveUntil(() => server.GetSnapshot().EventsApplied == 1);
+    Equal(RemoteApplicationEventScheduleStatus.Queued, server.TrySchedule());
+    fixture.DriveUntil(() => server.GetSnapshot().EventsApplied == 2);
+
+    Span<RemoteApplicationEventSnapshot> delivered = stackalloc RemoteApplicationEventSnapshot[4];
+    Equal(2, client.CopyEvents(delivered));
+    Equal(alice0.Sequence, delivered[0].Sequence);
+    Equal(alice2.Sequence, delivered[1].Sequence);
+    Equal(alice2.Sequence + 1, client.GetSnapshot().NextSequence);
+    Equal(3UL, server.GetSnapshot().EventRecordsExamined);
+    Equal(1UL, server.GetSnapshot().EventRecordsSkipped);
+    False(delivered[0].ParticipantId == bob.Value || delivered[1].ParticipantId == bob.Value,
+        "Participant filtering exposed another participant's Event payload.");
+}
+
+static void ApplicationEventDuplicateRetryRetiresPendingAcknowledgement()
+{
+    NetworkProtocolLimits limits = NetworkProtocolLimits.Default with { MaximumReliableMessages = 4 };
+    using Fixture fixture = Fixture.Create(true, default, limits);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    var client = new RemoteApplicationEventClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, participant.Value,
+        new StateEpoch(0xE902), eventFloor: 0, maximumRetainedEvents: 2);
+
+    FillClientControlQueue();
+    Send(0);
+    True(client.TryConsumeNext(out _));
+    fixture.DriveUntil(() => fixture.ClientPeer.ReliableQueued == 0);
+
+    // The semantic duplicate retries the identical retained ACK. A successful
+    // retry must retire the retained copy before another acknowledgement exists.
+    Send(0);
+    FillClientControlQueue();
+    Send(1);
+    False(client.GetSnapshot().IsNonviable,
+        "A successfully retried duplicate left a stale pending acknowledgement.");
+
+    void FillClientControlQueue()
+    {
+        var filler = new RemoteApplicationEventAppliedMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0xE902,
+            NextSequence = 999,
+            Status = RemoteApplicationEventApplyStatus.Applied,
+        };
+        Span<byte> bytes = stackalloc byte[RemoteApplicationEventAppliedMessageCodec.EncodedSize];
+        True(RemoteApplicationEventAppliedMessageCodec.TryWriteExact(bytes, in filler));
+        while (fixture.ClientPeer.TryQueue(
+            RemoteApplicationEventAppliedMessageCodec.Descriptor.Id, bytes) == NetworkQueueStatus.Accepted) { }
+    }
+
+    void Send(ulong sequence)
+    {
+        var message = new RemoteApplicationEventMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0xE902,
+            Sequence = sequence,
+            ParticipantId = participant.Value,
+            Kind = 1,
+            Subject = sequence + 1,
+            PayloadHash = sequence + 10,
+        };
+        Span<byte> payload = stackalloc byte[RemoteApplicationEventMessageCodec.EncodedSize];
+        True(RemoteApplicationEventMessageCodec.TryWriteExact(payload, in message));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Event, RemoteApplicationEventMessageCodec.Descriptor.Id,
+            RemoteApplicationEventMessageCodec.Descriptor.Version, default, payload.Length), payload));
+    }
+}
+
+static void BaselineCancellationRetiresPendingAcknowledgement()
+{
+    NetworkProtocolLimits limits = NetworkProtocolLimits.Default with { MaximumReliableMessages = 4 };
+    using Fixture fixture = Fixture.Create(true, default, limits);
+    fixture.AuthenticateAndEnter();
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, new StateEpoch(0xE903),
+        maximumKnownIdentities: 4, maximumActiveEntities: 4,
+        maximumRecordsPerBundle: 2);
+    FillClientControlQueue();
+    SendBegin(1, 1);
+    True(client.GetSnapshot().BaselineCandidateActive);
+    SendCancel(1);
+    False(client.GetSnapshot().BaselineCandidateActive);
+    SendBegin(2, 2);
+    True(client.GetSnapshot().BaselineCandidateActive);
+    False(client.GetSnapshot().IsFaulted,
+        "A canceled baseline acknowledgement poisoned its successor transaction.");
+
+    fixture.DriveUntil(() => fixture.ClientPeer.ReliableQueued == 0);
+    while (fixture.ServerPeer.TryPeekReceived(out _, out _))
+        True(fixture.ServerPeer.TryConsumeReceived());
+    True(client.TryFlushAcknowledgements());
+    for (int step = 0; step < 50_000 && fixture.ServerPeer.ReceivedQueued == 0; step++)
+        fixture.PumpTransport();
+    True(fixture.ServerPeer.ReceivedQueued != 0,
+        "The successor baseline acknowledgement did not reach transport delivery.");
+    True(fixture.ServerPeer.TryPeekReceived(out NetworkDeliveredMessage delivered, out ReadOnlySpan<byte> payload));
+    Equal(RemoteWorldBaselineAppliedMessageCodec.Descriptor.Id, delivered.MessageId);
+    True(RemoteWorldBaselineAppliedMessageCodec.TryReadExact(
+        payload, out RemoteWorldBaselineAppliedMessage acknowledgement));
+    Equal(2UL, acknowledgement.BaselineId);
+    True(fixture.ServerPeer.TryConsumeReceived());
+
+    void FillClientControlQueue()
+    {
+        var filler = new RemoteWorldBaselineAppliedMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0xE903,
+            BaselineId = 99,
+            BaselineRevision = 99,
+            Status = RemoteWorldBaselineApplyStatus.Prepared,
+        };
+        Span<byte> bytes = stackalloc byte[RemoteWorldBaselineAppliedMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineAppliedMessageCodec.TryWriteExact(bytes, in filler));
+        while (fixture.ClientPeer.TryQueue(
+            RemoteWorldBaselineAppliedMessageCodec.Descriptor.Id, bytes) == NetworkQueueStatus.Accepted) { }
+    }
+
+    void SendBegin(ulong baselineId, ulong revision)
+    {
+        var begin = new RemoteWorldBaselineBeginMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0xE903,
+            BaselineId = baselineId,
+            BaselineRevision = revision,
+            EventFloor = revision,
+            RelationSequenceFloor = 1,
+            SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+            ContentHash = UltraSimGameProtocol.ComputeWorldBaselineHash([]),
+            RecordCount = 0,
+            SegmentCount = 0,
+            RecordsPerSegment = 1,
+        };
+        Span<byte> bytes = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(bytes, in begin));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default, bytes.Length), bytes));
+    }
+
+    void SendCancel(ulong baselineId)
+    {
+        var cancel = new RemoteWorldBaselineCancelMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0xE903,
+            BaselineId = baselineId,
+        };
+        Span<byte> bytes = stackalloc byte[RemoteWorldBaselineCancelMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineCancelMessageCodec.TryWriteExact(bytes, in cancel));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineCancelMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineCancelMessageCodec.Descriptor.Version, default, bytes.Length), bytes));
     }
 }
 

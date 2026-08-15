@@ -51,7 +51,7 @@ public readonly record struct RemoteWorldStateClientSnapshot(
 /// resurrect an older relation sequence. Camera selection only reads this retained
 /// state and never changes server interest.
 /// </remarks>
-public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
+public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
@@ -244,6 +244,8 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         return true;
     }
 
+    bool IRemoteGameProtocolProgressor.TryProgress() => TryFlushAcknowledgements();
+
     public int CopyActiveEntities(Span<RemoteWorldEntitySnapshot> destination)
     {
         EnsureOwnerThread();
@@ -376,6 +378,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             return;
         }
 
+        RetirePendingBaselineAcknowledgement();
         ClearCandidate();
         _candidateBaselineId = begin.BaselineId;
         _candidateBaselineRevision = begin.BaselineRevision;
@@ -474,11 +477,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             SaturatingIncrement(ref _rejectedBaselines);
             return;
         }
-        if (_candidateBaselineId == 0 ||
-            cancel.StateEpoch != _candidateStateEpoch.Value ||
-            cancel.BaselineId != _candidateBaselineId)
-            return;
-        ClearCandidate();
+        bool candidateMatches = _candidateBaselineId != 0 &&
+            cancel.StateEpoch == _candidateStateEpoch.Value &&
+            cancel.BaselineId == _candidateBaselineId;
+        RetirePendingBaselineAcknowledgement(cancel.StateEpoch, cancel.BaselineId);
+        if (candidateMatches) ClearCandidate();
     }
 
     private void TryCommitCandidate()
@@ -579,14 +582,19 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             BaselineRevision = _candidateBaselineRevision,
             Status = status,
         };
-        if (TryQueueBaselineAcknowledgement(in acknowledgement)) return;
-        if (_hasPendingBaselineAcknowledgement &&
-            !BaselineAcknowledgementsEqual(
-                in _pendingBaselineAcknowledgement, in acknowledgement))
+        if (_hasPendingBaselineAcknowledgement)
         {
-            _faulted = true;
+            if (!BaselineAcknowledgementsEqual(
+                    in _pendingBaselineAcknowledgement, in acknowledgement))
+            {
+                _faulted = true;
+                return;
+            }
+            if (TryQueueBaselineAcknowledgement(in _pendingBaselineAcknowledgement))
+                RetirePendingBaselineAcknowledgement();
             return;
         }
+        if (TryQueueBaselineAcknowledgement(in acknowledgement)) return;
         _pendingBaselineAcknowledgement = acknowledgement;
         _hasPendingBaselineAcknowledgement = true;
     }
@@ -603,14 +611,19 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             BaselineRevision = begin.BaselineRevision,
             Status = status,
         };
-        if (TryQueueBaselineAcknowledgement(in acknowledgement)) return;
-        if (_hasPendingBaselineAcknowledgement &&
-            !BaselineAcknowledgementsEqual(
-                in _pendingBaselineAcknowledgement, in acknowledgement))
+        if (_hasPendingBaselineAcknowledgement)
         {
-            _faulted = true;
+            if (!BaselineAcknowledgementsEqual(
+                    in _pendingBaselineAcknowledgement, in acknowledgement))
+            {
+                _faulted = true;
+                return;
+            }
+            if (TryQueueBaselineAcknowledgement(in _pendingBaselineAcknowledgement))
+                RetirePendingBaselineAcknowledgement();
             return;
         }
+        if (TryQueueBaselineAcknowledgement(in acknowledgement)) return;
         _pendingBaselineAcknowledgement = acknowledgement;
         _hasPendingBaselineAcknowledgement = true;
     }
@@ -633,6 +646,21 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         left.BaselineId == right.BaselineId &&
         left.BaselineRevision == right.BaselineRevision &&
         left.Status == right.Status;
+
+    private void RetirePendingBaselineAcknowledgement()
+    {
+        _pendingBaselineAcknowledgement = default;
+        _hasPendingBaselineAcknowledgement = false;
+    }
+
+    private void RetirePendingBaselineAcknowledgement(ulong stateEpoch, ulong baselineId)
+    {
+        if (_hasPendingBaselineAcknowledgement &&
+            _pendingBaselineAcknowledgement.ApplicationSessionEpoch == _applicationSessionEpoch &&
+            _pendingBaselineAcknowledgement.StateEpoch == stateEpoch &&
+            _pendingBaselineAcknowledgement.BaselineId == baselineId)
+            RetirePendingBaselineAcknowledgement();
+    }
 
     private void ClearCandidate()
     {

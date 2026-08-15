@@ -268,12 +268,23 @@ real reliable application Event path and its post-floor/fresh-client proof.
 Each `RemoteApplicationEventServer` is bound to one participant and advances an
 independent projection-owned consumer cursor. Only the minimum cursor across
 registered consumers releases global history. `RemoteApplicationEventClient`
-applies events in sequence into reclaimable bounded working storage and
-idempotently acknowledges semantic duplicates. One pending ACK survives
-temporary Control backpressure; missing application proof has a bounded retry
-and terminal policy. Same-epoch relation and event floors are
+accepts a monotonically increasing participant-filtered subsequence into
+reclaimable bounded working storage. Gaps are trusted proof that the server
+filtered other participants' facts; no cross-participant payload crosses the
+connection. Semantic duplicates are idempotently acknowledged. One pending ACK
+survives temporary Control backpressure, and the normal client owner pump retries
+it through `IRemoteGameProtocolProgressor`. Baseline cancellation/supersession
+retires only the matching retained ACK so a prior transaction cannot poison its
+successor. Missing application proof has a bounded retry and terminal policy.
+Same-epoch relation and event floors are
 monotonic, and generation replacement requires a strictly increasing
 `StateEpoch`.
+
+N0.10 diagnostics expose the cost of the deliberately simple global Event
+ledger: each connection adapter reports records examined/skipped, while the
+projection reports consumer count, retained-event high water, and cumulative
+minimum-cursor scan entries. These counters decide whether participant-local
+indexing is earned; they do not pre-approve a new representation.
 
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces

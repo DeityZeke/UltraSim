@@ -12,7 +12,7 @@ namespace UltraSim.Game.Protocol;
 /// first handler that claims a message consumes it. Handlers remain owned and
 /// disposed by their creating game/client composition.
 /// </remarks>
-public sealed class RemoteGameProtocolComposition : IRemoteGameProtocolHandler
+public sealed class RemoteGameProtocolComposition : IRemoteGameProtocolHandler, IRemoteGameProtocolProgressor
 {
     private readonly IRemoteGameProtocolHandler?[] _handlers;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -48,6 +48,17 @@ public sealed class RemoteGameProtocolComposition : IRemoteGameProtocolHandler
         for (int index = 0; index < _count; index++)
             if (_handlers[index]!.TryProcess(in message, payload)) return true;
         return false;
+    }
+
+    public bool TryProgress()
+    {
+        EnsureOwnerThread();
+        bool completed = true;
+        for (int index = 0; index < _count; index++)
+            if (_handlers[index] is IRemoteGameProtocolProgressor progressor &&
+                !progressor.TryProgress())
+                completed = false;
+        return completed;
     }
 
     private void EnsureOwnerThread()
