@@ -1,8 +1,9 @@
 # Game replication
 
 Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accepted.
-N0.3 secure reliable ProtocolLoopback is accepted below this layer; remote game
-binding begins at N0.4 and recipient scheduling remains N0.7 work.
+N0.3 secure reliable ProtocolLoopback is accepted below this layer; N0.4 remote
+application binding is accepted beside it. Real transport remains N0.5 and
+recipient scheduling remains N0.7 work.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -14,7 +15,7 @@ application events. A state baseline can repair projection lifecycle; it cannot
 silently discard or recreate a non-coalescible application event.
 
 Participant capacity is non-poisoning. An excess Admission session is excluded
-from the bounded projection and can be rejected by the future remote admission
+from the bounded projection and can be rejected by the remote admission
 boundary; it does not freeze capture for already admitted participants.
 
 `Game/Replication` is the game-owned seam between committed authoritative state
@@ -153,6 +154,12 @@ dotnet run --project _Tests/UltraSim.Game.Replication.Tests -c Release
 dotnet run --project _Benchmarks/UltraSim.Game.ReplicationBenchmarks -c Release
 ```
 
-N0.3 consumes this projection through secure reliable loopback without moving
-authority into Network. N0.4 binds the existing Admission/UI application semantics
-to that protocol.
+N0.4 also proves the separate application surface: a secure peer authenticates
+provider credentials into `TrustedIdentity`, then existing Accounting, Admission,
+CharacterSelect, and Inventory workflows run through `RemoteUiSemanticPort` and
+the remote client bridge. Network never resolves an ECS entity or owns game
+policy. OfflineDirect and ProtocolLoopback produce the same authority, normalized
+UI trace, and eventual client model for Play, Split (`Update + Add`), Equip
+(`Remove`), cold close, and exact hot reopen. Loss, duplication, corruption,
+reordering, unauthenticated traffic, duplicated actions, post-commit presentation
+failure, disconnect, and reconnect are permanent gates.

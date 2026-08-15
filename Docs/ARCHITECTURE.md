@@ -61,8 +61,8 @@ authority through callback-scoped capabilities; hosts and clients never receive
 the ECS world as shared mutable state.
 
 Offline play remains server-authoritative. Its local semantic link avoids fake
-packetization but preserves the same authority/presentation separation expected
-of the future remote path.
+packetization while preserving the same authority/presentation separation now
+proved by the N0.4 remote ProtocolLoopback path.
 
 ## Data and time boundaries
 
@@ -105,6 +105,7 @@ derived/application indexes when their ownership and scale are explicit.
   comparison projects.
 
 Network V3 is the active major layer. N0.0 evidence, N0.1 game-owned canonical
-projection/OfflineDirect, N0.2 bounded byte foundations, and N0.3 secure reliable
-ProtocolLoopback are implemented. Remote Admission/UI begins at N0.4. The remaining checkpoints are in
+projection/OfflineDirect, N0.2 bounded byte foundations, N0.3 secure reliable
+ProtocolLoopback, and N0.4 remote Admission/UI application binding are implemented.
+Real UDP transport begins at N0.5. The remaining checkpoints are in
 [`Plans/NETWORK.md`](Plans/NETWORK.md).

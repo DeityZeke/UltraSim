@@ -21,7 +21,12 @@ public readonly record struct UiClientLimits(
 /// <summary>
 /// Client-local registry, exact definition cache, and sequence-aware model applier.
 /// </summary>
-public sealed class UiClientRuntime
+public interface IUiActionSink
+{
+    void SubmitAction(UiActionRequest request);
+}
+
+public sealed class UiClientRuntime : IDisposable
 {
     private readonly IUiRenderer _renderer;
     private readonly UiClientLimits _limits;
@@ -30,9 +35,10 @@ public sealed class UiClientRuntime
     private readonly Dictionary<UiViewInstanceId, UiViewState> _views = [];
     private readonly int _ownerThreadId;
     private ulong _nextInstance = 1;
-    private LocalSemanticLink? _link;
+    private IUiActionSink? _actionSink;
     private Exception? _fault;
     private bool _rendererExecuting;
+    private bool _disposed;
 
     public UiClientRuntime(IUiRenderer renderer, UiClientLimits limits = default)
     {
@@ -73,11 +79,24 @@ public sealed class UiClientRuntime
 
     public void AttachLink(LocalSemanticLink link)
     {
+        AttachActionSink(link);
+    }
+
+    public void AttachActionSink(IUiActionSink sink)
+    {
         EnsureOperational();
-        ArgumentNullException.ThrowIfNull(link);
-        if (_link is not null && !ReferenceEquals(_link, link))
-            throw new InvalidOperationException("A client runtime can have only one local semantic link.");
-        _link = link;
+        ArgumentNullException.ThrowIfNull(sink);
+        if (_actionSink is not null && !ReferenceEquals(_actionSink, sink))
+            throw new InvalidOperationException("A client runtime can have only one semantic action sink.");
+        _actionSink = sink;
+    }
+
+    public void DetachActionSink(IUiActionSink sink)
+    {
+        EnsureOwnerThread();
+        ArgumentNullException.ThrowIfNull(sink);
+        if (ReferenceEquals(_actionSink, sink))
+            _actionSink = null;
     }
 
     public UiViewInstanceId OpenView(UiOpenView operation)
@@ -199,6 +218,14 @@ public sealed class UiClientRuntime
         return info;
     }
 
+    public bool TryGetCachedDefinition(
+        UiDefinitionCacheKey cacheKey,
+        out CompiledUiDefinition? definition)
+    {
+        EnsureOperational();
+        return _definitions.TryGetValue(cacheKey, out definition);
+    }
+
     public UiModel SnapshotModel(UiViewInstanceId instance) => GetViewState(instance).Model.Clone();
 
     public UiValue GetValue(UiViewInstanceId instance, UiSlotId slot) =>
@@ -242,9 +269,9 @@ public sealed class UiClientRuntime
         }
         UiViewState view = GetViewState(request.Instance);
         view.Definition.ValidateAction(request, view.Model);
-        if (_link is null)
-            throw new InvalidOperationException("The UI client is not attached to a local semantic link.");
-        _link.SubmitAction(request);
+        if (_actionSink is null)
+            throw new InvalidOperationException("The UI client is not attached to a semantic action sink.");
+        _actionSink.SubmitAction(request);
     }
 
     private UiViewState GetViewState(UiViewInstanceId instance)
@@ -429,8 +456,30 @@ public sealed class UiClientRuntime
     private void EnsureOperational()
     {
         EnsureOwnerThread();
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_fault is not null)
             throw new UiClientRuntimeFaultedException(_fault);
+    }
+
+    public void Dispose()
+    {
+        EnsureOwnerThread();
+        if (_disposed) return;
+        _disposed = true;
+        _actionSink = null;
+        Exception? firstFailure = null;
+        foreach (UiViewState view in _views.Values)
+        {
+            _rendererExecuting = true;
+            try { _renderer.Close(view.RenderHandle); }
+            catch (Exception exception) { firstFailure ??= exception; }
+            finally { _rendererExecuting = false; }
+        }
+        _views.Clear();
+        _definitions.Clear();
+        _currentDefinitions.Clear();
+        if (firstFailure is not null)
+            _fault = firstFailure;
     }
 
     private IUiRenderHandle CreateRendererHandle(
@@ -513,7 +562,7 @@ public readonly record struct UiViewInfo(
 /// In-process logical bridge. It exposes semantic view operations only; it does
 /// not encode packets, serialize JSON, open sockets, or own server authority.
 /// </summary>
-public sealed class LocalSemanticLink
+public sealed class LocalSemanticLink : IUiActionSink
 {
     private readonly UiClientRuntime _client;
 
@@ -541,4 +590,6 @@ public sealed class LocalSemanticLink
             throw new InvalidOperationException("The local UI link has no authority action endpoint attached.");
         target.Invoke(request);
     }
+
+    void IUiActionSink.SubmitAction(UiActionRequest request) => SubmitAction(request);
 }

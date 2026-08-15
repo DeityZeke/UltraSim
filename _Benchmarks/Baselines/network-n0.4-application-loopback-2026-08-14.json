@@ -1,0 +1,23 @@
+{
+  "Workload": "ultrasim-network-n0.4-application-loopback-v1",
+  "CapturedAtUtc": "2026-08-15T00:06:02.91115+00:00",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "CachyOS",
+  "LogicalProcessorCount": 16,
+  "Samples": 11,
+  "OfflineDirectMeanNanoseconds": 228458.9090909091,
+  "OfflineDirectP95Nanoseconds": 251897,
+  "ProtocolLoopbackMeanNanoseconds": 4860274.636363637,
+  "ProtocolLoopbackP95Nanoseconds": 5556129,
+  "ProtocolLoopbackToDirectRatio": 21.27417422985952,
+  "ProtocolStepsMedian": 43,
+  "ColdCallerAllocatedBytes": 135526672,
+  "EstablishedInteractionsPerSample": 64,
+  "EstablishedDirectMeanNanosecondsPerInteraction": 2190.7457386363635,
+  "EstablishedDirectP95NanosecondsPerInteraction": 2459.5,
+  "EstablishedProtocolMeanNanosecondsPerInteraction": 397383.2556818182,
+  "EstablishedProtocolP95NanosecondsPerInteraction": 776907.109375,
+  "EstablishedProtocolToDirectRatio": 181.39177389393012,
+  "EstablishedCallerAllocatedBytes": 2867392,
+  "Notes": "Cold result: complete world/fixture \u002B secure loopback setup and real workflow. Established result: repeated real Inventory Select intent -\u003E authoritative controller validation -\u003E semantic model delta -\u003E client apply -\u003E application acknowledgement on one established session, 64 interactions/sample. 11 alternating-order samples. Allocation is reported honestly and includes current UI semantic model/delta work; it is not a Network hot-loop zero-allocation claim."
+}

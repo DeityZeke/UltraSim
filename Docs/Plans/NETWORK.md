@@ -1,9 +1,10 @@
 # Network V3: N0 remote-authority implementation plan
 
 Status: active forward plan. N0.0 contract/evidence, N0.1 canonical game
-projection/OfflineDirect, N0.2 bounded Network kernel foundations, and N0.3
-secure reliable protocol over deterministic datagrams are accepted. N0.4 remote
-Admission/UI over ProtocolLoopback is next.
+projection/OfflineDirect, N0.2 bounded Network kernel foundations, N0.3 secure
+reliable protocol over deterministic datagrams, and N0.4 remote Admission/UI
+over ProtocolLoopback are accepted. N0.5 real UDP transport/session ownership
+is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -386,8 +387,9 @@ Admission
     -> Account -> durable Character -> current Entity
 ```
 
-A cryptographically established channel does not imply account trust. Network
-is the second real trusted-identity source, so the remote Admission phase
+A cryptographically established channel does not imply account trust. Remote
+game authentication over that channel is the second real trusted-identity source,
+so the remote Admission phase
 replaces the local-fixture-shaped `TrustedLocalIdentity` with a bounded
 provider-scoped identity. Network never owns password or account policy. This
 change includes persistence/version compatibility rather than an unreviewed
@@ -926,7 +928,7 @@ frames, replay during delivery backpressure, key change, and shutdown.
 Gate: ProtocolLoopback exhibits production delivery/security semantics without
 OS sockets.
 
-### N0.4 — Remote Admission and UI over ProtocolLoopback
+### N0.4 — Remote Admission and UI over ProtocolLoopback — accepted
 
 Deliver:
 
@@ -957,6 +959,31 @@ resistance.
 
 Gate: an existing V3 game workflow runs remotely through the complete protocol
 without moving its authority into Network.
+
+Accepted implementation keeps the dependency split explicit:
+
+```text
+Kernels/UI          bounded transport-independent semantic UI codec
+Game/Protocol       game message manifest + server RemoteUiSemanticPort
+Game/Replication    secure-peer authentication/application session binding
+Client/Network      remote Client/Core bridge + deterministic detach
+```
+
+Provider credentials are authenticated above the secure transport into a
+provider-scoped `TrustedIdentity`; `ParticipantId` and application-session epoch
+are server-created. The accepted oracle compares OfflineDirect and
+ProtocolLoopback from the same fixture/actions and proves equal authority,
+normalized UI semantics, and eventual client state through CharacterSelect,
+Play, Inventory Split/Equip, close, and exact hot reopen. Impairment,
+unauthenticated/stale/duplicate actions, post-commit presentation failure,
+disconnect, and reconnect are executable gates.
+
+The focused benchmark is intentionally application-shaped. Cold complete
+workflow setup and established Inventory selection round trips are reported
+separately; allocation includes UI application work and is not mislabeled as a
+Network hot-loop zero-allocation claim. The immutable N0.3 protocol microbaseline
+remains the protocol-mechanism reference. N0.4 does not justify reopening that
+machine before N0.5/N0.6 provide real transport and high-rate state workloads.
 
 ### N0.5 — Real UDP transport/session runtime
 

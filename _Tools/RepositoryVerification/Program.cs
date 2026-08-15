@@ -26,6 +26,7 @@ string[] testProjects =
     "_Tests/UltraSim.UI.Tests/UltraSim.UI.Tests.csproj",
     "_Tests/UltraSim.Network.Tests/UltraSim.Network.Tests.csproj",
     "_Tests/UltraSim.Network.Generator.Tests/UltraSim.Network.Generator.Tests.csproj",
+    "_Tests/UltraSim.Network.Application.Tests/UltraSim.Network.Application.Tests.csproj",
     "_Tests/UltraSim.Game.Replication.Tests/UltraSim.Game.Replication.Tests.csproj",
     "_Tests/UltraSim.Client.Tests/UltraSim.Client.Tests.csproj",
     "_Tests/UltraSim.Game.Persistence.Tests/UltraSim.Game.Persistence.Tests.csproj",
@@ -83,6 +84,13 @@ static void VerifyArchitecture(string root)
             ["Server/Runtime/UltraSim.Server.Runtime.csproj"],
         ["Client/Core/UltraSim.Client.Core.csproj"] =
             ["Kernels/UI/UltraSim.UI.csproj"],
+        ["Client/Network/UltraSim.Client.Network.csproj"] =
+        [
+            "Client/Core/UltraSim.Client.Core.csproj",
+            "Game/Protocol/UltraSim.Game.Protocol.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
+        ],
         ["Client/_Godot/UltraSim.Client.Godot.csproj"] =
             ["Client/Core/UltraSim.Client.Core.csproj"],
         ["Game/Accounting/UltraSim.Game.Accounting.csproj"] =
@@ -121,13 +129,22 @@ static void VerifyArchitecture(string root)
             "Server/Persistence/UltraSim.Server.Persistence.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
+        ["Game/Protocol/UltraSim.Game.Protocol.csproj"] =
+        [
+            "Kernels/Network.Generators/UltraSim.Network.Generators.csproj",
+            "Kernels/Network/UltraSim.Network.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
+        ],
         ["Game/Replication/UltraSim.Game.Replication.csproj"] =
         [
+            "Game/Accounting/UltraSim.Game.Accounting.csproj",
             "Game/Admission/UltraSim.Game.Admission.csproj",
             "Game/Composition/UltraSim.Game.Composition.csproj",
             "Game/Contracts/UltraSim.Game.Contracts.csproj",
+            "Game/Protocol/UltraSim.Game.Protocol.csproj",
             "Kernels/ECS/UltraSim.ECS.csproj",
             "Kernels/Network/UltraSim.Network.csproj",
+            "Kernels/UI/UltraSim.UI.csproj",
             "Server/Runtime/UltraSim.Server.Runtime.csproj",
         ],
     };

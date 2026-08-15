@@ -317,5 +317,7 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
 ```
 
 N0.1 is implemented by [Game replication](../../Game/Replication/README.md).
-N0.4 is next: remote game authentication, Admission, CharacterSelect, Inventory,
-and the existing UI semantic protocol through ProtocolLoopback.
+N0.4 now binds remote game authentication, Admission, CharacterSelect,
+Inventory, and the existing UI semantics through ProtocolLoopback above this
+dependency-clean kernel. N0.5 replaces only the deterministic datagram topology
+with real UDP/session ownership while retaining the same application vertical.

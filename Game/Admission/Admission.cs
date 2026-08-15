@@ -193,7 +193,13 @@ public sealed class AdmissionService : IDisposable
 
     public AdmissionResult JoinAccountBacked(
         ParticipantId participant,
-        TrustedLocalIdentity trustedIdentity)
+        TrustedLocalIdentity trustedIdentity) =>
+        JoinAccountBacked(participant, trustedIdentity.ToTrustedIdentity());
+
+    /// <summary>Begins account-backed admission from an authenticated provider subject.</summary>
+    public AdmissionResult JoinAccountBacked(
+        ParticipantId participant,
+        TrustedIdentity trustedIdentity)
     {
         EnsureOperational();
         if (!participant.IsValid)
@@ -230,7 +236,7 @@ public sealed class AdmissionService : IDisposable
         if (!selection.Found)
         {
             return RejectNew(participant, AdmissionRejection.TrustedIdentityUnknown,
-                "The trusted local identity does not resolve to an account.");
+                "The trusted identity does not resolve to an account.");
         }
         AccountRecord account = selection.Account;
         if (!account.IsEnabled)
@@ -838,7 +844,7 @@ public sealed class AdmissionService : IDisposable
 
         public PersistentEntityKey ControlledEntity { get; set; }
 
-        public TrustedLocalIdentity TrustedIdentity { get; set; }
+        public TrustedIdentity TrustedIdentity { get; set; }
 
         public AccountId AccountId { get; set; }
 

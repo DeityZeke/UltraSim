@@ -49,7 +49,8 @@ public sealed class AccountingPersistenceOptions
 public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
 {
     private const uint Magic = 0x43415355; // "USAC" in little-endian order.
-    private const ushort FormatVersion = 1;
+    private const ushort LocalIdentityFormatVersion = 1;
+    private const ushort FormatVersion = 2;
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
     private readonly AccountingStore? _source;
     private readonly AccountingPersistenceOptions _options;
@@ -132,7 +133,10 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
         AccountingPersistenceOptions options)
     {
         var reader = new ArtifactReader(bytes);
-        if (reader.ReadUInt32() != Magic || reader.ReadUInt16() != FormatVersion)
+        if (reader.ReadUInt32() != Magic)
+            throw new PersistenceCompatibilityException("The Accounting artifact format is unsupported.");
+        ushort formatVersion = reader.ReadUInt16();
+        if (formatVersion is not (LocalIdentityFormatVersion or FormatVersion))
             throw new PersistenceCompatibilityException("The Accounting artifact format is unsupported.");
         ulong sequence = reader.ReadUInt64();
         if (sequence != expectedSequence)
@@ -149,7 +153,7 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
             throw new PersistenceValidationException("The Accounting trusted-identity limit was exceeded.");
         reader.EnsureRemaining(
             checked((long)accountCount * 9L +
-                (long)identityCount * 12L +
+                (long)identityCount * (formatVersion == LocalIdentityFormatVersion ? 12L : 16L) +
                 (long)characterCount * 44L));
 
         var accounts = new AccountRecord[accountCount];
@@ -167,20 +171,23 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
         }
 
         var identities = new TrustedIdentityBinding[identityCount];
-        string? previousIdentity = null;
+        TrustedIdentity previousIdentity = default;
         for (int index = 0; index < identities.Length; index++)
         {
-            string encodedIdentity = reader.ReadString(TrustedLocalIdentity.MaximumLength);
-            TrustedLocalIdentity identity = new(encodedIdentity);
-            if (!StringComparer.Ordinal.Equals(identity.Value, encodedIdentity) ||
-                (previousIdentity is not null &&
-                    StringComparer.Ordinal.Compare(previousIdentity, identity.Value) >= 0))
+            string encodedProvider = formatVersion == LocalIdentityFormatVersion
+                ? TrustedIdentity.LocalProvider
+                : reader.ReadString(TrustedIdentity.MaximumProviderLength);
+            string encodedSubject = reader.ReadString(TrustedIdentity.MaximumSubjectLength);
+            var identity = new TrustedIdentity(encodedProvider, encodedSubject);
+            if (!StringComparer.Ordinal.Equals(identity.Provider, encodedProvider) ||
+                !StringComparer.Ordinal.Equals(identity.Subject, encodedSubject) ||
+                (index != 0 && previousIdentity.CompareTo(identity) >= 0))
             {
                 throw new PersistenceValidationException(
                     "Accounting trusted identities are not canonically encoded and ordered.");
             }
             identities[index] = new TrustedIdentityBinding(identity, new AccountId(reader.ReadUInt64()));
-            previousIdentity = identity.Value;
+            previousIdentity = identity;
         }
 
         var characters = new CharacterRecord[characterCount];
@@ -258,7 +265,8 @@ public sealed class AccountingSaveSetParticipant : ISaveSetParticipant
         }
         foreach (TrustedIdentityBinding identity in snapshot.TrustedIdentities)
         {
-            WriteString(writer, identity.Identity.Value, TrustedLocalIdentity.MaximumLength);
+            WriteString(writer, identity.Identity.Provider, TrustedIdentity.MaximumProviderLength);
+            WriteString(writer, identity.Identity.Subject, TrustedIdentity.MaximumSubjectLength);
             writer.Write(identity.AccountId.Value);
         }
         foreach (CharacterRecord character in snapshot.Characters)

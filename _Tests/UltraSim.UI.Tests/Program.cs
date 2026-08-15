@@ -24,6 +24,7 @@ var tests = new (string Name, Action Body)[]
     ("ListRowActionsHaveExplicitContext", ListRowActionsHaveExplicitContext),
     ("RowActionsRequireListProvenanceAndExistingRows", RowActionsRequireListProvenanceAndExistingRows),
     ("DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode", DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode),
+    ("SemanticWireCodecIsCanonicalBoundedAndTransactional", SemanticWireCodecIsCanonicalBoundedAndTransactional),
 };
 
 foreach ((string name, Action body) in tests)
@@ -607,6 +608,51 @@ static void DynamicTextAndIdentityRejectMalformedOrUnboundedUnicode()
     UiModel model = new(definition);
     Assert.Throws<InvalidDataException>(() => model.SetText(
         definition.Prepare(text), new string('x', 65)));
+}
+
+static void SemanticWireCodecIsCanonicalBoundedAndTransactional()
+{
+    CompiledUiDefinition definition = UiDefinitionCompiler.Compile(CreateFixture());
+    var cacheKey = new UiDefinitionCacheKey(
+        "server", "composition", 1, definition.Key, definition.Version, definition.Hash);
+    var model = new UiModel(definition);
+    UiSlotId title = definition.Bindings.RequireSlot("title");
+    UiSlotId rows = definition.Bindings.RequireSlot("rows");
+    model.SetText(title, "Inventory");
+    model.ReplaceRows(rows,
+    [
+        new UiListRow(new UiRowId(7), [UiValue.FromText("Bread")]),
+    ]);
+    var operation = new UiOpenView(
+        cacheKey, definition, model, new UiViewInstanceId(11), sequence: 3);
+    UiSemanticWireLimits limits = UiSemanticWireLimits.Default;
+    byte[] encoded = new byte[limits.MaximumOperationBytes];
+    Assert.True(UiSemanticWireCodec.TryWriteColdOpen(
+        encoded, operation, limits, out int written));
+    Assert.True(UiSemanticWireCodec.TryReadColdOpen(
+        encoded.AsSpan(0, written), limits, out UiOpenView decoded));
+    Assert.Equal(operation.Instance, decoded.Instance);
+    Assert.Equal(operation.Sequence, decoded.Sequence);
+    Assert.Equal(definition.Hash, decoded.Definition.Hash);
+    Assert.Equal("Inventory", decoded.SnapshotModel().Get(title).Text);
+    Assert.Equal("Bread", decoded.SnapshotModel().GetRows(rows)[0].Values[0].Text);
+
+    for (int length = 0; length < written; length++)
+        Assert.False(UiSemanticWireCodec.TryReadColdOpen(
+            encoded.AsSpan(0, length), limits, out _));
+    encoded[written] = 0;
+    Assert.False(UiSemanticWireCodec.TryReadColdOpen(
+        encoded.AsSpan(0, written + 1), limits, out _));
+
+    var hot = new UiHotOpenView(cacheKey, model, new UiViewInstanceId(12), sequence: 4);
+    Assert.True(UiSemanticWireCodec.TryWriteHotOpen(encoded, hot, limits, out written));
+    Assert.True(UiSemanticWireCodec.TryReadHotOpen(
+        encoded.AsSpan(0, written), limits,
+        key => key == cacheKey ? definition : null,
+        out UiHotOpenView decodedHot));
+    Assert.Equal(hot.Instance, decodedHot.Instance);
+    Assert.False(UiSemanticWireCodec.TryReadHotOpen(
+        encoded.AsSpan(0, written), limits, _ => null, out _));
 }
 
 static UiDefinitionBuilder CreateMixedOrderFixture(bool layoutLast)

@@ -427,6 +427,190 @@ public static class UiDefinitionCompiler
             source.Identity);
     }
 
+    internal static CompiledUiDefinition RestoreCompiled(
+        UiDefinitionKey key,
+        ushort version,
+        UiCompileLimits limits,
+        UiCompiledLayoutNode[] nodes,
+        UiCompiledElement[] elements,
+        UiSlotDefinition[] slots,
+        UiActionDefinition[] actions,
+        UiDefinitionHash expectedHash)
+    {
+        if (!key.IsValid || version == 0 || !expectedHash.IsValid)
+            throw new InvalidDataException("The wire UI definition identity is invalid.");
+        if (nodes.Length == 0 || nodes.Length > limits.MaximumLayoutNodes ||
+            elements.Length > limits.MaximumElements || slots.Length > limits.MaximumSlots ||
+            actions.Length > limits.MaximumActions)
+            throw new InvalidDataException("The wire UI definition exceeds its declared limits.");
+
+        var slotIds = new Dictionary<string, UiSlotId>(StringComparer.Ordinal);
+        for (int index = 0; index < slots.Length; index++)
+        {
+            UiSlotDefinition slot = slots[index];
+            ValidateCompiledSourceKey(slot.Key, "slot");
+            if (slot.Id.Value != index || (uint)slot.ValueKind > (uint)UiSlotValueKind.List ||
+                !slotIds.TryAdd(slot.Key, slot.Id))
+                throw new InvalidDataException("The wire UI slot table is non-canonical.");
+        }
+
+        var actionIds = new Dictionary<string, UiActionId>(StringComparer.Ordinal);
+        for (int index = 0; index < actions.Length; index++)
+        {
+            UiActionDefinition action = actions[index];
+            ValidateCompiledSourceKey(action.Key, "action");
+            if (action.Id.Value != index || (uint)action.InputKind > (uint)UiValueKind.Boolean ||
+                !actionIds.TryAdd(action.Key, action.Id))
+                throw new InvalidDataException("The wire UI action table is non-canonical.");
+        }
+
+        var siblingOrders = new HashSet<(int Parent, int Order)>();
+        var childCounts = new int[nodes.Length];
+        var depths = new int[nodes.Length];
+        for (int index = 0; index < nodes.Length; index++)
+        {
+            UiCompiledLayoutNode node = nodes[index];
+            if (node.Id.Value != index)
+                throw new InvalidDataException("The wire UI layout IDs are non-canonical.");
+            ValidateLayoutKind(node.Kind);
+            ValidateCompiledSourceKey(node.Key, "layout");
+            if (index == 0)
+            {
+                if (node.Parent.IsValid || node.Kind != UiLayoutKind.Canvas ||
+                    node.Canvas.Width <= 0 || node.Canvas.Height <= 0)
+                    throw new InvalidDataException("The wire UI root is not one valid Canvas.");
+            }
+            else
+            {
+                if (!node.Parent.IsValid || node.Parent.Value >= index || node.Kind == UiLayoutKind.Canvas)
+                    throw new InvalidDataException("The wire UI layout topology is invalid.");
+                UiCompiledLayoutNode parent = nodes[node.Parent.Value];
+                ValidateRestoredPlacement(node.Placement, parent.Kind == UiLayoutKind.Canvas, node.Kind);
+                depths[index] = checked(depths[node.Parent.Value] + 1);
+                if (depths[index] > limits.MaximumDepth || node.SiblingOrder < 0 ||
+                    !siblingOrders.Add((node.Parent.Value, node.SiblingOrder)))
+                    throw new InvalidDataException("The wire UI layout depth or sibling order is invalid.");
+                childCounts[node.Parent.Value]++;
+            }
+            ValidateRestoredFlow(node.Flow);
+        }
+
+        var elementKeys = new HashSet<string>(StringComparer.Ordinal);
+        for (int index = 0; index < elements.Length; index++)
+        {
+            UiCompiledElement element = elements[index];
+            if (element.Id.Value != index || !element.Parent.IsValid ||
+                element.Parent.Value >= nodes.Length || (uint)element.Kind > (uint)UiElementKind.List ||
+                element.SiblingOrder < 0)
+                throw new InvalidDataException("The wire UI element table is non-canonical.");
+            ValidateCompiledSourceKey(element.Key, "element");
+            if (!elementKeys.Add(element.Key) ||
+                !siblingOrders.Add((element.Parent.Value, element.SiblingOrder)))
+                throw new InvalidDataException("The wire UI element key or sibling order is duplicated.");
+            childCounts[element.Parent.Value]++;
+            ValidateRestoredPlacement(
+                element.Placement,
+                nodes[element.Parent.Value].Kind == UiLayoutKind.Canvas,
+                nodes[element.Parent.Value].Kind);
+            ValidateRestoredElement(element, slots, actions);
+        }
+
+        foreach ((int parent, int order) in siblingOrders)
+            if (order >= childCounts[parent])
+                throw new InvalidDataException("The wire UI sibling order is not dense.");
+
+        int textCharacters = 0;
+        AddText(ref textCharacters, key.Value, limits);
+        foreach (UiCompiledLayoutNode node in nodes) AddText(ref textCharacters, node.Key, limits);
+        foreach (UiCompiledElement element in elements)
+        {
+            AddText(ref textCharacters, element.Key, limits);
+            AddText(ref textCharacters, element.StyleRole, limits);
+            AddText(ref textCharacters, element.AssetRole, limits);
+        }
+        foreach (UiSlotDefinition slot in slots) AddText(ref textCharacters, slot.Key, limits);
+        foreach (UiActionDefinition action in actions) AddText(ref textCharacters, action.Key, limits);
+
+        UiDefinitionHash actualHash = ComputeHash(
+            key, version, limits, nodes.ToList(), elements.ToList(), slots, actions);
+        if (actualHash != expectedHash)
+            throw new InvalidDataException("The wire UI definition hash does not match its canonical structure.");
+
+        return new CompiledUiDefinition(
+            key,
+            version,
+            new UiDefinitionHandle(actualHash.Low, actualHash.High),
+            actualHash,
+            limits,
+            nodes,
+            elements,
+            slots,
+            actions,
+            new UiPreparedBindings(slotIds, actionIds),
+            new object());
+    }
+
+    private static void ValidateRestoredFlow(UiFlowOptions flow)
+    {
+        if (!float.IsFinite(flow.Spacing) || flow.Spacing < 0 ||
+            (uint)flow.Sizing > (uint)UiSizing.Fill || flow.Sizing == UiSizing.Fixed ||
+            (uint)flow.Alignment > (uint)UiAlignment.Stretch || !IsValidPadding(flow.Padding))
+            throw new InvalidDataException("The wire UI flow options are invalid.");
+    }
+
+    private static void ValidateRestoredPlacement(
+        UiChildLayout placement,
+        bool parentIsCanvas,
+        UiLayoutKind contextualKind)
+    {
+        ValidatePlacement(placement, parentIsCanvas, contextualKind);
+    }
+
+    private static void ValidateRestoredElement(
+        UiCompiledElement element,
+        UiSlotDefinition[] slots,
+        UiActionDefinition[] actions)
+    {
+        UiSlotValueKind required = element.Kind switch
+        {
+            UiElementKind.Text or UiElementKind.TextInput => UiSlotValueKind.Text,
+            UiElementKind.Toggle => UiSlotValueKind.Boolean,
+            UiElementKind.List => UiSlotValueKind.List,
+            UiElementKind.Button => UiSlotValueKind.Text,
+            _ => UiSlotValueKind.Any,
+        };
+        if (element.Slot.IsValid)
+        {
+            if (element.Slot.Value >= slots.Length)
+                throw new InvalidDataException("The wire UI element references an unknown slot.");
+            UiSlotValueKind actual = slots[element.Slot.Value].ValueKind;
+            if (required != UiSlotValueKind.Any && actual != UiSlotValueKind.Any && actual != required)
+                throw new InvalidDataException("The wire UI element slot kind is incompatible.");
+        }
+        else if (required != UiSlotValueKind.Any)
+        {
+            throw new InvalidDataException("The wire UI element is missing its required slot.");
+        }
+
+        if (element.Kind == UiElementKind.Image && string.IsNullOrWhiteSpace(element.AssetRole))
+            throw new InvalidDataException("The wire UI image is missing its asset role.");
+        if (element.Kind == UiElementKind.Button && !element.Action.IsValid)
+            throw new InvalidDataException("The wire UI button is missing its action.");
+        if (!element.Action.IsValid) return;
+        if (element.Action.Value >= actions.Length)
+            throw new InvalidDataException("The wire UI element references an unknown action.");
+        UiActionDefinition action = actions[element.Action.Value];
+        bool rowContext = element.Kind == UiElementKind.List;
+        UiValueKind input = element.Kind switch
+        {
+            UiElementKind.TextInput => UiValueKind.Text,
+            UiElementKind.Toggle => UiValueKind.Boolean,
+            _ => UiValueKind.Unset,
+        };
+        if (action.AcceptsRowContext != rowContext || action.InputKind != input)
+            throw new InvalidDataException("The wire UI element action contract is incompatible.");
+    }
+
     private static void ValidateSourceDeclarations(UiDefinitionBuilder source, UiCompileLimits limits)
     {
         if (source.Slots.Count > limits.MaximumSlots)

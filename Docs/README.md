@@ -35,7 +35,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Network kernel foundation](../Kernels/Network/README.md) — N0.0 contracts,
   N0.2 bounded bytes, and N0.3 secure reliable ProtocolLoopback.
-- [Network V3 active plan](Plans/NETWORK.md) — N0.4 through the complete remote
+- [Network V3 active plan](Plans/NETWORK.md) — accepted N0.4 application binding
+  and N0.5 through the complete remote
   authority/client vertical.
 
 ## Evidence and tools
@@ -47,8 +48,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 ## Active plan
 
 - [Network V3](Plans/NETWORK.md) is the only active major implementation plan.
-  N0.0 through N0.3 are accepted; N0.4 starts from the bounded canonical game
-  projection and secure reliable loopback without reopening ECS or S0.
+  N0.0 through N0.4 are accepted; N0.5 carries the exact N0.4 application
+  vertical onto real UDP without reopening ECS, Runtime, or game authority.
 
 ## Source-of-truth hierarchy
 

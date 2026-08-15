@@ -15,6 +15,9 @@ Game/UI and Game/Admission
 Client/Core
     retained definitions/views, sequence validation, semantic link
 
+Client/Network
+    authenticated application-session bridge and remote action/apply translation
+
 Client/_Godot
     Godot control construction, rendering, and input forwarding
 ```
@@ -49,16 +52,26 @@ back. A failed open/update/close detaches or desynchronizes the session and
 requires a fresh snapshot. Observer event failures are isolated from committed
 authority.
 
-## Local and future remote paths
+## Local and remote paths
 
 `LocalSemanticLink` is the engine-neutral offline bridge. It transfers the same
 semantic definition/model/action operations without manufacturing packets or
-sharing server authority. It is not a claim that Network V3 is implemented.
+sharing server authority.
 
-The remote path will encode the same bounded semantic protocol through Network
-V3, with reconnect, ordering, duplication, loss, and compatibility behavior
-owned by the network/client lifecycle.
+The N0.4 remote path encodes the same bounded semantics through the accepted
+secure `ProtocolLoopback`. `Game/Protocol` owns game message identity and the
+server-side semantic port; `Client/Network` owns translation into
+`UiClientRuntime`. Server view IDs are allocated before delivery and no
+authoritative callback waits for a network round trip.
 
-`UiClientRuntime` owns retained client projection and renderer handles. Mature
-network lifecycle must deterministically close/detach these resources on
-disconnect or disposal.
+Transport acknowledgement proves only that the remote protocol admitted a
+message. A separate application apply result proves that the client UI state
+machine applied, duplicated, or rejected a semantic operation. A rejected
+post-commit update marks the server-side view desynchronized; it never rolls
+authority back. Cold close plus exact hot reopen proves cache identity. Session
+detach disposes the client runtime, closes renderer handles best-effort, and
+clears definitions, so reconnect begins from a fresh coherent cache/session.
+
+`UiClientRuntime` owns retained client projection and renderer handles and is
+deterministically disposable. N0.5 retains this exact lifecycle while replacing
+only the deterministic datagram topology with real UDP transport ownership.

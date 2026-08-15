@@ -8,8 +8,9 @@ Inventory, and the completed S0 end-to-end integration slice.
 
 Network V3 is the active major implementation milestone. N0.0's contracts,
 N0.1's canonical game projection/OfflineDirect oracle, N0.2's bounded byte/kernel
-foundation, and N0.3's secure reliable ProtocolLoopback are implemented. Remote
-Admission/UI is next.
+foundation, N0.3's secure reliable ProtocolLoopback, and N0.4's remote
+Admission/CharacterSelect/Inventory application vertical are implemented. Real
+UDP transport/session ownership is next at N0.5.
 
 ## Design
 
@@ -47,11 +48,12 @@ per-step behavior is an explicit documented choice.
   and packet ownership, generated codecs/manifests, canonical framing, and
   deterministic datagrams plus the secure reliable ProtocolLoopback; real socket
   transport remains a later checkpoint.
-- `Kernels/UI` — neutral definitions, models, deltas, actions, and semantic port.
+- `Kernels/UI` — neutral definitions, models, deltas, actions, semantic port,
+  and bounded transport-independent semantic wire codec.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.
-- `Client/*` — retained client projection and Godot presentation.
-- `Game/*` — concrete game schema/content/state, authoritative workflows, and
-  N0.1 canonical replication projection.
+- `Client/*` — retained client projection, remote application bridge, and Godot presentation.
+- `Game/*` — concrete game schema/content/state, authoritative workflows,
+  canonical replication projection, and game-owned network application binding.
 - `_Tests`, `_Benchmarks`, `_Tools` — executable correctness, evidence, and gates.
 - `_V2` — frozen historical/reference source used only by explicit comparisons.
 

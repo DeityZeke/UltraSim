@@ -60,16 +60,79 @@ public readonly struct CharacterId : IEquatable<CharacterId>, IComparable<Charac
     public static bool operator !=(CharacterId left, CharacterId right) => !left.Equals(right);
 }
 
-/// <summary>Small trusted local-identity fixture used by account-backed admission.</summary>
+/// <summary>Provider-scoped trusted identity produced after application authentication.</summary>
+public readonly struct TrustedIdentity : IEquatable<TrustedIdentity>, IComparable<TrustedIdentity>
+{
+    public const int MaximumProviderLength = 64;
+    public const int MaximumSubjectLength = 256;
+    public const string LocalProvider = "local";
+
+    public TrustedIdentity(string provider, string subject)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentException.ThrowIfNullOrWhiteSpace(subject);
+        string normalizedProvider = provider.Trim();
+        string normalizedSubject = subject.Trim();
+        ValidateUnicode(normalizedProvider, nameof(provider));
+        ValidateUnicode(normalizedSubject, nameof(subject));
+        if (normalizedProvider.Length > MaximumProviderLength)
+            throw new ArgumentOutOfRangeException(nameof(provider));
+        if (normalizedSubject.Length > MaximumSubjectLength)
+            throw new ArgumentOutOfRangeException(nameof(subject));
+        Provider = normalizedProvider;
+        Subject = normalizedSubject;
+    }
+
+    public string Provider { get; }
+    public string Subject { get; }
+    public bool IsValid => !string.IsNullOrEmpty(Provider) && !string.IsNullOrEmpty(Subject);
+
+    public int CompareTo(TrustedIdentity other)
+    {
+        int provider = StringComparer.Ordinal.Compare(Provider, other.Provider);
+        return provider != 0 ? provider : StringComparer.Ordinal.Compare(Subject, other.Subject);
+    }
+
+    public bool Equals(TrustedIdentity other) =>
+        string.Equals(Provider, other.Provider, StringComparison.Ordinal) &&
+        string.Equals(Subject, other.Subject, StringComparison.Ordinal);
+
+    public override bool Equals(object? obj) => obj is TrustedIdentity other && Equals(other);
+    public override int GetHashCode() => HashCode.Combine(
+        StringComparer.Ordinal.GetHashCode(Provider ?? string.Empty),
+        StringComparer.Ordinal.GetHashCode(Subject ?? string.Empty));
+    public override string ToString() => IsValid ? $"{Provider}:{Subject}" : string.Empty;
+    public static bool operator ==(TrustedIdentity left, TrustedIdentity right) => left.Equals(right);
+    public static bool operator !=(TrustedIdentity left, TrustedIdentity right) => !left.Equals(right);
+
+    internal static void ValidateUnicode(string value, string parameterName)
+    {
+        for (int index = 0; index < value.Length; index++)
+        {
+            char current = value[index];
+            if (char.IsHighSurrogate(current))
+            {
+                if (++index >= value.Length || !char.IsLowSurrogate(value[index]))
+                    throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
+            }
+            else if (char.IsLowSurrogate(current))
+            {
+                throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
+            }
+        }
+    }
+}
+
+/// <summary>Compatibility value for local/offline trusted identity fixtures.</summary>
 public readonly struct TrustedLocalIdentity : IEquatable<TrustedLocalIdentity>
 {
-    public const int MaximumLength = 256;
+    public const int MaximumLength = TrustedIdentity.MaximumSubjectLength;
 
     public TrustedLocalIdentity(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
         string normalized = value.Trim();
-        ValidateUnicode(normalized, nameof(value));
+        TrustedIdentity.ValidateUnicode(normalized, nameof(value));
         if (normalized.Length > MaximumLength)
             throw new ArgumentOutOfRangeException(nameof(value));
         Value = normalized;
@@ -88,26 +151,14 @@ public readonly struct TrustedLocalIdentity : IEquatable<TrustedLocalIdentity>
 
     public override string ToString() => Value ?? string.Empty;
 
+    public TrustedIdentity ToTrustedIdentity() => IsValid
+        ? new TrustedIdentity(TrustedIdentity.LocalProvider, Value)
+        : default;
+
     public static bool operator ==(TrustedLocalIdentity left, TrustedLocalIdentity right) => left.Equals(right);
 
     public static bool operator !=(TrustedLocalIdentity left, TrustedLocalIdentity right) => !left.Equals(right);
 
-    internal static void ValidateUnicode(string value, string parameterName)
-    {
-        for (int index = 0; index < value.Length; index++)
-        {
-            char current = value[index];
-            if (char.IsHighSurrogate(current))
-            {
-                if (++index >= value.Length || !char.IsLowSurrogate(value[index]))
-                    throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
-            }
-            else if (char.IsLowSurrogate(current))
-            {
-                throw new ArgumentException("Text contains an unpaired UTF-16 surrogate.", parameterName);
-            }
-        }
-    }
 }
 
 public enum AccountStatus : byte
@@ -144,7 +195,7 @@ public readonly record struct CharacterRecord
             throw new ArgumentOutOfRangeException(nameof(slot));
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
         string normalizedName = displayName.Trim();
-        TrustedLocalIdentity.ValidateUnicode(normalizedName, nameof(displayName));
+        TrustedIdentity.ValidateUnicode(normalizedName, nameof(displayName));
         if (normalizedName.Length > 128)
             throw new ArgumentOutOfRangeException(nameof(displayName));
         if (!prefabKey.IsValid)
@@ -173,9 +224,9 @@ public readonly record struct CharacterRecord
     public PersistentEntityKey PersistentEntityKey { get; }
 }
 
-/// <summary>One durable trusted-local-identity to account binding.</summary>
+/// <summary>One durable provider-scoped trusted identity to account binding.</summary>
 public readonly record struct TrustedIdentityBinding(
-    TrustedLocalIdentity Identity,
+    TrustedIdentity Identity,
     AccountId AccountId);
 
 /// <summary>
@@ -201,8 +252,7 @@ public sealed class AccountingSnapshot
     {
         Array.Sort(accounts, static (left, right) => left.AccountId.CompareTo(right.AccountId));
         Array.Sort(characters, static (left, right) => left.CharacterId.CompareTo(right.CharacterId));
-        Array.Sort(trustedIdentities, static (left, right) =>
-            StringComparer.Ordinal.Compare(left.Identity.Value, right.Identity.Value));
+        Array.Sort(trustedIdentities, static (left, right) => left.Identity.CompareTo(right.Identity));
         Accounts = Array.AsReadOnly(accounts);
         Characters = Array.AsReadOnly(characters);
         TrustedIdentities = Array.AsReadOnly(trustedIdentities);
@@ -239,7 +289,7 @@ public sealed class AccountingStore : IAccountingGenerationStateProvider, IDispo
 {
     private readonly Dictionary<AccountId, AccountRecord> _accounts = [];
     private readonly Dictionary<CharacterId, CharacterRecord> _characters = [];
-    private readonly Dictionary<TrustedLocalIdentity, AccountId> _trustedIdentities = [];
+    private readonly Dictionary<TrustedIdentity, AccountId> _trustedIdentities = [];
     private readonly HashSet<(AccountId Account, int Slot)> _characterSlots = [];
     private readonly HashSet<PersistentEntityKey> _persistentCharacters = [];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -310,19 +360,22 @@ public sealed class AccountingStore : IAccountingGenerationStateProvider, IDispo
         }
     }
 
-    public void BindTrustedIdentity(TrustedLocalIdentity identity, AccountId accountId)
+    public void BindTrustedIdentity(TrustedIdentity identity, AccountId accountId)
     {
         EnsureOperational();
         if (!identity.IsValid)
-            throw new ArgumentException("A valid trusted local identity is required.", nameof(identity));
+            throw new ArgumentException("A valid provider-scoped trusted identity is required.", nameof(identity));
         if (!_accounts.ContainsKey(accountId))
             throw new KeyNotFoundException($"The account '{accountId}' does not exist.");
         if (!_trustedIdentities.TryAdd(identity, accountId))
         {
             throw new InvalidOperationException(
-                $"The trusted local identity '{identity}' is already bound.");
+                $"The trusted identity '{identity}' is already bound.");
         }
     }
+
+    public void BindTrustedIdentity(TrustedLocalIdentity identity, AccountId accountId) =>
+        BindTrustedIdentity(identity.ToTrustedIdentity(), accountId);
 
     public bool TryGetAccount(AccountId accountId, out AccountRecord account)
     {
@@ -347,7 +400,7 @@ public sealed class AccountingStore : IAccountingGenerationStateProvider, IDispo
         return _characters.TryGetValue(characterId, out character);
     }
 
-    public bool TryResolveAccount(TrustedLocalIdentity identity, out AccountRecord account)
+    public bool TryResolveAccount(TrustedIdentity identity, out AccountRecord account)
     {
         EnsureOperational();
         if (_trustedIdentities.TryGetValue(identity, out AccountId accountId) &&
@@ -359,6 +412,9 @@ public sealed class AccountingStore : IAccountingGenerationStateProvider, IDispo
         account = default;
         return false;
     }
+
+    public bool TryResolveAccount(TrustedLocalIdentity identity, out AccountRecord account) =>
+        TryResolveAccount(identity.ToTrustedIdentity(), out account);
 
     public IReadOnlyList<CharacterRecord> GetCharacters(AccountId accountId)
     {

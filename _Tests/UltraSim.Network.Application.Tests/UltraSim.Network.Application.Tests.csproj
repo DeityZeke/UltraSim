@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
+    <AssemblyName>UltraSim.Network.Application.Tests</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Client/Core/UltraSim.Client.Core.csproj" />
+    <ProjectReference Include="../../Client/Network/UltraSim.Client.Network.csproj" />
+    <ProjectReference Include="../../Game/Composition/UltraSim.Game.Composition.csproj" />
+    <ProjectReference Include="../../Game/Protocol/UltraSim.Game.Protocol.csproj" />
+    <ProjectReference Include="../../Game/Replication/UltraSim.Game.Replication.csproj" />
+    <ProjectReference Include="../../Game/UI/UltraSim.Game.UI.csproj" />
+    <ProjectReference Include="../../Kernels/Network/UltraSim.Network.csproj" />
+    <ProjectReference Include="../../Server/Hosting/UltraSim.Server.Hosting.csproj" />
+  </ItemGroup>
+</Project>

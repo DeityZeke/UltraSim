@@ -42,6 +42,9 @@ Useful current anchors can be located by their embedded workload or filename:
   whole-window liveness, message-family state isolation, and inbound-budget fixes.
   It is additional immutable evidence and does not replace the earlier performance
   reference;
+- `network-n0.4-application-loopback-*` — paired OfflineDirect/secure-loopback
+  CharacterSelect and Inventory workflow plus established semantic UI
+  action→authority→delta→apply-ack observations;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

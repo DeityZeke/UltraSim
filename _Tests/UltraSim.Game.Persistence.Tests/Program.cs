@@ -60,6 +60,21 @@ static void AccountingArtifactIsDeterministic()
     Assert.SequenceEqual(
         Capture(new AccountingSaveSetParticipant(forward), new SaveSetContext(8, 800)),
         Capture(new AccountingSaveSetParticipant(reverse), new SaveSetContext(8, 800)));
+
+    using var providerScoped = new AccountingStore();
+    providerScoped.AddAccount(new AccountRecord(new AccountId(9)));
+    providerScoped.BindTrustedIdentity(new TrustedIdentity("oidc", "alice"), new AccountId(9));
+    byte[] providerArtifact = Capture(
+        new AccountingSaveSetParticipant(providerScoped), new SaveSetContext(9, 900));
+    using var providerPrepared = (PreparedAccountingParticipant)new AccountingSaveSetParticipant()
+        .Prepare(providerArtifact, new SaveSetContext(9, 900));
+    providerPrepared.Resolve(new StaticResolver(fixture.Key, fixture.Entity));
+    providerPrepared.Validate();
+    Assert.True(providerPrepared.Store.TryResolveAccount(
+        new TrustedIdentity("oidc", "alice"), out AccountRecord providerAccount));
+    Assert.Equal(new AccountId(9), providerAccount.AccountId);
+    Assert.False(providerPrepared.Store.TryResolveAccount(
+        new TrustedIdentity("local", "alice"), out _));
 }
 
 static void AccountingArtifactBoundsAndCanonicalEncodingAreStrict()
@@ -454,7 +469,7 @@ static byte[] BuildAccountingArtifact(
     }
     foreach (TrustedIdentityBinding identity in identities)
     {
-        WriteString(writer, identity.Identity.Value);
+        WriteString(writer, identity.Identity.Subject);
         writer.Write(identity.AccountId.Value);
     }
     foreach (CharacterRecord character in characters)
