@@ -1,0 +1,76 @@
+{
+  "Workload": "ultrasim-network-n0.7-maintained-interest-v2",
+  "CapturedUtc": "2026-08-15T05:06:13.8313964+00:00",
+  "Runtime": "8.0.29",
+  "ProcessorCount": 16,
+  "Entities": 5000,
+  "Recipients": 16,
+  "DirtyPercent": 10,
+  "Warmup": 6,
+  "Samples": 15,
+  "EntitySpacingMillimeters": 4000,
+  "RegionEdgeMillimeters": 16000,
+  "ImmediateRadiusMillimeters": 5000,
+  "NearRadiusMillimeters": 96000,
+  "FarRadiusMillimeters": 192000,
+  "SetupMicroseconds": 28155.893,
+  "CanonicalUpdate": {
+    "MeanMicroseconds": 734.3322000000001,
+    "P50Microseconds": 735.933,
+    "P95Microseconds": 756.143,
+    "P99Microseconds": 756.143,
+    "MaximumMicroseconds": 756.143
+  },
+  "PendingDeliveryAndApplicationAck": {
+    "MeanMicroseconds": 330.0763333333333,
+    "P50Microseconds": 326.97700000000003,
+    "P95Microseconds": 346.257,
+    "P99Microseconds": 346.257,
+    "MaximumMicroseconds": 346.257
+  },
+  "AllRecipientSameCellMovement": {
+    "MeanMicroseconds": 194.6011333333333,
+    "P50Microseconds": 193.208,
+    "P95Microseconds": 210.809,
+    "P99Microseconds": 210.809,
+    "MaximumMicroseconds": 210.809
+  },
+  "OneRecipientRegionCrossing": {
+    "MeanMicroseconds": 85.04246666666668,
+    "P50Microseconds": 85.049,
+    "P95Microseconds": 94.419,
+    "P99Microseconds": 94.419,
+    "MaximumMicroseconds": 94.419
+  },
+  "MovementDeliveryAndApplicationAck": {
+    "MeanMicroseconds": 7.6286666666666685,
+    "P50Microseconds": 1.03,
+    "P95Microseconds": 16.43,
+    "P99Microseconds": 16.43,
+    "MaximumMicroseconds": 16.43
+  },
+  "IdleScheduler": {
+    "MeanMicroseconds": 0.4442187500000001,
+    "P50Microseconds": 0.44,
+    "P95Microseconds": 0.45,
+    "P99Microseconds": 0.47000000000000003,
+    "MaximumMicroseconds": 0.47000000000000003
+  },
+  "TimedManagedBytes": 0,
+  "CanonicalUpdateAllocatedBytes": 0,
+  "DeliveryAllocatedBytes": 0,
+  "AllRecipientSameCellMoveAllocatedBytes": 0,
+  "RecipientMoveAllocatedBytes": 0,
+  "MovementDeliveryAllocatedBytes": 0,
+  "InitialRelations": 56592,
+  "FinalRelations": 56592,
+  "FinalPendingRelations": 0,
+  "UniqueSemanticConstructions": 14476,
+  "SemanticRecordCopies": 213948,
+  "SemanticBytesCopied": 8985816,
+  "DeliveredBundles": 3617,
+  "DeliveredBundleBytes": 4803329,
+  "RegionInterestEdges": 10000,
+  "ReservedBytes": 15955444,
+  "Notes": "Single-owner maintained graph; complete WorldState records; immediate application ACK; every recipient moves and returns inside one cell, then one recipient crosses and returns across a region boundary per sample; presentation excluded."
+}

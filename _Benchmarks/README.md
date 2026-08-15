@@ -39,7 +39,7 @@ when those systems exist.
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |
 | `UltraSim.Network.Application.Tests --benchmark-udp` | N0.5 paired secure ProtocolLoopback/real localhost UDP run of the exact N0.4 application workflow and established Inventory interaction. |
 | `UltraSim.Network.Application.Tests --benchmark-n06` | N0.6 paired ProtocolLoopback/localhost UDP complete controlled-input, authority-tick, owner-state, and client-reconciliation cycle. |
-| `UltraSim.Game.ReplicationBenchmarks --n07` | N0.7 maintained spatial interest, newest pending state, semantic fanout, application ACK, traversal, idle, allocation, and reservation evidence with configurable density/radii/region/fanout/dirty profiles. |
+| `UltraSim.Game.ReplicationBenchmarks --n07` | N0.7 maintained spatial interest, newest pending state, semantic fanout, application ACK, all-recipient same-cell movement, region traversal, idle, allocation, and reservation evidence. Density/radius/region/fanout/dirty parameters are configurable; the preserved sensitivity matrix currently covers density, region edge, fanout, and dirty ratio. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.

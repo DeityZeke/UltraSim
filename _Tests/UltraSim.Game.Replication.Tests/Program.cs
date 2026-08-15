@@ -31,6 +31,9 @@ var tests = new (string Name, Action Body)[]
     ("NewestPendingStateAndPromotionCollapseCorrectly", NewestPendingStateAndPromotionCollapseCorrectly),
     ("FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact", FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact),
     ("ApplicationAckCannotClearNewerPendingState", ApplicationAckCannotClearNewerPendingState),
+    ("CanonicalSlotReuseCollapsesOlderLifetimeDebt", CanonicalSlotReuseCollapsesOlderLifetimeDebt),
+    ("LowerInterestTiersProgressUnderImmediateSaturation", LowerInterestTiersProgressUnderImmediateSaturation),
+    ("SameCellMovementExaminesOnlyLocalImmediateNeighborhood", SameCellMovementExaminesOnlyLocalImmediateNeighborhood),
     ("SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress", SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress),
     ("InterestCapacityFailureIsExplicitlyNonviable", InterestCapacityFailureIsExplicitlyNonviable),
     ("ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow", ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow),
@@ -240,6 +243,150 @@ static void ApplicationAckCannotClearNewerPendingState()
         service.TryBuildBundle(participant, 3, 1_024, records, out _));
     Check.True(service.TryAcknowledgeBundle(participant, newest.BundleId, applied: true));
     Check.Equal(0UL, Relation(service, participant, entity.Entity).PendingCanonicalVersion);
+
+    service.UpsertEntity(Projected(11, 1, 4), 4, Point(1, 0), GameReplicationHorizon.Far, 4);
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 4, 1_024, records, out GameWorldStateBundle fourth));
+    service.UpsertEntity(Projected(11, 1, 5), 5, Point(1, 0), GameReplicationHorizon.Far, 5);
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 5, 1_024, records, out GameWorldStateBundle fifth));
+    Check.True(service.TryAcknowledgeBundle(participant, fifth.BundleId, applied: true));
+    Check.Equal(5UL, Relation(service, participant, entity.Entity).KnownCanonicalVersion);
+    Check.True(service.TryAcknowledgeBundle(participant, fourth.BundleId, applied: true));
+    GameRecipientEntityRelationSnapshot converged = Relation(service, participant, entity.Entity);
+    Check.Equal(5UL, converged.KnownCanonicalVersion);
+    Check.Equal(0UL, converged.PendingCanonicalVersion);
+}
+
+static void CanonicalSlotReuseCollapsesOlderLifetimeDebt()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(80);
+    var first = new ReplicationEntityId(50, 1);
+    var second = new ReplicationEntityId(50, 2);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(50, 1, 1), 1, Point(1, 0), GameReplicationHorizon.Far, 0));
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 0, 1_024, records, out GameWorldStateBundle initial));
+    Check.True(service.TryAcknowledgeBundle(participant, initial.BundleId, applied: true));
+
+    Check.Equal(GameInterestUpdateStatus.Success, service.RemoveEntity(first, 2, 1));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 1, 1_024, records, out GameWorldStateBundle oldTombstone));
+    Check.False(records[0].IsPresent);
+    Check.Equal(first, records[0].Entity);
+
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(50, 2, 2), 1, Point(1, 0), GameReplicationHorizon.Far, 2));
+    Span<GameRecipientEntityRelationSnapshot> relations = stackalloc GameRecipientEntityRelationSnapshot[4];
+    Check.Equal(1, service.CopyRelations(relations));
+    Check.Equal(second, relations[0].Entity);
+    Check.Equal(1UL, relations[0].PendingCanonicalVersion);
+
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 2, 1_024, records, out GameWorldStateBundle current));
+    Check.Equal(1, current.RecordCount);
+    Check.True(records[0].IsPresent);
+    Check.Equal(second, records[0].Entity);
+
+    // The delayed old-lifetime acknowledgement references a retired relation
+    // generation and cannot clear or rewrite the new lifetime.
+    Check.True(service.TryAcknowledgeBundle(participant, oldTombstone.BundleId, applied: true));
+    Check.Equal(1UL, Relation(service, participant, second).PendingCanonicalVersion);
+    Check.True(service.TryAcknowledgeBundle(participant, current.BundleId, applied: true));
+    Check.Equal(0UL, Relation(service, participant, second).PendingCanonicalVersion);
+
+    var hiddenFirst = new ReplicationEntityId(51, 1);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(51, 1, 1), 1, Point(1, 0), GameReplicationHorizon.Far, 3));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 3, 1_024, records, out GameWorldStateBundle hiddenInitial));
+    Check.True(service.TryAcknowledgeBundle(participant, hiddenInitial.BundleId, applied: true));
+    Check.Equal(GameInterestUpdateStatus.Success, service.RemoveEntity(hiddenFirst, 2, 4));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(51, 2, 1), 1, Point(1, 0), GameReplicationHorizon.None, 5));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 5, 1_024, records, out GameWorldStateBundle retainedTombstone));
+    Check.False(records[0].IsPresent);
+    Check.Equal(hiddenFirst, records[0].Entity);
+    Check.True(service.TryAcknowledgeBundle(participant, retainedTombstone.BundleId, applied: true));
+}
+
+static void LowerInterestTiersProgressUnderImmediateSaturation()
+{
+    var service = new GameInterestService(
+        new StateEpoch(3),
+        new GameInterestLimits(32, 2, 512, 1_024, 128, 64, 1),
+        InterestProfile());
+    ParticipantId participant = new(82);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    for (uint index = 1; index <= 8; index++)
+        Check.Equal(GameInterestUpdateStatus.Success,
+            service.UpsertEntity(Projected(index, 1, 1), 1,
+                Millimeters(500 + checked((int)index), 0), GameReplicationHorizon.Far, 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(20, 1, 1), 1, Point(10, 0), GameReplicationHorizon.Far, 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(21, 1, 1), 1, Point(30, 0), GameReplicationHorizon.Far, 0));
+
+    Span<GameWorldStateRecord> record = stackalloc GameWorldStateRecord[1];
+    Span<ulong> immediateVersions = stackalloc ulong[9];
+    immediateVersions.Fill(1);
+    bool nearProgress = false;
+    bool farProgress = false;
+    for (int iteration = 0; iteration < 14 && (!nearProgress || !farProgress); iteration++)
+    {
+        Check.Equal(GameWorldStateBuildStatus.Success,
+            service.TryBuildBundle(participant, 100 + iteration, 1_024, record,
+                out GameWorldStateBundle bundle));
+        uint index = record[0].Entity.Index;
+        nearProgress |= index == 20;
+        farProgress |= index == 21;
+        Check.True(service.TryAcknowledgeBundle(participant, bundle.BundleId, applied: true));
+        if (index is >= 1 and <= 8)
+        {
+            ulong version = ++immediateVersions[(int)index];
+            Check.Equal(GameInterestUpdateStatus.Success,
+                service.UpsertEntity(Projected(index, 1, checked((int)version)), version,
+                    Millimeters(500 + checked((int)index), 0), GameReplicationHorizon.Far,
+                    100 + iteration));
+        }
+    }
+    Check.True(nearProgress);
+    Check.True(farProgress);
+}
+
+static void SameCellMovementExaminesOnlyLocalImmediateNeighborhood()
+{
+    var service = new GameInterestService(
+        new StateEpoch(4),
+        new GameInterestLimits(256, 2, 512, 1_024, 512, 64, 16),
+        InterestProfile());
+    ParticipantId participant = new(83);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(1, 1, 1), 1, Point(1, 0), GameReplicationHorizon.Far, 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(2, 1, 1), 1, Point(6, 0), GameReplicationHorizon.Far, 0));
+    for (uint index = 3; index < 203; index++)
+        Check.Equal(GameInterestUpdateStatus.Success,
+            service.UpsertEntity(Projected(index, 1, 1), 1,
+                Point(30, 30), GameReplicationHorizon.Far, 0));
+
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(1, 0), 1));
+    GameInterestSnapshot snapshot = service.GetSnapshot();
+    Check.Equal(0, snapshot.LastRegionEdgesAdded);
+    Check.Equal(0, snapshot.LastRegionEdgesRemoved);
+    Check.True(snapshot.RelationCount >= 202);
+    Check.True(snapshot.LastRelationsExamined < 16);
+    Check.Equal(GameInterestTier.Immediate,
+        Relation(service, participant, new ReplicationEntityId(1, 1)).Tier);
 }
 
 static void SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress()

@@ -234,7 +234,7 @@ internal static class ProtocolBenchmarkFixture
         NetworkProtocolManifest manifest,
         NetworkImpairmentOptions impairment = default)
     {
-        var limits = new NetworkProtocolLimits(32, 32, 8_192, 64, 512, 64, 64, 2, 128, 8, 64);
+        var limits = new NetworkProtocolLimits(32, 32, 8_192, 64, 512, 64, 64, 2, 128, 8, 64, 32);
         var datagrams = new DeterministicDatagramLimits(64, 1_200);
         if (!ProtocolLoopback.TryCreate(limits, datagrams, impairment,
                 out ProtocolLoopback? loopback, out _, manifest))

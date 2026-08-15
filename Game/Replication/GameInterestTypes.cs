@@ -195,4 +195,5 @@ public readonly record struct GameInterestSnapshot(
     int LastRegionEdgesRemoved,
     int LastRegionEdgesRetiered,
     int LastRelationsChanged,
+    int LastRelationsExamined,
     long ReservedBytes);

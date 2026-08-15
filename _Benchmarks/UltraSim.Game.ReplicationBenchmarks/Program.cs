@@ -238,12 +238,14 @@ static void RunN07(string[] arguments)
 
     var updateUs = new double[samples];
     var deliveryUs = new double[samples];
+    var allRecipientSameCellMoveUs = new double[samples];
     var recipientMoveUs = new double[samples];
     var movementDeliveryUs = new double[samples];
     ulong deliveredBundles = 0;
     ulong deliveredBytes = 0;
     long updateBytes = 0;
     long deliveryBytes = 0;
+    long allRecipientSameCellMoveBytes = 0;
     long recipientMoveBytes = 0;
     long movementDeliveryBytes = 0;
     long beforeAllocated = GC.GetAllocatedBytesForCurrentThread();
@@ -254,12 +256,15 @@ static void RunN07(string[] arguments)
             regionEdge, 30_000 + sample * 100, recordScratch);
         updateUs[sample] = timing.UpdateMicroseconds;
         deliveryUs[sample] = timing.DeliveryMicroseconds;
+        allRecipientSameCellMoveUs[sample] = timing.AllRecipientSameCellMoveMicroseconds;
         recipientMoveUs[sample] = timing.RecipientMoveMicroseconds;
         movementDeliveryUs[sample] = timing.MovementDeliveryMicroseconds;
         deliveredBundles = checked(deliveredBundles + timing.Bundles);
         deliveredBytes = checked(deliveredBytes + timing.BundleBytes);
         updateBytes = checked(updateBytes + timing.UpdateAllocatedBytes);
         deliveryBytes = checked(deliveryBytes + timing.DeliveryAllocatedBytes);
+        allRecipientSameCellMoveBytes = checked(
+            allRecipientSameCellMoveBytes + timing.AllRecipientSameCellMoveAllocatedBytes);
         recipientMoveBytes = checked(recipientMoveBytes + timing.RecipientMoveAllocatedBytes);
         movementDeliveryBytes = checked(movementDeliveryBytes + timing.MovementDeliveryAllocatedBytes);
     }
@@ -279,7 +284,7 @@ static void RunN07(string[] arguments)
 
     GameInterestSnapshot final = service.GetSnapshot();
     var report = new N07BenchmarkReport(
-        "ultrasim-network-n0.7-maintained-interest-v1",
+        "ultrasim-network-n0.7-maintained-interest-v2",
         DateTimeOffset.UtcNow,
         Environment.Version.ToString(),
         Environment.ProcessorCount,
@@ -296,12 +301,14 @@ static void RunN07(string[] arguments)
         setupMicroseconds,
         Stats.From(updateUs),
         Stats.From(deliveryUs),
+        Stats.From(allRecipientSameCellMoveUs),
         Stats.From(recipientMoveUs),
         Stats.From(movementDeliveryUs),
         Stats.From(idleUs),
         allocated,
         updateBytes,
         deliveryBytes,
+        allRecipientSameCellMoveBytes,
         recipientMoveBytes,
         movementDeliveryBytes,
         initial.RelationCount,
@@ -315,7 +322,8 @@ static void RunN07(string[] arguments)
         final.RegionInterestEdgeCount,
         final.ReservedBytes,
         "Single-owner maintained graph; complete WorldState records; immediate application ACK; " +
-        "one recipient crosses and returns across a region boundary per sample; presentation excluded.");
+        "every recipient moves and returns inside one cell, then one recipient crosses and returns " +
+        "across a region boundary per sample; presentation excluded.");
     string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
     Console.WriteLine(json);
     if (!string.IsNullOrWhiteSpace(output))
@@ -359,6 +367,21 @@ static InterestRoundTiming RunInterestRound(
     double deliveryMicroseconds = Microseconds(Stopwatch.GetTimestamp() - started);
     long afterDelivery = GC.GetAllocatedBytesForCurrentThread();
 
+    started = Stopwatch.GetTimestamp();
+    for (int index = 0; index < recipients; index++)
+    {
+        ParticipantId moving = new(checked((ulong)index + 1));
+        ReplicationSpatialPoint anchor = RecipientAnchor(index, anchorColumns);
+        Check(service.SetRecipientAnchor(moving,
+            new ReplicationSpatialPoint(checked(anchor.XMillimeters + 1), anchor.ZMillimeters),
+            now + 50) == GameInterestUpdateStatus.Success,
+            "Same-cell recipient movement failed during maintained-interest benchmark.");
+        Check(service.SetRecipientAnchor(moving, anchor, now + 50) == GameInterestUpdateStatus.Success,
+            "Same-cell recipient return failed during maintained-interest benchmark.");
+    }
+    double allRecipientSameCellMoveMicroseconds = Microseconds(Stopwatch.GetTimestamp() - started);
+    long afterSameCellMove = GC.GetAllocatedBytesForCurrentThread();
+
     int recipientIndex = checked((int)((now / 100) % recipients));
     ParticipantId participant = new(checked((ulong)recipientIndex + 1));
     ReplicationSpatialPoint origin = RecipientAnchor(recipientIndex, anchorColumns);
@@ -377,13 +400,15 @@ static InterestRoundTiming RunInterestRound(
     return new(
         updateMicroseconds,
         deliveryMicroseconds,
+        allRecipientSameCellMoveMicroseconds,
         recipientMoveMicroseconds,
         movementDeliveryMicroseconds,
         checked(bundles + movementBundles),
         checked(bytes + movementBytes),
         afterUpdate - allocated,
         afterDelivery - afterUpdate,
-        afterMove - afterDelivery,
+        afterSameCellMove - afterDelivery,
+        afterMove - afterSameCellMove,
         GC.GetAllocatedBytesForCurrentThread() - afterMove);
 }
 
@@ -483,12 +508,14 @@ readonly record struct BenchmarkReport(
 readonly record struct InterestRoundTiming(
     double UpdateMicroseconds,
     double DeliveryMicroseconds,
+    double AllRecipientSameCellMoveMicroseconds,
     double RecipientMoveMicroseconds,
     double MovementDeliveryMicroseconds,
     ulong Bundles,
     ulong BundleBytes,
     long UpdateAllocatedBytes,
     long DeliveryAllocatedBytes,
+    long AllRecipientSameCellMoveAllocatedBytes,
     long RecipientMoveAllocatedBytes,
     long MovementDeliveryAllocatedBytes);
 
@@ -510,12 +537,14 @@ readonly record struct N07BenchmarkReport(
     double SetupMicroseconds,
     Stats CanonicalUpdate,
     Stats PendingDeliveryAndApplicationAck,
+    Stats AllRecipientSameCellMovement,
     Stats OneRecipientRegionCrossing,
     Stats MovementDeliveryAndApplicationAck,
     Stats IdleScheduler,
     long TimedManagedBytes,
     long CanonicalUpdateAllocatedBytes,
     long DeliveryAllocatedBytes,
+    long AllRecipientSameCellMoveAllocatedBytes,
     long RecipientMoveAllocatedBytes,
     long MovementDeliveryAllocatedBytes,
     int InitialRelations,

@@ -546,7 +546,7 @@ Freeze semantic delivery before packet layout:
 | Control | reliable ordered; highest priority; connection/protocol/world control |
 | Input | unreliable sequenced with bounded redundancy and time-defined expiry |
 | OwnerState | sequenced latest/keyframe; high priority; correction/ack aware |
-| WorldState | sequenced latest, coalesced, baseline aware |
+| WorldState | unreliable unordered independent bundles; relation-versioned and baseline aware |
 | Event | reliable ordered application facts whose intermediate occurrence matters |
 | Bulk | reliable segmented and isolated from realtime/control |
 | Disposable | optional unreliable cosmetic state with explicit expiry |
@@ -705,8 +705,9 @@ slabs, homogeneous packet batches, and shared scatter/gather submission are
 measured N0.10 optimizations rather than N0.7 correctness machinery. Share
 meaning, not invalid recipient-relative wire bytes.
 
-Overload policy is explicit: coalesce latest state, lower optional replication
-frequency/fidelity, defer Bulk, or disconnect a persistently nonviable session.
+Overload policy is explicit: coalesce latest state in the game-owned relation
+graph, lower optional replication frequency/fidelity, defer Bulk, or disconnect
+a persistently nonviable session.
 It never silently drops ordered facts or changes authority.
 
 ## Client projection and baselines
@@ -1186,23 +1187,28 @@ which dynamic entities are meaningful at each horizon. Camera direction does not
 demote base server interest.
 
 Region/entity and region/recipient membership changes incrementally establish,
-remove, or retier compact `RecipientEntityRelation` records. Each relation retains
-the effective tier, recipient-known version, newest pending canonical version,
-application-knowledge sequence, and bounded scheduling state. Canonical changes
-fan directly through maintained reverse relations; packet production never
-rescans ECS or rebuilds a recipient world.
+remove, or retier compact `RecipientEntityRelation` records. Each
+recipient/canonical-slot relation retains the effective lifetime and tier,
+recipient-known version, newest pending canonical version, application-knowledge
+sequence, and bounded scheduling state. Canonical changes fan directly through
+maintained reverse relations; packet production never rescans ECS or rebuilds a
+recipient world.
 
 The first WorldState representation uses complete self-contained entity/family
 samples. Shared semantic construction is cached/reused per demanded canonical
-version; interest cadence remains independent from representation. Final bundle
-assembly, packet numbering, reliability evidence, encryption, and socket
-submission remain connection-relative and happen last. Explicit cohort managers,
-region slabs, aliases, delta compression, and syscall batching require N0.10
-measurements.
+version; interest cadence remains independent from representation. Each final
+WorldState bundle is an independent bounded unreliable container, not one
+message-family latest stream: multiple disjoint relation subsets may be in flight
+and acknowledged out of order. Per-relation sequence/version state supplies
+staleness and recovery, while Network neither reliably retains nor coalesces these
+bundles. Final bundle assembly, packet numbering, encryption, and socket submission
+remain connection-relative and happen last. Explicit cohort managers, region slabs,
+aliases, delta compression, and syscall batching require N0.10 measurements.
 
 World-state application acknowledgement remains separate from transport ACK.
 Every newest version stays pending until application knowledge proves it safe or
-a baseline replaces the scope. Newer changes replace older unsatisfied state;
+a baseline replaces the scope. Newer changes and newer canonical lifetimes
+replace older unsatisfied state;
 application ACK of an older bundle cannot clear a newer pending version. Interest
 entry sends current complete state. Interest exit and canonical destruction
 publish recoverable absence/tombstone state whose sequence defeats delayed old
@@ -1220,15 +1226,20 @@ state, unique demanded semantic versions, and delivered bytes—not clients time
 world entities.
 
 Permanent tests include a brute-force relation/tier oracle; same-region and cross-
-region R0; hysteresis; incremental recipient/entity movement; zero work for
+region R0; hysteresis; local-neighborhood recipient movement; zero work for
 unchanged/no-subscriber state; newest-version collapse; R0 promotion; phased
 outer-tier eligibility; family policy; shared semantic construction with
-independent acknowledgements; slow/full recipient retention; older ACK versus
-newer pending state; tombstone versus delayed present; client knowledge independent
-from camera presentation; and explicit capacity degradation/resync.
+independent acknowledgements; pipelined unordered WorldState bundles; bounded
+lower-tier progress under continuous R0 load; slow/full recipient retention; older
+ACK versus newer pending state; canonical-slot lifetime collapse; tombstone versus
+delayed present; client knowledge independent from camera presentation; and
+explicit capacity degradation/nonviability.
 
-Benchmarks sweep region edge, R0 radius, outer radii, density, dirty percentage,
-entity/recipient movement, state mix, and recipient fanout. Record time alongside
+The accepted artifact matrix sweeps region edge, density, dirty percentage, and
+recipient fanout. The hardened reference additionally measures every recipient
+moving within its current cell. Radius and state-family parameters remain
+configurable for future targeted experiments but are not claimed as preserved
+sensitivity evidence yet. Record time alongside
 edges touched, live relations, pending writes, unique semantic constructions,
 semantic copies/bytes, bundle bytes, and reserved bytes per bounded domain.
 
@@ -1239,22 +1250,28 @@ Accepted implementation notes:
 
 - `GameInterestService` owns fixed-capacity entity/region/recipient indexes,
   reverse region-interest edges, compact recipient/entity relations, exact R0
-  hysteresis, coarse R1/R2 envelopes, per-tier pending queues, fair recipient
-  selection, byte budgets, tombstones, and application-ACK knowledge;
+  hysteresis, coarse R1/R2 envelopes, per-tier pending queues, bounded weighted
+  tier progress, fair recipient selection, byte budgets, tombstones, and
+  application-ACK knowledge;
 - canonical updates are pushed into the maintained graph after capture. Packet
   production reads cached canonical semantics and pending relations; it neither
   scans ECS nor reconstructs recipient worlds;
 - one semantic construction is cached per demanded entity/version and copied
   into independent recipient records. Explicit cohort objects and shared encoded
   packet bytes remain unearned N0.10 optimizations;
-- each connection adapter permits one unacknowledged partial WorldState bundle.
-  A retry requeues that identical bundle ID and byte sequence. Therefore the
-  kernel's per-message-family latest-state slot can never replace it with a
-  different partial subset; newer canonical versions remain pending behind the
-  application barrier;
+- WorldState uses the kernel's bounded independent-unreliable retention class.
+  Multiple disjoint application bundles may be queued/in flight without waiting
+  an application RTT. Lost bundles are not transport-retained; their relations
+  remain newest-version pending and become eligible for a later fresh bundle;
+- one recipient/canonical slot owns at most one unsatisfied lifetime. A newer
+  replication generation supersedes an older present/tombstone debt, preventing
+  duplicate-index wire bundles and slot-reuse liveness loops;
+- same-cell recipient movement scans the small exact-R0 candidate neighborhood
+  plus the maintained current-R0 list. It does not rescan unrelated R1/R2
+  relations; region crossings retain differential edge-strip maintenance;
 - per-recipient outstanding quotas keep a slow recipient from consuming the
   complete application-ACK ledger. Capacity exhaustion is explicit nonviability,
-  never silent state loss;
+  never silent state loss or an endless impossible-scope retry loop;
 - `RemoteWorldStateClient` maps canonical IDs to private dense generational
   client slots, retains tombstone knowledge independently from active storage,
   preflights complete bundles, frees before allocating during atomic commit, and
@@ -1266,22 +1283,33 @@ Accepted implementation notes:
   bytes include owned arrays plus deterministic dictionary-capacity estimates,
   not CLR object headers or process working set.
 
-Permanent evidence now includes 26 game-replication tests and 31 remote
+Permanent evidence now includes 29 game-replication tests and 32 remote
 application tests. The N0.7 additions prove the brute-force tier oracle,
 cross-region exact R0, hysteresis, differential region-edge maintenance,
 newest-version collapse and promotion, horizon policy, shared semantic reuse,
-old-ACK/new-pending safety, slow-recipient isolation, explicit capacity failure,
-zero warmed allocation, strict transactional wire decoding, secure-loopback
+old-ACK/new-pending safety, canonical-slot generation collapse, R1/R2 progress
+under R0 saturation, local-only same-cell movement, slow-recipient isolation,
+explicit capacity failure, zero warmed allocation, strict transactional wire
+decoding, independent-unreliable kernel queueing, pipelined secure-loopback
 application ACK, first-seen/repeated tombstones, camera-independent knowledge,
 and record-order-independent atomic client capacity replacement.
 
-The accepted 5,000-entity/16-recipient/10%-dirty reference observation records
+The original accepted 5,000-entity/16-recipient/10%-dirty reference observation records
 56,592 live relations and 10,000 region-interest edges. Mean canonical update is
 approximately 881.42 us, pending delivery plus immediate application ACK is
 355.16 us, one recipient cross-and-return operation is 366.25 us, and idle
 scheduling is 0.208 us. All timed phases allocate 0 B; known reserved payload is
 15,677,408 B. These are single-owner semantic scheduler measurements, not socket
 or WAN claims.
+
+The post-hardening v2 observation preserves the same 56,592 relations and 10,000
+region-interest edges while adding all-recipient same-cell movement. Mean canonical
+update is approximately 734.33 us, pending delivery plus immediate application ACK
+is 330.08 us, all 16 recipients moving out-and-back within their current cells is
+194.60 us total, one recipient region cross-and-return is 85.04 us, and idle
+scheduling is 0.444 us. All phases remain 0 B allocated. The additional immediate
+list and independent-lifetime bookkeeping raise known reserved payload to
+15,955,444 B.
 
 Sensitivity evidence deliberately varies dirty state (1%, 10%, 100%), region
 edge (8 m, 16 m, 32 m), density (1 m, 4 m, 16 m entity spacing), and fanout
@@ -1300,6 +1328,7 @@ semantic-copy, bundle-byte, relation/edge, allocation, and reservation facts:
 - [`network-n0.7-maintained-interest-spread-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-spread-2026-08-14.json)
 - [`network-n0.7-maintained-interest-fanout4-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-fanout4-2026-08-14.json)
 - [`network-n0.7-maintained-interest-fanout64-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-fanout64-2026-08-14.json)
+- [`network-n0.7-hardening-reference-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.7-hardening-reference-2026-08-15.json)
 
 ### N0.8 — Atomic baseline and recovery
 

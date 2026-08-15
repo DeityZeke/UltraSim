@@ -197,6 +197,9 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly byte[] _reliablePayloads;
     private readonly ulong[] _lastSentSteps;
     private readonly int[] _reliableFree;
+    private readonly OutgoingMessage[] _independent;
+    private readonly byte[] _independentPayloads;
+    private readonly int[] _independentFree;
     private readonly SentPacketRecord[] _sentPackets;
     private readonly UnreliableStreamState[] _unreliableStreams;
     private readonly int[] _unreliableHeads;
@@ -211,6 +214,9 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly int[] _receivedQueue;
     private int _reliableFreeCount;
     private int _reliableCount;
+    private int _independentFreeCount;
+    private int _independentCount;
+    private int _nextIndependentSchedule;
     private int _receivedFreeCount;
     private int _receivedHead;
     private int _receivedCount;
@@ -268,6 +274,13 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reliableFree = new int[limits.MaximumReliableMessages];
         for (int index = 0; index < _reliableFree.Length; index++) _reliableFree[index] = _reliableFree.Length - 1 - index;
         _reliableFreeCount = _reliableFree.Length;
+        _independent = new OutgoingMessage[limits.MaximumIndependentUnreliableMessages];
+        _independentPayloads = new byte[checked(
+            limits.MaximumIndependentUnreliableMessages * limits.MaximumMessageBytes)];
+        _independentFree = new int[limits.MaximumIndependentUnreliableMessages];
+        for (int index = 0; index < _independentFree.Length; index++)
+            _independentFree[index] = _independentFree.Length - 1 - index;
+        _independentFreeCount = _independentFree.Length;
         _sentPackets = new SentPacketRecord[limits.SentPacketCapacity];
         _unreliableStreams = new UnreliableStreamState[manifest.Count];
         _unreliableHeads = new int[NetworkLaneContracts.Count];
@@ -317,6 +330,16 @@ public sealed class NetworkProtocolPeer : IDisposable
                 new LaneSequence(sequence), payload.Length, (ushort)fragmentCount, 0);
             _reliableCount++;
         }
+        else if (lane.Retention == NetworkRetentionPolicy.IndependentState)
+        {
+            if (_independentFreeCount == 0) return NetworkQueueStatus.CapacityExceeded;
+            int slot = _independentFree[--_independentFreeCount];
+            payload.CopyTo(IndependentPayload(slot));
+            _independent[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
+                new LaneSequence(sequence), payload.Length, 1, 0);
+            _independentCount++;
+            _unreliableStreams[messageSlot].NextSendSequence = sequence + 1;
+        }
         else
         {
             ref UnreliableStreamState stream = ref _unreliableStreams[messageSlot];
@@ -339,6 +362,11 @@ public sealed class NetworkProtocolPeer : IDisposable
     public int ReliableQueued
     {
         get { EnsureOperational(); return _reliableCount; }
+    }
+
+    public int IndependentUnreliableQueued
+    {
+        get { EnsureOperational(); return _independentCount; }
     }
 
     public int ReceivedQueued
@@ -435,9 +463,11 @@ public sealed class NetworkProtocolPeer : IDisposable
 
         while (budget > 0 && _inFlight < _congestionWindow)
         {
-            if (!TrySelectNext(out int reliableSlot, out ushort fragment, out int unreliableSlot)) break;
+            if (!TrySelectNext(out int reliableSlot, out ushort fragment,
+                    out int independentSlot, out int unreliableSlot)) break;
             bool reliable = reliableSlot >= 0;
-            if (!TryEmitData(reliableSlot, fragment, unreliableSlot, step, reliable)) break;
+            if (!TryEmitData(reliableSlot, fragment, independentSlot,
+                    unreliableSlot, step, reliable)) break;
             budget--;
             if (_usesMonotonicPacing && _smoothedRtt != 0)
             {
@@ -459,7 +489,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         return new(true, _sendCryptography.Epoch, _receiveCryptography.Epoch,
             _sentPacketsCount, _receivedPacketsCount, _authenticationFailures, _replayRejections,
             _retransmissions, _acknowledgements, _sequencedDrops, _capacityDrops,
-            _reliableCount, _receivedCount, _congestionWindow, _inFlight, _smoothedRtt, _rto, reserved);
+            _reliableCount, _independentCount, _receivedCount, _congestionWindow,
+            _inFlight, _smoothedRtt, _rto, reserved);
     }
 
     public void Dispose()
@@ -469,6 +500,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         _sendCryptography.Dispose();
         _receiveCryptography.Dispose();
         CryptographicOperations.ZeroMemory(_reliablePayloads);
+        CryptographicOperations.ZeroMemory(_independentPayloads);
         CryptographicOperations.ZeroMemory(_unreliablePayloads);
         CryptographicOperations.ZeroMemory(_reassemblyPayloads);
         CryptographicOperations.ZeroMemory(_receivedPayloads);
@@ -481,7 +513,11 @@ public sealed class NetworkProtocolPeer : IDisposable
         NetworkSecureDatagramFraming.MaximumPlaintextBytes(_datagramLimits.MaximumDatagramBytes) -
         NetworkProtocolDataHeader.EncodedBytes;
 
-    private bool TrySelectNext(out int reliableSlot, out ushort fragment, out int unreliableSlot)
+    private bool TrySelectNext(
+        out int reliableSlot,
+        out ushort fragment,
+        out int independentSlot,
+        out int unreliableSlot)
     {
         foreach (NetworkLane lane in NetworkLaneContracts.PriorityOrder)
         {
@@ -489,6 +525,16 @@ public sealed class NetworkProtocolPeer : IDisposable
             if (selected >= 0 && TryFindDueFragment(selected, out fragment))
             {
                 reliableSlot = selected;
+                independentSlot = -1;
+                unreliableSlot = -1;
+                return true;
+            }
+            int independent = FindIndependentPending(lane);
+            if (independent >= 0)
+            {
+                reliableSlot = -1;
+                fragment = 0;
+                independentSlot = independent;
                 unreliableSlot = -1;
                 return true;
             }
@@ -497,14 +543,26 @@ public sealed class NetworkProtocolPeer : IDisposable
             {
                 reliableSlot = -1;
                 fragment = 0;
+                independentSlot = -1;
                 unreliableSlot = pending;
                 return true;
             }
         }
         reliableSlot = -1;
         fragment = 0;
+        independentSlot = -1;
         unreliableSlot = -1;
         return false;
+    }
+
+    private int FindIndependentPending(NetworkLane lane)
+    {
+        for (int offset = 0; offset < _independent.Length; offset++)
+        {
+            int index = (_nextIndependentSchedule + offset) % _independent.Length;
+            if (_independent[index].Active && _independent[index].Lane == lane) return index;
+        }
+        return -1;
     }
 
     private int FindUnreliablePending(NetworkLane lane) => _unreliableHeads[(int)lane];
@@ -548,15 +606,25 @@ public sealed class NetworkProtocolPeer : IDisposable
         return false;
     }
 
-    private bool TryEmitData(int reliableSlot, ushort fragmentIndex, int unreliableSlot,
-        ulong step, bool reliable)
+    private bool TryEmitData(
+        int reliableSlot,
+        ushort fragmentIndex,
+        int independentSlot,
+        int unreliableSlot,
+        ulong step,
+        bool reliable)
     {
+        bool independent = independentSlot >= 0;
         OutgoingMessage message = reliable
             ? _reliable[reliableSlot]
-            : _unreliableStreams[unreliableSlot].Message;
+            : independent
+                ? _independent[independentSlot]
+                : _unreliableStreams[unreliableSlot].Message;
         ReadOnlySpan<byte> payload = reliable
             ? ReliablePayload(reliableSlot)[..message.Length]
-            : UnreliablePayload(unreliableSlot)[..message.Length];
+            : independent
+                ? IndependentPayload(independentSlot)[..message.Length]
+                : UnreliablePayload(unreliableSlot)[..message.Length];
         int fragmentPayload = FragmentPayloadBytes;
         int offset = reliable ? fragmentIndex * fragmentPayload : 0;
         int length = reliable ? Math.Min(fragmentPayload, message.Length - offset) : message.Length;
@@ -594,6 +662,11 @@ public sealed class NetworkProtocolPeer : IDisposable
                 }
                 _lastSentSteps[reliableSlot * _limits.MaximumFragmentsPerMessage + fragmentIndex] = step + 1;
                 _inFlight++;
+            }
+            else if (independent)
+            {
+                FreeIndependent(independentSlot);
+                _nextIndependentSchedule = (independentSlot + 1) % _independent.Length;
             }
             else
             {
@@ -978,6 +1051,8 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private Span<byte> ReliablePayload(int slot) =>
         _reliablePayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+    private Span<byte> IndependentPayload(int slot) =>
+        _independentPayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
     private Span<byte> UnreliablePayload(int messageSlot) =>
         _unreliablePayloads.AsSpan(messageSlot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
     private Span<byte> ReassemblyPayload(NetworkLane lane) =>
@@ -992,6 +1067,9 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reliablePayloads.Length +
         (long)_lastSentSteps.Length * sizeof(ulong) +
         (long)_reliableFree.Length * sizeof(int) +
+        (long)_independent.Length * Unsafe.SizeOf<OutgoingMessage>() +
+        _independentPayloads.Length +
+        (long)_independentFree.Length * sizeof(int) +
         (long)_sentPackets.Length * Unsafe.SizeOf<SentPacketRecord>() +
         (long)_unreliableStreams.Length * Unsafe.SizeOf<UnreliableStreamState>() +
         (long)_unreliableHeads.Length * sizeof(int) +
@@ -1005,6 +1083,14 @@ public sealed class NetworkProtocolPeer : IDisposable
         (long)_receivedFree.Length * sizeof(int) +
         (long)_receivedQueue.Length * sizeof(int) +
         64L);
+
+    private void FreeIndependent(int slot)
+    {
+        IndependentPayload(slot).Clear();
+        _independent[slot] = default;
+        _independentFree[_independentFreeCount++] = slot;
+        _independentCount--;
+    }
 
     private void EnsureOperational()
     {

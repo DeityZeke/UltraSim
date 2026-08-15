@@ -6,7 +6,7 @@ using UltraSim.Network;
 internal static class N05UdpTransportTests
 {
     private static readonly NetworkProtocolLimits s_protocol = new(
-        16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32);
+        16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32, 16);
     private static readonly UdpProtocolLimits s_udp = new(
         512, 64 * 1024, 64 * 1024, 4_096, 30_000, 5_000, 1_000, 1_000);
     private static readonly NetworkMessageId s_probe = new(1);

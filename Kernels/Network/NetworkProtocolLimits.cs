@@ -12,10 +12,11 @@ public readonly record struct NetworkProtocolLimits(
     int MinimumRetransmissionSteps,
     int MaximumRetransmissionSteps,
     int InitialCongestionWindowPackets,
-    int MaximumCongestionWindowPackets)
+    int MaximumCongestionWindowPackets,
+    int MaximumIndependentUnreliableMessages)
 {
     public static NetworkProtocolLimits Default => new(
-        128, 128, 16_384, 64, 2_048, 64, 64, 2, 128, 4, 128);
+        128, 128, 16_384, 64, 2_048, 64, 64, 2, 128, 4, 128, 128);
 
     internal void Validate(DeterministicDatagramLimits datagrams)
     {
@@ -24,6 +25,8 @@ public readonly record struct NetworkProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumReliableMessages));
         if (MaximumReceivedMessages is <= 0 or > 65_536)
             throw new ArgumentOutOfRangeException(nameof(MaximumReceivedMessages));
+        if (MaximumIndependentUnreliableMessages is <= 0 or > 65_536)
+            throw new ArgumentOutOfRangeException(nameof(MaximumIndependentUnreliableMessages));
         if (MaximumMessageBytes is <= 0 or > 16_777_216)
             throw new ArgumentOutOfRangeException(nameof(MaximumMessageBytes));
         if (MaximumFragmentsPerMessage is <= 0 or > 64)
@@ -45,6 +48,7 @@ public readonly record struct NetworkProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(datagrams));
 
         _ = checked((long)MaximumReliableMessages * MaximumMessageBytes);
+        _ = checked((long)MaximumIndependentUnreliableMessages * MaximumMessageBytes);
         _ = checked((long)MaximumReceivedMessages * MaximumMessageBytes);
         _ = checked((long)NetworkLaneContracts.Count * MaximumMessageBytes);
     }
@@ -62,12 +66,15 @@ public readonly record struct NetworkProtocolLimits(
         if (protocolMessageCount <= 0) throw new ArgumentOutOfRangeException(nameof(protocolMessageCount));
         return checked(
             (long)MaximumReliableMessages * MaximumMessageBytes +
+            (long)MaximumIndependentUnreliableMessages * MaximumMessageBytes +
             (long)MaximumReceivedMessages * MaximumMessageBytes +
             (long)protocolMessageCount * MaximumMessageBytes +
             (long)NetworkLaneContracts.Count * MaximumMessageBytes +
             (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
             (long)SentPacketCapacity * NetworkSentPacketMetadata.EstimatedBytes +
             (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
+            (long)MaximumIndependentUnreliableMessages *
+                (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
             (long)protocolMessageCount * NetworkUnreliableStreamMetadata.EstimatedBytes +
             (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
                 sizeof(ulong) * 2 + sizeof(byte) + sizeof(int)) +
@@ -120,6 +127,7 @@ public readonly record struct NetworkProtocolSnapshot(
     ulong SequencedDrops,
     ulong CapacityDrops,
     int ReliableQueued,
+    int IndependentUnreliableQueued,
     int ReceivedQueued,
     int CongestionWindowPackets,
     int InFlightPackets,

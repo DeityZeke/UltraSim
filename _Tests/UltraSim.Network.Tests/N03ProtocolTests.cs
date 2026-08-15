@@ -4,7 +4,7 @@ using UltraSim.Network;
 internal static class N03ProtocolTests
 {
     private static readonly NetworkProtocolLimits s_limits = new(
-        16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32);
+        16, 16, 4_096, 32, 256, 16, 16, 2, 64, 4, 32, 16);
     private static readonly DeterministicDatagramLimits s_datagrams = new(256, 512);
     private static readonly NetworkProtocolManifest s_manifest = CreateManifest();
 
@@ -16,6 +16,7 @@ internal static class N03ProtocolTests
         Run("ReliableDeliveryRecoversAfterWholeWindowLoss", ReliableDeliveryRecoversAfterWholeWindowLoss);
         Run("ReliableDeliveryRecoversAfterWholeWindowAckLoss", ReliableDeliveryRecoversAfterWholeWindowAckLoss);
         Run("UnreliableLanesApplySequencingAndCoalescing", UnreliableLanesApplySequencingAndCoalescing);
+        Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
         Run("UnreliableMessageFamiliesOwnIndependentStreams", UnreliableMessageFamiliesOwnIndependentStreams);
         Run("SequencedCapacityDropAdvancesStaleFloor", SequencedCapacityDropAdvancesStaleFloor);
         Run("BulkFragmentationReassemblesExactlyAtSmallMtu", BulkFragmentationReassemblesExactly);
@@ -184,11 +185,10 @@ internal static class N03ProtocolTests
             WriteUInt64(payload, value);
             Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Input), payload));
             Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.OwnerState), payload));
-            Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.WorldState), payload));
         }
         byte[] disposable = { 99 };
         Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Disposable), disposable));
-        Drive(loopback, () => loopback.Server.GetSnapshot().ReceivedQueued >= 4, 1_000);
+        Drive(loopback, () => loopback.Server.GetSnapshot().ReceivedQueued >= 3, 1_000);
 
         var seen = new Dictionary<NetworkLane, ulong>();
         while (loopback.Server.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> delivered))
@@ -198,8 +198,44 @@ internal static class N03ProtocolTests
         }
         Equal(9UL, seen[NetworkLane.Input]);
         Equal(9UL, seen[NetworkLane.OwnerState]);
-        Equal(9UL, seen[NetworkLane.WorldState]);
         Equal(99UL, seen[NetworkLane.Disposable]);
+    }
+
+    private static void IndependentWorldStateContainersDoNotCoalesce()
+    {
+        using ProtocolLoopback loopback = Create(default);
+        Span<byte> payload = stackalloc byte[8];
+        for (ulong value = 0; value < 10; value++)
+        {
+            WriteUInt64(payload, value);
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.WorldState), payload));
+        }
+        Equal(10, loopback.Client.IndependentUnreliableQueued);
+        Drive(loopback, () => loopback.Server.GetSnapshot().ReceivedQueued == 10, 1_000);
+
+        Span<bool> seen = stackalloc bool[10];
+        while (loopback.Server.TryPeekReceived(out NetworkDeliveredMessage message,
+                   out ReadOnlySpan<byte> delivered))
+        {
+            Equal(NetworkLane.WorldState, message.Lane);
+            ulong value = ReadUInt64(delivered);
+            True(value < 10);
+            False(seen[(int)value]);
+            seen[(int)value] = true;
+            True(loopback.Server.TryConsumeReceived());
+        }
+        for (int index = 0; index < seen.Length; index++) True(seen[index]);
+        Equal(0, loopback.Client.IndependentUnreliableQueued);
+
+        NetworkProtocolLimits bounded = s_limits with { MaximumIndependentUnreliableMessages = 2 };
+        using ProtocolLoopback capacity = Create(default, limits: bounded);
+        Equal(NetworkQueueStatus.Accepted,
+            capacity.Client.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            capacity.Client.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 2 }));
+        Equal(NetworkQueueStatus.CapacityExceeded,
+            capacity.Client.TryQueue(Id(NetworkLane.WorldState), stackalloc byte[] { 3 }));
     }
 
     private static void UnreliableMessageFamiliesOwnIndependentStreams()
@@ -516,6 +552,23 @@ internal static class N03ProtocolTests
             True(loopback.Server.TryConsumeReceived());
         }
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Equal(0L, allocated);
+        Equal(499_500UL, checksum);
+
+        before = GC.GetAllocatedBytesForCurrentThread();
+        checksum = 0;
+        for (ulong iteration = 0; iteration < 1_000; iteration++)
+        {
+            WriteUInt64(payload, iteration);
+            Equal(NetworkQueueStatus.Accepted,
+                loopback.Client.TryQueue(Id(NetworkLane.WorldState), payload));
+            for (int pump = 0; pump < 4 && loopback.Server.GetSnapshot().ReceivedQueued == 0; pump++)
+                loopback.Pump();
+            True(loopback.Server.TryPeekReceived(out _, out ReadOnlySpan<byte> delivered));
+            checksum += ReadUInt64(delivered);
+            True(loopback.Server.TryConsumeReceived());
+        }
+        allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Equal(0L, allocated);
         Equal(499_500UL, checksum);
     }

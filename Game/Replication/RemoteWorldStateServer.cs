@@ -8,8 +8,8 @@ public readonly record struct RemoteWorldStateServerSnapshot(
     ulong BundlesQueued,
     ulong ApplicationAcknowledgements,
     ulong ApplicationRejections,
+    ulong ApplicationCapacityFailures,
     ulong MalformedAcknowledgements,
-    ulong OutstandingBundleId,
     GameWorldStateBuildStatus LastBuildStatus);
 
 /// <summary>
@@ -19,6 +19,8 @@ public readonly record struct RemoteWorldStateServerSnapshot(
 /// The interest graph owns relevance, pending newest versions, and application
 /// knowledge. This adapter performs only final bounded wire assembly and maps
 /// application ACKs back to the graph; transport ACKs never advance knowledge.
+/// WorldState messages are independent unreliable containers, so disjoint
+/// bundles may be queued without waiting for an application round trip.
 /// </remarks>
 public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
 {
@@ -33,11 +35,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     private ulong _queued;
     private ulong _acknowledged;
     private ulong _rejected;
+    private ulong _capacityFailures;
     private ulong _malformed;
-    private ulong _outstandingBundleId;
-    private int _outstandingBytes;
-    private long _outstandingFirstQueuedAt;
-    private long _outstandingLastQueuedAt;
     private GameWorldStateBuildStatus _lastBuild;
 
     public RemoteWorldStateServer(
@@ -64,28 +63,6 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     {
         EnsureOwnerThread();
         if (nowMilliseconds < 0) return _lastBuild = GameWorldStateBuildStatus.NoData;
-        if (_outstandingBundleId != 0)
-        {
-            long age = nowMilliseconds - _outstandingFirstQueuedAt;
-            if (age >= _interest.ApplicationAckTimeoutMilliseconds)
-            {
-                _ = _interest.AbandonBundle(_outstandingBundleId);
-                ClearOutstanding();
-            }
-            else
-            {
-                if (nowMilliseconds - _outstandingLastQueuedAt <
-                    _interest.ApplicationAckRetryMilliseconds)
-                    return _lastBuild = GameWorldStateBuildStatus.OutstandingCapacityExceeded;
-                if (_peer.TryQueue(
-                        RemoteWorldStateBundleHeaderCodec.Descriptor.Id,
-                        _messageScratch.AsSpan(0, _outstandingBytes)) != NetworkQueueStatus.Accepted)
-                    return _lastBuild = GameWorldStateBuildStatus.TransportNotAccepting;
-                _outstandingLastQueuedAt = nowMilliseconds;
-                SaturatingIncrement(ref _queued);
-                return _lastBuild = GameWorldStateBuildStatus.Success;
-            }
-        }
         _lastBuild = _interest.TryBuildBundle(
             _participant, nowMilliseconds, byteBudget, _records, out GameWorldStateBundle bundle);
         if (_lastBuild != GameWorldStateBuildStatus.Success) return _lastBuild;
@@ -121,10 +98,6 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         }
         _records.AsSpan(0, bundle.RecordCount).Clear();
         _wireRecords.AsSpan(0, bundle.RecordCount).Clear();
-        _outstandingBundleId = bundle.BundleId;
-        _outstandingBytes = written;
-        _outstandingFirstQueuedAt = nowMilliseconds;
-        _outstandingLastQueuedAt = nowMilliseconds;
         SaturatingIncrement(ref _queued);
         return _lastBuild;
     }
@@ -137,7 +110,6 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                 payload, out RemoteWorldStateAppliedMessage acknowledgement) ||
             acknowledgement.ApplicationSessionEpoch != _applicationSessionEpoch ||
             acknowledgement.StateEpoch != _interest.StateEpoch.Value ||
-            acknowledgement.BundleId != _outstandingBundleId ||
             (uint)acknowledgement.Status > (uint)RemoteWorldStateApplyStatus.CapacityExceeded ||
             !_interest.TryAcknowledgeBundle(
                 _participant,
@@ -147,9 +119,13 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
             SaturatingIncrement(ref _malformed);
             return true;
         }
-        ClearOutstanding();
         if (acknowledgement.Status == RemoteWorldStateApplyStatus.Applied)
             SaturatingIncrement(ref _acknowledged);
+        else if (acknowledgement.Status == RemoteWorldStateApplyStatus.CapacityExceeded)
+        {
+            SaturatingIncrement(ref _capacityFailures);
+            _interest.MarkRecipientProjectionNonviable(_participant);
+        }
         else
             SaturatingIncrement(ref _rejected);
         return true;
@@ -158,18 +134,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     public RemoteWorldStateServerSnapshot GetSnapshot()
     {
         EnsureOwnerThread();
-        return new(_queued, _acknowledged, _rejected, _malformed,
-            _outstandingBundleId, _lastBuild);
-    }
-
-    private void ClearOutstanding()
-    {
-        if (_outstandingBytes != 0)
-            _messageScratch.AsSpan(0, _outstandingBytes).Clear();
-        _outstandingBundleId = 0;
-        _outstandingBytes = 0;
-        _outstandingFirstQueuedAt = 0;
-        _outstandingLastQueuedAt = 0;
+        return new(_queued, _acknowledged, _rejected, _capacityFailures,
+            _malformed, _lastBuild);
     }
 
     private static void SaturatingIncrement(ref ulong value)

@@ -86,7 +86,8 @@ static void LaneTableIsExhaustiveAndSemanticallyDistinct()
     Equal(NetworkDeliveryGuarantee.Reliable, control.Delivery);
     Equal(NetworkRetentionPolicy.ExpiringInput, input.Retention);
     Equal(NetworkRetentionPolicy.LatestState, owner.Retention);
-    Equal(NetworkRetentionPolicy.LatestState, world.Retention);
+    Equal(NetworkRetentionPolicy.IndependentState, world.Retention);
+    Equal(NetworkDeliveryOrder.None, world.Order);
     Equal(NetworkRetentionPolicy.ApplicationEvent, events.Retention);
     Equal(NetworkRetentionPolicy.SegmentedBulk, bulk.Retention);
     Equal(NetworkRetentionPolicy.Disposable, disposable.Retention);

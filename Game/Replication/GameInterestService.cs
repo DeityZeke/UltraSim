@@ -21,6 +21,7 @@ public sealed class GameInterestService
 
     private readonly GameInterestLimits _limits;
     private readonly GameInterestProfile _profile;
+    private readonly int _immediateCellRadius;
     private readonly int _nearCellRadius;
     private readonly int _farCellRadius;
     private readonly int _maximumOutstandingBundlesPerRecipient;
@@ -85,6 +86,7 @@ public sealed class GameInterestService
     private int _lastRegionEdgesRemoved;
     private int _lastRegionEdgesRetiered;
     private int _lastRelationsChanged;
+    private int _lastRelationsExamined;
 
     public GameInterestService(
         StateEpoch stateEpoch,
@@ -99,6 +101,8 @@ public sealed class GameInterestService
         _limits = limits;
         _profile = profile;
         _stateEpoch = stateEpoch;
+        _immediateCellRadius = CandidateCellRadius(
+            profile.ImmediateLeaveRadiusMillimeters, profile.RegionEdgeMillimeters);
         _nearCellRadius = CellRadius(profile.NearRadiusMillimeters, profile.RegionEdgeMillimeters);
         _farCellRadius = CellRadius(profile.FarRadiusMillimeters, profile.RegionEdgeMillimeters);
         _maximumOutstandingBundlesPerRecipient = Math.Max(
@@ -159,8 +163,9 @@ public sealed class GameInterestService
         if (!participant.IsValid || nowMilliseconds < 0)
             return GameInterestUpdateStatus.InvalidInput;
         ReplicationSpatialRegionId region = ToRegion(anchor);
-        if (region.X < int.MinValue + _farCellRadius || region.X > int.MaxValue - _farCellRadius ||
-            region.Z < int.MinValue + _farCellRadius || region.Z > int.MaxValue - _farCellRadius)
+        int anchorMargin = Math.Max(_farCellRadius, _immediateCellRadius);
+        if (region.X < int.MinValue + anchorMargin || region.X > int.MaxValue - anchorMargin ||
+            region.Z < int.MinValue + anchorMargin || region.Z > int.MaxValue - anchorMargin)
             return GameInterestUpdateStatus.InvalidInput;
 
         bool created = false;
@@ -175,6 +180,7 @@ public sealed class GameInterestService
                 Participant = participant,
                 RegionEdgeHead = -1,
                 RelationHead = -1,
+                ImmediateRelationHead = -1,
                 PendingImmediateHead = -1,
                 PendingImmediateTail = -1,
                 PendingNearHead = -1,
@@ -198,7 +204,7 @@ public sealed class GameInterestService
         recipient.HasAnchor = true;
         GameInterestUpdateStatus status = crossedRegion
             ? RebuildRecipientRegionEnvelope(recipientIndex, nowMilliseconds)
-            : RetierRecipientRelations(recipientIndex, nowMilliseconds);
+            : ReconcileRecipientImmediate(recipientIndex, nowMilliseconds);
         if (status != GameInterestUpdateStatus.Success && created)
             MarkRecipientNonviable(recipientIndex);
         return status;
@@ -210,6 +216,19 @@ public sealed class GameInterestService
         EnsureOwnerThread();
         if (!_recipientMap.TryGetValue(participant, out int recipientIndex)) return false;
         RemoveRecipientInternal(recipientIndex);
+        return true;
+    }
+
+    /// <summary>
+    /// Marks a recipient unable to represent its admitted projection scope.
+    /// Further state scheduling stops until a later baseline/rescope mechanism
+    /// replaces this generation-local recipient.
+    /// </summary>
+    public bool MarkRecipientProjectionNonviable(ParticipantId participant)
+    {
+        EnsureOwnerThread();
+        if (!_recipientMap.TryGetValue(participant, out int recipientIndex)) return false;
+        MarkRecipientNonviable(recipientIndex);
         return true;
     }
 
@@ -526,6 +545,7 @@ public sealed class GameInterestService
             _lastRegionEdgesRemoved,
             _lastRegionEdgesRetiered,
             _lastRelationsChanged,
+            _lastRelationsExamined,
             CalculateReservedBytes());
     }
 
@@ -564,15 +584,20 @@ public sealed class GameInterestService
                 RemoveRegionEdge(edge, now);
             edge = next;
         }
-        return RetierRecipientRelations(recipientIndex, now);
+        return ReconcileRecipientImmediate(recipientIndex, now);
     }
 
-    private GameInterestUpdateStatus RetierRecipientRelations(int recipientIndex, long now)
+    private GameInterestUpdateStatus ReconcileRecipientImmediate(int recipientIndex, long now)
     {
-        int relation = _recipients[recipientIndex].RelationHead;
+        ref RecipientState recipient = ref _recipients[recipientIndex];
+
+        // Only the exact R0 set needs exit reconciliation when an anchor moves;
+        // coarse R1/R2 membership is unchanged unless region edges changed.
+        int relation = recipient.ImmediateRelationHead;
         while (relation >= 0)
         {
-            int next = _relations[relation].RecipientNext;
+            int next = _relations[relation].ImmediateNext;
+            _lastRelationsExamined++;
             if (_relations[relation].EntityLinked)
             {
                 int entityIndex = _relations[relation].EntitySlot;
@@ -583,6 +608,35 @@ public sealed class GameInterestService
                     SetRelationAbsent(relation, now);
             }
             relation = next;
+        }
+
+        // Reconcile possible R0 entries from only the small local cell
+        // neighborhood. This deliberately does not scan unrelated Near/Far
+        // relations owned by the recipient.
+        ReplicationSpatialRegionId anchor = recipient.AnchorRegion;
+        for (int dz = -_immediateCellRadius; dz <= _immediateCellRadius; dz++)
+        {
+            for (int dx = -_immediateCellRadius; dx <= _immediateCellRadius; dx++)
+            {
+                var id = new ReplicationSpatialRegionId(anchor.X + dx, anchor.Z + dz);
+                if (!_regionMap.TryGetValue(id, out int regionIndex) ||
+                    !_regionEdgeMap.TryGetValue(
+                        new RecipientRegionKey(recipientIndex, regionIndex), out int edge))
+                    continue;
+                int entityIndex = _regions[regionIndex].EntityHead;
+                while (entityIndex >= 0)
+                {
+                    int next = _entities[entityIndex].RegionNext;
+                    _lastRelationsExamined++;
+                    if (!EnsureDesiredRelation(
+                            recipientIndex, entityIndex, _regionEdges[edge].Tier, now))
+                    {
+                        MarkRecipientNonviable(recipientIndex);
+                        return GameInterestUpdateStatus.RecipientNonviable;
+                    }
+                    entityIndex = next;
+                }
+            }
         }
         return _recipients[recipientIndex].Nonviable
             ? GameInterestUpdateStatus.RecipientNonviable
@@ -653,7 +707,7 @@ public sealed class GameInterestService
         while (member >= 0)
         {
             int next = _entities[member].RegionNext;
-            var key = new RecipientEntityKey(edge.Recipient, _entities[member].Entity);
+            var key = new RecipientEntityKey(edge.Recipient, _entities[member].Entity.Index);
             if (_relationMap.TryGetValue(key, out int relation))
                 SetRelationAbsent(relation, now);
             member = next;
@@ -682,12 +736,30 @@ public sealed class GameInterestService
     private bool EnsureDesiredRelation(int recipientIndex, int entityIndex, GameInterestTier baseTier, long now)
     {
         ref EntityState entity = ref _entities[entityIndex];
-        var key = new RecipientEntityKey(recipientIndex, entity.Entity);
+        var key = new RecipientEntityKey(recipientIndex, entity.Entity.Index);
         if (_relationMap.TryGetValue(key, out int relationIndex))
         {
-            if (!_relations[relationIndex].EntityLinked) LinkRelationToEntity(relationIndex, entityIndex);
-            SetRelationTierAndPresence(relationIndex, baseTier, now);
-            return !_recipients[recipientIndex].Nonviable;
+            // One recipient/canonical slot owns at most one unsatisfied
+            // lifetime. A newer generation supersedes any pending tombstone or
+            // present record for the older generation.
+            if (_relations[relationIndex].Entity != entity.Entity)
+            {
+                // A newer lifetime only supersedes the old absence debt when
+                // it can itself publish a complete present record to this
+                // recipient. Otherwise retain the tombstone for the known old
+                // lifetime until it is applied.
+                if (DetermineTier(
+                        recipientIndex, entityIndex, baseTier, GameInterestTier.None) ==
+                    GameInterestTier.None)
+                    return true;
+                RemoveRelation(relationIndex);
+            }
+            else
+            {
+                if (!_relations[relationIndex].EntityLinked) LinkRelationToEntity(relationIndex, entityIndex);
+                SetRelationTierAndPresence(relationIndex, baseTier, now);
+                return !_recipients[recipientIndex].Nonviable;
+            }
         }
         GameInterestTier tier = DetermineTier(recipientIndex, entityIndex, baseTier, GameInterestTier.None);
         if (tier == GameInterestTier.None) return true;
@@ -707,6 +779,8 @@ public sealed class GameInterestService
             RecipientNext = _recipients[recipientIndex].RelationHead,
             EntityPrevious = -1,
             EntityNext = entity.RelationHead,
+            ImmediatePrevious = -1,
+            ImmediateNext = -1,
         };
         if (relation.RecipientNext >= 0)
             _relations[relation.RecipientNext].RecipientPrevious = relationIndex;
@@ -715,6 +789,7 @@ public sealed class GameInterestService
         _recipients[recipientIndex].RelationHead = relationIndex;
         entity.RelationHead = relationIndex;
         _relationMap.Add(key, relationIndex);
+        if (tier == GameInterestTier.Immediate) LinkImmediateRelation(relationIndex);
         _relationCount++;
         MarkRelationPending(relationIndex, present: true, entity.CanonicalVersion, now);
         _lastRelationsChanged++;
@@ -733,7 +808,7 @@ public sealed class GameInterestService
         }
         bool wasDesired = relation.DesiredPresent;
         GameInterestTier previous = relation.Tier;
-        relation.Tier = tier;
+        SetRelationTier(relationIndex, tier);
         relation.DesiredPresent = true;
         if (!wasDesired)
             MarkRelationPending(relationIndex, present: true, _entities[entityIndex].CanonicalVersion, now);
@@ -757,7 +832,7 @@ public sealed class GameInterestService
             ? _entities[relation.EntitySlot].CanonicalVersion
             : Math.Max(relation.PendingCanonicalVersion, relation.KnownCanonicalVersion);
         relation.DesiredPresent = false;
-        relation.Tier = GameInterestTier.None;
+        SetRelationTier(relationIndex, GameInterestTier.None);
         if (relation.EntityLinked) UnlinkRelationFromEntity(relationIndex);
         MarkRelationPending(relationIndex, present: false, canonicalVersion, now);
         _lastRelationsChanged++;
@@ -986,11 +1061,30 @@ public sealed class GameInterestService
 
     private int SelectEligibleRelation(int recipientIndex, long now)
     {
-        ref readonly RecipientState recipient = ref _recipients[recipientIndex];
-        int selected = SelectEligibleInPendingList(recipient.PendingImmediateHead, now);
-        if (selected >= 0) return selected;
-        selected = SelectEligibleInPendingList(recipient.PendingNearHead, now);
-        return selected >= 0 ? selected : SelectEligibleInPendingList(recipient.PendingFarHead, now);
+        ref RecipientState recipient = ref _recipients[recipientIndex];
+        const int scheduleLength = 7;
+        for (int offset = 0; offset < scheduleLength; offset++)
+        {
+            int scheduleIndex = (recipient.NextTierSchedule + offset) % scheduleLength;
+            GameInterestTier tier = scheduleIndex switch
+            {
+                0 or 1 or 2 or 4 => GameInterestTier.Immediate,
+                3 or 5 => GameInterestTier.Near,
+                _ => GameInterestTier.Far,
+            };
+            int head = tier switch
+            {
+                GameInterestTier.Immediate => recipient.PendingImmediateHead,
+                GameInterestTier.Near => recipient.PendingNearHead,
+                GameInterestTier.Far => recipient.PendingFarHead,
+                _ => -1,
+            };
+            int selected = SelectEligibleInPendingList(head, now);
+            if (selected < 0) continue;
+            recipient.NextTierSchedule = checked((byte)((scheduleIndex + 1) % scheduleLength));
+            return selected;
+        }
+        return -1;
     }
 
     private int SelectEligibleInPendingList(int relation, long now)
@@ -1139,6 +1233,8 @@ public sealed class GameInterestService
     {
         ref RelationState relation = ref _relations[relationIndex];
         if (!relation.Active) return;
+        if (relation.Tier == GameInterestTier.Immediate)
+            UnlinkImmediateRelation(relationIndex);
         if (relation.Pending)
         {
             UnlinkPending(relationIndex);
@@ -1151,7 +1247,7 @@ public sealed class GameInterestService
             _recipients[relation.Recipient].RelationHead = relation.RecipientNext;
         if (relation.RecipientNext >= 0)
             _relations[relation.RecipientNext].RecipientPrevious = relation.RecipientPrevious;
-        _relationMap.Remove(new RecipientEntityKey(relation.Recipient, relation.Entity));
+        _relationMap.Remove(new RecipientEntityKey(relation.Recipient, relation.Entity.Index));
         uint generation = relation.Generation;
         relation = default;
         _relationCount--;
@@ -1186,6 +1282,41 @@ public sealed class GameInterestService
         relation.EntitySlot = -1;
         relation.EntityPrevious = -1;
         relation.EntityNext = -1;
+    }
+
+    private void SetRelationTier(int relationIndex, GameInterestTier tier)
+    {
+        ref RelationState relation = ref _relations[relationIndex];
+        if (relation.Tier == tier) return;
+        if (relation.Tier == GameInterestTier.Immediate)
+            UnlinkImmediateRelation(relationIndex);
+        relation.Tier = tier;
+        if (tier == GameInterestTier.Immediate)
+            LinkImmediateRelation(relationIndex);
+    }
+
+    private void LinkImmediateRelation(int relationIndex)
+    {
+        ref RelationState relation = ref _relations[relationIndex];
+        ref RecipientState recipient = ref _recipients[relation.Recipient];
+        relation.ImmediatePrevious = -1;
+        relation.ImmediateNext = recipient.ImmediateRelationHead;
+        if (relation.ImmediateNext >= 0)
+            _relations[relation.ImmediateNext].ImmediatePrevious = relationIndex;
+        recipient.ImmediateRelationHead = relationIndex;
+    }
+
+    private void UnlinkImmediateRelation(int relationIndex)
+    {
+        ref RelationState relation = ref _relations[relationIndex];
+        if (relation.ImmediatePrevious >= 0)
+            _relations[relation.ImmediatePrevious].ImmediateNext = relation.ImmediateNext;
+        else
+            _recipients[relation.Recipient].ImmediateRelationHead = relation.ImmediateNext;
+        if (relation.ImmediateNext >= 0)
+            _relations[relation.ImmediateNext].ImmediatePrevious = relation.ImmediatePrevious;
+        relation.ImmediatePrevious = -1;
+        relation.ImmediateNext = -1;
     }
 
     private void LinkEntityToRegion(int entityIndex, int regionIndex)
@@ -1406,6 +1537,11 @@ public sealed class GameInterestService
     private static int CellRadius(int radius, int edge) =>
         checked((int)(((long)radius + edge - 1L) / edge));
 
+    // Exact local-distance candidates must include the cell just across a
+    // boundary when radius is an exact multiple of edge length.
+    private static int CandidateCellRadius(int radius, int edge) =>
+        checked(radius / edge + 1);
+
     private static bool WithinSquaredDistance(
         in ReplicationSpatialPoint left,
         in ReplicationSpatialPoint right,
@@ -1423,6 +1559,7 @@ public sealed class GameInterestService
         _lastRegionEdgesRemoved = 0;
         _lastRegionEdgesRetiered = 0;
         _lastRelationsChanged = 0;
+        _lastRelationsExamined = 0;
     }
 
     private long CalculateReservedBytes()
@@ -1467,7 +1604,7 @@ public sealed class GameInterestService
     }
 
     private readonly record struct RecipientRegionKey(int Recipient, int Region);
-    private readonly record struct RecipientEntityKey(int Recipient, ReplicationEntityId Entity);
+    private readonly record struct RecipientEntityKey(int Recipient, uint EntityIndex);
 
     private struct EntityState
     {
@@ -1495,6 +1632,7 @@ public sealed class GameInterestService
         internal ReplicationSpatialRegionId AnchorRegion;
         internal int RegionEdgeHead;
         internal int RelationHead;
+        internal int ImmediateRelationHead;
         internal int PendingImmediateHead;
         internal int PendingImmediateTail;
         internal int PendingNearHead;
@@ -1502,6 +1640,7 @@ public sealed class GameInterestService
         internal int PendingFarHead;
         internal int PendingFarTail;
         internal int OutstandingBundleCount;
+        internal byte NextTierSchedule;
     }
 
     private struct RegionState
@@ -1553,6 +1692,8 @@ public sealed class GameInterestService
         internal int RecipientNext;
         internal int EntityPrevious;
         internal int EntityNext;
+        internal int ImmediatePrevious;
+        internal int ImmediateNext;
         internal uint BuildStamp;
     }
 

@@ -36,6 +36,11 @@ public enum NetworkRetentionPolicy : byte
     ApplicationEvent = 3,
     SegmentedBulk = 4,
     Disposable = 5,
+    /// <summary>
+    /// Bounded independent state containers. Each admitted message is sent at
+    /// most once by Network and remains semantically recoverable by its owner.
+    /// </summary>
+    IndependentState = 6,
 }
 
 /// <summary>Describes the fixed semantic contract of one <see cref="NetworkLane"/>.</summary>
@@ -105,7 +110,7 @@ public static class NetworkLaneContracts
         NetworkLane.OwnerState => new(lane, NetworkDeliveryGuarantee.Unreliable,
             NetworkDeliveryOrder.Sequenced, NetworkRetentionPolicy.LatestState, 2, false),
         NetworkLane.WorldState => new(lane, NetworkDeliveryGuarantee.Unreliable,
-            NetworkDeliveryOrder.Sequenced, NetworkRetentionPolicy.LatestState, 3, false),
+            NetworkDeliveryOrder.None, NetworkRetentionPolicy.IndependentState, 3, false),
         NetworkLane.Event => new(lane, NetworkDeliveryGuarantee.Reliable,
             NetworkDeliveryOrder.Ordered, NetworkRetentionPolicy.ApplicationEvent, 2, true),
         NetworkLane.Bulk => new(lane, NetworkDeliveryGuarantee.Reliable,

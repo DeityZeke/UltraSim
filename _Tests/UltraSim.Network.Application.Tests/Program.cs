@@ -54,6 +54,7 @@ internal static class Program
             ("MaintainedWorldStateCrossesLoopbackWithApplicationAck", MaintainedWorldStateCrossesLoopbackWithApplicationAck),
             ("WorldStateTombstoneKnowledgeIsIndependentFromPresentation", WorldStateTombstoneKnowledgeIsIndependentFromPresentation),
             ("WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder", WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder),
+            ("WorldStateCapacityFailureMakesRecipientExplicitlyNonviable", WorldStateCapacityFailureMakesRecipientExplicitlyNonviable),
         };
 
         foreach ((string name, Action body) in tests)
@@ -505,7 +506,7 @@ static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
             new ReplicationSpatialPoint(2_000, 0), GameReplicationHorizon.Far, 0));
 
     var server = new RemoteWorldStateServer(
-        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch, 8);
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch, 1);
     var client = new RemoteWorldStateClient(
         fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
         maximumKnownIdentities: 16, maximumActiveEntities: 8,
@@ -514,14 +515,11 @@ static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
     fixture.ClientBridge!.BindProtocolHandler(client);
 
     Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(0, 4_096));
-    Equal(GameWorldStateBuildStatus.OutstandingCapacityExceeded,
-        server.TrySchedule(1, 4_096),
-        "A different partial WorldState bundle could overwrite the unacknowledged family slot.");
-    ulong retainedBundle = server.GetSnapshot().OutstandingBundleId;
-    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(100, 4_096));
-    Equal(retainedBundle, server.GetSnapshot().OutstandingBundleId,
-        "WorldState retry changed semantic bundle identity instead of requeueing identical meaning.");
-    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 1);
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(0, 4_096));
+    Equal(GameWorldStateBuildStatus.NoData, server.TrySchedule(0, 4_096));
+    Equal(2, fixture.ServerPeer.IndependentUnreliableQueued,
+        "Independent relation subsets were coalesced instead of pipelined.");
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 2);
     RemoteWorldStateClientSnapshot clientSnapshot = client.GetSnapshot();
     Equal(2, clientSnapshot.ActiveEntityCount);
     Equal(0, clientSnapshot.PendingApplicationAcknowledgements);
@@ -531,7 +529,7 @@ static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
         interest.UpsertEntity(ProjectedWorldEntity(3, 1, 31), 2,
             new ReplicationSpatialPoint(1_500, 0), GameReplicationHorizon.Far, 1));
     Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(1, 4_096));
-    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 2);
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 3);
     Span<RemoteWorldEntitySnapshot> active = stackalloc RemoteWorldEntitySnapshot[8];
     Equal(2, client.CopyActiveEntities(active));
     Equal(3U, active[0].Entity.Index);
@@ -569,6 +567,11 @@ static void WorldStateTombstoneKnowledgeIsIndependentFromPresentation()
     Equal(RemoteWorldStateClientApplyStatus.Applied,
         client.ApplyDecodedBundle([nextLifetime]));
     Equal(1, client.GetSnapshot().ActiveEntityCount);
+    Equal(RemoteWorldStateClientApplyStatus.Duplicate,
+        client.ApplyDecodedBundle([tombstone]));
+    Span<RemoteWorldEntitySnapshot> retained = stackalloc RemoteWorldEntitySnapshot[2];
+    Equal(1, client.CopyActiveEntities(retained));
+    Equal(10U, retained[0].Entity.Generation);
 
     Span<ClientEntitySlot> visible = stackalloc ClientEntitySlot[2];
     Equal(0, client.CopyPresentationCandidates(new ClientWorldPoint(0, 0), 1_000, visible));
@@ -608,6 +611,42 @@ static void WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder()
     Equal(RemoteWorldStateClientApplyStatus.CapacityExceeded,
         client.ApplyDecodedBundle([WorldRecord(1, 3, 1, 1, true, 30)]));
     Equal(stable, client.GetSnapshot(), "Capacity rejection partially mutated client projection.");
+}
+
+static void WorldStateCapacityFailureMakesRecipientExplicitlyNonviable()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(42);
+    StateEpoch epoch = new(0x708);
+    var interest = new GameInterestService(
+        epoch,
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(1, 1, 1), 1,
+            new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(2, 1, 2), 1,
+            new ReplicationSpatialPoint(2_000, 0), GameReplicationHorizon.Far, 0));
+
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch, 4);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
+        maximumKnownIdentities: 2, maximumActiveEntities: 1,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(0, 4_096));
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationCapacityFailures == 1);
+    Equal(1, interest.GetSnapshot().NonviableRecipientCount);
+    Equal(GameWorldStateBuildStatus.RecipientNonviable,
+        server.TrySchedule(1, 4_096));
+    Equal(1UL, server.GetSnapshot().ApplicationCapacityFailures);
 }
 
 static RemoteWorldStateRecord WorldRecord(

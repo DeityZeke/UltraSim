@@ -38,7 +38,7 @@ Identity is explicit and non-interchangeable:
 | `ConnectionId` | Network | Server-created transport slot plus reuse generation; neither durable nor client-chosen. |
 | `SecurityEpoch` | Network | Key/replay lifetime within one connection. |
 | `PacketNumber` | Network | Authenticated datagram sequence; admitted data packet numbers are referenced separately by transport-delivery ACKs. |
-| `LaneSequence` | Network | Reliable ordering is lane-scoped; unreliable sequencing/coalescing is isolated per message family. N0.6 uses one complete logical stream per Input/OwnerState family; a generic sub-stream key remains deferred until a second simultaneous stream earns it. |
+| `LaneSequence` | Network | Reliable ordering is lane-scoped; sequenced unreliable coalescing is isolated per Input/OwnerState message family. WorldState containers are unordered and use application relation sequences instead. N0.6 uses one complete logical stream per Input/OwnerState family; a generic sub-stream key remains deferred until a second simultaneous stream earns it. |
 | `StateEpoch` | Projection/protocol seam | One coherent canonical projection generation. |
 | `ReplicationEntityId` | Canonical projection | Dense generational identity shared by all recipients within one `StateEpoch`. |
 | `ParticipantId` | Game contracts | Server-created game/session participant; not defined by this kernel. |
@@ -114,8 +114,10 @@ The bounded delivery machine provides:
 
 - independent 64-packet authenticated-replay and transport-delivery windows;
 - reliable ordered Control, Event, and Bulk retention with ACK-driven release;
-- unreliable sequenced Input, OwnerState, and WorldState coalescing isolated per
-  message family;
+- unreliable sequenced Input and OwnerState coalescing isolated per message
+  family;
+- bounded independent unordered WorldState containers whose application owner
+  retains and retries newest relation debt;
 - disposable unordered delivery;
 - MTU-bounded fragmentation/reassembly;
 - deterministic step-clock RTT/RTO, congestion-window/backoff, and independent
@@ -155,7 +157,7 @@ packetization exists:
 | Control | reliable ordered | protocol, session, baseline, and clock control state |
 | Input | unreliable sequenced | expiring authoritative input |
 | OwnerState | unreliable sequenced | latest owner state |
-| WorldState | unreliable sequenced | latest observer state |
+| WorldState | unreliable unordered | independent recoverable state containers; no Network coalescing |
 | Event | reliable ordered | application facts whose intermediate occurrence matters |
 | Bulk | reliable ordered, fragmentable | bounded segmented definitions/baselines/content |
 | Disposable | unreliable unordered | explicitly disposable presentation data |
