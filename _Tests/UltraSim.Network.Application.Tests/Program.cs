@@ -9,11 +9,13 @@ using UltraSim.Game.Accounting;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
 using UltraSim.Game.Inventory;
+using UltraSim.Game.Persistence;
 using UltraSim.Game.Protocol;
 using UltraSim.Game.Replication;
 using UltraSim.Game.UI;
 using UltraSim.Network;
 using UltraSim.Server.Hosting;
+using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
 using UltraSim.UI;
 
@@ -55,6 +57,16 @@ internal static class Program
             ("WorldStateTombstoneKnowledgeIsIndependentFromPresentation", WorldStateTombstoneKnowledgeIsIndependentFromPresentation),
             ("WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder", WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder),
             ("WorldStateCapacityFailureMakesRecipientExplicitlyNonviable", WorldStateCapacityFailureMakesRecipientExplicitlyNonviable),
+            ("AtomicWorldBaselineCommitsCutoffThenPostCutoffState", AtomicWorldBaselineCommitsCutoffThenPostCutoffState),
+            ("FreshProjectionEpochReplacesClientStateWithoutReconnect", FreshProjectionEpochReplacesClientStateWithoutReconnect),
+            ("PersistencePublicationRebaselinesEstablishedConnection", PersistencePublicationRebaselinesEstablishedConnection),
+            ("WorldBaselineConvergesUnderLossReorderAndDuplication", WorldBaselineConvergesUnderLossReorderAndDuplication),
+            ("WorldBaselineCapacityRejectsWithoutPartialPublication", WorldBaselineCapacityRejectsWithoutPartialPublication),
+            ("NewerBaselineCancelsOlderCandidate", NewerBaselineCancelsOlderCandidate),
+            ("ReconnectStartsFreshAtomicWorldBaseline", ReconnectStartsFreshAtomicWorldBaseline),
+            ("WorldBaselineCodecIsCanonicalAndTransactional", WorldBaselineCodecIsCanonicalAndTransactional),
+            ("WorldBaselineHashFailurePreservesLiveProjection", WorldBaselineHashFailurePreservesLiveProjection),
+            ("SameEpochBaselineFloorPreventsOmittedEntityResurrection", SameEpochBaselineFloorPreventsOmittedEntityResurrection),
         };
 
         foreach ((string name, Action body) in tests)
@@ -62,8 +74,10 @@ internal static class Program
             body();
             Console.WriteLine($"PASS {name}");
         }
-        Console.WriteLine($"All {tests.Length} Network N0.4/N0.5/N0.6/N0.7 application tests passed.");
-        if (args.Contains("--benchmark-n06", StringComparer.Ordinal))
+        Console.WriteLine($"All {tests.Length} Network N0.4 through N0.8 application tests passed.");
+        if (args.Contains("--benchmark-n08", StringComparer.Ordinal))
+            RunN08Benchmark(args);
+        else if (args.Contains("--benchmark-n06", StringComparer.Ordinal))
             RunN06Benchmark(args);
         else if (args.Contains("--benchmark-udp", StringComparer.Ordinal))
             RunUdpBenchmark(args);
@@ -647,6 +661,537 @@ static void WorldStateCapacityFailureMakesRecipientExplicitlyNonviable()
     Equal(GameWorldStateBuildStatus.RecipientNonviable,
         server.TrySchedule(1, 4_096));
     Equal(1UL, server.GetSnapshot().ApplicationCapacityFailures);
+}
+
+static void AtomicWorldBaselineCommitsCutoffThenPostCutoffState()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    StateEpoch epoch = new(0x801);
+    var interest = new GameInterestService(
+        epoch,
+        new GameInterestLimits(64, 4, 1_024, 1_024, 256, 32, 8),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 10), 1,
+            new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(9, 1, 20), 1,
+            new ReplicationSpatialPoint(2_000, 0), GameReplicationHorizon.Far, 0));
+
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 8);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
+        maximumKnownIdentities: 8, maximumActiveEntities: 8,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    // Baseline is captured at version 1. A version 2 write after the cutoff
+    // must remain ordinary relation debt after the baseline application ACK.
+    Equal(RemoteWorldBaselineProgressStatus.AwaitingClientPreparation,
+        server.TryBeginBaseline(baselineRevision: 1, eventFloor: 7, recordsPerSegment: 1));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 31), 2,
+            new ReplicationSpatialPoint(1_500, 0), GameReplicationHorizon.Far, 1));
+
+    fixture.DriveUntil(() => client.GetSnapshot().BaselineCandidateActive);
+    RemoteWorldStateClientSnapshot staging = client.GetSnapshot();
+    True(staging.BaselineCandidateActive);
+    Equal(0, staging.ActiveEntityCount,
+        "Baseline Begin mutated the live projection before complete validation.");
+    fixture.DriveNetworkSteps(1);
+    Equal(0, client.GetSnapshot().ActiveEntityCount,
+        "Prepared baseline publication occurred before Bulk data crossed the transport.");
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 1);
+
+    RemoteWorldStateClientSnapshot committed = client.GetSnapshot();
+    Equal(epoch, committed.StateEpoch);
+    Equal(1UL, committed.BaselineRevision);
+    Equal(7UL, committed.EventFloor);
+    Equal(2, committed.ActiveEntityCount);
+    Equal(1, interest.GetSnapshot().PendingRelationCount,
+        "Baseline acknowledgement incorrectly cleared post-cutoff relation debt.");
+    Span<RemoteWorldEntitySnapshot> baselineRows = stackalloc RemoteWorldEntitySnapshot[8];
+    Equal(2, client.CopyActiveEntities(baselineRows));
+    Equal(10, baselineRows[0].TickMarker);
+
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(2, 4_096));
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 1);
+    Span<RemoteWorldEntitySnapshot> currentRows = stackalloc RemoteWorldEntitySnapshot[8];
+    Equal(2, client.CopyActiveEntities(currentRows));
+    Equal(31, currentRows[0].TickMarker);
+    Equal(0, interest.GetSnapshot().PendingRelationCount);
+}
+
+static void FreshProjectionEpochReplacesClientStateWithoutReconnect()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    GameInterestService Build(StateEpoch epoch, uint entityIndex, int marker)
+    {
+        var value = new GameInterestService(
+            epoch,
+            new GameInterestLimits(64, 4, 1_024, 1_024, 256, 32, 8),
+            GameInterestProfile.Reference);
+        Equal(GameInterestUpdateStatus.Success,
+            value.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+        Equal(GameInterestUpdateStatus.Success,
+            value.UpsertEntity(ProjectedWorldEntity(entityIndex, 1, marker), 1,
+                new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 0));
+        return value;
+    }
+
+    var first = Build(new StateEpoch(0x810), 4, 10);
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, first, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 8);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, first.StateEpoch,
+        maximumKnownIdentities: 8, maximumActiveEntities: 8,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+    _ = server.TryBeginBaseline(1, recordsPerSegment: 1);
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 1);
+    Equal(4U, CopySingle(client).Entity.Index);
+
+    var replacement = Build(new StateEpoch(0x811), 7, 70);
+    server.ReplaceInterest(replacement);
+    _ = server.TryBeginBaseline(1, recordsPerSegment: 1);
+    fixture.DriveNetworkSteps(2);
+    Equal(4U, CopySingle(client).Entity.Index,
+        "A partially received replacement epoch changed live client state.");
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 2);
+    RemoteWorldEntitySnapshot replaced = CopySingle(client);
+    Equal(7U, replaced.Entity.Index);
+    Equal(70, replaced.TickMarker);
+    Equal(replacement.StateEpoch, client.GetSnapshot().StateEpoch);
+    Equal(77UL, fixture.ClientBridge!.GetSnapshot().ApplicationSessionEpoch,
+        "Projection replacement incorrectly replaced the healthy application session.");
+
+    // A delayed complete record from the prior epoch is rejected after the
+    // atomic swap and cannot revive the old projection.
+    RemoteWorldStateRecord old = WorldRecord(99, 4, 1, 99, true, 999);
+    Span<byte> payload = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+    True(UltraSimGameProtocol.TryWriteWorldStateBundle(
+        payload, fixture.ApplicationSessionEpoch, first.StateEpoch.Value, 99, [old], out int written));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.WorldState,
+        RemoteWorldStateBundleHeaderCodec.Descriptor.Id,
+        RemoteWorldStateBundleHeaderCodec.Descriptor.Version,
+        default,
+        written), payload[..written]));
+    Equal(7U, CopySingle(client).Entity.Index);
+}
+
+static RemoteWorldEntitySnapshot CopySingle(RemoteWorldStateClient client)
+{
+    Span<RemoteWorldEntitySnapshot> rows = stackalloc RemoteWorldEntitySnapshot[8];
+    Equal(1, client.CopyActiveEntities(rows));
+    return rows[0];
+}
+
+static void PersistencePublicationRebaselinesEstablishedConnection()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    using GameProjectionService projection = fixture.CreateProjection();
+    True(projection.SynchronizeParticipant(participant));
+    Equal(GameProjectionCaptureStatus.BaselineRebuilt, projection.RebuildBaseline().Status);
+    GameInterestService initialInterest = BuildInterestFromProjection(projection, participant, 0);
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, initialInterest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 8, maximumBaselineRecords: 64);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, projection.StateEpoch,
+        maximumKnownIdentities: 64, maximumActiveEntities: 64,
+        maximumRecordsPerBundle: 8);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+    _ = server.TryBeginBaseline(1, recordsPerSegment: 2);
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 1);
+    ulong applicationEpoch = fixture.ClientBridge.GetSnapshot().ApplicationSessionEpoch;
+    StateEpoch oldEpoch = client.GetSnapshot().StateEpoch;
+    int savedMarker = fixture.ReadAliceSimulation().TickMarker;
+
+    (ulong savedTick, ulong divergentTick, ulong restoredTick, ulong generation) =
+        fixture.SaveDivergeRestore();
+    True(divergentTick > savedTick);
+    Equal(savedTick, restoredTick,
+        "Persistence publication did not restore authoritative scheduler time.");
+    True(generation > 1);
+    Equal(savedMarker, fixture.ReadAliceSimulation().TickMarker,
+        "Restored Alice did not recover the saved authoritative state.");
+    True(fixture.Server.Admission.TryGetSession(participant, out AdmissionResult rebound) &&
+        rebound.IsEntered && rebound.GenerationId == generation,
+        "Admission did not atomically rebind Alice to the restored generation.");
+
+    GameProjectionCaptureResult rebuilt = projection.RebuildBaseline();
+    Equal(GameProjectionCaptureStatus.BaselineRebuilt, rebuilt.Status);
+    True(projection.StateEpoch != oldEpoch);
+    GameInterestService restoredInterest = BuildInterestFromProjection(projection, participant, 1);
+    server.ReplaceInterest(restoredInterest);
+    _ = server.TryBeginBaseline(rebuilt.Frame.BaselineRevision, recordsPerSegment: 2);
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 2);
+    Equal(projection.StateEpoch, client.GetSnapshot().StateEpoch);
+    Equal(applicationEpoch, fixture.ClientBridge.GetSnapshot().ApplicationSessionEpoch,
+        "Whole-authority replacement incorrectly replaced healthy connection/application identity.");
+
+    // Alice continues under the same connection after the restored generation
+    // becomes the only committed projection epoch.
+    fixture.TickRuntime();
+    Equal(GameProjectionCaptureStatus.Success, projection.CaptureAfterTick().Status);
+    True(projection.TryGetOwnerState(participant, out GameProjectionOwnerState owner));
+    GameProjectedEntity alice = owner.Entity;
+    Equal(GameInterestUpdateStatus.Success,
+        restoredInterest.UpsertEntity(alice, 2,
+            new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 2));
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(2, 4_096));
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 1);
+    RemoteWorldEntitySnapshot continued = CopySingle(client);
+    Equal(fixture.ReadAliceSimulation().TickMarker, continued.TickMarker);
+}
+
+static GameInterestService BuildInterestFromProjection(
+    GameProjectionService projection,
+    ParticipantId participant,
+    long now)
+{
+    var interest = new GameInterestService(
+        projection.StateEpoch,
+        new GameInterestLimits(64, 4, 1_024, 1_024, 256, 32, 8),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), now));
+    Span<GameProjectedEntity> entities = stackalloc GameProjectedEntity[64];
+    int count = projection.CopyEntities(entities);
+    ulong version = 1;
+    for (int index = 0; index < count; index++)
+    {
+        if (!entities[index].HasSimulationState) continue;
+        Equal(GameInterestUpdateStatus.Success,
+            interest.UpsertEntity(entities[index], version,
+                new ReplicationSpatialPoint(1_000 + index * 10, 0),
+                GameReplicationHorizon.Far, now));
+    }
+    return interest;
+}
+
+static void WorldBaselineConvergesUnderLossReorderAndDuplication()
+{
+    using Fixture fixture = Fixture.CreateN06(
+        new NetworkImpairmentOptions(0xB453_11E, 180, 200, 40, 5));
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    var interest = new GameInterestService(
+        new StateEpoch(0x820),
+        new GameInterestLimits(64, 4, 1_024, 1_024, 512, 64, 8),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, default, 0));
+    for (uint index = 1; index <= 12; index++)
+        Equal(GameInterestUpdateStatus.Success,
+            interest.UpsertEntity(ProjectedWorldEntity(index, 1, checked((int)index)), 1,
+                new ReplicationSpatialPoint(checked((int)index * 100), 0),
+                GameReplicationHorizon.Far, 0));
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 16);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, interest.StateEpoch,
+        maximumKnownIdentities: 16, maximumActiveEntities: 16,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+    _ = server.TryBeginBaseline(1, recordsPerSegment: 2);
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesApplied == 1, maximumSteps: 200_000);
+    Equal(12, client.GetSnapshot().ActiveEntityCount);
+    True(fixture.Loopback!.GetSnapshot().Datagram.Dropped > 0);
+    True(fixture.Loopback.GetSnapshot().Datagram.Duplicated > 0);
+}
+
+static void WorldBaselineCapacityRejectsWithoutPartialPublication()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    var interest = new GameInterestService(
+        new StateEpoch(0x821),
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, default, 0));
+    for (uint index = 1; index <= 2; index++)
+        Equal(GameInterestUpdateStatus.Success,
+            interest.UpsertEntity(ProjectedWorldEntity(index, 1, checked((int)index)), 1,
+                new ReplicationSpatialPoint(checked((int)index * 100), 0),
+                GameReplicationHorizon.Far, 0));
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+        maximumRecordsPerBundle: 4, maximumBaselineRecords: 4);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, interest.StateEpoch,
+        maximumKnownIdentities: 1, maximumActiveEntities: 1,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+    _ = server.TryBeginBaseline(1, recordsPerSegment: 1);
+    fixture.DriveUntil(() => server.GetSnapshot().BaselinesRejected == 1);
+    Equal(0, client.GetSnapshot().ActiveEntityCount);
+    Equal(0, client.GetSnapshot().KnownIdentityCount);
+    Equal(1, interest.GetSnapshot().NonviableRecipientCount);
+}
+
+static void NewerBaselineCancelsOlderCandidate()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, new StateEpoch(0x830),
+        maximumKnownIdentities: 4, maximumActiveEntities: 4,
+        maximumRecordsPerBundle: 2);
+    RemoteWorldStateRecord oldRecord = WorldRecord(1, 1, 1, 1, true, 10);
+    RemoteWorldStateRecord newRecord = WorldRecord(2, 2, 1, 1, true, 20);
+    SendBegin(1, 1, oldRecord);
+    True(client.GetSnapshot().BaselineCandidateActive);
+    SendBegin(2, 2, newRecord);
+    True(client.GetSnapshot().BaselineCandidateActive);
+    SendSegmentAndCommit(1, 1, oldRecord); // delayed prior transaction
+    True(client.GetSnapshot().BaselineCandidateActive);
+    Equal(0, client.GetSnapshot().ActiveEntityCount);
+    SendSegmentAndCommit(2, 2, newRecord);
+    False(client.GetSnapshot().BaselineCandidateActive);
+    Equal(2U, CopySingle(client).Entity.Index);
+
+    void SendBegin(ulong id, ulong revision, RemoteWorldStateRecord record)
+    {
+        var begin = new RemoteWorldBaselineBeginMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0x830,
+            BaselineId = id,
+            BaselineRevision = revision,
+            EventFloor = revision,
+            RelationSequenceFloor = record.RelationSequence,
+            SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+            ContentHash = UltraSimGameProtocol.ComputeWorldBaselineHash([record]),
+            RecordCount = 1,
+            SegmentCount = 1,
+            RecordsPerSegment = 1,
+        };
+        Span<byte> bytes = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(bytes, in begin));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default, bytes.Length), bytes));
+    }
+
+    void SendSegmentAndCommit(ulong id, ulong revision, RemoteWorldStateRecord record)
+    {
+        Span<byte> segment = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+        True(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+            segment, fixture.ApplicationSessionEpoch, 0x830, id, 0, 1, [record], out int written));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Bulk, RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Id,
+            RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Version, default, written),
+            segment[..written]));
+        var commit = new RemoteWorldBaselineCommitMessage
+        {
+            ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+            StateEpoch = 0x830,
+            BaselineId = id,
+            BaselineRevision = revision,
+            ContentHash = UltraSimGameProtocol.ComputeWorldBaselineHash([record]),
+        };
+        Span<byte> bytes = stackalloc byte[RemoteWorldBaselineCommitMessageCodec.EncodedSize];
+        True(RemoteWorldBaselineCommitMessageCodec.TryWriteExact(bytes, in commit));
+        True(client.TryProcess(new NetworkDeliveredMessage(
+            NetworkLane.Control, RemoteWorldBaselineCommitMessageCodec.Descriptor.Id,
+            RemoteWorldBaselineCommitMessageCodec.Descriptor.Version, default, bytes.Length), bytes));
+    }
+}
+
+static void ReconnectStartsFreshAtomicWorldBaseline()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    var interest = new GameInterestService(
+        new StateEpoch(0x840),
+        new GameInterestLimits(16, 2, 1_024, 1_024, 64, 16, 4),
+        GameInterestProfile.Reference);
+    ParticipantId participant = new(42);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, default, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(5, 1, 50), 1,
+            new ReplicationSpatialPoint(100, 0), GameReplicationHorizon.Far, 0));
+    RemoteWorldStateClientSnapshot reconnected = fixture.ReconnectWithWorldBaseline(interest, participant);
+    Equal(interest.StateEpoch, reconnected.StateEpoch);
+    Equal(1UL, reconnected.BaselineRevision);
+    Equal(1, reconnected.ActiveEntityCount);
+    Equal(RemoteServerApplicationState.Active, fixture.ReconnectedServerState);
+}
+
+static void WorldBaselineCodecIsCanonicalAndTransactional()
+{
+    RemoteWorldStateRecord[] source =
+    [
+        WorldRecord(1, 4, 2, 8, true, 19),
+        WorldRecord(2, 9, 3, 11, true, 23),
+    ];
+    Span<byte> encoded = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+    True(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+        encoded, 77, 81, 3, 0, 1, source, out int written));
+    Span<RemoteWorldStateRecord> decoded = stackalloc RemoteWorldStateRecord[4];
+    True(UltraSimGameProtocol.TryReadWorldBaselineSegment(
+        encoded[..written], out RemoteWorldBaselineSegmentHeader header,
+        decoded, out int count));
+    Equal(2, count);
+    Equal(source[0], decoded[0]);
+    Equal(source[1], decoded[1]);
+    Equal(UltraSimGameProtocol.ComputeWorldBaselineHash(source),
+        UltraSimGameProtocol.ComputeWorldBaselineHash(decoded[..count]));
+
+    for (int length = 0; length < written; length++)
+    {
+        decoded.Fill(WorldRecord(99, 99, 1, 1, true, 1));
+        False(UltraSimGameProtocol.TryReadWorldBaselineSegment(
+            encoded[..length], out header, decoded, out count));
+        Equal(default(RemoteWorldBaselineSegmentHeader), header);
+        Equal(0, count);
+    }
+    encoded[written] = 0xCC;
+    False(UltraSimGameProtocol.TryReadWorldBaselineSegment(
+        encoded[..(written + 1)], out header, decoded, out count));
+    RemoteWorldStateRecord duplicate = source[1] with { EntityIndex = source[0].EntityIndex };
+    False(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+        encoded, 77, 81, 4, 0, 1, [source[0], duplicate], out _));
+    False(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+        encoded, 77, 81, 4, 0, 1,
+        [source[0] with { IsPresent = false }], out _));
+}
+
+static void WorldBaselineHashFailurePreservesLiveProjection()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, new StateEpoch(0x850),
+        maximumKnownIdentities: 4, maximumActiveEntities: 4,
+        maximumRecordsPerBundle: 2);
+    RemoteWorldStateRecord live = WorldRecord(1, 1, 1, 1, true, 10);
+    Equal(RemoteWorldStateClientApplyStatus.Applied, client.ApplyDecodedBundle([live]));
+    RemoteWorldStateRecord expected = WorldRecord(2, 2, 1, 1, true, 20);
+    RemoteWorldStateRecord corrupted = expected with { TickMarker = 21 };
+    ulong expectedHash = UltraSimGameProtocol.ComputeWorldBaselineHash([expected]);
+    var begin = new RemoteWorldBaselineBeginMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = 0x850,
+        BaselineId = 1,
+        BaselineRevision = 1,
+        RelationSequenceFloor = expected.RelationSequence,
+        SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+        ContentHash = expectedHash,
+        RecordCount = 1,
+        SegmentCount = 1,
+        RecordsPerSegment = 1,
+    };
+    Span<byte> beginBytes = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+    True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(beginBytes, in begin));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+        RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default, beginBytes.Length), beginBytes));
+    Span<byte> segment = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+    True(UltraSimGameProtocol.TryWriteWorldBaselineSegment(
+        segment, fixture.ApplicationSessionEpoch, 0x850, 1, 0, 1, [corrupted], out int written));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Bulk, RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Id,
+        RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Version, default, written), segment[..written]));
+    var commit = new RemoteWorldBaselineCommitMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = 0x850,
+        BaselineId = 1,
+        BaselineRevision = 1,
+        ContentHash = expectedHash,
+    };
+    Span<byte> commitBytes = stackalloc byte[RemoteWorldBaselineCommitMessageCodec.EncodedSize];
+    True(RemoteWorldBaselineCommitMessageCodec.TryWriteExact(commitBytes, in commit));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldBaselineCommitMessageCodec.Descriptor.Id,
+        RemoteWorldBaselineCommitMessageCodec.Descriptor.Version, default, commitBytes.Length), commitBytes));
+    False(client.GetSnapshot().BaselineCandidateActive);
+    Equal(1U, CopySingle(client).Entity.Index);
+    Equal(10, CopySingle(client).TickMarker);
+    Equal(0UL, client.GetSnapshot().AppliedBaselines);
+    True(client.GetSnapshot().RejectedBaselines > 0);
+}
+
+static void SameEpochBaselineFloorPreventsOmittedEntityResurrection()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, new StateEpoch(0x851),
+        maximumKnownIdentities: 4, maximumActiveEntities: 4,
+        maximumRecordsPerBundle: 2);
+    RemoteWorldStateRecord prior = WorldRecord(5, 8, 1, 1, true, 80);
+    Equal(RemoteWorldStateClientApplyStatus.Applied, client.ApplyDecodedBundle([prior]));
+
+    ulong emptyHash = UltraSimGameProtocol.ComputeWorldBaselineHash([]);
+    var begin = new RemoteWorldBaselineBeginMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = 0x851,
+        BaselineId = 1,
+        BaselineRevision = 1,
+        RelationSequenceFloor = 10,
+        SchemaFingerprint = UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint,
+        ContentHash = emptyHash,
+        RecordCount = 0,
+        SegmentCount = 0,
+        RecordsPerSegment = 1,
+    };
+    Span<byte> beginBytes = stackalloc byte[RemoteWorldBaselineBeginMessageCodec.EncodedSize];
+    True(RemoteWorldBaselineBeginMessageCodec.TryWriteExact(beginBytes, in begin));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldBaselineBeginMessageCodec.Descriptor.Id,
+        RemoteWorldBaselineBeginMessageCodec.Descriptor.Version, default, beginBytes.Length), beginBytes));
+    var commit = new RemoteWorldBaselineCommitMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = 0x851,
+        BaselineId = 1,
+        BaselineRevision = 1,
+        ContentHash = emptyHash,
+    };
+    Span<byte> commitBytes = stackalloc byte[RemoteWorldBaselineCommitMessageCodec.EncodedSize];
+    True(RemoteWorldBaselineCommitMessageCodec.TryWriteExact(commitBytes, in commit));
+    True(client.TryProcess(new NetworkDeliveredMessage(
+        NetworkLane.Control, RemoteWorldBaselineCommitMessageCodec.Descriptor.Id,
+        RemoteWorldBaselineCommitMessageCodec.Descriptor.Version, default, commitBytes.Length), commitBytes));
+    Equal(0, client.GetSnapshot().ActiveEntityCount);
+    Equal(10UL, client.GetSnapshot().RelationSequenceFloor);
+
+    RemoteWorldStateRecord delayed = prior with
+    {
+        RelationSequence = 9,
+        CanonicalVersion = 2,
+        TickMarker = 90,
+    };
+    Equal(RemoteWorldStateClientApplyStatus.Duplicate,
+        client.ApplyDecodedBundle([delayed]));
+    Equal(0, client.GetSnapshot().ActiveEntityCount,
+        "A pre-cutoff present record resurrected an identity omitted by the repaired baseline.");
 }
 
 static RemoteWorldStateRecord WorldRecord(
@@ -1287,6 +1832,117 @@ static void RunN06Benchmark(string[] args)
     }
 }
 
+static void RunN08Benchmark(string[] args)
+{
+    const int samples = 21;
+    const int entities = 256;
+    using Fixture loopback = Fixture.CreateN06(default);
+    using Fixture udp = Fixture.CreateN06(default, udp: true);
+    (RemoteWorldStateServer Server, RemoteWorldStateClient Client) Prepare(Fixture fixture, ulong epoch)
+    {
+        fixture.AuthenticateAndEnter();
+        ParticipantId participant = new(41);
+        var interest = new GameInterestService(
+            new StateEpoch(epoch),
+            new GameInterestLimits(512, 2, 2_048, 2_048, 1_024, 64, 32),
+            GameInterestProfile.Reference);
+        Equal(GameInterestUpdateStatus.Success,
+            interest.SetRecipientAnchor(participant, default, 0));
+        for (uint index = 1; index <= entities; index++)
+            Equal(GameInterestUpdateStatus.Success,
+                interest.UpsertEntity(ProjectedWorldEntity(index, 1, checked((int)index)), 1,
+                    new ReplicationSpatialPoint(checked((int)index * 10), 0),
+                    GameReplicationHorizon.Far, 0));
+        var server = new RemoteWorldStateServer(
+            fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch,
+            maximumRecordsPerBundle: 32, maximumBaselineRecords: entities);
+        var client = new RemoteWorldStateClient(
+            fixture.ClientPeer, fixture.ApplicationSessionEpoch, interest.StateEpoch,
+            maximumKnownIdentities: entities, maximumActiveEntities: entities,
+            maximumRecordsPerBundle: 32);
+        fixture.Server!.BindProtocolHandler(server);
+        fixture.ClientBridge!.BindProtocolHandler(client);
+        return (server, client);
+    }
+
+    var loop = Prepare(loopback, 0x901);
+    var real = Prepare(udp, 0x902);
+    ulong loopRevision = 1;
+    ulong udpRevision = 1;
+    for (int warmup = 0; warmup < 3; warmup++)
+    {
+        _ = Measure(loopback, loop.Server, loop.Client, loopRevision++);
+        _ = Measure(udp, real.Server, real.Client, udpRevision++);
+    }
+    var loopSamples = new double[samples];
+    var udpSamples = new double[samples];
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int sample = 0; sample < samples; sample++)
+    {
+        if ((sample & 1) == 0)
+        {
+            loopSamples[sample] = Measure(loopback, loop.Server, loop.Client, loopRevision++);
+            udpSamples[sample] = Measure(udp, real.Server, real.Client, udpRevision++);
+        }
+        else
+        {
+            udpSamples[sample] = Measure(udp, real.Server, real.Client, udpRevision++);
+            loopSamples[sample] = Measure(loopback, loop.Server, loop.Client, loopRevision++);
+        }
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Array.Sort(loopSamples);
+    Array.Sort(udpSamples);
+    var report = new N08BenchmarkResult(
+        "ultrasim-network-n0.8-atomic-world-baseline-v1",
+        DateTimeOffset.UtcNow,
+        Environment.Version.ToString(),
+        System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        Environment.ProcessorCount,
+        UltraSimGameProtocol.Manifest.Version,
+        UltraSimGameProtocol.Manifest.Fingerprint,
+        samples,
+        entities,
+        32,
+        loopSamples.Average(),
+        Percentile(loopSamples, 0.95),
+        udpSamples.Average(),
+        Percentile(udpSamples, 0.95),
+        udpSamples.Average() / loopSamples.Average(),
+        allocated,
+        loop.Server.GetSnapshot().ReservedBytes,
+        real.Server.GetSnapshot().ReservedBytes,
+        loop.Client.GetSnapshot().ReservedBytes,
+        real.Client.GetSnapshot().ReservedBytes,
+        "One complete 256-entity relevant-scope cutoff: server capture/hash, reliable Begin preparation, eight Bulk segments, reliable Commit, private client validation/swap, and application ACK. Alternating paired ProtocolLoopback/localhost UDP samples; cold/recovery mechanism measured after capacity warmup; fixed 60 Hz and no adaptive cadence.");
+    string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+    Console.WriteLine(json);
+    int outputIndex = Array.IndexOf(args, "--output");
+    if (outputIndex >= 0 && outputIndex + 1 < args.Length)
+    {
+        string path = Path.GetFullPath(args[outputIndex + 1]);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, json + Environment.NewLine);
+    }
+
+    static double Measure(
+        Fixture fixture,
+        RemoteWorldStateServer server,
+        RemoteWorldStateClient client,
+        ulong revision)
+    {
+        ulong prior = server.GetSnapshot().BaselinesApplied;
+        long started = Stopwatch.GetTimestamp();
+        RemoteWorldBaselineProgressStatus status = server.TryBeginBaseline(
+            revision, eventFloor: revision, recordsPerSegment: 32);
+        True(status is RemoteWorldBaselineProgressStatus.AwaitingClientPreparation or
+            RemoteWorldBaselineProgressStatus.Progressed);
+        fixture.DriveUntilBaselineApplied(server, prior);
+        Equal(revision, client.GetSnapshot().BaselineRevision);
+        return (Stopwatch.GetTimestamp() - started) * (1_000_000_000d / Stopwatch.Frequency);
+    }
+}
+
 static double MeasureControlled(Fixture fixture, int cycles)
 {
     long started = Stopwatch.GetTimestamp();
@@ -1321,6 +1977,7 @@ sealed class Fixture : IDisposable
     private bool _disposed;
     private readonly UdpProtocolSession? _udp;
     private ulong _networkPumps;
+    private RemoteServerApplicationState _reconnectedServerState;
 
     private Fixture(
         bool remote,
@@ -1401,6 +2058,12 @@ sealed class Fixture : IDisposable
         _controlledClient?.GetSnapshot() ?? default;
     internal RemoteControlledSimulationServerSnapshot ControlledServerSnapshot =>
         _controlledServer?.GetSnapshot() ?? default;
+    internal RemoteServerApplicationState ReconnectedServerState => _reconnectedServerState;
+
+    internal GameProjectionService CreateProjection() => new(
+        _runtime.Game,
+        Server?.Admission ?? throw new InvalidOperationException("A remote Admission session is required."),
+        new GameReplicationLimits(512, 8, 512, 1_024, 1_024, 64, 64));
 
     internal static Fixture Create(
         bool remote,
@@ -1582,6 +2245,53 @@ sealed class Fixture : IDisposable
         return (simulation.TickMarker, simulation.InputVelocity);
     }
 
+    internal GameSimulationState ReadAliceSimulation()
+    {
+        (int marker, int velocity) = ReadControlledSimulation();
+        return new GameSimulationState { TickMarker = marker, InputVelocity = velocity };
+    }
+
+    internal void TickRuntime() => _runtime.Tick();
+
+    internal (ulong SavedTick, ulong DivergentTick, ulong RestoredTick, ulong Generation)
+        SaveDivergeRestore()
+    {
+        string root = Path.Combine(Path.GetTempPath(),
+            "ultrasim-network-n08-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var persistence = new GameRuntimePersistence(
+                _runtime.Game,
+                _composition,
+                new PersistenceRestoreOptions(
+                    new PersistenceLimits(
+                        maximumArtifactBytes: 16 * 1024 * 1024,
+                        maximumEntities: 100_000,
+                        maximumShapes: 64,
+                        maximumComponents: 64,
+                        maximumSections: 256,
+                        maximumComponentPayloadBytes: 8 * 1024 * 1024,
+                        maximumTemporaryBytes: 64 * 1024 * 1024),
+                    ChunkLayoutOptions.KiB16),
+                new SaveSetCoordinator(root));
+            ulong savedTick = _runtime.SimulationTick;
+            GameSaveResult saved = persistence.TrySave(
+                new SaveSetContext(1, 1_700_001_000_001),
+                static capture => capture());
+            True(saved.Succeeded);
+            _runtime.Tick();
+            _runtime.Tick();
+            ulong divergentTick = _runtime.SimulationTick;
+            GameLoadResult loaded = persistence.TryLoad();
+            True(loaded.Succeeded);
+            return (savedTick, divergentTick, _runtime.SimulationTick, loaded.GenerationId);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
     internal void SetSimulationFrequency(int frequency) => _runtime.SetSimulationFrequency(frequency);
 
     internal void RetireControlledAuthority()
@@ -1632,6 +2342,19 @@ sealed class Fixture : IDisposable
     internal void DriveNetworkSteps(int count)
     {
         for (int step = 0; step < count; step++) PumpApplicationOnce();
+    }
+
+    internal void DriveUntilBaselineApplied(
+        RemoteWorldStateServer server,
+        ulong prior,
+        int maximumSteps = 50_000)
+    {
+        for (int step = 0; step < maximumSteps; step++)
+        {
+            if (server.GetSnapshot().BaselinesApplied > prior) return;
+            PumpApplicationOnce();
+        }
+        throw new InvalidOperationException("The atomic WorldState baseline did not converge.");
     }
 
     private void PumpApplicationOnce()
@@ -1810,6 +2533,61 @@ sealed class Fixture : IDisposable
             }
         }
         return false;
+    }
+
+    internal RemoteWorldStateClientSnapshot ReconnectWithWorldBaseline(
+        GameInterestService interest,
+        ParticipantId participant)
+    {
+        if (!_remote || Loopback is null)
+            throw new InvalidOperationException("The reconnect baseline fixture requires ProtocolLoopback.");
+        Server!.Disconnect();
+        DriveUntil(() => ClientBridge!.GetSnapshot().State == RemoteClientApplicationState.Detached);
+        Server.Dispose();
+        ClientBridge!.Dispose();
+
+        var renderer = new RecordingRenderer();
+        var uiClient = new UiClientRuntime(renderer);
+        using var bridge = new RemoteUiClientBridge(Loopback.Client, uiClient);
+        using var application = new RemoteGameApplicationSession(
+            Loopback.Server,
+            _runtime.Game,
+            _composition,
+            Authenticate,
+            participant,
+            ApplicationSessionEpoch + 1);
+        True(bridge.TryBeginAuthentication(2, "test", "alice-token"));
+        for (int step = 0; step < 50_000 &&
+            bridge.GetSnapshot().State != RemoteClientApplicationState.Active; step++)
+        {
+            PumpTransport();
+            bridge.ProcessReceived();
+            application.ProcessReceived();
+        }
+        Equal(RemoteClientApplicationState.Active, bridge.GetSnapshot().State);
+
+        var worldServer = new RemoteWorldStateServer(
+            Loopback.Server, interest, participant, ApplicationSessionEpoch + 1,
+            maximumRecordsPerBundle: 4, maximumBaselineRecords: 8);
+        var worldClient = new RemoteWorldStateClient(
+            Loopback.Client, ApplicationSessionEpoch + 1, interest.StateEpoch,
+            maximumKnownIdentities: 8, maximumActiveEntities: 8,
+            maximumRecordsPerBundle: 4);
+        application.BindProtocolHandler(worldServer);
+        bridge.BindProtocolHandler(worldClient);
+        _ = worldServer.TryBeginBaseline(1, recordsPerSegment: 1);
+        for (int step = 0; step < 50_000 &&
+            worldServer.GetSnapshot().BaselinesApplied == 0; step++)
+        {
+            PumpTransport();
+            bridge.ProcessReceived();
+            application.ProcessReceived();
+            _ = worldClient.TryFlushAcknowledgements();
+            _ = worldServer.TryProgressBaseline();
+        }
+        Equal(1UL, worldServer.GetSnapshot().BaselinesApplied);
+        _reconnectedServerState = application.GetSnapshot().State;
+        return worldClient.GetSnapshot();
     }
 
     internal bool RecoverMissingInventoryDefinition()
@@ -2047,6 +2825,29 @@ sealed record N06BenchmarkResult(
     double LocalhostUdpP95NanosecondsPerCycle,
     double UdpToLoopbackRatio,
     long CallerAllocatedBytes,
+    string Notes);
+
+sealed record N08BenchmarkResult(
+    string Workload,
+    DateTimeOffset CapturedAtUtc,
+    string Runtime,
+    string OperatingSystem,
+    int LogicalProcessorCount,
+    ushort ProtocolVersion,
+    ulong ProtocolFingerprint,
+    int Samples,
+    int EntityCount,
+    int RecordsPerSegment,
+    double ProtocolLoopbackMeanNanoseconds,
+    double ProtocolLoopbackP95Nanoseconds,
+    double LocalhostUdpMeanNanoseconds,
+    double LocalhostUdpP95Nanoseconds,
+    double UdpToLoopbackRatio,
+    long CallerAllocatedBytes,
+    long LoopbackServerReservedBytes,
+    long UdpServerReservedBytes,
+    long LoopbackClientReservedBytes,
+    long UdpClientReservedBytes,
     string Notes);
 
 sealed record N05BenchmarkResult(

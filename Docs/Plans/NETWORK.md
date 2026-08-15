@@ -6,7 +6,8 @@ reliable protocol over deterministic datagrams, N0.4 remote Admission/UI over
 ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, N0.6
 bounded authoritative input/owner-state replication, and N0.7 maintained AOI,
 pending state, application knowledge, and shared semantic fanout are accepted.
-N0.8 atomic baseline/recovery is next.
+N0.8 atomic baseline/recovery, reconnect, and generation replacement are
+accepted. N0.9 integrated topology acceptance is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -1330,7 +1331,7 @@ semantic-copy, bundle-byte, relation/edge, allocation, and reservation facts:
 - [`network-n0.7-maintained-interest-fanout64-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-fanout64-2026-08-14.json)
 - [`network-n0.7-hardening-reference-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.7-hardening-reference-2026-08-15.json)
 
-### N0.8 — Atomic baseline and recovery
+### N0.8 — Atomic baseline and recovery — accepted
 
 Deliver baseline descriptors/staging, counts/limits/schema/hash, one active
 candidate, post-cutoff state, event floor, cancellation/restart, resnapshot,
@@ -1353,6 +1354,71 @@ Alice continues
 
 Gate: whole-authority replacement never requires Network identity to become
 persistent identity.
+
+Implemented as a game-owned WorldState transaction rather than a generic
+Network snapshot framework:
+
+```text
+server cutoff
+    -> one bounded sorted recipient scope
+    -> reliable Control Begin
+    -> client capacity/schema preparation ACK
+    -> independently reliable Bulk segments
+    -> reliable Control Commit
+    -> private client validation + one swap
+    -> application baseline ACK
+    -> recipient knowledge advances to cutoff
+    -> post-cutoff relation debt resumes
+```
+
+Begin declares application/session epoch, `StateEpoch`, baseline identity and
+revision, event floor, schema fingerprint, canonical content hash, record count,
+relation-sequence floor, segment count, and segment size. The preparation round
+trip is intentional: Bulk
+cannot race ahead of the client's admitted descriptor across independent lanes.
+Exactly one candidate exists. A newer epoch/revision cancels an older candidate;
+delayed old segments and commits cannot affect it.
+
+The client preallocates separate candidate knowledge, dense entity slots, slot
+generations, records, and receipt bits. Live state does not change during Begin,
+segment arrival, duplicate delivery, or Commit arrival. Only a complete exact
+count/schema/hash/epoch candidate swaps live. Capacity or semantic failure emits
+an application rejection and preserves the prior projection exactly. Baseline
+ACK is distinct from transport delivery ACK.
+
+The server suppresses ordinary WorldState scheduling while a baseline is active.
+Canonical changes after capture continue to replace relation debt. On successful
+baseline ACK, only matching cutoff sequences advance recipient-known state; a
+newer pending version cannot be cleared accidentally. Rejected capacity marks the
+recipient explicitly nonviable instead of retrying an impossible scope forever.
+For same-epoch repair, the committed relation floor also rejects delayed
+pre-cutoff rows for identities omitted by the new complete scope; omission cannot
+be followed by resurrection from an old unreliable bundle.
+
+Fresh `StateEpoch` publication rebinds the connection-owned adapter without
+replacing the healthy connection, application epoch, participant, or any durable
+identity. Persistence continues to restore only authority. The permanent gate
+saves Alice, diverges authority, publishes the restored Runtime generation,
+proves Admission durable rebind, rebuilds projection, atomically commits the new
+epoch over the existing secure session, rejects old-epoch traffic, and continues
+simulation afterward. Reconnect creates a fresh application session and baseline
+rather than reviving old view/projection instances.
+
+Permanent N0.8 evidence covers private staging, post-cutoff updates, replacement
+epochs, actual durable generation publication, loss/reorder/duplication,
+capacity rejection without partial publication, candidate cancellation/restart,
+delayed prior transactions, and fresh reconnect. The focused 256-entity baseline
+observation uses eight 32-record segments and 21 alternating paired samples:
+
+- ProtocolLoopback mean: approximately 1.449 ms;
+- connected localhost UDP mean: approximately 1.498 ms;
+- UDP/loopback ratio: approximately 1.034x for this same-process recovery workload;
+- warmed caller allocation: 0 B;
+- known adapter reserved payload: 44,032 B server and 94,000 B client.
+
+These are cold/recovery latency facts, not a hot per-tick replication target.
+The immutable artifact is
+[`network-n0.8-atomic-world-baseline-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.8-atomic-world-baseline-2026-08-15.json).
 
 ### N0.9 — Integrated topology acceptance
 

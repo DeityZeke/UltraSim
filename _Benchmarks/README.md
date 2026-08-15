@@ -40,6 +40,7 @@ when those systems exist.
 | `UltraSim.Network.Application.Tests --benchmark-udp` | N0.5 paired secure ProtocolLoopback/real localhost UDP run of the exact N0.4 application workflow and established Inventory interaction. |
 | `UltraSim.Network.Application.Tests --benchmark-n06` | N0.6 paired ProtocolLoopback/localhost UDP complete controlled-input, authority-tick, owner-state, and client-reconciliation cycle. |
 | `UltraSim.Game.ReplicationBenchmarks --n07` | N0.7 maintained spatial interest, newest pending state, semantic fanout, application ACK, all-recipient same-cell movement, region traversal, idle, allocation, and reservation evidence. Density/radius/region/fanout/dirty parameters are configurable; the preserved sensitivity matrix currently covers density, region edge, fanout, and dirty ratio. |
+| `UltraSim.Network.Application.Tests --benchmark-n08` | N0.8 paired ProtocolLoopback/localhost UDP atomic 256-entity baseline capture, preparation, segmented transfer, private client commit, application ACK, allocation, and reservation evidence. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
@@ -50,6 +51,7 @@ N0.4 adds application-level semantic parity and interaction evidence, N0.5
 changes only byte transport/session ownership while retaining that oracle, and
 N0.6 adds a continuous one-owner input/state/reconciliation profile. N0.7 adds
 maintained many-entity/many-recipient interest and application-knowledge sweeps.
+N0.8 adds an atomic recovery/generation-replacement baseline profile.
 None is mislabeled as a V2/V3 protocol ratio. Ratios become eligible only when an
 equivalent reviewed profile exists.
 
@@ -72,6 +74,9 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Game.ReplicationBenchmarks -c Release -- \
     --n07 --entities=5000 --recipients=16 --dirty-percent=10 \
     --output=_Benchmarks/results/network-n0.7-local-run.json
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release -- \
+    --benchmark-n08 --output _Benchmarks/results/network-n0.8-local-run.json
 ```
 
 Each executable's `--help`/argument parser is the source of truth for filters,

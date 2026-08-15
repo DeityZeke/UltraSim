@@ -152,6 +152,12 @@ public sealed class GameInterestService
         get { EnsureOwnerThread(); return _profile.ApplicationAckTimeoutMilliseconds; }
     }
 
+    /// <summary>Latest globally issued recipient-relation sequence in this projection epoch.</summary>
+    public ulong LatestRelationSequence
+    {
+        get { EnsureOwnerThread(); return _nextRelationSequence - 1; }
+    }
+
     /// <summary>Adds or moves one game-owned 360-degree observation anchor.</summary>
     public GameInterestUpdateStatus SetRecipientAnchor(
         ParticipantId participant,
@@ -229,6 +235,98 @@ public sealed class GameInterestService
         EnsureOwnerThread();
         if (!_recipientMap.TryGetValue(participant, out int recipientIndex)) return false;
         MarkRecipientNonviable(recipientIndex);
+        return true;
+    }
+
+    /// <summary>
+    /// Copies one complete, sorted present-state cutoff for a recipient.
+    /// Existing pending sequences are reused so post-cutoff changes remain
+    /// distinguishable and baseline acknowledgement cannot clear newer debt.
+    /// </summary>
+    public GameWorldBaselineCaptureStatus CopyRecipientBaseline(
+        ParticipantId participant,
+        Span<GameWorldStateRecord> destination,
+        out int count)
+    {
+        EnsureOwnerThread();
+        count = 0;
+        if (!_recipientMap.TryGetValue(participant, out int recipientIndex))
+            return GameWorldBaselineCaptureStatus.UnknownRecipient;
+        if (_recipients[recipientIndex].Nonviable)
+            return GameWorldBaselineCaptureStatus.RecipientNonviable;
+
+        int relation = _recipients[recipientIndex].RelationHead;
+        while (relation >= 0)
+        {
+            ref readonly RelationState state = ref _relations[relation];
+            if (state.DesiredPresent)
+            {
+                if (count == destination.Length)
+                {
+                    destination[..count].Clear();
+                    count = 0;
+                    return GameWorldBaselineCaptureStatus.DestinationTooSmall;
+                }
+                ulong sequence = state.Pending && state.PendingPresent
+                    ? state.PendingRelationSequence
+                    : state.KnownRelationSequence;
+                if (sequence == 0)
+                {
+                    destination[..count].Clear();
+                    count = 0;
+                    return GameWorldBaselineCaptureStatus.SequenceExhausted;
+                }
+                ref readonly EntityState entity = ref _entities[state.EntitySlot];
+                if (!entity.Active || entity.Entity != state.Entity)
+                    throw new InvalidOperationException("A desired relation lost its canonical entity.");
+                destination[count++] = new(
+                    sequence,
+                    entity.Entity,
+                    entity.CanonicalVersion,
+                    true,
+                    entity.Horizon,
+                    entity.Position,
+                    entity.Projected.SimulationState);
+            }
+            relation = state.RecipientNext;
+        }
+        destination[..count].Sort(static (left, right) =>
+        {
+            int index = left.Entity.Index.CompareTo(right.Entity.Index);
+            return index != 0 ? index : left.Entity.Generation.CompareTo(right.Entity.Generation);
+        });
+        return GameWorldBaselineCaptureStatus.Success;
+    }
+
+    /// <summary>
+    /// Advances recipient knowledge to an atomically applied baseline cutoff.
+    /// Newer relation debt produced after capture is deliberately retained.
+    /// </summary>
+    public bool TryAcknowledgeBaseline(
+        ParticipantId participant,
+        ReadOnlySpan<GameWorldStateRecord> records)
+    {
+        EnsureOwnerThread();
+        if (!participant.IsValid || !_recipientMap.TryGetValue(participant, out int recipientIndex))
+            return false;
+        for (int index = 0; index < records.Length; index++)
+        {
+            ref readonly GameWorldStateRecord item = ref records[index];
+            if (!_relationMap.TryGetValue(
+                    new RecipientEntityKey(recipientIndex, item.Entity.Index), out int relationIndex))
+                continue;
+            ref RelationState relation = ref _relations[relationIndex];
+            if (!relation.Active || relation.Entity != item.Entity) continue;
+            if (item.RelationSequence > relation.KnownRelationSequence)
+            {
+                relation.KnownRelationSequence = item.RelationSequence;
+                relation.KnownCanonicalVersion = item.CanonicalVersion;
+                relation.KnownPresent = true;
+            }
+            if (relation.Pending && relation.PendingPresent &&
+                relation.PendingRelationSequence == item.RelationSequence)
+                ClearPending(relationIndex);
+        }
         return true;
     }
 

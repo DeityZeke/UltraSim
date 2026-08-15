@@ -4,7 +4,8 @@ Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accep
 N0.3 secure reliable ProtocolLoopback is accepted below this layer; N0.4 remote
 application binding is accepted beside it. N0.5 carries the same binding over
 real connected localhost UDP. N0.6 adds bounded authoritative input, revisioned
-clock anchors, and one complete owner-state stream; N0.7 recipient scheduling remains.
+clock anchors, and one complete owner-state stream. N0.7 maintained recipient
+interest/application knowledge and N0.8 atomic baseline/recovery are accepted.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -226,3 +227,36 @@ reconciliation cycle is preserved in
 The semantic-hardening rerun is preserved separately rather than rewriting that
 historical artifact:
 [`network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json).
+
+## N0.7 maintained interest and N0.8 baseline recovery
+
+`GameInterestService` owns bounded regions, recipient/entity relations, newest
+unsatisfied relation state, fairness, and application knowledge. WorldState uses
+independent unreliable bundles: Game/Replication coalesces per relation, while
+Network merely carries arbitrary bounded relation subsets. Multiple bundles may
+be in flight; no application-RTT stop-and-wait exists.
+
+`RemoteWorldStateServer` and `RemoteWorldStateClient` add one explicitly cold
+baseline transaction. The server copies a sorted complete present scope at a
+cutoff. The client admits its descriptor, stages reliable Bulk segments into a
+separate fixed candidate, validates exact count/schema/hash/epoch, and swaps the
+whole scope once. Ordinary bundles are rejected while staging and remain server
+debt; changes after cutoff cannot be erased by baseline acknowledgement.
+The descriptor's relation-sequence floor makes omission authoritative during
+same-epoch repair: delayed pre-cutoff present rows cannot resurrect an entity
+absent from the committed complete scope.
+
+Generation publication replaces the adapter's game-owned interest graph and
+`StateEpoch`, not the connection or persistent identity. Delayed prior-epoch
+state is fenced. The accepted persistence test restores ECS, clock, Accounting,
+Admission and Inventory authority first, then reconstructs Network projection
+from that published authority. Network state itself is never persisted.
+
+Run the focused application/recovery gate and observation with:
+
+```bash
+dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release -- \
+    --benchmark-n08 --output _Benchmarks/results/network-n0.8-local-run.json
+```

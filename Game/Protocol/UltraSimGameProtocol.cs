@@ -31,7 +31,15 @@ public enum RemoteWorldStateApplyStatus : byte
     CapacityExceeded = 2,
 }
 
-[NetworkProtocol(4)]
+public enum RemoteWorldBaselineApplyStatus : byte
+{
+    Applied = 0,
+    Rejected = 1,
+    CapacityExceeded = 2,
+    Prepared = 3,
+}
+
+[NetworkProtocol(6)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -153,6 +161,57 @@ public partial struct RemoteWorldStateAppliedMessage
     public RemoteWorldStateApplyStatus Status;
 }
 
+/// <summary>Declares one bounded atomic replacement of the relevant WorldState scope.</summary>
+[NetworkMessage(111, "ultrasim.game.world-baseline-begin", 1, NetworkLane.Control)]
+public partial struct RemoteWorldBaselineBeginMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong BaselineId;
+    public ulong BaselineRevision;
+    public ulong EventFloor;
+    public ulong RelationSequenceFloor;
+    public ulong SchemaFingerprint;
+    public ulong ContentHash;
+    public uint RecordCount;
+    public ushort SegmentCount;
+    public ushort RecordsPerSegment;
+}
+
+/// <summary>Envelope for one independently retained Bulk segment of a baseline candidate.</summary>
+[NetworkMessage(112, "ultrasim.game.world-baseline-segment", 1, NetworkLane.Bulk)]
+public partial struct RemoteWorldBaselineSegmentHeader
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong BaselineId;
+    public ushort SegmentIndex;
+    public ushort SegmentCount;
+    public ushort RecordCount;
+}
+
+/// <summary>Signals that every declared segment may now be atomically validated and committed.</summary>
+[NetworkMessage(113, "ultrasim.game.world-baseline-commit", 1, NetworkLane.Control)]
+public partial struct RemoteWorldBaselineCommitMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong BaselineId;
+    public ulong BaselineRevision;
+    public ulong ContentHash;
+}
+
+/// <summary>Application proof that a complete baseline candidate committed or failed.</summary>
+[NetworkMessage(114, "ultrasim.game.world-baseline-applied", 1, NetworkLane.Control)]
+public partial struct RemoteWorldBaselineAppliedMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong BaselineId;
+    public ulong BaselineRevision;
+    public RemoteWorldBaselineApplyStatus Status;
+}
+
 /// <summary>One complete present or absent dynamic-state operation.</summary>
 public readonly record struct RemoteWorldStateRecord(
     ulong RelationSequence,
@@ -171,13 +230,14 @@ public readonly record struct RemoteWorldStateRecord(
         sizeof(byte) + sizeof(byte) + sizeof(int) * 4;
 }
 
-/// <summary>Accepted game application protocol manifest and bounded dynamic codecs through N0.7.</summary>
+/// <summary>Accepted game application protocol manifest and bounded dynamic codecs through N0.8.</summary>
 public static class UltraSimGameProtocol
 {
     public const int MaximumMessageBytes = 16_384;
     public const int MaximumIdentityBytes = 1_024;
     public const int MaximumInputRedundancy = 3;
     public const int MaximumWorldStateRecords = 64;
+    public const ulong WorldStateBaselineSchemaFingerprint = 0x5553_5742_4C30_3031UL;
 
     /// <summary>Default semantic UI payload bound after reserving the largest application envelope.</summary>
     public static UiSemanticWireLimits DefaultUiWireLimits => new(
@@ -185,7 +245,7 @@ public static class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 5,
+        version: 6,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -205,6 +265,11 @@ public static class UltraSimGameProtocol
                 { MaximumEncodedBytes = RemoteWorldStateBundleHeaderCodec.EncodedSize +
                     MaximumWorldStateRecords * RemoteWorldStateRecord.EncodedSize },
             RemoteWorldStateAppliedMessageCodec.Descriptor,
+            RemoteWorldBaselineBeginMessageCodec.Descriptor,
+            RemoteWorldBaselineSegmentHeaderCodec.Descriptor with
+                { MaximumEncodedBytes = MaximumMessageBytes },
+            RemoteWorldBaselineCommitMessageCodec.Descriptor,
+            RemoteWorldBaselineAppliedMessageCodec.Descriptor,
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;
@@ -473,6 +538,142 @@ public static class UltraSimGameProtocol
         }
         header = stagedHeader;
         count = stagedHeader.RecordCount;
+        return true;
+    }
+
+    public static bool TryWriteWorldBaselineSegment(
+        Span<byte> destination,
+        ulong applicationSessionEpoch,
+        ulong stateEpoch,
+        ulong baselineId,
+        ushort segmentIndex,
+        ushort segmentCount,
+        ReadOnlySpan<RemoteWorldStateRecord> records,
+        out int written)
+    {
+        written = 0;
+        if (applicationSessionEpoch == 0 || stateEpoch == 0 || baselineId == 0 ||
+            segmentCount == 0 || segmentIndex >= segmentCount || records.IsEmpty ||
+            records.Length > MaximumWorldStateRecords) return false;
+        var writer = new NetworkPacketWriter(destination);
+        var header = new RemoteWorldBaselineSegmentHeader
+        {
+            ApplicationSessionEpoch = applicationSessionEpoch,
+            StateEpoch = stateEpoch,
+            BaselineId = baselineId,
+            SegmentIndex = segmentIndex,
+            SegmentCount = segmentCount,
+            RecordCount = checked((ushort)records.Length),
+        };
+        if (!RemoteWorldBaselineSegmentHeaderCodec.TryWrite(ref writer, in header) ||
+            !TryWriteWorldRecords(ref writer, records)) return false;
+        written = writer.WrittenCount;
+        return true;
+    }
+
+    public static bool TryReadWorldBaselineSegment(
+        ReadOnlySpan<byte> source,
+        out RemoteWorldBaselineSegmentHeader header,
+        Span<RemoteWorldStateRecord> records,
+        out int count)
+    {
+        header = default;
+        count = 0;
+        var reader = new NetworkPacketReader(source);
+        RemoteWorldBaselineSegmentHeader staged = default;
+        if (!RemoteWorldBaselineSegmentHeaderCodec.TryRead(ref reader, out staged) ||
+            staged.ApplicationSessionEpoch == 0 || staged.StateEpoch == 0 ||
+            staged.BaselineId == 0 || staged.SegmentCount == 0 ||
+            staged.SegmentIndex >= staged.SegmentCount || staged.RecordCount == 0 ||
+            staged.RecordCount > MaximumWorldStateRecords || staged.RecordCount > records.Length ||
+            !TryReadWorldRecords(ref reader, records, staged.RecordCount) || !reader.IsComplete)
+        {
+            records[..Math.Min(staged.RecordCount, (ushort)records.Length)].Clear();
+            return false;
+        }
+        header = staged;
+        count = staged.RecordCount;
+        return true;
+    }
+
+    /// <summary>Computes the canonical content hash over records already sorted by entity index.</summary>
+    public static ulong ComputeWorldBaselineHash(ReadOnlySpan<RemoteWorldStateRecord> records)
+    {
+        const ulong offset = 14695981039346656037UL;
+        const ulong prime = 1099511628211UL;
+        ulong hash = offset;
+        foreach (ref readonly RemoteWorldStateRecord record in records)
+        {
+            Mix(record.RelationSequence);
+            Mix(record.EntityIndex);
+            Mix(record.EntityGeneration);
+            Mix(record.CanonicalVersion);
+            Mix(record.IsPresent ? 1UL : 0UL);
+            Mix(record.Horizon);
+            Mix(unchecked((uint)record.XMillimeters));
+            Mix(unchecked((uint)record.ZMillimeters));
+            Mix(unchecked((uint)record.TickMarker));
+            Mix(unchecked((uint)record.InputVelocity));
+        }
+        return hash;
+
+        void Mix(ulong value)
+        {
+            for (int shift = 0; shift < 64; shift += 8)
+            {
+                hash ^= unchecked((byte)(value >> shift));
+                hash = unchecked(hash * prime);
+            }
+        }
+    }
+
+    private static bool TryWriteWorldRecords(
+        ref NetworkPacketWriter writer,
+        ReadOnlySpan<RemoteWorldStateRecord> records)
+    {
+        for (int index = 0; index < records.Length; index++)
+        {
+            ref readonly RemoteWorldStateRecord record = ref records[index];
+            if (record.RelationSequence == 0 || record.EntityGeneration == 0 ||
+                record.CanonicalVersion == 0 || !record.IsPresent || record.Horizon == 0 ||
+                record.Horizon > 3) return false;
+            for (int prior = 0; prior < index; prior++)
+                if (records[prior].EntityIndex == record.EntityIndex) return false;
+            if (!writer.TryWriteUInt64(record.RelationSequence) ||
+                !writer.TryWriteUInt32(record.EntityIndex) ||
+                !writer.TryWriteUInt32(record.EntityGeneration) ||
+                !writer.TryWriteUInt64(record.CanonicalVersion) ||
+                !writer.TryWriteBoolean(true) || !writer.TryWriteByte(record.Horizon) ||
+                !writer.TryWriteInt32(record.XMillimeters) ||
+                !writer.TryWriteInt32(record.ZMillimeters) ||
+                !writer.TryWriteInt32(record.TickMarker) ||
+                !writer.TryWriteInt32(record.InputVelocity)) return false;
+        }
+        return true;
+    }
+
+    private static bool TryReadWorldRecords(
+        ref NetworkPacketReader reader,
+        Span<RemoteWorldStateRecord> records,
+        int count)
+    {
+        for (int index = 0; index < count; index++)
+        {
+            if (!reader.TryReadUInt64(out ulong relationSequence) || relationSequence == 0 ||
+                !reader.TryReadUInt32(out uint entityIndex) ||
+                !reader.TryReadUInt32(out uint entityGeneration) || entityGeneration == 0 ||
+                !reader.TryReadUInt64(out ulong canonicalVersion) || canonicalVersion == 0 ||
+                !reader.TryReadBoolean(out bool present) || !present ||
+                !reader.TryReadByte(out byte horizon) || horizon is 0 or > 3 ||
+                !reader.TryReadInt32(out int x) || !reader.TryReadInt32(out int z) ||
+                !reader.TryReadInt32(out int marker) || !reader.TryReadInt32(out int velocity))
+            {
+                records[..index].Clear();
+                return false;
+            }
+            records[index] = new(relationSequence, entityIndex, entityGeneration,
+                canonicalVersion, true, horizon, x, z, marker, velocity);
+        }
         return true;
     }
 }

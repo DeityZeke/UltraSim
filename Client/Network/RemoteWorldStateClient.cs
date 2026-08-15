@@ -26,12 +26,18 @@ public readonly record struct RemoteWorldEntitySnapshot(
 
 public readonly record struct RemoteWorldStateClientSnapshot(
     StateEpoch StateEpoch,
+    ulong BaselineRevision,
+    ulong EventFloor,
+    ulong RelationSequenceFloor,
     int KnownIdentityCount,
     int ActiveEntityCount,
     int PendingApplicationAcknowledgements,
     ulong AppliedBundles,
     ulong DuplicateBundles,
     ulong RejectedBundles,
+    ulong AppliedBaselines,
+    ulong RejectedBaselines,
+    bool BaselineCandidateActive,
     bool IsFaulted,
     long ReservedBytes);
 
@@ -49,15 +55,21 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
-    private readonly StateEpoch _stateEpoch;
+    private StateEpoch _stateEpoch;
     private readonly int _maximumKnownIdentities;
-    private readonly Dictionary<uint, KnowledgeState> _knowledge;
-    private readonly RemoteWorldEntitySnapshot[] _active;
-    private readonly uint[] _slotGenerations;
-    private readonly int[] _freeSlots;
+    private Dictionary<uint, KnowledgeState> _knowledge;
+    private RemoteWorldEntitySnapshot[] _active;
+    private uint[] _slotGenerations;
+    private int[] _freeSlots;
+    private Dictionary<uint, KnowledgeState> _candidateKnowledge;
+    private RemoteWorldEntitySnapshot[] _candidateActive;
+    private uint[] _candidateSlotGenerations;
+    private int[] _candidateFreeSlots;
+    private readonly RemoteWorldStateRecord[] _baselineRecords;
+    private readonly bool[] _baselineSegments;
     private readonly RemoteWorldStateRecord[] _records;
     private readonly RemoteWorldStateAppliedMessage[] _pendingAcknowledgements;
-    private readonly byte[] _ackScratch = new byte[RemoteWorldStateAppliedMessageCodec.EncodedSize];
+    private readonly byte[] _ackScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly int _knowledgeMapCapacity;
     private int _activeHigh;
@@ -69,6 +81,24 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
     private ulong _duplicateBundles;
     private ulong _rejectedBundles;
     private bool _faulted;
+    private bool _hasPendingBaselineAcknowledgement;
+    private RemoteWorldBaselineAppliedMessage _pendingBaselineAcknowledgement;
+    private ulong _baselineRevision;
+    private ulong _eventFloor;
+    private ulong _relationSequenceFloor;
+    private ulong _candidateBaselineId;
+    private ulong _candidateBaselineRevision;
+    private ulong _candidateEventFloor;
+    private ulong _candidateRelationSequenceFloor;
+    private ulong _candidateHash;
+    private StateEpoch _candidateStateEpoch;
+    private int _candidateRecordCount;
+    private ushort _candidateSegmentCount;
+    private ushort _candidateRecordsPerSegment;
+    private int _receivedSegmentCount;
+    private bool _candidateCommitReceived;
+    private ulong _appliedBaselines;
+    private ulong _rejectedBaselines;
 
     public RemoteWorldStateClient(
         NetworkProtocolPeer peer,
@@ -97,6 +127,13 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         _active = new RemoteWorldEntitySnapshot[maximumActiveEntities];
         _slotGenerations = new uint[maximumActiveEntities];
         _freeSlots = new int[maximumActiveEntities];
+        _candidateKnowledge = new Dictionary<uint, KnowledgeState>(maximumKnownIdentities);
+        _ = _candidateKnowledge.EnsureCapacity(maximumKnownIdentities);
+        _candidateActive = new RemoteWorldEntitySnapshot[maximumActiveEntities];
+        _candidateSlotGenerations = new uint[maximumActiveEntities];
+        _candidateFreeSlots = new int[maximumActiveEntities];
+        _baselineRecords = new RemoteWorldStateRecord[maximumKnownIdentities];
+        _baselineSegments = new bool[maximumKnownIdentities];
         _records = new RemoteWorldStateRecord[maximumRecordsPerBundle];
         _pendingAcknowledgements = new RemoteWorldStateAppliedMessage[maximumPendingAcknowledgements];
     }
@@ -104,6 +141,21 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
     public bool TryProcess(in NetworkDeliveredMessage message, ReadOnlySpan<byte> payload)
     {
         EnsureOwnerThread();
+        if (message.MessageId == RemoteWorldBaselineBeginMessageCodec.Descriptor.Id)
+        {
+            ProcessBaselineBegin(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteWorldBaselineSegmentHeaderCodec.Descriptor.Id)
+        {
+            ProcessBaselineSegment(payload);
+            return true;
+        }
+        if (message.MessageId == RemoteWorldBaselineCommitMessageCodec.Descriptor.Id)
+        {
+            ProcessBaselineCommit(payload);
+            return true;
+        }
         if (message.MessageId != RemoteWorldStateBundleHeaderCodec.Descriptor.Id) return false;
         if (_faulted) return true;
         if (!UltraSimGameProtocol.TryReadWorldStateBundle(
@@ -115,6 +167,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         RemoteWorldStateApplyStatus acknowledgement;
         if (header.ApplicationSessionEpoch != _applicationSessionEpoch ||
             header.StateEpoch != _stateEpoch.Value)
+        {
+            acknowledgement = RemoteWorldStateApplyStatus.Rejected;
+            SaturatingIncrement(ref _rejectedBundles);
+        }
+        else if (_candidateBaselineId != 0)
         {
             acknowledgement = RemoteWorldStateApplyStatus.Rejected;
             SaturatingIncrement(ref _rejectedBundles);
@@ -165,6 +222,12 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
     public bool TryFlushAcknowledgements()
     {
         EnsureOwnerThread();
+        if (_hasPendingBaselineAcknowledgement)
+        {
+            if (!TryQueueBaselineAcknowledgement(in _pendingBaselineAcknowledgement)) return false;
+            _pendingBaselineAcknowledgement = default;
+            _hasPendingBaselineAcknowledgement = false;
+        }
         while (_ackCount != 0)
         {
             RemoteWorldStateAppliedMessage acknowledgement = _pendingAcknowledgements[_ackHead];
@@ -227,17 +290,325 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             (long)_freeSlots.Length * sizeof(int) +
             (long)_records.Length * Unsafe.SizeOf<RemoteWorldStateRecord>() +
             (long)_pendingAcknowledgements.Length * Unsafe.SizeOf<RemoteWorldStateAppliedMessage>() +
-            (long)_knowledgeMapCapacity * (sizeof(int) * 3L + sizeof(uint) + Unsafe.SizeOf<KnowledgeState>()));
+            (long)_candidateActive.Length * Unsafe.SizeOf<RemoteWorldEntitySnapshot>() +
+            (long)_candidateSlotGenerations.Length * sizeof(uint) +
+            (long)_candidateFreeSlots.Length * sizeof(int) +
+            (long)_baselineRecords.Length * Unsafe.SizeOf<RemoteWorldStateRecord>() +
+            _baselineSegments.Length +
+            _ackScratch.Length +
+            2L * _knowledgeMapCapacity *
+                (sizeof(int) * 3L + sizeof(uint) + Unsafe.SizeOf<KnowledgeState>()));
         return new(
             _stateEpoch,
+            _baselineRevision,
+            _eventFloor,
+            _relationSequenceFloor,
             _knowledge.Count,
             _activeCount,
             _ackCount,
             _appliedBundles,
             _duplicateBundles,
             _rejectedBundles,
+            _appliedBaselines,
+            _rejectedBaselines,
+            _candidateBaselineId != 0,
             _faulted,
             bytes);
+    }
+
+    private void ProcessBaselineBegin(ReadOnlySpan<byte> payload)
+    {
+        if (_faulted || !RemoteWorldBaselineBeginMessageCodec.TryReadExact(
+                payload, out RemoteWorldBaselineBeginMessage begin) ||
+            begin.ApplicationSessionEpoch != _applicationSessionEpoch || begin.StateEpoch == 0 ||
+            begin.BaselineId == 0 || begin.BaselineRevision == 0)
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            return;
+        }
+        if (_candidateBaselineId == begin.BaselineId &&
+            _candidateStateEpoch.Value == begin.StateEpoch &&
+            _candidateBaselineRevision == begin.BaselineRevision)
+        {
+            QueueBaselineAcknowledgement(RemoteWorldBaselineApplyStatus.Prepared);
+            return;
+        }
+        bool staleLive = (_stateEpoch.IsValid && begin.StateEpoch < _stateEpoch.Value) ||
+            (begin.StateEpoch == _stateEpoch.Value && begin.BaselineRevision <= _baselineRevision);
+        bool staleCandidate = _candidateBaselineId != 0 &&
+            (begin.StateEpoch < _candidateStateEpoch.Value ||
+             (begin.StateEpoch == _candidateStateEpoch.Value &&
+              begin.BaselineRevision <= _candidateBaselineRevision));
+        if (staleLive || staleCandidate)
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            QueueRawBaselineAcknowledgement(in begin, RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        bool invalidShape = begin.SchemaFingerprint !=
+                UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint ||
+            begin.RecordsPerSegment == 0 || begin.RecordsPerSegment > _records.Length ||
+            begin.RecordCount > _baselineRecords.Length ||
+            (begin.RecordCount != 0 && begin.RelationSequenceFloor == 0) ||
+            begin.SegmentCount != (begin.RecordCount + begin.RecordsPerSegment - 1) /
+                begin.RecordsPerSegment;
+        if (invalidShape)
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            QueueRawBaselineAcknowledgement(in begin,
+                begin.RecordCount > _baselineRecords.Length
+                    ? RemoteWorldBaselineApplyStatus.CapacityExceeded
+                    : RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+
+        ClearCandidate();
+        _candidateBaselineId = begin.BaselineId;
+        _candidateBaselineRevision = begin.BaselineRevision;
+        _candidateEventFloor = begin.EventFloor;
+        _candidateRelationSequenceFloor = begin.RelationSequenceFloor;
+        _candidateHash = begin.ContentHash;
+        _candidateStateEpoch = new StateEpoch(begin.StateEpoch);
+        _candidateRecordCount = checked((int)begin.RecordCount);
+        _candidateSegmentCount = begin.SegmentCount;
+        _candidateRecordsPerSegment = begin.RecordsPerSegment;
+        QueueBaselineAcknowledgement(RemoteWorldBaselineApplyStatus.Prepared);
+    }
+
+    private void ProcessBaselineSegment(ReadOnlySpan<byte> payload)
+    {
+        if (_faulted || _candidateBaselineId == 0) return;
+        if (!UltraSimGameProtocol.TryReadWorldBaselineSegment(
+                payload, out RemoteWorldBaselineSegmentHeader header,
+                _records, out int count))
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        if (header.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            header.StateEpoch != _candidateStateEpoch.Value ||
+            header.BaselineId != _candidateBaselineId)
+        {
+            _records.AsSpan(0, count).Clear();
+            SaturatingIncrement(ref _rejectedBaselines);
+            return;
+        }
+        if (header.SegmentCount != _candidateSegmentCount)
+        {
+            _records.AsSpan(0, count).Clear();
+            RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        int offset = checked(header.SegmentIndex * _candidateRecordsPerSegment);
+        int expected = Math.Min(_candidateRecordsPerSegment, _candidateRecordCount - offset);
+        if (offset < 0 || expected != count)
+        {
+            _records.AsSpan(0, count).Clear();
+            RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        if (_baselineSegments[header.SegmentIndex])
+        {
+            if (!_records.AsSpan(0, count).SequenceEqual(
+                    _baselineRecords.AsSpan(offset, count)))
+                RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            _records.AsSpan(0, count).Clear();
+            return;
+        }
+        _records.AsSpan(0, count).CopyTo(_baselineRecords.AsSpan(offset, count));
+        _records.AsSpan(0, count).Clear();
+        _baselineSegments[header.SegmentIndex] = true;
+        _receivedSegmentCount++;
+        TryCommitCandidate();
+    }
+
+    private void ProcessBaselineCommit(ReadOnlySpan<byte> payload)
+    {
+        if (_faulted || _candidateBaselineId == 0) return;
+        if (!RemoteWorldBaselineCommitMessageCodec.TryReadExact(
+                payload, out RemoteWorldBaselineCommitMessage commit))
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        if (commit.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            commit.StateEpoch != _candidateStateEpoch.Value ||
+            commit.BaselineId != _candidateBaselineId)
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            return;
+        }
+        if (commit.BaselineRevision != _candidateBaselineRevision ||
+            commit.ContentHash != _candidateHash)
+        {
+            RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        _candidateCommitReceived = true;
+        TryCommitCandidate();
+    }
+
+    private void TryCommitCandidate()
+    {
+        if (!_candidateCommitReceived || _receivedSegmentCount != _candidateSegmentCount) return;
+        ReadOnlySpan<RemoteWorldStateRecord> records =
+            _baselineRecords.AsSpan(0, _candidateRecordCount);
+        if (UltraSimGameProtocol.ComputeWorldBaselineHash(records) != _candidateHash)
+        {
+            RejectCandidate(RemoteWorldBaselineApplyStatus.Rejected);
+            return;
+        }
+        _candidateKnowledge.Clear();
+        Array.Clear(_candidateActive);
+        Array.Copy(_slotGenerations, _candidateSlotGenerations, _slotGenerations.Length);
+        Array.Clear(_candidateFreeSlots);
+        uint priorIndex = 0;
+        for (int index = 0; index < records.Length; index++)
+        {
+            ref readonly RemoteWorldStateRecord record = ref records[index];
+            if (!record.IsPresent || record.RelationSequence == 0 || record.EntityGeneration == 0 ||
+                record.CanonicalVersion == 0 || record.Horizon is 0 or > 3 ||
+                record.RelationSequence > _candidateRelationSequenceFloor ||
+                (index != 0 && record.EntityIndex <= priorIndex) || index >= _candidateActive.Length ||
+                _candidateSlotGenerations[index] == uint.MaxValue)
+            {
+                RejectCandidate(index >= _candidateActive.Length
+                    ? RemoteWorldBaselineApplyStatus.CapacityExceeded
+                    : RemoteWorldBaselineApplyStatus.Rejected);
+                return;
+            }
+            uint localGeneration = ++_candidateSlotGenerations[index];
+            var slot = new ClientEntitySlot(checked((uint)index), localGeneration);
+            _candidateActive[index] = new RemoteWorldEntitySnapshot(
+                new ReplicationEntityId(record.EntityIndex, record.EntityGeneration),
+                slot,
+                record.CanonicalVersion,
+                record.Horizon,
+                record.XMillimeters,
+                record.ZMillimeters,
+                record.TickMarker,
+                record.InputVelocity);
+            _candidateKnowledge.Add(record.EntityIndex, new KnowledgeState
+            {
+                EntityGeneration = record.EntityGeneration,
+                RelationSequence = record.RelationSequence,
+                CanonicalVersion = record.CanonicalVersion,
+                Present = true,
+                SlotIndex = index,
+                LocalSlotGeneration = localGeneration,
+            });
+            priorIndex = record.EntityIndex;
+        }
+
+        (_knowledge, _candidateKnowledge) = (_candidateKnowledge, _knowledge);
+        (_active, _candidateActive) = (_candidateActive, _active);
+        (_slotGenerations, _candidateSlotGenerations) =
+            (_candidateSlotGenerations, _slotGenerations);
+        (_freeSlots, _candidateFreeSlots) = (_candidateFreeSlots, _freeSlots);
+        _activeHigh = _candidateRecordCount;
+        _activeCount = _candidateRecordCount;
+        _freeSlotCount = 0;
+        _stateEpoch = _candidateStateEpoch;
+        _baselineRevision = _candidateBaselineRevision;
+        _eventFloor = _candidateEventFloor;
+        _relationSequenceFloor = _candidateRelationSequenceFloor;
+        SaturatingIncrement(ref _appliedBaselines);
+        QueueBaselineAcknowledgement(RemoteWorldBaselineApplyStatus.Applied);
+        ClearCandidate();
+    }
+
+    private void RejectCandidate(RemoteWorldBaselineApplyStatus status)
+    {
+        SaturatingIncrement(ref _rejectedBaselines);
+        QueueBaselineAcknowledgement(status);
+        ClearCandidate();
+    }
+
+    private void QueueBaselineAcknowledgement(RemoteWorldBaselineApplyStatus status)
+    {
+        if (_candidateBaselineId == 0) return;
+        var acknowledgement = new RemoteWorldBaselineAppliedMessage
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            StateEpoch = _candidateStateEpoch.Value,
+            BaselineId = _candidateBaselineId,
+            BaselineRevision = _candidateBaselineRevision,
+            Status = status,
+        };
+        if (TryQueueBaselineAcknowledgement(in acknowledgement)) return;
+        if (_hasPendingBaselineAcknowledgement &&
+            !BaselineAcknowledgementsEqual(
+                in _pendingBaselineAcknowledgement, in acknowledgement))
+        {
+            _faulted = true;
+            return;
+        }
+        _pendingBaselineAcknowledgement = acknowledgement;
+        _hasPendingBaselineAcknowledgement = true;
+    }
+
+    private void QueueRawBaselineAcknowledgement(
+        in RemoteWorldBaselineBeginMessage begin,
+        RemoteWorldBaselineApplyStatus status)
+    {
+        var acknowledgement = new RemoteWorldBaselineAppliedMessage
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            StateEpoch = begin.StateEpoch,
+            BaselineId = begin.BaselineId,
+            BaselineRevision = begin.BaselineRevision,
+            Status = status,
+        };
+        if (TryQueueBaselineAcknowledgement(in acknowledgement)) return;
+        if (_hasPendingBaselineAcknowledgement &&
+            !BaselineAcknowledgementsEqual(
+                in _pendingBaselineAcknowledgement, in acknowledgement))
+        {
+            _faulted = true;
+            return;
+        }
+        _pendingBaselineAcknowledgement = acknowledgement;
+        _hasPendingBaselineAcknowledgement = true;
+    }
+
+    private bool TryQueueBaselineAcknowledgement(
+        in RemoteWorldBaselineAppliedMessage acknowledgement)
+    {
+        int bytes = RemoteWorldBaselineAppliedMessageCodec.EncodedSize;
+        return RemoteWorldBaselineAppliedMessageCodec.TryWriteExact(
+                _ackScratch.AsSpan(0, bytes), in acknowledgement) &&
+            _peer.TryQueue(RemoteWorldBaselineAppliedMessageCodec.Descriptor.Id,
+                _ackScratch.AsSpan(0, bytes)) == NetworkQueueStatus.Accepted;
+    }
+
+    private static bool BaselineAcknowledgementsEqual(
+        in RemoteWorldBaselineAppliedMessage left,
+        in RemoteWorldBaselineAppliedMessage right) =>
+        left.ApplicationSessionEpoch == right.ApplicationSessionEpoch &&
+        left.StateEpoch == right.StateEpoch &&
+        left.BaselineId == right.BaselineId &&
+        left.BaselineRevision == right.BaselineRevision &&
+        left.Status == right.Status;
+
+    private void ClearCandidate()
+    {
+        _baselineRecords.AsSpan(0, _candidateRecordCount).Clear();
+        _baselineSegments.AsSpan(0, _candidateSegmentCount).Clear();
+        _candidateKnowledge.Clear();
+        Array.Clear(_candidateActive);
+        _candidateBaselineId = 0;
+        _candidateBaselineRevision = 0;
+        _candidateEventFloor = 0;
+        _candidateRelationSequenceFloor = 0;
+        _candidateHash = 0;
+        _candidateStateEpoch = default;
+        _candidateRecordCount = 0;
+        _candidateSegmentCount = 0;
+        _candidateRecordsPerSegment = 0;
+        _receivedSegmentCount = 0;
+        _candidateCommitReceived = false;
     }
 
     private RemoteWorldStateClientApplyStatus Preflight(
@@ -260,6 +631,8 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             for (int prior = 0; prior < index; prior++)
                 if (records[prior].EntityIndex == record.EntityIndex)
                     return RemoteWorldStateClientApplyStatus.Rejected;
+            if (record.RelationSequence <= _relationSequenceFloor)
+                continue;
 
             if (!_knowledge.TryGetValue(record.EntityIndex, out KnowledgeState knowledge))
             {
@@ -415,11 +788,14 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
 
     private bool TryQueueAcknowledgement(in RemoteWorldStateAppliedMessage acknowledgement)
     {
-        if (!RemoteWorldStateAppliedMessageCodec.TryWriteExact(_ackScratch, in acknowledgement))
+        if (!RemoteWorldStateAppliedMessageCodec.TryWriteExact(
+                _ackScratch.AsSpan(0, RemoteWorldStateAppliedMessageCodec.EncodedSize),
+                in acknowledgement))
             throw new InvalidOperationException("A validated WorldState acknowledgement did not encode.");
         return _peer.TryQueue(
             RemoteWorldStateAppliedMessageCodec.Descriptor.Id,
-            _ackScratch) == NetworkQueueStatus.Accepted;
+            _ackScratch.AsSpan(0, RemoteWorldStateAppliedMessageCodec.EncodedSize)) ==
+            NetworkQueueStatus.Accepted;
     }
 
     private static bool WithinSquaredDistance(

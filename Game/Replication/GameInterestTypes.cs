@@ -128,6 +128,16 @@ public enum GameWorldStateBuildStatus : byte
     OutstandingCapacityExceeded = 6,
     SequenceExhausted = 7,
     TransportNotAccepting = 8,
+    BaselineInProgress = 9,
+}
+
+public enum GameWorldBaselineCaptureStatus : byte
+{
+    Success = 0,
+    UnknownRecipient = 1,
+    RecipientNonviable = 2,
+    DestinationTooSmall = 3,
+    SequenceExhausted = 4,
 }
 
 /// <summary>Shared recipient-independent semantic state cached per canonical version.</summary>

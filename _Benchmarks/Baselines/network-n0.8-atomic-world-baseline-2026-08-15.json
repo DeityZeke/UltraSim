@@ -1,0 +1,23 @@
+{
+  "Workload": "ultrasim-network-n0.8-atomic-world-baseline-v1",
+  "CapturedAtUtc": "2026-08-15T05:40:05.8067678+00:00",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "CachyOS",
+  "LogicalProcessorCount": 16,
+  "ProtocolVersion": 6,
+  "ProtocolFingerprint": 8609355961487036799,
+  "Samples": 21,
+  "EntityCount": 256,
+  "RecordsPerSegment": 32,
+  "ProtocolLoopbackMeanNanoseconds": 1449075,
+  "ProtocolLoopbackP95Nanoseconds": 1504717,
+  "LocalhostUdpMeanNanoseconds": 1497747.9047619049,
+  "LocalhostUdpP95Nanoseconds": 1553216,
+  "UdpToLoopbackRatio": 1.0335889479577696,
+  "CallerAllocatedBytes": 0,
+  "LoopbackServerReservedBytes": 44032,
+  "UdpServerReservedBytes": 44032,
+  "LoopbackClientReservedBytes": 94000,
+  "UdpClientReservedBytes": 94000,
+  "Notes": "One complete 256-entity relevant-scope cutoff: server capture/hash, reliable Begin preparation, eight Bulk segments, reliable Commit, private client validation/swap, and application ACK. Alternating paired ProtocolLoopback/localhost UDP samples; cold/recovery mechanism measured after capacity warmup; fixed 60 Hz and no adaptive cadence."
+}
