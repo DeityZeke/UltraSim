@@ -86,6 +86,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     private bool _baselinePrepared;
     private bool _baselineCommitQueued;
     private long _baselineLastProgressAtMilliseconds;
+    private StateEpoch _cancelStateEpoch;
+    private ulong _cancelBaselineId;
     private GameWorldStateBuildStatus _lastBuild;
 
     public RemoteWorldStateServer(
@@ -134,7 +136,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         if (interest.StateEpoch.Value <= _interest.StateEpoch.Value)
             throw new ArgumentException(
                 "Replacement interest must own a strictly newer StateEpoch.", nameof(interest));
-        ClearBaseline();
+        RequestBaselineCancellation();
         _consecutiveBaselineTimeouts = 0;
         _lastBaselineRevision = 0;
         _lastBaselineEventFloor = 0;
@@ -147,7 +149,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     {
         EnsureOwnerThread();
         _ = TryExpireBaselineCore();
-        if (_baselineId != 0)
+        if (!TryFlushBaselineCancellation() || _baselineId != 0)
             return _lastBuild = GameWorldStateBuildStatus.BaselineInProgress;
         if (nowMilliseconds < 0) return _lastBuild = GameWorldStateBuildStatus.NoData;
         _lastBuild = _interest.TryBuildBundle(
@@ -196,7 +198,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         ushort recordsPerSegment = 32)
     {
         EnsureOwnerThread();
-        if (_baselineId != 0) return RemoteWorldBaselineProgressStatus.AlreadyActive;
+        if (!TryFlushBaselineCancellation() || _baselineId != 0)
+            return RemoteWorldBaselineProgressStatus.AlreadyActive;
         if (baselineRevision == 0 || baselineRevision <= _lastBaselineRevision ||
             eventFloor < _lastBaselineEventFloor || recordsPerSegment == 0 ||
             recordsPerSegment > UltraSimGameProtocol.MaximumWorldStateRecords)
@@ -234,6 +237,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     {
         EnsureOwnerThread();
         if (TryExpireBaselineCore()) return RemoteWorldBaselineProgressStatus.NoBaseline;
+        if (!TryFlushBaselineCancellation())
+            return RemoteWorldBaselineProgressStatus.TransportBackpressure;
         if (_baselineId == 0) return RemoteWorldBaselineProgressStatus.NoBaseline;
         if (!_baselineBeginQueued)
         {
@@ -327,7 +332,7 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         EnsureOwnerThread();
         if (_baselineId == 0) return false;
         SaturatingIncrement(ref _baselinesAbandoned);
-        ClearBaseline();
+        RequestBaselineCancellation();
         return true;
     }
 
@@ -371,7 +376,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         return new(_queued, _acknowledged, _rejected, _capacityFailures,
             _malformed, _baselinesStarted, _baselinesApplied, _baselinesRejected,
             _baselinesTimedOut, _baselinesAbandoned, _consecutiveBaselineTimeouts,
-            _baselineId != 0, _baselineId, _lastBuild,
+            _baselineId != 0 || _cancelBaselineId != 0,
+            _baselineId != 0 ? _baselineId : _cancelBaselineId, _lastBuild,
             checked(
                 (long)_records.Length * Unsafe.SizeOf<GameWorldStateRecord>() +
                 (long)_wireRecords.Length * Unsafe.SizeOf<RemoteWorldStateRecord>() +
@@ -455,9 +461,40 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         SaturatingIncrement(ref _baselinesTimedOut);
         if (_consecutiveBaselineTimeouts != uint.MaxValue)
             _consecutiveBaselineTimeouts++;
-        ClearBaseline();
+        RequestBaselineCancellation();
         if (_consecutiveBaselineTimeouts >= _maximumConsecutiveBaselineTimeouts)
             _interest.MarkRecipientProjectionNonviable(_participant);
+        return true;
+    }
+
+    private void RequestBaselineCancellation()
+    {
+        if (_baselineId == 0) return;
+        if (_cancelBaselineId != 0)
+            throw new InvalidOperationException("Only one bounded baseline cancellation may be pending.");
+        _cancelStateEpoch = _interest.StateEpoch;
+        _cancelBaselineId = _baselineId;
+        ClearBaseline();
+        _ = TryFlushBaselineCancellation();
+    }
+
+    private bool TryFlushBaselineCancellation()
+    {
+        if (_cancelBaselineId == 0) return true;
+        var cancel = new RemoteWorldBaselineCancelMessage
+        {
+            ApplicationSessionEpoch = _applicationSessionEpoch,
+            StateEpoch = _cancelStateEpoch.Value,
+            BaselineId = _cancelBaselineId,
+        };
+        int bytes = RemoteWorldBaselineCancelMessageCodec.EncodedSize;
+        if (!RemoteWorldBaselineCancelMessageCodec.TryWriteExact(
+                _messageScratch.AsSpan(0, bytes), in cancel) ||
+            _peer.TryQueue(RemoteWorldBaselineCancelMessageCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, bytes)) != NetworkQueueStatus.Accepted)
+            return false;
+        _cancelStateEpoch = default;
+        _cancelBaselineId = 0;
         return true;
     }
 

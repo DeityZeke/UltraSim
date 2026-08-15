@@ -156,6 +156,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             ProcessBaselineCommit(payload);
             return true;
         }
+        if (message.MessageId == RemoteWorldBaselineCancelMessageCodec.Descriptor.Id)
+        {
+            ProcessBaselineCancel(payload);
+            return true;
+        }
         if (message.MessageId != RemoteWorldStateBundleHeaderCodec.Descriptor.Id) return false;
         if (_faulted) return true;
         if (!UltraSimGameProtocol.TryReadWorldStateBundle(
@@ -356,6 +361,7 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
                 UltraSimGameProtocol.WorldStateBaselineSchemaFingerprint ||
             begin.RecordsPerSegment == 0 || begin.RecordsPerSegment > _records.Length ||
             begin.RecordCount > _baselineRecords.Length ||
+            begin.RecordCount > _candidateActive.Length ||
             (begin.RecordCount != 0 && begin.RelationSequenceFloor == 0) ||
             begin.SegmentCount != (begin.RecordCount + begin.RecordsPerSegment - 1) /
                 begin.RecordsPerSegment;
@@ -363,7 +369,8 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         {
             SaturatingIncrement(ref _rejectedBaselines);
             QueueRawBaselineAcknowledgement(in begin,
-                begin.RecordCount > _baselineRecords.Length
+                begin.RecordCount > _baselineRecords.Length ||
+                begin.RecordCount > _candidateActive.Length
                     ? RemoteWorldBaselineApplyStatus.CapacityExceeded
                     : RemoteWorldBaselineApplyStatus.Rejected);
             return;
@@ -457,6 +464,23 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         TryCommitCandidate();
     }
 
+    private void ProcessBaselineCancel(ReadOnlySpan<byte> payload)
+    {
+        if (!RemoteWorldBaselineCancelMessageCodec.TryReadExact(
+                payload, out RemoteWorldBaselineCancelMessage cancel) ||
+            cancel.ApplicationSessionEpoch != _applicationSessionEpoch ||
+            cancel.StateEpoch == 0 || cancel.BaselineId == 0)
+        {
+            SaturatingIncrement(ref _rejectedBaselines);
+            return;
+        }
+        if (_candidateBaselineId == 0 ||
+            cancel.StateEpoch != _candidateStateEpoch.Value ||
+            cancel.BaselineId != _candidateBaselineId)
+            return;
+        ClearCandidate();
+    }
+
     private void TryCommitCandidate()
     {
         if (!_candidateCommitReceived || _receivedSegmentCount != _candidateSegmentCount) return;
@@ -509,14 +533,25 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
             priorIndex = record.EntityIndex;
         }
 
+        int candidateActiveHigh = _candidateRecordCount;
+        int candidateFreeSlotCount = 0;
+        for (int index = _candidateRecordCount; index < _candidateSlotGenerations.Length; index++)
+        {
+            uint generation = _candidateSlotGenerations[index];
+            if (generation == 0) continue;
+            candidateActiveHigh = index + 1;
+            if (generation != uint.MaxValue)
+                _candidateFreeSlots[candidateFreeSlotCount++] = index;
+        }
+
         (_knowledge, _candidateKnowledge) = (_candidateKnowledge, _knowledge);
         (_active, _candidateActive) = (_candidateActive, _active);
         (_slotGenerations, _candidateSlotGenerations) =
             (_candidateSlotGenerations, _slotGenerations);
         (_freeSlots, _candidateFreeSlots) = (_candidateFreeSlots, _freeSlots);
-        _activeHigh = _candidateRecordCount;
+        _activeHigh = candidateActiveHigh;
         _activeCount = _candidateRecordCount;
-        _freeSlotCount = 0;
+        _freeSlotCount = candidateFreeSlotCount;
         _stateEpoch = _candidateStateEpoch;
         _baselineRevision = _candidateBaselineRevision;
         _eventFloor = _candidateEventFloor;
@@ -696,7 +731,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler
         if (_activeHigh == _active.Length)
             throw new InvalidOperationException("Client slot preflight diverged from commit.");
         slot = _activeHigh++;
-        _slotGenerations[slot] = 1;
+        if (_slotGenerations[slot] == uint.MaxValue)
+            throw new InvalidOperationException("Client slot preflight admitted a retired slot.");
+        _slotGenerations[slot] = _slotGenerations[slot] == 0
+            ? 1
+            : checked(_slotGenerations[slot] + 1);
         _activeCount++;
         return slot;
     }

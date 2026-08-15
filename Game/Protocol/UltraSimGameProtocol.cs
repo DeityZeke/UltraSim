@@ -219,6 +219,18 @@ public partial struct RemoteWorldBaselineAppliedMessage
     public RemoteWorldBaselineApplyStatus Status;
 }
 
+/// <summary>
+/// Reliably retires one server-abandoned baseline candidate without changing
+/// the client's currently published projection.
+/// </summary>
+[NetworkMessage(117, "ultrasim.game.world-baseline-cancel", 1, NetworkLane.Control)]
+public partial struct RemoteWorldBaselineCancelMessage
+{
+    public ulong ApplicationSessionEpoch;
+    public ulong StateEpoch;
+    public ulong BaselineId;
+}
+
 /// <summary>One retained non-coalescible game fact on the reliable Event lane.</summary>
 [NetworkMessage(115, "ultrasim.game.application-event", 1, NetworkLane.Event)]
 public partial struct RemoteApplicationEventMessage
@@ -275,7 +287,7 @@ public static class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 7,
+        version: 8,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -302,6 +314,7 @@ public static class UltraSimGameProtocol
             RemoteWorldBaselineAppliedMessageCodec.Descriptor,
             RemoteApplicationEventMessageCodec.Descriptor,
             RemoteApplicationEventAppliedMessageCodec.Descriptor,
+            RemoteWorldBaselineCancelMessageCodec.Descriptor,
         ]);
 
     public static NetworkProtocolManifest Manifest => s_manifest;

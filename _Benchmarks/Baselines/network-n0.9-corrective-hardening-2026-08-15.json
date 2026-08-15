@@ -1,0 +1,22 @@
+{
+  "Workload": "ultrasim-network-n0.9-integrated-topology-acceptance-v1",
+  "CapturedAtUtc": "2026-08-15T14:08:26.9549359+00:00",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "CachyOS",
+  "LogicalProcessorCount": 16,
+  "ProtocolVersion": 8,
+  "ProtocolFingerprint": 14489164343495917727,
+  "Samples": 7,
+  "OfflineDirectMeanNanoseconds": 649595.7142857143,
+  "OfflineDirectP95Nanoseconds": 832755,
+  "ProtocolLoopbackMeanNanoseconds": 5209232.714285715,
+  "ProtocolLoopbackP95Nanoseconds": 6266932,
+  "LocalhostUdpMeanNanoseconds": 6314212.285714285,
+  "LocalhostUdpP95Nanoseconds": 13149501,
+  "ProtocolLoopbackToDirectRatio": 8.01919193696299,
+  "UdpToProtocolLoopbackRatio": 1.2121194486854643,
+  "OfflineDirectMedianCallerAllocatedBytes": 1887448,
+  "ProtocolLoopbackMedianCallerAllocatedBytes": 18429520,
+  "LocalhostUdpMedianCallerAllocatedBytes": 16186208,
+  "Notes": "Cold integrated acceptance workload: Admission/CharacterSelect, Inventory Split/Equip/hot reopen, canonical projection, atomic initial and same-epoch baselines, retained application Event, authoritative input, owner and maintained WorldState, durable save/diverge/restore, fresh StateEpoch baseline, continued input, and deterministic shutdown. Seven rotated-order samples. Allocation is cold caller allocation and is not a warmed hot-path claim; fixed 60 Hz and no adaptive cadence."
+}

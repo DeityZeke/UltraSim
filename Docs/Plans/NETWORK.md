@@ -6,8 +6,8 @@ reliable protocol over deterministic datagrams, N0.4 remote Admission/UI over
 ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, N0.6
 bounded authoritative input/owner-state replication, and N0.7 maintained AOI,
 pending state, application knowledge, and shared semantic fanout are accepted.
-N0.8 atomic baseline/recovery, reconnect, and generation replacement and N0.9
-integrated topology acceptance are accepted. N0.10 scale and measured
+N0.8 atomic baseline/recovery, reconnect, and generation replacement and the
+correctness-hardened N0.9 integrated topology acceptance are accepted. N0.10 scale and measured
 specialization is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
@@ -1377,15 +1377,21 @@ revision, event floor, schema fingerprint, canonical content hash, record count,
 relation-sequence floor, segment count, and segment size. The preparation round
 trip is intentional: Bulk
 cannot race ahead of the client's admitted descriptor across independent lanes.
-Exactly one candidate exists. A newer epoch/revision cancels an older candidate;
-delayed old segments and commits cannot affect it.
+Exactly one candidate exists. A newer epoch/revision supersedes an older
+candidate. Explicit abandonment or timeout queues a reliable baseline-cancel
+transition before ordinary state resumes; delayed old segments and commits
+cannot strand or affect the client candidate.
 
 The client preallocates separate candidate knowledge, dense entity slots, slot
 generations, records, and receipt bits. Live state does not change during Begin,
 segment arrival, duplicate delivery, or Commit arrival. Only a complete exact
 count/schema/hash/epoch candidate swaps live. Capacity or semantic failure emits
 an application rejection and preserves the prior projection exactly. Baseline
-ACK is distinct from transport delivery ACK.
+ACK is distinct from transport delivery ACK. Begin rejects a record count that
+cannot fit either known-identity storage or active dense slots before any Bulk
+segment is admitted. Slot generations survive baseline compaction: regrowing a
+historically used local index always advances its private generation and a
+retired generation is never made virgin again.
 
 The server suppresses ordinary WorldState scheduling while a baseline is active.
 Canonical changes after capture continue to replace relation debt. On successful
@@ -1399,7 +1405,8 @@ be followed by resurrection from an old unreliable bundle.
 The transaction also has a bounded monotonic application lifetime. Progress
 through Begin, Prepared, Bulk, and Commit refreshes its deadline; failure to
 receive a terminal application result abandons the retained cutoff without
-advancing recipient knowledge. A newer attempt may start immediately, while
+advancing recipient knowledge and reliably cancels the client's private
+candidate. A newer attempt may start after that cancellation is admitted, while
 repeated stalls reach an explicit recipient-nonviable policy instead of blocking
 WorldState forever. Manual abandonment has the same no-knowledge-advance rule.
 Successful complete-scope acknowledgement consumes both explicitly present rows
@@ -1466,13 +1473,17 @@ not a general message bus: Network still identifies messages, the game orders a
 bounded number of mutually exclusive owners, and the first owning adapter
 consumes each message. No game policy moved into Network.
 
-Protocol version 7 adds one reliable non-coalescible application Event and its
-separate application acknowledgement. Fresh baseline floors omit prior history;
-post-floor facts remain in `GameProjectionService` until applied, survive
+Protocol version 8 retains the version-7 non-coalescible Event messages and adds
+reliable baseline cancellation. Fresh baseline floors omit prior history;
+post-floor facts remain in `GameProjectionService` until every registered
+participant consumer has advanced beyond them, survive
 same-epoch resnapshot, converge under deterministic loss/reorder, and apply
-idempotently. Generation replacement resets generation-local facts and requires
-an explicit new floor. Transport acknowledgement remains weaker than Event
-application acknowledgement.
+idempotently. Event audience is participant-scoped, client retention is bounded
+working storage with explicit consumption, transient Control backpressure keeps
+one retryable application ACK, and missing application ACKs reach a bounded
+retry/nonviable policy. Generation replacement resets generation-local facts
+and requires an explicit new floor. Transport acknowledgement remains weaker
+than Event application acknowledgement.
 
 The normalized three-topology gate keeps Admission/CharacterSelect, Inventory
 Split/Equip/hot reopen, canonical projection, initial and same-epoch baselines,
@@ -1480,7 +1491,8 @@ Event, complete authoritative input, owner state, maintained WorldState, durable
 save/diverge/restore, fresh `StateEpoch` recovery, continued input, and shutdown
 alive in one scenario. OfflineDirect, secure ProtocolLoopback, and connected
 localhost UDP produce the same authority, complete UI/client state, simulation
-state, relevant projection count, and final Event. Dedicated permanent gates in
+state, normalized WorldState identities/versions/horizons/positions/payloads,
+and participant/epoch-qualified Event. Dedicated permanent gates in
 the same suite cover fresh application/WorldState reconnect and delayed prior
 traffic rather than weakening the normalized oracle with transport-specific
 trace identity.
@@ -1490,19 +1502,23 @@ participant into one `ServerRuntime`, proves both participant bindings own the
 same `ServerGenerationId`, and projects the same shared authority without moving
 simulation ownership.
 
-The accepted cold composition observation uses seven rotated-order samples:
+The accepted protocol-v8 corrective-hardening observation uses seven
+rotated-order cold samples:
 
-- OfflineDirect mean: approximately 0.567 ms;
-- secure ProtocolLoopback mean: approximately 5.354 ms;
-- connected localhost UDP mean: approximately 6.391 ms;
-- UDP/ProtocolLoopback ratio: approximately 1.194x;
+- OfflineDirect mean: approximately 0.650 ms;
+- secure ProtocolLoopback mean: approximately 5.209 ms;
+- connected localhost UDP mean: approximately 6.314 ms;
+- UDP/ProtocolLoopback ratio: approximately 1.212x;
 - median cold caller allocation: approximately 1.89 MB direct, 18.39 MB
   ProtocolLoopback, and 16.15 MB UDP.
 
 These figures include fixture/handshake, UI, persistence I/O, projection
 recovery, and shutdown. They are cold integration evidence, not a hot tick or
-socket-cost claim. The immutable artifact is
-[`network-n0.9-integrated-topology-acceptance-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.9-integrated-topology-acceptance-2026-08-15.json).
+socket-cost claim. The accepted hardened artifact is
+[`network-n0.9-corrective-hardening-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.9-corrective-hardening-2026-08-15.json).
+The original protocol-v7
+[`network-n0.9-integrated-topology-acceptance-2026-08-15.json`](../../_Benchmarks/Baselines/network-n0.9-integrated-topology-acceptance-2026-08-15.json)
+remains immutable historical evidence rather than being normalized or replaced.
 
 ### N0.10 — Scale and measured specialization
 

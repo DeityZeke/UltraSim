@@ -35,8 +35,8 @@ reports live in git history. Accepted measurements live in immutable JSON under
 
 - [Network kernel foundation](../Kernels/Network/README.md) — N0.0 contracts,
   N0.2 bounded bytes, and N0.3 secure reliable ProtocolLoopback.
-- [Network V3 active plan](Plans/NETWORK.md) — accepted N0.9 integrated remote
-  authority/client vertical and N0.10 scale specialization.
+- [Network V3 active plan](Plans/NETWORK.md) — accepted correctness-hardened N0.9
+  integrated remote authority/client vertical and N0.10 scale specialization.
 
 ## Evidence and tools
 

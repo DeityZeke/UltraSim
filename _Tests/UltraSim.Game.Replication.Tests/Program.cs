@@ -722,11 +722,13 @@ static void LifecycleHistoryOverflowRequiresBaseline()
         fixture.Runtime.Game,
         fixture.Admission,
         new GameReplicationLimits(population + 16, 8, population + 8, population + 8, 32, 8, 8));
+    ParticipantId participant = new(46);
+    Check.True(fixture.Admission.JoinAccountless(participant).IsEntered);
+    Check.True(projection.SynchronizeParticipant(participant));
     GameProjectionCaptureResult baseline = projection.RebuildBaseline();
     Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, baseline.Status);
     var offline = new OfflineDirectGameProjection(population + 16, 8, 64);
     Check.Equal(OfflineProjectionApplyStatus.Success, offline.ApplyBaseline(projection, baseline.Frame));
-    ParticipantId participant = new(46);
     Check.True(projection.TryPublishApplicationEvent(participant, 1, 10, 100, out _));
     Span<GameApplicationEvent> eventScratch = stackalloc GameApplicationEvent[2];
     GameProjectionHistoryReadResult firstRead = projection.ReadApplicationEvents(0, eventScratch[..1]);
@@ -750,7 +752,7 @@ static void LifecycleHistoryOverflowRequiresBaseline()
     Check.Equal(GameProjectionCaptureStatus.BaselineRebuilt, repaired.Status);
     Check.Equal(baseline.Frame.StateEpoch, repaired.Frame.StateEpoch);
     Check.True(repaired.Frame.BaselineRevision > baseline.Frame.BaselineRevision);
-    Check.Equal(population, projection.GetSnapshot().EntityCount);
+    Check.Equal(population + 1, projection.GetSnapshot().EntityCount);
     GameProjectionHistoryReadResult retainedRead = projection.ReadApplicationEvents(firstRead.NextSequence, eventScratch);
     Check.Equal(GameProjectionHistoryReadStatus.Success, retainedRead.Status);
     Check.Equal(1, retainedRead.Count);

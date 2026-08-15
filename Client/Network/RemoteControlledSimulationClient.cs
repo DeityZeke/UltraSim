@@ -83,7 +83,8 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
         int inputVelocity)
     {
         EnsureOwnerThread();
-        if (!_stateEpoch.IsValid || _nextInputSequence == 0 ||
+        if (!_stateEpoch.IsValid || _clockRevision == 0 ||
+            _nextInputSequence == ulong.MaxValue ||
             _pendingInputCount == _pendingInputs.Length ||
             targetSimulationTick == ulong.MaxValue || expiresAtWorldTimeMicroseconds < 0) return false;
         var candidate = new RemoteAuthoritativeInputSample(
@@ -96,7 +97,7 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
             _pendingInputs[--_pendingInputCount] = default;
             return false;
         }
-        _nextInputSequence = _nextInputSequence == ulong.MaxValue ? 0 : _nextInputSequence + 1;
+        _nextInputSequence++;
         ApplyPredicted(in candidate);
         return true;
     }
@@ -153,6 +154,7 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
         _pendingInputs.AsSpan(0, _pendingInputCount).Clear();
         _pendingInputCount = 0;
         _ownerEntity = default;
+        _ownerSlot = default;
         _ownerPresent = false;
         _simulationTick = 0;
         _frameSequence = 0;
@@ -162,6 +164,13 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
         _predictedVelocity = 0;
         _pendingOwnerState = default;
         _hasPendingOwnerState = false;
+    }
+
+    internal void SetNextInputSequenceForTest(ulong nextInputSequence)
+    {
+        EnsureOwnerThread();
+        if (nextInputSequence == 0) throw new ArgumentOutOfRangeException(nameof(nextInputSequence));
+        _nextInputSequence = nextInputSequence;
     }
 
     private bool TryQueuePendingBundle()

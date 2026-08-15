@@ -6,9 +6,10 @@ application binding is accepted beside it. N0.5 carries the same binding over
 real connected localhost UDP. N0.6 adds bounded authoritative input, revisioned
 clock anchors, and one complete owner-state stream. N0.7 maintained recipient
 interest/application knowledge and N0.8 atomic baseline/recovery are accepted.
-N0.9 composes controlled state, maintained WorldState, atomic recovery, and a
-real retained application Event across OfflineDirect, secure ProtocolLoopback,
-and connected localhost UDP.
+N0.9 composes controlled state, maintained WorldState, atomic recovery, and
+multi-consumer retained application Events across OfflineDirect, secure
+ProtocolLoopback, and connected localhost UDP. Corrective hardening adds exact
+WorldState parity, reliable baseline cancellation, and client-slot ABA fencing.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -252,16 +253,25 @@ absent from the committed complete scope.
 The server-side transaction has a bounded monotonic deadline. An application
 peer that authenticates and receives reliable baseline data but never returns a
 terminal apply result cannot suppress ordinary WorldState indefinitely. Timeout
-or explicit abandonment clears only retained transaction state, never advances
-recipient knowledge, and repeated stalls make the recipient explicitly
+or explicit abandonment queues a reliable cancel for the matching client
+candidate, clears only retained transaction state, never advances recipient
+knowledge, and repeated stalls make the recipient explicitly
 nonviable. Applying a complete scope also consumes omitted tombstone debt through
 the captured relation floor while preserving every newer write.
 
+Begin preflights both known-identity and active dense-slot capacity before Bulk.
+Baseline compaction preserves all historical local-slot generations and rebuilds
+the free list; a later regrow cannot recreate an old `ClientEntitySlot` handle.
+
 The descriptor's `EventFloor` is structural N0.8 state. N0.9 supplies the first
 real reliable application Event path and its post-floor/fresh-client proof.
-`RemoteApplicationEventServer` retains game facts until explicit application
-acknowledgement; `RemoteApplicationEventClient` applies them in sequence and
-idempotently acknowledges semantic duplicates. Same-epoch relation and event floors are
+Each `RemoteApplicationEventServer` is bound to one participant and advances an
+independent projection-owned consumer cursor. Only the minimum cursor across
+registered consumers releases global history. `RemoteApplicationEventClient`
+applies events in sequence into reclaimable bounded working storage and
+idempotently acknowledges semantic duplicates. One pending ACK survives
+temporary Control backpressure; missing application proof has a bounded retry
+and terminal policy. Same-epoch relation and event floors are
 monotonic, and generation replacement requires a strictly increasing
 `StateEpoch`.
 

@@ -102,7 +102,9 @@ internal sealed class NetworkDirectionalCryptography : IDisposable
     private readonly byte[] _masterSecret;
     private readonly bool _clientToServer;
     private AesGcm _cipher;
+    private AesGcm? _nextCipher;
     private uint _epoch;
+    private ulong _cipherDerivations;
 
     internal NetworkDirectionalCryptography(ReadOnlySpan<byte> masterSecret, bool clientToServer, SecurityEpoch epoch)
     {
@@ -111,17 +113,23 @@ internal sealed class NetworkDirectionalCryptography : IDisposable
         _clientToServer = clientToServer;
         _epoch = epoch.Value;
         _cipher = CreateCipher(_masterSecret, _clientToServer, epoch);
+        _cipherDerivations = 1;
+        _nextCipher = CreateNextCipher();
     }
 
     internal SecurityEpoch Epoch => new(_epoch);
+    internal ulong CipherDerivations => _cipherDerivations;
 
     internal bool TryAdvanceTo(SecurityEpoch epoch)
     {
-        if (epoch.Value != _epoch + 1 || _epoch == uint.MaxValue) return false;
-        AesGcm replacement = CreateCipher(_masterSecret, _clientToServer, epoch);
+        if (_epoch == uint.MaxValue || epoch.Value != _epoch + 1) return false;
+        AesGcm replacement = _nextCipher ??
+            throw new InvalidOperationException("The next security epoch cipher was not prepared.");
+        _nextCipher = null;
         _cipher.Dispose();
         _cipher = replacement;
         _epoch = epoch.Value;
+        _nextCipher = CreateNextCipher();
         return true;
     }
 
@@ -158,7 +166,8 @@ internal sealed class NetworkDirectionalCryptography : IDisposable
             return TryDecrypt(packet, ciphertext, tag, plaintext, associatedData);
         if (_epoch == uint.MaxValue || epoch.Value != _epoch + 1) return false;
 
-        using AesGcm candidate = CreateCipher(_masterSecret, _clientToServer, epoch);
+        AesGcm candidate = _nextCipher ??
+            throw new InvalidOperationException("The next security epoch cipher was not prepared.");
         Span<byte> nonce = stackalloc byte[NetworkSecureDatagramFraming.NonceBytes];
         NetworkSecureDatagramFraming.WriteNonce(epoch, packet, nonce);
         try
@@ -179,7 +188,15 @@ internal sealed class NetworkDirectionalCryptography : IDisposable
     public void Dispose()
     {
         _cipher.Dispose();
+        _nextCipher?.Dispose();
         CryptographicOperations.ZeroMemory(_masterSecret);
+    }
+
+    private AesGcm? CreateNextCipher()
+    {
+        if (_epoch == uint.MaxValue) return null;
+        _cipherDerivations++;
+        return CreateCipher(_masterSecret, _clientToServer, new SecurityEpoch(_epoch + 1));
     }
 
     private static AesGcm CreateCipher(ReadOnlySpan<byte> masterSecret, bool clientToServer, SecurityEpoch epoch)

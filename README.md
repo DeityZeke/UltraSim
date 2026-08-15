@@ -13,8 +13,9 @@ Admission/CharacterSelect/Inventory application vertical, N0.5's connected-UDP
 transport/session path, N0.6's bounded controlled-input/owner-state vertical,
 N0.7's maintained AOI/pending/application-knowledge vertical, and N0.8's atomic
 baseline/recovery/generation-replacement vertical are implemented. N0.9 now
-accepts the integrated OfflineDirect/secure-loopback/UDP/listen-host vertical,
-including retained application Events and durable generation replacement.
+accepts the hardened integrated OfflineDirect/secure-loopback/UDP/listen-host
+vertical, including multi-consumer retained application Events, reliable
+baseline cancellation, exact WorldState parity, and durable generation replacement.
 N0.10 scale and measured specialization is next.
 
 ## Design

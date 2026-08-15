@@ -25,6 +25,7 @@ internal static class N03ProtocolTests
         Run("AuthenticatedRegionsRejectWithoutStatePublication", AuthenticatedRegionsRejectWithoutStatePublication);
         Run("ReceiveBackpressureRetainsReliableMessage", ReceiveBackpressureRetainsReliableMessage);
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
+        Run("HostileNextEpochProbesReuseOnePreparedCipher", HostileNextEpochProbesReuseOnePreparedCipher);
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
         Run("InboundBudgetCannotStarveOutboundControl", InboundBudgetCannotStarveOutboundControl);
         Run("AbortiveShutdownIsBalancedAndIdempotent", AbortiveShutdownIsBalancedAndIdempotent);
@@ -489,6 +490,37 @@ internal static class N03ProtocolTests
         Equal(new SecurityEpoch(2), loopback.Client.GetSnapshot().ReceiveSecurityEpoch);
         Equal(new SecurityEpoch(2), loopback.Server.GetSnapshot().SendSecurityEpoch);
         Equal(new SecurityEpoch(2), loopback.Server.GetSnapshot().ReceiveSecurityEpoch);
+    }
+
+    private static void HostileNextEpochProbesReuseOnePreparedCipher()
+    {
+        Span<byte> secret = stackalloc byte[32];
+        RandomNumberGenerator.Fill(secret);
+        using var cryptography = new NetworkDirectionalCryptography(
+            secret, clientToServer: true, new SecurityEpoch(1));
+        CryptographicOperations.ZeroMemory(secret);
+        ulong prepared = cryptography.CipherDerivations;
+        Span<byte> plaintext = stackalloc byte[1];
+        Span<byte> ciphertext = stackalloc byte[1];
+        Span<byte> tag = stackalloc byte[NetworkSecureDatagramFraming.TagBytes];
+        Span<byte> associated = stackalloc byte[NetworkSecureDatagramFraming.HeaderBytes];
+        for (ulong packet = 1; packet <= 1_000; packet++)
+        {
+            False(cryptography.TryDecryptAtEpoch(
+                new SecurityEpoch(2), new PacketNumber(packet), ciphertext, tag,
+                plaintext, associated, out bool advanced));
+            False(advanced);
+        }
+        Equal(prepared, cryptography.CipherDerivations);
+        Equal(new SecurityEpoch(1), cryptography.Epoch);
+
+        Span<byte> exhaustedSecret = stackalloc byte[32];
+        RandomNumberGenerator.Fill(exhaustedSecret);
+        using var exhausted = new NetworkDirectionalCryptography(
+            exhaustedSecret, clientToServer: true, new SecurityEpoch(uint.MaxValue));
+        CryptographicOperations.ZeroMemory(exhaustedSecret);
+        False(exhausted.TryAdvanceTo(new SecurityEpoch(uint.MaxValue)));
+        Equal(1UL, exhausted.CipherDerivations);
     }
 
     private static void ProtocolCapacitiesRejectTransactionally()
