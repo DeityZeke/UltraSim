@@ -52,6 +52,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     private ulong _operationsApplied;
     private ulong _duplicateOperations;
     private ulong _rejectedOperations;
+    private IRemoteGameProtocolHandler? _additionalHandler;
     private bool _disposed;
 
     public RemoteUiClientBridge(
@@ -73,6 +74,17 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
     }
 
     public UiClientRuntime Client => _client;
+
+    /// <summary>Binds one additional authenticated client-projection consumer.</summary>
+    public void BindProtocolHandler(IRemoteGameProtocolHandler handler)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_additionalHandler is not null)
+            throw new InvalidOperationException(
+                "The remote client bridge already has an additional protocol handler.");
+        _additionalHandler = handler;
+    }
 
     public bool TryBeginAuthentication(ulong attemptId, string provider, string credential)
     {
@@ -153,6 +165,7 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
         _state = RemoteClientApplicationState.Detached;
         _client.DetachActionSink(this);
         _client.Dispose();
+        _additionalHandler = null;
         Array.Clear(_semanticScratch);
         Array.Clear(_messageScratch);
     }
@@ -170,10 +183,12 @@ public sealed class RemoteUiClientBridge : IUiActionSink, IDisposable
             ProcessDetach(payload);
             return;
         }
-        if (id != RemoteUiOperationHeaderCodec.Descriptor.Id ||
-            _state != RemoteClientApplicationState.Active)
+        if (_state != RemoteClientApplicationState.Active)
             return;
-        ProcessUiOperation(payload);
+        if (id == RemoteUiOperationHeaderCodec.Descriptor.Id)
+            ProcessUiOperation(payload);
+        else
+            _ = _additionalHandler?.TryProcess(in message, payload);
     }
 
     private void ProcessAuthenticationResult(ReadOnlySpan<byte> payload)

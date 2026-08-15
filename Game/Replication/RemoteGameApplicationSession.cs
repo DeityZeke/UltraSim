@@ -54,6 +54,7 @@ public sealed class RemoteGameApplicationSession : IDisposable
     private RemoteAuthenticationResultMessage _authenticationResult;
     private ulong _authenticationAttempt;
     private ulong _messagesProcessed;
+    private IRemoteGameProtocolHandler? _additionalHandler;
     private bool _disposed;
 
     public RemoteGameApplicationSession(
@@ -87,6 +88,17 @@ public sealed class RemoteGameApplicationSession : IDisposable
 
     /// <summary>Reports an unexpected application-authentication implementation failure.</summary>
     public event Action<Exception>? ApplicationFaulted;
+
+    /// <summary>Binds one additional authenticated game-protocol consumer.</summary>
+    public void BindProtocolHandler(IRemoteGameProtocolHandler handler)
+    {
+        EnsureOperational();
+        ArgumentNullException.ThrowIfNull(handler);
+        if (_additionalHandler is not null)
+            throw new InvalidOperationException(
+                "The remote application session already has an additional protocol handler.");
+        _additionalHandler = handler;
+    }
 
     /// <summary>Drains delivered application messages without exposing them to Network policy.</summary>
     public int ProcessReceived()
@@ -145,6 +157,7 @@ public sealed class RemoteGameApplicationSession : IDisposable
         if (_state != RemoteServerApplicationState.Detached)
             Disconnect();
         _disposed = true;
+        _additionalHandler = null;
         PresentationFaulted = null;
         ApplicationFaulted = null;
         Array.Clear(_messageScratch);
@@ -166,6 +179,10 @@ public sealed class RemoteGameApplicationSession : IDisposable
         else if (message.MessageId == RemoteUiApplyResultMessageCodec.Descriptor.Id)
         {
             _ = _ui.TryProcessApplyResult(payload);
+        }
+        else
+        {
+            _ = _additionalHandler?.TryProcess(in message, payload);
         }
     }
 

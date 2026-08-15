@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using UltraSim.ECS;
 using UltraSim.Game.Accounting;
+using UltraSim.Game.Composition;
 using UltraSim.Game.Persistence;
 using UltraSim.Server.Persistence;
 using UltraSim.Server.Runtime;
@@ -13,6 +14,7 @@ var tests = new (string Name, Action Body)[]
     ("AccountingArtifactBoundsAndCanonicalEncodingAreStrict", AccountingArtifactBoundsAndCanonicalEncodingAreStrict),
     ("DuplicateDurableCharacterLinkIsRejected", DuplicateDurableCharacterLinkIsRejected),
     ("ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState", ClockArtifactUsesFrequencyIndependentTimeAndReadsExactLegacyState),
+    ("SimulationStateVersionOneRestoresWithDefaultVelocity", SimulationStateVersionOneRestoresWithDefaultVelocity),
     ("RealRuntimeSaveLoadPublishesEcsAndAccountingTogether", RealRuntimeSaveLoadPublishesEcsAndAccountingTogether),
     ("SaveRestoreRecaptureIsCanonical", SaveRestoreRecaptureIsCanonical),
     ("MissingCharacterEntityLeavesActiveGenerationUntouched", MissingCharacterEntityLeavesActiveGenerationUntouched),
@@ -30,6 +32,57 @@ foreach ((string name, Action body) in tests)
 }
 
 Console.WriteLine($"All {tests.Length} S0.6 Game Persistence tests passed.");
+
+static void SimulationStateVersionOneRestoresWithDefaultVelocity()
+{
+    const string key = "game.activity.simulation-state";
+    var oldFingerprint = new PersistenceSchemaFingerprint(
+        0xd73d4f0c721df04fUL, 0xb58fc0d39daa8237UL);
+    ComponentSchema oldSchema = ComponentSchema.Create(new SchemaId(0x700602, 1),
+    [
+        ComponentRegistration.Create<GameSimulationState>(
+            new ComponentId(0), key, StableHash64.Compute(key), version: 1,
+            ComponentFlags.Persistent, persistenceId: 700602,
+            ComponentPersistenceMode.Value),
+    ]);
+    PersistenceCatalog oldCatalog = new PersistenceCatalogBuilder(oldSchema)
+        .Register<GameSimulationState>(oldFingerprint, new GameSimulationStateV1Codec())
+        .Build();
+    using var source = new EcsWorld(oldSchema, UltraSimGameComposition.CreateWorldOptions(
+        64, new PersistenceIdentityOptions(new PersistentWorldId(0x700602))));
+    ArchetypeHandle shape = source.RegisterArchetype(
+        [new ComponentId(0)], ChunkLayoutOptions.KiB16, maximumChunks: 1);
+    ComponentLookup<GameSimulationState> sourceLookup = source.PrepareLookup<GameSimulationState>();
+    source.Seal();
+    source.Initialize();
+    source.BeginRun();
+    Assert.True(source.TryCreate(shape, out Entity entity));
+    Assert.True(source.TryWrite(entity, sourceLookup,
+        new GameSimulationState { TickMarker = 41, InputVelocity = 777 }));
+    PersistenceSnapshotArtifact artifact = EcsPersistence.Capture(
+        source, oldCatalog, new PersistenceCaptureOptions(1), out _);
+
+    var composition = new UltraSimGameComposition();
+    var options = new PersistenceRestoreOptions(
+        PersistenceLimits.ServerDefault, ChunkLayoutOptions.KiB16);
+    PersistenceRestorePlan plan = EcsPersistenceRestore.Preflight(
+        artifact.Bytes, composition.PersistenceCatalog, options);
+    ComponentLookup<GameSimulationState> restoredLookup = default;
+    using EcsWorld restored = plan.Restore(requirements =>
+    {
+        var world = new EcsWorld(requirements.Schema,
+            UltraSimGameComposition.CreateWorldOptions(
+                Math.Max(64, requirements.EntityCount), requirements.IdentityOptions));
+        restoredLookup = world.PrepareLookup<GameSimulationState>();
+        return world;
+    }, out PersistenceRestoreReport report);
+
+    Assert.Equal(1, report.MigratedComponentCount);
+    Assert.True(restored.TryGetEntity(0, out Entity restoredEntity));
+    Assert.True(restored.TryRead(restoredEntity, restoredLookup, out GameSimulationState state));
+    Assert.Equal(41, state.TickMarker);
+    Assert.Equal(0, state.InputVelocity);
+}
 
 static void AccountingArtifactIsDeterministic()
 {
@@ -778,6 +831,26 @@ sealed class PersistedValueCodec : IPersistenceComponentCodec<PersistedValue>, I
     {
         for (int index = 0; index < values.Length; index++)
             values[index].Value = BinaryPrimitives.ReadInt32LittleEndian(source[(index * sizeof(int))..]);
+    }
+}
+
+sealed class GameSimulationStateV1Codec : IPersistenceComponentCodec<GameSimulationState>
+{
+    public int EncodedSize => sizeof(int);
+
+    public void Encode(
+        in GameSimulationState value,
+        Span<byte> destination,
+        PersistenceWriteContext context) =>
+        BinaryPrimitives.WriteInt32LittleEndian(destination, value.TickMarker);
+
+    public void Decode(
+        ReadOnlySpan<byte> source,
+        ref GameSimulationState value,
+        PersistenceReadContext context)
+    {
+        value.TickMarker = BinaryPrimitives.ReadInt32LittleEndian(source);
+        value.InputVelocity = 0;
     }
 }
 

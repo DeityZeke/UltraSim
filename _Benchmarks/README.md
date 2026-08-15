@@ -38,14 +38,16 @@ when those systems exist.
 | `UltraSim.Network.ProtocolBenchmarks` | N0.3 secure unreliable/reliable delivery, 4 KiB fragmentation, and deterministic impairment convergence. |
 | `UltraSim.Network.Application.Tests --benchmark` | N0.4 paired OfflineDirect/secure-ProtocolLoopback real Admission/UI workflow and established Inventory interaction evidence. |
 | `UltraSim.Network.Application.Tests --benchmark-udp` | N0.5 paired secure ProtocolLoopback/real localhost UDP run of the exact N0.4 application workflow and established Inventory interaction. |
+| `UltraSim.Network.Application.Tests --benchmark-n06` | N0.6 paired ProtocolLoopback/localhost UDP complete controlled-input, authority-tick, owner-state, and client-reconciliation cycle. |
 
 The corresponding executable tests under `_Tests` validate comparison catalogs,
 bitmap semantics, persistence, and benchmark invariants.
 
 Network N0.1 adds game-projection/OfflineDirect evidence, N0.2 adds fixed-runtime
 kernel micro evidence, N0.3 adds a standalone secure ProtocolLoopback baseline,
-N0.4 adds application-level semantic parity and interaction evidence, and N0.5
-changes only byte transport/session ownership while retaining that oracle.
+N0.4 adds application-level semantic parity and interaction evidence, N0.5
+changes only byte transport/session ownership while retaining that oracle, and
+N0.6 adds a continuous one-owner input/state/reconciliation profile.
 None is mislabeled as a V2/V3 protocol ratio. Ratios become eligible only when an
 equivalent reviewed profile exists.
 
@@ -61,6 +63,9 @@ dotnet run --project _Benchmarks/UltraSim.ECS.SimulationSlice0 -c Release -- --m
 dotnet run --project _Benchmarks/UltraSim.Game.ReplicationBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
+DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
+  dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release -- \
+    --benchmark-n06 --output _Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-2026-08-14.json
 ```
 
 Each executable's `--help`/argument parser is the source of truth for filters,

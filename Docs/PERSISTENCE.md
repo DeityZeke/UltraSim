@@ -72,6 +72,12 @@ generation lease has ended. Existing admission/UI sessions rebind by durable
 identity or detach; generation-local `Entity` values are never silently carried
 forward.
 
+Persistent game component changes follow the same explicit version rule. N0.6
+advanced `GameSimulationState` to version 2 when it added `InputVelocity`; the
+catalog's direct v1 reader restores the former tick-marker payload and defaults
+the new velocity to zero. The compatibility path is executable evidence, not a
+same-version reinterpretation of wider bytes.
+
 Restore starts with clean change/lifecycle observation rather than fabricating a
 gameplay-wide creation storm.
 

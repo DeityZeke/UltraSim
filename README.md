@@ -8,10 +8,10 @@ Inventory, and the completed S0 end-to-end integration slice.
 
 Network V3 is the active major implementation milestone. N0.0's contracts,
 N0.1's canonical game projection/OfflineDirect oracle, N0.2's bounded byte/kernel
-foundation, N0.3's secure reliable ProtocolLoopback, and N0.4's remote
-Admission/CharacterSelect/Inventory application vertical are implemented. N0.5's
-real connected-UDP transport/session path is also implemented; authoritative
-input and replicated world state are next at N0.6.
+foundation, N0.3's secure reliable ProtocolLoopback, N0.4's remote
+Admission/CharacterSelect/Inventory application vertical, N0.5's connected-UDP
+transport/session path, and N0.6's bounded controlled-input/owner-state vertical
+are implemented. AOI, recipient scheduling, and fanout are next at N0.7.
 
 ## Design
 
@@ -48,7 +48,8 @@ per-step behavior is an explicit documented choice.
 - `Kernels/Network*` — dependency-clean identity/lane contracts, fixed connection
   and packet ownership, generated codecs/manifests, canonical framing, and
   deterministic datagrams plus secure reliable ProtocolLoopback and connected
-  owner-thread UDP transport.
+  owner-thread UDP transport. Game-owned adapters above it now carry bounded
+  redundant input and revisioned owner state without transferring authority.
 - `Kernels/UI` — neutral definitions, models, deltas, actions, semantic port,
   and bounded transport-independent semantic wire codec.
 - `Server/*` — authority lifecycle, hosts, and durable save-set coordination.

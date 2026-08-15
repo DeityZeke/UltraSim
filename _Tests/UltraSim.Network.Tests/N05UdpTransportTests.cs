@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using UltraSim.Network;
 
 internal static class N05UdpTransportTests
@@ -15,6 +16,10 @@ internal static class N05UdpTransportTests
         Run("RealUdpHandshakeAndReliableDelivery", RealUdpHandshakeAndReliableDelivery);
         Run("UdpPinnedIdentityAndConnectedPathRejectSpoofing", UdpPinnedIdentityAndConnectedPathRejectSpoofing);
         Run("UdpDrainPreservesAdmittedReliableDelivery", UdpDrainPreservesAdmittedReliableDelivery);
+        Run("UdpDrainRejectsNewApplicationWork", UdpDrainRejectsNewApplicationWork);
+        Run("UdpTimersAreDeterministic", UdpTimersAreDeterministic);
+        Run("UdpNonzeroPacingBranchDefersSecondPacket", UdpNonzeroPacingBranchDefersSecondPacket);
+        Run("UdpCookieAcceptsPreviousBucketAndRejectsExpiredBucket", UdpCookieAcceptsPreviousBucketAndRejectsExpiredBucket);
         Run("UdpAbruptPeerLossAndOutstandingShutdownAreBalanced", UdpAbruptPeerLossAndOutstandingShutdownAreBalanced);
         Run("FreshUdpReconnectOwnsFreshPathAndSecurity", FreshUdpReconnectOwnsFreshPathAndSecurity);
         Run("UdpPreAuthenticationFailureDoesNotLeakCapacity", UdpPreAuthenticationFailureDoesNotLeakCapacity);
@@ -73,6 +78,123 @@ internal static class N05UdpTransportTests
         Drive(session, () => session.State == UdpProtocolSessionState.Closed);
         AssertReceive(session.Client, payload);
         Equal(0, session.Server.ReliableQueued);
+    }
+
+    private static void UdpDrainRejectsNewApplicationWork()
+    {
+        using UdpProtocolSession session = Create();
+        Equal(NetworkQueueStatus.Accepted,
+            session.Server.TryQueue(s_probe, stackalloc byte[] { 1 }));
+        session.BeginDrain();
+        Equal(NetworkQueueStatus.NotAccepting,
+            session.Server.TryQueue(s_probe, stackalloc byte[] { 2 }));
+        Equal(NetworkQueueStatus.NotAccepting,
+            session.Client.TryQueue(s_probe, stackalloc byte[] { 3 }));
+        Drive(session, () => session.State == UdpProtocolSessionState.Closed);
+        AssertReceive(session.Client, stackalloc byte[] { 1 });
+        Equal(NetworkQueueStatus.NotAccepting,
+            session.Server.TryQueue(s_probe, stackalloc byte[] { 4 }));
+    }
+
+    private static void UdpTimersAreDeterministic()
+    {
+        var clock = new ManualClock();
+        UdpProtocolLimits limits = s_udp with
+        {
+            CookieBucketMilliseconds = 10,
+            KeepAliveIntervalMilliseconds = 10,
+            IdleTimeoutMilliseconds = 25,
+            DrainTimeoutMilliseconds = 5,
+        };
+        using UdpProtocolSession session = Create(clock, limits);
+        ulong received = session.GetSnapshot().Client.ReceivedPackets +
+            session.GetSnapshot().Server.ReceivedPackets;
+        for (int interval = 0; interval < 3; interval++)
+        {
+            clock.Advance(10);
+            session.Pump();
+            session.Pump();
+        }
+        UdpProtocolSessionSnapshot alive = session.GetSnapshot();
+        Equal(UdpProtocolSessionState.Established, alive.State);
+        True(alive.Client.ReceivedPackets + alive.Server.ReceivedPackets > received,
+            "Authenticated keepalive traffic did not refresh the idle lifetime.");
+
+        session.SuppressOutboundDatagramsForTesting(true);
+        clock.Advance(25);
+        session.Pump();
+        Equal(UdpProtocolSessionState.Closed, session.State,
+            "Lack of authenticated receive activity did not reach the idle/drain policy.");
+    }
+
+    private static void UdpNonzeroPacingBranchDefersSecondPacket()
+    {
+        var clock = new ManualClock();
+        UdpProtocolLimits limits = s_udp with
+        {
+            KeepAliveIntervalMilliseconds = 1_000,
+            IdleTimeoutMilliseconds = 5_000,
+        };
+        NetworkProtocolLimits protocol = s_protocol with
+        {
+            MinimumRetransmissionSteps = 100,
+            MaximumRetransmissionSteps = 1_000,
+        };
+        using UdpProtocolSession session = Create(clock, limits, protocol);
+        Equal(NetworkQueueStatus.Accepted,
+            session.Client.TryQueue(s_probe, stackalloc byte[] { 7 }));
+        session.Pump(); // emit at t=0
+        clock.Advance(50); // below RTO, above CWND for nonzero pacing
+        session.Pump(); // server admits and emits ACK
+        session.Pump(); // client publishes the deterministic monotonic RTT sample
+        NetworkProtocolSnapshot timed = session.GetSnapshot().Client;
+        True(timed.SmoothedRoundTripSteps != 0,
+            $"The timed acknowledgement did not publish an RTT sample: {timed}.");
+
+        Equal(NetworkQueueStatus.Accepted,
+            session.Client.TryQueue(s_probe, stackalloc byte[] { 8 }));
+        Equal(NetworkQueueStatus.Accepted,
+            session.Client.TryQueue(s_probe, stackalloc byte[] { 9 }));
+        ulong before = session.GetSnapshot().ClientDatagrams.Sent;
+        session.Pump();
+        ulong afterFirst = session.GetSnapshot().ClientDatagrams.Sent;
+        Equal(before + 1, afterFirst,
+            "The nonzero pacing branch did not stop after one admitted data packet.");
+        session.Pump();
+        Equal(afterFirst, session.GetSnapshot().ClientDatagrams.Sent,
+            "A second packet escaped before the monotonic pacing deadline.");
+        clock.Advance(timed.SmoothedRoundTripSteps);
+        session.Pump();
+        True(session.GetSnapshot().ClientDatagrams.Sent > afterFirst,
+            "The paced packet did not become eligible after its deadline.");
+    }
+
+    private static void UdpCookieAcceptsPreviousBucketAndRejectsExpiredBucket()
+    {
+        True(TryHandshakeWithBucketTransition(expired: false),
+            "The immediately previous cookie bucket should remain valid.");
+        False(TryHandshakeWithBucketTransition(expired: true),
+            "A cookie older than the current/previous bucket was accepted.");
+    }
+
+    private static bool TryHandshakeWithBucketTransition(bool expired)
+    {
+        UdpDatagramEndpoint.CreateConnectedLoopbackPair(s_udp, out UdpDatagramEndpoint client,
+            out UdpDatagramEndpoint server);
+        using (client)
+        using (server)
+        using (var identity = NetworkServerIdentity.CreateEphemeral())
+        {
+            int calls = 0;
+            ulong Bucket() => calls++ == 0 ? 10UL : expired ? 12UL : 11UL;
+            bool established = ProtocolLoopbackHandshake.TryEstablishUdp(
+                client, server, s_udp.MaximumDatagramBytes, Bucket,
+                server.RemotePathBinding, CoreNetworkProtocol.Manifest,
+                CoreNetworkProtocol.Manifest, identity, identity.PublicKey,
+                maximumPumps: expired ? 64 : 4_096, out ProtocolHandshakeResult result);
+            if (established) CryptographicOperations.ZeroMemory(result.MasterSecret);
+            return established;
+        }
     }
 
     private static void UdpAbruptPeerLossAndOutstandingShutdownAreBalanced()
@@ -177,6 +299,16 @@ internal static class N05UdpTransportTests
         return session!;
     }
 
+    private static UdpProtocolSession Create(
+        ManualClock clock,
+        UdpProtocolLimits limits,
+        NetworkProtocolLimits? protocol = null)
+    {
+        True(UdpProtocolSession.TryCreateForTesting(
+            protocol ?? s_protocol, limits, clock, out UdpProtocolSession? session, out _));
+        return session!;
+    }
+
     private static void Drive(UdpProtocolSession session, Func<bool> complete, int maximumPumps = 10_000)
     {
         for (int pump = 0; pump < maximumPumps; pump++)
@@ -212,5 +344,13 @@ internal static class N05UdpTransportTests
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
             throw new InvalidOperationException(message ?? $"Expected '{expected}', got '{actual}'.");
+    }
+
+    private sealed class ManualClock : INetworkMonotonicClock
+    {
+        public ulong Milliseconds { get; private set; }
+
+        internal void Advance(ulong milliseconds) =>
+            Milliseconds = checked(Milliseconds + milliseconds);
     }
 }

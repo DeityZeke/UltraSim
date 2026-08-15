@@ -106,6 +106,14 @@ public sealed class ServerGameFacet
         _runtime.TryCapturePersistentClockState(out state);
 
     /// <summary>
+    /// Captures authoritative time together with current host cadence for
+    /// revisioned replication anchors. This is diagnostic/replication state,
+    /// not a durable-host-policy contract.
+    /// </summary>
+    public bool TryCaptureClockSnapshot(out WorldClockSnapshot snapshot) =>
+        _runtime.TryCaptureClockSnapshot(out snapshot);
+
+    /// <summary>
     /// Publishes a fully prepared ECS world and opaque game-owned state through
     /// the same active generation root used by normal Runtime replacements.
     /// </summary>

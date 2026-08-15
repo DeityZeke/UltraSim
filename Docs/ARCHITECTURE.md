@@ -107,6 +107,7 @@ derived/application indexes when their ownership and scale are explicit.
 Network V3 is the active major layer. N0.0 evidence, N0.1 game-owned canonical
 projection/OfflineDirect, N0.2 bounded byte foundations, N0.3 secure reliable
 ProtocolLoopback, and N0.4 remote Admission/UI application binding are implemented.
-N0.5 real connected-UDP transport/session ownership is also implemented. N0.6
-authoritative input and replicated world state is next. The remaining checkpoints are in
+N0.5 real connected-UDP transport/session ownership and N0.6 bounded
+controlled-input/owner-state replication are also implemented. N0.7 AOI,
+recipient scheduling, and fanout are next. The remaining checkpoints are in
 [`Plans/NETWORK.md`](Plans/NETWORK.md).

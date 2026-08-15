@@ -291,6 +291,7 @@ public sealed class AdmissionService : IDisposable
             TrustedIdentity = trustedIdentity,
             GenerationId = selection.GenerationId,
             CharacterSelectView = view,
+            CharacterSelectModel = model,
         };
         _sessions.Add(participant, session);
         _characterSelectViews.Add(view, participant);
@@ -351,6 +352,7 @@ public sealed class AdmissionService : IDisposable
             UiViewInstanceId oldView = session.CharacterSelectView;
             _characterSelectViews.Remove(oldView);
             session.CharacterSelectView = UiViewInstanceId.Invalid;
+            session.CharacterSelectModel = null;
             if (!TryReleaseView(oldView, out Exception? releaseFailure))
             {
                 return RejectExisting(session, AdmissionRejection.UiUnavailable,
@@ -394,6 +396,7 @@ public sealed class AdmissionService : IDisposable
         session.Stage = AdmissionStage.WaitingForCharacter;
         session.GenerationId = selection.GenerationId;
         session.CharacterSelectView = view;
+        session.CharacterSelectModel = model;
         session.Rejection = AdmissionRejection.None;
         session.Message = null;
         _characterSelectViews.Add(view, participant);
@@ -455,12 +458,12 @@ public sealed class AdmissionService : IDisposable
             return;
         if (!_sessions.TryGetValue(participant, out Session? session))
             return;
-        if (request.Definition != CharacterSelectUi.Definition.Handle ||
-            request.Action != CharacterSelectUi.Play ||
-            !request.Row.IsValid)
+        if (session.CharacterSelectModel is null ||
+            !session.CharacterSelectModel.TryValidateAction(request))
         {
-            RejectExisting(session, AdmissionRejection.InvalidCharacterSelectAction,
-                "The CharacterSelect action was not a valid Play row action.");
+            // Structurally valid remote input is still untrusted semantic intent.
+            // Reject it before Accounting/ECS authority while keeping the retained
+            // selector usable for a later well-formed action.
             return;
         }
         CharacterId characterId;
@@ -539,6 +542,7 @@ public sealed class AdmissionService : IDisposable
         UiViewInstanceId completedView = session.CharacterSelectView;
         _characterSelectViews.Remove(completedView);
         session.CharacterSelectView = UiViewInstanceId.Invalid;
+        session.CharacterSelectModel = null;
         if (!TryReleaseView(completedView, out Exception? releaseFailure))
             NotifyPresentationFault(releaseFailure!);
         NotifyObservers(Entered, session.Snapshot());
@@ -652,6 +656,7 @@ public sealed class AdmissionService : IDisposable
             UiViewInstanceId rejectedView = session.CharacterSelectView;
             _characterSelectViews.Remove(rejectedView);
             session.CharacterSelectView = UiViewInstanceId.Invalid;
+            session.CharacterSelectModel = null;
             if (!TryReleaseView(rejectedView, out Exception? releaseFailure))
                 NotifyPresentationFault(releaseFailure!);
         }
@@ -853,6 +858,8 @@ public sealed class AdmissionService : IDisposable
         public ulong GenerationId { get; set; }
 
         public UiViewInstanceId CharacterSelectView { get; set; }
+
+        public UiModel? CharacterSelectModel { get; set; }
 
         public AdmissionRejection Rejection { get; set; }
 

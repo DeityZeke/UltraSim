@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -6,12 +5,16 @@ using System.Security.Cryptography;
 namespace UltraSim.Network;
 
 /// <summary>Fixed socket/session bounds for one owner-thread localhost UDP topology.</summary>
+/// <remarks>
+/// <c>CookieBucketMilliseconds</c> is one rotating bucket duration. Validation accepts
+/// the current and immediately previous bucket, so maximum cookie age can approach twice it.
+/// </remarks>
 public readonly record struct UdpProtocolLimits(
     int MaximumDatagramBytes = 1_472,
     int SocketSendBufferBytes = 262_144,
     int SocketReceiveBufferBytes = 262_144,
     int MaximumHandshakePumps = 4_096,
-    int CookieLifetimeMilliseconds = 30_000,
+    int CookieBucketMilliseconds = 30_000,
     int IdleTimeoutMilliseconds = 30_000,
     int DrainTimeoutMilliseconds = 5_000,
     int KeepAliveIntervalMilliseconds = 5_000)
@@ -28,8 +31,8 @@ public readonly record struct UdpProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(SocketReceiveBufferBytes));
         if (MaximumHandshakePumps is <= 0 or > 1_048_576)
             throw new ArgumentOutOfRangeException(nameof(MaximumHandshakePumps));
-        if (CookieLifetimeMilliseconds is <= 0 or > 3_600_000)
-            throw new ArgumentOutOfRangeException(nameof(CookieLifetimeMilliseconds));
+        if (CookieBucketMilliseconds is <= 0 or > 3_600_000)
+            throw new ArgumentOutOfRangeException(nameof(CookieBucketMilliseconds));
         if (IdleTimeoutMilliseconds is <= 0 or > 86_400_000)
             throw new ArgumentOutOfRangeException(nameof(IdleTimeoutMilliseconds));
         if (DrainTimeoutMilliseconds <= 0 || DrainTimeoutMilliseconds > IdleTimeoutMilliseconds)
@@ -95,8 +98,9 @@ public sealed class UdpProtocolSession : IDisposable
     private readonly UdpDatagramEndpoint _clientEndpoint;
     private readonly UdpDatagramEndpoint _serverEndpoint;
     private readonly bool _ownsIdentity;
+    private readonly INetworkMonotonicClock _clock;
     private NetworkServerIdentity? _identity;
-    private readonly long _startedTimestamp;
+    private readonly ulong _startedMilliseconds;
     private ulong _lastActivity;
     private ulong _drainDeadline;
     private ulong _lastKeepAlive;
@@ -112,6 +116,7 @@ public sealed class UdpProtocolSession : IDisposable
         NetworkProtocolLimits protocolLimits,
         NetworkServerIdentity identity,
         bool ownsIdentity,
+        INetworkMonotonicClock clock,
         ProtocolHandshakeResult handshake)
     {
         _udpLimits = udpLimits;
@@ -120,7 +125,8 @@ public sealed class UdpProtocolSession : IDisposable
         _connections = handshake.Connections;
         _identity = identity;
         _ownsIdentity = ownsIdentity;
-        _startedTimestamp = Stopwatch.GetTimestamp();
+        _clock = clock;
+        _startedMilliseconds = clock.Milliseconds;
         Handshake = handshake.Snapshot;
         Connection = handshake.Connection;
         var datagramLimits = new DeterministicDatagramLimits(1, udpLimits.MaximumDatagramBytes);
@@ -152,8 +158,36 @@ public sealed class UdpProtocolSession : IDisposable
         NetworkProtocolManifest? manifest = null,
         NetworkServerIdentity? serverIdentity = null,
         ReadOnlyMemory<byte> trustedServerPublicKey = default,
-        NetworkProtocolManifest? serverManifest = null)
+        NetworkProtocolManifest? serverManifest = null) =>
+        TryCreateCore(protocolLimits, udpLimits, StopwatchNetworkMonotonicClock.Instance,
+            out session, out handshake, manifest, serverIdentity,
+            trustedServerPublicKey, serverManifest);
+
+    internal static bool TryCreateForTesting(
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        INetworkMonotonicClock clock,
+        out UdpProtocolSession? session,
+        out ProtocolHandshakeSnapshot handshake,
+        NetworkProtocolManifest? manifest = null,
+        NetworkServerIdentity? serverIdentity = null,
+        ReadOnlyMemory<byte> trustedServerPublicKey = default,
+        NetworkProtocolManifest? serverManifest = null) =>
+        TryCreateCore(protocolLimits, udpLimits, clock, out session, out handshake,
+            manifest, serverIdentity, trustedServerPublicKey, serverManifest);
+
+    private static bool TryCreateCore(
+        NetworkProtocolLimits protocolLimits,
+        UdpProtocolLimits udpLimits,
+        INetworkMonotonicClock clock,
+        out UdpProtocolSession? session,
+        out ProtocolHandshakeSnapshot handshake,
+        NetworkProtocolManifest? manifest,
+        NetworkServerIdentity? serverIdentity,
+        ReadOnlyMemory<byte> trustedServerPublicKey,
+        NetworkProtocolManifest? serverManifest)
     {
+        ArgumentNullException.ThrowIfNull(clock);
         udpLimits.Validate();
         var datagramLimits = new DeterministicDatagramLimits(1, udpLimits.MaximumDatagramBytes);
         protocolLimits.Validate(datagramLimits);
@@ -169,10 +203,8 @@ public sealed class UdpProtocolSession : IDisposable
         try
         {
             UdpDatagramEndpoint.CreateConnectedLoopbackPair(udpLimits, out client, out server);
-            long handshakeStart = Stopwatch.GetTimestamp();
-            ulong CookieBucket() => checked((ulong)(
-                (Stopwatch.GetTimestamp() - handshakeStart) * 1_000L /
-                Stopwatch.Frequency / udpLimits.CookieLifetimeMilliseconds));
+            ulong CookieBucket() => clock.Milliseconds /
+                checked((ulong)udpLimits.CookieBucketMilliseconds);
             if (!ProtocolLoopbackHandshake.TryEstablishUdp(
                     client, server, udpLimits.MaximumDatagramBytes, CookieBucket,
                     server.RemotePathBinding, manifest, serverManifest, serverIdentity,
@@ -190,7 +222,7 @@ public sealed class UdpProtocolSession : IDisposable
             DrainHandshakeResidue(client, server, udpLimits.MaximumDatagramBytes);
             session = new UdpProtocolSession(
                 udpLimits, client, server, manifest, serverManifest,
-                protocolLimits, serverIdentity, ownsIdentity, result);
+                protocolLimits, serverIdentity, ownsIdentity, clock, result);
             handshake = result.Snapshot;
             return true;
         }
@@ -298,17 +330,28 @@ public sealed class UdpProtocolSession : IDisposable
             BeginDrainCore(ElapsedMilliseconds);
     }
 
+    internal void SuppressOutboundDatagramsForTesting(bool suppress)
+    {
+        EnsureOperational();
+        _clientEndpoint.SuppressSendsForTesting = suppress;
+        _serverEndpoint.SuppressSendsForTesting = suppress;
+    }
+
     private ulong ElapsedMilliseconds
     {
         get
         {
-            long elapsed = Stopwatch.GetTimestamp() - _startedTimestamp;
-            return checked((ulong)(elapsed * 1_000L / Stopwatch.Frequency));
+            ulong current = _clock.Milliseconds;
+            if (current < _startedMilliseconds)
+                throw new InvalidOperationException("The network monotonic clock moved backward.");
+            return current - _startedMilliseconds;
         }
     }
 
     private void BeginDrainCore(ulong now)
     {
+        Client.StopAcceptingNewSends();
+        Server.StopAcceptingNewSends();
         _state = UdpProtocolSessionState.Draining;
         _drainDeadline = checked(now + (ulong)_udpLimits.DrainTimeoutMilliseconds);
         if (_connections.TryGetState(Connection, out NetworkConnectionState state) &&
@@ -356,6 +399,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
     private readonly int _maximumDatagramBytes;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private bool _disposed;
+    internal bool SuppressSendsForTesting { get; set; }
     private ulong _sent;
     private ulong _received;
     private ulong _capacityDrops;
@@ -416,6 +460,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
             _rejected++;
             return DatagramSendStatus.DatagramTooLarge;
         }
+        if (SuppressSendsForTesting) return DatagramSendStatus.DroppedByImpairment;
         try
         {
             if (_socket.Send(datagram, SocketFlags.None) != datagram.Length)

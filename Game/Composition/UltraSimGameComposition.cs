@@ -40,7 +40,11 @@ public sealed class UltraSimGameComposition : IServerComposition, IAdmissionEnti
         _maximumChunksPerContentArchetype = maximumChunksPerContentArchetype;
         _runtimeProfile = runtimeProfile;
         Schema = GameSchema.CreateSchema();
-        PersistenceCatalog = GameSchema.CreatePersistenceCatalog();
+        PersistenceCatalog = GameSchema.CreatePersistenceCatalog(static builder =>
+            builder.RegisterHistoricalReader<GameSimulationState>(
+                savedVersion: 1,
+                GameSimulationStateV1Reader.Fingerprint,
+                new GameSimulationStateV1Reader()));
     }
 
     public ComponentSchema Schema { get; }

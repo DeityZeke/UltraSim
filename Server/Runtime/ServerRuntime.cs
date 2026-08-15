@@ -221,6 +221,19 @@ public sealed class ServerRuntime : IDisposable
         return true;
     }
 
+    internal bool TryCaptureClockSnapshot(out WorldClockSnapshot snapshot)
+    {
+        EnsureOwnerThread();
+        if (_state != ServerRuntimeState.Running || _currentGeneration is null)
+        {
+            snapshot = default;
+            return false;
+        }
+        EnsureIdleOperation(nameof(TryCaptureClockSnapshot));
+        snapshot = _currentGeneration.Clock.CaptureSnapshot();
+        return true;
+    }
+
     /// <summary>Identity of the currently active authoritative generation.</summary>
     public ulong ActiveGenerationId
     {

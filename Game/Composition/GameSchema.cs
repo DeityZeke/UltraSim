@@ -14,10 +14,12 @@ public struct GameCharacter : IComponent<GameCharacter>
 /// Unrelated simulation component deliberately included in the one closed game
 /// schema so Inventory can never assume locally assigned component IDs.
 /// </summary>
-[EcsComponent("game.activity.simulation-state", PersistenceId = 700602)]
+[EcsComponent("game.activity.simulation-state", Version = 2, PersistenceId = 700602)]
 public struct GameSimulationState : IComponent<GameSimulationState>
 {
     public int TickMarker;
+    /// <summary>Step-relative diagnostic velocity controlled by N0.6 input.</summary>
+    public int InputVelocity;
 }
 
 [EcsSchema(

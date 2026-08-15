@@ -28,6 +28,8 @@ public enum GameSimulationCommandKind : byte
     AddSimulationState = 1,
     RemoveSimulationState = 2,
     RetireControlledEntity = 3,
+    /// <summary>Sets the controlled diagnostic velocity; zero is the explicit stop command.</summary>
+    SetInputVelocity = 4,
 }
 
 /// <summary>
@@ -126,7 +128,7 @@ internal sealed class GameSimulationCommandRuntime : IRangeSystemRuntime<GameSim
         {
             ref readonly GameSimulationCommand command = ref commands[index];
             if (!command.Participant.IsValid || !command.Entity.IsValid || command.ClientSequence == 0 ||
-                (uint)command.Kind > (uint)GameSimulationCommandKind.RetireControlledEntity)
+                (uint)command.Kind > (uint)GameSimulationCommandKind.SetInputVelocity)
                 return false;
         }
         commands.CopyTo(_commands.AsSpan(_count));
@@ -205,6 +207,16 @@ internal struct GameSimulationCommandJob : IRangeJob
                     break;
                 case GameSimulationCommandKind.RetireControlledEntity:
                     if (context.Commands.TryDestroy(command.Entity)) Applied++;
+                    else Rejected++;
+                    break;
+                case GameSimulationCommandKind.SetInputVelocity:
+                    if (!context.TryRead(command.Entity, _simulation, out GameSimulationState velocityState))
+                    {
+                        Rejected++;
+                        break;
+                    }
+                    velocityState.InputVelocity = command.TickMarkerDelta;
+                    if (context.TryWrite(command.Entity, _simulation, velocityState)) Applied++;
                     else Rejected++;
                     break;
                 default:

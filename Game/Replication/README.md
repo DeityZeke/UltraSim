@@ -3,7 +3,8 @@
 Status: Network N0.1 canonical projection/capture and OfflineDirect oracle accepted.
 N0.3 secure reliable ProtocolLoopback is accepted below this layer; N0.4 remote
 application binding is accepted beside it. N0.5 carries the same binding over
-real connected localhost UDP; N0.6 input/state and N0.7 recipient scheduling remain.
+real connected localhost UDP. N0.6 adds bounded authoritative input, revisioned
+clock anchors, and one complete owner-state stream; N0.7 recipient scheduling remains.
 
 Same-generation projection repair and authoritative generation replacement are
 different boundaries. Replacement creates a new `StateEpoch`, resets canonical
@@ -163,3 +164,47 @@ UI trace, and eventual client model for Play, Split (`Update + Add`), Equip
 (`Remove`), cold close, and exact hot reopen. Loss, duplication, corruption,
 reordering, unauthenticated traffic, duplicated actions, post-commit presentation
 failure, disconnect, and reconnect are permanent gates.
+
+## N0.6 controlled simulation vertical
+
+`RemoteControlledSimulationServer` translates one authenticated participant's
+bounded input bundles into the existing game-owned authoritative ingress. It
+validates application epoch, projection epoch, strictly increasing input sequence,
+target-tick bounds, and authoritative-world-time expiry before publication. A
+processed-input sequence advances for every semantically handled sample, including
+intentional rejection, so a client can retire expired or capacity-rejected intent
+without confusing processing with authoritative correction.
+
+The client repeats up to three newest unprocessed samples. This is bounded
+redundancy, not reliable event delivery: intermediate facts that must occur use a
+reliable application Event contract. The accepted control input is latest
+`InputVelocity`; the delta command remains a narrow ingress/parity probe.
+
+After each complete Runtime step, the server captures canonical projection and
+queues one complete superseding owner-state sample. The sample uses the
+connection-independent `ReplicationEntityId`; the client maps that to its private
+dense generational `ClientEntitySlot`. Tombstones prevent same-generation
+resurrection, and replication-slot reuse advances the client-local generation.
+
+Cadence/time interpretation is separate reliable Control state. A clock anchor
+declares `ClockRevision`, effective simulation tick, exact frequency, and fixed-
+point authoritative time. Owner state names its revision and is staged if that
+anchor has not arrived yet. The permanent cadence test proves 60→30→60 changes at
+the declared tick without changing the meaning of scheduler `PeriodTicks`.
+
+The focused gates cover loss/duplication/reordering, lost-stop recovery, stale,
+duplicate, expired and future input, independent processing acknowledgement and
+correction, prior-epoch state, entity retirement/reuse, Control/OwnerState
+reordering, exact ProtocolLoopback/UDP authority and client parity, and warmed
+zero caller allocation. N0.6 deliberately has one participant, one controlled
+entity, and one complete owner-state family. Per-recipient AOI, observer/world
+state, pending newest versions, and fanout belong to N0.7.
+
+Adding `InputVelocity` advanced persistent `GameSimulationState` to schema version
+2. The game persistence catalog includes a direct v1 tick-marker reader that
+defaults velocity to zero, and a permanent restore test proves accepted pre-N0.6
+saves remain compatible rather than silently reinterpreting the wider payload.
+
+Accepted paired evidence for one complete input→authority tick→projection→client
+reconciliation cycle is preserved in
+[`network-n0.6-controlled-input-owner-state-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-2026-08-14.json).

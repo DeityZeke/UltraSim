@@ -10,6 +10,8 @@ public enum NetworkQueueStatus : byte
     MessageTooLarge = 2,
     InvalidDescriptor = 3,
     SequenceExhausted = 4,
+    /// <summary>The owning transport lifetime no longer admits new application sends.</summary>
+    NotAccepting = 5,
 }
 
 public readonly record struct NetworkDeliveredMessage(
@@ -234,6 +236,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _nextLossDeadlineCount;
     private readonly bool _usesMonotonicPacing;
     private ulong _nextPacedDataStep;
+    private bool _acceptsNewSends = true;
     private bool _disposed;
 
     internal NetworkProtocolPeer(
@@ -287,6 +290,7 @@ public sealed class NetworkProtocolPeer : IDisposable
     public NetworkQueueStatus TryQueue(NetworkMessageId messageId, ReadOnlySpan<byte> payload)
     {
         EnsureOperational();
+        if (!_acceptsNewSends) return NetworkQueueStatus.NotAccepting;
         if (!_manifest.TryGet(messageId, out NetworkMessageDescriptor descriptor, out int messageSlot))
             return NetworkQueueStatus.InvalidDescriptor;
         if (payload.Length > descriptor.MaximumEncodedBytes || payload.Length > _limits.MaximumMessageBytes)
@@ -385,6 +389,16 @@ public sealed class NetworkProtocolPeer : IDisposable
         !_disposed && _reliableCount == 0 && _inFlight == 0 && _sendCryptography.Epoch.Value != uint.MaxValue;
 
     internal ulong ReceivedPacketCount => _receivedPacketsCount;
+
+    /// <summary>
+    /// Closes new application admission while retaining ACK/retransmission work
+    /// already owned by this protocol peer.
+    /// </summary>
+    internal void StopAcceptingNewSends()
+    {
+        EnsureOperational();
+        _acceptsNewSends = false;
+    }
 
     internal bool TryEmitKeepAlive()
     {

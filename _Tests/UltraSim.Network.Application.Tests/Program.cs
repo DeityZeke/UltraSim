@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
@@ -31,6 +32,7 @@ internal static class Program
             ("ControlAndCharacterSelectProgressThroughBulkBacklog", ControlAndCharacterSelectProgressThroughBulkBacklog),
             ("DuplicateAndStaleActionsCannotRepeatAuthority", DuplicateAndStaleActionsCannotRepeatAuthority),
             ("MalformedSemanticActionsAreContainedBeforeAuthority", MalformedSemanticActionsAreContainedBeforeAuthority),
+            ("MalformedCharacterSelectActionsAreContainedBeforeAuthority", MalformedCharacterSelectActionsAreContainedBeforeAuthority),
             ("PresentationFailureAfterCommitDoesNotRollbackAuthority", PresentationFailureAfterCommitDoesNotRollbackAuthority),
             ("RejectedHotOpenRecoversThroughColdResnapshot", RejectedHotOpenRecoversThroughColdResnapshot),
             ("DisconnectDisposesRemoteClientProjection", DisconnectDisposesRemoteClientProjection),
@@ -38,6 +40,14 @@ internal static class Program
             ("ReconnectStartsFreshApplicationSession", ReconnectStartsFreshApplicationSession),
             ("DelayedPriorDetachCannotRetireFreshUdpApplication", DelayedPriorDetachCannotRetireFreshUdpApplication),
             ("UdpDisconnectDrainsTransportAfterSemanticDetach", UdpDisconnectDrainsTransportAfterSemanticDetach),
+            ("AuthoritativeInputCodecIsCanonicalAndTransactional", AuthoritativeInputCodecIsCanonicalAndTransactional),
+            ("ControlledInputAndOwnerStateConvergeUnderLoss", ControlledInputAndOwnerStateConvergeUnderLoss),
+            ("InputSequenceExpiryAndFutureBoundsAreAuthoritative", InputSequenceExpiryAndFutureBoundsAreAuthoritative),
+            ("OwnerIdentityEpochAndClockReorderingAreFenced", OwnerIdentityEpochAndClockReorderingAreFenced),
+            ("CadenceAnchorsApplyAtRevisionedTicks", CadenceAnchorsApplyAtRevisionedTicks),
+            ("WarmedControlledInputStatePathAllocatesZero", WarmedControlledInputStatePathAllocatesZero),
+            ("ControlledStateMatchesAcrossLoopbackAndUdp", ControlledStateMatchesAcrossLoopbackAndUdp),
+            ("ControlledAuthorityDespawnPublishesTombstone", ControlledAuthorityDespawnPublishesTombstone),
         };
 
         foreach ((string name, Action body) in tests)
@@ -45,8 +55,10 @@ internal static class Program
             body();
             Console.WriteLine($"PASS {name}");
         }
-        Console.WriteLine($"All {tests.Length} Network N0.4/N0.5 application tests passed.");
-        if (args.Contains("--benchmark-udp", StringComparer.Ordinal))
+        Console.WriteLine($"All {tests.Length} Network N0.4/N0.5/N0.6 application tests passed.");
+        if (args.Contains("--benchmark-n06", StringComparer.Ordinal))
+            RunN06Benchmark(args);
+        else if (args.Contains("--benchmark-udp", StringComparer.Ordinal))
             RunUdpBenchmark(args);
         else if (args.Contains("--benchmark", StringComparer.Ordinal))
             RunBenchmark(args);
@@ -165,6 +177,269 @@ static void MalformedSemanticActionsAreContainedBeforeAuthority()
     fixture.DriveUntil(() => fixture.ClientRowsForTesting() == "Bread|Bread|Iron Sword");
     True(fixture.CaptureAuthority().Contains("bread:4", StringComparison.Ordinal));
     True(fixture.CaptureAuthority().Contains("bread:1", StringComparison.Ordinal));
+}
+
+static void MalformedCharacterSelectActionsAreContainedBeforeAuthority()
+{
+    using Fixture fixture = Fixture.Create(remote: true, default);
+    AdmissionResult waiting = fixture.AuthenticateToCharacterSelect();
+    string before = fixture.CaptureAuthority();
+    UiElementId wrongSource = CharacterSelectUi.Definition.Elements.ToArray()
+        .First(static element => element.Action != CharacterSelectUi.Play).Id;
+
+    UiActionRequest[] hostile =
+    [
+        new(waiting.CharacterSelectView, CharacterSelectUi.Definition.Handle,
+            UiActionId.Invalid, new UiRowId(1), clientSequence: 50),
+        new(waiting.CharacterSelectView, CharacterSelectUi.Definition.Handle,
+            CharacterSelectUi.Play, new UiRowId(1), clientSequence: 51, source: wrongSource),
+        new(waiting.CharacterSelectView, CharacterSelectUi.Definition.Handle,
+            CharacterSelectUi.Play, new UiRowId(999), clientSequence: 52),
+        new(waiting.CharacterSelectView, CharacterSelectUi.Definition.Handle,
+            CharacterSelectUi.Play, new UiRowId(1), UiValue.FromText("wrong"), clientSequence: 53),
+    ];
+
+    foreach (UiActionRequest request in hostile)
+    {
+        fixture.QueueRawAction(request);
+        True(fixture.Server!.Admission.TryGetSession(new ParticipantId(41), out AdmissionResult current) &&
+            current.IsWaitingForCharacter,
+            "Malformed CharacterSelect intent escaped its retained-model boundary.");
+        Equal(before, fixture.CaptureAuthority(),
+            "Malformed CharacterSelect intent reached authoritative state.");
+    }
+
+    fixture.QueueRawAction(new UiActionRequest(
+        waiting.CharacterSelectView, CharacterSelectUi.Definition.Handle,
+        CharacterSelectUi.Play, new UiRowId(1), clientSequence: 54));
+    fixture.DriveUntil(() =>
+        fixture.Server!.Admission.TryGetSession(new ParticipantId(41), out AdmissionResult entered) &&
+        entered.IsEntered);
+}
+
+static void ControlledInputAndOwnerStateConvergeUnderLoss()
+{
+    using Fixture fixture = Fixture.CreateN06(
+        new NetworkImpairmentOptions(0x6006, 250, 100, 0, 3));
+    fixture.AuthenticateAndEnter();
+    fixture.EnableControlledSimulation();
+
+    fixture.QueueControlledInput(RemoteAuthoritativeInputKind.SetInputVelocity, 4);
+    fixture.RepeatInputUntilServerObserves(sequence: 1);
+    fixture.PublishTickAndConvergeOwnerState();
+    RemoteControlledSimulationClientSnapshot moving = fixture.ControlledClientSnapshot;
+    Equal(1UL, moving.LastProcessedInputSequence);
+    Equal(4, moving.AuthoritativeInputVelocity);
+
+    // The first stop datagram may be lost; the bounded redundancy bundle is
+    // repeated until authority observes it. No reliable input queue is created.
+    fixture.QueueControlledInput(RemoteAuthoritativeInputKind.SetInputVelocity, 0);
+    fixture.RepeatInputUntilServerObserves(sequence: 2);
+    fixture.PublishTickAndConvergeOwnerState();
+    RemoteControlledSimulationClientSnapshot stopped = fixture.ControlledClientSnapshot;
+    Equal(2UL, stopped.LastProcessedInputSequence);
+    Equal(0, stopped.AuthoritativeInputVelocity);
+    Equal(0, stopped.PendingInputs);
+    Equal(fixture.ReadControlledSimulation(),
+        (stopped.AuthoritativeTickMarker, stopped.AuthoritativeInputVelocity));
+    True(fixture.Loopback!.GetSnapshot().Datagram.Dropped > 0,
+        "The impairment fixture did not exercise packet loss.");
+}
+
+static void InputSequenceExpiryAndFutureBoundsAreAuthoritative()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    fixture.EnableControlledSimulation();
+
+    RemoteControlledSimulationServerSnapshot before = fixture.ControlledServerSnapshot;
+    fixture.QueueControlledInput(RemoteAuthoritativeInputKind.ApplyTickMarkerDelta, 5,
+        targetTickOffset: 100);
+    fixture.DriveUntil(() => fixture.ControlledServerSnapshot.RejectedInputSamples >
+        before.RejectedInputSamples);
+    fixture.QueueControlledInput(RemoteAuthoritativeInputKind.ApplyTickMarkerDelta, 7,
+        expiryOffsetMicroseconds: -1);
+    fixture.DriveUntil(() => fixture.ControlledServerSnapshot.RejectedInputSamples >
+        before.RejectedInputSamples + 1);
+
+    fixture.QueueControlledInput(RemoteAuthoritativeInputKind.ApplyTickMarkerDelta, 3);
+    fixture.RepeatInputOnce(); // duplicate redundant samples are independently rejected
+    fixture.DriveUntil(() => fixture.ControlledServerSnapshot.LastQueuedInputSequence == 3);
+    fixture.PublishTickAndConvergeOwnerState();
+    RemoteControlledSimulationClientSnapshot state = fixture.ControlledClientSnapshot;
+    Equal(3UL, state.LastProcessedInputSequence);
+    Equal(0, state.PendingInputs);
+    True(fixture.ControlledServerSnapshot.RejectedInputSamples >= 3);
+}
+
+static void OwnerIdentityEpochAndClockReorderingAreFenced()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    fixture.EnableControlledSimulation();
+    RemoteControlledSimulationClientSnapshot initial = fixture.ControlledClientSnapshot;
+
+    var future = new RemoteOwnerStateMessage
+    {
+        ApplicationSessionEpoch = fixture.ApplicationSessionEpoch,
+        StateEpoch = initial.StateEpoch.Value,
+        EntityIndex = initial.OwnerEntity.Index,
+        EntityGeneration = initial.OwnerEntity.Generation,
+        SimulationTick = initial.SimulationTick + 1,
+        FrameSequence = initial.FrameSequence + 1,
+        LastProcessedInputSequence = initial.LastProcessedInputSequence,
+        TickMarker = initial.AuthoritativeTickMarker + 10,
+        InputVelocity = 0,
+        ClockRevision = initial.ClockRevision + 1,
+        IsPresent = true,
+    };
+    fixture.QueueRawOwnerState(in future);
+    fixture.DriveNetworkSteps(8);
+    Equal(initial.FrameSequence, fixture.ControlledClientSnapshot.FrameSequence,
+        "State using an unknown cadence revision published before its anchor.");
+    fixture.QueueRawClockAnchor(initial.ClockRevision + 1, initial.SimulationTick + 1, 30);
+    fixture.DriveUntil(() => fixture.ControlledClientSnapshot.FrameSequence == future.FrameSequence);
+    Equal(30, fixture.ControlledClientSnapshot.SimulationFrequencyHz);
+
+    RemoteControlledSimulationClientSnapshot anchored = fixture.ControlledClientSnapshot;
+    var priorEpoch = future;
+    priorEpoch.StateEpoch = anchored.StateEpoch.Value + 99;
+    priorEpoch.FrameSequence++;
+    fixture.QueueRawOwnerState(in priorEpoch);
+    fixture.DriveNetworkSteps(8);
+    Equal(anchored.FrameSequence, fixture.ControlledClientSnapshot.FrameSequence);
+
+    var tombstone = future;
+    tombstone.ClockRevision = anchored.ClockRevision;
+    tombstone.FrameSequence = anchored.FrameSequence + 1;
+    tombstone.IsPresent = false;
+    fixture.QueueRawOwnerState(in tombstone);
+    fixture.DriveUntil(() => !fixture.ControlledClientSnapshot.OwnerPresent);
+    ClientEntitySlot oldSlot = anchored.OwnerSlot;
+    var reused = tombstone;
+    reused.FrameSequence++;
+    reused.EntityGeneration++;
+    reused.IsPresent = true;
+    fixture.QueueRawOwnerState(in reused);
+    fixture.DriveUntil(() => fixture.ControlledClientSnapshot.OwnerPresent);
+    True(fixture.ControlledClientSnapshot.OwnerSlot.Generation > oldSlot.Generation,
+        "Client dense slot reuse did not advance its local generation.");
+}
+
+static void CadenceAnchorsApplyAtRevisionedTicks()
+{
+    using Fixture fixture = Fixture.CreateN06(default, allowVariableCadence: true);
+    fixture.AuthenticateAndEnter();
+    fixture.EnableControlledSimulation();
+    Equal(60, fixture.ControlledClientSnapshot.SimulationFrequencyHz);
+
+    fixture.SetSimulationFrequency(30);
+    fixture.TickAndConvergeOwnerState();
+    RemoteControlledSimulationClientSnapshot thirty = fixture.ControlledClientSnapshot;
+    Equal(30, thirty.SimulationFrequencyHz);
+    Equal(thirty.SimulationTick, thirty.EffectiveFromSimulationTick);
+
+    fixture.SetSimulationFrequency(60);
+    fixture.TickAndConvergeOwnerState();
+    RemoteControlledSimulationClientSnapshot sixty = fixture.ControlledClientSnapshot;
+    Equal(60, sixty.SimulationFrequencyHz);
+    Equal(thirty.ClockRevision + 1, sixty.ClockRevision);
+    Equal(sixty.SimulationTick, sixty.EffectiveFromSimulationTick);
+}
+
+static void WarmedControlledInputStatePathAllocatesZero()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    fixture.EnableControlledSimulation();
+    for (int index = 0; index < 8; index++) fixture.RunControlledCycle(index & 1);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 32; index++) fixture.RunControlledCycle(index & 1);
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Equal(0L, allocated);
+}
+
+static void ControlledStateMatchesAcrossLoopbackAndUdp()
+{
+    (int TickMarker, int InputVelocity, ulong Ack) Run(bool udp)
+    {
+        using Fixture fixture = Fixture.CreateN06(default, udp: udp);
+        fixture.AuthenticateAndEnter();
+        fixture.EnableControlledSimulation();
+        fixture.QueueControlledInput(RemoteAuthoritativeInputKind.SetInputVelocity, 2);
+        fixture.RepeatInputUntilServerObserves(1);
+        fixture.PublishTickAndConvergeOwnerState();
+        fixture.QueueControlledInput(RemoteAuthoritativeInputKind.ApplyTickMarkerDelta, 5);
+        fixture.RepeatInputUntilServerObserves(2);
+        fixture.PublishTickAndConvergeOwnerState();
+        RemoteControlledSimulationClientSnapshot client = fixture.ControlledClientSnapshot;
+        (int marker, int velocity) = fixture.ReadControlledSimulation();
+        Equal((marker, velocity),
+            (client.AuthoritativeTickMarker, client.AuthoritativeInputVelocity));
+        return (marker, velocity, client.LastProcessedInputSequence);
+    }
+
+    Equal(Run(udp: false), Run(udp: true),
+        "Replacing deterministic datagrams with UDP changed controlled simulation semantics.");
+}
+
+static void AuthoritativeInputCodecIsCanonicalAndTransactional()
+{
+    var epoch = new StateEpoch(9);
+    RemoteAuthoritativeInputSample[] expected =
+    [
+        new(4, 20, 1_000, RemoteAuthoritativeInputKind.SetInputVelocity, 3),
+        new(5, 21, 1_001, RemoteAuthoritativeInputKind.ApplyTickMarkerDelta, -2),
+        new(6, 22, 1_002, RemoteAuthoritativeInputKind.SetInputVelocity, 0),
+    ];
+    byte[] encoded = new byte[UltraSimGameProtocol.MaximumMessageBytes];
+    True(UltraSimGameProtocol.TryWriteAuthoritativeInputBundle(
+        encoded, 7, epoch, expected, out int written));
+    var actual = new RemoteAuthoritativeInputSample[UltraSimGameProtocol.MaximumInputRedundancy];
+    True(UltraSimGameProtocol.TryReadAuthoritativeInputBundle(
+        encoded.AsSpan(0, written), out RemoteAuthoritativeInputBundleHeader header,
+        actual, out int count));
+    Equal(7UL, header.ApplicationSessionEpoch);
+    Equal(epoch.Value, header.StateEpoch);
+    Equal(expected.Length, count);
+    True(expected.AsSpan().SequenceEqual(actual.AsSpan(0, count)));
+
+    for (int length = 0; length < written; length++)
+    {
+        False(UltraSimGameProtocol.TryReadAuthoritativeInputBundle(
+            encoded.AsSpan(0, length), out _, actual, out int truncatedCount));
+        Equal(0, truncatedCount);
+    }
+    encoded[written] = 0;
+    False(UltraSimGameProtocol.TryReadAuthoritativeInputBundle(
+        encoded.AsSpan(0, written + 1), out _, actual, out _));
+
+    int firstSample = RemoteAuthoritativeInputBundleHeaderCodec.EncodedSize;
+    byte[] noncanonical = encoded.AsSpan(0, written).ToArray();
+    BinaryPrimitives.WriteUInt64BigEndian(
+        noncanonical.AsSpan(firstSample + 29, sizeof(ulong)), expected[0].Sequence);
+    False(UltraSimGameProtocol.TryReadAuthoritativeInputBundle(
+        noncanonical, out _, actual, out _));
+    noncanonical = encoded.AsSpan(0, written).ToArray();
+    noncanonical[firstSample + 24] = byte.MaxValue;
+    False(UltraSimGameProtocol.TryReadAuthoritativeInputBundle(
+        noncanonical, out _, actual, out _));
+
+    False(UltraSimGameProtocol.TryWriteAuthoritativeInputBundle(
+        encoded, 7, epoch, expected.AsSpan(1, 2).ToArray().Reverse().ToArray(), out int unorderedBytes));
+    Equal(0, unorderedBytes);
+    False(UltraSimGameProtocol.TryWriteAuthoritativeInputBundle(
+        encoded.AsSpan(0, written - 1), 7, epoch, expected, out int shortBytes));
+    Equal(0, shortBytes);
+}
+
+static void ControlledAuthorityDespawnPublishesTombstone()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    fixture.EnableControlledSimulation();
+    fixture.RetireControlledAuthority();
+    False(fixture.ControlledClientSnapshot.OwnerPresent);
 }
 
 static void ControlAndCharacterSelectProgressThroughBulkBacklog()
@@ -586,6 +861,76 @@ static void RunUdpBenchmark(string[] args)
     }
 }
 
+static void RunN06Benchmark(string[] args)
+{
+    const int samples = 21;
+    const int cycles = 128;
+    using Fixture loopback = Fixture.CreateN06(default);
+    using Fixture udp = Fixture.CreateN06(default, udp: true);
+    loopback.AuthenticateAndEnter();
+    udp.AuthenticateAndEnter();
+    loopback.EnableControlledSimulation();
+    udp.EnableControlledSimulation();
+    for (int index = 0; index < 8; index++)
+    {
+        loopback.RunControlledCycle(index & 1);
+        udp.RunControlledCycle(index & 1);
+    }
+
+    var loopbackSamples = new double[samples];
+    var udpSamples = new double[samples];
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int sample = 0; sample < samples; sample++)
+    {
+        if ((sample & 1) == 0)
+        {
+            loopbackSamples[sample] = MeasureControlled(loopback, cycles);
+            udpSamples[sample] = MeasureControlled(udp, cycles);
+        }
+        else
+        {
+            udpSamples[sample] = MeasureControlled(udp, cycles);
+            loopbackSamples[sample] = MeasureControlled(loopback, cycles);
+        }
+    }
+    long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+    Array.Sort(loopbackSamples);
+    Array.Sort(udpSamples);
+    var report = new N06BenchmarkResult(
+        "ultrasim-network-n0.6-controlled-input-owner-state-v1",
+        DateTimeOffset.UtcNow,
+        Environment.Version.ToString(),
+        System.Runtime.InteropServices.RuntimeInformation.OSDescription,
+        Environment.ProcessorCount,
+        Environment.GetEnvironmentVariable("DOTNET_TieredCompilation") ?? "runtime-default",
+        Environment.GetEnvironmentVariable("DOTNET_ReadyToRun") ?? "runtime-default",
+        samples,
+        cycles,
+        loopbackSamples.Average() / cycles,
+        Percentile(loopbackSamples, 0.95) / cycles,
+        udpSamples.Average() / cycles,
+        Percentile(udpSamples, 0.95) / cycles,
+        udpSamples.Average() / loopbackSamples.Average(),
+        allocated,
+        "One complete input decode/admission, authoritative scheduler tick, projection capture, revisioned owner state, secure transport, client reconciliation, and input acknowledgement per cycle. Fixed 60 Hz; no adaptive cadence; alternating paired samples; warmed caller path remains allocation-free.");
+    string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
+    Console.WriteLine(json);
+    int outputIndex = Array.IndexOf(args, "--output");
+    if (outputIndex >= 0 && outputIndex + 1 < args.Length)
+    {
+        string path = Path.GetFullPath(args[outputIndex + 1]);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, json + Environment.NewLine);
+    }
+}
+
+static double MeasureControlled(Fixture fixture, int cycles)
+{
+    long started = Stopwatch.GetTimestamp();
+    for (int index = 0; index < cycles; index++) fixture.RunControlledCycle(index & 1);
+    return (Stopwatch.GetTimestamp() - started) * (1_000_000_000d / Stopwatch.Frequency);
+}
+
 static double MeasureScenario(Func<ScenarioResult> scenario, out ScenarioResult result)
 {
     long started = Stopwatch.GetTimestamp();
@@ -606,6 +951,9 @@ sealed class Fixture : IDisposable
     private readonly LocalUiPort? _localPort;
     private readonly AdmissionService? _localAdmission;
     private InventoryUiController? _inventory;
+    private GameProjectionService? _projection;
+    private RemoteControlledSimulationServer? _controlledServer;
+    private RemoteControlledSimulationClient? _controlledClient;
     private readonly StringBuilder _clientSemanticCheckpoints = new();
     private bool _disposed;
     private readonly UdpProtocolSession? _udp;
@@ -616,7 +964,8 @@ sealed class Fixture : IDisposable
         NetworkImpairmentOptions impairment,
         NetworkProtocolLimits? protocolLimits = null,
         RemoteIdentityAuthenticator? authenticator = null,
-        bool udp = false)
+        bool udp = false,
+        bool allowVariableCadence = false)
     {
         _remote = remote;
         _composition = new UltraSimGameComposition(
@@ -626,7 +975,8 @@ sealed class Fixture : IDisposable
         _host = new InternalHost(_composition, new ServerRuntimeOptions(
             UltraSimGameComposition.CreateWorldOptions(512, identity,
                 remote ? GameRuntimeProfile.Networked : GameRuntimeProfile.Local),
-            WorldClockOptions.Default));
+            WorldClockOptions.Default,
+            allowVariableSimulationFrequency: allowVariableCadence));
         _host.Start();
         _runtime = _host.RuntimeForTesting;
         _keys = Populate(_runtime.Game);
@@ -684,6 +1034,10 @@ sealed class Fixture : IDisposable
     internal RemoteGameApplicationSession? Server { get; }
     internal ulong ApplicationSessionEpoch { get; }
     internal UiViewInstanceId InventoryView { get; private set; }
+    internal RemoteControlledSimulationClientSnapshot ControlledClientSnapshot =>
+        _controlledClient?.GetSnapshot() ?? default;
+    internal RemoteControlledSimulationServerSnapshot ControlledServerSnapshot =>
+        _controlledServer?.GetSnapshot() ?? default;
 
     internal static Fixture Create(
         bool remote,
@@ -697,7 +1051,20 @@ sealed class Fixture : IDisposable
         RemoteIdentityAuthenticator? authenticator = null) =>
         new(remote: true, default, protocolLimits, authenticator, udp: true);
 
+    internal static Fixture CreateN06(
+        NetworkImpairmentOptions impairment,
+        bool allowVariableCadence = false,
+        bool udp = false) =>
+        new(remote: true, impairment, udp: udp,
+            allowVariableCadence: allowVariableCadence);
+
     internal void AuthenticateAndEnter()
+    {
+        AdmissionResult waiting = AuthenticateToCharacterSelect();
+        EnterWaitingCharacter(waiting);
+    }
+
+    internal AdmissionResult AuthenticateToCharacterSelect()
     {
         AdmissionService admission;
         if (_remote)
@@ -717,6 +1084,12 @@ sealed class Fixture : IDisposable
 
         True(admission.TryGetSession(new ParticipantId(41), out AdmissionResult waiting) &&
             waiting.IsWaitingForCharacter);
+        return waiting;
+    }
+
+    internal void EnterWaitingCharacter(AdmissionResult waiting)
+    {
+        AdmissionService admission = _remote ? Server!.Admission : _localAdmission!;
         ReadOnlySpan<UiListRow> rows = Client.GetRows(
             waiting.CharacterSelectView, CharacterSelectUi.Characters);
         Equal(1, rows.Length, "CharacterSelect did not contain Alice.");
@@ -738,6 +1111,174 @@ sealed class Fixture : IDisposable
         if (_remote) DriveUntil(() => Client.OpenViewCount == 1);
         Equal("Bread|Iron Sword", ClientRows());
         CaptureClientCheckpoint("inventory-open", InventoryView);
+    }
+
+    internal void EnableControlledSimulation()
+    {
+        if (!_remote || Server is null || ClientBridge is null)
+            throw new InvalidOperationException("Controlled simulation requires an authenticated remote fixture.");
+        _projection = new GameProjectionService(_runtime.Game, Server.Admission,
+            new GameReplicationLimits(512, 8, 512, 1_024, 1_024, 64, 64));
+        True(_projection.SynchronizeParticipant(new ParticipantId(41)));
+        Equal(GameProjectionCaptureStatus.BaselineRebuilt,
+            _projection.RebuildBaseline().Status);
+        _controlledServer = new RemoteControlledSimulationServer(
+            ServerPeer, _runtime.Game, _projection, new ParticipantId(41), ApplicationSessionEpoch);
+        _controlledClient = new RemoteControlledSimulationClient(
+            ClientPeer, ApplicationSessionEpoch, maximumEntities: 512, maximumPendingInputs: 64);
+        Server.BindProtocolHandler(_controlledServer);
+        ClientBridge.BindProtocolHandler(_controlledClient);
+        TickAndConvergeOwnerState();
+        True(ControlledClientSnapshot.OwnerPresent);
+    }
+
+    internal void QueueControlledInput(
+        RemoteAuthoritativeInputKind kind,
+        int value,
+        ulong targetTickOffset = 1,
+        long expiryOffsetMicroseconds = 1_000_000)
+    {
+        True(_runtime.Game.TryCaptureClockSnapshot(out WorldClockSnapshot clock));
+        True(_controlledClient!.TryQueueInput(
+            checked(clock.SimulationTick + targetTickOffset),
+            checked(clock.WorldTimeMicroseconds + expiryOffsetMicroseconds),
+            kind,
+            value));
+    }
+
+    internal void RepeatInputOnce() => True(_controlledClient!.TryRepeatPendingInputBundle());
+
+    internal void RepeatInputUntilServerObserves(ulong sequence)
+    {
+        for (int step = 0; step < 50_000; step++)
+        {
+            PumpApplicationOnce();
+            if (_controlledServer!.GetSnapshot().LastQueuedInputSequence >= sequence) return;
+            if ((step & 7) == 7) _ = _controlledClient!.TryRepeatPendingInputBundle();
+        }
+        throw new InvalidOperationException(
+            $"The redundant input bundle did not reach the server: {_controlledServer!.GetSnapshot()} / " +
+            $"client={_controlledClient!.GetSnapshot()} / transport={Loopback!.GetSnapshot()}.");
+    }
+
+    internal void PublishTickAndConvergeOwnerState()
+    {
+        GameAuthoritativeIngressResult ingress = _controlledServer!.PublishInputs();
+        Equal(GameAuthoritativeIngressStatus.Success, ingress.Status);
+        TickAndConvergeOwnerState();
+    }
+
+    internal void TickAndConvergeOwnerState()
+    {
+        ulong previous = ControlledClientSnapshot.FrameSequence;
+        _runtime.Tick();
+        True(_controlledServer!.CaptureAndQueueOwnerState(out GameProjectionCaptureResult capture));
+        True(capture.Succeeded);
+        for (int step = 0; step < 50_000; step++)
+        {
+            PumpApplicationOnce();
+            if (ControlledClientSnapshot.FrameSequence > previous) return;
+            if ((step & 7) == 7) _ = _controlledServer.TryRepeatOwnerState();
+        }
+        throw new InvalidOperationException("The latest owner state did not converge.");
+    }
+
+    internal void RunControlledCycle(int velocity)
+    {
+        ulong sequence = checked(_controlledServer!.GetSnapshot().LastQueuedInputSequence + 1);
+        True(_runtime.Game.TryCaptureClockSnapshot(out WorldClockSnapshot clock));
+        True(_controlledClient!.TryQueueInput(
+            checked(clock.SimulationTick + 1),
+            checked(clock.WorldTimeMicroseconds + 1_000_000),
+            RemoteAuthoritativeInputKind.SetInputVelocity,
+            velocity));
+        for (int step = 0; _controlledServer.GetSnapshot().LastQueuedInputSequence < sequence; step++)
+        {
+            if (step == 50_000) throw new InvalidOperationException("Input did not converge.");
+            PumpApplicationOnce();
+            if ((step & 7) == 7) _ = _controlledClient.TryRepeatPendingInputBundle();
+        }
+        Equal(GameAuthoritativeIngressStatus.Success, _controlledServer.PublishInputs().Status);
+        ulong frame = _controlledClient.GetSnapshot().FrameSequence;
+        _runtime.Tick();
+        True(_controlledServer.CaptureAndQueueOwnerState(out _));
+        for (int step = 0; _controlledClient.GetSnapshot().FrameSequence <= frame; step++)
+        {
+            if (step == 50_000) throw new InvalidOperationException("Owner state did not converge.");
+            PumpApplicationOnce();
+            if ((step & 7) == 7) _ = _controlledServer.TryRepeatOwnerState();
+        }
+    }
+
+    internal (int TickMarker, int InputVelocity) ReadControlledSimulation()
+    {
+        True(Server!.Admission.TryGetSession(new ParticipantId(41), out AdmissionResult entered));
+        True(_runtime.Game.TryUseActiveGeneration<IGameGenerationStateProvider, GameSimulationState>(
+            (world, _, game) =>
+            {
+                True(game.TryReadSimulationState(world, entered.Entity, out GameSimulationState state));
+                return state;
+            }, out GameSimulationState simulation));
+        return (simulation.TickMarker, simulation.InputVelocity);
+    }
+
+    internal void SetSimulationFrequency(int frequency) => _runtime.SetSimulationFrequency(frequency);
+
+    internal void RetireControlledAuthority()
+    {
+        True(_projection!.TryEnqueueAuthoritativeInput(new GameAuthoritativeInput(
+            new ParticipantId(41), 1, GameSimulationCommandKind.RetireControlledEntity, 0)));
+        Equal(GameAuthoritativeIngressStatus.Success, _controlledServer!.PublishInputs().Status);
+        ulong frame = ControlledClientSnapshot.FrameSequence;
+        _runtime.Tick();
+        True(_controlledServer.CaptureAndQueueOwnerState(out _));
+        for (int step = 0; step < 50_000; step++)
+        {
+            PumpApplicationOnce();
+            if (ControlledClientSnapshot.FrameSequence > frame &&
+                !ControlledClientSnapshot.OwnerPresent) return;
+            if ((step & 7) == 7) _ = _controlledServer.TryRepeatOwnerState();
+        }
+        throw new InvalidOperationException("The controlled-entity tombstone did not converge.");
+    }
+
+    internal void QueueRawOwnerState(in RemoteOwnerStateMessage state)
+    {
+        Span<byte> payload = stackalloc byte[RemoteOwnerStateMessageCodec.EncodedSize];
+        True(RemoteOwnerStateMessageCodec.TryWriteExact(payload, in state));
+        Equal(NetworkQueueStatus.Accepted,
+            ServerPeer.TryQueue(RemoteOwnerStateMessageCodec.Descriptor.Id, payload));
+    }
+
+    internal void QueueRawClockAnchor(uint revision, ulong effectiveTick, int frequency)
+    {
+        RemoteControlledSimulationClientSnapshot client = ControlledClientSnapshot;
+        var anchor = new RemoteClockAnchorMessage
+        {
+            ApplicationSessionEpoch = ApplicationSessionEpoch,
+            StateEpoch = client.StateEpoch.Value,
+            ClockRevision = revision,
+            EffectiveFromSimulationTick = effectiveTick,
+            SimulationFrequencyHz = frequency,
+            WorldTimeMicroseconds = client.WorldTimeMicroseconds,
+            WorldTimeFractionQuanta = client.WorldTimeFractionQuanta,
+        };
+        Span<byte> payload = stackalloc byte[RemoteClockAnchorMessageCodec.EncodedSize];
+        True(RemoteClockAnchorMessageCodec.TryWriteExact(payload, in anchor));
+        Equal(NetworkQueueStatus.Accepted,
+            ServerPeer.TryQueue(RemoteClockAnchorMessageCodec.Descriptor.Id, payload));
+    }
+
+    internal void DriveNetworkSteps(int count)
+    {
+        for (int step = 0; step < count; step++) PumpApplicationOnce();
+    }
+
+    private void PumpApplicationOnce()
+    {
+        PumpTransport();
+        ClientBridge!.ProcessReceived();
+        Server!.ProcessReceived();
     }
 
     internal void SplitAndEquip()
@@ -932,6 +1473,7 @@ sealed class Fixture : IDisposable
         if (_disposed) return;
         _disposed = true;
         try { _inventory?.Dispose(); } catch { }
+        try { _projection?.Dispose(); } catch { }
         if (_remote)
         {
             try { Server?.Dispose(); } catch { }
@@ -1125,6 +1667,24 @@ sealed record N04BenchmarkResult(
     double EstablishedProtocolP95NanosecondsPerInteraction,
     double EstablishedProtocolToDirectRatio,
     long EstablishedCallerAllocatedBytes,
+    string Notes);
+
+sealed record N06BenchmarkResult(
+    string Workload,
+    DateTimeOffset CapturedAtUtc,
+    string Runtime,
+    string OperatingSystem,
+    int LogicalProcessorCount,
+    string TieredCompilation,
+    string ReadyToRun,
+    int Samples,
+    int CyclesPerSample,
+    double ProtocolLoopbackMeanNanosecondsPerCycle,
+    double ProtocolLoopbackP95NanosecondsPerCycle,
+    double LocalhostUdpMeanNanosecondsPerCycle,
+    double LocalhostUdpP95NanosecondsPerCycle,
+    double UdpToLoopbackRatio,
+    long CallerAllocatedBytes,
     string Notes);
 
 sealed record N05BenchmarkResult(

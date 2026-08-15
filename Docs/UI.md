@@ -75,3 +75,10 @@ clears definitions, so reconnect begins from a fresh coherent cache/session.
 `UiClientRuntime` owns retained client projection and renderer handles and is
 deterministically disposable. Accepted N0.5 retains this exact lifecycle while
 replacing only the deterministic datagram topology with real UDP ownership.
+
+Both Inventory and CharacterSelect retain the exact presented `UiModel` and run
+`TryValidateAction` before entering any authority callback. Structurally valid
+wire intent with an unknown action, wrong source/input contract, absent row, or
+disabled action is contained as a semantic rejection; trusted implementation
+exceptions after that boundary remain fatal rather than being disguised as user
+rejection.

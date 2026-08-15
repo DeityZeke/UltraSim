@@ -3,8 +3,9 @@
 Status: active forward plan. N0.0 contract/evidence, N0.1 canonical game
 projection/OfflineDirect, N0.2 bounded Network kernel foundations, N0.3 secure
 reliable protocol over deterministic datagrams, N0.4 remote Admission/UI over
-ProtocolLoopback, and N0.5 real connected-UDP transport/session ownership are
-accepted. N0.6 authoritative input and replicated world state is next.
+ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, and N0.6
+bounded authoritative input/owner-state replication are accepted. N0.7 AOI,
+pending state, recipient scheduling, and fanout are next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -894,8 +895,10 @@ run across deterministic datagrams.
 Acceptance hardening makes timeout discovery independent of congestion-window
 admission, separates inbound and outbound budgets, advances unreliable stale floors
 even when latest-state delivery is capacity-dropped, and isolates unreliable
-pending/sequence state per message family. Generic game-defined sub-stream identity
-is deliberately deferred until N0.6 provides an actual input/state requirement.
+pending/sequence state per message family. N0.6 proved one complete logical
+Input stream and one complete OwnerState stream without needing a generic
+sub-stream identity; that abstraction remains deferred until a second simultaneous
+logical stream earns it.
 
 The loopback cookie binds a fixed path token and its protocol clock uses
 deterministic steps. N0.5 binds the cookie to the connected client IP/port with
@@ -1016,22 +1019,26 @@ protocol/application trace for the real application vertical.
 The accepted implementation uses connected nonblocking IPv4 UDP sockets on the
 same owner thread as `NetworkProtocolPeer`. This deliberately removes any hidden
 cross-thread packet-buffer handoff. Socket buffers, datagram size, handshake
-pumps, cookie lifetime, idle timeout, and drain timeout are explicit limits.
+pumps, cookie bucket duration, idle timeout, and drain timeout are explicit limits.
 Empty receive polling avoids normal-path `WouldBlock` exceptions and preserves
 the warmed 0-B secure-delivery profile.
 
 The secure handshake crosses the real sockets. Its stateless cookie binds the
 client path and a current/previous monotonic expiry bucket before connection
-allocation and ECDH. Connected socket filtering rejects unrelated paths. Fresh
+allocation and ECDH. Because both buckets are accepted, maximum cookie age can
+approach twice `CookieBucketMilliseconds`. Connected socket filtering rejects unrelated paths. Fresh
 reconnect owns fresh socket endpoints and independently derived keys. Prior UI
 and application traffic is additionally fenced by the application-session epoch;
 before authentication, detach messages are ignored rather than selecting an
 arbitrary future epoch.
 
-Graceful shutdown drains reliable retention or reaches its bounded deadline
-before socket close. Authenticated keepalives preserve idle sessions without
-creating application messages; lack of authenticated receive activity reaches
-the idle/drain policy. Permanent gates cover real bidirectional delivery, pinned
+Graceful shutdown first closes new peer/application-message admission, then drains
+existing reliable retention or reaches its bounded deadline before socket close;
+closed sessions remain unable to enqueue unsendable work. Authenticated keepalives
+preserve idle sessions without creating application messages; lack of authenticated
+receive activity reaches the idle/drain policy. An injected monotonic clock gives
+deterministic permanent coverage of keepalive, idle expiry, nonzero pacing, and
+cookie-bucket expiry without wall-clock sleeps. Permanent gates cover real bidirectional delivery, pinned
 identity failure, spoofed paths, graceful/abrupt cleanup, reconnect isolation,
 pre-auth failure churn, outstanding sends, the exact N0.4 workflow, delayed
 detach fencing, and warmed 0-B secure UDP delivery.
@@ -1051,12 +1058,13 @@ includes UI/game work, while the kernel gate separately proves warmed UDP delive
 at 0 B. Immutable evidence:
 [`network-n0.5-real-udp-application-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.5-real-udp-application-2026-08-14.json).
 
-### N0.6 — Authoritative input and replicated world state
+### N0.6 — Authoritative input and replicated owner state — accepted
 
 Deliver bounded decoded input ingress, sequence/redundancy/expiry, participant
-to controlled-entity binding, network entity maps, owner/observer state, client
-dense generational slots, lifecycle visibility, reliable cadence/clock anchor,
-and minimal measured prediction/reconciliation where real movement requires it.
+to controlled-entity binding, one complete owner-state stream, client-dense
+generational slots, owner lifecycle visibility, reliable cadence/clock anchor,
+and minimal measured prediction/reconciliation. Observer/world state remains
+part of N0.7's earned multi-entity recipient scheduler.
 
 Tests include stale/duplicate/future input, lost stop, prior-epoch state, entity
 reuse, clock Control/State reordering, 60→30→60 cadence change effective from
@@ -1064,6 +1072,53 @@ the declared tick/revision, exact final authority parity, and input ACK remainin
 independent from owner correction.
 
 Gate: one controlled entity remains semantically correct under loss.
+
+The accepted implementation intentionally proves the narrow first vertical:
+
+```text
+bounded three-sample client input redundancy
+        ↓
+application/session + StateEpoch + sequence + tick/time validation
+        ↓
+existing game-owned authoritative ingress
+        ↓
+one complete ServerRuntime scheduler step
+        ↓
+canonical projection capture
+        ↓
+reliable revisioned clock anchor + latest complete owner state
+        ↓
+private dense generational ClientEntitySlot + minimal reconciliation
+```
+
+Input processing acknowledgement is not correction: `LastProcessedInputSequence`
+advances for every semantically handled sample, including expiry/capacity rejection,
+while owner state independently carries authoritative values. The accepted
+latest-control input is `SetInputVelocity`; non-coalescible application facts must
+use reliable Event semantics rather than assuming unreliable redundancy guarantees
+every occurrence.
+
+Owner state is a complete superseding sample for one participant and one controlled
+entity. State referencing a future clock revision is staged until its reliable
+anchor arrives. The anchor declares its effective simulation tick and exact
+fixed-point authoritative time; the permanent test proves 60→30→60 without
+changing step-relative scheduler cadence. Despawn publishes a tombstone, old
+generations cannot resurrect, and canonical replication-slot reuse advances a
+private client-slot generation.
+
+Permanent tests cover stale/duplicate/expired/future input, loss/duplication/reorder,
+lost-stop recovery, prior-epoch state, Control/OwnerState reordering, entity reuse,
+despawn, exact ProtocolLoopback/UDP parity, independent processing acknowledgement,
+and warmed 0-B caller allocation. N0.7, not transport coalescing, owns multiple
+entities, observer/world state, AOI, per-recipient pending versions, and fanout.
+
+Accepted paired evidence (21 alternating samples, 128 complete cycles/sample,
+tiered compilation and ReadyToRun disabled) records approximately 139.13 us per
+ProtocolLoopback cycle and 139.12 us per localhost-UDP cycle, ratio 1.0000x, with
+0 B caller allocation. This same-process ratio means UDP added no material cost
+to this admitted workload; it is not a WAN or universal syscall-cost claim.
+Immutable artifact:
+[`network-n0.6-controlled-input-owner-state-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-2026-08-14.json).
 
 ### N0.7 — AOI, pending state, scheduler, and fanout
 

@@ -76,6 +76,12 @@ public readonly record struct GameProjectionParticipant(
     ReplicationEntityId ControlledEntity,
     ulong ServerGenerationId);
 
+/// <summary>Current canonical owner binding and input-admission proof.</summary>
+public readonly record struct GameProjectionOwnerState(
+    GameProjectionParticipant Binding,
+    GameProjectedEntity Entity,
+    ulong LastAcceptedInputSequence);
+
 /// <summary>One ordered semantic change produced by a successful projection capture.</summary>
 public readonly record struct GameProjectionDelta(
     ulong Sequence,

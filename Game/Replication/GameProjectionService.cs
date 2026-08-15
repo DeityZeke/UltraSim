@@ -227,6 +227,26 @@ public sealed class GameProjectionService : IDisposable
         return count;
     }
 
+    /// <summary>Resolves the current canonical state for one entered participant.</summary>
+    public bool TryGetOwnerState(ParticipantId participant, out GameProjectionOwnerState owner)
+    {
+        EnsureOperational();
+        if (!_participants.TryGetValue(participant, out ParticipantState state) ||
+            !state.Binding.ControlledEntity.IsValid)
+        {
+            owner = default;
+            return false;
+        }
+        ReplicationEntityId id = state.Binding.ControlledEntity;
+        if (id.Index >= _entities.Length || _entities[id.Index].Entity != id)
+        {
+            owner = default;
+            return false;
+        }
+        owner = new(state.Binding, _entities[id.Index], state.LastAcceptedInputSequence);
+        return true;
+    }
+
     public int CopyLastFrameDeltas(Span<GameProjectionDelta> destination)
     {
         EnsureOperational();
@@ -326,7 +346,7 @@ public sealed class GameProjectionService : IDisposable
     {
         EnsureOperational();
         if (!input.Participant.IsValid || input.ClientSequence == 0 ||
-            (uint)input.Kind > (uint)GameSimulationCommandKind.RetireControlledEntity ||
+            (uint)input.Kind > (uint)GameSimulationCommandKind.SetInputVelocity ||
             _inputCount == _inputs.Length)
             return false;
         _inputs[_inputCount++] = input;

@@ -1,9 +1,9 @@
 # UltraSim Network kernel
 
 Status: N0.0 contracts, N0.1 game projection/OfflineDirect, N0.2 bounded kernel
-foundations, N0.3 secure reliable ProtocolLoopback, N0.4 remote Admission/UI, and
-N0.5 real connected-UDP transport are accepted. Authoritative input and replicated
-world state begin at N0.6.
+foundations, N0.3 secure reliable ProtocolLoopback, N0.4 remote Admission/UI,
+N0.5 real connected-UDP transport, and N0.6 controlled input/owner state are
+accepted. AOI, recipient scheduling, and fanout begin at N0.7.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -38,7 +38,7 @@ Identity is explicit and non-interchangeable:
 | `ConnectionId` | Network | Server-created transport slot plus reuse generation; neither durable nor client-chosen. |
 | `SecurityEpoch` | Network | Key/replay lifetime within one connection. |
 | `PacketNumber` | Network | Authenticated datagram sequence; admitted data packet numbers are referenced separately by transport-delivery ACKs. |
-| `LaneSequence` | Network | Reliable ordering is lane-scoped; N0.3 unreliable sequencing/coalescing is isolated per message family. Deeper game-defined sub-stream keys remain N0.6 work. |
+| `LaneSequence` | Network | Reliable ordering is lane-scoped; unreliable sequencing/coalescing is isolated per message family. N0.6 uses one complete logical stream per Input/OwnerState family; a generic sub-stream key remains deferred until a second simultaneous stream earns it. |
 | `StateEpoch` | Projection/protocol seam | One coherent canonical projection generation. |
 | `ReplicationEntityId` | Canonical projection | Dense generational identity shared by all recipients within one `StateEpoch`. |
 | `ParticipantId` | Game contracts | Server-created game/session participant; not defined by this kernel. |
@@ -222,22 +222,43 @@ ProtocolLoopback and UDP; neither result justifies reopening N0.3 micro-optimiza
 
 `UdpProtocolSession` runs the accepted secure peers across actual connected,
 nonblocking localhost UDP sockets. `UdpProtocolLimits` bounds datagram bytes,
-configured socket buffers, handshake work, cookie lifetime, idle retirement, and
+configured socket buffers, handshake work, cookie buckets, idle retirement, and
 graceful drain. Socket and protocol state share one owner thread.
 
 The handshake cookie covers the client address/port and a current or immediately
-previous monotonic time bucket. Server pinning, ECDH, transcript signature, secret
+previous monotonic time bucket. Maximum accepted age can therefore approach twice
+`CookieBucketMilliseconds`. Server pinning, ECDH, transcript signature, secret
 proofs, AEAD, replay, delivery ACK, lanes, fragmentation, and application meaning
 remain the N0.3/N0.4 contracts. Connected-path filtering rejects unrelated source
 endpoints before protocol parsing.
 
 Normal pumping uses monotonic milliseconds for RTT, retransmission, loss discovery,
 and admitted pacing. Empty receives poll readiness rather than allocate a normal
-`SocketException`; the warmed secure UDP delivery test remains 0 B. Drain closes
-the path after reliable retention empties or its deadline expires. Authenticated
-keepalives preserve live idle paths without acquiring application meaning. Fresh reconnects
-own fresh endpoints and independently derived secrets. The accepted topology is a
-same-process localhost proof, not a WAN-latency or socket-worker claim.
+`SocketException`; the warmed secure UDP delivery test remains 0 B. Beginning
+drain closes new application-message admission while retained reliable data and
+ACKs continue until empty or the deadline expires; a closed session cannot accept
+new peer work. Authenticated keepalives preserve live idle paths without acquiring
+application meaning. Deterministic clock gates directly prove keepalive retention,
+idle expiry, nonzero pacing, and current/previous-cookie-bucket acceptance/expiry.
+Fresh reconnects own fresh endpoints and independently derived secrets. The
+accepted topology is a same-process localhost proof, not a WAN-latency or
+socket-worker claim.
+
+## N0.6 application-owned input and owner state
+
+The kernel did not acquire game state in N0.6. `Game/Protocol` adds bounded Input,
+OwnerState, and Control message families; `Game/Replication` validates and
+publishes intent through existing authority, while `Client/Network` owns its
+private projection. Input repeats at most three newest unprocessed samples and
+expires against authoritative world time. One complete owner-state sample
+supersedes the prior sample for the single controlled entity. Reliable revisioned
+clock anchors define how state is interpreted across live cadence changes.
+
+This deliberately does not add a generic transport sub-stream identity. There is
+one semantic latest-state stream in each admitted family, so message-family
+coalescing is correct. N0.7 must keep per-entity/recipient pending truth above the
+kernel and assemble bundles with explicit supersession semantics rather than let
+transport coalescing invent AOI behavior.
 
 ## Evidence admission
 
@@ -341,3 +362,5 @@ N0.4 binds remote game authentication, Admission, CharacterSelect, Inventory,
 and the existing UI semantics through ProtocolLoopback above this dependency-clean
 kernel. Accepted N0.5 replaces only byte transport/session ownership with real
 UDP while retaining the same application vertical and complete client-state oracle.
+Accepted N0.6 then adds one bounded controlled simulation stream above the same
+protocol for both deterministic loopback and UDP.

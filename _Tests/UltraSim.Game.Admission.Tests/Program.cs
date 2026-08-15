@@ -20,7 +20,7 @@ var tests = new (string Name, Action Body)[]
     ("LocalUiSemanticPortDetachesOnDispose", LocalUiSemanticPortDetachesOnDispose),
     ("AdmissionDisposeAttemptsEveryOpenView", AdmissionDisposeAttemptsEveryOpenView),
     ("AdmissionConfigurationRejectionsAreExplicit", AdmissionConfigurationRejectionsAreExplicit),
-    ("UnownedCharacterRowRejectsAndClosesSelector", UnownedCharacterRowRejectsAndClosesSelector),
+    ("UnprojectedCharacterRowIsContainedByRetainedModel", UnprojectedCharacterRowIsContainedByRetainedModel),
     ("PlayReauthorizesIdentityAndCurrentAccountStatus", PlayReauthorizesIdentityAndCurrentAccountStatus),
     ("CloseFailureAfterEntryDoesNotUndoAuthority", CloseFailureAfterEntryDoesNotUndoAuthority),
     ("AdmissionIsOwnerThreadBound", AdmissionIsOwnerThreadBound),
@@ -187,6 +187,18 @@ static void EmptyCharacterSelectDisablesPlayDynamically()
         waiting.CharacterSelectView,
         CharacterSelectUi.Play,
         new UiRowId(1)));
+
+    var hostileUi = new FaultingUiPort();
+    using var hostileService = new AdmissionService(runtime.Game, composition, hostileUi);
+    AdmissionResult hostileWaiting = hostileService.JoinAccountBacked(new ParticipantId(5), identity);
+    hostileUi.Submit(new UiActionRequest(
+        hostileWaiting.CharacterSelectView,
+        CharacterSelectUi.Definition.Handle,
+        CharacterSelectUi.Play,
+        new UiRowId(1)));
+    Assert.True(hostileService.TryGetSession(new ParticipantId(5), out AdmissionResult retained));
+    Assert.True(retained.IsWaitingForCharacter);
+    Assert.Equal(0, hostileUi.CloseCount);
 }
 
 static void AccountingOrdersCharactersAndKeepsOnlyDomainFacts()
@@ -419,7 +431,7 @@ static void AdmissionConfigurationRejectionsAreExplicit()
     Assert.Equal(0, missingUi.SessionCount);
 }
 
-static void UnownedCharacterRowRejectsAndClosesSelector()
+static void UnprojectedCharacterRowIsContainedByRetainedModel()
 {
     var composition = new AdmissionComposition();
     var accounting = new AccountingStore();
@@ -455,8 +467,9 @@ static void UnownedCharacterRowRejectsAndClosesSelector()
         new UiRowId(81)));
 
     Assert.True(service.TryGetSession(waiting.Participant, out AdmissionResult result));
-    Assert.Equal(AdmissionRejection.CharacterNotOwned, result.Rejection);
-    Assert.Equal(1, ui.CloseCount);
+    Assert.True(result.IsWaitingForCharacter);
+    Assert.Equal(AdmissionRejection.None, result.Rejection);
+    Assert.Equal(0, ui.CloseCount);
 }
 
 static void PlayReauthorizesIdentityAndCurrentAccountStatus()

@@ -1,0 +1,18 @@
+{
+  "Workload": "ultrasim-network-n0.6-controlled-input-owner-state-v1",
+  "CapturedAtUtc": "2026-08-15T01:41:52.583736+00:00",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "CachyOS",
+  "LogicalProcessorCount": 16,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Samples": 21,
+  "CyclesPerSample": 128,
+  "ProtocolLoopbackMeanNanosecondsPerCycle": 139128.65141369047,
+  "ProtocolLoopbackP95NanosecondsPerCycle": 139988.1171875,
+  "LocalhostUdpMeanNanosecondsPerCycle": 139122.04799107142,
+  "LocalhostUdpP95NanosecondsPerCycle": 140646.3984375,
+  "UdpToLoopbackRatio": 0.9999525372915503,
+  "CallerAllocatedBytes": 0,
+  "Notes": "One complete input decode/admission, authoritative scheduler tick, projection capture, revisioned owner state, secure transport, client reconciliation, and input acknowledgement per cycle. Fixed 60 Hz; no adaptive cadence; alternating paired samples; warmed caller path remains allocation-free."
+}
