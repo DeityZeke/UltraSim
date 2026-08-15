@@ -45,6 +45,12 @@ Useful current anchors can be located by their embedded workload or filename:
 - `network-n0.4-application-loopback-*` — paired OfflineDirect/secure-loopback
   CharacterSelect and Inventory workflow plus established semantic UI
   action→authority→delta→apply-ack observations;
+- `network-n0.5-real-udp-application-*` — paired secure ProtocolLoopback/connected
+  localhost UDP evidence for the same application semantics;
+- `network-n0.6-controlled-input-owner-state-*` — paired complete input→authority
+  tick→projection→client reconciliation evidence. The `semantic-hardened`
+  artifact supplements the original accepted run after the Input supersession,
+  complete-tombstone, and true client-local slot corrections;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

@@ -24,7 +24,7 @@ public enum RemoteUiApplyStatus : byte
     Rejected = 2,
 }
 
-[NetworkProtocol(2)]
+[NetworkProtocol(3)]
 public static partial class GeneratedUltraSimGameProtocol
 {
 }
@@ -74,14 +74,8 @@ public partial struct RemoteSessionDetachMessage
     public ulong ApplicationSessionEpoch;
 }
 
-public enum RemoteAuthoritativeInputKind : byte
-{
-    ApplyTickMarkerDelta = 0,
-    SetInputVelocity = 1,
-}
-
 /// <summary>Header for one complete bounded redundant input bundle.</summary>
-[NetworkMessage(106, "ultrasim.game.authoritative-input", 1, NetworkLane.Input)]
+[NetworkMessage(106, "ultrasim.game.authoritative-input", 2, NetworkLane.Input)]
 public partial struct RemoteAuthoritativeInputBundleHeader
 {
     public ulong ApplicationSessionEpoch;
@@ -89,13 +83,18 @@ public partial struct RemoteAuthoritativeInputBundleHeader
     public byte SampleCount;
 }
 
-/// <summary>One client intent repeated in newest bundles until owner acknowledgement.</summary>
+/// <summary>One complete velocity state repeated in newest bundles until owner acknowledgement.</summary>
+/// <remarks>
+/// This sample is carried by a superseding unreliable Input stream. It remains
+/// correct when every older unprocessed sample is skipped and only the newest
+/// sample survives. Non-coalescible facts require reliable application Event
+/// semantics instead.
+/// </remarks>
 public readonly record struct RemoteAuthoritativeInputSample(
     ulong Sequence,
     ulong TargetSimulationTick,
     long ExpiresAtWorldTimeMicroseconds,
-    RemoteAuthoritativeInputKind Kind,
-    int Value);
+    int InputVelocity);
 
 /// <summary>Latest authoritative state for the one controlled N0.6 entity.</summary>
 [NetworkMessage(107, "ultrasim.game.owner-state", 1, NetworkLane.OwnerState)]
@@ -140,7 +139,7 @@ public static class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 2,
+        version: 3,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },
@@ -153,7 +152,7 @@ public static class UltraSimGameProtocol
             RemoteSessionDetachMessageCodec.Descriptor,
             RemoteAuthoritativeInputBundleHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = RemoteAuthoritativeInputBundleHeaderCodec.EncodedSize +
-                    MaximumInputRedundancy * (sizeof(ulong) * 2 + sizeof(long) + sizeof(byte) + sizeof(int)) },
+                    MaximumInputRedundancy * (sizeof(ulong) * 2 + sizeof(long) + sizeof(int)) },
             RemoteOwnerStateMessageCodec.Descriptor,
             RemoteClockAnchorMessageCodec.Descriptor,
         ]);
@@ -283,12 +282,10 @@ public static class UltraSimGameProtocol
             if (sample.Sequence == 0 || sample.Sequence <= previous ||
                 sample.TargetSimulationTick == ulong.MaxValue ||
                 sample.ExpiresAtWorldTimeMicroseconds < 0 ||
-                (uint)sample.Kind > (uint)RemoteAuthoritativeInputKind.SetInputVelocity ||
                 !writer.TryWriteUInt64(sample.Sequence) ||
                 !writer.TryWriteUInt64(sample.TargetSimulationTick) ||
                 !writer.TryWriteInt64(sample.ExpiresAtWorldTimeMicroseconds) ||
-                !writer.TryWriteByte((byte)sample.Kind) ||
-                !writer.TryWriteInt32(sample.Value)) return false;
+                !writer.TryWriteInt32(sample.InputVelocity)) return false;
             previous = sample.Sequence;
         }
         written = writer.WrittenCount;
@@ -314,15 +311,13 @@ public static class UltraSimGameProtocol
             if (!reader.TryReadUInt64(out ulong sequence) || sequence == 0 || sequence <= previous ||
                 !reader.TryReadUInt64(out ulong targetTick) || targetTick == ulong.MaxValue ||
                 !reader.TryReadInt64(out long expiry) || expiry < 0 ||
-                !reader.TryReadByte(out byte kind) || kind > (byte)RemoteAuthoritativeInputKind.SetInputVelocity ||
-                !reader.TryReadInt32(out int value))
+                !reader.TryReadInt32(out int inputVelocity))
             {
                 samples[..index].Clear();
                 header = default;
                 return false;
             }
-            samples[index] = new(sequence, targetTick, expiry,
-                (RemoteAuthoritativeInputKind)kind, value);
+            samples[index] = new(sequence, targetTick, expiry, inputVelocity);
             previous = sequence;
         }
         if (!reader.IsComplete)

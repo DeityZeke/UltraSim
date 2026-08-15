@@ -65,13 +65,15 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Benchmarks/UltraSim.Network.KernelBenchmarks -c Release
 DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
   dotnet run --project _Tests/UltraSim.Network.Application.Tests -c Release -- \
-    --benchmark-n06 --output _Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-2026-08-14.json
+    --benchmark-n06 --output _Benchmarks/results/network-n0.6-local-run.json
 ```
 
 Each executable's `--help`/argument parser is the source of truth for filters,
 scales, process order, output, worker count, and longer profiles. Accepted runs
 use Release, warmup, both A/B orders where relevant, and stable machine/runtime
 settings recorded in the artifact.
+Do not point an ordinary rerun at an existing immutable baseline filename; admit
+new evidence under a new descriptive name only after review.
 
 Godot extreme-stress setup and exact controls remain in
 [ECS_EXTREME_SPHERE_STRESS.md](ECS_EXTREME_SPHERE_STRESS.md). Cross-generation

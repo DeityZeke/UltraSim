@@ -250,9 +250,13 @@ The kernel did not acquire game state in N0.6. `Game/Protocol` adds bounded Inpu
 OwnerState, and Control message families; `Game/Replication` validates and
 publishes intent through existing authority, while `Client/Network` owns its
 private projection. Input repeats at most three newest unprocessed samples and
-expires against authoritative world time. One complete owner-state sample
-supersedes the prior sample for the single controlled entity. Reliable revisioned
-clock anchors define how state is interpreted across live cadence changes.
+expires against authoritative world time. Every admitted Input sample is complete
+velocity state and remains correct if older samples are skipped; non-coalescible
+facts use reliable application semantics above the kernel. One complete owner-
+state sample supersedes the prior sample for the single controlled entity, and a
+first-seen/repeated tombstone is itself complete absence plus a canonical
+generation floor. Reliable revisioned clock anchors define how state is
+interpreted across live cadence changes.
 
 This deliberately does not add a generic transport sub-stream identity. There is
 one semantic latest-state stream in each admitted family, so message-family

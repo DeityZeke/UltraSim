@@ -1094,23 +1094,34 @@ private dense generational ClientEntitySlot + minimal reconciliation
 Input processing acknowledgement is not correction: `LastProcessedInputSequence`
 advances for every semantically handled sample, including expiry/capacity rejection,
 while owner state independently carries authoritative values. The accepted
-latest-control input is `SetInputVelocity`; non-coalescible application facts must
-use reliable Event semantics rather than assuming unreliable redundancy guarantees
+latest-control input is complete `SetInputVelocity` state. The permanent contract
+is that Input remains semantically correct when all older unprocessed samples are
+skipped and only the newest survives. Non-coalescible application facts must use
+reliable Event semantics rather than assuming unreliable redundancy guarantees
 every occurrence.
 
 Owner state is a complete superseding sample for one participant and one controlled
 entity. State referencing a future clock revision is staged until its reliable
 anchor arrives. The anchor declares its effective simulation tick and exact
 fixed-point authoritative time; the permanent test proves 60→30→60 without
-changing step-relative scheduler cadence. Despawn publishes a tombstone, old
-generations cannot resurrect, and canonical replication-slot reuse advances a
-private client-slot generation.
+changing step-relative scheduler cadence. A first-seen or repeated despawn
+tombstone is complete state: it advances frame/input acknowledgement, establishes
+the canonical generation floor, and prevents same-generation resurrection.
+N0.6 uses one true client-local slot at index zero; canonical replication-slot
+reuse advances its independent private generation.
 
-Permanent tests cover stale/duplicate/expired/future input, loss/duplication/reorder,
-lost-stop recovery, prior-epoch state, Control/OwnerState reordering, entity reuse,
+Permanent tests cover stale/duplicate/expired/future input, safe omission of older
+coalesced input, loss/duplication/reorder, lost-stop recovery, prior-epoch state,
+Control/OwnerState reordering, first-seen/repeated tombstones, entity reuse,
 despawn, exact ProtocolLoopback/UDP parity, independent processing acknowledgement,
 and warmed 0-B caller allocation. N0.7, not transport coalescing, owns multiple
 entities, observer/world state, AOI, per-recipient pending versions, and fanout.
+
+The persisted N0.6 `InputVelocity` is explicitly diagnostic physical state.
+Expiry bounds late admission; it is not a control lease, and disconnect does not
+neutralize the value. Real player-control desire must declare and test its own
+disconnect/lease policy before N0.8 rather than inheriting transport lifetime by
+accident.
 
 Accepted paired evidence (21 alternating samples, 128 complete cycles/sample,
 tiered compilation and ReadyToRun disabled) records approximately 139.13 us per
@@ -1119,6 +1130,9 @@ ProtocolLoopback cycle and 139.12 us per localhost-UDP cycle, ratio 1.0000x, wit
 to this admitted workload; it is not a WAN or universal syscall-cost claim.
 Immutable artifact:
 [`network-n0.6-controlled-input-owner-state-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-2026-08-14.json).
+The post-audit semantic-hardening observation is additional immutable evidence,
+not a replacement for the original accepted run:
+[`network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json).
 
 ### N0.7 — AOI, pending state, scheduler, and fanout
 

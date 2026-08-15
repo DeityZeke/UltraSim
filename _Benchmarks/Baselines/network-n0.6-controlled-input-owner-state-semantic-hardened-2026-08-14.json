@@ -1,0 +1,20 @@
+{
+  "Workload": "ultrasim-network-n0.6-controlled-input-owner-state-v2",
+  "CapturedAtUtc": "2026-08-15T02:02:28.3499451+00:00",
+  "Runtime": "8.0.29",
+  "OperatingSystem": "CachyOS",
+  "LogicalProcessorCount": 16,
+  "ProtocolVersion": 3,
+  "ProtocolFingerprint": 14771904601146746981,
+  "TieredCompilation": "0",
+  "ReadyToRun": "0",
+  "Samples": 21,
+  "CyclesPerSample": 128,
+  "ProtocolLoopbackMeanNanosecondsPerCycle": 140963.19791666666,
+  "ProtocolLoopbackP95NanosecondsPerCycle": 143163.3359375,
+  "LocalhostUdpMeanNanosecondsPerCycle": 140884.90401785713,
+  "LocalhostUdpP95NanosecondsPerCycle": 143605.671875,
+  "UdpToLoopbackRatio": 0.9994445791528097,
+  "CallerAllocatedBytes": 0,
+  "Notes": "Post-audit semantic-hardened profile: remote Input contains only complete superseding velocity state, absence is a complete generation-fencing tombstone, and the one-owner client projection uses true local slot zero. One complete input decode/admission, authoritative scheduler tick, projection capture, revisioned owner state, secure transport, client reconciliation, and input acknowledgement per cycle. Fixed 60 Hz; no adaptive cadence; alternating paired samples; warmed caller path remains allocation-free."
+}

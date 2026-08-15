@@ -30,14 +30,14 @@ public readonly record struct RemoteControlledSimulationClientSnapshot(
 /// Input bundles repeat up to three still-unacknowledged samples. Owner state is
 /// a complete superseding sample, never a per-entity delta queue. A state that
 /// references a future clock revision is staged until its reliable anchor arrives.
+/// The one-owner vertical binds every canonical lifetime to local slot zero and
+/// advances an independent local generation. A tombstone is complete state: it
+/// establishes the canonical generation floor without requiring a prior spawn.
 /// </remarks>
 public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandler
 {
     private readonly NetworkProtocolPeer _peer;
     private readonly ulong _applicationSessionEpoch;
-    private readonly uint[] _replicationGenerations;
-    private readonly uint[] _clientGenerations;
-    private readonly bool[] _present;
     private readonly RemoteAuthoritativeInputSample[] _pendingInputs;
     private readonly byte[] _messageScratch = new byte[UltraSimGameProtocol.MaximumMessageBytes];
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
@@ -51,6 +51,8 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
     private int _pendingInputCount;
     private ReplicationEntityId _ownerEntity;
     private ClientEntitySlot _ownerSlot;
+    private uint _ownerSlotGeneration;
+    private bool _ownerPresent;
     private ulong _simulationTick;
     private ulong _frameSequence;
     private ulong _lastAdmittedInput;
@@ -65,34 +67,28 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
     public RemoteControlledSimulationClient(
         NetworkProtocolPeer peer,
         ulong applicationSessionEpoch,
-        int maximumEntities = 4_096,
         int maximumPendingInputs = 64)
     {
         _peer = peer ?? throw new ArgumentNullException(nameof(peer));
         if (applicationSessionEpoch == 0) throw new ArgumentOutOfRangeException(nameof(applicationSessionEpoch));
-        if (maximumEntities <= 0) throw new ArgumentOutOfRangeException(nameof(maximumEntities));
         if (maximumPendingInputs <= 0) throw new ArgumentOutOfRangeException(nameof(maximumPendingInputs));
         _applicationSessionEpoch = applicationSessionEpoch;
-        _replicationGenerations = new uint[maximumEntities];
-        _clientGenerations = new uint[maximumEntities];
-        _present = new bool[maximumEntities];
         _pendingInputs = new RemoteAuthoritativeInputSample[maximumPendingInputs];
     }
 
-    public bool TryQueueInput(
+    /// <summary>Queues complete superseding control state; older samples may be skipped safely.</summary>
+    public bool TryQueueInputVelocity(
         ulong targetSimulationTick,
         long expiresAtWorldTimeMicroseconds,
-        RemoteAuthoritativeInputKind kind,
-        int value)
+        int inputVelocity)
     {
         EnsureOwnerThread();
         if (!_stateEpoch.IsValid || _nextInputSequence == 0 ||
             _pendingInputCount == _pendingInputs.Length ||
-            targetSimulationTick == ulong.MaxValue || expiresAtWorldTimeMicroseconds < 0 ||
-            (uint)kind > (uint)RemoteAuthoritativeInputKind.SetInputVelocity) return false;
+            targetSimulationTick == ulong.MaxValue || expiresAtWorldTimeMicroseconds < 0) return false;
         var candidate = new RemoteAuthoritativeInputSample(
             _nextInputSequence, targetSimulationTick,
-            expiresAtWorldTimeMicroseconds, kind, value);
+            expiresAtWorldTimeMicroseconds, inputVelocity);
         _pendingInputs[_pendingInputCount++] = candidate;
         bool queued = TryQueuePendingBundle();
         if (!queued)
@@ -132,7 +128,7 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
     {
         EnsureOwnerThread();
         return new(_stateEpoch, _clockRevision, _effectiveTick, _frequency,
-            _worldTime, _worldFraction, _ownerEntity.IsValid,
+            _worldTime, _worldFraction, _ownerPresent,
             _ownerEntity, _ownerSlot, _simulationTick, _frameSequence,
             _lastAdmittedInput, _authoritativeMarker, _authoritativeVelocity,
             _predictedMarker, _predictedVelocity, _pendingInputCount, _rejected);
@@ -219,35 +215,35 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
     private bool ApplyOwnerState(in RemoteOwnerStateMessage state)
     {
         if (state.FrameSequence <= _frameSequence ||
-            state.LastProcessedInputSequence >= _nextInputSequence ||
-            state.EntityIndex >= _replicationGenerations.Length) return false;
+            state.LastProcessedInputSequence >= _nextInputSequence) return false;
         var entity = new ReplicationEntityId(state.EntityIndex, state.EntityGeneration);
-        uint knownGeneration = _replicationGenerations[state.EntityIndex];
-        if (state.EntityGeneration < knownGeneration) return false;
+        if (_ownerEntity.IsValid && entity.Index == _ownerEntity.Index &&
+            entity.Generation < _ownerEntity.Generation) return false;
 
-        if (!state.IsPresent)
+        bool newLifetime = entity != _ownerEntity;
+        if (newLifetime)
         {
-            if (_ownerEntity != entity || !_present[state.EntityIndex]) return false;
-            _present[state.EntityIndex] = false;
-            _ownerEntity = default;
+            if (_ownerSlotGeneration == uint.MaxValue) return false;
+            _ownerSlotGeneration++;
+            _ownerEntity = entity;
+            _ownerPresent = false;
             _ownerSlot = default;
+        }
+
+        if (state.IsPresent)
+        {
+            if (!newLifetime && !_ownerPresent)
+                return false; // a tombstoned canonical lifetime cannot resurrect
+            _ownerPresent = true;
+            _ownerSlot = new ClientEntitySlot(0, _ownerSlotGeneration);
         }
         else
         {
-            if (state.EntityGeneration > knownGeneration)
-            {
-                if (_clientGenerations[state.EntityIndex] == uint.MaxValue) return false;
-                _replicationGenerations[state.EntityIndex] = state.EntityGeneration;
-                _clientGenerations[state.EntityIndex]++;
-                if (_clientGenerations[state.EntityIndex] == 0) return false;
-                _present[state.EntityIndex] = true;
-            }
-            else if (!_present[state.EntityIndex])
-            {
-                return false; // tombstoned identities cannot resurrect
-            }
-            _ownerEntity = entity;
-            _ownerSlot = new ClientEntitySlot(state.EntityIndex, _clientGenerations[state.EntityIndex]);
+            // Absence is complete latest state. It establishes the canonical
+            // generation floor even when no present sample was observed, and a
+            // repeated tombstone may still advance frame/input acknowledgement.
+            _ownerPresent = false;
+            _ownerSlot = default;
         }
 
         _simulationTick = state.SimulationTick;
@@ -274,17 +270,7 @@ public sealed class RemoteControlledSimulationClient : IRemoteGameProtocolHandle
     }
 
     private void ApplyPredicted(in RemoteAuthoritativeInputSample sample)
-    {
-        switch (sample.Kind)
-        {
-            case RemoteAuthoritativeInputKind.ApplyTickMarkerDelta:
-                _predictedMarker = unchecked(_predictedMarker + sample.Value);
-                break;
-            case RemoteAuthoritativeInputKind.SetInputVelocity:
-                _predictedVelocity = sample.Value;
-                break;
-        }
-    }
+        => _predictedVelocity = sample.InputVelocity;
 
     private void EnsureOwnerThread()
     {

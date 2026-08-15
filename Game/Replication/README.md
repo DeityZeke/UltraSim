@@ -177,14 +177,21 @@ without confusing processing with authoritative correction.
 
 The client repeats up to three newest unprocessed samples. This is bounded
 redundancy, not reliable event delivery: intermediate facts that must occur use a
-reliable application Event contract. The accepted control input is latest
-`InputVelocity`; the delta command remains a narrow ingress/parity probe.
+reliable application Event contract. Every remote sample is complete
+`InputVelocity` state. Correctness must hold if every older unprocessed sample is
+skipped and only the newest sample survives; additive commands are therefore not
+part of the remote Input protocol. The internal authoritative ingress may still
+use non-coalescible commands from an appropriately reliable/local producer.
 
 After each complete Runtime step, the server captures canonical projection and
 queues one complete superseding owner-state sample. The sample uses the
 connection-independent `ReplicationEntityId`; the client maps that to its private
-dense generational `ClientEntitySlot`. Tombstones prevent same-generation
-resurrection, and replication-slot reuse advances the client-local generation.
+dense generational `ClientEntitySlot`. N0.6 owns exactly one local slot at index
+zero rather than indexing client arrays by canonical replication index. A first-
+seen or repeated tombstone is complete latest state: it records the canonical
+generation floor, advances frame/input acknowledgement, and prevents a delayed
+same-generation present sample from resurrecting the lifetime. A newer canonical
+lifetime advances the independent client-local generation.
 
 Cadence/time interpretation is separate reliable Control state. A clock anchor
 declares `ClockRevision`, effective simulation tick, exact frequency, and fixed-
@@ -194,11 +201,19 @@ the declared tick without changing the meaning of scheduler `PeriodTicks`.
 
 The focused gates cover loss/duplication/reordering, lost-stop recovery, stale,
 duplicate, expired and future input, independent processing acknowledgement and
-correction, prior-epoch state, entity retirement/reuse, Control/OwnerState
+correction, safe omission of older coalesced control samples, prior-epoch state,
+first-seen/repeated tombstones, entity retirement/reuse, Control/OwnerState
 reordering, exact ProtocolLoopback/UDP authority and client parity, and warmed
 zero caller allocation. N0.6 deliberately has one participant, one controlled
 entity, and one complete owner-state family. Per-recipient AOI, observer/world
 state, pending newest versions, and fanout belong to N0.7.
+
+`InputVelocity` in this diagnostic vertical is persisted authoritative physical
+state. Input expiry is an arrival/admission deadline, not a continuing control
+lease, and application disconnect does not implicitly zero the value. Before this
+field becomes real player control desire—or before N0.8 saves live controlled
+characters—the game must explicitly choose and test disconnect/lease
+neutralization. Network lifetime must not invent that gameplay policy.
 
 Adding `InputVelocity` advanced persistent `GameSimulationState` to schema version
 2. The game persistence catalog includes a direct v1 tick-marker reader that
@@ -208,3 +223,6 @@ saves remain compatible rather than silently reinterpreting the wider payload.
 Accepted paired evidence for one complete input→authority tick→projection→client
 reconciliation cycle is preserved in
 [`network-n0.6-controlled-input-owner-state-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-2026-08-14.json).
+The semantic-hardening rerun is preserved separately rather than rewriting that
+historical artifact:
+[`network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json).

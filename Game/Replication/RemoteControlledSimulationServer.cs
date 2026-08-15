@@ -40,7 +40,9 @@ public readonly record struct RemoteControlledSimulationServerSnapshot(
 /// Network transports bytes; this game-owned adapter validates input against the
 /// active projection/time domain, publishes it through the existing bounded
 /// authoritative ingress, and emits one complete owner-state sample. The message
-/// family therefore has one logical latest-state stream; AOI/fanout remain N0.7.
+/// family therefore has one logical latest-state stream. Every remote input is a
+/// complete superseding velocity state; non-coalescible commands are not admitted
+/// on this unreliable path. AOI/fanout remain N0.7.
 /// </remarks>
 public sealed class RemoteControlledSimulationServer : IRemoteGameProtocolHandler
 {
@@ -118,16 +120,9 @@ public sealed class RemoteControlledSimulationServer : IRemoteGameProtocolHandle
                 _rejectedInputs++;
                 continue;
             }
-            GameSimulationCommandKind kind = sample.Kind switch
-            {
-                RemoteAuthoritativeInputKind.ApplyTickMarkerDelta =>
-                    GameSimulationCommandKind.ApplyTickMarkerDelta,
-                RemoteAuthoritativeInputKind.SetInputVelocity =>
-                    GameSimulationCommandKind.SetInputVelocity,
-                _ => throw new InvalidOperationException("A decoded input kind escaped canonical validation."),
-            };
             var input = new GameAuthoritativeInput(
-                _participant, sample.Sequence, kind, sample.Value);
+                _participant, sample.Sequence,
+                GameSimulationCommandKind.SetInputVelocity, sample.InputVelocity);
             if (!_projection.TryEnqueueAuthoritativeInput(in input))
             {
                 _rejectedInputs++;
