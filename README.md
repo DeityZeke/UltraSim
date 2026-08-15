@@ -10,8 +10,9 @@ Network V3 is the active major implementation milestone. N0.0's contracts,
 N0.1's canonical game projection/OfflineDirect oracle, N0.2's bounded byte/kernel
 foundation, N0.3's secure reliable ProtocolLoopback, N0.4's remote
 Admission/CharacterSelect/Inventory application vertical, N0.5's connected-UDP
-transport/session path, and N0.6's bounded controlled-input/owner-state vertical
-are implemented. AOI, recipient scheduling, and fanout are next at N0.7.
+transport/session path, N0.6's bounded controlled-input/owner-state vertical,
+and N0.7's maintained AOI/pending/application-knowledge vertical are implemented.
+Atomic baseline and recovery are next at N0.8.
 
 ## Design
 

@@ -50,6 +50,10 @@ internal static class Program
             ("WarmedControlledInputStatePathAllocatesZero", WarmedControlledInputStatePathAllocatesZero),
             ("ControlledStateMatchesAcrossLoopbackAndUdp", ControlledStateMatchesAcrossLoopbackAndUdp),
             ("ControlledAuthorityDespawnPublishesTombstone", ControlledAuthorityDespawnPublishesTombstone),
+            ("WorldStateCodecIsCanonicalAndTransactional", WorldStateCodecIsCanonicalAndTransactional),
+            ("MaintainedWorldStateCrossesLoopbackWithApplicationAck", MaintainedWorldStateCrossesLoopbackWithApplicationAck),
+            ("WorldStateTombstoneKnowledgeIsIndependentFromPresentation", WorldStateTombstoneKnowledgeIsIndependentFromPresentation),
+            ("WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder", WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder),
         };
 
         foreach ((string name, Action body) in tests)
@@ -57,7 +61,7 @@ internal static class Program
             body();
             Console.WriteLine($"PASS {name}");
         }
-        Console.WriteLine($"All {tests.Length} Network N0.4/N0.5/N0.6 application tests passed.");
+        Console.WriteLine($"All {tests.Length} Network N0.4/N0.5/N0.6/N0.7 application tests passed.");
         if (args.Contains("--benchmark-n06", StringComparer.Ordinal))
             RunN06Benchmark(args);
         else if (args.Contains("--benchmark-udp", StringComparer.Ordinal))
@@ -434,6 +438,200 @@ static void TombstoneIsCompleteWithoutPriorPresentState()
     Equal(0U, newer.OwnerSlot.Index);
     Equal(2U, newer.OwnerSlot.Generation);
 }
+
+static void WorldStateCodecIsCanonicalAndTransactional()
+{
+    RemoteWorldStateRecord[] source =
+    [
+        WorldRecord(1, 4, 2, 8, present: true, marker: 19),
+        WorldRecord(2, 9, 3, 11, present: false, marker: 0),
+    ];
+    Span<byte> encoded = stackalloc byte[UltraSimGameProtocol.MaximumMessageBytes];
+    True(UltraSimGameProtocol.TryWriteWorldStateBundle(
+        encoded, 77, 81, 3, source, out int written));
+    Span<RemoteWorldStateRecord> decoded = stackalloc RemoteWorldStateRecord[4];
+    True(UltraSimGameProtocol.TryReadWorldStateBundle(
+        encoded[..written], out RemoteWorldStateBundleHeader header, decoded, out int count));
+    Equal(77UL, header.ApplicationSessionEpoch);
+    Equal(81UL, header.StateEpoch);
+    Equal(3UL, header.BundleId);
+    Equal(2, count);
+    Equal(source[0], decoded[0]);
+    Equal(source[1], decoded[1]);
+
+    // Every truncation and trailing data fail the exact dynamic codec.
+    for (int length = 0; length < written; length++)
+    {
+        decoded.Fill(WorldRecord(99, 99, 1, 1, true, 1));
+        False(UltraSimGameProtocol.TryReadWorldStateBundle(
+            encoded[..length], out header, decoded, out count));
+        Equal(default(RemoteWorldStateBundleHeader), header);
+        Equal(0, count);
+    }
+    encoded[written] = 0xCC;
+    False(UltraSimGameProtocol.TryReadWorldStateBundle(
+        encoded[..(written + 1)], out header, decoded, out count));
+    encoded[..sizeof(ulong)].Clear();
+    False(UltraSimGameProtocol.TryReadWorldStateBundle(
+        encoded[..written], out header, decoded, out count));
+    Equal(default(RemoteWorldStateBundleHeader), header);
+    Equal(0, count);
+
+    RemoteWorldStateRecord duplicate = source[1] with { EntityIndex = source[0].EntityIndex };
+    False(UltraSimGameProtocol.TryWriteWorldStateBundle(
+        encoded, 77, 81, 4, [source[0], duplicate], out _));
+    RemoteWorldStateRecord invalidTombstone = source[1] with { TickMarker = 1 };
+    False(UltraSimGameProtocol.TryWriteWorldStateBundle(
+        encoded, 77, 81, 5, [invalidTombstone], out _));
+}
+
+static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    StateEpoch epoch = new(0x707);
+    var interest = new GameInterestService(
+        epoch,
+        new GameInterestLimits(64, 4, 1_024, 1_024, 256, 32, 8),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 10), 1,
+            new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(9, 1, 20), 1,
+            new ReplicationSpatialPoint(2_000, 0), GameReplicationHorizon.Far, 0));
+
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch, 8);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
+        maximumKnownIdentities: 16, maximumActiveEntities: 8,
+        maximumRecordsPerBundle: 8);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(0, 4_096));
+    Equal(GameWorldStateBuildStatus.OutstandingCapacityExceeded,
+        server.TrySchedule(1, 4_096),
+        "A different partial WorldState bundle could overwrite the unacknowledged family slot.");
+    ulong retainedBundle = server.GetSnapshot().OutstandingBundleId;
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(100, 4_096));
+    Equal(retainedBundle, server.GetSnapshot().OutstandingBundleId,
+        "WorldState retry changed semantic bundle identity instead of requeueing identical meaning.");
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 1);
+    RemoteWorldStateClientSnapshot clientSnapshot = client.GetSnapshot();
+    Equal(2, clientSnapshot.ActiveEntityCount);
+    Equal(0, clientSnapshot.PendingApplicationAcknowledgements);
+    Equal(0, interest.GetSnapshot().PendingRelationCount);
+
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 31), 2,
+            new ReplicationSpatialPoint(1_500, 0), GameReplicationHorizon.Far, 1));
+    Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(1, 4_096));
+    fixture.DriveUntil(() => server.GetSnapshot().ApplicationAcknowledgements == 2);
+    Span<RemoteWorldEntitySnapshot> active = stackalloc RemoteWorldEntitySnapshot[8];
+    Equal(2, client.CopyActiveEntities(active));
+    Equal(3U, active[0].Entity.Index);
+    Equal(31, active[0].TickMarker);
+    Equal(2UL, active[0].CanonicalVersion);
+}
+
+static void WorldStateTombstoneKnowledgeIsIndependentFromPresentation()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, 77, new StateEpoch(91),
+        maximumKnownIdentities: 4, maximumActiveEntities: 2);
+    RemoteWorldStateRecord tombstone = WorldRecord(
+        10, 83_000, 9, 5, present: false, marker: 0);
+    Equal(RemoteWorldStateClientApplyStatus.Applied,
+        client.ApplyDecodedBundle([tombstone]));
+    Equal(1, client.GetSnapshot().KnownIdentityCount);
+    Equal(0, client.GetSnapshot().ActiveEntityCount);
+
+    RemoteWorldStateRecord delayed = WorldRecord(
+        9, 83_000, 9, 4, present: true, marker: 44);
+    Equal(RemoteWorldStateClientApplyStatus.Duplicate,
+        client.ApplyDecodedBundle([delayed]));
+    Equal(0, client.GetSnapshot().ActiveEntityCount);
+
+    RemoteWorldStateRecord repeated = tombstone with { RelationSequence = 11 };
+    Equal(RemoteWorldStateClientApplyStatus.Applied,
+        client.ApplyDecodedBundle([repeated]));
+    RemoteWorldStateRecord nextLifetime = WorldRecord(
+        12, 83_000, 10, 1, present: true, marker: 50) with
+    {
+        XMillimeters = 100_000,
+    };
+    Equal(RemoteWorldStateClientApplyStatus.Applied,
+        client.ApplyDecodedBundle([nextLifetime]));
+    Equal(1, client.GetSnapshot().ActiveEntityCount);
+
+    Span<ClientEntitySlot> visible = stackalloc ClientEntitySlot[2];
+    Equal(0, client.CopyPresentationCandidates(new ClientWorldPoint(0, 0), 1_000, visible));
+    Equal(1, client.GetSnapshot().ActiveEntityCount,
+        "Camera selection incorrectly changed retained network knowledge.");
+    Equal(1, client.CopyPresentationCandidates(
+        new ClientWorldPoint(100_000, 0), 1_000, visible));
+}
+
+static void WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, 77, new StateEpoch(92),
+        maximumKnownIdentities: 2, maximumActiveEntities: 1);
+    Equal(RemoteWorldStateClientApplyStatus.Applied,
+        client.ApplyDecodedBundle([WorldRecord(1, 1, 1, 1, true, 10)]));
+    Span<RemoteWorldEntitySnapshot> before = stackalloc RemoteWorldEntitySnapshot[1];
+    Equal(1, client.CopyActiveEntities(before));
+
+    // Allocation precedes release on the wire. Commit must still honor the
+    // successful aggregate preflight without throwing or partially publishing.
+    RemoteWorldStateRecord[] replacement =
+    [
+        WorldRecord(1, 2, 1, 1, true, 20),
+        WorldRecord(2, 1, 1, 2, false, 0),
+    ];
+    Equal(RemoteWorldStateClientApplyStatus.Applied,
+        client.ApplyDecodedBundle(replacement));
+    Span<RemoteWorldEntitySnapshot> after = stackalloc RemoteWorldEntitySnapshot[1];
+    Equal(1, client.CopyActiveEntities(after));
+    Equal(2U, after[0].Entity.Index);
+    Equal(before[0].Slot.Index, after[0].Slot.Index);
+    True(after[0].Slot.Generation > before[0].Slot.Generation);
+
+    RemoteWorldStateClientSnapshot stable = client.GetSnapshot();
+    Equal(RemoteWorldStateClientApplyStatus.CapacityExceeded,
+        client.ApplyDecodedBundle([WorldRecord(1, 3, 1, 1, true, 30)]));
+    Equal(stable, client.GetSnapshot(), "Capacity rejection partially mutated client projection.");
+}
+
+static RemoteWorldStateRecord WorldRecord(
+    ulong relationSequence,
+    uint entityIndex,
+    uint entityGeneration,
+    ulong canonicalVersion,
+    bool present,
+    int marker) => new(
+        relationSequence,
+        entityIndex,
+        entityGeneration,
+        canonicalVersion,
+        present,
+        present ? (byte)GameReplicationHorizon.Far : (byte)0,
+        present ? checked((int)entityIndex * 10) : 0,
+        present ? marker * 10 : 0,
+        present ? marker : 0,
+        present ? marker * 2 : 0);
+
+static GameProjectedEntity ProjectedWorldEntity(uint index, uint generation, int marker) => new(
+    new ReplicationEntityId(index, generation),
+    HasSimulationState: true,
+    new GameSimulationState { TickMarker = marker, InputVelocity = marker * 2 });
 
 static void DeliverOwnerState(
     RemoteControlledSimulationClient client,

@@ -25,6 +25,16 @@ var tests = new (string Name, Action Body)[]
     ("WorkingSetStampRolloverIsExplicitInCheckedBuild", WorkingSetStampRolloverIsExplicitInCheckedBuild),
     ("OfflineDirectRejectsInvalidFramesAtomically", OfflineDirectRejectsInvalidFramesAtomically),
     ("CanonicalProjectionAndSemanticTraceAreDeterministic", CanonicalProjectionAndTraceAreDeterministic),
+    ("MaintainedInterestMatchesBruteForceTierOracle", MaintainedInterestMatchesBruteForceTierOracle),
+    ("ImmediateHysteresisAndRegionBoundariesAreIndependent", ImmediateHysteresisAndRegionBoundariesAreIndependent),
+    ("RecipientRegionCrossingUpdatesOnlyEnvelopeDifference", RecipientRegionCrossingUpdatesOnlyEnvelopeDifference),
+    ("NewestPendingStateAndPromotionCollapseCorrectly", NewestPendingStateAndPromotionCollapseCorrectly),
+    ("FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact", FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact),
+    ("ApplicationAckCannotClearNewerPendingState", ApplicationAckCannotClearNewerPendingState),
+    ("SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress", SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress),
+    ("InterestCapacityFailureIsExplicitlyNonviable", InterestCapacityFailureIsExplicitlyNonviable),
+    ("ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow", ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow),
+    ("WarmedMaintainedInterestSchedulingAllocatesZero", WarmedMaintainedInterestSchedulingAllocatesZero),
 };
 
 foreach ((string name, Action body) in tests)
@@ -32,7 +42,7 @@ foreach ((string name, Action body) in tests)
     body();
     Console.WriteLine($"PASS {name}");
 }
-Console.WriteLine($"All {tests.Length} Network N0.1 game-replication tests passed.");
+Console.WriteLine($"All {tests.Length} Network N0.1/N0.7 game-replication tests passed.");
 
 static void NetworkProfileIsExplicit()
 {
@@ -53,6 +63,276 @@ static void NetworkProfileIsExplicit()
     GameProjectionCaptureResult result = projection.RebuildBaseline();
     Check.Equal(GameProjectionCaptureStatus.ReplicationNotConfigured, result.Status);
     Check.Equal(ServerRuntimeState.Running, fixture.Runtime.State);
+}
+
+static void MaintainedInterestMatchesBruteForceTierOracle()
+{
+    var service = CreateInterest();
+    ParticipantId alice = new(1);
+    ParticipantId bob = new(2);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(alice, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(bob, Point(30, 0), 0));
+
+    (GameProjectedEntity Entity, ReplicationSpatialPoint Position, GameReplicationHorizon Horizon)[] entities =
+    [
+        (Projected(0, 1, 10), Point(3, 0), GameReplicationHorizon.Far),
+        (Projected(1, 1, 20), Point(8, 0), GameReplicationHorizon.Far),
+        (Projected(2, 1, 30), Point(25, 0), GameReplicationHorizon.Near),
+        (Projected(3, 1, 40), Point(35, 0), GameReplicationHorizon.None),
+        // Across the 10 m region boundary but still within Alice's exact R0.
+        (Projected(4, 1, 50), Point(-1, 0), GameReplicationHorizon.Far),
+    ];
+    for (int index = 0; index < entities.Length; index++)
+        Check.Equal(GameInterestUpdateStatus.Success,
+            service.UpsertEntity(entities[index].Entity, 1, entities[index].Position,
+                entities[index].Horizon, 0));
+
+    var actual = new GameRecipientEntityRelationSnapshot[32];
+    int count = service.CopyRelations(actual);
+    var expected = new List<(ParticipantId, ReplicationEntityId, GameInterestTier)>();
+    AddOracle(expected, alice, Point(0, 0), entities);
+    AddOracle(expected, bob, Point(30, 0), entities);
+    expected.Sort(static (left, right) =>
+    {
+        int participant = left.Item1.CompareTo(right.Item1);
+        return participant != 0 ? participant : left.Item2.Index.CompareTo(right.Item2.Index);
+    });
+    Check.Equal(expected.Count, count);
+    for (int index = 0; index < count; index++)
+    {
+        Check.Equal(expected[index].Item1, actual[index].Participant);
+        Check.Equal(expected[index].Item2, actual[index].Entity);
+        Check.Equal(expected[index].Item3, actual[index].Tier);
+        Check.True(actual[index].DesiredPresent);
+    }
+}
+
+static void ImmediateHysteresisAndRegionBoundariesAreIndependent()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(3);
+    service.SetRecipientAnchor(participant, Point(0, 0), 0);
+    GameProjectedEntity first = Projected(5, 1, 1);
+    service.UpsertEntity(first, 1, Point(4, 0), GameReplicationHorizon.Far, 0);
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, first.Entity).Tier);
+
+    // Outside the 5 m enter radius but inside the 6 m leave radius: retain R0.
+    service.UpsertEntity(Projected(5, 1, 2), 2, Millimeters(5_500, 0), GameReplicationHorizon.Far, 1);
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, first.Entity).Tier);
+    service.UpsertEntity(Projected(5, 1, 3), 3, Millimeters(6_100, 0), GameReplicationHorizon.Far, 2);
+    Check.Equal(GameInterestTier.Near, Relation(service, participant, first.Entity).Tier);
+    service.UpsertEntity(Projected(5, 1, 4), 4, Millimeters(5_500, 0), GameReplicationHorizon.Far, 3);
+    Check.Equal(GameInterestTier.Near, Relation(service, participant, first.Entity).Tier);
+    service.UpsertEntity(Projected(5, 1, 5), 5, Millimeters(4_900, 0), GameReplicationHorizon.Far, 4);
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, first.Entity).Tier);
+
+    GameProjectedEntity crossBoundary = Projected(6, 1, 1);
+    service.UpsertEntity(crossBoundary, 1, Point(-1, 0), GameReplicationHorizon.Far, 4);
+    Check.Equal(GameInterestTier.Immediate,
+        Relation(service, participant, crossBoundary.Entity).Tier);
+}
+
+static void RecipientRegionCrossingUpdatesOnlyEnvelopeDifference()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(4);
+    service.SetRecipientAnchor(participant, Point(1, 1), 0);
+    GameInterestSnapshot initial = service.GetSnapshot();
+    Check.Equal(81, initial.RegionInterestEdgeCount);
+
+    service.SetRecipientAnchor(participant, Point(2, 1), 1);
+    GameInterestSnapshot sameCell = service.GetSnapshot();
+    Check.Equal(0, sameCell.LastRegionEdgesAdded);
+    Check.Equal(0, sameCell.LastRegionEdgesRemoved);
+    Check.Equal(0, sameCell.LastRegionEdgesRetiered);
+
+    service.SetRecipientAnchor(participant, Point(11, 1), 2);
+    GameInterestSnapshot crossed = service.GetSnapshot();
+    Check.Equal(9, crossed.LastRegionEdgesAdded);
+    Check.Equal(9, crossed.LastRegionEdgesRemoved);
+    Check.True(crossed.LastRegionEdgesRetiered > 0);
+    Check.Equal(initial.RegionInterestEdgeCount, crossed.RegionInterestEdgeCount);
+}
+
+static void NewestPendingStateAndPromotionCollapseCorrectly()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(5);
+    service.SetRecipientAnchor(participant, Point(0, 0), 0);
+    GameProjectedEntity entity = Projected(7, 1, 1);
+    service.UpsertEntity(entity, 1, Point(35, 0), GameReplicationHorizon.Far, 0);
+    service.UpsertEntity(Projected(7, 1, 2), 2, Point(35, 0), GameReplicationHorizon.Far, 1);
+    service.UpsertEntity(Projected(7, 1, 3), 3, Point(35, 0), GameReplicationHorizon.Far, 2);
+    GameRecipientEntityRelationSnapshot pending = Relation(service, participant, entity.Entity);
+    Check.Equal(3UL, pending.PendingCanonicalVersion);
+
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(participant, 2, 1_024, records, out _));
+    service.SetRecipientAnchor(participant, Point(34, 0), 3);
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, entity.Entity).Tier);
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 3, 1_024, records, out GameWorldStateBundle bundle));
+    Check.Equal(1, bundle.RecordCount);
+    Check.Equal(3UL, records[0].CanonicalVersion);
+}
+
+static void FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact()
+{
+    var service = CreateInterest();
+    GameProjectedEntity noSubscriber = Projected(8, 1, 1);
+    service.UpsertEntity(noSubscriber, 1, Point(0, 0), GameReplicationHorizon.Far, 0);
+    Check.Equal(0UL, service.GetSnapshot().UniqueSemanticConstructions);
+
+    ParticipantId first = new(6);
+    ParticipantId second = new(7);
+    service.SetRecipientAnchor(first, Point(0, 0), 0);
+    service.SetRecipientAnchor(second, Point(0, 1), 0);
+    GameProjectedEntity nearOnly = Projected(9, 1, 1);
+    service.UpsertEntity(nearOnly, 1, Point(25, 0), GameReplicationHorizon.Near, 0);
+    Check.True(RelationOrDefault(service, first, nearOnly.Entity).DesiredPresent);
+    GameProjectedEntity staticContent = Projected(10, 1, 1);
+    service.UpsertEntity(staticContent, 1, Point(1, 0), GameReplicationHorizon.None, 0);
+    Check.False(RelationOrDefault(service, first, staticContent.Entity).DesiredPresent);
+
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[16];
+    DrainRecipient(service, first, 100, records);
+    DrainRecipient(service, second, 100, records);
+    GameInterestSnapshot snapshot = service.GetSnapshot();
+    // Both recipients demanded identical entity/version semantics, built once.
+    Check.Equal(2UL, snapshot.UniqueSemanticConstructions);
+    Check.True(snapshot.SemanticRecordCopies >= 4);
+}
+
+static void ApplicationAckCannotClearNewerPendingState()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(8);
+    service.SetRecipientAnchor(participant, Point(0, 0), 0);
+    GameProjectedEntity entity = Projected(11, 1, 1);
+    service.UpsertEntity(entity, 1, Point(1, 0), GameReplicationHorizon.Far, 0);
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 0, 1_024, records, out GameWorldStateBundle oldBundle));
+    ulong oldRelationSequence = records[0].RelationSequence;
+
+    service.UpsertEntity(Projected(11, 1, 2), 2, Point(1, 0), GameReplicationHorizon.Far, 1);
+    Check.True(service.TryAcknowledgeBundle(participant, oldBundle.BundleId, applied: true));
+    GameRecipientEntityRelationSnapshot relation = Relation(service, participant, entity.Entity);
+    Check.Equal(2UL, relation.PendingCanonicalVersion);
+    Check.True(relation.PendingRelationSequence > oldRelationSequence);
+
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 1, 1_024, records, out GameWorldStateBundle latest));
+    Check.Equal(2UL, records[0].CanonicalVersion);
+
+    service.UpsertEntity(Projected(11, 1, 3), 3, Point(1, 0), GameReplicationHorizon.Far, 2);
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 2, 1_024, records, out GameWorldStateBundle newest));
+    Check.Equal(3UL, records[0].CanonicalVersion);
+
+    // Rejecting an older in-flight attempt must not reopen a newer attempt that
+    // already carries the current relation sequence.
+    Check.True(service.TryAcknowledgeBundle(participant, latest.BundleId, applied: false));
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(participant, 3, 1_024, records, out _));
+    Check.True(service.TryAcknowledgeBundle(participant, newest.BundleId, applied: true));
+    Check.Equal(0UL, Relation(service, participant, entity.Entity).PendingCanonicalVersion);
+}
+
+static void SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress()
+{
+    var service = new GameInterestService(
+        new StateEpoch(2),
+        new GameInterestLimits(8, 2, 256, 256, 8, 2, 2),
+        InterestProfile());
+    ParticipantId slow = new(81);
+    ParticipantId healthy = new(82);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(slow, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(healthy, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(3, 1, 1), 1,
+            Point(1, 0), GameReplicationHorizon.Far, 0));
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[2];
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(slow, 0, 1_024, records, out GameWorldStateBundle retained));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildNextBundle(0, 1_024, records, out GameWorldStateBundle peer));
+    Check.Equal(healthy, peer.Participant);
+    Check.True(service.TryAcknowledgeBundle(healthy, peer.BundleId, applied: true));
+    Check.Equal(1UL,
+        Relation(service, slow, new ReplicationEntityId(3, 1)).PendingCanonicalVersion);
+    Check.True(service.AbandonBundle(retained.BundleId));
+    Check.Equal(1, service.GetSnapshot().PendingRelationCount);
+}
+
+static void InterestCapacityFailureIsExplicitlyNonviable()
+{
+    var limits = new GameInterestLimits(8, 1, 128, 128, 1, 4, 4);
+    var service = new GameInterestService(new StateEpoch(1), limits, InterestProfile());
+    service.UpsertEntity(Projected(0, 1, 1), 1, Point(1, 0), GameReplicationHorizon.Far, 0);
+    service.UpsertEntity(Projected(1, 1, 1), 1, Point(2, 0), GameReplicationHorizon.Far, 0);
+    GameInterestUpdateStatus status = service.SetRecipientAnchor(new ParticipantId(9), Point(0, 0), 0);
+    Check.True(status is GameInterestUpdateStatus.CapacityExceeded or GameInterestUpdateStatus.RecipientNonviable);
+    Check.Equal(1, service.GetSnapshot().NonviableRecipientCount);
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
+    Check.Equal(GameWorldStateBuildStatus.RecipientNonviable,
+        service.TryBuildBundle(new ParticipantId(9), 0, 1_024, records, out _));
+}
+
+static void ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow()
+{
+    var edgeProfile = new GameInterestProfile(1, 1, 1, 1, 1, 1, 1, 1, 2);
+    var edge = new GameInterestService(
+        new StateEpoch(3),
+        new GameInterestLimits(2, 1, 16, 16, 4, 2, 2),
+        edgeProfile);
+    Check.Equal(GameInterestUpdateStatus.InvalidInput,
+        edge.SetRecipientAnchor(new ParticipantId(90),
+            new ReplicationSpatialPoint(int.MaxValue, int.MaxValue), 0));
+    Check.Equal(0, edge.GetSnapshot().RecipientCount);
+
+    var timeProfile = new GameInterestProfile(10, 1, 1, 10, 20, 7, 11, 1, 2);
+    var time = new GameInterestService(
+        new StateEpoch(4),
+        new GameInterestLimits(2, 1, 64, 64, 4, 2, 2),
+        timeProfile);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        time.SetRecipientAnchor(new ParticipantId(91), new ReplicationSpatialPoint(0, 0), long.MaxValue));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        time.UpsertEntity(Projected(1, 1, 1), 1,
+            new ReplicationSpatialPoint(15, 0), GameReplicationHorizon.Far, long.MaxValue));
+    Check.Equal(long.MaxValue,
+        Relation(time, new ParticipantId(91), new ReplicationEntityId(1, 1)).EligibleAtMilliseconds);
+}
+
+static void WarmedMaintainedInterestSchedulingAllocatesZero()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(10);
+    service.SetRecipientAnchor(participant, Point(0, 0), 0);
+    GameProjectedEntity entity = Projected(12, 1, 0);
+    service.UpsertEntity(entity, 1, Point(1, 0), GameReplicationHorizon.Far, 0);
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
+    DrainRecipient(service, participant, 0, records);
+    for (int version = 2; version < 8; version++)
+    {
+        service.UpsertEntity(Projected(12, 1, version), (ulong)version,
+            Point(1, 0), GameReplicationHorizon.Far, version);
+        DrainRecipient(service, participant, version, records);
+    }
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int version = 8; version < 72; version++)
+    {
+        service.UpsertEntity(Projected(12, 1, version), (ulong)version,
+            Point(1, 0), GameReplicationHorizon.Far, version);
+        DrainRecipient(service, participant, version, records);
+    }
+    Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
 }
 
 static void BaselineAndOfflineDirectPublishCanonicalTruth()
@@ -718,6 +998,143 @@ static CharacterRecord PopulateDurableCharacter(
         }, out bool populated));
     Check.True(populated);
     return record;
+}
+
+static GameInterestService CreateInterest() => new(
+    new StateEpoch(1),
+    new GameInterestLimits(
+        MaximumEntities: 64,
+        MaximumRecipients: 8,
+        MaximumRegions: 512,
+        MaximumRegionInterestEdges: 1_024,
+        MaximumRecipientEntityRelations: 512,
+        MaximumOutstandingBundles: 64,
+        MaximumRecordsPerBundle: 16),
+    InterestProfile());
+
+static GameInterestProfile InterestProfile() => new(
+    RegionEdgeMillimeters: 10_000,
+    ImmediateEnterRadiusMillimeters: 5_000,
+    ImmediateLeaveRadiusMillimeters: 6_000,
+    NearRadiusMillimeters: 20_000,
+    FarRadiusMillimeters: 40_000,
+    NearIntervalMilliseconds: 10,
+    FarIntervalMilliseconds: 20,
+    ApplicationAckRetryMilliseconds: 5,
+    ApplicationAckTimeoutMilliseconds: 100);
+
+static ReplicationSpatialPoint Point(int xMeters, int zMeters) =>
+    new(checked(xMeters * 1_000), checked(zMeters * 1_000));
+
+static ReplicationSpatialPoint Millimeters(int x, int z) => new(x, z);
+
+static GameProjectedEntity Projected(uint index, uint generation, int marker) => new(
+    new ReplicationEntityId(index, generation),
+    HasSimulationState: true,
+    new GameSimulationState
+    {
+        TickMarker = marker,
+        InputVelocity = marker * 2,
+    });
+
+static void AddOracle(
+    List<(ParticipantId Participant, ReplicationEntityId Entity, GameInterestTier Tier)> destination,
+    ParticipantId participant,
+    in ReplicationSpatialPoint anchor,
+    ReadOnlySpan<(GameProjectedEntity Entity, ReplicationSpatialPoint Position, GameReplicationHorizon Horizon)> entities)
+{
+    GameInterestProfile profile = InterestProfile();
+    int anchorRegionX = FloorDivide(anchor.XMillimeters, profile.RegionEdgeMillimeters);
+    int anchorRegionZ = FloorDivide(anchor.ZMillimeters, profile.RegionEdgeMillimeters);
+    int nearCells = DivideRoundUp(profile.NearRadiusMillimeters, profile.RegionEdgeMillimeters);
+    int farCells = DivideRoundUp(profile.FarRadiusMillimeters, profile.RegionEdgeMillimeters);
+    for (int index = 0; index < entities.Length; index++)
+    {
+        ref readonly var candidate = ref entities[index];
+        int regionX = FloorDivide(candidate.Position.XMillimeters, profile.RegionEdgeMillimeters);
+        int regionZ = FloorDivide(candidate.Position.ZMillimeters, profile.RegionEdgeMillimeters);
+        int regionDistance = Math.Max(Math.Abs(regionX - anchorRegionX), Math.Abs(regionZ - anchorRegionZ));
+        GameInterestTier coarse = regionDistance <= nearCells
+            ? GameInterestTier.Near
+            : regionDistance <= farCells ? GameInterestTier.Far : GameInterestTier.None;
+        GameInterestTier tier = Within(anchor, candidate.Position, profile.ImmediateEnterRadiusMillimeters) &&
+            Allows(candidate.Horizon, GameInterestTier.Immediate)
+            ? GameInterestTier.Immediate
+            : Allows(candidate.Horizon, coarse) ? coarse : GameInterestTier.None;
+        if (tier != GameInterestTier.None)
+            destination.Add((participant, candidate.Entity.Entity, tier));
+    }
+
+    static int FloorDivide(int value, int divisor)
+    {
+        int quotient = value / divisor;
+        return value % divisor < 0 ? quotient - 1 : quotient;
+    }
+
+    static int DivideRoundUp(int value, int divisor) =>
+        checked((int)(((long)value + divisor - 1L) / divisor));
+
+    static bool Within(in ReplicationSpatialPoint left, in ReplicationSpatialPoint right, int radius)
+    {
+        Int128 dx = (Int128)left.XMillimeters - right.XMillimeters;
+        Int128 dz = (Int128)left.ZMillimeters - right.ZMillimeters;
+        Int128 r = radius;
+        return dx * dx + dz * dz <= r * r;
+    }
+
+    static bool Allows(GameReplicationHorizon horizon, GameInterestTier tier) => tier switch
+    {
+        GameInterestTier.Immediate => horizon >= GameReplicationHorizon.Immediate,
+        GameInterestTier.Near => horizon >= GameReplicationHorizon.Near,
+        GameInterestTier.Far => horizon >= GameReplicationHorizon.Far,
+        _ => false,
+    };
+}
+
+static GameRecipientEntityRelationSnapshot Relation(
+    GameInterestService service,
+    ParticipantId participant,
+    ReplicationEntityId entity)
+{
+    GameRecipientEntityRelationSnapshot result = RelationOrDefault(service, participant, entity);
+    if (!result.Participant.IsValid)
+        throw new InvalidOperationException($"Expected relation {participant}/{entity}.");
+    return result;
+}
+
+static GameRecipientEntityRelationSnapshot RelationOrDefault(
+    GameInterestService service,
+    ParticipantId participant,
+    ReplicationEntityId entity)
+{
+    Span<GameRecipientEntityRelationSnapshot> relations = stackalloc GameRecipientEntityRelationSnapshot[512];
+    int count = service.CopyRelations(relations);
+    for (int index = 0; index < count; index++)
+        if (relations[index].Participant == participant && relations[index].Entity == entity)
+            return relations[index];
+    return default;
+}
+
+static void DrainRecipient(
+    GameInterestService service,
+    ParticipantId participant,
+    long nowMilliseconds,
+    Span<GameWorldStateRecord> records)
+{
+    while (true)
+    {
+        GameWorldStateBuildStatus status = service.TryBuildBundle(
+            participant,
+            nowMilliseconds,
+            4_096,
+            records,
+            out GameWorldStateBundle bundle);
+        if (status == GameWorldStateBuildStatus.NoData) return;
+        if (status != GameWorldStateBuildStatus.Success)
+            throw new InvalidOperationException($"Unexpected bundle status {status}.");
+        if (!service.TryAcknowledgeBundle(participant, bundle.BundleId, applied: true))
+            throw new InvalidOperationException("Expected application acknowledgement to succeed.");
+    }
 }
 
 static GameReplicationLimits Limits(int maximumEntities) =>

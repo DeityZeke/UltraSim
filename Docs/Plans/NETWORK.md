@@ -3,9 +3,10 @@
 Status: active forward plan. N0.0 contract/evidence, N0.1 canonical game
 projection/OfflineDirect, N0.2 bounded Network kernel foundations, N0.3 secure
 reliable protocol over deterministic datagrams, N0.4 remote Admission/UI over
-ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, and N0.6
-bounded authoritative input/owner-state replication are accepted. N0.7 AOI,
-pending state, recipient scheduling, and fanout are next.
+ProtocolLoopback, N0.5 real connected-UDP transport/session ownership, N0.6
+bounded authoritative input/owner-state replication, and N0.7 maintained AOI,
+pending state, application knowledge, and shared semantic fanout are accepted.
+N0.8 atomic baseline/recovery is next.
 
 This plan now runs on accepted ECS 3.4.2, Server Runtime, game composition,
 transactional persistence, cadence independence, and the neutral UI protocol.
@@ -41,6 +42,13 @@ CAPTURE HAPPENS AFTER AUTHORITY COMMITS.
 CAPTURE ONCE; RETAIN OUTSIDE ECS.
 INTEREST DECIDES WHO. DELIVERY DECIDES WHEN.
 CADENCE CONTROLS ELIGIBILITY, NOT EXISTENCE.
+REGIONS INDEX SPACE; THEY DO NOT DEFINE RELEVANCE.
+INTEREST IS MAINTAINED; IT IS NOT REBUILT FOR PACKET PRODUCTION.
+DISTANCE AND GAMEPLAY DEFINE BASE DYNAMIC RELEVANCE.
+CLIENT KNOWLEDGE IS NOT PRESENTATION.
+CAMERA SELECTS PRESENTATION; IT DOES NOT DEFINE SERVER DYNAMIC TRUTH.
+SHARE SEMANTIC WORK; PACKETIZE PER CONNECTION.
+FRESH BASELINES ESTABLISH KNOWLEDGE; LATEST-STATE PREHISTORY IS NOT REQUIRED.
 SENT IS NOT KNOWN. ACKNOWLEDGED/APPLIED IS KNOWN.
 LATEST STATE COALESCES. EVENTS RETAIN FACTS.
 BASELINES PREPARE, VALIDATE, THEN COMMIT.
@@ -665,22 +673,37 @@ prior-epoch state.
 ### Interest
 
 Interest decides who may receive captured state. It neither defines identity
-nor mutates simulation. Canonical region/chunk identity does not contain a
-recipient-relative ring:
+nor mutates simulation. Stable spatial regions answer where and accelerate
+candidate discovery/reverse routing; maintained recipient/entity relations say
+who currently cares and with what urgency. Regions never own canonical state,
+dirty state, packet state, or visibility. Canonical region identity does not
+contain a recipient-relative tier:
 
 ```text
 same region is Immediate for A, Near for B, Far for C, invisible to D
 ```
 
-Initial policy may use stable regions/layers/anchors with incremental bounded
-indexes. World coordinates remain authoritative. Floating origin and render
-window are later client/world-streaming presentation policy.
+The initial game-owned observation anchor is the controlled character and base
+dynamic relevance is 360 degrees. `R0 Immediate`, `R1 Near`, and `R2 Far` are
+recipient-relative meanings, not component schemas or protocol identities. R0
+uses exact squared distance plus hysteresis; outer tiers may use coarse region
+envelopes. Region edge length, tier radii, and target delivery intervals are
+configurable evidence profiles rather than protocol constants. Interest cadence
+controls when pending state becomes eligible; unchanged state produces no encode
+or network work.
+
+World coordinates remain authoritative. Camera direction does not demote base
+server interest. Floating origin, render windows, positive presentation
+activation, and terrain/static streaming are client/content concerns with their
+own potentially much larger horizons.
 
 ### Fanout and overload
 
-Cohorts may share captured semantic state and may share encoded fragments only
-when every recipient-relative field and baseline assumption is identical.
-Otherwise share meaning, not invalid wire bytes.
+Canonical entity/family/version work is shared where profitable, while final
+recipient bundles remain connection-relative. Explicit cohort managers, region
+slabs, homogeneous packet batches, and shared scatter/gather submission are
+measured N0.10 optimizations rather than N0.7 correctness machinery. Share
+meaning, not invalid recipient-relative wire bytes.
 
 Overload policy is explicit: coalesce latest state, lower optional replication
 frequency/fidelity, defer Bulk, or disconnect a persistently nonviable session.
@@ -692,8 +715,8 @@ The client owns a projection, never a second authority. Receive processing
 validates and stages complete semantic operations. One client apply barrier
 publishes coherent state to presentation/UI.
 
-Initial join, AOI expansion, reconnect, lifecycle/history loss, and generation
-replacement use an atomic baseline over an explicitly declared target:
+Initial join, generation replacement, reconnect, lifecycle/history loss, and
+explicit family/scope repair use an atomic baseline over a declared target:
 
 ```text
 PREPARE private candidate
@@ -713,15 +736,23 @@ Target scope is intentional:
 initial world entry / StateEpoch replacement
     -> complete relevant projection candidate
 
-AOI expansion / one state-family repair
-    -> atomic candidate for that declared region/family/scope
+one state-family repair
+    -> atomic candidate for that declared family/scope
 
 unrelated live scopes
     -> continue normally
 ```
 
-Walking into one region does not require replacing an enormous unrelated client
-projection merely because baseline commit is atomic.
+Ordinary AOI entry uses a complete self-contained current-state record and does
+not replay history or replace an unrelated client scope. A scoped atomic baseline
+is required only when a state family declares real atomic/reference dependencies
+or projection repair demands it.
+
+A fresh recipient has no prior latest-state knowledge. Its baseline establishes
+current truth at a declared cutoff; post-cutoff latest state coalesces and only
+non-coalescible application facts after the declared event floor retain history.
+Pre-cut positions or projection-lifecycle events are not replayed merely to invent
+interpolation history.
 
 Prediction/reconciliation is introduced only for selected movement semantics
 with a deterministic oracle. Observer interpolation uses presentation time and
@@ -763,8 +794,8 @@ N0.2   Network kernel capacity, identity, pools, and generated codecs
 N0.3   secure reliable protocol over ProtocolLoopback
 N0.4   remote Admission + server-defined UI through ProtocolLoopback
 N0.5   real UDP transport/session runtime using that application vertical
-N0.6   authoritative input + owner/world replication vertical
-N0.7   AOI, pending-state scheduler, and cohort fanout
+N0.6   authoritative input + owner-state vertical
+N0.7   maintained AOI, pending state, and shared semantic fanout
 N0.8   atomic baseline, recovery, reconnect, and generation replacement
 N0.9   integrated offline/loopback/UDP/listen-host acceptance
 N0.10  scale, sharding, measured specialization, and acceptance
@@ -1134,21 +1165,141 @@ The post-audit semantic-hardening observation is additional immutable evidence,
 not a replacement for the original accepted run:
 [`network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.6-controlled-input-owner-state-semantic-hardened-2026-08-14.json).
 
-### N0.7 — AOI, pending state, scheduler, and fanout
+### N0.7 — Maintained AOI, pending state, and shared fanout
 
-Deliver canonical region identity, incremental participant interest, reverse
-scope edges, recipient-relative priority/cadence, pending newest versions,
-tombstones, age/debt, byte budgets, fairness, cohorts, and explicit degradation.
+Deliver a game-owned bounded spatial broadphase and maintained recipient/entity
+relevance graph over canonical projection state. Stable regions accelerate
+candidate discovery and reverse routing but do not define identity, presentation,
+relevance semantics, or replicated-state ownership.
 
-Tests include brute-force interest oracle, cross-boundary movement, different
-rings per participant, off-phase one-shot update, full output ring, oversized
-Bulk, slow client, no subscribers, partial cohort failure, and tombstone versus
-delayed old state.
+Each admitted recipient has one game-owned observation anchor, initially the
+controlled character. Base dynamic relevance is 360 degrees and classified into
+recipient-relative `R0 Immediate`, `R1 Near`, and `R2 Far`. R0 uses exact close-
+range squared distance and enter/leave hysteresis; outer tiers may use coarse
+region envelopes. Exact meter thresholds, region edge length, and target delivery
+intervals are configurable evidence profiles rather than protocol constants.
 
-Benchmarks include spread, dense, multi-hotspot, traversal, immediate-radius,
-1/2/3 cadence, and cohort-size fanout controls.
+Interest tier controls priority and newest-state eligibility only. It does not
+create separate identity, require periodic transmission of unchanged state, or
+implicitly choose a payload schema. Game-owned replication-family policy decides
+which dynamic entities are meaningful at each horizon. Camera direction does not
+demote base server interest.
 
-Gate: exact recipient set, bounded pending state, and no lost latest version.
+Region/entity and region/recipient membership changes incrementally establish,
+remove, or retier compact `RecipientEntityRelation` records. Each relation retains
+the effective tier, recipient-known version, newest pending canonical version,
+application-knowledge sequence, and bounded scheduling state. Canonical changes
+fan directly through maintained reverse relations; packet production never
+rescans ECS or rebuilds a recipient world.
+
+The first WorldState representation uses complete self-contained entity/family
+samples. Shared semantic construction is cached/reused per demanded canonical
+version; interest cadence remains independent from representation. Final bundle
+assembly, packet numbering, reliability evidence, encryption, and socket
+submission remain connection-relative and happen last. Explicit cohort managers,
+region slabs, aliases, delta compression, and syscall batching require N0.10
+measurements.
+
+World-state application acknowledgement remains separate from transport ACK.
+Every newest version stays pending until application knowledge proves it safe or
+a baseline replaces the scope. Newer changes replace older unsatisfied state;
+application ACK of an older bundle cannot clear a newer pending version. Interest
+entry sends current complete state. Interest exit and canonical destruction
+publish recoverable absence/tombstone state whose sequence defeats delayed old
+present records. Normal AOI expansion does not replay history.
+
+Client/Core retains dynamic state independently from presentation. A local camera
+positively activates or warms presentation from retained state with an appropriate
+overscan margin. Terrain/static visual streaming is outside Network dynamic AOI;
+a future distant-observation mechanic must earn an explicit game-owned interest
+source rather than coupling camera frusta into the base server graph.
+
+The accepted baseline is single-owner, flat, bounded, and allocation-free. Its
+cost should track moved spatial membership, changed real relations, actual pending
+state, unique demanded semantic versions, and delivered bytes—not clients times
+world entities.
+
+Permanent tests include a brute-force relation/tier oracle; same-region and cross-
+region R0; hysteresis; incremental recipient/entity movement; zero work for
+unchanged/no-subscriber state; newest-version collapse; R0 promotion; phased
+outer-tier eligibility; family policy; shared semantic construction with
+independent acknowledgements; slow/full recipient retention; older ACK versus
+newer pending state; tombstone versus delayed present; client knowledge independent
+from camera presentation; and explicit capacity degradation/resync.
+
+Benchmarks sweep region edge, R0 radius, outer radii, density, dirty percentage,
+entity/recipient movement, state mix, and recipient fanout. Record time alongside
+edges touched, live relations, pending writes, unique semantic constructions,
+semantic copies/bytes, bundle bytes, and reserved bytes per bounded domain.
+
+Gate: exact maintained recipient set, bounded pending state, shared semantic work,
+and no lost latest version.
+
+Accepted implementation notes:
+
+- `GameInterestService` owns fixed-capacity entity/region/recipient indexes,
+  reverse region-interest edges, compact recipient/entity relations, exact R0
+  hysteresis, coarse R1/R2 envelopes, per-tier pending queues, fair recipient
+  selection, byte budgets, tombstones, and application-ACK knowledge;
+- canonical updates are pushed into the maintained graph after capture. Packet
+  production reads cached canonical semantics and pending relations; it neither
+  scans ECS nor reconstructs recipient worlds;
+- one semantic construction is cached per demanded entity/version and copied
+  into independent recipient records. Explicit cohort objects and shared encoded
+  packet bytes remain unearned N0.10 optimizations;
+- each connection adapter permits one unacknowledged partial WorldState bundle.
+  A retry requeues that identical bundle ID and byte sequence. Therefore the
+  kernel's per-message-family latest-state slot can never replace it with a
+  different partial subset; newer canonical versions remain pending behind the
+  application barrier;
+- per-recipient outstanding quotas keep a slow recipient from consuming the
+  complete application-ACK ledger. Capacity exhaustion is explicit nonviability,
+  never silent state loss;
+- `RemoteWorldStateClient` maps canonical IDs to private dense generational
+  client slots, retains tombstone knowledge independently from active storage,
+  preflights complete bundles, frees before allocating during atomic commit, and
+  treats camera selection as a local positive presentation query only;
+- the current dynamic family is a complete position plus `GameSimulationState`
+  sample. Broader game families and spatial-source integration extend this game
+  layer; they do not alter Network identity or delivery contracts;
+- managed dictionary indexes are pre-sized and count-bounded. Reported reserved
+  bytes include owned arrays plus deterministic dictionary-capacity estimates,
+  not CLR object headers or process working set.
+
+Permanent evidence now includes 26 game-replication tests and 31 remote
+application tests. The N0.7 additions prove the brute-force tier oracle,
+cross-region exact R0, hysteresis, differential region-edge maintenance,
+newest-version collapse and promotion, horizon policy, shared semantic reuse,
+old-ACK/new-pending safety, slow-recipient isolation, explicit capacity failure,
+zero warmed allocation, strict transactional wire decoding, secure-loopback
+application ACK, first-seen/repeated tombstones, camera-independent knowledge,
+and record-order-independent atomic client capacity replacement.
+
+The accepted 5,000-entity/16-recipient/10%-dirty reference observation records
+56,592 live relations and 10,000 region-interest edges. Mean canonical update is
+approximately 881.42 us, pending delivery plus immediate application ACK is
+355.16 us, one recipient cross-and-return operation is 366.25 us, and idle
+scheduling is 0.208 us. All timed phases allocate 0 B; known reserved payload is
+15,677,408 B. These are single-owner semantic scheduler measurements, not socket
+or WAN claims.
+
+Sensitivity evidence deliberately varies dirty state (1%, 10%, 100%), region
+edge (8 m, 16 m, 32 m), density (1 m, 4 m, 16 m entity spacing), and fanout
+(4, 16, 64 recipients). For example, 1% versus 100% dirty produces about
+97.79 us versus 6,270.03 us of canonical update work; 4 versus 64 recipients
+produces 12,480 versus 273,440 maintained relations and about 203.85 us versus
+3,792.71 us of 10%-dirty update work. The artifacts preserve the full timing,
+semantic-copy, bundle-byte, relation/edge, allocation, and reservation facts:
+
+- [`network-n0.7-maintained-interest-reference-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-reference-2026-08-14.json)
+- [`network-n0.7-maintained-interest-dirty1-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-dirty1-2026-08-14.json)
+- [`network-n0.7-maintained-interest-dirty100-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-dirty100-2026-08-14.json)
+- [`network-n0.7-maintained-interest-edge8-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-edge8-2026-08-14.json)
+- [`network-n0.7-maintained-interest-edge32-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-edge32-2026-08-14.json)
+- [`network-n0.7-maintained-interest-dense-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-dense-2026-08-14.json)
+- [`network-n0.7-maintained-interest-spread-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-spread-2026-08-14.json)
+- [`network-n0.7-maintained-interest-fanout4-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-fanout4-2026-08-14.json)
+- [`network-n0.7-maintained-interest-fanout64-2026-08-14.json`](../../_Benchmarks/Baselines/network-n0.7-maintained-interest-fanout64-2026-08-14.json)
 
 ### N0.8 — Atomic baseline and recovery
 
@@ -1241,7 +1392,7 @@ implementations.
 - lane ordering/supersession/expiry/recovery and starvation boundaries;
 - recipient-known versus merely sent state;
 - lifecycle lag/resync, event floors, baseline atomicity, tombstones;
-- interest enter/leave/crossing, layers, anchors, cohort fanout;
+- interest enter/leave/crossing, layers, anchors, and shared semantic fanout;
 - authority ingress ordering and client apply atomicity;
 - generation replacement, Admission rebind, persistence restore, reconnect;
 - capacity exhaustion, ownership, use-after-return, shutdown, worker faults;
@@ -1299,7 +1450,7 @@ These require evidence rather than premature commitment:
 - exact secure-UDP primitives/library;
 - acknowledgement detail retained for baseline/delta safety;
 - codec/generator project split;
-- cohort encoded-fragment reuse granularity;
+- whether measured traffic earns explicit cohorts/encoded-fragment reuse;
 - coordinate quantization and transform encoding;
 - compression thresholds and admitted content classes;
 - socket backend and sharding boundaries;

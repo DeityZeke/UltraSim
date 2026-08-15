@@ -51,6 +51,10 @@ Useful current anchors can be located by their embedded workload or filename:
   tick→projection→client reconciliation evidence. The `semantic-hardened`
   artifact supplements the original accepted run after the Input supersession,
   complete-tombstone, and true client-local slot corrections;
+- `network-n0.7-maintained-interest-*` — maintained region/relation/pending-state
+  scheduling and immediate application-ACK evidence. The reference, dirty,
+  region-edge, density, and fanout artifacts form one sensitivity matrix rather
+  than competing replacement baselines;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

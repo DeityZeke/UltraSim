@@ -1,0 +1,68 @@
+{
+  "Workload": "ultrasim-network-n0.7-maintained-interest-v1",
+  "CapturedUtc": "2026-08-15T04:13:27.0830692+00:00",
+  "Runtime": "8.0.29",
+  "ProcessorCount": 16,
+  "Entities": 5000,
+  "Recipients": 16,
+  "DirtyPercent": 10,
+  "Warmup": 6,
+  "Samples": 15,
+  "EntitySpacingMillimeters": 16000,
+  "RegionEdgeMillimeters": 16000,
+  "ImmediateRadiusMillimeters": 5000,
+  "NearRadiusMillimeters": 96000,
+  "FarRadiusMillimeters": 192000,
+  "SetupMicroseconds": 21311.671000000002,
+  "CanonicalUpdate": {
+    "MeanMicroseconds": 245.6864,
+    "P50Microseconds": 234.928,
+    "P95Microseconds": 311.017,
+    "P99Microseconds": 311.017,
+    "MaximumMicroseconds": 311.017
+  },
+  "PendingDeliveryAndApplicationAck": {
+    "MeanMicroseconds": 98.20906666666669,
+    "P50Microseconds": 96.369,
+    "P95Microseconds": 115.599,
+    "P99Microseconds": 115.599,
+    "MaximumMicroseconds": 115.599
+  },
+  "OneRecipientRegionCrossing": {
+    "MeanMicroseconds": 62.1196,
+    "P50Microseconds": 63,
+    "P95Microseconds": 72.099,
+    "P99Microseconds": 72.099,
+    "MaximumMicroseconds": 72.099
+  },
+  "MovementDeliveryAndApplicationAck": {
+    "MeanMicroseconds": 1.0186666666666666,
+    "P50Microseconds": 0.99,
+    "P95Microseconds": 1.3,
+    "P99Microseconds": 1.3,
+    "MaximumMicroseconds": 1.3
+  },
+  "IdleScheduler": {
+    "MeanMicroseconds": 0.20453124999999991,
+    "P50Microseconds": 0.2,
+    "P95Microseconds": 0.21,
+    "P99Microseconds": 0.23,
+    "MaximumMicroseconds": 0.23
+  },
+  "TimedManagedBytes": 0,
+  "CanonicalUpdateAllocatedBytes": 0,
+  "DeliveryAllocatedBytes": 0,
+  "RecipientMoveAllocatedBytes": 0,
+  "MovementDeliveryAllocatedBytes": 0,
+  "InitialRelations": 3888,
+  "FinalRelations": 3888,
+  "FinalPendingRelations": 0,
+  "UniqueSemanticConstructions": 3766,
+  "SemanticRecordCopies": 47518,
+  "SemanticBytesCopied": 1995756,
+  "DeliveredBundles": 1095,
+  "DeliveredBundleBytes": 1336179,
+  "RegionInterestEdges": 10000,
+  "ReservedBytes": 15677408,
+  "Notes": "Single-owner maintained graph; complete WorldState records; immediate application ACK; one recipient crosses and returns across a region boundary per sample; presentation excluded."
+}

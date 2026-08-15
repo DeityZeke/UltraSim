@@ -1,0 +1,68 @@
+{
+  "Workload": "ultrasim-network-n0.7-maintained-interest-v1",
+  "CapturedUtc": "2026-08-15T04:13:11.4964123+00:00",
+  "Runtime": "8.0.29",
+  "ProcessorCount": 16,
+  "Entities": 5000,
+  "Recipients": 16,
+  "DirtyPercent": 10,
+  "Warmup": 6,
+  "Samples": 15,
+  "EntitySpacingMillimeters": 4000,
+  "RegionEdgeMillimeters": 16000,
+  "ImmediateRadiusMillimeters": 5000,
+  "NearRadiusMillimeters": 96000,
+  "FarRadiusMillimeters": 192000,
+  "SetupMicroseconds": 29574.548,
+  "CanonicalUpdate": {
+    "MeanMicroseconds": 881.4201333333333,
+    "P50Microseconds": 881.213,
+    "P95Microseconds": 928.291,
+    "P99Microseconds": 928.291,
+    "MaximumMicroseconds": 928.291
+  },
+  "PendingDeliveryAndApplicationAck": {
+    "MeanMicroseconds": 355.15959999999995,
+    "P50Microseconds": 355.617,
+    "P95Microseconds": 363.587,
+    "P99Microseconds": 363.587,
+    "MaximumMicroseconds": 363.587
+  },
+  "OneRecipientRegionCrossing": {
+    "MeanMicroseconds": 366.2480666666667,
+    "P50Microseconds": 376.296,
+    "P95Microseconds": 391.147,
+    "P99Microseconds": 391.147,
+    "MaximumMicroseconds": 391.147
+  },
+  "MovementDeliveryAndApplicationAck": {
+    "MeanMicroseconds": 8.045933333333334,
+    "P50Microseconds": 0.31,
+    "P95Microseconds": 18.35,
+    "P99Microseconds": 18.35,
+    "MaximumMicroseconds": 18.35
+  },
+  "IdleScheduler": {
+    "MeanMicroseconds": 0.2084375000000001,
+    "P50Microseconds": 0.21,
+    "P95Microseconds": 0.22,
+    "P99Microseconds": 0.26,
+    "MaximumMicroseconds": 0.26
+  },
+  "TimedManagedBytes": 0,
+  "CanonicalUpdateAllocatedBytes": 0,
+  "DeliveryAllocatedBytes": 0,
+  "RecipientMoveAllocatedBytes": 0,
+  "MovementDeliveryAllocatedBytes": 0,
+  "InitialRelations": 56592,
+  "FinalRelations": 56592,
+  "FinalPendingRelations": 0,
+  "UniqueSemanticConstructions": 14476,
+  "SemanticRecordCopies": 213948,
+  "SemanticBytesCopied": 8985816,
+  "DeliveredBundles": 3617,
+  "DeliveredBundleBytes": 4803329,
+  "RegionInterestEdges": 10000,
+  "ReservedBytes": 15677408,
+  "Notes": "Single-owner maintained graph; complete WorldState records; immediate application ACK; one recipient crosses and returns across a region boundary per sample; presentation excluded."
+}
