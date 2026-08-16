@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Composition;
@@ -87,6 +88,41 @@ public sealed class GameInterestService
     private int _lastRegionEdgesRetiered;
     private int _lastRelationsChanged;
     private int _lastRelationsExamined;
+    private bool _attributionEnabled;
+    private ulong _attributionEntityUpserts;
+    private ulong _attributionExistingRelationVisits;
+    private ulong _attributionReverseRegionEdgeVisits;
+    private ulong _attributionRelationEnsureLookups;
+    private ulong _attributionPendingRelationVisits;
+    private ulong _attributionActualRelationChanges;
+    private ulong _attributionPendingVersionRewrites;
+    private ulong _attributionEntityCanonicalTicks;
+    private ulong _attributionRelationMaintenanceTicks;
+    private ulong _attributionBundleBuildCalls;
+    private ulong _attributionBundleBuildSuccesses;
+    private ulong _attributionBundleBuildNoData;
+    private ulong _attributionBundleBuildOutstandingCapacity;
+    private ulong _attributionBundleBuildOtherFailures;
+    private ulong _attributionPendingImmediateExamined;
+    private ulong _attributionPendingNearExamined;
+    private ulong _attributionPendingFarExamined;
+    private ulong _attributionPendingSelectedImmediate;
+    private ulong _attributionPendingSelectedNear;
+    private ulong _attributionPendingSelectedFar;
+    private ulong _attributionPendingSkippedAlreadySelected;
+    private ulong _attributionPendingSkippedCadence;
+    private ulong _attributionPendingSkippedAwaitingRetry;
+    private ulong _attributionBundleStopsNoEligibleDebt;
+    private ulong _attributionBundleStopsRecordLimit;
+    private ulong _attributionBundleStopsByteLimit;
+    private ulong _attributionBundleRecords;
+    private ulong _attributionBundleEstimatedBytes;
+    private int _attributionMaximumBundleRecords;
+    private int _attributionMaximumBundleEstimatedBytes;
+    private ulong _attributionApplicationAcknowledgements;
+    private ulong _attributionAcknowledgementRecordsExamined;
+    private ulong _attributionAcknowledgementTicks;
+    private readonly ulong[] _attributionBundleRecordHistogram;
 
     public GameInterestService(
         StateEpoch stateEpoch,
@@ -135,6 +171,7 @@ public sealed class GameInterestService
         _regionEdgeMapCapacity = _regionEdgeMap.EnsureCapacity(limits.MaximumRegionInterestEdges);
         _relationMapCapacity = _relationMap.EnsureCapacity(limits.MaximumRecipientEntityRelations);
         _bundleMapCapacity = _bundleMap.EnsureCapacity(limits.MaximumOutstandingBundles);
+        _attributionBundleRecordHistogram = new ulong[limits.MaximumRecordsPerBundle + 1];
     }
 
     public StateEpoch StateEpoch
@@ -363,6 +400,8 @@ public sealed class GameInterestService
         long nowMilliseconds)
     {
         EnsureOwnerThread();
+        long attributionStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionEntityUpserts);
         ResetLastMutationCounters();
         if (!entity.Entity.IsValid || entity.Entity.Index >= _entities.Length ||
             canonicalVersion == 0 || nowMilliseconds < 0 ||
@@ -422,11 +461,17 @@ public sealed class GameInterestService
         state.Horizon = horizon;
         state.CachedVersion = 0;
 
+        long maintenanceStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionEntityCanonicalTicks,
+                checked((ulong)(maintenanceStarted - attributionStarted)));
+
         if (created || previousRegion != nextRegion)
         {
             int relation = state.RelationHead;
             while (relation >= 0)
             {
+                if (_attributionEnabled) SaturatingIncrement(ref _attributionExistingRelationVisits);
                 int next = _relations[relation].EntityNext;
                 int recipientIndex = _relations[relation].Recipient;
                 if (!_regionEdgeMap.TryGetValue(new RecipientRegionKey(recipientIndex, nextRegion), out int edge))
@@ -441,6 +486,7 @@ public sealed class GameInterestService
             int relation = state.RelationHead;
             while (relation >= 0)
             {
+                if (_attributionEnabled) SaturatingIncrement(ref _attributionExistingRelationVisits);
                 int next = _relations[relation].EntityNext;
                 int recipientIndex = _relations[relation].Recipient;
                 int edge = _regionEdgeMap[new RecipientRegionKey(recipientIndex, nextRegion)];
@@ -455,6 +501,7 @@ public sealed class GameInterestService
         int regionEdge = _regions[nextRegion].InterestHead;
         while (regionEdge >= 0)
         {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionReverseRegionEdgeVisits);
             int next = _regionEdges[regionEdge].RegionNext;
             if (!EnsureDesiredRelation(
                     _regionEdges[regionEdge].Recipient,
@@ -470,6 +517,7 @@ public sealed class GameInterestService
         int pendingRelation = state.RelationHead;
         while (pendingRelation >= 0)
         {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionPendingRelationVisits);
             int next = _relations[pendingRelation].EntityNext;
             if (_relations[pendingRelation].DesiredPresent &&
                 (!_relations[pendingRelation].Pending ||
@@ -479,6 +527,12 @@ public sealed class GameInterestService
             pendingRelation = next;
         }
 
+        if (_attributionEnabled)
+        {
+            SaturatingAdd(ref _attributionRelationMaintenanceTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - maintenanceStarted)));
+            SaturatingAdd(ref _attributionActualRelationChanges, checked((ulong)_lastRelationsChanged));
+        }
         return AnyAffectedRecipientNonviable(state.Region)
             ? GameInterestUpdateStatus.RecipientNonviable
             : GameInterestUpdateStatus.Success;
@@ -543,17 +597,20 @@ public sealed class GameInterestService
     {
         EnsureOwnerThread();
         bundle = default;
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionBundleBuildCalls);
         if (!_recipientMap.TryGetValue(participant, out int recipientIndex))
-            return GameWorldStateBuildStatus.UnknownRecipient;
-        if (nowMilliseconds < 0) return GameWorldStateBuildStatus.NoData;
+            return RecordBuildStatus(GameWorldStateBuildStatus.UnknownRecipient);
+        if (nowMilliseconds < 0) return RecordBuildStatus(GameWorldStateBuildStatus.NoData);
         ExpireBundles(nowMilliseconds);
-        return TryBuildBundleCore(recipientIndex, nowMilliseconds, byteBudget, destination, out bundle);
+        return RecordBuildStatus(TryBuildBundleCore(
+            recipientIndex, nowMilliseconds, byteBudget, destination, out bundle));
     }
 
     /// <summary>Applies or rejects one application-level bundle acknowledgement.</summary>
     public bool TryAcknowledgeBundle(ParticipantId participant, ulong bundleId, bool applied)
     {
         EnsureOwnerThread();
+        long attributionStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         if (!participant.IsValid || bundleId == 0 || !_bundleMap.TryGetValue(bundleId, out int bundleIndex))
             return false;
         ref SentBundleState bundle = ref _bundles[bundleIndex];
@@ -561,6 +618,11 @@ public sealed class GameInterestService
             return false;
 
         int baseIndex = bundleIndex * _limits.MaximumRecordsPerBundle;
+        if (_attributionEnabled)
+        {
+            SaturatingIncrement(ref _attributionApplicationAcknowledgements);
+            SaturatingAdd(ref _attributionAcknowledgementRecordsExamined, checked((ulong)bundle.Count));
+        }
         for (int index = 0; index < bundle.Count; index++)
         {
             SentBundleItem item = _bundleItems[baseIndex + index];
@@ -589,6 +651,9 @@ public sealed class GameInterestService
         if (applied) SaturatingIncrement(ref _bundlesApplied);
         else SaturatingIncrement(ref _bundlesRejected);
         ReleaseBundle(bundleIndex);
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionAcknowledgementTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - attributionStarted)));
         return true;
     }
 
@@ -669,6 +734,96 @@ public sealed class GameInterestService
             _lastRelationsChanged,
             _lastRelationsExamined,
             CalculateReservedBytes());
+    }
+
+    /// <summary>Enables or disables cold diagnostic attribution and resets its cumulative epoch.</summary>
+    public void ResetAttribution(bool enabled)
+    {
+        EnsureOwnerThread();
+        _attributionEnabled = enabled;
+        _attributionEntityUpserts = 0;
+        _attributionExistingRelationVisits = 0;
+        _attributionReverseRegionEdgeVisits = 0;
+        _attributionRelationEnsureLookups = 0;
+        _attributionPendingRelationVisits = 0;
+        _attributionActualRelationChanges = 0;
+        _attributionPendingVersionRewrites = 0;
+        _attributionEntityCanonicalTicks = 0;
+        _attributionRelationMaintenanceTicks = 0;
+        _attributionBundleBuildCalls = 0;
+        _attributionBundleBuildSuccesses = 0;
+        _attributionBundleBuildNoData = 0;
+        _attributionBundleBuildOutstandingCapacity = 0;
+        _attributionBundleBuildOtherFailures = 0;
+        _attributionPendingImmediateExamined = 0;
+        _attributionPendingNearExamined = 0;
+        _attributionPendingFarExamined = 0;
+        _attributionPendingSelectedImmediate = 0;
+        _attributionPendingSelectedNear = 0;
+        _attributionPendingSelectedFar = 0;
+        _attributionPendingSkippedAlreadySelected = 0;
+        _attributionPendingSkippedCadence = 0;
+        _attributionPendingSkippedAwaitingRetry = 0;
+        _attributionBundleStopsNoEligibleDebt = 0;
+        _attributionBundleStopsRecordLimit = 0;
+        _attributionBundleStopsByteLimit = 0;
+        _attributionBundleRecords = 0;
+        _attributionBundleEstimatedBytes = 0;
+        _attributionMaximumBundleRecords = 0;
+        _attributionMaximumBundleEstimatedBytes = 0;
+        _attributionApplicationAcknowledgements = 0;
+        _attributionAcknowledgementRecordsExamined = 0;
+        _attributionAcknowledgementTicks = 0;
+        Array.Clear(_attributionBundleRecordHistogram);
+    }
+
+    public GameInterestAttributionSnapshot GetAttributionSnapshot()
+    {
+        EnsureOwnerThread();
+        return new(
+            _attributionEnabled,
+            _attributionEntityUpserts,
+            _attributionExistingRelationVisits,
+            _attributionReverseRegionEdgeVisits,
+            _attributionRelationEnsureLookups,
+            _attributionPendingRelationVisits,
+            _attributionActualRelationChanges,
+            _attributionPendingVersionRewrites,
+            _attributionEntityCanonicalTicks,
+            _attributionRelationMaintenanceTicks,
+            _attributionBundleBuildCalls,
+            _attributionBundleBuildSuccesses,
+            _attributionBundleBuildNoData,
+            _attributionBundleBuildOutstandingCapacity,
+            _attributionBundleBuildOtherFailures,
+            _attributionPendingImmediateExamined,
+            _attributionPendingNearExamined,
+            _attributionPendingFarExamined,
+            _attributionPendingSelectedImmediate,
+            _attributionPendingSelectedNear,
+            _attributionPendingSelectedFar,
+            _attributionPendingSkippedAlreadySelected,
+            _attributionPendingSkippedCadence,
+            _attributionPendingSkippedAwaitingRetry,
+            _attributionBundleStopsNoEligibleDebt,
+            _attributionBundleStopsRecordLimit,
+            _attributionBundleStopsByteLimit,
+            _attributionBundleRecords,
+            _attributionBundleEstimatedBytes,
+            _attributionMaximumBundleRecords,
+            _attributionMaximumBundleEstimatedBytes,
+            _attributionApplicationAcknowledgements,
+            _attributionAcknowledgementRecordsExamined,
+            _attributionAcknowledgementTicks);
+    }
+
+    public int CopyBundleRecordHistogram(Span<ulong> destination)
+    {
+        EnsureOwnerThread();
+        if (destination.Length < _attributionBundleRecordHistogram.Length)
+            throw new ArgumentException("Destination is smaller than the bundle-record histogram.", nameof(destination));
+        _attributionBundleRecordHistogram.CopyTo(destination);
+        return _attributionBundleRecordHistogram.Length;
     }
 
     private GameInterestUpdateStatus RebuildRecipientRegionEnvelope(int recipientIndex, long now)
@@ -857,6 +1012,7 @@ public sealed class GameInterestService
 
     private bool EnsureDesiredRelation(int recipientIndex, int entityIndex, GameInterestTier baseTier, long now)
     {
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionRelationEnsureLookups);
         ref EntityState entity = ref _entities[entityIndex];
         var key = new RecipientEntityKey(recipientIndex, entity.Entity.Index);
         if (_relationMap.TryGetValue(key, out int relationIndex))
@@ -968,7 +1124,11 @@ public sealed class GameInterestService
             MarkRecipientNonviable(relation.Recipient);
             return;
         }
-        if (relation.Pending) UnlinkPending(relationIndex);
+        if (relation.Pending)
+        {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionPendingVersionRewrites);
+            UnlinkPending(relationIndex);
+        }
         else _pendingCount++;
         relation.Pending = true;
         relation.PendingPresent = present;
@@ -1098,11 +1258,24 @@ public sealed class GameInterestService
         AdvanceBuildStamp();
         int count = 0;
         int bytes = BundleHeaderEstimate;
+        int immediateCursor = recipient.PendingImmediateHead;
+        int nearCursor = recipient.PendingNearHead;
+        int farCursor = recipient.PendingFarHead;
         while (count < maximum && bytes + GameWorldStateRecord.MaximumEncodedBytes <= byteBudget)
         {
-            int selected = SelectEligibleRelation(recipientIndex, now);
+            int selected = SelectEligibleRelation(
+                recipientIndex, now, ref immediateCursor, ref nearCursor, ref farCursor);
             if (selected < 0) break;
             ref RelationState relation = ref _relations[selected];
+            if (_attributionEnabled)
+            {
+                switch (relation.PendingTier)
+                {
+                    case GameInterestTier.Immediate: SaturatingIncrement(ref _attributionPendingSelectedImmediate); break;
+                    case GameInterestTier.Near: SaturatingIncrement(ref _attributionPendingSelectedNear); break;
+                    case GameInterestTier.Far: SaturatingIncrement(ref _attributionPendingSelectedFar); break;
+                }
+            }
             relation.BuildStamp = _buildStamp;
             GameWorldStateRecord record;
             if (relation.PendingPresent)
@@ -1161,6 +1334,13 @@ public sealed class GameInterestService
             SaturatingIncrement(ref _semanticCopies);
             SaturatingAdd(ref _semanticBytes, GameWorldStateRecord.MaximumEncodedBytes);
         }
+        if (_attributionEnabled)
+        {
+            if (count == maximum) SaturatingIncrement(ref _attributionBundleStopsRecordLimit);
+            else if (bytes + GameWorldStateRecord.MaximumEncodedBytes > byteBudget)
+                SaturatingIncrement(ref _attributionBundleStopsByteLimit);
+            else SaturatingIncrement(ref _attributionBundleStopsNoEligibleDebt);
+        }
         if (count == 0) return GameWorldStateBuildStatus.NoData;
 
         AllocatePeekedBundle(bundleIndex);
@@ -1177,11 +1357,24 @@ public sealed class GameInterestService
         _bundleCount++;
         recipient.OutstandingBundleCount++;
         SaturatingIncrement(ref _bundlesBuilt);
+        if (_attributionEnabled)
+        {
+            SaturatingAdd(ref _attributionBundleRecords, checked((ulong)count));
+            SaturatingAdd(ref _attributionBundleEstimatedBytes, checked((ulong)bytes));
+            _attributionMaximumBundleRecords = Math.Max(_attributionMaximumBundleRecords, count);
+            _attributionMaximumBundleEstimatedBytes = Math.Max(_attributionMaximumBundleEstimatedBytes, bytes);
+            SaturatingIncrement(ref _attributionBundleRecordHistogram[count]);
+        }
         bundle = new(recipient.Participant, _stateEpoch, id, count, bytes);
         return GameWorldStateBuildStatus.Success;
     }
 
-    private int SelectEligibleRelation(int recipientIndex, long now)
+    private int SelectEligibleRelation(
+        int recipientIndex,
+        long now,
+        ref int immediateCursor,
+        ref int nearCursor,
+        ref int farCursor)
     {
         ref RecipientState recipient = ref _recipients[recipientIndex];
         const int scheduleLength = 7;
@@ -1194,14 +1387,16 @@ public sealed class GameInterestService
                 3 or 5 => GameInterestTier.Near,
                 _ => GameInterestTier.Far,
             };
-            int head = tier switch
+            int selected = tier switch
             {
-                GameInterestTier.Immediate => recipient.PendingImmediateHead,
-                GameInterestTier.Near => recipient.PendingNearHead,
-                GameInterestTier.Far => recipient.PendingFarHead,
+                GameInterestTier.Immediate =>
+                    SelectEligibleInPendingList(ref immediateCursor, tier, now),
+                GameInterestTier.Near =>
+                    SelectEligibleInPendingList(ref nearCursor, tier, now),
+                GameInterestTier.Far =>
+                    SelectEligibleInPendingList(ref farCursor, tier, now),
                 _ => -1,
             };
-            int selected = SelectEligibleInPendingList(head, now);
             if (selected < 0) continue;
             recipient.NextTierSchedule = checked((byte)((scheduleIndex + 1) % scheduleLength));
             return selected;
@@ -1209,19 +1404,57 @@ public sealed class GameInterestService
         return -1;
     }
 
-    private int SelectEligibleInPendingList(int relation, long now)
+    private int SelectEligibleInPendingList(ref int relation, GameInterestTier tier, long now)
     {
         while (relation >= 0)
         {
-            ref readonly RelationState candidate = ref _relations[relation];
+            int candidateIndex = relation;
+            ref readonly RelationState candidate = ref _relations[candidateIndex];
+            relation = candidate.PendingNext;
+            if (_attributionEnabled)
+            {
+                switch (tier)
+                {
+                    case GameInterestTier.Immediate: SaturatingIncrement(ref _attributionPendingImmediateExamined); break;
+                    case GameInterestTier.Near: SaturatingIncrement(ref _attributionPendingNearExamined); break;
+                    case GameInterestTier.Far: SaturatingIncrement(ref _attributionPendingFarExamined); break;
+                }
+                if (candidate.BuildStamp == _buildStamp)
+                    SaturatingIncrement(ref _attributionPendingSkippedAlreadySelected);
+                else if (candidate.EligibleAtMilliseconds > now)
+                    SaturatingIncrement(ref _attributionPendingSkippedCadence);
+                else if (candidate.HasSent && now - candidate.LastSentMilliseconds <
+                    _profile.ApplicationAckRetryMilliseconds)
+                    SaturatingIncrement(ref _attributionPendingSkippedAwaitingRetry);
+            }
             if (candidate.BuildStamp != _buildStamp &&
                 candidate.EligibleAtMilliseconds <= now &&
                 (!candidate.HasSent || now - candidate.LastSentMilliseconds >=
                     _profile.ApplicationAckRetryMilliseconds))
-                return relation;
-            relation = candidate.PendingNext;
+                return candidateIndex;
         }
         return -1;
+    }
+
+    private GameWorldStateBuildStatus RecordBuildStatus(GameWorldStateBuildStatus status)
+    {
+        if (!_attributionEnabled) return status;
+        switch (status)
+        {
+            case GameWorldStateBuildStatus.Success:
+                SaturatingIncrement(ref _attributionBundleBuildSuccesses);
+                break;
+            case GameWorldStateBuildStatus.NoData:
+                SaturatingIncrement(ref _attributionBundleBuildNoData);
+                break;
+            case GameWorldStateBuildStatus.OutstandingCapacityExceeded:
+                SaturatingIncrement(ref _attributionBundleBuildOutstandingCapacity);
+                break;
+            default:
+                SaturatingIncrement(ref _attributionBundleBuildOtherFailures);
+                break;
+        }
+        return status;
     }
 
     private GameInterestTier DetermineTier(
@@ -1695,6 +1928,7 @@ public sealed class GameInterestService
         bytes = checked(bytes + (long)_relationGenerations.Length * sizeof(uint));
         bytes = checked(bytes + (long)_bundles.Length * Unsafe.SizeOf<SentBundleState>());
         bytes = checked(bytes + (long)_bundleItems.Length * Unsafe.SizeOf<SentBundleItem>());
+        bytes = checked(bytes + (long)_attributionBundleRecordHistogram.Length * sizeof(ulong));
         bytes = checked(bytes + ((long)_freeRecipients.Length + _freeRegions.Length +
             _freeRegionEdges.Length + _freeRelations.Length + _freeBundles.Length) * sizeof(int));
         bytes = checked(bytes + DictionaryReservation(_recipientMapCapacity, Unsafe.SizeOf<ParticipantId>()));
@@ -1718,6 +1952,9 @@ public sealed class GameInterestService
         ulong add = checked((ulong)amount);
         value = ulong.MaxValue - value < add ? ulong.MaxValue : value + add;
     }
+
+    private static void SaturatingAdd(ref ulong value, ulong amount) =>
+        value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
 
     private void EnsureOwnerThread()
     {

@@ -84,6 +84,12 @@ Useful current anchors can be located by their embedded workload or filename:
   Event-ledger change; `event-causal-participant-index` is the exact post-change
   causal control; and `event-index-hardened` is the probes-off dense/spread Full
   rerun. These supplement rather than rewrite the original artifact;
+- `network-v3-dense-worldstate-causal-*` — the four-way Full/WorldState/Event/
+  updates-only attribution before and after the per-tier bundle cursor. The
+  `tier-cursor-hardened` artifact is the matching probes-off observation. These
+  preserve the 80.1% pending-examination reduction and explicitly leave the
+  remaining protocol/application-ACK and canonical relation-maintenance
+  candidates open;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

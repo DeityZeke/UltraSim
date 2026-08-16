@@ -24,8 +24,12 @@ zero capacity loss. Participant-local Event indexing removed the first proven
 cross-participant ledger scan and reduced the probes-off dense/spread p95s to
 about 21.2/19.5 ms in the combined same-process harness. Opt-in role attribution
 puts dense server work at about 10.1 ms p95—inside feasibility but above the ≤6 ms
-usable target—so measured WorldState/AOI/server-role work now shapes the next
-specialization.
+usable target. The next WorldState census added an updates-only causal control
+and found repeated pending-list head scans. Per-tier bundle cursors removed
+80.1% of pending examinations and lowered probe-enabled dense Full server-role
+p95 from 10.568 to 9.971 ms without changing semantics, wire, cadence, or
+capacity. Dense remains feasible rather than usable; measured application-ACK/
+protocol and canonical relation-maintenance work shape the next isolated step.
 
 ## Design
 

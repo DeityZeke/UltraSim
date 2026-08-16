@@ -99,11 +99,17 @@ DOTNET_TieredCompilation=0 DOTNET_ReadyToRun=0 \
     --output=_Benchmarks/results/network-v3-dense-event-causal-local.json
 ```
 
-The replication causal control runs `full`, `worldstate-only`, and `event-only`
+The replication causal control runs `full`, `worldstate-only`, `event-only`, and
+`updates-only`
 with identical topology, maintained relations, dirty updates, capacities,
 cadence, and transport. Its phase report separates authority/update, Event
 publish/schedule, WorldState scheduling, server/client application work,
 combined protocol pumping, and opt-in server/client protocol-role estimates.
+`updates-only` preserves dirty canonical/AOI maintenance while suppressing both
+delivery families. Opt-in WorldState attribution additionally records relation
+and reverse-edge visits, per-tier scheduler examinations/selections/skips,
+bundle stop reasons and record histogram, ACK records/time, and adapter
+copy/codec/queue time.
 Cold freshness scans remain outside the timed tick. Probe-enabled figures are
 compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 

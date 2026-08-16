@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using UltraSim.Game.Admission;
 using UltraSim.Game.Protocol;
@@ -21,6 +22,22 @@ public readonly record struct RemoteWorldStateServerSnapshot(
     ulong ActiveBaselineId,
     GameWorldStateBuildStatus LastBuildStatus,
     long ReservedBytes);
+
+/// <summary>Opt-in connection-adapter attribution; all values are cumulative Stopwatch ticks/counts.</summary>
+public readonly record struct RemoteWorldStateServerAttributionSnapshot(
+    bool Enabled,
+    ulong ScheduleCalls,
+    ulong BuildTicks,
+    ulong RecordCopies,
+    ulong RecordCopyTicks,
+    ulong EncodedMessages,
+    ulong EncodedBytes,
+    ulong CodecTicks,
+    ulong QueueAttempts,
+    ulong QueueAccepted,
+    ulong QueueTicks,
+    ulong AcknowledgementMessages,
+    ulong AcknowledgementTicks);
 
 public enum RemoteWorldBaselineProgressStatus : byte
 {
@@ -89,6 +106,19 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     private StateEpoch _cancelStateEpoch;
     private ulong _cancelBaselineId;
     private GameWorldStateBuildStatus _lastBuild;
+    private bool _attributionEnabled;
+    private ulong _attributionScheduleCalls;
+    private ulong _attributionBuildTicks;
+    private ulong _attributionRecordCopies;
+    private ulong _attributionRecordCopyTicks;
+    private ulong _attributionEncodedMessages;
+    private ulong _attributionEncodedBytes;
+    private ulong _attributionCodecTicks;
+    private ulong _attributionQueueAttempts;
+    private ulong _attributionQueueAccepted;
+    private ulong _attributionQueueTicks;
+    private ulong _attributionAcknowledgementMessages;
+    private ulong _attributionAcknowledgementTicks;
 
     public RemoteWorldStateServer(
         NetworkProtocolPeer peer,
@@ -148,13 +178,19 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     public GameWorldStateBuildStatus TrySchedule(long nowMilliseconds, int byteBudget)
     {
         EnsureOwnerThread();
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionScheduleCalls);
         _ = TryExpireBaselineCore();
         if (!TryFlushBaselineCancellation() || _baselineId != 0)
             return _lastBuild = GameWorldStateBuildStatus.BaselineInProgress;
         if (nowMilliseconds < 0) return _lastBuild = GameWorldStateBuildStatus.NoData;
+        long phaseStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         _lastBuild = _interest.TryBuildBundle(
             _participant, nowMilliseconds, byteBudget, _records, out GameWorldStateBundle bundle);
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionBuildTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - phaseStarted)));
         if (_lastBuild != GameWorldStateBuildStatus.Success) return _lastBuild;
+        phaseStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         for (int index = 0; index < bundle.RecordCount; index++)
         {
             ref readonly GameWorldStateRecord record = ref _records[index];
@@ -170,15 +206,46 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                 record.SimulationState.TickMarker,
                 record.SimulationState.InputVelocity);
         }
-        if (!UltraSimGameProtocol.TryWriteWorldStateBundle(
+        if (_attributionEnabled)
+        {
+            SaturatingAdd(ref _attributionRecordCopies, checked((ulong)bundle.RecordCount));
+            SaturatingAdd(ref _attributionRecordCopyTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - phaseStarted)));
+        }
+        phaseStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
+        bool encoded = UltraSimGameProtocol.TryWriteWorldStateBundle(
                 _messageScratch,
                 _applicationSessionEpoch,
                 bundle.StateEpoch.Value,
                 bundle.BundleId,
                 _wireRecords.AsSpan(0, bundle.RecordCount),
-                out int written) ||
-            _peer.TryQueue(RemoteWorldStateBundleHeaderCodec.Descriptor.Id,
-                _messageScratch.AsSpan(0, written)) != NetworkQueueStatus.Accepted)
+                out int written);
+        if (_attributionEnabled)
+        {
+            SaturatingAdd(ref _attributionCodecTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - phaseStarted)));
+            if (encoded)
+            {
+                SaturatingIncrement(ref _attributionEncodedMessages);
+                SaturatingAdd(ref _attributionEncodedBytes, checked((ulong)written));
+            }
+        }
+        NetworkQueueStatus queueStatus = NetworkQueueStatus.InvalidDescriptor;
+        if (encoded)
+        {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionQueueAttempts);
+            phaseStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
+            queueStatus = _peer.TryQueue(RemoteWorldStateBundleHeaderCodec.Descriptor.Id,
+                _messageScratch.AsSpan(0, written));
+            if (_attributionEnabled)
+            {
+                SaturatingAdd(ref _attributionQueueTicks,
+                    checked((ulong)(Stopwatch.GetTimestamp() - phaseStarted)));
+                if (queueStatus == NetworkQueueStatus.Accepted)
+                    SaturatingIncrement(ref _attributionQueueAccepted);
+            }
+        }
+        if (!encoded || queueStatus != NetworkQueueStatus.Accepted)
         {
             _interest.AbandonBundle(bundle.BundleId);
             _records.AsSpan(0, bundle.RecordCount).Clear();
@@ -345,6 +412,8 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
             return true;
         }
         if (message.MessageId != RemoteWorldStateAppliedMessageCodec.Descriptor.Id) return false;
+        long attributionStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
+        if (_attributionEnabled) SaturatingIncrement(ref _attributionAcknowledgementMessages);
         if (!RemoteWorldStateAppliedMessageCodec.TryReadExact(
                 payload, out RemoteWorldStateAppliedMessage acknowledgement) ||
             acknowledgement.ApplicationSessionEpoch != _applicationSessionEpoch ||
@@ -356,6 +425,9 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                 acknowledgement.Status == RemoteWorldStateApplyStatus.Applied))
         {
             SaturatingIncrement(ref _malformed);
+            if (_attributionEnabled)
+                SaturatingAdd(ref _attributionAcknowledgementTicks,
+                    checked((ulong)(Stopwatch.GetTimestamp() - attributionStarted)));
             return true;
         }
         if (acknowledgement.Status == RemoteWorldStateApplyStatus.Applied)
@@ -367,6 +439,9 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
         }
         else
             SaturatingIncrement(ref _rejected);
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionAcknowledgementTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - attributionStarted)));
         return true;
     }
 
@@ -384,6 +459,43 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
                 (long)_baselineRecords.Length * Unsafe.SizeOf<GameWorldStateRecord>() +
                 (long)_baselineWireRecords.Length * Unsafe.SizeOf<RemoteWorldStateRecord>() +
                 _messageScratch.Length));
+    }
+
+    public void ResetAttribution(bool enabled)
+    {
+        EnsureOwnerThread();
+        _attributionEnabled = enabled;
+        _attributionScheduleCalls = 0;
+        _attributionBuildTicks = 0;
+        _attributionRecordCopies = 0;
+        _attributionRecordCopyTicks = 0;
+        _attributionEncodedMessages = 0;
+        _attributionEncodedBytes = 0;
+        _attributionCodecTicks = 0;
+        _attributionQueueAttempts = 0;
+        _attributionQueueAccepted = 0;
+        _attributionQueueTicks = 0;
+        _attributionAcknowledgementMessages = 0;
+        _attributionAcknowledgementTicks = 0;
+    }
+
+    public RemoteWorldStateServerAttributionSnapshot GetAttributionSnapshot()
+    {
+        EnsureOwnerThread();
+        return new(
+            _attributionEnabled,
+            _attributionScheduleCalls,
+            _attributionBuildTicks,
+            _attributionRecordCopies,
+            _attributionRecordCopyTicks,
+            _attributionEncodedMessages,
+            _attributionEncodedBytes,
+            _attributionCodecTicks,
+            _attributionQueueAttempts,
+            _attributionQueueAccepted,
+            _attributionQueueTicks,
+            _attributionAcknowledgementMessages,
+            _attributionAcknowledgementTicks);
     }
 
     private void ProcessBaselineAcknowledgement(ReadOnlySpan<byte> payload)
@@ -528,6 +640,9 @@ public sealed class RemoteWorldStateServer : IRemoteGameProtocolHandler
     {
         if (value != ulong.MaxValue) value++;
     }
+
+    private static void SaturatingAdd(ref ulong value, ulong amount) =>
+        value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
 
     private void EnsureOwnerThread()
     {

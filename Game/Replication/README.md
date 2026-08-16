@@ -299,6 +299,18 @@ interleaving, a lagging consumer pinning retention, tied minima, no-relevant
 fast-forward, unregister/reregister, physical ring-slot reuse, generation
 replacement, capacity rejection, duplicate retry, and warmed zero allocation.
 
+The subsequent Dense-400 WorldState census keeps production instrumentation
+dormant by default. When explicitly enabled, `GameInterestService` attributes
+canonical relation/reverse-edge/pending visits, per-tier scheduling scans and
+skip causes, bundle fullness/stop causes, and application-ACK work;
+`RemoteWorldStateServer` attributes final record projection, encoding, queueing,
+and ACK handling. Bundle selection now carries one local cursor per pending tier
+for the lifetime of a build, so a 24-record bundle never restarts at the list
+head and rediscovers its own selected rows. The weighted tier policy and every
+semantic/application-knowledge contract remain unchanged. A permanent gate
+proves one full 16-record Immediate bundle examines and selects each relation
+exactly once.
+
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces
 no routing policy; game/client composition supplies a fixed bounded ordered set.

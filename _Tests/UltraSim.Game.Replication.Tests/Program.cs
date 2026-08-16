@@ -38,6 +38,7 @@ var tests = new (string Name, Action Body)[]
     ("SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress", SlowRecipientOutstandingQuotaDoesNotBlockPeerProgress),
     ("InterestCapacityFailureIsExplicitlyNonviable", InterestCapacityFailureIsExplicitlyNonviable),
     ("ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow", ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow),
+    ("BundleSelectionResumesWithinEachTier", BundleSelectionResumesWithinEachTier),
     ("WarmedMaintainedInterestSchedulingAllocatesZero", WarmedMaintainedInterestSchedulingAllocatesZero),
 };
 
@@ -481,6 +482,36 @@ static void WarmedMaintainedInterestSchedulingAllocatesZero()
         DrainRecipient(service, participant, version, records);
     }
     Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
+
+static void BundleSelectionResumesWithinEachTier()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(92);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[16];
+    for (int index = 1; index <= 16; index++)
+        Check.Equal(GameInterestUpdateStatus.Success,
+            service.UpsertEntity(Projected(checked((uint)index), 1, 1), 1, Point(1, 0),
+                GameReplicationHorizon.Far, 0));
+    DrainRecipient(service, participant, 0, records);
+
+    service.ResetAttribution(enabled: true);
+    for (int index = 1; index <= 16; index++)
+        Check.Equal(GameInterestUpdateStatus.Success,
+            service.UpsertEntity(Projected(checked((uint)index), 1, 2), 2, Point(1, 0),
+                GameReplicationHorizon.Far, 1));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 1, 4_096, records, out GameWorldStateBundle bundle));
+    Check.Equal(16, bundle.RecordCount);
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.Equal(16UL, attribution.PendingImmediateExamined);
+    Check.Equal(16UL, attribution.PendingSelectedImmediate);
+    Check.Equal(0UL, attribution.PendingSkippedAlreadySelected);
+    Span<ulong> histogram = stackalloc ulong[17];
+    Check.Equal(17, service.CopyBundleRecordHistogram(histogram));
+    Check.Equal(1UL, histogram[16]);
 }
 
 static void BaselineAndOfflineDirectPublishCanonicalTruth()

@@ -207,3 +207,43 @@ public readonly record struct GameInterestSnapshot(
     int LastRelationsChanged,
     int LastRelationsExamined,
     long ReservedBytes);
+
+/// <summary>
+/// Opt-in cumulative work attribution for maintained WorldState interest and delivery.
+/// Disabled production paths do not read the clock or update these counters.
+/// </summary>
+public readonly record struct GameInterestAttributionSnapshot(
+    bool Enabled,
+    ulong EntityUpserts,
+    ulong ExistingRelationVisits,
+    ulong ReverseRegionEdgeVisits,
+    ulong RelationEnsureLookups,
+    ulong PendingRelationVisits,
+    ulong ActualRelationChanges,
+    ulong PendingVersionRewrites,
+    ulong EntityCanonicalTicks,
+    ulong RelationMaintenanceTicks,
+    ulong BundleBuildCalls,
+    ulong BundleBuildSuccesses,
+    ulong BundleBuildNoData,
+    ulong BundleBuildOutstandingCapacity,
+    ulong BundleBuildOtherFailures,
+    ulong PendingImmediateExamined,
+    ulong PendingNearExamined,
+    ulong PendingFarExamined,
+    ulong PendingSelectedImmediate,
+    ulong PendingSelectedNear,
+    ulong PendingSelectedFar,
+    ulong PendingSkippedAlreadySelected,
+    ulong PendingSkippedCadence,
+    ulong PendingSkippedAwaitingRetry,
+    ulong BundleStopsNoEligibleDebt,
+    ulong BundleStopsRecordLimit,
+    ulong BundleStopsByteLimit,
+    ulong BundleRecords,
+    ulong BundleEstimatedBytes,
+    int MaximumBundleRecords,
+    int MaximumBundleEstimatedBytes,
+    ulong ApplicationAcknowledgements,
+    ulong AcknowledgementRecordsExamined,
+    ulong AcknowledgementTicks);

@@ -2013,6 +2013,68 @@ but not usable, so the next measured question is WorldState/AOI/server-role cost
 and closing 10.108→≤6 ms—not Event, queue capacity, cadence retuning,
 socket/crypto work, workers, or sharding.
 
+#### Dense-400 WorldState/AOI attribution and tier-cursor specialization
+
+N0.10 next froze the Event-specialized Dense-400 topology and changed only its
+measurement surface. Opt-in attribution now records canonical-update relation
+visits, reverse-region lookups, pending-version rewrites, bundle build statuses,
+per-tier pending nodes examined/selected/skipped, bundle stop reasons and record
+histogram, application-ACK records/time, and final adapter copy/codec/queue/ACK
+time. A fourth `updates-only` causal control retains the same 400 recipients,
+400,000 relations, fixed-60 cadence, 2% dirty canonical updates, capacities, and
+secure shared-listener peers while suppressing WorldState and Event delivery.
+The probes remain disabled in ordinary accepted runs.
+
+The paired diagnostic evidence is:
+
+- [`network-v3-dense-worldstate-causal-pre-cursor-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-worldstate-causal-pre-cursor-2026-08-16.json)
+  — Full, WorldState-only, Event-only, and updates-only before the isolated
+  scheduler change;
+- [`network-v3-dense-worldstate-causal-tier-cursor-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-worldstate-causal-tier-cursor-2026-08-16.json)
+  — the exact same diagnostic controls after it;
+- [`network-v3-dense-worldstate-tier-cursor-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-worldstate-tier-cursor-hardened-2026-08-16.json)
+  — probes-off causal observations of the hardened path.
+
+The pre-change census found 97,912 bundle-build calls: 53,200 successes and
+44,712 `NoData` results. Those bundles moved 960,000 records (mean 18.05 of the
+24-record cap); 7,212 reached the record cap, none stopped on the 1,200-byte
+budget, and the maximum estimated bundle was 1,033 bytes. Bundle/MTU fill was
+therefore not the first defect. Final adapter work was also small across the
+whole 120-step observation: about 4.3 ms copying records, 16.5 ms encoding,
+6.4 ms queueing, and 36.3 ms processing application acknowledgements.
+
+The scheduler did, however, examine 24,568,821 pending nodes to select 960,000
+records. It restarted each tier scan at the pending-list head for every record;
+10,359,830 examinations rediscovered records already selected into that same
+bundle, with repeated cadence/retry skips accounting for much of the remainder.
+The isolated correction gives each bundle one local cursor per tier. Selection
+still follows the exact `R0 R0 R0 R1 R0 R1 R2` policy, skips ineligible debt,
+uses the same relation/application identities, and changes no wire, capacity,
+cadence, MTU, ACK, crypto, or authority semantic.
+
+That change reduced Full pending examinations to 4,901,079 (-80.1%) and same-bundle
+duplicate examinations to zero. Under the paired probes, Full WorldState
+scheduling p95 changed 3.560→2.969 ms and WorldState-only changed 3.427→2.810 ms.
+Full server-role p95 changed 10.568→9.971 ms; WorldState-only changed
+9.799→9.383 ms. The probes-off hardened observation records 20.837 ms Full and
+20.303 ms WorldState-only combined same-process tick p95, exact convergence,
+zero capacity loss, and bounded 67.875/65.125 ms all-state freshness p95. Those
+ordinary figures are observations, not a paired precision claim against older
+artifacts.
+
+The new causal control also sharpens the remaining work. Updates-only
+server-role p95 is 1.728 ms, including 1.012 ms canonical/AOI update p95 and
+0.651 ms idle peer/listener protocol work. WorldState-only server protocol p95
+is 5.057 ms, so delivery adds roughly 4.41 ms over that matched idle control;
+WorldState scheduling itself remains 2.810 ms. One canonical update currently
+visits its existing relation set, its reverse region-interest edges, and its
+pending relation set—960,000 visits in each category over this run despite zero
+tier/relevance changes. WorldState-only also emits exactly 106,400 Data packets
+and 53,200 transport ACK packets for 53,200 bundles: one state Data, one reliable
+application-ACK Data, and one transport ACK per applied bundle. These are now
+measured candidates for the next isolated checkpoint, not permission to combine
+ACK granularity, relation maintenance, protocol framing, or concurrency changes.
+
 Protected profiles:
 
 ```text

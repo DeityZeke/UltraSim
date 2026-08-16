@@ -44,7 +44,9 @@ internal static class DenseReplicationSuite
             "full" => [ReplicationTraffic.Full],
             "worldstate-only" => [ReplicationTraffic.WorldStateOnly],
             "event-only" => [ReplicationTraffic.EventOnly],
-            "causal" => [ReplicationTraffic.Full, ReplicationTraffic.WorldStateOnly, ReplicationTraffic.EventOnly],
+            "updates-only" => [ReplicationTraffic.UpdatesOnly],
+            "causal" => [ReplicationTraffic.Full, ReplicationTraffic.WorldStateOnly,
+                ReplicationTraffic.EventOnly, ReplicationTraffic.UpdatesOnly],
             _ => throw new ArgumentException($"Unknown replication traffic mode '{requestedTraffic}'."),
         };
         ReplicationWorkload[] profiles = baseProfiles
@@ -68,7 +70,7 @@ internal static class DenseReplicationSuite
         }
 
         var report = new ReplicationSuiteReport(
-            "ultrasim-network-v3-spread-dense-acceptance-v2",
+            "ultrasim-network-v3-spread-dense-acceptance-v3",
             DateTimeOffset.UtcNow,
             Environment.Version.ToString(),
             Environment.ProcessorCount,
@@ -358,7 +360,13 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         nextDeadline = Stopwatch.GetTimestamp();
 
         ResetMeasurement();
-        if (_phaseAttribution) ResetProtocolStageTiming(enabled: true);
+        if (_phaseAttribution)
+        {
+            ResetProtocolStageTiming(enabled: true);
+            _interest.ResetAttribution(enabled: true);
+            for (int index = 0; index < _bots.Length; index++)
+                _bots[index].WorldServer.ResetAttribution(enabled: true);
+        }
         GameInterestSnapshot interestBefore = _interest.GetSnapshot();
         GameProjectionSnapshot projectionBefore = _projection.GetSnapshot();
         EventTotals eventBefore = CaptureEventTotals();
@@ -401,6 +409,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         EventTotals eventAfter = CaptureEventTotals();
         TransportTotals networkAfter = CaptureTransportTotals();
         SharedUdpProtocolHostSnapshot hostAfter = _host.GetSnapshot();
+        ReplicationWorldStateAttribution worldAttribution = CaptureWorldStateAttribution();
 
         bool converged = ValidateConvergence();
         NetworkMetricSummary[] clientP95 = _clientFreshness
@@ -523,6 +532,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 NetworkMetricSummary.From(_clientProtocolMilliseconds),
                 NetworkMetricSummary.From(_serverRoleMilliseconds),
                 NetworkMetricSummary.From(_clientRoleMilliseconds)),
+            worldAttribution,
             new ReplicationAmplification(
                 constructions == 0 ? 0 : relationsCopied / (double)constructions,
                 relationsCopied == 0 ? 0 : bundles / (double)relationsCopied,
@@ -531,7 +541,13 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                 semanticBytes == 0 ? 0 : wireBytes / (double)semanticBytes,
                 wireDatagrams == 0 ? 0 : wireBytes / (double)wireDatagrams,
                 wireBytes == 0 ? 0 : retransmittedBytes / (double)wireBytes));
-        if (_phaseAttribution) ResetProtocolStageTiming(enabled: false);
+        if (_phaseAttribution)
+        {
+            ResetProtocolStageTiming(enabled: false);
+            _interest.ResetAttribution(enabled: false);
+            for (int index = 0; index < _bots.Length; index++)
+                _bots[index].WorldServer.ResetAttribution(enabled: false);
+        }
         return result;
     }
 
@@ -566,16 +582,16 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         RecordPhase(_authorityUpdateMilliseconds, phaseStarted, measure && _phaseAttribution);
 
         phaseStarted = Stopwatch.GetTimestamp();
-        if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) PublishEvents(tick);
+        if (_profile.EventsEnabled) PublishEvents(tick);
         RecordPhase(_eventPublishMilliseconds, phaseStarted, measure && _phaseAttribution);
 
         long now = SemanticMilliseconds(tick);
         phaseStarted = Stopwatch.GetTimestamp();
-        if (_profile.Traffic != ReplicationTraffic.EventOnly) ScheduleWorldState(now);
+        if (_profile.WorldStateEnabled) ScheduleWorldState(now);
         RecordPhase(_worldScheduleMilliseconds, phaseStarted, measure && _phaseAttribution);
 
         phaseStarted = Stopwatch.GetTimestamp();
-        if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) ScheduleEvents();
+        if (_profile.EventsEnabled) ScheduleEvents();
         RecordPhase(_eventScheduleMilliseconds, phaseStarted, measure && _phaseAttribution);
         for (int pass = 0; pass < 4; pass++) PumpAndDispatch(measure);
         if (measure)
@@ -664,8 +680,8 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
 
     private void ScheduleApplication(long nowMilliseconds)
     {
-        if (_profile.Traffic != ReplicationTraffic.EventOnly) ScheduleWorldState(nowMilliseconds);
-        if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) ScheduleEvents();
+        if (_profile.WorldStateEnabled) ScheduleWorldState(nowMilliseconds);
+        if (_profile.EventsEnabled) ScheduleEvents();
     }
 
     private void PumpAndDispatch(bool captureBatch)
@@ -728,7 +744,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         {
             // Every causal control begins from the same fully materialized client scope.
             ScheduleWorldState(checked(100L + round * 17L));
-            if (_profile.Traffic != ReplicationTraffic.WorldStateOnly) ScheduleEvents();
+            if (_profile.EventsEnabled) ScheduleEvents();
             for (int pass = 0; pass < 4; pass++) PumpAndDispatch(captureBatch: false);
             GameInterestSnapshot snapshot = _interest.GetSnapshot();
             if (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0)
@@ -750,9 +766,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             for (int pass = 0; pass < 4; pass++) PumpAndDispatch(captureBatch: measure);
             ScanFreshness(authorityTick, measure);
             GameInterestSnapshot snapshot = _interest.GetSnapshot();
-            bool worldComplete = _profile.Traffic == ReplicationTraffic.EventOnly ||
+            bool worldComplete = !_profile.WorldStateEnabled ||
                 (snapshot.PendingRelationCount == 0 && snapshot.OutstandingBundleCount == 0);
-            bool eventsComplete = _profile.Traffic == ReplicationTraffic.WorldStateOnly ||
+            bool eventsComplete = !_profile.EventsEnabled ||
                 _bots.All(bot => !bot.EventServer.GetSnapshot().AwaitingApplication);
             if (worldComplete && eventsComplete)
                 return settle;
@@ -801,7 +817,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
 
     private bool ValidateConvergence()
     {
-        if (_profile.Traffic == ReplicationTraffic.EventOnly)
+        if (!_profile.WorldStateEnabled)
             return _eventsPublished == _eventsApplied;
         int relationCount = _interest.CopyRelations(_relationScratch);
         int relationIndex = 0;
@@ -904,6 +920,61 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             _bots[index].Session.Server.ResetStageTiming(enabled);
         }
         _host.ResetListenerStageTiming(enabled);
+    }
+
+    private ReplicationWorldStateAttribution CaptureWorldStateAttribution()
+    {
+        if (!_phaseAttribution) return default;
+        GameInterestAttributionSnapshot interest = _interest.GetAttributionSnapshot();
+        ulong[] histogram = new ulong[RecordsPerBundle + 1];
+        _interest.CopyBundleRecordHistogram(histogram);
+        ulong scheduleCalls = 0;
+        ulong buildTicks = 0;
+        ulong recordCopies = 0;
+        ulong recordCopyTicks = 0;
+        ulong encodedMessages = 0;
+        ulong encodedBytes = 0;
+        ulong codecTicks = 0;
+        ulong queueAttempts = 0;
+        ulong queueAccepted = 0;
+        ulong queueTicks = 0;
+        ulong acknowledgementMessages = 0;
+        ulong acknowledgementTicks = 0;
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            RemoteWorldStateServerAttributionSnapshot adapter =
+                _bots[index].WorldServer.GetAttributionSnapshot();
+            scheduleCalls = SaturatingAdd(scheduleCalls, adapter.ScheduleCalls);
+            buildTicks = SaturatingAdd(buildTicks, adapter.BuildTicks);
+            recordCopies = SaturatingAdd(recordCopies, adapter.RecordCopies);
+            recordCopyTicks = SaturatingAdd(recordCopyTicks, adapter.RecordCopyTicks);
+            encodedMessages = SaturatingAdd(encodedMessages, adapter.EncodedMessages);
+            encodedBytes = SaturatingAdd(encodedBytes, adapter.EncodedBytes);
+            codecTicks = SaturatingAdd(codecTicks, adapter.CodecTicks);
+            queueAttempts = SaturatingAdd(queueAttempts, adapter.QueueAttempts);
+            queueAccepted = SaturatingAdd(queueAccepted, adapter.QueueAccepted);
+            queueTicks = SaturatingAdd(queueTicks, adapter.QueueTicks);
+            acknowledgementMessages = SaturatingAdd(
+                acknowledgementMessages, adapter.AcknowledgementMessages);
+            acknowledgementTicks = SaturatingAdd(
+                acknowledgementTicks, adapter.AcknowledgementTicks);
+        }
+        return new(
+            true,
+            interest,
+            histogram,
+            scheduleCalls,
+            ToMilliseconds(buildTicks),
+            recordCopies,
+            ToMilliseconds(recordCopyTicks),
+            encodedMessages,
+            encodedBytes,
+            ToMilliseconds(codecTicks),
+            queueAttempts,
+            queueAccepted,
+            ToMilliseconds(queueTicks),
+            acknowledgementMessages,
+            ToMilliseconds(acknowledgementTicks));
     }
 
     private ReplicationProtocolTiming CaptureProtocolStageTiming()
@@ -1277,6 +1348,7 @@ internal sealed record ReplicationWorkloadResult(
     SharedUdpListenerSnapshot ListenerAfter,
     ReplicationBatchOpportunityReport BatchOpportunity,
     ReplicationPhaseAttribution PhaseAttribution,
+    ReplicationWorldStateAttribution WorldStateAttribution,
     ReplicationAmplification Amplification);
 
 internal readonly record struct ReplicationPhaseAttribution(
@@ -1292,6 +1364,23 @@ internal readonly record struct ReplicationPhaseAttribution(
     NetworkMetricSummary ClientProtocolMilliseconds,
     NetworkMetricSummary ServerRoleTotalMilliseconds,
     NetworkMetricSummary ClientRoleTotalMilliseconds);
+
+internal readonly record struct ReplicationWorldStateAttribution(
+    bool Enabled,
+    GameInterestAttributionSnapshot Interest,
+    IReadOnlyList<ulong>? BundleRecordHistogram,
+    ulong AdapterScheduleCalls,
+    double AdapterBuildMilliseconds,
+    ulong AdapterRecordCopies,
+    double AdapterRecordCopyMilliseconds,
+    ulong AdapterEncodedMessages,
+    ulong AdapterEncodedBytes,
+    double AdapterCodecMilliseconds,
+    ulong AdapterQueueAttempts,
+    ulong AdapterQueueAccepted,
+    double AdapterQueueMilliseconds,
+    ulong AdapterAcknowledgementMessages,
+    double AdapterAcknowledgementMilliseconds);
 
 internal readonly record struct ReplicationProtocolTiming(ulong ClientTicks, ulong ServerTicks)
 {
@@ -1326,6 +1415,7 @@ internal enum ReplicationTraffic : byte
     Full = 0,
     WorldStateOnly = 1,
     EventOnly = 2,
+    UpdatesOnly = 3,
 }
 
 internal sealed record ReplicationWorkload(
@@ -1354,6 +1444,12 @@ internal sealed record ReplicationWorkload(
             : $"{Id}/{traffic.ToString().ToLowerInvariant()}",
         Traffic = traffic,
     };
+
+    internal bool WorldStateEnabled =>
+        Traffic is ReplicationTraffic.Full or ReplicationTraffic.WorldStateOnly;
+
+    internal bool EventsEnabled =>
+        Traffic is ReplicationTraffic.Full or ReplicationTraffic.EventOnly;
 
     internal ReplicationSpatialPoint EntityPoint(int entity)
     {
