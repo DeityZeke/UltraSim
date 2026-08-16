@@ -6,6 +6,7 @@ internal static class N010SharedUdpListenerTests
 {
     private static readonly NetworkMessageId s_reliable = new(1);
     private static readonly NetworkMessageId s_latest = new(2);
+    private static readonly NetworkMessageId s_independent = new(3);
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
         8,
         [
@@ -13,6 +14,8 @@ internal static class N010SharedUdpListenerTests
                 NetworkLane.Control, 32, 0x1010),
             new NetworkMessageDescriptor(s_latest, "ultrasim.test.shared-owner", 1,
                 NetworkLane.OwnerState, 32, 0x2020),
+            new NetworkMessageDescriptor(s_independent, "ultrasim.test.shared-world", 1,
+                NetworkLane.WorldState, 32, 0x3030),
         ]);
     private static readonly NetworkProtocolLimits s_protocol = new(
         8, 8, 64, 1, 64, 16, 16, 2, 64, 4, 32, 4);
@@ -28,6 +31,10 @@ internal static class N010SharedUdpListenerTests
         Run("SharedUdpRetiredCapacityAdvancesGeneration", SharedUdpRetiredCapacityAdvancesGeneration);
         Run("SharedUdpAggregateListenerCapacityPreservesBurst", SharedUdpAggregateListenerCapacityPreservesBurst);
         Run("WarmedSharedUdpDeliveryAllocatesZero", WarmedSharedUdpDeliveryAllocatesZero);
+        Run("SharedUdpNativeSendBatchPreservesIndependentDatagrams", SharedUdpNativeSendBatchPreservesIndependentDatagrams);
+        Run("SharedUdpNativeSendBatchBackpressureIsPerDatagram", SharedUdpNativeSendBatchBackpressureIsPerDatagram);
+        Run("SharedUdpNativeSendBatchRetirementPurgesQueuedPath", SharedUdpNativeSendBatchRetirementPurgesQueuedPath);
+        Run("WarmedSharedUdpNativeSendBatchAllocatesZero", WarmedSharedUdpNativeSendBatchAllocatesZero);
     }
 
     private static void SharedUdpListenerRoutesIndependentSecureSessions()
@@ -238,10 +245,160 @@ internal static class N010SharedUdpListenerTests
         }
     }
 
-    private static SharedUdpProtocolHost CreateHost(int maximumSessions) => new(
+    private static void SharedUdpNativeSendBatchPreservesIndependentDatagrams()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        const int sessionCount = 8;
+        using SharedUdpProtocolHost host = CreateHost(
+            sessionCount, SharedUdpSocketIoMode.PlatformBatch);
+        var sessions = new SharedUdpProtocolSession[sessionCount];
+        for (int index = 0; index < sessions.Length; index++)
+        {
+            True(host.TryAddLoopbackSession(out SharedUdpProtocolSession? session, out _));
+            sessions[index] = session!;
+            byte[] queued = [(byte)index];
+            Equal(NetworkQueueStatus.Accepted,
+                sessions[index].Server.TryQueue(s_latest, queued));
+        }
+
+        host.Pump();
+        SharedUdpListenerSnapshot submitted = host.GetSnapshot().Listener;
+        True(submitted.UsesNativeSendBatching);
+        Equal(1UL, submitted.NativeSendCalls);
+        Equal((ulong)sessionCount, submitted.NativeSentDatagrams);
+        Equal(sessionCount, submitted.MaximumNativeSendBatch);
+        Equal(sessionCount, submitted.NativeSendBatchP50);
+        Equal(sessionCount, submitted.NativeSendBatchP95);
+        Equal(sessionCount, submitted.MaximumOutboundQueuedDatagrams);
+        Equal(0UL, submitted.PartialNativeSendCalls);
+
+        Drive(host, AllDelivered);
+        for (int index = 0; index < sessions.Length; index++)
+        {
+            True(sessions[index].Client.TryPeekReceived(out NetworkDeliveredMessage message,
+                out ReadOnlySpan<byte> payload));
+            Equal(s_latest, message.MessageId);
+            byte[] expected = [(byte)index];
+            True(payload.SequenceEqual(expected));
+            True(sessions[index].Client.TryConsumeReceived());
+        }
+
+        bool AllDelivered()
+        {
+            for (int index = 0; index < sessions.Length; index++)
+                if (sessions[index].Client.ReceivedQueued != 1) return false;
+            return true;
+        }
+    }
+
+    private static void SharedUdpNativeSendBatchBackpressureIsPerDatagram()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using var host = new SharedUdpProtocolHost(
+            s_protocol,
+            s_udp,
+            new SharedUdpProtocolLimits(
+                1, 1, 16, SharedUdpSocketIoMode.PlatformBatch, 8),
+            s_manifest);
+        True(host.TryAddLoopbackSession(out SharedUdpProtocolSession? created, out _));
+        SharedUdpProtocolSession session = created!;
+        for (byte value = 0; value < 4; value++)
+        {
+            byte[] payload = [value];
+            Equal(NetworkQueueStatus.Accepted,
+                session.Server.TryQueue(s_independent, payload));
+        }
+
+        Drive(host, () => session.Client.ReceivedQueued == 4);
+        for (byte value = 0; value < 4; value++)
+        {
+            byte[] expected = [value];
+            True(session.Client.TryPeekReceived(out NetworkDeliveredMessage message,
+                out ReadOnlySpan<byte> payload));
+            Equal(s_independent, message.MessageId);
+            True(payload.SequenceEqual(expected));
+            True(session.Client.TryConsumeReceived());
+        }
+
+        SharedUdpListenerSnapshot listener = host.GetSnapshot().Listener;
+        True(listener.UsesNativeSendBatching);
+        True(listener.CapacityDrops > 0,
+            "The one-datagram listener queue never exercised per-datagram backpressure.");
+        Equal(4UL, listener.NativeSentDatagrams);
+        Equal(1, listener.MaximumNativeSendBatch);
+    }
+
+    private static void WarmedSharedUdpNativeSendBatchAllocatesZero()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using SharedUdpProtocolHost host = CreateHost(4, SharedUdpSocketIoMode.PlatformBatch);
+        var sessions = new SharedUdpProtocolSession[4];
+        for (int index = 0; index < sessions.Length; index++)
+        {
+            True(host.TryAddLoopbackSession(out SharedUdpProtocolSession? session, out _));
+            sessions[index] = session!;
+        }
+        for (int iteration = 0; iteration < 32; iteration++) RoundTrip(iteration);
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int iteration = 0; iteration < 128; iteration++) RoundTrip(iteration);
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        Equal(0L, allocated,
+            $"The warmed native send-batch path allocated {allocated} managed bytes.");
+
+        void RoundTrip(int value)
+        {
+            Span<byte> payload = stackalloc byte[4];
+            BitConverter.TryWriteBytes(payload, value);
+            for (int index = 0; index < sessions.Length; index++)
+                Equal(NetworkQueueStatus.Accepted,
+                    sessions[index].Server.TryQueue(s_latest, payload));
+            int step = 0;
+            while (!AllDelivered() && step++ < 50_000) host.Pump();
+            True(AllDelivered(), "Shared UDP native-batch latest state did not converge.");
+            for (int index = 0; index < sessions.Length; index++)
+            {
+                True(sessions[index].Client.TryConsumeReceived());
+            }
+
+            bool AllDelivered()
+            {
+                for (int index = 0; index < sessions.Length; index++)
+                    if (sessions[index].Client.ReceivedQueued != 1) return false;
+                return true;
+            }
+        }
+    }
+
+    private static void SharedUdpNativeSendBatchRetirementPurgesQueuedPath()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        using SharedUdpProtocolHost host = CreateHost(1, SharedUdpSocketIoMode.PlatformBatch);
+        True(host.TryAddLoopbackSession(out SharedUdpProtocolSession? created, out _));
+        SharedUdpProtocolSession session = created!;
+        ulong sentBefore = host.GetSnapshot().Listener.Sent;
+        Equal(DatagramSendStatus.Accepted,
+            session.ServerEndpoint.TrySend(stackalloc byte[] { 1, 2, 3 }));
+        session.Dispose();
+        host.Pump();
+        Equal(sentBefore, host.GetSnapshot().Listener.Sent,
+            "Retiring an endpoint submitted a queued datagram to its stale path.");
+
+        True(host.TryAddLoopbackSession(out SharedUdpProtocolSession? replacement, out _));
+        Equal(NetworkQueueStatus.Accepted,
+            replacement!.Server.TryQueue(s_latest, stackalloc byte[] { 9 }));
+        Drive(host, () => replacement.Client.ReceivedQueued == 1);
+    }
+
+    private static SharedUdpProtocolHost CreateHost(
+        int maximumSessions,
+        SharedUdpSocketIoMode mode = SharedUdpSocketIoMode.Scalar) => new(
         s_protocol,
         s_udp,
-        new SharedUdpProtocolLimits(maximumSessions, 4, checked(maximumSessions * 16)),
+        new SharedUdpProtocolLimits(
+            maximumSessions, 4, checked(maximumSessions * 16), mode, 32),
         s_manifest);
 
     private static void Drive(SharedUdpProtocolHost host, Func<bool> done)

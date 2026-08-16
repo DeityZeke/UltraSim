@@ -303,6 +303,14 @@ disabled. It shows no 2+ same-peer unreliable opportunities in `owner_movement`;
 endpoint send/receive, not selection or codec work, owns most remaining active
 peer time. No multi-frame wire form was added without evidence.
 
+The follow-up shared-listener experiment optionally uses Linux `sendmmsg` beneath
+the endpoint contract. Peers still create and consume individual authenticated
+datagrams. A fixed listener-owned ring provides per-datagram admission and retains
+an unsent native suffix; unsupported platforms and handshake traffic use scalar
+socket operations. The listener submits only work already present in the current
+pump and never delays traffic to form a batch. This mode remains opt-in because
+its additional reservation has not yet passed the connection-memory checkpoint.
+
 ## N0.6 application-owned input and owner state
 
 The kernel did not acquire game state in N0.6. `Game/Protocol` adds bounded Input,

@@ -2,8 +2,21 @@ using System.Net;
 using System.Net.Sockets;
 using System.Numerics;
 using System.Security.Cryptography;
+using System.Diagnostics;
 
 namespace UltraSim.Network;
+
+/// <summary>Platform-specialized shared-listener socket submission policy.</summary>
+public enum SharedUdpSocketIoMode : byte
+{
+    /// <summary>Use the portable one-datagram socket operations.</summary>
+    Scalar = 0,
+    /// <summary>
+    /// Use bounded native batching where supported and otherwise fall back to
+    /// the scalar contract without changing packet or application semantics.
+    /// </summary>
+    PlatformBatch = 1,
+}
 
 /// <summary>Fixed ownership and routing bounds for one shared UDP server socket.</summary>
 /// <remarks>
@@ -15,7 +28,9 @@ namespace UltraSim.Network;
 public readonly record struct SharedUdpProtocolLimits(
     int MaximumSessions = 256,
     int MaximumQueuedDatagramsPerSession = 8,
-    int MaximumInboundDatagramsPerPump = 4_096)
+    int MaximumInboundDatagramsPerPump = 4_096,
+    SharedUdpSocketIoMode SocketIoMode = SharedUdpSocketIoMode.Scalar,
+    int MaximumNativeSendBatchDatagrams = 32)
 {
     public static SharedUdpProtocolLimits Default => new();
 
@@ -28,6 +43,10 @@ public readonly record struct SharedUdpProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumQueuedDatagramsPerSession));
         if (MaximumInboundDatagramsPerPump is <= 0 or > 1_048_576)
             throw new ArgumentOutOfRangeException(nameof(MaximumInboundDatagramsPerPump));
+        if (!Enum.IsDefined(SocketIoMode))
+            throw new ArgumentOutOfRangeException(nameof(SocketIoMode));
+        if (MaximumNativeSendBatchDatagrams is < 2 or > 256)
+            throw new ArgumentOutOfRangeException(nameof(MaximumNativeSendBatchDatagrams));
         _ = checked((long)MaximumSessions * MaximumQueuedDatagramsPerSession *
             udp.MaximumDatagramBytes);
     }
@@ -51,16 +70,25 @@ public readonly record struct SharedUdpProtocolLimits(
 
     /// <summary>Estimates the explicitly owned demultiplexing payload.</summary>
     public long EstimateReservedPayloadBytes(UdpProtocolLimits udp)
+        => EstimateReservedPayloadBytes(udp, SocketIoMode == SharedUdpSocketIoMode.PlatformBatch);
+
+    internal long EstimateReservedPayloadBytes(UdpProtocolLimits udp, bool includeOutboundBatch)
     {
         Validate(udp);
         int routeCapacity = checked((int)BitOperations.RoundUpToPowerOf2(
             checked((uint)MaximumSessions * 2U)));
-        return checked(
+        long bytes = checked(
             (long)MaximumSessions * MaximumQueuedDatagramsPerSession * udp.MaximumDatagramBytes +
             (long)MaximumSessions * MaximumQueuedDatagramsPerSession * sizeof(int) +
             (long)MaximumSessions * IntPtr.Size +
             (long)routeCapacity * (sizeof(ulong) + sizeof(int)) +
             udp.MaximumDatagramBytes);
+        if (!includeOutboundBatch) return bytes;
+        int outbound = checked(MaximumSessions * MaximumQueuedDatagramsPerSession);
+        return checked(bytes +
+            (long)outbound * udp.MaximumDatagramBytes +
+            (long)outbound * (sizeof(int) + 16 + IntPtr.Size) +
+            (long)(MaximumNativeSendBatchDatagrams + 1) * sizeof(ulong));
     }
 }
 
@@ -77,6 +105,18 @@ public readonly record struct SharedUdpListenerSnapshot(
     ulong ReceivePollCalls,
     ulong ReceiveCalls,
     ulong WouldBlockEvents,
+    bool UsesNativeSendBatching,
+    ulong NativeSendCalls,
+    ulong NativeSentDatagrams,
+    ulong PartialNativeSendCalls,
+    ulong NativeSendWouldBlockEvents,
+    int NativeSendBatchP50,
+    int NativeSendBatchP95,
+    int MaximumNativeSendBatch,
+    int MaximumOutboundQueuedDatagrams,
+    ulong SendSystemCallTicks,
+    ulong ReceivePollTicks,
+    ulong ReceiveSystemCallTicks,
     int MaximumSentDatagramBytes,
     int MaximumReceivedDatagramBytes,
     int RegisteredPaths,
@@ -114,7 +154,10 @@ public readonly record struct SharedUdpProtocolHostSnapshot(
 /// state, and application semantics. The listener performs one bounded receive
 /// sweep, routes by the kernel-observed IPv4 source path, then the host pumps
 /// every admitted peer in deterministic slot order. It does not introduce
-/// workers, sharding, batching, compression, or a second protocol.
+/// workers, sharding, compression, or a second protocol. An opt-in platform
+/// send-batch implementation may submit several already-built independent
+/// datagrams in one native call; it does not batch protocol frames or wait for
+/// additional work.
 ///
 /// The current public constructor creates loopback clients for controlled
 /// topology and benchmark evidence. A public Internet-facing acceptor remains
@@ -314,6 +357,10 @@ public sealed class SharedUdpProtocolHost : IDisposable
             current.Server.Emit(now);
         }
 
+        // Submit only datagrams already admitted during this pump. The listener
+        // never waits for more work merely to form a larger native batch.
+        _listener.PumpOutbound();
+
         for (int index = 0; index < _sessions.Length; index++)
         {
             if (_sessions[index] is not SharedUdpProtocolSession current) continue;
@@ -387,6 +434,12 @@ public sealed class SharedUdpProtocolHost : IDisposable
         return new(session.RawState, session.Connection, session.Handshake,
             session.Client.GetSnapshot(), session.Server.GetSnapshot(),
             session.ClientEndpoint.GetSnapshot(), session.ServerEndpoint.GetSnapshot());
+    }
+
+    internal void ResetListenerStageTiming(bool enabled)
+    {
+        EnsureOperational();
+        _listener.ResetStageTiming(enabled);
     }
 
     internal void Retire(SharedUdpProtocolSession session)
@@ -550,6 +603,7 @@ internal sealed class SharedUdpServerListener : IDisposable
     private const ulong Tombstone = ulong.MaxValue;
     private readonly int _ownerThreadId = Environment.CurrentManagedThreadId;
     private readonly Socket _socket;
+    private readonly int _socketDescriptor;
     private readonly int _maximumDatagramBytes;
     private readonly int _maximumQueuedDatagramsPerSession;
     private readonly int _maximumInboundDatagramsPerPump;
@@ -560,6 +614,15 @@ internal sealed class SharedUdpServerListener : IDisposable
     private readonly int[] _freeEndpoints;
     private readonly ulong[] _routeKeys;
     private readonly int[] _routeSlots;
+    private readonly bool _usesNativeSendBatching;
+    private readonly int _maximumNativeSendBatchDatagrams;
+    private readonly byte[] _outboundPayloads;
+    private readonly byte[] _outboundAddresses;
+    private readonly int[] _outboundLengths;
+    private readonly SharedUdpServerEndpoint?[] _outboundEndpoints;
+    private readonly ulong[] _nativeSendBatchHistogram;
+    private int _outboundHead;
+    private int _outboundCount;
     private int _freeCount;
     private int _registered;
     private int _maximumQueued;
@@ -574,6 +637,16 @@ internal sealed class SharedUdpServerListener : IDisposable
     private ulong _receivePollCalls;
     private ulong _receiveCalls;
     private ulong _wouldBlockEvents;
+    private ulong _nativeSendCalls;
+    private ulong _nativeSentDatagrams;
+    private ulong _partialNativeSendCalls;
+    private ulong _nativeSendWouldBlockEvents;
+    private int _maximumNativeSendBatch;
+    private int _maximumOutboundQueued;
+    private bool _stageTimingEnabled;
+    private ulong _sendSystemCallTicks;
+    private ulong _receivePollTicks;
+    private ulong _receiveSystemCallTicks;
     private int _maximumSentDatagramBytes;
     private int _maximumReceivedDatagramBytes;
     private SocketError _lastError;
@@ -586,6 +659,9 @@ internal sealed class SharedUdpServerListener : IDisposable
         _maximumDatagramBytes = udp.MaximumDatagramBytes;
         _maximumQueuedDatagramsPerSession = shared.MaximumQueuedDatagramsPerSession;
         _maximumInboundDatagramsPerPump = shared.MaximumInboundDatagramsPerPump;
+        _maximumNativeSendBatchDatagrams = shared.MaximumNativeSendBatchDatagrams;
+        _usesNativeSendBatching =
+            shared.SocketIoMode == SharedUdpSocketIoMode.PlatformBatch && LinuxUdpBatch.IsSupported;
         _receiveScratch = new byte[udp.MaximumDatagramBytes];
         _receivedAddress = new SocketAddress(AddressFamily.InterNetwork, 16);
         _endpoints = new SharedUdpServerEndpoint[shared.MaximumSessions];
@@ -598,14 +674,33 @@ internal sealed class SharedUdpServerListener : IDisposable
         _routeKeys = new ulong[routeCapacity];
         _routeSlots = new int[routeCapacity];
         Array.Fill(_routeSlots, -1);
+        int outboundCapacity = _usesNativeSendBatching
+            ? checked(shared.MaximumSessions * shared.MaximumQueuedDatagramsPerSession)
+            : 0;
+        _outboundPayloads = outboundCapacity == 0
+            ? Array.Empty<byte>()
+            : new byte[checked(outboundCapacity * udp.MaximumDatagramBytes)];
+        _outboundAddresses = outboundCapacity == 0
+            ? Array.Empty<byte>()
+            : new byte[checked(outboundCapacity * 16)];
+        _outboundLengths = outboundCapacity == 0 ? Array.Empty<int>() : new int[outboundCapacity];
+        _outboundEndpoints = outboundCapacity == 0
+            ? Array.Empty<SharedUdpServerEndpoint>()
+            : new SharedUdpServerEndpoint[outboundCapacity];
+        _nativeSendBatchHistogram = _usesNativeSendBatching
+            ? new ulong[shared.MaximumNativeSendBatchDatagrams + 1]
+            : Array.Empty<ulong>();
         _configuredSocketBufferBytes = checked(
             (long)listenerLimits.SocketSendBufferBytes +
             listenerLimits.SocketReceiveBufferBytes);
         _socket = UdpDatagramEndpoint.CreateSocket(listenerLimits);
+        _socketDescriptor = _usesNativeSendBatching
+            ? _socket.SafeHandle.DangerousGetHandle().ToInt32()
+            : -1;
         _socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
         _socket.Blocking = false;
         LocalEndPoint = (IPEndPoint)_socket.LocalEndPoint!;
-        ReservedBytes = shared.EstimateReservedPayloadBytes(udp);
+        ReservedBytes = shared.EstimateReservedPayloadBytes(udp, _usesNativeSendBatching);
     }
 
     internal IPEndPoint LocalEndPoint { get; }
@@ -646,11 +741,16 @@ internal sealed class SharedUdpServerListener : IDisposable
         while (budget-- > 0)
         {
             _receivePollCalls = SaturatingIncrement(_receivePollCalls);
-            if (!_socket.Poll(0, SelectMode.SelectRead)) break;
+            long pollStarted = StartStageTiming();
+            bool readable = _socket.Poll(0, SelectMode.SelectRead);
+            RecordStageTiming(ref _receivePollTicks, pollStarted);
+            if (!readable) break;
             try
             {
                 _receiveCalls = SaturatingIncrement(_receiveCalls);
+                long receiveStarted = StartStageTiming();
                 int length = _socket.ReceiveFrom(_receiveScratch, SocketFlags.None, _receivedAddress);
+                RecordStageTiming(ref _receiveSystemCallTicks, receiveStarted);
                 if (length <= 0) break;
                 _received = SaturatingIncrement(_received);
                 _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)length));
@@ -682,7 +782,16 @@ internal sealed class SharedUdpServerListener : IDisposable
         }
     }
 
-    internal DatagramSendStatus TrySend(int slot, ReadOnlySpan<byte> datagram)
+    internal DatagramSendStatus TrySend(int slot, ReadOnlySpan<byte> datagram) =>
+        TrySend(slot, datagram, allowBatch: true);
+
+    internal DatagramSendStatus TrySendImmediate(int slot, ReadOnlySpan<byte> datagram) =>
+        TrySend(slot, datagram, allowBatch: false);
+
+    private DatagramSendStatus TrySend(
+        int slot,
+        ReadOnlySpan<byte> datagram,
+        bool allowBatch)
     {
         EnsureOperational();
         if ((uint)slot >= (uint)_endpoints.Length ||
@@ -693,14 +802,107 @@ internal sealed class SharedUdpServerListener : IDisposable
             _rejected = SaturatingIncrement(_rejected);
             return DatagramSendStatus.DatagramTooLarge;
         }
-        try
+        if (_usesNativeSendBatching && allowBatch)
         {
-            _sendCalls = SaturatingIncrement(_sendCalls);
-            if (_socket.SendTo(datagram, SocketFlags.None, endpoint.RemoteAddress) != datagram.Length)
+            if (_outboundCount == _outboundLengths.Length)
             {
                 _capacityDrops = SaturatingIncrement(_capacityDrops);
                 return DatagramSendStatus.CapacityExceeded;
             }
+            int tail = (_outboundHead + _outboundCount) % _outboundLengths.Length;
+            datagram.CopyTo(_outboundPayloads.AsSpan(tail * _maximumDatagramBytes));
+            Span<byte> nativeAddress = _outboundAddresses.AsSpan(tail * 16, 16);
+            for (int index = 0; index < nativeAddress.Length; index++)
+                nativeAddress[index] = (byte)endpoint.RemoteAddress[index];
+            _outboundLengths[tail] = datagram.Length;
+            _outboundEndpoints[tail] = endpoint;
+            _outboundCount++;
+            _maximumOutboundQueued = Math.Max(_maximumOutboundQueued, _outboundCount);
+            return DatagramSendStatus.Accepted;
+        }
+        return TrySendScalar(endpoint, datagram);
+    }
+
+    internal void PumpOutbound()
+    {
+        EnsureOperational();
+        if (!_usesNativeSendBatching || _outboundCount == 0) return;
+
+        DiscardInvalidOutboundHead();
+        while (_outboundCount != 0)
+        {
+            int requested = Math.Min(_outboundCount, _maximumNativeSendBatchDatagrams);
+            for (int offset = 1; offset < requested; offset++)
+            {
+                int slot = (_outboundHead + offset) % _outboundLengths.Length;
+                SharedUdpServerEndpoint? candidate = _outboundEndpoints[slot];
+                if (candidate is null || candidate.IsDisposed ||
+                    (uint)candidate.Slot >= (uint)_endpoints.Length ||
+                    !ReferenceEquals(_endpoints[candidate.Slot], candidate))
+                {
+                    requested = offset;
+                    break;
+                }
+            }
+            long sendStarted = StartStageTiming();
+            int sent = LinuxUdpBatch.Send(
+                _socketDescriptor,
+                _outboundPayloads,
+                _maximumDatagramBytes,
+                _outboundAddresses,
+                16,
+                _outboundLengths,
+                _outboundHead,
+                _outboundLengths.Length,
+                requested,
+                out int error);
+            RecordStageTiming(ref _sendSystemCallTicks, sendStarted);
+            _sendCalls = SaturatingIncrement(_sendCalls);
+            _nativeSendCalls = SaturatingIncrement(_nativeSendCalls);
+            if (sent < 0)
+            {
+                if (error is 11 or 105)
+                {
+                    _lastError = error == 105
+                        ? SocketError.NoBufferSpaceAvailable
+                        : SocketError.WouldBlock;
+                    _wouldBlockEvents = SaturatingIncrement(_wouldBlockEvents);
+                    _nativeSendWouldBlockEvents = SaturatingIncrement(_nativeSendWouldBlockEvents);
+                    break;
+                }
+
+                _lastError = SocketError.SocketError;
+                _rejected = SaturatingIncrement(_rejected);
+                ConsumeOutbound(1, sentSuccessfully: false);
+                DiscardInvalidOutboundHead();
+                continue;
+            }
+            if (sent == 0) break;
+            if (sent < requested)
+                _partialNativeSendCalls = SaturatingIncrement(_partialNativeSendCalls);
+            _nativeSentDatagrams = SaturatingAdd(_nativeSentDatagrams, checked((ulong)sent));
+            _maximumNativeSendBatch = Math.Max(_maximumNativeSendBatch, sent);
+            _nativeSendBatchHistogram[sent] = SaturatingIncrement(_nativeSendBatchHistogram[sent]);
+            ConsumeOutbound(sent, sentSuccessfully: true);
+            DiscardInvalidOutboundHead();
+        }
+    }
+
+    private DatagramSendStatus TrySendScalar(
+        SharedUdpServerEndpoint endpoint,
+        ReadOnlySpan<byte> datagram)
+    {
+        try
+        {
+            _sendCalls = SaturatingIncrement(_sendCalls);
+            long sendStarted = StartStageTiming();
+            if (_socket.SendTo(datagram, SocketFlags.None, endpoint.RemoteAddress) != datagram.Length)
+            {
+                RecordStageTiming(ref _sendSystemCallTicks, sendStarted);
+                _capacityDrops = SaturatingIncrement(_capacityDrops);
+                return DatagramSendStatus.CapacityExceeded;
+            }
+            RecordStageTiming(ref _sendSystemCallTicks, sendStarted);
             _sent = SaturatingIncrement(_sent);
             _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
             _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
@@ -718,6 +920,40 @@ internal sealed class SharedUdpServerListener : IDisposable
             _lastError = exception.SocketErrorCode;
             _rejected = SaturatingIncrement(_rejected);
             return DatagramSendStatus.CapacityExceeded;
+        }
+    }
+
+    private void ConsumeOutbound(int count, bool sentSuccessfully)
+    {
+        for (int offset = 0; offset < count; offset++)
+        {
+            int slot = _outboundHead;
+            if (sentSuccessfully)
+            {
+                int length = _outboundLengths[slot];
+                _sent = SaturatingIncrement(_sent);
+                _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)length));
+                _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, length);
+            }
+            _outboundPayloads.AsSpan(slot * _maximumDatagramBytes, _outboundLengths[slot]).Clear();
+            _outboundAddresses.AsSpan(slot * 16, 16).Clear();
+            _outboundLengths[slot] = 0;
+            _outboundEndpoints[slot] = null;
+            _outboundHead = (_outboundHead + 1) % _outboundLengths.Length;
+            _outboundCount--;
+        }
+    }
+
+    private void DiscardInvalidOutboundHead()
+    {
+        while (_outboundCount != 0)
+        {
+            SharedUdpServerEndpoint? endpoint = _outboundEndpoints[_outboundHead];
+            if (endpoint is not null && !endpoint.IsDisposed &&
+                (uint)endpoint.Slot < (uint)_endpoints.Length &&
+                ReferenceEquals(_endpoints[endpoint.Slot], endpoint)) return;
+            _rejected = SaturatingIncrement(_rejected);
+            ConsumeOutbound(1, sentSuccessfully: false);
         }
     }
 
@@ -741,19 +977,84 @@ internal sealed class SharedUdpServerListener : IDisposable
             }
             index = (index + 1) & mask;
         }
+        DiscardEndpointOutbound(endpoint);
         _endpoints[endpoint.Slot] = null;
         _freeEndpoints[_freeCount++] = endpoint.Slot;
         _registered--;
     }
 
+    private void DiscardEndpointOutbound(SharedUdpServerEndpoint endpoint)
+    {
+        if (_outboundCount == 0) return;
+        int originalCount = _outboundCount;
+        int writeOffset = 0;
+        for (int readOffset = 0; readOffset < originalCount; readOffset++)
+        {
+            int read = (_outboundHead + readOffset) % _outboundLengths.Length;
+            if (ReferenceEquals(_outboundEndpoints[read], endpoint))
+            {
+                _outboundPayloads.AsSpan(
+                    read * _maximumDatagramBytes, _outboundLengths[read]).Clear();
+                _outboundAddresses.AsSpan(read * 16, 16).Clear();
+                _outboundLengths[read] = 0;
+                _outboundEndpoints[read] = null;
+                continue;
+            }
+
+            int write = (_outboundHead + writeOffset) % _outboundLengths.Length;
+            if (write != read)
+            {
+                _outboundPayloads.AsSpan(
+                    read * _maximumDatagramBytes, _outboundLengths[read]).CopyTo(
+                        _outboundPayloads.AsSpan(write * _maximumDatagramBytes));
+                _outboundAddresses.AsSpan(read * 16, 16).CopyTo(
+                    _outboundAddresses.AsSpan(write * 16, 16));
+                _outboundLengths[write] = _outboundLengths[read];
+                _outboundEndpoints[write] = _outboundEndpoints[read];
+                _outboundPayloads.AsSpan(
+                    read * _maximumDatagramBytes, _outboundLengths[read]).Clear();
+                _outboundAddresses.AsSpan(read * 16, 16).Clear();
+                _outboundLengths[read] = 0;
+                _outboundEndpoints[read] = null;
+            }
+            writeOffset++;
+        }
+        _outboundCount = writeOffset;
+    }
+
     internal SharedUdpListenerSnapshot GetSnapshot()
     {
         EnsureOperational();
+        int p50 = BatchPercentile(0.50);
+        int p95 = BatchPercentile(0.95);
         return new(_sent, _received, _sentBytes, _receivedBytes,
             _unknownPaths, _capacityDrops, _rejected, _sendCalls, _receivePollCalls,
-            _receiveCalls, _wouldBlockEvents, _maximumSentDatagramBytes,
+            _receiveCalls, _wouldBlockEvents, _usesNativeSendBatching,
+            _nativeSendCalls, _nativeSentDatagrams, _partialNativeSendCalls,
+            _nativeSendWouldBlockEvents, p50, p95, _maximumNativeSendBatch,
+            _maximumOutboundQueued, _sendSystemCallTicks, _receivePollTicks,
+            _receiveSystemCallTicks, _maximumSentDatagramBytes,
             _maximumReceivedDatagramBytes, _registered,
             _maximumQueued, true, _lastError, ReservedBytes);
+    }
+
+    internal void ResetStageTiming(bool enabled)
+    {
+        EnsureOperational();
+        _sendSystemCallTicks = 0;
+        _receivePollTicks = 0;
+        _receiveSystemCallTicks = 0;
+        if (enabled)
+        {
+            _nativeSendCalls = 0;
+            _nativeSentDatagrams = 0;
+            _partialNativeSendCalls = 0;
+            _nativeSendWouldBlockEvents = 0;
+            _maximumNativeSendBatch = 0;
+            _maximumOutboundQueued = _outboundCount;
+            Array.Clear(_nativeSendBatchHistogram);
+        }
+        _stageTimingEnabled = enabled;
     }
 
     public void Dispose()
@@ -763,6 +1064,10 @@ internal sealed class SharedUdpServerListener : IDisposable
         _disposed = true;
         _socket.Dispose();
         CryptographicOperations.ZeroMemory(_receiveScratch);
+        CryptographicOperations.ZeroMemory(_outboundPayloads);
+        CryptographicOperations.ZeroMemory(_outboundAddresses);
+        Array.Clear(_outboundLengths);
+        Array.Clear(_outboundEndpoints);
     }
 
     private int FindInsertion(ulong key)
@@ -836,6 +1141,32 @@ internal sealed class SharedUdpServerListener : IDisposable
     private static ulong SaturatingAdd(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 
+    private int BatchPercentile(double percentile)
+    {
+        ulong total = 0;
+        for (int index = 1; index < _nativeSendBatchHistogram.Length; index++)
+            total = SaturatingAdd(total, _nativeSendBatchHistogram[index]);
+        if (total == 0) return 0;
+        ulong target = checked((ulong)Math.Ceiling(total * percentile));
+        ulong cumulative = 0;
+        for (int index = 1; index < _nativeSendBatchHistogram.Length; index++)
+        {
+            cumulative = SaturatingAdd(cumulative, _nativeSendBatchHistogram[index]);
+            if (cumulative >= target) return index;
+        }
+        return _maximumNativeSendBatch;
+    }
+
+    private long StartStageTiming() => _stageTimingEnabled ? Stopwatch.GetTimestamp() : 0;
+
+    private void RecordStageTiming(ref ulong accumulator, long started)
+    {
+        if (!_stageTimingEnabled) return;
+        long elapsed = Stopwatch.GetTimestamp() - started;
+        if (elapsed > 0)
+            accumulator = SaturatingAdd(accumulator, checked((ulong)elapsed));
+    }
+
     private void EnsureOperational()
     {
         EnsureOwnerThread();
@@ -891,6 +1222,7 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     internal SocketAddress RemoteAddress { get; }
     internal byte[] RemotePathBinding { get; }
     internal int QueuedDatagrams => _count;
+    internal bool IsDisposed => _disposed;
 
     internal void BindConnection(ConnectionId connection)
     {
@@ -926,7 +1258,9 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     {
         EnsureOwnerThread();
         if (_disposed) return DatagramSendStatus.CapacityExceeded;
-        DatagramSendStatus status = _listener.TrySend(Slot, datagram);
+        DatagramSendStatus status = _connection.IsValid
+            ? _listener.TrySend(Slot, datagram)
+            : _listener.TrySendImmediate(Slot, datagram);
         if (status == DatagramSendStatus.Accepted)
         {
             _sent = SaturatingIncrement(_sent);

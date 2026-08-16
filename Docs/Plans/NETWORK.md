@@ -1741,6 +1741,32 @@ backpressure contract; a Linux-only fast path is evidence, not the universal
 Network API. Same-connection multi-frame assembly remains deferred until a
 WorldState workload demonstrates 2+ ready frames for one peer direction.
 
+That experiment is now implemented as an opt-in, bounded Linux `sendmmsg` path
+with the portable scalar path retained as fallback. It changes no peer packet,
+crypto, reliability, replay, or application semantics. Server endpoints admit
+complete datagrams into a fixed listener-owned ring; one host pump submits only
+the already-ready prefix and never waits to fill a batch. Partial native success
+removes exactly the submitted prefix, bounded pressure leaves later peer work
+pending, and retired endpoints cannot leak queued traffic into a reused slot.
+
+At 256 clients, Input+Owner changes 38,400 server send calls into 600 native calls
+of 64 datagrams and lowers diagnostic tick p95 by 6.5%. Full changes about 38,067
+calls into 846 calls averaging 45.5 datagrams and lowers p95 by 8.6%. Input-only,
+which has no server outbound state, is unchanged. Server socket-submit time falls
+about 23%, not 64x: `sendmmsg` removes repeated syscall crossings but does not
+remove per-datagram kernel UDP work. No partial/WouldBlock native submissions
+occurred. Evidence:
+
+- [`network-v3-shared-listener-scalar-split-attribution-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-shared-listener-scalar-split-attribution-2026-08-15.json)
+- [`network-v3-shared-listener-native-send-batch-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-shared-listener-native-send-batch-2026-08-15.json)
+
+The native mode remains opt-in while connection reservation is specialized; its
+fixed outbound ring raises the 256-client known reservation from approximately
+6.51 MiB to 7.97 MiB in the current profile. This is a retained modest server
+optimization and platform seam, not the previously hypothesized 30-50% recovery.
+Native receive batching is deferred because measured listener receive syscall
+time is small in `owner_movement`; observer-heavy profiles must remeasure it.
+
 N0.10 also freezes cadence decoupling as a first-class acceptance dimension:
 
 > Additional Network pumps without additional authoritative publication may

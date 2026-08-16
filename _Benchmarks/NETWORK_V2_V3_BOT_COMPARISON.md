@@ -163,6 +163,8 @@ dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
 Development smoke runs may pass `--clients=4 --single-order`. `--use-existing`
 rejoins already-created adapter artifacts at their expected scale/order paths.
 `--v3-topology=connected-pairs` retains the N0.10 entry control.
+The V3 adapter-only `--shared-socket-io=platform-batch` enables the opt-in
+shared-listener native-send experiment; scalar remains the comparison default.
 An immutable accepted baseline requires the full matrix, semantic tests, both
 orders, stable machine conditions, and review under the repository benchmark
 policy.
@@ -429,6 +431,48 @@ several already-built datagrams in fewer OS calls. It must first define a bounde
 portable ownership/fallback contract and preserve latency, backpressure, and
 failure attribution. Linux-only evidence cannot silently become the portable
 Network contract. Reservation specialization remains independently required.
+
+### N0.10.5 shared-listener native send experiment
+
+The first socket-batching experiment preserves one independently framed,
+encrypted, numbered, replay-protected datagram per peer operation. On supported
+Linux hosts, the shared listener admits those datagrams into one fixed outbound
+ring and submits already-ready prefixes through `sendmmsg`; unsupported hosts and
+handshake traffic retain the scalar `SendTo` path. No send waits for a fuller
+batch. A returned native prefix is removed exactly, an unsent suffix remains
+owned by the bounded listener, and endpoint retirement cannot send a stale queued
+path. The mode is opt-in because its additional fixed reservation belongs in the
+separate connection-memory specialization.
+
+Permanent tests cover an eight-recipient native batch, one-datagram outbound-ring
+pressure with later peer work remaining pending, independent payload/recipient
+delivery, and 0 B warmed allocation. The diagnostic artifacts are:
+
+- [`network-v3-shared-listener-scalar-split-attribution-2026-08-15.json`](Baselines/network-v3-shared-listener-scalar-split-attribution-2026-08-15.json)
+- [`network-v3-shared-listener-native-send-batch-2026-08-15.json`](Baselines/network-v3-shared-listener-native-send-batch-2026-08-15.json)
+
+| 256-client case | Scalar tick p95 | Native-send tick p95 | Listener sends | Native batch | Result |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Input | 1.547 ms | 1.565 ms | 0 -> 0 | n/a | unchanged/no server sends |
+| Input + Owner | 3.186 ms | 2.979 ms | 38,400 -> 600 | 64.0 datagrams/call | 6.5% lower |
+| Full | 3.325 ms | 3.039 ms | 38,067 -> 846 | 45.5 datagrams/call | 8.6% lower |
+
+Input+Owner's server socket-submit time falls from approximately 110.8 ms to
+85.0 ms across the measured stage, while peer-side bounded queue admission adds
+about 3.7 ms. Client socket send time remains about 28.3 ms and shared-listener
+receive time about 7.6-7.8 ms. There were no partial native submissions or native
+WouldBlock results; native batch p50/p95/max was 64 for the two server-output
+cases. A normal, probes-disabled 256-client Full smoke measured 2.683 ms versus
+the prior scalar 2.821 ms observation, consistent with the diagnostic result.
+
+The experiment therefore earns the bounded native-send seam but rejects the
+stronger prediction that syscall-count collapse alone would remove most of the
+remaining CPU gap. `sendmmsg` amortizes the managed/kernel transition while the
+kernel still performs per-datagram UDP work. Native receive batching is not the
+next broad optimization by inspection: server receive syscall time is only about
+8 ms in these stages. Per-connection reservation specialization remains the next
+independent obligation; any further CPU work must remeasure the residual rather
+than infer it from syscall counts.
 
 ### Cadence-decoupling acceptance
 

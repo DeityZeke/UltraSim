@@ -13,7 +13,8 @@ if (options.DiagnosticSuite)
 }
 using var harness = new V3OwnerMovementHarness(
     scenario, options.Topology,
-    new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming));
+    new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming),
+    options.SharedSocketIoMode);
 NetworkBotStageResult result = harness.Run();
 NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
@@ -41,7 +42,8 @@ static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenar
         {
             using var diagnostic = new V3OwnerMovementHarness(
                 scenario, options.Topology,
-                new V3HarnessProfile(item.Layer, item.ActiveRatio, DeepTiming: true));
+                new V3HarnessProfile(item.Layer, item.ActiveRatio, DeepTiming: true),
+                options.SharedSocketIoMode);
             NetworkBotStageResult measured = diagnostic.Run();
             observations.Add(new(pass == 0 ? "forward" : "reverse", order++, item, measured));
             Console.WriteLine($"DIAGNOSTIC {item.Id}/{(pass == 0 ? "forward" : "reverse")}: " +
@@ -131,6 +133,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly Bot[] _bots;
     private readonly NetworkServerIdentity _identity;
     private readonly V3UdpTopology _topology;
+    private readonly SharedUdpSocketIoMode _sharedSocketIoMode;
     private readonly SharedUdpProtocolHost? _sharedHost;
     private readonly V3HarnessProfile _profile;
     private readonly int _activeBots;
@@ -147,10 +150,12 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     internal V3OwnerMovementHarness(
         NetworkBotScenario scenario,
         V3UdpTopology topology,
-        V3HarnessProfile profile)
+        V3HarnessProfile profile,
+        SharedUdpSocketIoMode sharedSocketIoMode = SharedUdpSocketIoMode.Scalar)
     {
         _scenario = scenario.Validate();
         _topology = topology;
+        _sharedSocketIoMode = sharedSocketIoMode;
         _profile = profile.Validate();
         _activeBots = checked((int)Math.Round(
             scenario.Clients * profile.ActiveRatio, MidpointRounding.AwayFromZero));
@@ -167,7 +172,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 new SharedUdpProtocolLimits(
                     scenario.Clients,
                     MaximumQueuedDatagramsPerSession: 4,
-                    MaximumInboundDatagramsPerPump: checked(scenario.Clients * 16)),
+                    MaximumInboundDatagramsPerPump: checked(scenario.Clients * 16),
+                    SocketIoMode: sharedSocketIoMode,
+                    MaximumNativeSendBatchDatagrams: 64),
                 Manifest, _identity, trusted);
         const int width = 32; // frozen V2 bot-harness spawn-grid default
         for (int index = 0; index < _bots.Length; index++)
@@ -394,7 +401,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             PumpAll(1);
         }
 
-        ProtocolStageTimingTotal protocolStageTiming = _profile.DeepTiming
+        ProtocolStageTimingSides protocolStageTiming = _profile.DeepTiming
             ? CaptureProtocolStageTiming()
             : default;
         if (_profile.DeepTiming) ResetProtocolStageTiming(enabled: false);
@@ -471,9 +478,19 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             }
         }
         SharedUdpProtocolHostSnapshot sharedSnapshot = default;
+        ulong listenerSendCalls = 0;
+        ulong listenerReceivePollCalls = 0;
+        ulong listenerReceiveCalls = 0;
+        ulong listenerNativeSendCalls = 0;
+        ulong listenerNativeSentDatagrams = 0;
         if (_sharedHost is not null)
         {
             sharedSnapshot = _sharedHost.GetSnapshot();
+            listenerSendCalls = sharedSnapshot.Listener.SendCalls;
+            listenerReceivePollCalls = sharedSnapshot.Listener.ReceivePollCalls;
+            listenerReceiveCalls = sharedSnapshot.Listener.ReceiveCalls;
+            listenerNativeSendCalls = sharedSnapshot.Listener.NativeSendCalls;
+            listenerNativeSentDatagrams = sharedSnapshot.Listener.NativeSentDatagrams;
             reserved = sharedSnapshot.KnownReservedBytes;
             socketBuffers = sharedSnapshot.ConfiguredSocketBufferBytes;
             capacityDrops = SaturatingAdd(capacityDrops, sharedSnapshot.Listener.CapacityDrops);
@@ -504,6 +521,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             socketReceivePollCalls -= diagnosticBaseline.SocketReceivePollCalls;
             socketReceiveCalls -= diagnosticBaseline.SocketReceiveCalls;
             socketWouldBlockEvents -= diagnosticBaseline.SocketWouldBlockEvents;
+            listenerSendCalls -= diagnosticBaseline.ListenerSendCalls;
+            listenerReceivePollCalls -= diagnosticBaseline.ListenerReceivePollCalls;
+            listenerReceiveCalls -= diagnosticBaseline.ListenerReceiveCalls;
+            listenerNativeSendCalls -= diagnosticBaseline.ListenerNativeSendCalls;
+            listenerNativeSentDatagrams -= diagnosticBaseline.ListenerNativeSentDatagrams;
         }
         peakManagedHeap = Math.Max(peakManagedHeap, GC.GetTotalMemory(false));
         process.Refresh();
@@ -529,7 +551,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         var result = new NetworkBotStageResult
         {
             Generation = (_topology == V3UdpTopology.SharedListener
-                ? "V3-shared-listener"
+                ? _sharedSocketIoMode == SharedUdpSocketIoMode.PlatformBatch
+                    ? "V3-shared-listener-native-send-batch"
+                    : "V3-shared-listener"
                 : "V3-connected-pairs") +
                 (_profile.IsComparisonDefault ? string.Empty : $"-{_profile.Layer}-{_activeBots}"),
             Scenario = _scenario,
@@ -543,7 +567,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 "workload bounds fixed; implementation reservations reported separately",
                 $"fixed {_scenario.TickHz} Hz; {_scenario.InputHz} Hz phased input; realtime",
                 _topology == V3UdpTopology.SharedListener
-                    ? "one shared server UDP listener, one client socket and two secure protocol peers per bot"
+                    ? _sharedSocketIoMode == SharedUdpSocketIoMode.PlatformBatch
+                        ? "one shared server UDP listener with bounded platform send batching, one client socket and two secure protocol peers per bot"
+                        : "one shared server UDP listener, one client socket and two secure protocol peers per bot"
                     : "one connected localhost UDP socket pair and two secure protocol peers per bot",
                 "process-wide allocated bytes and GC collections; physical memory where exposed"),
             ReadyClients = _bots.Length,
@@ -692,6 +718,43 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["shared_listener_unknown_path_datagrams"] = sharedSnapshot.Listener.UnknownPathDatagrams,
                 ["shared_listener_capacity_drops"] = sharedSnapshot.Listener.CapacityDrops,
                 ["shared_listener_reserved_bytes"] = sharedSnapshot.Listener.ReservedBytes,
+                ["shared_listener_uses_native_send_batching"] =
+                    sharedSnapshot.Listener.UsesNativeSendBatching ? 1 : 0,
+                ["shared_listener_send_calls"] = listenerSendCalls,
+                ["shared_listener_receive_poll_calls"] = listenerReceivePollCalls,
+                ["shared_listener_receive_calls"] = listenerReceiveCalls,
+                ["non_listener_endpoint_send_calls"] = socketSendCalls >= listenerSendCalls
+                    ? socketSendCalls - listenerSendCalls
+                    : 0,
+                ["non_listener_endpoint_receive_calls"] = socketReceiveCalls >= listenerReceiveCalls
+                    ? socketReceiveCalls - listenerReceiveCalls
+                    : 0,
+                ["client_endpoint_metrics_measured"] = _sharedHost is null ? 0 : 1,
+                ["client_endpoint_send_calls"] = _sharedHost is null ||
+                    socketSendCalls < listenerSendCalls
+                        ? 0
+                        : socketSendCalls - listenerSendCalls,
+                ["client_endpoint_receive_calls"] = _sharedHost is null ||
+                    socketReceiveCalls < listenerReceiveCalls
+                        ? 0
+                        : socketReceiveCalls - listenerReceiveCalls,
+                ["shared_listener_native_send_calls"] = listenerNativeSendCalls,
+                ["shared_listener_native_sent_datagrams"] = listenerNativeSentDatagrams,
+                ["shared_listener_datagrams_per_native_send_call"] = listenerNativeSendCalls == 0
+                    ? 0
+                    : listenerNativeSentDatagrams / (double)listenerNativeSendCalls,
+                ["shared_listener_native_send_batch_p50"] =
+                    sharedSnapshot.Listener.NativeSendBatchP50,
+                ["shared_listener_native_send_batch_p95"] =
+                    sharedSnapshot.Listener.NativeSendBatchP95,
+                ["shared_listener_native_send_batch_max"] =
+                    sharedSnapshot.Listener.MaximumNativeSendBatch,
+                ["shared_listener_partial_native_send_calls"] =
+                    sharedSnapshot.Listener.PartialNativeSendCalls,
+                ["shared_listener_native_send_would_block"] =
+                    sharedSnapshot.Listener.NativeSendWouldBlockEvents,
+                ["shared_listener_maximum_outbound_queued"] =
+                    sharedSnapshot.Listener.MaximumOutboundQueuedDatagrams,
                 ["diagnostic_active_clients"] = _activeBots,
                 ["diagnostic_active_ratio"] = _profile.ActiveRatio,
             },
@@ -756,52 +819,70 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _bots[index].Client.ResetStageTiming(enabled);
             _bots[index].Server.ResetStageTiming(enabled);
         }
+        _sharedHost?.ResetListenerStageTiming(enabled);
     }
 
-    private ProtocolStageTimingTotal CaptureProtocolStageTiming()
+    private ProtocolStageTimingSides CaptureProtocolStageTiming()
     {
-        ProtocolStageTimingTotal total = default;
+        ProtocolStageTimingTotal client = default;
+        ProtocolStageTimingTotal server = default;
         for (int index = 0; index < _bots.Length; index++)
         {
-            total.Add(_bots[index].Client.GetStageTiming());
-            total.Add(_bots[index].Server.GetStageTiming());
+            client.Add(_bots[index].Client.GetStageTiming());
+            server.Add(_bots[index].Server.GetStageTiming());
         }
-        return total;
+        SharedUdpListenerSnapshot listener = _sharedHost?.GetSnapshot().Listener ?? default;
+        return new(client, server, new(
+            listener.SendSystemCallTicks,
+            listener.ReceivePollTicks,
+            listener.ReceiveSystemCallTicks));
     }
 
     private static void AddProtocolStageTimingDiagnostics(
         Dictionary<string, double> diagnostics,
-        ProtocolStageTimingTotal timing,
+        ProtocolStageTimingSides timing,
         ulong dataPackets)
     {
         double ToMilliseconds(ulong ticks) => ticks * 1000d / Stopwatch.Frequency;
         double ToMicrosecondsPerDataPacket(ulong ticks) => dataPackets == 0
             ? 0
             : ticks * 1_000_000d / Stopwatch.Frequency / dataPackets;
-        ulong attributedEmit = SaturatingAdd(
-            SaturatingAdd(timing.SelectionTicks, timing.FrameEncodeTicks),
-            SaturatingAdd(timing.SecureSendTicks, timing.EndpointSendTicks));
-        ulong attributedInbound = SaturatingAdd(
-            timing.EndpointReceiveTicks,
-            SaturatingAdd(timing.SecureReceiveTicks, timing.FrameAdmissionTicks));
-        ulong emitResidual = timing.EmitTicks >= attributedEmit
-            ? timing.EmitTicks - attributedEmit
-            : 0;
-        ulong inboundResidual = timing.InboundTicks >= attributedInbound
-            ? timing.InboundTicks - attributedInbound
-            : 0;
+        ProtocolStageTimingTotal total = timing.Client;
+        total.Add(timing.Server);
+        AddPeer(string.Empty, total);
+        AddPeer("client_peer_", timing.Client);
+        AddPeer("server_peer_", timing.Server);
+        Add("listener_socket_send", timing.Listener.SendSystemCallTicks);
+        Add("listener_socket_receive_poll", timing.Listener.ReceivePollTicks);
+        Add("listener_socket_receive", timing.Listener.ReceiveSystemCallTicks);
 
-        Add("emit_total", timing.EmitTicks);
-        Add("select_schedule", timing.SelectionTicks);
-        Add("frame_encode", timing.FrameEncodeTicks);
-        Add("secure_frame_encrypt", timing.SecureSendTicks);
-        Add("endpoint_send", timing.EndpointSendTicks);
-        Add("emit_residual", emitResidual);
-        Add("inbound_total", timing.InboundTicks);
-        Add("endpoint_receive", timing.EndpointReceiveTicks);
-        Add("secure_parse_decrypt", timing.SecureReceiveTicks);
-        Add("frame_decode_admission", timing.FrameAdmissionTicks);
-        Add("inbound_residual", inboundResidual);
+        void AddPeer(string prefix, ProtocolStageTimingTotal value)
+        {
+            ulong attributedEmit = SaturatingAdd(
+                SaturatingAdd(value.SelectionTicks, value.FrameEncodeTicks),
+                SaturatingAdd(value.SecureSendTicks, value.EndpointSendTicks));
+            ulong attributedInbound = SaturatingAdd(
+                value.EndpointReceiveTicks,
+                SaturatingAdd(value.SecureReceiveTicks, value.FrameAdmissionTicks));
+            ulong emitResidual = value.EmitTicks >= attributedEmit
+                ? value.EmitTicks - attributedEmit
+                : 0;
+            ulong inboundResidual = value.InboundTicks >= attributedInbound
+                ? value.InboundTicks - attributedInbound
+                : 0;
+
+            Add(prefix + "emit_total", value.EmitTicks);
+            Add(prefix + "select_schedule", value.SelectionTicks);
+            Add(prefix + "frame_encode", value.FrameEncodeTicks);
+            Add(prefix + "secure_frame_encrypt", value.SecureSendTicks);
+            Add(prefix + "endpoint_send", value.EndpointSendTicks);
+            Add(prefix + "emit_residual", emitResidual);
+            Add(prefix + "inbound_total", value.InboundTicks);
+            Add(prefix + "endpoint_receive", value.EndpointReceiveTicks);
+            Add(prefix + "secure_parse_decrypt", value.SecureReceiveTicks);
+            Add(prefix + "frame_decode_admission", value.FrameAdmissionTicks);
+            Add(prefix + "inbound_residual", inboundResidual);
+        }
 
         void Add(string key, ulong ticks)
         {
@@ -1295,9 +1376,32 @@ internal struct ProtocolStageTimingTotal
         FrameAdmissionTicks = Add(FrameAdmissionTicks, value.FrameAdmissionTicks);
     }
 
+    internal void Add(ProtocolStageTimingTotal value)
+    {
+        EmitTicks = Add(EmitTicks, value.EmitTicks);
+        SelectionTicks = Add(SelectionTicks, value.SelectionTicks);
+        FrameEncodeTicks = Add(FrameEncodeTicks, value.FrameEncodeTicks);
+        SecureSendTicks = Add(SecureSendTicks, value.SecureSendTicks);
+        EndpointSendTicks = Add(EndpointSendTicks, value.EndpointSendTicks);
+        InboundTicks = Add(InboundTicks, value.InboundTicks);
+        EndpointReceiveTicks = Add(EndpointReceiveTicks, value.EndpointReceiveTicks);
+        SecureReceiveTicks = Add(SecureReceiveTicks, value.SecureReceiveTicks);
+        FrameAdmissionTicks = Add(FrameAdmissionTicks, value.FrameAdmissionTicks);
+    }
+
     private static ulong Add(ulong left, ulong right) =>
         ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
 }
+
+internal readonly record struct SharedListenerStageTiming(
+    ulong SendSystemCallTicks,
+    ulong ReceivePollTicks,
+    ulong ReceiveSystemCallTicks);
+
+internal readonly record struct ProtocolStageTimingSides(
+    ProtocolStageTimingTotal Client,
+    ProtocolStageTimingTotal Server,
+    SharedListenerStageTiming Listener);
 
 internal readonly record struct DiagnosticCounterBaseline(
     ulong Datagrams,
@@ -1315,7 +1419,12 @@ internal readonly record struct DiagnosticCounterBaseline(
     ulong SocketSendCalls,
     ulong SocketReceivePollCalls,
     ulong SocketReceiveCalls,
-    ulong SocketWouldBlockEvents)
+    ulong SocketWouldBlockEvents,
+    ulong ListenerSendCalls,
+    ulong ListenerReceivePollCalls,
+    ulong ListenerReceiveCalls,
+    ulong ListenerNativeSendCalls,
+    ulong ListenerNativeSentDatagrams)
 {
     internal DiagnosticCounterBaseline Add(BenchmarkTransportSnapshot value) => this with
     {
@@ -1356,6 +1465,12 @@ internal readonly record struct DiagnosticCounterBaseline(
         SocketReceivePollCalls = checked(SocketReceivePollCalls + value.ReceivePollCalls),
         SocketReceiveCalls = checked(SocketReceiveCalls + value.ReceiveCalls),
         SocketWouldBlockEvents = checked(SocketWouldBlockEvents + value.WouldBlockEvents),
+        ListenerSendCalls = checked(ListenerSendCalls + value.SendCalls),
+        ListenerReceivePollCalls = checked(ListenerReceivePollCalls + value.ReceivePollCalls),
+        ListenerReceiveCalls = checked(ListenerReceiveCalls + value.ReceiveCalls),
+        ListenerNativeSendCalls = checked(ListenerNativeSendCalls + value.NativeSendCalls),
+        ListenerNativeSentDatagrams = checked(
+            ListenerNativeSentDatagrams + value.NativeSentDatagrams),
     };
 }
 
@@ -1369,6 +1484,7 @@ internal sealed record AdapterOptions(
     int SettleTicks,
     double SpawnSpacing,
     V3UdpTopology Topology,
+    SharedUdpSocketIoMode SharedSocketIoMode,
     double ActiveRatio,
     V3DiagnosticLayer Layer,
     bool DeepTiming,
@@ -1384,6 +1500,7 @@ internal sealed record AdapterOptions(
         ParseInt(Get(args, "--settle-ticks="), 30),
         ParseDouble(Get(args, "--spawn-spacing="), 12),
         ParseTopology(Get(args, "--topology=")),
+        ParseSharedSocketIoMode(Get(args, "--shared-socket-io=")),
         ParseDouble(Get(args, "--active-ratio="), 1),
         ParseLayer(Get(args, "--diagnostic-layer=")),
         Has(args, "--deep-timing"),
@@ -1409,6 +1526,13 @@ internal sealed record AdapterOptions(
         "shared-listener" => V3UdpTopology.SharedListener,
         _ => throw new ArgumentException($"Unsupported V3 UDP topology '{value}'."),
     };
+    private static SharedUdpSocketIoMode ParseSharedSocketIoMode(string? value) =>
+        value?.ToLowerInvariant() switch
+        {
+            null or "scalar" => SharedUdpSocketIoMode.Scalar,
+            "platform-batch" or "native-send-batch" => SharedUdpSocketIoMode.PlatformBatch,
+            _ => throw new ArgumentException($"Unsupported shared socket I/O mode '{value}'."),
+        };
     private static V3DiagnosticLayer ParseLayer(string? value) => value?.ToLowerInvariant() switch
     {
         null or "full" => V3DiagnosticLayer.Full,
