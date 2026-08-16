@@ -228,7 +228,9 @@ internal readonly record struct NetworkProtocolStageTiming(
     ulong InboundTicks,
     ulong EndpointReceiveTicks,
     ulong SecureReceiveTicks,
-    ulong FrameAdmissionTicks);
+    ulong FrameAdmissionTicks,
+    ulong ReliableCompactionTicks,
+    ulong ReceivedCompactionTicks);
 
 /// <summary>
 /// Cold protocol diagnostics. <see cref="ReservedBytes"/> is the exact payload
@@ -268,7 +270,9 @@ public readonly record struct NetworkProtocolSnapshot(
 /// Exact cold diagnostics for payload bytes retained by one protocol peer. Capacities
 /// describe owned payload arrays, not CLR array headers. High-water values are monotonic
 /// for the peer lifetime; a zero byte-capacity failure count is distinct from an
-/// unmeasured value.
+/// unmeasured value. Compaction volume counts bytes physically copied because
+/// their retained range moved; deep timing remains opt-in through protocol-stage
+/// diagnostics.
 /// </summary>
 public readonly record struct NetworkRetainedPayloadSnapshot(
     int ReliableBytes,
@@ -289,7 +293,11 @@ public readonly record struct NetworkRetainedPayloadSnapshot(
     int LargestRetainedMessageBytes,
     ulong ByteCapacityFailures,
     ulong ReliableCompactions,
-    ulong ReceivedCompactions)
+    ulong ReliableCompactionBytesMoved,
+    int ReliableMaximumBytesMovedPerCompaction,
+    ulong ReceivedCompactions,
+    ulong ReceivedCompactionBytesMoved,
+    int ReceivedMaximumBytesMovedPerCompaction)
 {
     public long TotalBytes => checked(
         (long)ReliableBytes + IndependentBytes + UnreliableStreamBytes + ReassemblyBytes + ReceivedBytes);

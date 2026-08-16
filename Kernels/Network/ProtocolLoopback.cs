@@ -259,7 +259,11 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _largestRetainedMessageBytes;
     private ulong _retainedByteCapacityFailures;
     private ulong _reliablePayloadCompactions;
+    private ulong _reliablePayloadCompactionBytesMoved;
+    private int _reliablePayloadMaximumBytesMovedPerCompaction;
     private ulong _receivedPayloadCompactions;
+    private ulong _receivedPayloadCompactionBytesMoved;
+    private int _receivedPayloadMaximumBytesMovedPerCompaction;
     private NetworkPacketWindow _authenticatedPackets;
     private NetworkPacketWindow _transportDeliveries;
     private bool _ackPending;
@@ -283,6 +287,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _endpointReceiveTicks;
     private ulong _secureReceiveTicks;
     private ulong _frameAdmissionTicks;
+    private ulong _reliableCompactionTicks;
+    private ulong _receivedCompactionTicks;
     private bool _acceptsNewSends = true;
     private bool _disposed;
 
@@ -542,6 +548,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         _endpointReceiveTicks = 0;
         _secureReceiveTicks = 0;
         _frameAdmissionTicks = 0;
+        _reliableCompactionTicks = 0;
+        _receivedCompactionTicks = 0;
         _stageTimingEnabled = enabled;
     }
 
@@ -557,7 +565,9 @@ public sealed class NetworkProtocolPeer : IDisposable
             _inboundTicks,
             _endpointReceiveTicks,
             _secureReceiveTicks,
-            _frameAdmissionTicks);
+            _frameAdmissionTicks,
+            _reliableCompactionTicks,
+            _receivedCompactionTicks);
     }
 
     /// <summary>
@@ -658,7 +668,10 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _reassemblyRetainedBytes, _reassemblyRetainedHighWaterBytes, _reassemblyPayloads.Length,
                 _receivedRetainedBytes, _receivedRetainedHighWaterBytes, _receivedPayloads.Length,
                 _largestRetainedMessageBytes, _retainedByteCapacityFailures,
-                _reliablePayloadCompactions, _receivedPayloadCompactions));
+                _reliablePayloadCompactions, _reliablePayloadCompactionBytesMoved,
+                _reliablePayloadMaximumBytesMovedPerCompaction,
+                _receivedPayloadCompactions, _receivedPayloadCompactionBytesMoved,
+                _receivedPayloadMaximumBytesMovedPerCompaction));
     }
 
     public void Dispose()
@@ -1323,7 +1336,9 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void CompactReliablePayloads()
     {
+        long timingStarted = StartStageTiming();
         _reliablePayloadCompactions = SaturatingIncrement(_reliablePayloadCompactions);
+        int bytesMoved = 0;
         int count = 0;
         for (int slot = 0; slot < _reliable.Length; slot++)
             if (_reliable[slot].Active) _reliableCompactOrder[count++] = slot;
@@ -1335,17 +1350,27 @@ public sealed class NetworkProtocolPeer : IDisposable
             int length = _reliable[slot].Length;
             int source = _reliablePayloadOffsets[slot];
             if (source != cursor)
+            {
                 _reliablePayloads.AsSpan(source, length).CopyTo(_reliablePayloads.AsSpan(cursor, length));
+                bytesMoved = checked(bytesMoved + length);
+            }
             _reliablePayloadOffsets[slot] = cursor;
             cursor = checked(cursor + length);
         }
         _reliablePayloads.AsSpan(cursor, _reliablePayloadTail - cursor).Clear();
         _reliablePayloadTail = cursor;
+        _reliablePayloadCompactionBytesMoved = SaturatingAdd(
+            _reliablePayloadCompactionBytesMoved, checked((ulong)bytesMoved));
+        _reliablePayloadMaximumBytesMovedPerCompaction = Math.Max(
+            _reliablePayloadMaximumBytesMovedPerCompaction, bytesMoved);
+        RecordStageTiming(ref _reliableCompactionTicks, timingStarted);
     }
 
     private void CompactReceivedPayloads()
     {
+        long timingStarted = StartStageTiming();
         _receivedPayloadCompactions = SaturatingIncrement(_receivedPayloadCompactions);
+        int bytesMoved = 0;
         int count = 0;
         for (int slot = 0; slot < _received.Length; slot++)
             if (_receivedPayloadOffsets[slot] >= 0) _receivedCompactOrder[count++] = slot;
@@ -1357,12 +1382,20 @@ public sealed class NetworkProtocolPeer : IDisposable
             int length = _received[slot].PayloadLength;
             int source = _receivedPayloadOffsets[slot];
             if (source != cursor)
+            {
                 _receivedPayloads.AsSpan(source, length).CopyTo(_receivedPayloads.AsSpan(cursor, length));
+                bytesMoved = checked(bytesMoved + length);
+            }
             _receivedPayloadOffsets[slot] = cursor;
             cursor = checked(cursor + length);
         }
         _receivedPayloads.AsSpan(cursor, _receivedPayloadTail - cursor).Clear();
         _receivedPayloadTail = cursor;
+        _receivedPayloadCompactionBytesMoved = SaturatingAdd(
+            _receivedPayloadCompactionBytesMoved, checked((ulong)bytesMoved));
+        _receivedPayloadMaximumBytesMovedPerCompaction = Math.Max(
+            _receivedPayloadMaximumBytesMovedPerCompaction, bytesMoved);
+        RecordStageTiming(ref _receivedCompactionTicks, timingStarted);
     }
 
     private static void SortByPayloadOffset(int[] order, int count, int[] offsets)

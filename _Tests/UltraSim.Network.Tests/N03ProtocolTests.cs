@@ -771,6 +771,7 @@ internal static class N03ProtocolTests
         Func<bool> compactedDeliveryComplete = () =>
             compacted.Server.GetSnapshot().ReceivedQueued == 3 &&
             compacted.Client.GetSnapshot().ReliableQueued == 0;
+        compacted.Server.ResetStageTiming(enabled: true);
         long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
         Equal(NetworkQueueStatus.Accepted, compacted.Client.TryQueue(Id(NetworkLane.Bulk), fourth));
         Drive(compacted, compactedDeliveryComplete, 10_000);
@@ -779,7 +780,12 @@ internal static class N03ProtocolTests
         AssertReceive(compacted.Server, NetworkLane.Bulk, third);
         AssertReceive(compacted.Server, NetworkLane.Bulk, fourth);
         Equal(0UL, compacted.Server.GetSnapshot().RetainedPayloads.ByteCapacityFailures);
-        True(compacted.Server.GetSnapshot().RetainedPayloads.ReceivedCompactions >= 1);
+        NetworkRetainedPayloadSnapshot compaction = compacted.Server.GetSnapshot().RetainedPayloads;
+        Equal(1UL, compaction.ReceivedCompactions);
+        Equal(2_000UL, compaction.ReceivedCompactionBytesMoved);
+        Equal(2_000, compaction.ReceivedMaximumBytesMovedPerCompaction);
+        True(compacted.Server.GetStageTiming().ReceivedCompactionTicks > 0);
+        compacted.Server.ResetStageTiming(enabled: false);
     }
 
     private static void InboundBudgetCannotStarveOutboundControl()

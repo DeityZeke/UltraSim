@@ -547,3 +547,34 @@ must report peak occupancy/debt, retransmission and wire bursts, recovery time,
 and maximum client state age. Normal performance development remains fixed 60 Hz,
 1x playback, cadence adaptation off; this matrix tests correctness and liveness,
 not an escape hatch for missing the 60 Hz budget.
+
+Run the executable V3-only matrix with:
+
+```bash
+dotnet run -c Release --project \
+  _Benchmarks/UltraSim.Network.V3ComparisonAdapter/UltraSim.Network.V3ComparisonAdapter.csproj \
+  -- --cadence-suite --clients=32 --topology=shared-listener \
+  --shared-socket-io=platform-batch --output=<artifact.json>
+```
+
+`--cadence-case=<id>` selects one case for diagnostics without weakening the
+full-suite acceptance gate. The accepted 32-client artifact is
+[`network-v3-cadence-stall-acceptance-2026-08-16.json`](Baselines/network-v3-cadence-stall-acceptance-2026-08-16.json).
+All eleven cases have identical canonical newest-control state, exactly one owner
+publication per authoritative step/client, zero capacity drops, and zero
+retained-byte failures. Selected observations:
+
+| Case | Authority/s | Network pumps/s | Input ACK p95 | Owner age max | Owner freshness max | Recovery |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `60/60` | 60 | 60 | 50.68 ms | 5 steps | 18.85 ms | n/a |
+| `60/240` | 60 | 240 | 20.92 ms | 1 step | 8.56 ms | n/a |
+| `20/120` | 20 | 120 | 58.62 ms | 1 step | 16.89 ms | n/a |
+| `120/60` | 120 | 60 | 50.44 ms | 11 steps | 17.48 ms | n/a |
+| authority stall 250 ms | 55 average | 120 | 25.23 ms | 2 steps | 17.17 ms | 33.3 ms |
+| Network stall 250 ms | 60 | 110 average | 33.53 ms | 16 steps | 258.71 ms | 50.0 ms |
+
+The post-window semantic drain is wall-clock paced because real UDP pacing uses a
+monotonic timer. Repeated zero-time pumps cannot prove convergence: they may not
+reach the next permitted send instant. Input redundancy during this drain repeats
+the same newest complete sample and does not create a new application input
+sequence or alter measured traffic.

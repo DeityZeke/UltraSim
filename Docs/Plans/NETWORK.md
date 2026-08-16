@@ -1814,7 +1814,10 @@ exact capacities and high water, largest retained message, aggregate byte-pressu
 ticks, and explicit byte-capacity failures. `owner_movement` demonstrates the
 machinery, not final production byte budgets. `dense_mix`, `generation_resync`,
 `slow_client`, and UI/Bulk workloads must validate or specialize the 256 KiB
-budgets. Snapshot telemetry also reports reliable/received arena compactions.
+budgets. Snapshot telemetry also reports reliable/received arena compactions,
+cumulative bytes physically moved, and the largest single compaction. Opt-in
+deep timing reports compaction duration without burdening the ordinary protocol
+path.
 Page/size classes are unnecessary while exact bounded compacting arenas satisfy
 the ownership and allocation contract; reopen that representation only if large
 retained workloads demonstrate compaction cost or fragmentation pressure.
@@ -1857,6 +1860,24 @@ application queues unchanged absent legitimate timers. The inverse test advances
 authority repeatedly without Network and proves latest-state coalescing plus
 lossless bounded Event/Control retention. Fixed 60 Hz remains the normal
 performance gate; adaptive cadence cannot conceal a regression.
+
+The first executable cadence artifact is
+[`network-v3-cadence-stall-acceptance-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-cadence-stall-acceptance-2026-08-16.json).
+It runs all nine fixed/transition schedules plus both 250 ms stall cases with 32
+secure shared-listener clients. All eleven converge to the same canonical newest
+control/owner state, publish exactly once per authoritative step/client, and
+record zero capacity drops or retained-byte failures. Network rates from 60 to
+240 Hz do not create extra semantic publication. The authority stall recovers in
+4 wall ticks (33.3 ms); the Network stall recovers in 6 wall ticks (50 ms) and
+exposes the expected worst freshness excursion of 16 authoritative steps / about
+258.7 ms before convergence.
+
+Cadence-mode convergence advances the real monotonic transport clock. Tight
+untimed pump loops are not a valid convergence oracle once pacing is enabled:
+they may leave a correctly deferred final datagram pending forever in benchmark
+time. The measured cadence window remains unchanged; only its post-window
+semantic drain uses the configured wall cadence and repeats the newest complete
+Input state, matching the superseding Input contract.
 
 Protected profiles:
 
