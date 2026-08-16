@@ -13,7 +13,9 @@ public readonly record struct NetworkProtocolLimits(
     int MaximumRetransmissionSteps,
     int InitialCongestionWindowPackets,
     int MaximumCongestionWindowPackets,
-    int MaximumIndependentUnreliableMessages)
+    int MaximumIndependentUnreliableMessages,
+    int ReliablePayloadByteCapacity = 262_144,
+    int ReceivedPayloadByteCapacity = 262_144)
 {
     public static NetworkProtocolLimits Default => new(
         128, 128, 16_384, 64, 2_048, 64, 64, 2, 128, 4, 128, 128);
@@ -29,6 +31,10 @@ public readonly record struct NetworkProtocolLimits(
             throw new ArgumentOutOfRangeException(nameof(MaximumIndependentUnreliableMessages));
         if (MaximumMessageBytes is <= 0 or > 16_777_216)
             throw new ArgumentOutOfRangeException(nameof(MaximumMessageBytes));
+        if (ReliablePayloadByteCapacity < MaximumMessageBytes)
+            throw new ArgumentOutOfRangeException(nameof(ReliablePayloadByteCapacity));
+        if (ReceivedPayloadByteCapacity < MaximumMessageBytes)
+            throw new ArgumentOutOfRangeException(nameof(ReceivedPayloadByteCapacity));
         if (MaximumFragmentsPerMessage is <= 0 or > 64)
             throw new ArgumentOutOfRangeException(nameof(MaximumFragmentsPerMessage));
         if (SentPacketCapacity is <= 0 or > 1_048_576)
@@ -65,9 +71,9 @@ public readonly record struct NetworkProtocolLimits(
         Validate(datagrams);
         if (protocolMessageCount <= 0) throw new ArgumentOutOfRangeException(nameof(protocolMessageCount));
         return checked(
-            (long)MaximumReliableMessages * MaximumMessageBytes +
+            ReliablePayloadByteCapacity +
             (long)MaximumIndependentUnreliableMessages * MaximumMessageBytes +
-            (long)MaximumReceivedMessages * MaximumMessageBytes +
+            ReceivedPayloadByteCapacity +
             (long)protocolMessageCount * MaximumMessageBytes +
             (long)NetworkLaneContracts.Count * MaximumMessageBytes +
             (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
@@ -99,9 +105,11 @@ public readonly record struct NetworkProtocolLimits(
         NetworkPayloadReservationLayout layout = NetworkPayloadReservationLayout.Create(
             manifest, this, fragmentPayload);
         return checked(
-            (long)MaximumReliableMessages * layout.ReliableStride +
+            Math.Min((long)MaximumReliableMessages * layout.ReliableStride,
+                ReliablePayloadByteCapacity) +
             (long)MaximumIndependentUnreliableMessages * layout.IndependentStride +
-            (long)MaximumReceivedMessages * layout.ReceivedStride +
+            Math.Min((long)MaximumReceivedMessages * layout.ReceivedStride,
+                ReceivedPayloadByteCapacity) +
             layout.UnreliableOffsets[^1] +
             layout.ReassemblyOffsets[^1] +
             (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
@@ -279,7 +287,9 @@ public readonly record struct NetworkRetainedPayloadSnapshot(
     int ReceivedHighWaterBytes,
     int ReceivedCapacityBytes,
     int LargestRetainedMessageBytes,
-    ulong ByteCapacityFailures)
+    ulong ByteCapacityFailures,
+    ulong ReliableCompactions,
+    ulong ReceivedCompactions)
 {
     public long TotalBytes => checked(
         (long)ReliableBytes + IndependentBytes + UnreliableStreamBytes + ReassemblyBytes + ReceivedBytes);

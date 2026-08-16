@@ -99,9 +99,10 @@ handshake traffic. V2 does not currently expose physical wire bytes, so no
 cross-generation byte ratio is claimed.
 
 V3 uses an explicit owner-workload capacity profile for executable 256-client
-evidence. Each artifact also records the current default protocol reservation
-estimate per client and total. The benchmark profile is evidence, not yet a
-production default change.
+evidence. Each artifact also records `NetworkProtocolLimits.Default` applied to
+the benchmark manifest, per client and total. It is not an estimate for
+`UltraSimGameProtocol.Manifest`; that cross-layer value is owned by the permanent
+game-protocol reservation test.
 
 Application Event scale diagnostics live in production snapshots rather than a
 deep timing mode: records examined/skipped, registered consumers, retained high
@@ -486,28 +487,42 @@ datagram, a byte beyond it is rejected, unused descriptors and non-reliable lane
 reserve no reassembly region, fragmented Bulk still reassembles, retained-byte
 counters transition exactly, and warmed delivery remains 0 B.
 
-The accepted artifact is
-[`network-v3-manifest-payload-reservation-2026-08-15.json`](Baselines/network-v3-manifest-payload-reservation-2026-08-15.json):
+The corrected accepted artifact is
+[`network-v3-bounded-retained-payload-2026-08-16.json`](Baselines/network-v3-bounded-retained-payload-2026-08-16.json).
+The prior
+[`manifest-payload-reservation`](Baselines/network-v3-manifest-payload-reservation-2026-08-15.json)
+artifact remains immutable and is explicitly retained as the mislabeled first
+observation:
 
 | 256-client observation | Result |
 | --- | ---: |
-| known Network reservation | 6.21 MiB |
-| known reservation/client | 25.4 KiB |
-| manifest-aware default two-peer estimate/client | 303.0 KiB |
-| old conservative count-only estimate/client | about 12.6 MiB |
+| known Network reservation | 6.27 MiB |
+| known reservation/client | 25.7 KiB |
+| benchmark-manifest/default-limits two-peer estimate/client | 303.0 KiB |
 | retained payload capacity/client in this profile | 596 B |
-| population retained-byte mean / p95 / max | 901 / 1,011 / 1,070 B |
+| population retained-byte mean / p95 / max | 893 / 978 / 1,010 B |
 | largest retained message | 30 B |
 | byte-pressure ticks >= 50/75/90/100% | 0 / 0 / 0 / 0 |
 | byte-capacity failures | 0 |
-| peak managed heap / private bytes | 14.6 / 82.9 MiB |
+| peak managed heap / private bytes | 14.7 / 83.1 MiB |
 
-The run's 3.295 ms tick p95 is recorded but is not a paired CPU claim; this is a
-memory/evidence checkpoint. `owner_movement` contains no large Bulk or baseline
-traffic and cannot select eventual byte budgets. The same telemetry must be
-collected for `dense_mix`, `generation_resync`, `slow_client`, and UI/Bulk. Only
-then should a bounded shared page/size-class store replace reliable/received
-fixed strides if the remaining reservation and high water justify it.
+The 303 KiB row is deliberately benchmark-manifest scoped. The original artifact
+and text incorrectly called it the concrete game-protocol default. The real game
+manifest has 16 KiB Control/Bulk descriptors, making its old fixed reliable and
+receive strides at least 8 MiB/two-peer client before other storage.
+
+Reliable and receive descriptors now use bounded byte arenas: 128 metadata slots
+and 16 KiB individual messages remain, while each default peer owns a 256 KiB
+reliable arena and 256 KiB receive arena. The actual game-manifest permanent test
+constructs two peers at 1,705,248 bytes (~1.63 MiB) against a 1,706,054-byte
+estimate. Byte exhaustion is transactional; reliable receive does not acknowledge
+before admission; in-place compaction uses preallocated ordering scratch.
+
+The run's 2.676 ms tick p95 shows no visible ordinary-path regression, but is not
+a paired CPU claim. `owner_movement` contains no large Bulk/baseline traffic and
+cannot validate final byte budgets. `dense_mix`,
+`generation_resync`, `slow_client`, and UI/Bulk must report retained-byte high
+water, failures, and arena compactions before these defaults are frozen.
 
 ### Cadence-decoupling acceptance
 

@@ -1785,23 +1785,39 @@ capacity failure, fragmentation, and warmed allocation behavior. The count-only
 reservation API remains explicitly conservative; a manifest-aware overload is
 the relevant preconstruction estimate for a concrete protocol.
 
-For the current game manifest under default protocol limits, the two-peer/client
-estimate falls from about 12.6 MiB under the old count-times-global-maximum model
-to about 303 KiB. In the smaller `owner_movement` profile, the accepted
-256-client native-listener run owns 6.21 MiB total, about 25.4 KiB/client including
-both peers and listener machinery. Retained payload capacity is 596 bytes/client;
-population retained payload peaked at 1,070 bytes with no byte-capacity failure.
-Evidence is preserved in
+The first artifact's approximately 303 KiB value is specifically
+`NetworkProtocolLimits.Default` applied to the four-message benchmark manifest;
+it is not `UltraSimGameProtocol.Manifest`. The production game manifest contains
+16 KiB Control/Bulk descriptors, so fixed maximum-descriptor strides still forced
+at least 8 MiB/two-peer client from reliable and receive payloads alone. The
+benchmark diagnostic was renamed to make that scope mechanical.
+
+That evidence earns a second bounded-backing correction. Reliable and received
+message slots now own metadata plus an offset; their bytes come from separate
+fixed peer arenas. Defaults retain 128 descriptors and a 16 KiB individual
+message maximum while bounding each arena to 256 KiB. Allocation failure is
+transactional `CapacityExceeded`; reliable receive remains unacknowledged until
+space exists. Fragmented arenas compact active ranges in source order using
+preallocated index scratch, with no runtime allocation or handle invalidation.
+
+The permanent game-protocol test compares its manifest estimate to constructed
+peers. The default two-peer game protocol now constructs at 1,705,248 bytes
+(~1.63 MiB); its estimate is 1,706,054 bytes. The smaller `owner_movement`
+profile owns about 6.27 MiB total at 256 clients because its descriptor-
+sized payload regions were already tiny. Evidence is preserved in
+[`network-v3-bounded-retained-payload-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-bounded-retained-payload-2026-08-16.json).
+The earlier mislabeled observation remains immutable as
 [`network-v3-manifest-payload-reservation-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-manifest-payload-reservation-2026-08-15.json).
 
 Runtime snapshots and the bot harness now expose per-category retained bytes,
 exact capacities and high water, largest retained message, aggregate byte-pressure
 ticks, and explicit byte-capacity failures. `owner_movement` demonstrates the
 machinery, not final production byte budgets. `dense_mix`, `generation_resync`,
-`slow_client`, and UI/Bulk workloads must establish those budgets. A shared page/
-size-class backend for reliable and received retention is deferred until those
-workloads show descriptor-aware fixed strides remain the dominant reservation;
-that ownership change gets its own correctness and performance gate.
+`slow_client`, and UI/Bulk workloads must validate or specialize the 256 KiB
+budgets. Snapshot telemetry also reports reliable/received arena compactions.
+Page/size classes are unnecessary while exact bounded compacting arenas satisfy
+the ownership and allocation contract; reopen that representation only if large
+retained workloads demonstrate compaction cost or fragmentation pressure.
 
 N0.10 also freezes cadence decoupling as a first-class acceptance dimension:
 

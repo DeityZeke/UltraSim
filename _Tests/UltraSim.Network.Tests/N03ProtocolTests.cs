@@ -33,6 +33,7 @@ internal static class N03ProtocolTests
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
         Run("PayloadReservationsFollowManifestAndLaneContracts", PayloadReservationsFollowManifestAndLaneContracts);
         Run("RetainedPayloadPressureIsExact", RetainedPayloadPressureIsExact);
+        Run("RetainedPayloadByteBudgetsRejectAndCompactTransactionally", RetainedPayloadByteBudgetsRejectAndCompactTransactionally);
         Run("InboundBudgetCannotStarveOutboundControl", InboundBudgetCannotStarveOutboundControl);
         Run("AbortiveShutdownIsBalancedAndIdempotent", AbortiveShutdownIsBalancedAndIdempotent);
         Run("N03WarmedSecureDeliveryAllocatesZero", WarmedSecureDeliveryAllocatesZero);
@@ -713,6 +714,72 @@ internal static class N03ProtocolTests
 
         while (loopback.Server.TryConsumeReceived()) { }
         Equal(0, loopback.Server.GetSnapshot().RetainedPayloads.ReceivedBytes);
+    }
+
+    private static void RetainedPayloadByteBudgetsRejectAndCompactTransactionally()
+    {
+        NetworkProtocolLimits limits = s_limits with
+        {
+            MaximumReliableMessages = 4,
+            MaximumReceivedMessages = 4,
+            ReliablePayloadByteCapacity = 4_096,
+            ReceivedPayloadByteCapacity = 4_096,
+        };
+        using (ProtocolLoopback capacity = Create(default, s_datagrams, limits))
+        {
+            Equal(4_096, capacity.Client.GetSnapshot().RetainedPayloads.ReliableCapacityBytes);
+            Equal(NetworkQueueStatus.Accepted,
+                capacity.Client.TryQueue(Id(NetworkLane.Bulk), new byte[2_000]));
+            Equal(NetworkQueueStatus.Accepted,
+                capacity.Client.TryQueue(Id(NetworkLane.Bulk), new byte[2_000]));
+            Equal(NetworkQueueStatus.CapacityExceeded,
+                capacity.Client.TryQueue(Id(NetworkLane.Bulk), new byte[100]));
+            Equal(2, capacity.Client.GetSnapshot().ReliableQueued);
+            Equal(1UL, capacity.Client.GetSnapshot().RetainedPayloads.ByteCapacityFailures);
+        }
+
+        using (ProtocolLoopback receivePressure = Create(default, s_datagrams, limits))
+        {
+            byte[] retained = new byte[2_000];
+            Equal(NetworkQueueStatus.Accepted,
+                receivePressure.Client.TryQueue(Id(NetworkLane.Bulk), retained));
+            Equal(NetworkQueueStatus.Accepted,
+                receivePressure.Client.TryQueue(Id(NetworkLane.Bulk), retained));
+            Drive(receivePressure, () => receivePressure.Server.GetSnapshot().ReceivedQueued == 2 &&
+                receivePressure.Client.GetSnapshot().ReliableQueued == 0, 10_000);
+            Equal(NetworkQueueStatus.Accepted,
+                receivePressure.Client.TryQueue(Id(NetworkLane.Bulk), new byte[100]));
+            for (int pump = 0; pump < 32; pump++) receivePressure.Pump();
+            Equal(1, receivePressure.Client.GetSnapshot().ReliableQueued);
+            True(receivePressure.Server.GetSnapshot().RetainedPayloads.ByteCapacityFailures > 0);
+            AssertReceive(receivePressure.Server, NetworkLane.Bulk, retained);
+            Drive(receivePressure, () => receivePressure.Server.GetSnapshot().ReceivedQueued == 2 &&
+                receivePressure.Client.GetSnapshot().ReliableQueued == 0, 10_000);
+        }
+
+        using ProtocolLoopback compacted = Create(default, s_datagrams, limits);
+        byte[] first = Enumerable.Repeat((byte)1, 1_000).ToArray();
+        byte[] second = Enumerable.Repeat((byte)2, 1_000).ToArray();
+        byte[] third = Enumerable.Repeat((byte)3, 1_000).ToArray();
+        byte[] fourth = Enumerable.Repeat((byte)4, 1_500).ToArray();
+        Equal(NetworkQueueStatus.Accepted, compacted.Client.TryQueue(Id(NetworkLane.Bulk), first));
+        Equal(NetworkQueueStatus.Accepted, compacted.Client.TryQueue(Id(NetworkLane.Bulk), second));
+        Equal(NetworkQueueStatus.Accepted, compacted.Client.TryQueue(Id(NetworkLane.Bulk), third));
+        Drive(compacted, () => compacted.Server.GetSnapshot().ReceivedQueued == 3 &&
+            compacted.Client.GetSnapshot().ReliableQueued == 0, 10_000);
+        AssertReceive(compacted.Server, NetworkLane.Bulk, first);
+        Func<bool> compactedDeliveryComplete = () =>
+            compacted.Server.GetSnapshot().ReceivedQueued == 3 &&
+            compacted.Client.GetSnapshot().ReliableQueued == 0;
+        long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+        Equal(NetworkQueueStatus.Accepted, compacted.Client.TryQueue(Id(NetworkLane.Bulk), fourth));
+        Drive(compacted, compactedDeliveryComplete, 10_000);
+        Equal(0L, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
+        AssertReceive(compacted.Server, NetworkLane.Bulk, second);
+        AssertReceive(compacted.Server, NetworkLane.Bulk, third);
+        AssertReceive(compacted.Server, NetworkLane.Bulk, fourth);
+        Equal(0UL, compacted.Server.GetSnapshot().RetainedPayloads.ByteCapacityFailures);
+        True(compacted.Server.GetSnapshot().RetainedPayloads.ReceivedCompactions >= 1);
     }
 
     private static void InboundBudgetCannotStarveOutboundControl()

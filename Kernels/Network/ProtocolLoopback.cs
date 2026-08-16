@@ -196,7 +196,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly byte[] _plaintextScratch;
     private readonly OutgoingMessage[] _reliable;
     private readonly byte[] _reliablePayloads;
-    private readonly int _reliablePayloadStride;
+    private readonly int[] _reliablePayloadOffsets;
+    private readonly int[] _reliableCompactOrder;
     private readonly ulong[] _lastSentSteps;
     private readonly int[] _reliableFree;
     private readonly OutgoingMessage[] _independent;
@@ -215,7 +216,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly int[] _reassemblyPayloadOffsets;
     private readonly NetworkDeliveredMessage[] _received;
     private readonly byte[] _receivedPayloads;
-    private readonly int _receivedPayloadStride;
+    private readonly int[] _receivedPayloadOffsets;
+    private readonly int[] _receivedCompactOrder;
     private readonly int[] _receivedFree;
     private readonly int[] _receivedQueue;
     private int _reliableFreeCount;
@@ -226,6 +228,8 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _receivedFreeCount;
     private int _receivedHead;
     private int _receivedCount;
+    private int _reliablePayloadTail;
+    private int _receivedPayloadTail;
     private ulong _nextPacketNumber;
     private ulong _sentPacketsCount;
     private ulong _receivedPacketsCount;
@@ -253,6 +257,9 @@ public sealed class NetworkProtocolPeer : IDisposable
     private int _receivedRetainedBytes;
     private int _receivedRetainedHighWaterBytes;
     private int _largestRetainedMessageBytes;
+    private ulong _retainedByteCapacityFailures;
+    private ulong _reliablePayloadCompactions;
+    private ulong _receivedPayloadCompactions;
     private NetworkPacketWindow _authenticatedPackets;
     private NetworkPacketWindow _transportDeliveries;
     private bool _ackPending;
@@ -305,8 +312,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         NetworkPayloadReservationLayout payloadLayout = NetworkPayloadReservationLayout.Create(
             manifest, limits, FragmentPayloadBytes);
         _reliable = new OutgoingMessage[limits.MaximumReliableMessages];
-        _reliablePayloadStride = payloadLayout.ReliableStride;
-        _reliablePayloads = new byte[checked(limits.MaximumReliableMessages * _reliablePayloadStride)];
+        _reliablePayloads = new byte[checked((int)Math.Min(
+            (long)limits.MaximumReliableMessages * payloadLayout.ReliableStride,
+            limits.ReliablePayloadByteCapacity))];
+        _reliablePayloadOffsets = new int[limits.MaximumReliableMessages];
+        Array.Fill(_reliablePayloadOffsets, -1);
+        _reliableCompactOrder = new int[limits.MaximumReliableMessages];
         _lastSentSteps = new ulong[checked(limits.MaximumReliableMessages * limits.MaximumFragmentsPerMessage)];
         _reliableFree = new int[limits.MaximumReliableMessages];
         for (int index = 0; index < _reliableFree.Length; index++) _reliableFree[index] = _reliableFree.Length - 1 - index;
@@ -331,8 +342,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reassemblyPayloadOffsets = payloadLayout.ReassemblyOffsets;
         _reassemblyPayloads = new byte[_reassemblyPayloadOffsets[^1]];
         _received = new NetworkDeliveredMessage[limits.MaximumReceivedMessages];
-        _receivedPayloadStride = payloadLayout.ReceivedStride;
-        _receivedPayloads = new byte[checked(limits.MaximumReceivedMessages * _receivedPayloadStride)];
+        _receivedPayloads = new byte[checked((int)Math.Min(
+            (long)limits.MaximumReceivedMessages * payloadLayout.ReceivedStride,
+            limits.ReceivedPayloadByteCapacity))];
+        _receivedPayloadOffsets = new int[limits.MaximumReceivedMessages];
+        Array.Fill(_receivedPayloadOffsets, -1);
+        _receivedCompactOrder = new int[limits.MaximumReceivedMessages];
         _receivedFree = new int[limits.MaximumReceivedMessages];
         _receivedQueue = new int[limits.MaximumReceivedMessages];
         for (int index = 0; index < _receivedFree.Length; index++) _receivedFree[index] = _receivedFree.Length - 1 - index;
@@ -363,8 +378,14 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (lane.Delivery == NetworkDeliveryGuarantee.Reliable)
         {
             if (_reliableFreeCount == 0) return NetworkQueueStatus.CapacityExceeded;
-            int slot = _reliableFree[--_reliableFreeCount];
-            payload.CopyTo(ReliablePayload(slot));
+            int slot = _reliableFree[_reliableFreeCount - 1];
+            if (!TryAllocateReliablePayload(slot, payload.Length))
+            {
+                _retainedByteCapacityFailures = SaturatingIncrement(_retainedByteCapacityFailures);
+                return NetworkQueueStatus.CapacityExceeded;
+            }
+            _reliableFreeCount--;
+            payload.CopyTo(ReliablePayload(slot, payload.Length));
             _lastSentSteps.AsSpan(slot * _limits.MaximumFragmentsPerMessage,
                 _limits.MaximumFragmentsPerMessage).Clear();
             _reliable[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
@@ -430,7 +451,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         }
         int slot = _receivedQueue[_receivedHead];
         message = _received[slot];
-        payload = ReceivedPayload(slot)[..message.PayloadLength];
+        payload = ReceivedPayload(slot, message.PayloadLength);
         return true;
     }
 
@@ -442,10 +463,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         _receivedHead = (_receivedHead + 1) % _receivedQueue.Length;
         _receivedCount--;
         int payloadLength = _received[slot].PayloadLength;
-        ReceivedPayload(slot).Clear();
+        ReceivedPayload(slot, payloadLength).Clear();
+        _receivedPayloadOffsets[slot] = -1;
         _receivedRetainedBytes -= payloadLength;
         _received[slot] = default;
         _receivedFree[_receivedFreeCount++] = slot;
+        if (_receivedCount == 0) _receivedPayloadTail = 0;
         return true;
     }
 
@@ -634,7 +657,8 @@ public sealed class NetworkProtocolPeer : IDisposable
                 _unreliableRetainedBytes, _unreliableRetainedHighWaterBytes, _unreliablePayloads.Length,
                 _reassemblyRetainedBytes, _reassemblyRetainedHighWaterBytes, _reassemblyPayloads.Length,
                 _receivedRetainedBytes, _receivedRetainedHighWaterBytes, _receivedPayloads.Length,
-                _largestRetainedMessageBytes, 0));
+                _largestRetainedMessageBytes, _retainedByteCapacityFailures,
+                _reliablePayloadCompactions, _receivedPayloadCompactions));
     }
 
     public void Dispose()
@@ -765,7 +789,7 @@ public sealed class NetworkProtocolPeer : IDisposable
                 ? _independent[independentSlot]
                 : _unreliableStreams[unreliableSlot].Message;
         ReadOnlySpan<byte> payload = reliable
-            ? ReliablePayload(reliableSlot)[..message.Length]
+            ? ReliablePayload(reliableSlot, message.Length)
             : independent
                 ? IndependentPayload(independentSlot)[..message.Length]
                 : UnreliablePayload(unreliableSlot)[..message.Length];
@@ -1029,7 +1053,12 @@ public sealed class NetworkProtocolPeer : IDisposable
             _capacityDrops++;
             return NetworkDeliveryAdmission.Admitted;
         }
-        EnqueueReceived(header.Lane, header.MessageId, header.MessageVersion, header.LaneSequence, fragment);
+        if (!TryEnqueueReceived(header.Lane, header.MessageId, header.MessageVersion,
+                header.LaneSequence, fragment))
+        {
+            _capacityDrops++;
+            return NetworkDeliveryAdmission.Admitted;
+        }
         return NetworkDeliveryAdmission.Admitted;
     }
 
@@ -1066,8 +1095,12 @@ public sealed class NetworkProtocolPeer : IDisposable
             _capacityDrops++;
             return NetworkDeliveryAdmission.Deferred;
         }
-        EnqueueReceived(header.Lane, header.MessageId, header.MessageVersion, header.LaneSequence,
-            ReassemblyPayload(header.Lane)[..header.MessageLength]);
+        if (!TryEnqueueReceived(header.Lane, header.MessageId, header.MessageVersion,
+                header.LaneSequence, ReassemblyPayload(header.Lane)[..header.MessageLength]))
+        {
+            _capacityDrops++;
+            return NetworkDeliveryAdmission.Deferred;
+        }
         ReassemblyPayload(header.Lane).Clear();
         _reassemblyRetainedBytes -= header.MessageLength;
         state = default;
@@ -1226,29 +1259,39 @@ public sealed class NetworkProtocolPeer : IDisposable
         int payloadLength = _reliable[slot].Length;
         for (ushort fragment = 0; fragment < _reliable[slot].FragmentCount; fragment++)
             RetireSentRecords(slot, fragment);
-        ReliablePayload(slot).Clear();
+        ReliablePayload(slot, payloadLength).Clear();
+        _reliablePayloadOffsets[slot] = -1;
         _lastSentSteps.AsSpan(slot * _limits.MaximumFragmentsPerMessage,
             _limits.MaximumFragmentsPerMessage).Clear();
         _reliable[slot] = default;
         _reliableRetainedBytes -= payloadLength;
         _reliableFree[_reliableFreeCount++] = slot;
         _reliableCount--;
+        if (_reliableCount == 0) _reliablePayloadTail = 0;
     }
 
-    private void EnqueueReceived(NetworkLane lane, NetworkMessageId messageId, ushort messageVersion,
+    private bool TryEnqueueReceived(NetworkLane lane, NetworkMessageId messageId, ushort messageVersion,
         LaneSequence sequence, ReadOnlySpan<byte> payload)
     {
-        int slot = _receivedFree[--_receivedFreeCount];
-        payload.CopyTo(ReceivedPayload(slot));
+        if (_receivedFreeCount == 0) return false;
+        int slot = _receivedFree[_receivedFreeCount - 1];
+        if (!TryAllocateReceivedPayload(slot, payload.Length))
+        {
+            _retainedByteCapacityFailures = SaturatingIncrement(_retainedByteCapacityFailures);
+            return false;
+        }
+        _receivedFreeCount--;
+        payload.CopyTo(ReceivedPayload(slot, payload.Length));
         _received[slot] = new(lane, messageId, messageVersion, sequence, payload.Length);
         int tail = (_receivedHead + _receivedCount) % _receivedQueue.Length;
         _receivedQueue[tail] = slot;
         _receivedCount++;
         AddRetainedBytes(ref _receivedRetainedBytes, ref _receivedRetainedHighWaterBytes, payload.Length);
+        return true;
     }
 
-    private Span<byte> ReliablePayload(int slot) =>
-        _reliablePayloads.AsSpan(slot * _reliablePayloadStride, _reliablePayloadStride);
+    private Span<byte> ReliablePayload(int slot, int length) =>
+        _reliablePayloads.AsSpan(_reliablePayloadOffsets[slot], length);
     private Span<byte> IndependentPayload(int slot) =>
         _independentPayloads.AsSpan(slot * _independentPayloadStride, _independentPayloadStride);
     private Span<byte> UnreliablePayload(int messageSlot) =>
@@ -1257,14 +1300,93 @@ public sealed class NetworkProtocolPeer : IDisposable
     private Span<byte> ReassemblyPayload(NetworkLane lane) =>
         _reassemblyPayloads.AsSpan(_reassemblyPayloadOffsets[(int)lane],
             _reassemblyPayloadOffsets[(int)lane + 1] - _reassemblyPayloadOffsets[(int)lane]);
-    private Span<byte> ReceivedPayload(int slot) =>
-        _receivedPayloads.AsSpan(slot * _receivedPayloadStride, _receivedPayloadStride);
+    private Span<byte> ReceivedPayload(int slot, int length) =>
+        _receivedPayloads.AsSpan(_receivedPayloadOffsets[slot], length);
+
+    private bool TryAllocateReliablePayload(int slot, int length)
+    {
+        if (length > _reliablePayloads.Length - _reliableRetainedBytes) return false;
+        if (length > _reliablePayloads.Length - _reliablePayloadTail) CompactReliablePayloads();
+        _reliablePayloadOffsets[slot] = _reliablePayloadTail;
+        _reliablePayloadTail = checked(_reliablePayloadTail + length);
+        return true;
+    }
+
+    private bool TryAllocateReceivedPayload(int slot, int length)
+    {
+        if (length > _receivedPayloads.Length - _receivedRetainedBytes) return false;
+        if (length > _receivedPayloads.Length - _receivedPayloadTail) CompactReceivedPayloads();
+        _receivedPayloadOffsets[slot] = _receivedPayloadTail;
+        _receivedPayloadTail = checked(_receivedPayloadTail + length);
+        return true;
+    }
+
+    private void CompactReliablePayloads()
+    {
+        _reliablePayloadCompactions = SaturatingIncrement(_reliablePayloadCompactions);
+        int count = 0;
+        for (int slot = 0; slot < _reliable.Length; slot++)
+            if (_reliable[slot].Active) _reliableCompactOrder[count++] = slot;
+        SortByPayloadOffset(_reliableCompactOrder, count, _reliablePayloadOffsets);
+        int cursor = 0;
+        for (int index = 0; index < count; index++)
+        {
+            int slot = _reliableCompactOrder[index];
+            int length = _reliable[slot].Length;
+            int source = _reliablePayloadOffsets[slot];
+            if (source != cursor)
+                _reliablePayloads.AsSpan(source, length).CopyTo(_reliablePayloads.AsSpan(cursor, length));
+            _reliablePayloadOffsets[slot] = cursor;
+            cursor = checked(cursor + length);
+        }
+        _reliablePayloads.AsSpan(cursor, _reliablePayloadTail - cursor).Clear();
+        _reliablePayloadTail = cursor;
+    }
+
+    private void CompactReceivedPayloads()
+    {
+        _receivedPayloadCompactions = SaturatingIncrement(_receivedPayloadCompactions);
+        int count = 0;
+        for (int slot = 0; slot < _received.Length; slot++)
+            if (_receivedPayloadOffsets[slot] >= 0) _receivedCompactOrder[count++] = slot;
+        SortByPayloadOffset(_receivedCompactOrder, count, _receivedPayloadOffsets);
+        int cursor = 0;
+        for (int index = 0; index < count; index++)
+        {
+            int slot = _receivedCompactOrder[index];
+            int length = _received[slot].PayloadLength;
+            int source = _receivedPayloadOffsets[slot];
+            if (source != cursor)
+                _receivedPayloads.AsSpan(source, length).CopyTo(_receivedPayloads.AsSpan(cursor, length));
+            _receivedPayloadOffsets[slot] = cursor;
+            cursor = checked(cursor + length);
+        }
+        _receivedPayloads.AsSpan(cursor, _receivedPayloadTail - cursor).Clear();
+        _receivedPayloadTail = cursor;
+    }
+
+    private static void SortByPayloadOffset(int[] order, int count, int[] offsets)
+    {
+        for (int index = 1; index < count; index++)
+        {
+            int slot = order[index];
+            int offset = offsets[slot];
+            int insertion = index;
+            while (insertion > 0 && offsets[order[insertion - 1]] > offset)
+            {
+                order[insertion] = order[insertion - 1];
+                insertion--;
+            }
+            order[insertion] = slot;
+        }
+    }
 
     private long CalculateReservedBytes() => checked(
         (long)_wireScratch.Length +
         _plaintextScratch.Length +
         (long)_reliable.Length * Unsafe.SizeOf<OutgoingMessage>() +
         _reliablePayloads.Length +
+        (long)(_reliablePayloadOffsets.Length + _reliableCompactOrder.Length) * sizeof(int) +
         (long)_lastSentSteps.Length * sizeof(ulong) +
         (long)_reliableFree.Length * sizeof(int) +
         (long)_independent.Length * Unsafe.SizeOf<OutgoingMessage>() +
@@ -1282,6 +1404,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         _reassemblyPayloads.Length +
         (long)_received.Length * Unsafe.SizeOf<NetworkDeliveredMessage>() +
         _receivedPayloads.Length +
+        (long)(_receivedPayloadOffsets.Length + _receivedCompactOrder.Length) * sizeof(int) +
         (long)_receivedFree.Length * sizeof(int) +
         (long)_receivedQueue.Length * sizeof(int) +
         64L);

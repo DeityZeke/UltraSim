@@ -25,6 +25,7 @@ internal static class Program
     {
         var tests = new (string Name, Action Body)[]
         {
+            ("GameProtocolReservationEstimateMatchesConstructedPeers", GameProtocolReservationEstimateMatchesConstructedPeers),
             ("RemoteWorkflowMatchesOfflineDirect", RemoteWorkflowMatchesOfflineDirect),
             ("LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect", LocalhostUdpWorkflowMatchesLoopbackAndOfflineDirect),
             ("RemoteWorkflowConvergesUnderDeterministicImpairment", RemoteWorkflowConvergesUnderImpairment),
@@ -100,7 +101,35 @@ internal static class Program
             RunUdpBenchmark(args);
         else if (args.Contains("--benchmark", StringComparer.Ordinal))
             RunBenchmark(args);
+}
+
+static void GameProtocolReservationEstimateMatchesConstructedPeers()
+{
+    NetworkProtocolLimits limits = NetworkProtocolLimits.Default;
+    var datagrams = new DeterministicDatagramLimits(2_048, 1_200);
+    long conservative = checked(2 * limits.EstimateReservedPayloadBytes(
+        datagrams, UltraSimGameProtocol.Manifest.Count));
+    long manifestEstimate = checked(2 * limits.EstimateReservedPayloadBytes(
+        datagrams, UltraSimGameProtocol.Manifest));
+    True(ProtocolLoopback.TryCreate(limits, datagrams, default,
+        out ProtocolLoopback? loopback, out _, UltraSimGameProtocol.Manifest));
+    using (ProtocolLoopback established = loopback!)
+    {
+        long constructed = checked(established.Client.GetSnapshot().ReservedBytes +
+            established.Server.GetSnapshot().ReservedBytes);
+        True(manifestEstimate >= constructed,
+            $"Manifest estimate {manifestEstimate} was below constructed reservation {constructed}.");
+        True(manifestEstimate - constructed < 64 * 1_024,
+            $"Manifest estimate {manifestEstimate} drifted too far from constructed reservation {constructed}.");
+        True(manifestEstimate < conservative);
+        True(constructed < 2 * 1_024 * 1_024,
+            $"Pooled two-peer game protocol reservation remained too large: {constructed} bytes.");
+        Console.WriteLine($"RESERVATION game_protocol_two_peer constructed={constructed}B " +
+            $"manifest_estimate={manifestEstimate}B count_only_estimate={conservative}B " +
+            $"reliable_budget_per_peer={limits.ReliablePayloadByteCapacity}B " +
+            $"received_budget_per_peer={limits.ReceivedPayloadByteCapacity}B");
     }
+}
 
 static void RemoteWorkflowMatchesOfflineDirect()
 {

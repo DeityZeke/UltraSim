@@ -444,6 +444,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         long retainedPayloadHighWater = 0;
         int largestRetainedMessage = 0;
         ulong retainedByteCapacityFailures = 0;
+        ulong reliablePayloadCompactions = 0;
+        ulong receivedPayloadCompactions = 0;
         long reserved = 0;
         long socketBuffers = 0;
         for (int index = 0; index < _bots.Length; index++)
@@ -500,6 +502,12 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             retainedByteCapacityFailures = SaturatingAdd(retainedByteCapacityFailures,
                 SaturatingAdd(snapshot.Client.RetainedPayloads.ByteCapacityFailures,
                     snapshot.Server.RetainedPayloads.ByteCapacityFailures));
+            reliablePayloadCompactions = SaturatingAdd(reliablePayloadCompactions,
+                SaturatingAdd(snapshot.Client.RetainedPayloads.ReliableCompactions,
+                    snapshot.Server.RetainedPayloads.ReliableCompactions));
+            receivedPayloadCompactions = SaturatingAdd(receivedPayloadCompactions,
+                SaturatingAdd(snapshot.Client.RetainedPayloads.ReceivedCompactions,
+                    snapshot.Server.RetainedPayloads.ReceivedCompactions));
             capacityDrops = SaturatingAdd(capacityDrops,
                 SaturatingAdd(snapshot.Client.CapacityDrops + snapshot.ClientDatagrams.CapacityDrops,
                     snapshot.Server.CapacityDrops + snapshot.ServerDatagrams.CapacityDrops));
@@ -564,7 +572,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         peakWorkingSet = Math.Max(peakWorkingSet, process.WorkingSet64);
         peakPrivateBytes = Math.Max(peakPrivateBytes, process.PrivateMemorySize64);
         IReadOnlyList<NetworkCanonicalOwnerState> canonicalStates = CaptureCanonicalStates();
-        long defaultReservedPerClient = checked(2 * NetworkProtocolLimits.Default.EstimateReservedPayloadBytes(
+        long benchmarkManifestDefaultReservedPerClient = checked(
+            2 * NetworkProtocolLimits.Default.EstimateReservedPayloadBytes(
             new DeterministicDatagramLimits(UdpLimits.MaximumDatagramBytes, UdpLimits.MaximumDatagramBytes),
             Manifest));
         long normalizedLogicalBytes = checked(
@@ -720,6 +729,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["retained_payload_category_high_water_sum_bytes"] = retainedPayloadHighWater,
                 ["retained_payload_largest_message_bytes"] = largestRetainedMessage,
                 ["retained_payload_byte_capacity_failures"] = retainedByteCapacityFailures,
+                ["retained_reliable_payload_compactions"] = reliablePayloadCompactions,
+                ["retained_received_payload_compactions"] = receivedPayloadCompactions,
                 ["retained_payload_pressure_ticks_50"] = bytePressure50,
                 ["retained_payload_pressure_ticks_75"] = bytePressure75,
                 ["retained_payload_pressure_ticks_90"] = bytePressure90,
@@ -764,9 +775,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     _handshakeAllocatedBytes / (double)_handshakeSuccesses,
                 ["handshake_wire_bytes_per_join"] = _handshakeSuccesses == 0 ? 0 :
                     _handshakeWireBytes / (double)_handshakeSuccesses,
-                ["default_protocol_reserved_bytes_per_client_estimate"] = defaultReservedPerClient,
-                ["default_protocol_reserved_bytes_total_estimate"] =
-                    checked(defaultReservedPerClient * (long)_bots.Length),
+                ["benchmark_manifest_default_limits_reserved_bytes_per_client_estimate"] =
+                    benchmarkManifestDefaultReservedPerClient,
+                ["benchmark_manifest_default_limits_reserved_bytes_total_estimate"] =
+                    checked(benchmarkManifestDefaultReservedPerClient * (long)_bots.Length),
                 ["shared_listener_registered_paths"] = sharedSnapshot.Listener.RegisteredPaths,
                 ["shared_listener_maximum_queued_datagrams"] = sharedSnapshot.Listener.MaximumQueuedDatagrams,
                 ["shared_listener_unknown_path_datagrams"] = sharedSnapshot.Listener.UnknownPathDatagrams,

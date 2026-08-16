@@ -321,11 +321,17 @@ The count-only estimate remains conservative, while the manifest overload
 estimates a concrete protocol.
 
 `NetworkProtocolSnapshot.RetainedPayloads` reports exact current/high-water/
-capacity bytes by ownership category, plus the largest retained message and
-explicit byte-capacity failures. The current game manifest's default two-peer
-estimate is about 303 KiB rather than the old roughly 12.6 MiB estimate. A shared
-page backend is not claimed; Bulk/resync/slow-recipient evidence must first show
-that fixed descriptor strides remain material.
+capacity bytes by ownership category, plus the largest retained message, explicit
+byte-capacity failures, and reliable/received compactions. Reliable and received
+slots use separate fixed byte arenas rather than per-slot maximum-size slabs.
+The default arenas are 256 KiB each per peer while slot count remains 128 and an
+individual message may remain 16 KiB. Exhaustion rejects transactionally;
+fragmented arenas compact using preallocated scratch and allocate nothing.
+
+The earlier approximately 303 KiB estimate described the small benchmark
+manifest, not the game protocol. A permanent cross-layer test now constructs the
+actual `UltraSimGameProtocol.Manifest`: its default two-peer reservation is
+1,705,248 bytes (~1.63 MiB), with a 1,706,054-byte preconstruction estimate.
 
 ## N0.6 application-owned input and owner state
 
