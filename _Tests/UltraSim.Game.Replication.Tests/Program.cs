@@ -42,6 +42,7 @@ var tests = new (string Name, Action Body)[]
     ("InterestCapacityFailureIsExplicitlyNonviable", InterestCapacityFailureIsExplicitlyNonviable),
     ("ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow", ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow),
     ("BundleSelectionResumesWithinEachTier", BundleSelectionResumesWithinEachTier),
+    ("BundleExpirationSweepCachesOnlyCompletedSemanticTime", BundleExpirationSweepCachesOnlyCompletedSemanticTime),
     ("WarmedMaintainedInterestSchedulingAllocatesZero", WarmedMaintainedInterestSchedulingAllocatesZero),
 };
 
@@ -624,6 +625,98 @@ static void WarmedMaintainedInterestSchedulingAllocatesZero()
             Point(1, 0), GameReplicationHorizon.Far, version);
         DrainRecipient(service, participant, version, records);
     }
+    Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
+
+static void BundleExpirationSweepCachesOnlyCompletedSemanticTime()
+{
+    var profile = new GameInterestProfile(
+        RegionEdgeMillimeters: 10_000,
+        ImmediateEnterRadiusMillimeters: 5_000,
+        ImmediateLeaveRadiusMillimeters: 6_000,
+        NearRadiusMillimeters: 20_000,
+        FarRadiusMillimeters: 40_000,
+        NearIntervalMilliseconds: 10,
+        FarIntervalMilliseconds: 20,
+        ApplicationAckRetryMilliseconds: 100,
+        ApplicationAckTimeoutMilliseconds: 100);
+    var service = new GameInterestService(
+        new StateEpoch(5),
+        new GameInterestLimits(4, 2, 512, 1_024, 8, 4, 1),
+        profile);
+    ParticipantId first = new(93);
+    ParticipantId second = new(94);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(first, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(second, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(1, 1, 1), 1, Point(1, 0),
+            GameReplicationHorizon.Far, 0));
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[1];
+
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(first, 0, 1_024, records, out GameWorldStateBundle firstBundle));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(second, 0, 1_024, records, out GameWorldStateBundle secondBundle));
+    Check.True(service.TryAcknowledgeBundle(first, firstBundle.BundleId, applied: true));
+    Check.True(service.AbandonBundle(secondBundle.BundleId));
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(first, 0, 1_024, records, out _));
+
+    GameInterestAttributionSnapshot cached = service.GetAttributionSnapshot();
+    Check.Equal(3UL, cached.ExpirationRequests);
+    Check.Equal(1UL, cached.ExpirationSweeps);
+    Check.Equal(1UL, cached.ExpirationDistinctTimeRequests);
+    Check.Equal(2UL, cached.ExpirationRepeatedSameTimeRequests);
+    Check.Equal(2UL, cached.ExpirationSweepCacheHits);
+    Check.Equal(4UL, cached.ExpirationSlotsExamined);
+    Check.Equal(0UL, cached.ExpirationActiveSlotsExamined);
+    Check.Equal(0UL, cached.ExpirationActualExpirations);
+    Check.Equal(2, cached.ExpirationMaximumBundleHigh);
+
+    // A different semantic time always sweeps. The exact timeout boundary releases
+    // the old attempt before selection, restoring retry eligibility in the same call.
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(1, 1, 2), 2, Point(1, 0),
+            GameReplicationHorizon.Far, 10));
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(first, 10, 1_024, records, out GameWorldStateBundle retained));
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(first, 109, 1_024, records, out _));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(first, 110, 1_024, records, out GameWorldStateBundle retried));
+    Check.False(retained.BundleId == retried.BundleId);
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(first, 110, 1_024, records, out _));
+
+    GameInterestAttributionSnapshot boundary = service.GetAttributionSnapshot();
+    Check.Equal(4UL, boundary.ExpirationRequests);
+    Check.Equal(3UL, boundary.ExpirationSweeps);
+    Check.Equal(3UL, boundary.ExpirationDistinctTimeRequests);
+    Check.Equal(1UL, boundary.ExpirationRepeatedSameTimeRequests);
+    Check.Equal(1UL, boundary.ExpirationSweepCacheHits);
+    Check.Equal(12UL, boundary.ExpirationSlotsExamined);
+    Check.Equal(1UL, boundary.ExpirationActualExpirations);
+
+    // Large forward and backward time jumps both invalidate the same-time cache.
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(first, 1_000, 1_024, records, out _));
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(first, 500, 1_024, records, out _));
+    GameInterestAttributionSnapshot jumped = service.GetAttributionSnapshot();
+    Check.Equal(5UL, jumped.ExpirationSweeps);
+    Check.Equal(2UL, jumped.ExpirationActualExpirations);
+
+    // Repeated same-time cache hits remain allocation-free after warmup.
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(first, 500, 1_024, records, out _));
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    for (int index = 0; index < 10_000; index++)
+        Check.Equal(GameWorldStateBuildStatus.NoData,
+            service.TryBuildBundle(first, 500, 1_024, records, out _));
     Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
 }
 

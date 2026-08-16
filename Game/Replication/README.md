@@ -331,6 +331,18 @@ general path. Opt-in counters prove fast-path eligibility, necessary visits,
 avoided work, tier transitions, and version publications; boundary and warmed-
 allocation gates protect the invariant.
 
+Outstanding-bundle expiration remains a global fixed-array sweep, but it now
+runs at most once per exact semantic `nowMilliseconds`. After a complete sweep
+at T, any bundle created later at T has `SentAtMilliseconds == T` and cannot
+already be timed out; acknowledgements and abandon operations can only remove
+bundles. Any different time—including a backward test-time jump—performs the
+normal sweep. Opt-in attribution reports expiration requests, consecutive
+distinct/repeated request times, actual sweeps, same-time cache hits, total and
+active slots examined, expirations, `_bundleHigh` high-water, and sweep ticks.
+Permanent gates cover multiple recipients, ACK/abandon between same-time calls,
+the exact timeout boundary restoring retry eligibility, forward/backward time
+jumps, and zero warmed allocation.
+
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces
 no routing policy; game/client composition supplies a fixed bounded ordered set.

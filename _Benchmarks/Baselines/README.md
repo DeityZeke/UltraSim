@@ -99,8 +99,11 @@ Useful current anchors can be located by their embedded workload or filename:
 - `network-v3-dense-stable-far-fast-path-causal-*` — the one-pass stable
   same-lifetime/same-region `Far→Far` causal result, including 100% eligibility
   and the exact avoided visit counts; `stable-far-fast-path-hardened` is the
-  probes-off observation. These leave base-tier lookup and eligibility-aware
-  pending-debt organization as separate possible checkpoints;
+  probes-off observation;
+- `network-v3-dense-bundle-expiration-*` — the matched full-array expiration
+  census, exact-time sweep-cache causal result, and probes-off hardened
+  observation. These preserve the 97,912-request/123-time diagnosis and leave
+  eligibility-aware pending-debt organization as the next separate candidate;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

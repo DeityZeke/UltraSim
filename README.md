@@ -39,7 +39,14 @@ target. A subsequent stable `Far`-horizon fast path collapsed three maintained-
 graph traversals into one for all 2,400 Dense-400 dirty updates, lowering
 authority-update p95 1.087→0.703 ms and probe-enabled Full server-role p95
 7.743→7.557 ms. The probes-off combined Full tick is now 13.068 ms with zero
-deadline misses; known-deferred pending debt is the next measured candidate.
+deadline misses. A following expiration census found 97,912 bundle-build calls
+rescanning 3,200 slots at only 123 semantic times: 313.3 million diagnostic slot
+checks. Caching one completed global expiration sweep per exact semantic time
+reduces that to 393,600 checks. Probe-enabled Full server-role p95 is now
+5.876 ms and the probes-off combined Full tick is 10.598 ms, with identical
+bundles, records, packets, wire bytes, convergence, and capacity behavior.
+Dense-400 is now inside the ≤6 ms server-role usable target in this observation;
+known-deferred pending debt remains the next measured candidate.
 
 ## Design
 

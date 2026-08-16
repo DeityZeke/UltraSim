@@ -57,6 +57,8 @@ public sealed class GameInterestService
     private int _regionEdgeHigh;
     private int _relationHigh;
     private int _bundleHigh;
+    private bool _hasExpirationSweepTime;
+    private long _lastExpirationSweepTime;
     private int _freeRecipientCount;
     private int _freeRegionCount;
     private int _freeRegionEdgeCount;
@@ -113,6 +115,18 @@ public sealed class GameInterestService
     private ulong _attributionBundleBuildNoData;
     private ulong _attributionBundleBuildOutstandingCapacity;
     private ulong _attributionBundleBuildOtherFailures;
+    private ulong _attributionExpirationRequests;
+    private ulong _attributionExpirationSweeps;
+    private ulong _attributionExpirationDistinctTimeRequests;
+    private ulong _attributionExpirationRepeatedSameTimeRequests;
+    private ulong _attributionExpirationSweepCacheHits;
+    private ulong _attributionExpirationSlotsExamined;
+    private ulong _attributionExpirationActiveSlotsExamined;
+    private ulong _attributionExpirationActualExpirations;
+    private int _attributionExpirationMaximumBundleHigh;
+    private ulong _attributionExpirationSweepTicks;
+    private bool _attributionHasExpirationRequestTime;
+    private long _attributionLastExpirationRequestTime;
     private ulong _attributionPendingImmediateExamined;
     private ulong _attributionPendingNearExamined;
     private ulong _attributionPendingFarExamined;
@@ -838,6 +852,18 @@ public sealed class GameInterestService
         _attributionBundleBuildNoData = 0;
         _attributionBundleBuildOutstandingCapacity = 0;
         _attributionBundleBuildOtherFailures = 0;
+        _attributionExpirationRequests = 0;
+        _attributionExpirationSweeps = 0;
+        _attributionExpirationDistinctTimeRequests = 0;
+        _attributionExpirationRepeatedSameTimeRequests = 0;
+        _attributionExpirationSweepCacheHits = 0;
+        _attributionExpirationSlotsExamined = 0;
+        _attributionExpirationActiveSlotsExamined = 0;
+        _attributionExpirationActualExpirations = 0;
+        _attributionExpirationMaximumBundleHigh = 0;
+        _attributionExpirationSweepTicks = 0;
+        _attributionHasExpirationRequestTime = false;
+        _attributionLastExpirationRequestTime = 0;
         _attributionPendingImmediateExamined = 0;
         _attributionPendingNearExamined = 0;
         _attributionPendingFarExamined = 0;
@@ -889,6 +915,16 @@ public sealed class GameInterestService
             _attributionBundleBuildNoData,
             _attributionBundleBuildOutstandingCapacity,
             _attributionBundleBuildOtherFailures,
+            _attributionExpirationRequests,
+            _attributionExpirationSweeps,
+            _attributionExpirationDistinctTimeRequests,
+            _attributionExpirationRepeatedSameTimeRequests,
+            _attributionExpirationSweepCacheHits,
+            _attributionExpirationSlotsExamined,
+            _attributionExpirationActiveSlotsExamined,
+            _attributionExpirationActualExpirations,
+            _attributionExpirationMaximumBundleHigh,
+            _attributionExpirationSweepTicks,
             _attributionPendingImmediateExamined,
             _attributionPendingNearExamined,
             _attributionPendingFarExamined,
@@ -1792,10 +1828,43 @@ public sealed class GameInterestService
 
     private void ExpireBundles(long now)
     {
+        long started = 0;
+        if (_attributionEnabled)
+        {
+            SaturatingIncrement(ref _attributionExpirationRequests);
+            if (_attributionHasExpirationRequestTime && _attributionLastExpirationRequestTime == now)
+                SaturatingIncrement(ref _attributionExpirationRepeatedSameTimeRequests);
+            else
+                SaturatingIncrement(ref _attributionExpirationDistinctTimeRequests);
+            _attributionHasExpirationRequestTime = true;
+            _attributionLastExpirationRequestTime = now;
+            if (_bundleHigh > _attributionExpirationMaximumBundleHigh)
+                _attributionExpirationMaximumBundleHigh = _bundleHigh;
+        }
+
+        // All bundles created after a completed sweep at T have SentAt == T, so they
+        // cannot expire during another build attempt at the same semantic time. ACK
+        // and abandon operations can only release bundles and therefore cannot
+        // invalidate this cache.
+        if (_hasExpirationSweepTime && _lastExpirationSweepTime == now)
+        {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionExpirationSweepCacheHits);
+            return;
+        }
+
+        if (_attributionEnabled)
+        {
+            SaturatingIncrement(ref _attributionExpirationSweeps);
+            started = Stopwatch.GetTimestamp();
+        }
         for (int index = 0; index < _bundles.Length; index++)
         {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionExpirationSlotsExamined);
             ref SentBundleState bundle = ref _bundles[index];
-            if (!bundle.Active || now - bundle.SentAtMilliseconds < _profile.ApplicationAckTimeoutMilliseconds)
+            if (!bundle.Active)
+                continue;
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionExpirationActiveSlotsExamined);
+            if (now - bundle.SentAtMilliseconds < _profile.ApplicationAckTimeoutMilliseconds)
                 continue;
             int baseIndex = index * _limits.MaximumRecordsPerBundle;
             for (int itemIndex = 0; itemIndex < bundle.Count; itemIndex++)
@@ -1808,8 +1877,14 @@ public sealed class GameInterestService
                     relation.HasSent = false;
             }
             SaturatingIncrement(ref _timedOutBundles);
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionExpirationActualExpirations);
             ReleaseBundle(index);
         }
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionExpirationSweepTicks,
+                (ulong)(Stopwatch.GetTimestamp() - started));
+        _hasExpirationSweepTime = true;
+        _lastExpirationSweepTime = now;
     }
 
     private void ReleaseBundle(int bundleIndex)

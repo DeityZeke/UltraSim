@@ -119,6 +119,11 @@ from general-path upserts and reports eligibility, necessary relation visits,
 avoided reverse/second/ensure visits, Immediate transitions, tier changes, and
 pending version publications. These counters are opt-in and do not justify
 dictionary removal or other AOI changes by themselves.
+Bundle-expiration attribution separately records build-time expiration requests,
+consecutive distinct/repeated semantic times, completed sweeps/cache hits, total
+and active slots examined, actual expirations, `_bundleHigh` high-water, and
+cumulative sweep time. It exists to distinguish global timeout housekeeping from
+pending-debt selection; ordinary acceptance keeps all attribution probes off.
 Cold freshness scans remain outside the timed tick. Probe-enabled figures are
 compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 

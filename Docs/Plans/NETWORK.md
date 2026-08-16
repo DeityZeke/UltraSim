@@ -2212,13 +2212,77 @@ is 47.625 ms, Event apply p95 remains 7.625 ms, and convergence still takes
 three settlement steps with zero deadline misses, capacity/byte failures,
 retransmissions, or GC collections. Updates-only p95 falls 3.236→3.049 ms.
 
-The server-role improvement is real but modest: 7.743→7.557 ms (2.4%). Dense-400
-therefore remains inside the integrated fixed-60 deadline but above the ≤6 ms
-server target. The post-change attribution still examines about 4.88 million
-pending nodes, including about 2.68 million cadence skips and 1.24 million
-awaiting-retry skips. Making known-deferred debt cheap not to inspect is the next
-measured candidate; workers, sharding, dictionary removal, and broader AOI
-changes remain unearned.
+The server-role improvement is real but modest: 7.743→7.557 ms (2.4%). The
+post-change attribution still examines about 4.88 million pending nodes, but the
+next checkpoint first measures a larger previously-unattributed global timeout
+scan. Workers, sharding, dictionary removal, and broader AOI changes remain
+unearned.
+
+#### Dense-400 outstanding-bundle expiration specialization
+
+Every `TryBuildBundle` attempt previously called `ExpireBundles(now)` and scanned
+all 3,200 configured outstanding-bundle slots. The initial opt-in census proved
+that this was not a theoretical concern:
+
+```text
+expiration requests             97,912
+consecutive distinct times         123
+repeated same-time requests      97,789
+full-array slot checks      313,318,400
+active-slot checks           26,744,430
+actual expirations                    0
+_bundleHigh high-water              800
+cumulative instrumented sweep   310.47 ms
+```
+
+[`network-v3-dense-bundle-expiration-census-pre-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-bundle-expiration-census-pre-2026-08-16.json)
+preserves that pre-change census. Its per-slot counters deliberately make it a
+diagnostic cost observation rather than a probes-off production baseline.
+
+The isolated correction caches only a completed expiration sweep's exact
+`nowMilliseconds`. Subsequent build attempts at the same time skip the global
+array. This is safe because any bundle created after the sweep at T has
+`SentAtMilliseconds == T` and cannot meet the positive timeout at T; ACK and
+abandon only release bundles. Every different time performs the unchanged full
+sweep. The implementation does not add a heap, timer wheel, per-recipient bundle
+list, `_bundleHigh` scan bound, or pending-debt representation.
+
+Permanent tests prove repeated same-time attempts across multiple recipients,
+ACK and abandon between calls, the exact timeout boundary, timeout restoring
+retry eligibility in the same build call, large forward and backward time jumps,
+and zero warmed allocation. The post-change causal artifact is
+[`network-v3-dense-bundle-expiration-cache-causal-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-bundle-expiration-cache-causal-2026-08-16.json).
+
+| Full diagnostic | Before | After |
+| --- | ---: | ---: |
+| expiration sweeps | 97,912 | 123 |
+| slots examined | 313,318,400 | 393,600 |
+| cumulative sweep time | 310.47 ms | 0.44 ms |
+| WorldState schedule p95 | 3.606 ms | 0.907 ms |
+| server-role p95 | 8.577 ms | 5.876 ms |
+| server-role p99 | 8.736 ms | 6.962 ms |
+
+The matched semantic work is identical: 53,200 bundles, 960,000 records,
+111,200 Data packets, 4,800 transport ACKs, 50,898,400 wire bytes, and three
+settlement steps. The cache changes no pending scan, freshness, wire, cadence,
+or application-knowledge policy. The direct diagnostic before/after delta also
+includes avoided per-slot census increments; the ordinary probes-off observation
+is therefore reported separately rather than presented as the same CPU scope.
+
+[`network-v3-dense-bundle-expiration-cache-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-bundle-expiration-cache-hardened-2026-08-16.json)
+records Full combined tick p95/p99 of 10.598/10.728 ms, versus the prior
+13.068/13.369 ms longitudinal observation. Full state-age p95 is 45.125 ms,
+Event apply p95 is 5.625 ms, convergence remains exact in three settlement
+steps, and there are zero deadline misses, capacity/retained-byte failures,
+nonviable recipients, retransmissions, or GC collections. Timed harness
+allocation remains about 288 KiB and the expiration-cache regression itself is
+zero-allocation after warmup.
+
+The probe-enabled Full server-role p95 is now 5.876 ms, inside the current ≤6 ms
+usable target for this observation. The remaining scheduler still examines about
+4.88 million pending nodes, including known cadence/retry-deferred debt.
+Eligibility-aware ready/deferred pending organization is therefore the next
+measured candidate; it remains separate from this global expiration correction.
 
 Protected profiles:
 
