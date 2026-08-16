@@ -58,6 +58,83 @@ public readonly record struct NetworkMetricSummary(
     }
 }
 
+/// <summary>Occupancy distribution for one explicitly bounded surface.</summary>
+public readonly record struct NetworkOccupancySummary(
+    int Capacity,
+    double Mean,
+    double P95,
+    int Max,
+    double MaximumRatio,
+    long TicksAtOrAbove50,
+    long TicksAtOrAbove75,
+    long TicksAtOrAbove90,
+    long TicksAtOrAbove100)
+{
+    public static NetworkOccupancySummary From(IReadOnlyList<int> values, int capacity)
+    {
+        if (capacity <= 0 || values.Count == 0) return default;
+        int[] sorted = values.ToArray();
+        Array.Sort(sorted);
+        long at50 = 0;
+        long at75 = 0;
+        long at90 = 0;
+        long at100 = 0;
+        long sum = 0;
+        for (int index = 0; index < sorted.Length; index++)
+        {
+            int value = sorted[index];
+            double ratio = value / (double)capacity;
+            sum += value;
+            if (ratio >= 0.50) at50++;
+            if (ratio >= 0.75) at75++;
+            if (ratio >= 0.90) at90++;
+            if (ratio >= 1.00) at100++;
+        }
+        return new(capacity, sum / (double)sorted.Length,
+            Percentile(sorted, 0.95), sorted[^1], sorted[^1] / (double)capacity,
+            at50, at75, at90, at100);
+    }
+
+    private static double Percentile(ReadOnlySpan<int> sorted, double percentile)
+    {
+        double position = (sorted.Length - 1) * percentile;
+        int lower = (int)position;
+        int upper = (int)Math.Ceiling(position);
+        return lower == upper
+            ? sorted[lower]
+            : sorted[lower] + ((sorted[upper] - sorted[lower]) * (position - lower));
+    }
+}
+
+/// <summary>
+/// Explicit evidence coverage. A false value means unavailable for this workload,
+/// not a measured zero.
+/// </summary>
+public readonly record struct NetworkBotMetricCoverage(
+    bool OwnerInputFreshness,
+    bool WorldStateFreshnessByTier,
+    bool ApplicationEventLatency,
+    bool PerClientFairness,
+    bool TickDeadlineCompliance,
+    bool BoundedOccupancy,
+    bool WireBytes,
+    bool SocketSyscalls,
+    bool SecurityBytes,
+    bool ProcessMemory,
+    bool ManagedAllocation,
+    bool ProcessCpu,
+    bool Handshake,
+    bool InterestAmplification,
+    bool BaselineRecovery,
+    bool DeepPhaseTiming);
+
+/// <summary>Marginal p95 tick slope between adjacent population stages.</summary>
+public readonly record struct NetworkBotScaleDelta(
+    int FromClients,
+    int ToClients,
+    double V2MicrosecondsPerAddedClient,
+    double V3MicrosecondsPerAddedClient);
+
 public readonly record struct NetworkCanonicalOwnerState(
     int ClientIndex,
     uint NetworkEntityId,
@@ -109,6 +186,11 @@ public sealed record NetworkBotStageResult
     public required NetworkMetricSummary ClientPumpMilliseconds { get; init; }
     public required NetworkMetricSummary PingMilliseconds { get; init; }
     public required NetworkMetricSummary InputAcknowledgementMilliseconds { get; init; }
+    public required NetworkMetricSummary InputAcknowledgementTicks { get; init; }
+    public required NetworkMetricSummary PerClientInputAckP95Milliseconds { get; init; }
+    public required NetworkMetricSummary PerClientPingP95Milliseconds { get; init; }
+    public required NetworkMetricSummary HandshakeMilliseconds { get; init; }
+    public required NetworkBotMetricCoverage MetricCoverage { get; init; }
     public required long TickDeadlineMisses { get; init; }
     public required int LongestDeadlineMissStreak { get; init; }
     public required long LogicalInputs { get; init; }
@@ -118,6 +200,7 @@ public sealed record NetworkBotStageResult
     public required ulong WireDatagramsSent { get; init; }
     public required ulong WireBytesSent { get; init; }
     public required ulong RetransmittedPackets { get; init; }
+    public required ulong RetransmittedWireBytes { get; init; }
     public required long ReservedNetworkBytes { get; init; }
     public required long ConfiguredSocketBufferBytes { get; init; }
     public required long ManagedHeapBytes { get; init; }
@@ -127,15 +210,31 @@ public sealed record NetworkBotStageResult
     public required int Gen0Collections { get; init; }
     public required int Gen1Collections { get; init; }
     public required int Gen2Collections { get; init; }
+    public required double ProcessCpuMilliseconds { get; init; }
+    public required double ProcessCpuCoreUtilization { get; init; }
     public required int MaximumReliableQueued { get; init; }
     public required int MaximumUnreliableQueued { get; init; }
     public required int MaximumReceivedQueued { get; init; }
     public required int MaximumInFlightPackets { get; init; }
+    public required NetworkOccupancySummary ReliableOccupancy { get; init; }
+    public required NetworkOccupancySummary IndependentUnreliableOccupancy { get; init; }
+    public required NetworkOccupancySummary ReceivedOccupancy { get; init; }
+    public required NetworkOccupancySummary InFlightOccupancy { get; init; }
     public required long CapacityPressureTicks50 { get; init; }
     public required long CapacityPressureTicks75 { get; init; }
     public required long CapacityPressureTicks90 { get; init; }
     public required long CapacityPressureTicks100 { get; init; }
     public required ulong CapacityDrops { get; init; }
+    public required long HandshakeAttempts { get; init; }
+    public required long HandshakeSuccesses { get; init; }
+    public required long HandshakeAllocatedBytes { get; init; }
+    public required ulong HandshakeWireDatagrams { get; init; }
+    public required ulong HandshakeWireBytes { get; init; }
+    public required ulong SocketSendCalls { get; init; }
+    public required ulong SocketReceivePollCalls { get; init; }
+    public required ulong SocketReceiveCalls { get; init; }
+    public required ulong SocketWouldBlockEvents { get; init; }
+    public required int MaximumSentDatagramBytes { get; init; }
     public required string CanonicalOwnerStateHash { get; init; }
     public required IReadOnlyList<NetworkCanonicalOwnerState> CanonicalOwnerStates { get; init; }
     public required string CanonicalValidation { get; init; }
@@ -144,7 +243,7 @@ public sealed record NetworkBotStageResult
 
 public sealed record NetworkBotAdapterReport
 {
-    public const string Protocol = "ultrasim-network-v2-v3-bot-comparison-v1";
+    public const string Protocol = "ultrasim-network-v2-v3-bot-comparison-v2";
     public required string ProtocolVersion { get; init; }
     public required string Generation { get; init; }
     public required DateTimeOffset TimestampUtc { get; init; }
@@ -191,6 +290,7 @@ public sealed record NetworkBotMatrixReport(
     IReadOnlyList<int> ClientStages,
     bool BothProcessOrders,
     IReadOnlyList<NetworkBotJoinedReport> Runs,
+    IReadOnlyList<NetworkBotScaleDelta> MarginalTickCosts,
     bool AllCanonicalStatesMatch);
 
 public static class NetworkBotComparisonIo

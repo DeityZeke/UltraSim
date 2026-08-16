@@ -229,6 +229,13 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _acknowledgements;
     private ulong _sequencedDrops;
     private ulong _capacityDrops;
+    private ulong _dataPacketsSent;
+    private ulong _acknowledgementPacketsSent;
+    private ulong _keepAlivePacketsSent;
+    private ulong _encryptedPlaintextBytes;
+    private ulong _decryptedPlaintextBytes;
+    private ulong _reliableFragmentsSent;
+    private ulong _reliableRetransmittedWireBytes;
     private NetworkPacketWindow _authenticatedPackets;
     private NetworkPacketWindow _transportDeliveries;
     private bool _ackPending;
@@ -489,6 +496,9 @@ public sealed class NetworkProtocolPeer : IDisposable
         return new(true, _sendCryptography.Epoch, _receiveCryptography.Epoch,
             _sentPacketsCount, _receivedPacketsCount, _authenticationFailures, _replayRejections,
             _retransmissions, _acknowledgements, _sequencedDrops, _capacityDrops,
+            _dataPacketsSent, _acknowledgementPacketsSent, _keepAlivePacketsSent,
+            _encryptedPlaintextBytes, _decryptedPlaintextBytes, _reliableFragmentsSent,
+            _reliableRetransmittedWireBytes,
             _reliableCount, _independentCount, _receivedCount, _congestionWindow,
             _inFlight, _smoothedRtt, _rto, reserved);
     }
@@ -600,7 +610,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             ulong bit = 1UL << index;
             if ((message.AcknowledgedMask & bit) != 0) continue;
             ulong marker = sent[index];
-            if (marker == 0) { fragment = index; return true; }
+            if (marker is 0 or ulong.MaxValue) { fragment = index; return true; }
         }
         fragment = 0;
         return false;
@@ -638,6 +648,10 @@ public sealed class NetworkProtocolPeer : IDisposable
 
         int reservedSentRecord = reliable ? FindFreeSentRecord() : -1;
         if (reliable && reservedSentRecord < 0) return false;
+        int sentMarkerIndex = reliable
+            ? reliableSlot * _limits.MaximumFragmentsPerMessage + fragmentIndex
+            : -1;
+        bool retransmission = reliable && _lastSentSteps[sentMarkerIndex] == ulong.MaxValue;
 
         if (!TryEncryptAndSend(NetworkSecureDatagramKind.Data, writer.WrittenSpan,
                 out PacketNumber packet, out DatagramSendStatus status)) return false;
@@ -645,6 +659,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         {
             if (reliable)
             {
+                _reliableFragmentsSent = SaturatingIncrement(_reliableFragmentsSent);
+                if (retransmission)
+                    _reliableRetransmittedWireBytes = SaturatingAdd(
+                        _reliableRetransmittedWireBytes,
+                        checked((ulong)(NetworkSecureDatagramFraming.HeaderBytes +
+                            writer.WrittenCount + NetworkSecureDatagramFraming.TagBytes)));
                 _sentPackets[reservedSentRecord] = new(
                     packet.Value, step, reliableSlot, checked((uint)_rto), fragmentIndex, true);
                 ulong deadline = _sentPackets[reservedSentRecord].DeadlineStep;
@@ -727,7 +747,21 @@ public sealed class NetworkProtocolPeer : IDisposable
         if (status is DatagramSendStatus.Accepted or DatagramSendStatus.DroppedByImpairment)
         {
             _nextPacketNumber++;
-            _sentPacketsCount++;
+            _sentPacketsCount = SaturatingIncrement(_sentPacketsCount);
+            _encryptedPlaintextBytes = SaturatingAdd(
+                _encryptedPlaintextBytes, checked((ulong)plaintext.Length));
+            switch (kind)
+            {
+                case NetworkSecureDatagramKind.Data:
+                    _dataPacketsSent = SaturatingIncrement(_dataPacketsSent);
+                    break;
+                case NetworkSecureDatagramKind.Acknowledgement:
+                    _acknowledgementPacketsSent = SaturatingIncrement(_acknowledgementPacketsSent);
+                    break;
+                case NetworkSecureDatagramKind.KeepAlive:
+                    _keepAlivePacketsSent = SaturatingIncrement(_keepAlivePacketsSent);
+                    break;
+            }
             return true;
         }
         return false;
@@ -759,6 +793,8 @@ public sealed class NetworkProtocolPeer : IDisposable
             _authenticationFailures++;
             return;
         }
+        _decryptedPlaintextBytes = SaturatingAdd(
+            _decryptedPlaintextBytes, checked((ulong)plaintext.Length));
 
         // Authentication and delivery are distinct facts. An authentic packet number is
         // consumed even when bounded semantic admission must defer it; reliable retry uses
@@ -983,8 +1019,9 @@ public sealed class NetworkProtocolPeer : IDisposable
                 continue;
             }
             RetireSentRecords(record.MessageSlot, record.FragmentIndex);
-            _lastSentSteps[record.MessageSlot * _limits.MaximumFragmentsPerMessage + record.FragmentIndex] = 0;
-            _retransmissions++;
+            _lastSentSteps[record.MessageSlot * _limits.MaximumFragmentsPerMessage + record.FragmentIndex] =
+                ulong.MaxValue;
+            _retransmissions = SaturatingIncrement(_retransmissions);
             detectedLoss = true;
         }
         _nextLossCheckStep = _inFlight == 0 ? ulong.MaxValue : nextCheck;
@@ -1091,6 +1128,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         _independentFree[_independentFreeCount++] = slot;
         _independentCount--;
     }
+
+    private static ulong SaturatingAdd(ulong left, ulong right) =>
+        ulong.MaxValue - left < right ? ulong.MaxValue : left + right;
+
+    private static ulong SaturatingIncrement(ulong value) =>
+        value == ulong.MaxValue ? value : value + 1;
 
     private void EnsureOperational()
     {

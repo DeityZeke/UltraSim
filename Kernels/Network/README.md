@@ -336,6 +336,13 @@ protocol-equivalence claim: V2 and V3 retain different security, reliability,
 reservation, and allocation contracts. N0.3 standalone evidence remains
 unrelated to that ratio.
 
+Cold protocol snapshots also expose packet-kind counts, encrypted/decrypted
+plaintext bytes, reliable-fragment sends, and exact reliable retransmitted wire
+bytes. UDP endpoint/listener snapshots expose actual send, receive, and poll
+calls, transient WouldBlock observations, and maximum observed datagram sizes.
+These are cheap N0.10 counters; crypto/codec phase timing remains an opt-in
+future diagnostic and is not charged to the normal hot path.
+
 ## N0.0–N0.3 gates
 
 - production kernel has zero project dependencies;

@@ -6,6 +6,7 @@ var tests = new (string Name, Action Body)[]
     ("CanonicalHashIgnoresDiagnosticPosition", CanonicalHashIgnoresDiagnosticPosition),
     ("CanonicalHashProtectsSemanticOwnerState", CanonicalHashProtectsSemanticOwnerState),
     ("ProvisionalComparisonPermitsOnlyTopologyDifference", ProvisionalComparisonPermitsOnlyTopologyDifference),
+    ("OccupancySummaryPreservesCapacityPressure", OccupancySummaryPreservesCapacityPressure),
     ("MatrixEvidenceRoundTrips", MatrixEvidenceRoundTrips),
 };
 
@@ -53,6 +54,16 @@ static void ProvisionalComparisonPermitsOnlyTopologyDifference()
     False(rejected.MayReportHeadlineRatio);
 }
 
+static void OccupancySummaryPreservesCapacityPressure()
+{
+    NetworkOccupancySummary summary = NetworkOccupancySummary.From([0, 4, 6, 8], 8);
+    Equal(8, summary.Capacity);
+    Equal(8, summary.Max);
+    Equal(1L, summary.TicksAtOrAbove100);
+    Equal(3L, summary.TicksAtOrAbove50);
+    True(summary.P95 > 7);
+}
+
 static void MatrixEvidenceRoundTrips()
 {
     NetworkBotStageResult stage = Stage();
@@ -65,7 +76,7 @@ static void MatrixEvidenceRoundTrips()
         true, "MATCH", v2, v3, 1, 1, null, null, null);
     var matrix = new NetworkBotMatrixReport(
         NetworkBotAdapterReport.Protocol, DateTimeOffset.UnixEpoch, "owner_movement",
-        [4], false, [joined], true);
+        [4], false, [joined], [new(4, 8, 2, 3)], true);
     string path = Path.Combine(Path.GetTempPath(), $"ultrasim-network-comparison-{Guid.NewGuid():N}.json");
     try
     {
@@ -73,6 +84,8 @@ static void MatrixEvidenceRoundTrips()
         NetworkBotMatrixReport restored = NetworkBotComparisonIo.Read<NetworkBotMatrixReport>(path);
         Equal(matrix.ProtocolVersion, restored.ProtocolVersion);
         Equal(1, restored.Runs.Count);
+        Equal(1, restored.MarginalTickCosts.Count);
+        Equal(3d, restored.MarginalTickCosts[0].V3MicrosecondsPerAddedClient);
         True(restored.AllCanonicalStatesMatch);
         Equal("owner_movement", restored.Runs[0].V3.Result.Scenario.Id);
     }
@@ -111,6 +124,11 @@ static NetworkBotStageResult Stage()
         ClientPumpMilliseconds = default,
         PingMilliseconds = default,
         InputAcknowledgementMilliseconds = default,
+        InputAcknowledgementTicks = default,
+        PerClientInputAckP95Milliseconds = default,
+        PerClientPingP95Milliseconds = default,
+        HandshakeMilliseconds = default,
+        MetricCoverage = default,
         TickDeadlineMisses = 0,
         LongestDeadlineMissStreak = 0,
         LogicalInputs = 1,
@@ -120,6 +138,7 @@ static NetworkBotStageResult Stage()
         WireDatagramsSent = 0,
         WireBytesSent = 0,
         RetransmittedPackets = 0,
+        RetransmittedWireBytes = 0,
         ReservedNetworkBytes = 0,
         ConfiguredSocketBufferBytes = 0,
         ManagedHeapBytes = 0,
@@ -129,15 +148,31 @@ static NetworkBotStageResult Stage()
         Gen0Collections = 0,
         Gen1Collections = 0,
         Gen2Collections = 0,
+        ProcessCpuMilliseconds = 0,
+        ProcessCpuCoreUtilization = 0,
         MaximumReliableQueued = 0,
         MaximumUnreliableQueued = 0,
         MaximumReceivedQueued = 0,
         MaximumInFlightPackets = 0,
+        ReliableOccupancy = default,
+        IndependentUnreliableOccupancy = default,
+        ReceivedOccupancy = default,
+        InFlightOccupancy = default,
         CapacityPressureTicks50 = 0,
         CapacityPressureTicks75 = 0,
         CapacityPressureTicks90 = 0,
         CapacityPressureTicks100 = 0,
         CapacityDrops = 0,
+        HandshakeAttempts = 0,
+        HandshakeSuccesses = 0,
+        HandshakeAllocatedBytes = 0,
+        HandshakeWireDatagrams = 0,
+        HandshakeWireBytes = 0,
+        SocketSendCalls = 0,
+        SocketReceivePollCalls = 0,
+        SocketReceiveCalls = 0,
+        SocketWouldBlockEvents = 0,
+        MaximumSentDatagramBytes = 0,
         CanonicalOwnerStateHash = NetworkBotCanonicalState.ComputeHash(rows),
         CanonicalOwnerStates = rows,
         CanonicalValidation = "test",

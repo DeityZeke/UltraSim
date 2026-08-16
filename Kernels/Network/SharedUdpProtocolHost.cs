@@ -73,6 +73,12 @@ public readonly record struct SharedUdpListenerSnapshot(
     ulong UnknownPathDatagrams,
     ulong CapacityDrops,
     ulong RejectedDatagrams,
+    ulong SendCalls,
+    ulong ReceivePollCalls,
+    ulong ReceiveCalls,
+    ulong WouldBlockEvents,
+    int MaximumSentDatagramBytes,
+    int MaximumReceivedDatagramBytes,
     int RegisteredPaths,
     int MaximumQueuedDatagrams,
     bool IsOpen,
@@ -564,6 +570,12 @@ internal sealed class SharedUdpServerListener : IDisposable
     private ulong _unknownPaths;
     private ulong _capacityDrops;
     private ulong _rejected;
+    private ulong _sendCalls;
+    private ulong _receivePollCalls;
+    private ulong _receiveCalls;
+    private ulong _wouldBlockEvents;
+    private int _maximumSentDatagramBytes;
+    private int _maximumReceivedDatagramBytes;
     private SocketError _lastError;
     private bool _disposed;
 
@@ -631,14 +643,18 @@ internal sealed class SharedUdpServerListener : IDisposable
     {
         EnsureOperational();
         int budget = _maximumInboundDatagramsPerPump;
-        while (budget-- > 0 && _socket.Poll(0, SelectMode.SelectRead))
+        while (budget-- > 0)
         {
+            _receivePollCalls = SaturatingIncrement(_receivePollCalls);
+            if (!_socket.Poll(0, SelectMode.SelectRead)) break;
             try
             {
+                _receiveCalls = SaturatingIncrement(_receiveCalls);
                 int length = _socket.ReceiveFrom(_receiveScratch, SocketFlags.None, _receivedAddress);
                 if (length <= 0) break;
                 _received = SaturatingIncrement(_received);
                 _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)length));
+                _maximumReceivedDatagramBytes = Math.Max(_maximumReceivedDatagramBytes, length);
                 if (_receivedAddress.Family != AddressFamily.InterNetwork ||
                     !TryResolve(Pack(_receivedAddress), out int slot) ||
                     _endpoints[slot] is not SharedUdpServerEndpoint endpoint)
@@ -654,6 +670,7 @@ internal sealed class SharedUdpServerListener : IDisposable
             catch (SocketException exception) when (IsTransient(exception.SocketErrorCode))
             {
                 _lastError = exception.SocketErrorCode;
+                _wouldBlockEvents = SaturatingIncrement(_wouldBlockEvents);
                 break;
             }
             catch (SocketException exception)
@@ -678,6 +695,7 @@ internal sealed class SharedUdpServerListener : IDisposable
         }
         try
         {
+            _sendCalls = SaturatingIncrement(_sendCalls);
             if (_socket.SendTo(datagram, SocketFlags.None, endpoint.RemoteAddress) != datagram.Length)
             {
                 _capacityDrops = SaturatingIncrement(_capacityDrops);
@@ -685,12 +703,14 @@ internal sealed class SharedUdpServerListener : IDisposable
             }
             _sent = SaturatingIncrement(_sent);
             _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
+            _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
             return DatagramSendStatus.Accepted;
         }
         catch (SocketException exception) when (IsTransient(exception.SocketErrorCode))
         {
             _lastError = exception.SocketErrorCode;
             _capacityDrops = SaturatingIncrement(_capacityDrops);
+            _wouldBlockEvents = SaturatingIncrement(_wouldBlockEvents);
             return DatagramSendStatus.CapacityExceeded;
         }
         catch (SocketException exception)
@@ -730,7 +750,9 @@ internal sealed class SharedUdpServerListener : IDisposable
     {
         EnsureOperational();
         return new(_sent, _received, _sentBytes, _receivedBytes,
-            _unknownPaths, _capacityDrops, _rejected, _registered,
+            _unknownPaths, _capacityDrops, _rejected, _sendCalls, _receivePollCalls,
+            _receiveCalls, _wouldBlockEvents, _maximumSentDatagramBytes,
+            _maximumReceivedDatagramBytes, _registered,
             _maximumQueued, true, _lastError, ReservedBytes);
     }
 
@@ -843,6 +865,8 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     private ulong _receivedBytes;
     private ulong _capacityDrops;
     private ulong _rejected;
+    private int _maximumSentDatagramBytes;
+    private int _maximumReceivedDatagramBytes;
     private bool _disposed;
 
     internal SharedUdpServerEndpoint(
@@ -907,6 +931,7 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         {
             _sent = SaturatingIncrement(_sent);
             _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
+            _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
         }
         else if (status == DatagramSendStatus.CapacityExceeded)
             _capacityDrops = SaturatingIncrement(_capacityDrops);
@@ -930,6 +955,7 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
         _lengths[_head] = 0;
         _head = (_head + 1) % _lengths.Length;
         _count--;
+        _maximumReceivedDatagramBytes = Math.Max(_maximumReceivedDatagramBytes, length);
         return true;
     }
 
@@ -937,7 +963,9 @@ internal sealed class SharedUdpServerEndpoint : INetworkDatagramEndpoint, IDispo
     {
         EnsureOwnerThread();
         return new(_sent, _received, _sentBytes, _receivedBytes,
-            _capacityDrops, _rejected, !_disposed, SocketError.Success);
+            _capacityDrops, _rejected, 0, 0, 0, 0,
+            _maximumSentDatagramBytes, _maximumReceivedDatagramBytes,
+            !_disposed, SocketError.Success);
     }
 
     public void Dispose()

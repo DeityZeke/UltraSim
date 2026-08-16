@@ -60,6 +60,11 @@ internal static class N010SharedUdpListenerTests
             "The listener must retain the aggregate configured socket capacity that the two server sockets replaced.");
         True(snapshot.Listener.Sent > 0 && snapshot.Listener.Received > 0);
         True(snapshot.Listener.SentBytes > 0 && snapshot.Listener.ReceivedBytes > 0);
+        True(snapshot.Listener.SendCalls > 0);
+        True(snapshot.Listener.ReceivePollCalls >= snapshot.Listener.ReceiveCalls);
+        True(snapshot.Listener.ReceiveCalls > 0);
+        True(snapshot.Listener.MaximumSentDatagramBytes > 0);
+        True(snapshot.Listener.MaximumReceivedDatagramBytes > 0);
     }
 
     private static void SharedUdpListenerCapacityAndUnknownPathsAreBounded()

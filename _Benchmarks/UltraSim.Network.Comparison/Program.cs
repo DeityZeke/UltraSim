@@ -66,6 +66,7 @@ var matrix = new NetworkBotMatrixReport(
     options.ClientStages,
     options.BothOrders,
     runs,
+    CalculateScaleDeltas(runs),
     runs.All(run => run.CanonicalStateMatches));
 string json = Path.Combine(options.OutputDirectory, "network-v2-v3-bot-comparison-matrix.json");
 string markdown = Path.Combine(options.OutputDirectory, "network-v2-v3-bot-comparison-matrix.md");
@@ -182,6 +183,32 @@ static void ValidateCatalog(NetworkBotScenario left, NetworkBotScenario right)
 static double? Ratio(double numerator, double denominator) =>
     numerator > 0 && denominator > 0 ? numerator / denominator : null;
 
+static IReadOnlyList<NetworkBotScaleDelta> CalculateScaleDeltas(
+    IReadOnlyList<NetworkBotJoinedReport> runs)
+{
+    var stages = runs
+        .GroupBy(run => run.V2.Result.Scenario.Clients)
+        .OrderBy(group => group.Key)
+        .Select(group => new
+        {
+            Clients = group.Key,
+            V2 = group.Average(run => run.V2.Result.TickMilliseconds.P95),
+            V3 = group.Average(run => run.V3.Result.TickMilliseconds.P95),
+        })
+        .ToArray();
+    var deltas = new NetworkBotScaleDelta[Math.Max(0, stages.Length - 1)];
+    for (int index = 1; index < stages.Length; index++)
+    {
+        int added = stages[index].Clients - stages[index - 1].Clients;
+        deltas[index - 1] = new(
+            stages[index - 1].Clients,
+            stages[index].Clients,
+            (stages[index].V2 - stages[index - 1].V2) * 1000d / added,
+            (stages[index].V3 - stages[index - 1].V3) * 1000d / added);
+    }
+    return deltas;
+}
+
 static string BuildRunMarkdown(NetworkBotJoinedReport report)
 {
     NetworkBotStageResult v2 = report.V2.Result;
@@ -200,18 +227,30 @@ static string BuildRunMarkdown(NetworkBotJoinedReport report)
     Row("tick p95 ms", v2.TickMilliseconds.P95, v3.TickMilliseconds.P95, report.V3ToV2TickP95Ratio);
     Row("ping p95 ms", v2.PingMilliseconds.P95, v3.PingMilliseconds.P95, report.V3ToV2PingP95Ratio);
     Row("input ACK p95 ms", v2.InputAcknowledgementMilliseconds.P95, v3.InputAcknowledgementMilliseconds.P95, null);
+    Row("input ACK p95 ticks", v2.InputAcknowledgementTicks.P95, v3.InputAcknowledgementTicks.P95, null);
+    Row("worst-client input ACK p95 ms", v2.PerClientInputAckP95Milliseconds.Max,
+        v3.PerClientInputAckP95Milliseconds.Max, null);
     Row("deadline misses", v2.TickDeadlineMisses, v3.TickDeadlineMisses, null);
     Row("allocated bytes", v2.AllocatedBytes, v3.AllocatedBytes, report.V3ToV2AllocatedBytesRatio);
     Row("reserved network bytes", v2.ReservedNetworkBytes, v3.ReservedNetworkBytes, report.V3ToV2ReservedBytesRatio);
     Row("configured socket bytes", v2.ConfiguredSocketBufferBytes, v3.ConfiguredSocketBufferBytes, null);
     Row("wire datagrams", v2.WireDatagramsSent, v3.WireDatagramsSent, null);
     Row("wire bytes", v2.WireBytesSent, v3.WireBytesSent, report.V3ToV2WireBytesRatio);
+    Row("retransmitted wire bytes", v2.RetransmittedWireBytes, v3.RetransmittedWireBytes, null);
+    Row("socket send calls", v2.SocketSendCalls, v3.SocketSendCalls, null);
+    Row("handshake p95 ms", v2.HandshakeMilliseconds.P95, v3.HandshakeMilliseconds.P95, null);
+    Row("max reliable occupancy %", v2.ReliableOccupancy.MaximumRatio * 100,
+        v3.ReliableOccupancy.MaximumRatio * 100, null);
+    Row("max receive occupancy %", v2.ReceivedOccupancy.MaximumRatio * 100,
+        v3.ReceivedOccupancy.MaximumRatio * 100, null);
+    Row("process CPU core-equivalents", v2.ProcessCpuCoreUtilization,
+        v3.ProcessCpuCoreUtilization, null);
     Row("normalized logical application bytes",
         Diagnostic(v2, "normalized_logical_application_bytes"),
         Diagnostic(v3, "normalized_logical_application_bytes"), null);
     Row("wire / normalized logical byte", 0,
         Diagnostic(v3, "wire_bytes_per_normalized_logical_byte"), null);
-    text.AppendLine().AppendLine("Zero values can mean the historical V2 harness did not expose that measurement; inspect the JSON evidence profiles and diagnostics before interpreting a row.");
+    text.AppendLine().AppendLine("Inspect each JSON `metric_coverage` object before interpreting zero: false means the adapter/workload did not measure that family. Frozen V2's complete numeric stage output is retained under `diagnostics.v2.*`.");
     return text.ToString();
 
     void Row(string name, double left, double right, double? ratio) => text.Append("| ")
@@ -245,6 +284,17 @@ static string BuildMatrixMarkdown(NetworkBotMatrixReport report)
             .Append(" | ").Append(v2.PingMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
             .Append(" | ").Append(v3.PingMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
             .Append(" | ").Append(run.CanonicalStateMatches ? "MATCH" : "MISMATCH").AppendLine(" |");
+    }
+    if (report.MarginalTickCosts.Count != 0)
+    {
+        text.AppendLine().AppendLine("## Marginal p95 tick cost").AppendLine();
+        text.AppendLine("| Population step | V2 us/added client | V3 us/added client |");
+        text.AppendLine("| --- | ---: | ---: |");
+        foreach (NetworkBotScaleDelta delta in report.MarginalTickCosts)
+            text.Append("| ").Append(delta.FromClients).Append(" → ").Append(delta.ToClients)
+                .Append(" | ").Append(delta.V2MicrosecondsPerAddedClient.ToString("0.###", CultureInfo.InvariantCulture))
+                .Append(" | ").Append(delta.V3MicrosecondsPerAddedClient.ToString("0.###", CultureInfo.InvariantCulture))
+                .AppendLine(" |");
     }
     string v3Topologies = string.Join("; ", report.Runs
         .Select(run => run.V3.Result.EvidenceProfile.ExecutionTopology)

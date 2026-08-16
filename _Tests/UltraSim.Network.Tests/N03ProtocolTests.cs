@@ -106,6 +106,10 @@ internal static class N03ProtocolTests
         Drive(loopback, () => loopback.Client.GetSnapshot().ReliableQueued == 0, 20_000);
         NetworkProtocolSnapshot client = loopback.Client.GetSnapshot();
         True(client.ReliableRetransmissions > 0);
+        True(client.ReliableRetransmittedWireBytes > 0);
+        True(client.ReliableFragmentsSent > client.ReliableAcknowledgements);
+        True(client.DataPacketsSent > 0);
+        True(client.EncryptedPlaintextBytes > 0);
         True(client.ReliableAcknowledgements >= 3);
     }
 

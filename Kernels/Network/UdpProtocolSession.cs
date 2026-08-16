@@ -66,6 +66,12 @@ public readonly record struct UdpDatagramEndpointSnapshot(
     ulong ReceivedBytes,
     ulong CapacityDrops,
     ulong RejectedDatagrams,
+    ulong SendCalls,
+    ulong ReceivePollCalls,
+    ulong ReceiveCalls,
+    ulong WouldBlockEvents,
+    int MaximumSentDatagramBytes,
+    int MaximumReceivedDatagramBytes,
     bool IsOpen,
     SocketError LastSocketError);
 
@@ -408,6 +414,12 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
     private ulong _receivedBytes;
     private ulong _capacityDrops;
     private ulong _rejected;
+    private ulong _sendCalls;
+    private ulong _receivePollCalls;
+    private ulong _receiveCalls;
+    private ulong _wouldBlockEvents;
+    private int _maximumSentDatagramBytes;
+    private int _maximumReceivedDatagramBytes;
     private SocketError _lastError;
 
     private UdpDatagramEndpoint(Socket socket, int maximumDatagramBytes)
@@ -483,6 +495,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
         if (SuppressSendsForTesting) return DatagramSendStatus.DroppedByImpairment;
         try
         {
+            _sendCalls++;
             if (_socket.Send(datagram, SocketFlags.None) != datagram.Length)
             {
                 _capacityDrops++;
@@ -490,12 +503,14 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
             }
             _sent++;
             _sentBytes = SaturatingAdd(_sentBytes, checked((ulong)datagram.Length));
+            _maximumSentDatagramBytes = Math.Max(_maximumSentDatagramBytes, datagram.Length);
             return DatagramSendStatus.Accepted;
         }
         catch (SocketException exception) when (IsTransient(exception.SocketErrorCode))
         {
             _lastError = exception.SocketErrorCode;
             _capacityDrops++;
+            _wouldBlockEvents++;
             return DatagramSendStatus.CapacityExceeded;
         }
         catch (SocketException exception)
@@ -515,19 +530,23 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
             throw new ArgumentException("The UDP receive destination is below the admitted datagram size.", nameof(destination));
         // Avoid using WouldBlock exceptions as the normal empty-queue branch;
         // Linux SocketException construction otherwise allocates on every pump.
+        _receivePollCalls++;
         if (!_socket.Poll(0, SelectMode.SelectRead)) return false;
         try
         {
+            _receiveCalls++;
             length = _socket.Receive(destination, SocketFlags.None);
             if (length == 0) return false;
             _received++;
             _receivedBytes = SaturatingAdd(_receivedBytes, checked((ulong)length));
+            _maximumReceivedDatagramBytes = Math.Max(_maximumReceivedDatagramBytes, length);
             return true;
         }
         catch (SocketException exception) when (exception.SocketErrorCode is
             SocketError.WouldBlock or SocketError.IOPending or SocketError.NoBufferSpaceAvailable)
         {
             _lastError = exception.SocketErrorCode;
+            _wouldBlockEvents++;
             return false;
         }
         catch (SocketException exception)
@@ -542,7 +561,9 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
     {
         EnsureOwnerThread();
         return new(_sent, _received, _sentBytes, _receivedBytes,
-            _capacityDrops, _rejected, !_disposed, _lastError);
+            _capacityDrops, _rejected, _sendCalls, _receivePollCalls, _receiveCalls,
+            _wouldBlockEvents, _maximumSentDatagramBytes, _maximumReceivedDatagramBytes,
+            !_disposed, _lastError);
     }
 
     public void Dispose()

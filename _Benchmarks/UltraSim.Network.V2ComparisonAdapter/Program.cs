@@ -81,6 +81,20 @@ try
         logicalInputs * 10 + ownerMessagesQueued * 30 + pingSamples * 4);
     IReadOnlyList<NetworkCanonicalOwnerState> canonicalStates =
         ParseCanonicalStates(stage.GetProperty("canonical_owner_states"));
+    var diagnostics = new Dictionary<string, double>(StringComparer.Ordinal);
+    foreach (JsonProperty property in stage.EnumerateObject())
+        if (property.Value.ValueKind == JsonValueKind.Number &&
+            property.Value.TryGetDouble(out double numeric))
+            diagnostics["v2." + property.Name] = numeric;
+    diagnostics["pending_max_per_client"] = stage.GetProperty("pending_max_per_client").GetDouble();
+    diagnostics["replication_logical_datagrams"] = stage.GetProperty("replication_datagrams").GetDouble();
+    diagnostics["replication_wire_datagrams"] = stage.GetProperty("replication_wire_datagrams").GetDouble();
+    diagnostics["owner_correction_position_error_max"] =
+        stage.GetProperty("owner_correction_max_position_error").GetDouble();
+    diagnostics["owner_state_messages_queued"] = ownerMessagesQueued;
+    diagnostics["configured_socket_bytes_per_client_including_shared_server"] =
+        ((long)(scenario.Clients + 1) * 8 * 1024 * 1024) / (double)scenario.Clients;
+    diagnostics["normalized_logical_application_bytes"] = normalizedLogicalBytes;
     var result = new NetworkBotStageResult
     {
         Generation = "V2",
@@ -98,6 +112,27 @@ try
         ClientPumpMilliseconds = Summary(stage, "client_pump_avg_ms", "client_pump_p95_ms"),
         PingMilliseconds = Summary(stage, "ping_avg_ms", "ping_p95_ms", "ping_p99_ms", "ping_max_ms"),
         InputAcknowledgementMilliseconds = default,
+        InputAcknowledgementTicks = default,
+        PerClientInputAckP95Milliseconds = default,
+        PerClientPingP95Milliseconds = PerClientPingSummary(stage.GetProperty("per_client_ping")),
+        HandshakeMilliseconds = default,
+        MetricCoverage = new(
+            OwnerInputFreshness: false,
+            WorldStateFreshnessByTier: false,
+            ApplicationEventLatency: false,
+            PerClientFairness: true,
+            TickDeadlineCompliance: false,
+            BoundedOccupancy: false,
+            WireBytes: false,
+            SocketSyscalls: false,
+            SecurityBytes: false,
+            ProcessMemory: true,
+            ManagedAllocation: true,
+            ProcessCpu: false,
+            Handshake: false,
+            InterestAmplification: false,
+            BaselineRecovery: false,
+            DeepPhaseTiming: true),
         TickDeadlineMisses = 0,
         LongestDeadlineMissStreak = 0,
         LogicalInputs = logicalInputs,
@@ -107,6 +142,7 @@ try
         WireDatagramsSent = 0,
         WireBytesSent = 0,
         RetransmittedPackets = 0,
+        RetransmittedWireBytes = 0,
         ReservedNetworkBytes = 0,
         ConfiguredSocketBufferBytes = checked((long)(scenario.Clients + 1) * 8 * 1024 * 1024),
         ManagedHeapBytes = 0,
@@ -116,29 +152,35 @@ try
         Gen0Collections = stage.GetProperty("gc_gen0_collections").GetInt32(),
         Gen1Collections = stage.GetProperty("gc_gen1_collections").GetInt32(),
         Gen2Collections = stage.GetProperty("gc_gen2_collections").GetInt32(),
+        ProcessCpuMilliseconds = 0,
+        ProcessCpuCoreUtilization = 0,
         MaximumReliableQueued = 0,
         MaximumUnreliableQueued = 0,
         MaximumReceivedQueued = 0,
         MaximumInFlightPackets = 0,
+        ReliableOccupancy = default,
+        IndependentUnreliableOccupancy = default,
+        ReceivedOccupancy = default,
+        InFlightOccupancy = default,
         CapacityPressureTicks50 = 0,
         CapacityPressureTicks75 = 0,
         CapacityPressureTicks90 = 0,
         CapacityPressureTicks100 = 0,
         CapacityDrops = 0,
+        HandshakeAttempts = stage.GetProperty("connect_attempts").GetInt64(),
+        HandshakeSuccesses = stage.GetProperty("connect_success").GetInt64(),
+        HandshakeAllocatedBytes = 0,
+        HandshakeWireDatagrams = 0,
+        HandshakeWireBytes = 0,
+        SocketSendCalls = 0,
+        SocketReceivePollCalls = 0,
+        SocketReceiveCalls = 0,
+        SocketWouldBlockEvents = 0,
+        MaximumSentDatagramBytes = 0,
         CanonicalOwnerStateHash = NetworkBotCanonicalState.ComputeHash(canonicalStates),
         CanonicalOwnerStates = canonicalStates,
         CanonicalValidation = "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input.",
-        Diagnostics = new Dictionary<string, double>
-        {
-            ["pending_max_per_client"] = stage.GetProperty("pending_max_per_client").GetDouble(),
-            ["replication_logical_datagrams"] = stage.GetProperty("replication_datagrams").GetDouble(),
-            ["replication_wire_datagrams"] = stage.GetProperty("replication_wire_datagrams").GetDouble(),
-            ["owner_correction_position_error_max"] = stage.GetProperty("owner_correction_max_position_error").GetDouble(),
-            ["owner_state_messages_queued"] = ownerMessagesQueued,
-            ["configured_socket_bytes_per_client_including_shared_server"] =
-                ((long)(scenario.Clients + 1) * 8 * 1024 * 1024) / (double)scenario.Clients,
-            ["normalized_logical_application_bytes"] = normalizedLogicalBytes,
-        },
+        Diagnostics = diagnostics,
     };
     NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create("V2", result));
     Console.Write(output);
@@ -169,6 +211,15 @@ static NetworkMetricSummary Summary(
     return new(average, 0, percentile95,
         p99 is null ? 0 : stage.GetProperty(p99).GetDouble(),
         max is null ? percentile95 : stage.GetProperty(max).GetDouble());
+}
+
+static NetworkMetricSummary PerClientPingSummary(JsonElement rows)
+{
+    var values = new List<double>(rows.GetArrayLength());
+    foreach (JsonElement row in rows.EnumerateArray())
+        if (row.TryGetProperty("sample_count", out JsonElement count) && count.GetInt32() > 0)
+            values.Add(row.GetProperty("ping_p95_ms").GetDouble());
+    return NetworkMetricSummary.From(values);
 }
 
 static IReadOnlyList<NetworkCanonicalOwnerState> ParseCanonicalStates(JsonElement rows)

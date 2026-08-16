@@ -1544,18 +1544,27 @@ sequence, and velocity are required before any relative row is admitted.
 Arrival-relative position remains a diagnostic rather than a false equality
 claim.
 
-The first instrument reports tick/server/client time, ping and V3 input-to-owner
-acknowledgement latency, deadline misses, allocation/GC, process memory,
-configured socket buffers, protocol reservation, queue/in-flight high water,
-capacity-pressure ticks, retransmission/drop counts, actual V3 UDP bytes, and a
-normalized logical-message-byte count. The latter measures semantic messages
-admitted by the sender; applied counts remain separate so coalescing stays
-visible.
-Unavailable frozen-V2 values remain explicitly zero/unavailable rather than
-being synthesized. V3 also reports the current default per-connection protocol
+The comparison-v2 instrument reports tick/server/client time, ping and V3
+input-to-owner acknowledgement age in both milliseconds and simulation ticks,
+per-client freshness/fairness, deadline misses/streak/headroom, allocation/GC,
+process memory and combined-process CPU, configured socket buffers, protocol
+reservation, per-surface queue/in-flight occupancy distributions and pressure,
+exact retransmitted bytes, actual V3 UDP bytes/syscalls/MTU use, handshake cost,
+secure packet/byte counters, marginal p95 cost per added client, and a normalized
+logical-message-byte count. The latter measures semantic messages admitted by
+the sender; applied counts remain separate so coalescing stays visible.
+Unavailable metric families are explicitly flagged rather than inferred from a
+zero. The V2 adapter also preserves every top-level numeric frozen-harness stage
+diagnostic under `v2.*`. V3 reports the current default per-connection protocol
 reservation estimate beside the deliberately small owner-workload benchmark
 profile. That evidence—not the desire for a flattering scale graph—decides the
 first production capacity specialization.
+
+Instrumentation remains layered. Cheap counts, bytes, occupancy, freshness,
+deadline, and amplification counters belong in normal evidence. Overall phase,
+semantic latency, and handshake timing are normal benchmark measurements. Deep
+crypto/codec/assembly, per-lane CPU, GC-pause, and future worker/shard timing are
+opt-in investigations so measurement does not become the workload.
 
 `spread_mix` and `dense_mix` are catalog names only until both adapters perform
 equivalent observer WorldState/Event semantics and their canonical oracles are
@@ -1563,6 +1572,14 @@ implemented. The comparison executable rejects them today rather than silently
 running owner-only work under a broader label. Event-ledger examined/skipped,
 minimum-cursor scan entries, and retained high water are now always-available
 N0.10 counters for deciding whether participant-local Event indexing is earned.
+Those profiles must add WorldState age by Immediate/Near/Far tier, application
+Event publish-to-apply latency, worst-recipient freshness, and canonical-change
+to semantic-construction/recipient-copy/bundle/datagram amplification. Likewise,
+`traversal` must expose edge/relation/retier work, `generation_resync` must expose
+baseline and all-clients-current latency, `slow_client` must expose debt and
+nonviability escalation, and `join_storm` must expose join throughput and
+per-established-session cost. Owner-only evidence must not report synthetic
+zeros for those semantics.
 
 The first accepted provisional owner matrix matched canonical state in all eight
 scale/order runs. V2 tick p95 ranged from approximately 0.26 ms at 32 bots to

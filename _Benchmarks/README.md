@@ -98,6 +98,11 @@ Godot extreme-stress setup and exact controls remain in
 contract details remain in [ECS_V2_V3_COMPARISON.md](ECS_V2_V3_COMPARISON.md).
 The provisional N0.10 network instrument is documented in
 [NETWORK_V2_V3_BOT_COMPARISON.md](NETWORK_V2_V3_BOT_COMPARISON.md).
+Its v2 evidence schema distinguishes unavailable metric families from measured
+zero, preserves all numeric frozen-V2 stage diagnostics, and reports V3
+occupancy, freshness/fairness, handshake, wire/security, syscall, CPU, and
+marginal-scale context. Observer/AoI/Event/recovery metrics remain tied to their
+future semantic workloads rather than being fabricated by the owner-only run.
 
 ## Comparability
 

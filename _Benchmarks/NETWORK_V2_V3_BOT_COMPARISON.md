@@ -1,6 +1,6 @@
 # Network V2/V3 bot comparison
 
-Protocol: `ultrasim-network-v2-v3-bot-comparison-v1`.
+Protocol: `ultrasim-network-v2-v3-bot-comparison-v2`.
 
 This is the measurement entrance to N0.10. It reuses the useful experimental
 shape of the frozen V2 bot harness—stages, deterministic phased input, fixed
@@ -65,16 +65,29 @@ The stable joined schema includes:
 - tick, server-pump, client-pump, ping, and input-ack distributions where exposed;
 - deadline misses and longest miss streak;
 - logical input/owner/WorldState/Event work counts;
-- actual V3 UDP datagrams and bytes, retransmission and capacity drops;
+- actual V3 UDP datagrams and bytes, exact reliable retransmitted bytes, and
+  capacity drops;
 - normalized logical application bytes and V3 wire/logical amplification;
 - protocol reservation and configured socket-buffer bytes;
 - managed allocation, collection counts, and process memory;
-- reliable/unreliable/receive/in-flight high water and pressure ticks;
+- per-surface reliable/independent-unreliable/receive/in-flight occupancy
+  capacity, mean, p95, maximum, and 50/75/90/100% pressure ticks;
+- owner input-to-authority-ack age in milliseconds and simulation ticks, plus
+  per-client ping/input-ack fairness summaries;
+- stage process CPU/core utilization for the same-process V3 topology;
+- handshake latency, allocation, datagrams, bytes, attempts, and successes;
+- UDP send/receive/poll calls, WouldBlock observations, mean/max MTU use;
+- secure data/ACK/keepalive packet counts, encrypted/decrypted plaintext, and
+  authentication/replay diagnostics;
+- population-to-population marginal p95 tick cost in microseconds per added bot;
 - exact normalized canonical rows and hash;
 - adapter-specific diagnostics.
 
-Frozen V2 does not expose every V3 counter. Missing measurements remain zero and
-are called out in Markdown; no ratio is produced from a zero denominator.
+Every result includes explicit metric-family coverage flags. A false flag means
+**not measured by that workload/adapter**, never a measured zero. Frozen V2 does
+not expose every V3 counter, but the adapter now preserves every top-level
+numeric V2 stage diagnostic under `diagnostics.v2.*`; no ratio is produced from
+an unavailable/zero denominator.
 
 The owner-only workload's normalized logical-byte diagnostic counts semantic
 messages admitted by the sender, not either protocol's framing: 10 bytes per
@@ -94,6 +107,43 @@ Application Event scale diagnostics live in production snapshots rather than a
 deep timing mode: records examined/skipped, registered consumers, retained high
 water, and minimum-cursor scan entries. The future mixed workload will use these
 to decide whether the simple global Event ledger needs participant-local indexing.
+
+### Metric levels and remaining gates
+
+The harness deliberately uses three evidence levels:
+
+```text
+always-on counters
+    bytes, packet kinds, occupancy/high-water, pressure, drops,
+    retransmission bytes, syscall counts, reservation, deadline misses
+
+normal timings
+    tick/server/client wall time, ping, owner input ACK,
+    handshake, combined-process CPU
+
+deep diagnostic mode (not enabled yet)
+    crypto/codec/assembly phase CPU, per-lane timing,
+    GC pause events, worker/shard busy and handoff time
+```
+
+`owner_movement` can honestly measure owner-input freshness and per-client
+fairness. It cannot measure WorldState age by Immediate/Near/Far tier,
+application-Event publish-to-apply latency, interest amplification, baseline
+recovery, slow-recipient debt, or traversal edge/relation work. Those are frozen
+as required metrics for the workloads that own the semantics:
+
+| Future profile | Required additional evidence |
+| --- | --- |
+| `spread_mix` / `dense_mix` | WorldState age by tier; canonical changes → semantic constructions → recipient copies → bundles → datagrams/bytes; worst-recipient freshness. |
+| `traversal` | region edges added/removed, relations examined/changed, retier work, interest CPU. |
+| `generation_resync` | baseline capture, records/segments/bytes/retries, first new-epoch owner/input latency, all-clients-current duration. |
+| `slow_client` | debt age, retained bytes, retries, occupancy, nonviable/escalation counts, pathological-recipient CPU spillover. |
+| `join_storm` | joins/second, handshake CPU/allocation/bytes, established reservation and physical memory per join. |
+
+P95 packet-fill distribution, GC pause duration, LOH/pinned pressure, and
+server-only CPU require targeted instrumentation rather than inference from the
+current combined process. They remain explicit N0.10 follow-ups. Worker/shard
+metrics remain inapplicable until a measured checkpoint actually adds workers.
 
 ## Running
 
