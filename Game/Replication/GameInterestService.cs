@@ -19,6 +19,7 @@ namespace UltraSim.Game.Replication;
 public sealed class GameInterestService
 {
     private const int BundleHeaderEstimate = sizeof(ulong) * 3 + sizeof(byte);
+    public const int DeferredDelayHistogramLength = 16;
 
     private readonly GameInterestLimits _limits;
     private readonly GameInterestProfile _profile;
@@ -136,6 +137,19 @@ public sealed class GameInterestService
     private ulong _attributionPendingSkippedAlreadySelected;
     private ulong _attributionPendingSkippedCadence;
     private ulong _attributionPendingSkippedAwaitingRetry;
+    private ulong _attributionPendingSelectableTicks;
+    private ulong _attributionPendingAlreadySelectedTicks;
+    private ulong _attributionPendingCadenceDeferredTicks;
+    private ulong _attributionPendingRetryDeferredTicks;
+    private ulong _attributionPendingTraversalTicks;
+    private ulong _attributionTierSelectionTicks;
+    private ulong _attributionRecordMaterializationTicks;
+    private ulong _attributionBundleCommitTicks;
+    private ulong _attributionNoDataAllDeferredBuilds;
+    private ulong _attributionCadenceDeferredDelayTotalMilliseconds;
+    private long _attributionCadenceDeferredDelayMaximumMilliseconds;
+    private ulong _attributionRetryDeferredDelayTotalMilliseconds;
+    private long _attributionRetryDeferredDelayMaximumMilliseconds;
     private ulong _attributionBundleStopsNoEligibleDebt;
     private ulong _attributionBundleStopsRecordLimit;
     private ulong _attributionBundleStopsByteLimit;
@@ -147,6 +161,8 @@ public sealed class GameInterestService
     private ulong _attributionAcknowledgementRecordsExamined;
     private ulong _attributionAcknowledgementTicks;
     private readonly ulong[] _attributionBundleRecordHistogram;
+    private readonly ulong[] _attributionCadenceDeferredDelayHistogram;
+    private readonly ulong[] _attributionRetryDeferredDelayHistogram;
 
     public GameInterestService(
         StateEpoch stateEpoch,
@@ -196,6 +212,8 @@ public sealed class GameInterestService
         _relationMapCapacity = _relationMap.EnsureCapacity(limits.MaximumRecipientEntityRelations);
         _bundleMapCapacity = _bundleMap.EnsureCapacity(limits.MaximumOutstandingBundles);
         _attributionBundleRecordHistogram = new ulong[limits.MaximumRecordsPerBundle + 1];
+        _attributionCadenceDeferredDelayHistogram = new ulong[DeferredDelayHistogramLength];
+        _attributionRetryDeferredDelayHistogram = new ulong[DeferredDelayHistogramLength];
     }
 
     public StateEpoch StateEpoch
@@ -873,6 +891,19 @@ public sealed class GameInterestService
         _attributionPendingSkippedAlreadySelected = 0;
         _attributionPendingSkippedCadence = 0;
         _attributionPendingSkippedAwaitingRetry = 0;
+        _attributionPendingSelectableTicks = 0;
+        _attributionPendingAlreadySelectedTicks = 0;
+        _attributionPendingCadenceDeferredTicks = 0;
+        _attributionPendingRetryDeferredTicks = 0;
+        _attributionPendingTraversalTicks = 0;
+        _attributionTierSelectionTicks = 0;
+        _attributionRecordMaterializationTicks = 0;
+        _attributionBundleCommitTicks = 0;
+        _attributionNoDataAllDeferredBuilds = 0;
+        _attributionCadenceDeferredDelayTotalMilliseconds = 0;
+        _attributionCadenceDeferredDelayMaximumMilliseconds = 0;
+        _attributionRetryDeferredDelayTotalMilliseconds = 0;
+        _attributionRetryDeferredDelayMaximumMilliseconds = 0;
         _attributionBundleStopsNoEligibleDebt = 0;
         _attributionBundleStopsRecordLimit = 0;
         _attributionBundleStopsByteLimit = 0;
@@ -884,6 +915,8 @@ public sealed class GameInterestService
         _attributionAcknowledgementRecordsExamined = 0;
         _attributionAcknowledgementTicks = 0;
         Array.Clear(_attributionBundleRecordHistogram);
+        Array.Clear(_attributionCadenceDeferredDelayHistogram);
+        Array.Clear(_attributionRetryDeferredDelayHistogram);
     }
 
     public GameInterestAttributionSnapshot GetAttributionSnapshot()
@@ -934,6 +967,19 @@ public sealed class GameInterestService
             _attributionPendingSkippedAlreadySelected,
             _attributionPendingSkippedCadence,
             _attributionPendingSkippedAwaitingRetry,
+            _attributionPendingSelectableTicks,
+            _attributionPendingAlreadySelectedTicks,
+            _attributionPendingCadenceDeferredTicks,
+            _attributionPendingRetryDeferredTicks,
+            _attributionPendingTraversalTicks,
+            _attributionTierSelectionTicks,
+            _attributionRecordMaterializationTicks,
+            _attributionBundleCommitTicks,
+            _attributionNoDataAllDeferredBuilds,
+            _attributionCadenceDeferredDelayTotalMilliseconds,
+            _attributionCadenceDeferredDelayMaximumMilliseconds,
+            _attributionRetryDeferredDelayTotalMilliseconds,
+            _attributionRetryDeferredDelayMaximumMilliseconds,
             _attributionBundleStopsNoEligibleDebt,
             _attributionBundleStopsRecordLimit,
             _attributionBundleStopsByteLimit,
@@ -953,6 +999,26 @@ public sealed class GameInterestService
             throw new ArgumentException("Destination is smaller than the bundle-record histogram.", nameof(destination));
         _attributionBundleRecordHistogram.CopyTo(destination);
         return _attributionBundleRecordHistogram.Length;
+    }
+
+    /// <summary>
+    /// Copies logarithmic remaining-delay histograms. Buckets 0..14 have inclusive
+    /// upper bounds 1,2,4,...16,384 ms; bucket 15 contains larger delays.
+    /// </summary>
+    public int CopyDeferredDelayHistograms(
+        Span<ulong> cadenceDestination,
+        Span<ulong> retryDestination)
+    {
+        EnsureOwnerThread();
+        if (cadenceDestination.Length < DeferredDelayHistogramLength)
+            throw new ArgumentException("Destination is smaller than the cadence-delay histogram.",
+                nameof(cadenceDestination));
+        if (retryDestination.Length < DeferredDelayHistogramLength)
+            throw new ArgumentException("Destination is smaller than the retry-delay histogram.",
+                nameof(retryDestination));
+        _attributionCadenceDeferredDelayHistogram.CopyTo(cadenceDestination);
+        _attributionRetryDeferredDelayHistogram.CopyTo(retryDestination);
+        return DeferredDelayHistogramLength;
     }
 
     private GameInterestUpdateStatus RebuildRecipientRegionEnvelope(int recipientIndex, long now)
@@ -1384,6 +1450,18 @@ public sealed class GameInterestService
         if (_nextBundleId == ulong.MaxValue)
             return GameWorldStateBuildStatus.SequenceExhausted;
 
+        ulong examinedBefore = 0;
+        ulong deferredBefore = 0;
+        if (_attributionEnabled)
+        {
+            examinedBefore = SaturatingSum(
+                _attributionPendingImmediateExamined,
+                _attributionPendingNearExamined,
+                _attributionPendingFarExamined);
+            deferredBefore = SaturatingSum(
+                _attributionPendingSkippedCadence,
+                _attributionPendingSkippedAwaitingRetry);
+        }
         AdvanceBuildStamp();
         int count = 0;
         int bytes = BundleHeaderEstimate;
@@ -1395,6 +1473,7 @@ public sealed class GameInterestService
             int selected = SelectEligibleRelation(
                 recipientIndex, now, ref immediateCursor, ref nearCursor, ref farCursor);
             if (selected < 0) break;
+            long materializationStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
             ref RelationState relation = ref _relations[selected];
             if (_attributionEnabled)
             {
@@ -1462,6 +1541,9 @@ public sealed class GameInterestService
             bytes += GameWorldStateRecord.MaximumEncodedBytes;
             SaturatingIncrement(ref _semanticCopies);
             SaturatingAdd(ref _semanticBytes, GameWorldStateRecord.MaximumEncodedBytes);
+            if (_attributionEnabled)
+                SaturatingAdd(ref _attributionRecordMaterializationTicks,
+                    checked((ulong)(Stopwatch.GetTimestamp() - materializationStarted)));
         }
         if (_attributionEnabled)
         {
@@ -1470,8 +1552,26 @@ public sealed class GameInterestService
                 SaturatingIncrement(ref _attributionBundleStopsByteLimit);
             else SaturatingIncrement(ref _attributionBundleStopsNoEligibleDebt);
         }
-        if (count == 0) return GameWorldStateBuildStatus.NoData;
+        if (count == 0)
+        {
+            if (_attributionEnabled)
+            {
+                ulong examinedAfter = SaturatingSum(
+                    _attributionPendingImmediateExamined,
+                    _attributionPendingNearExamined,
+                    _attributionPendingFarExamined);
+                ulong deferredAfter = SaturatingSum(
+                    _attributionPendingSkippedCadence,
+                    _attributionPendingSkippedAwaitingRetry);
+                ulong examined = examinedAfter - examinedBefore;
+                ulong deferred = deferredAfter - deferredBefore;
+                if (examined != 0 && examined == deferred)
+                    SaturatingIncrement(ref _attributionNoDataAllDeferredBuilds);
+            }
+            return GameWorldStateBuildStatus.NoData;
+        }
 
+        long commitStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         AllocatePeekedBundle(bundleIndex);
         ulong id = _nextBundleId++;
         _bundles[bundleIndex] = new SentBundleState
@@ -1493,6 +1593,8 @@ public sealed class GameInterestService
             _attributionMaximumBundleRecords = Math.Max(_attributionMaximumBundleRecords, count);
             _attributionMaximumBundleEstimatedBytes = Math.Max(_attributionMaximumBundleEstimatedBytes, bytes);
             SaturatingIncrement(ref _attributionBundleRecordHistogram[count]);
+            SaturatingAdd(ref _attributionBundleCommitTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - commitStarted)));
         }
         bundle = new(recipient.Participant, _stateEpoch, id, count, bytes);
         return GameWorldStateBuildStatus.Success;
@@ -1505,8 +1607,10 @@ public sealed class GameInterestService
         ref int nearCursor,
         ref int farCursor)
     {
+        long started = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         ref RecipientState recipient = ref _recipients[recipientIndex];
         const int scheduleLength = 7;
+        int result = -1;
         for (int offset = 0; offset < scheduleLength; offset++)
         {
             int scheduleIndex = (recipient.NextTierSchedule + offset) % scheduleLength;
@@ -1528,18 +1632,46 @@ public sealed class GameInterestService
             };
             if (selected < 0) continue;
             recipient.NextTierSchedule = checked((byte)((scheduleIndex + 1) % scheduleLength));
-            return selected;
+            if (!_attributionEnabled) return selected;
+            result = selected;
+            break;
         }
-        return -1;
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionTierSelectionTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - started)));
+        return result;
     }
 
     private int SelectEligibleInPendingList(ref int relation, GameInterestTier tier, long now)
     {
+        if (!_attributionEnabled)
+        {
+            while (relation >= 0)
+            {
+                int candidateIndex = relation;
+                ref readonly RelationState candidate = ref _relations[candidateIndex];
+                relation = candidate.PendingNext;
+                if (candidate.BuildStamp != _buildStamp &&
+                    candidate.EligibleAtMilliseconds <= now &&
+                    (!candidate.HasSent || now - candidate.LastSentMilliseconds >=
+                        _profile.ApplicationAckRetryMilliseconds))
+                    return candidateIndex;
+            }
+            return -1;
+        }
+
+        long traversalStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         while (relation >= 0)
         {
+            long candidateStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
             int candidateIndex = relation;
             ref readonly RelationState candidate = ref _relations[candidateIndex];
             relation = candidate.PendingNext;
+            bool alreadySelected = candidate.BuildStamp == _buildStamp;
+            bool cadenceDeferred = !alreadySelected && candidate.EligibleAtMilliseconds > now;
+            bool retryDeferred = !alreadySelected && !cadenceDeferred && candidate.HasSent &&
+                now - candidate.LastSentMilliseconds < _profile.ApplicationAckRetryMilliseconds;
+            bool selectable = !alreadySelected && !cadenceDeferred && !retryDeferred;
             if (_attributionEnabled)
             {
                 switch (tier)
@@ -1548,20 +1680,49 @@ public sealed class GameInterestService
                     case GameInterestTier.Near: SaturatingIncrement(ref _attributionPendingNearExamined); break;
                     case GameInterestTier.Far: SaturatingIncrement(ref _attributionPendingFarExamined); break;
                 }
-                if (candidate.BuildStamp == _buildStamp)
+                ulong classificationTicks = checked((ulong)(Stopwatch.GetTimestamp() - candidateStarted));
+                if (alreadySelected)
+                {
                     SaturatingIncrement(ref _attributionPendingSkippedAlreadySelected);
-                else if (candidate.EligibleAtMilliseconds > now)
+                    SaturatingAdd(ref _attributionPendingAlreadySelectedTicks, classificationTicks);
+                }
+                else if (cadenceDeferred)
+                {
                     SaturatingIncrement(ref _attributionPendingSkippedCadence);
-                else if (candidate.HasSent && now - candidate.LastSentMilliseconds <
-                    _profile.ApplicationAckRetryMilliseconds)
+                    SaturatingAdd(ref _attributionPendingCadenceDeferredTicks, classificationTicks);
+                    RecordDeferredDelay(
+                        _attributionCadenceDeferredDelayHistogram,
+                        candidate.EligibleAtMilliseconds - now,
+                        ref _attributionCadenceDeferredDelayTotalMilliseconds,
+                        ref _attributionCadenceDeferredDelayMaximumMilliseconds);
+                }
+                else if (retryDeferred)
+                {
                     SaturatingIncrement(ref _attributionPendingSkippedAwaitingRetry);
+                    SaturatingAdd(ref _attributionPendingRetryDeferredTicks, classificationTicks);
+                    long elapsed = now - candidate.LastSentMilliseconds;
+                    RecordDeferredDelay(
+                        _attributionRetryDeferredDelayHistogram,
+                        _profile.ApplicationAckRetryMilliseconds - elapsed,
+                        ref _attributionRetryDeferredDelayTotalMilliseconds,
+                        ref _attributionRetryDeferredDelayMaximumMilliseconds);
+                }
+                else
+                {
+                    SaturatingAdd(ref _attributionPendingSelectableTicks, classificationTicks);
+                }
             }
-            if (candidate.BuildStamp != _buildStamp &&
-                candidate.EligibleAtMilliseconds <= now &&
-                (!candidate.HasSent || now - candidate.LastSentMilliseconds >=
-                    _profile.ApplicationAckRetryMilliseconds))
+            if (selectable)
+            {
+                if (_attributionEnabled)
+                    SaturatingAdd(ref _attributionPendingTraversalTicks,
+                        checked((ulong)(Stopwatch.GetTimestamp() - traversalStarted)));
                 return candidateIndex;
+            }
         }
+        if (_attributionEnabled)
+            SaturatingAdd(ref _attributionPendingTraversalTicks,
+                checked((ulong)(Stopwatch.GetTimestamp() - traversalStarted)));
         return -1;
     }
 
@@ -2097,6 +2258,8 @@ public sealed class GameInterestService
         bytes = checked(bytes + (long)_bundles.Length * Unsafe.SizeOf<SentBundleState>());
         bytes = checked(bytes + (long)_bundleItems.Length * Unsafe.SizeOf<SentBundleItem>());
         bytes = checked(bytes + (long)_attributionBundleRecordHistogram.Length * sizeof(ulong));
+        bytes = checked(bytes + (long)(_attributionCadenceDeferredDelayHistogram.Length +
+            _attributionRetryDeferredDelayHistogram.Length) * sizeof(ulong));
         bytes = checked(bytes + ((long)_freeRecipients.Length + _freeRegions.Length +
             _freeRegionEdges.Length + _freeRelations.Length + _freeBundles.Length) * sizeof(int));
         bytes = checked(bytes + DictionaryReservation(_recipientMapCapacity, Unsafe.SizeOf<ParticipantId>()));
@@ -2123,6 +2286,32 @@ public sealed class GameInterestService
 
     private static void SaturatingAdd(ref ulong value, ulong amount) =>
         value = ulong.MaxValue - value < amount ? ulong.MaxValue : value + amount;
+
+    private static ulong SaturatingSum(ulong first, ulong second) =>
+        ulong.MaxValue - first < second ? ulong.MaxValue : first + second;
+
+    private static ulong SaturatingSum(ulong first, ulong second, ulong third) =>
+        SaturatingSum(SaturatingSum(first, second), third);
+
+    private static void RecordDeferredDelay(
+        ulong[] histogram,
+        long delayMilliseconds,
+        ref ulong totalMilliseconds,
+        ref long maximumMilliseconds)
+    {
+        if (delayMilliseconds <= 0)
+            throw new InvalidOperationException("A deferred relation must have a positive remaining delay.");
+        int bucket = 0;
+        long upper = 1;
+        while (bucket < DeferredDelayHistogramLength - 1 && delayMilliseconds > upper)
+        {
+            bucket++;
+            upper <<= 1;
+        }
+        SaturatingIncrement(ref histogram[bucket]);
+        SaturatingAdd(ref totalMilliseconds, checked((ulong)delayMilliseconds));
+        maximumMilliseconds = Math.Max(maximumMilliseconds, delayMilliseconds);
+    }
 
     private void EnsureOwnerThread()
     {

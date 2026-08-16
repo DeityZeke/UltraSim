@@ -944,6 +944,21 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             : interest.StableFarFastPathUpserts * 100d / classifiedUpserts;
         ulong[] histogram = new ulong[RecordsPerBundle + 1];
         _interest.CopyBundleRecordHistogram(histogram);
+        ulong[] cadenceDelayHistogram = new ulong[GameInterestService.DeferredDelayHistogramLength];
+        ulong[] retryDelayHistogram = new ulong[GameInterestService.DeferredDelayHistogramLength];
+        _interest.CopyDeferredDelayHistograms(cadenceDelayHistogram, retryDelayHistogram);
+        ulong selectedRecords = SaturatingAdd(
+            SaturatingAdd(interest.PendingSelectedImmediate, interest.PendingSelectedNear),
+            interest.PendingSelectedFar);
+        ulong deferredExaminations = SaturatingAdd(
+            interest.PendingSkippedCadence,
+            interest.PendingSkippedAwaitingRetry);
+        double skippedDeferredDebtPerSelectedRecord = selectedRecords == 0
+            ? 0
+            : deferredExaminations / (double)selectedRecords;
+        ulong tierOverheadTicks = interest.TierSelectionTicks >= interest.PendingTraversalTicks
+            ? interest.TierSelectionTicks - interest.PendingTraversalTicks
+            : 0;
         ulong scheduleCalls = 0;
         ulong buildTicks = 0;
         ulong recordCopies = 0;
@@ -980,6 +995,18 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             interest,
             stableFarFastPathEligibilityPercent,
             ToMilliseconds(interest.ExpirationSweepTicks),
+            skippedDeferredDebtPerSelectedRecord,
+            ToMilliseconds(interest.PendingSelectableTicks),
+            ToMilliseconds(interest.PendingAlreadySelectedTicks),
+            ToMilliseconds(interest.PendingCadenceDeferredTicks),
+            ToMilliseconds(interest.PendingRetryDeferredTicks),
+            ToMilliseconds(interest.PendingTraversalTicks),
+            ToMilliseconds(tierOverheadTicks),
+            ToMilliseconds(SaturatingAdd(
+                interest.RecordMaterializationTicks,
+                interest.BundleCommitTicks)),
+            cadenceDelayHistogram,
+            retryDelayHistogram,
             histogram,
             scheduleCalls,
             ToMilliseconds(buildTicks),
@@ -1460,6 +1487,16 @@ internal readonly record struct ReplicationWorldStateAttribution(
     GameInterestAttributionSnapshot Interest,
     double StableFarFastPathEligibilityPercent,
     double ExpirationSweepMilliseconds,
+    double SkippedDeferredDebtPerSelectedRecord,
+    double PendingSelectableMilliseconds,
+    double PendingAlreadySelectedMilliseconds,
+    double PendingCadenceDeferredMilliseconds,
+    double PendingRetryDeferredMilliseconds,
+    double PendingTraversalMilliseconds,
+    double TierSelectionOverheadMilliseconds,
+    double RecordMaterializationAndBundleCommitMilliseconds,
+    IReadOnlyList<ulong>? CadenceDeferredDelayHistogram,
+    IReadOnlyList<ulong>? RetryDeferredDelayHistogram,
     IReadOnlyList<ulong>? BundleRecordHistogram,
     ulong AdapterScheduleCalls,
     double AdapterBuildMilliseconds,

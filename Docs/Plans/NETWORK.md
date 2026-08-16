@@ -2280,9 +2280,70 @@ zero-allocation after warmup.
 
 The probe-enabled Full server-role p95 is now 5.876 ms, inside the current ≤6 ms
 usable target for this observation. The remaining scheduler still examines about
-4.88 million pending nodes, including known cadence/retry-deferred debt.
-Eligibility-aware ready/deferred pending organization is therefore the next
-measured candidate; it remains separate from this global expiration correction.
+4.88 million pending nodes, including known cadence/retry-deferred debt. The next
+checkpoint measures that ceiling before accepting another representation.
+
+#### Dense-400 pending-eligibility census and rejected wheel
+
+The opt-in pending census separates candidate classification, list traversal,
+tier arbitration, record materialization/commit, all-deferred `NoData` builds,
+and remaining cadence/retry delay. Its per-candidate clocks intentionally make
+the diagnostic run slower; the category proportions and counts are evidence,
+not probes-off millisecond estimates.
+
+[`network-v3-dense-pending-eligibility-census-pre-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-pending-eligibility-census-pre-2026-08-16.json)
+records:
+
+```text
+selected records                         960,000
+cadence-deferred examinations          2,678,263
+retry-deferred examinations            1,241,388
+deferred examinations / selected            4.08
+NoData builds                           44,712
+NoData builds containing only deferred 44,430
+cadence remaining delay mean/max       14.16 / 49 ms
+retry remaining delay mean/max         96.09 / 100 ms
+```
+
+Classification ticks split approximately 23.75 ms selectable, 56.92 ms cadence
+deferred, and 27.56 ms retry deferred across the complete run. Total instrumented
+traversal is 292.64 ms and tier-selection overhead is 107.91 ms, both dominated
+in part by the diagnostic clocks themselves. The production WorldState schedule
+p95 before these clocks was only 0.907 ms, so the recoverable production ceiling
+was always below one millisecond.
+
+The evidence nevertheless earned one isolated experiment: a service-private
+256-bucket ready/deferred wheel retaining exact cadence/retry boundaries. It
+reduced pending examinations 4,879,651→960,000, eliminated all deferred-only
+list scans, and promoted 926,914 relations after 934,640 deferred visits. Under
+the heavy probes, WorldState scheduling p95 improved 4.523→3.384 ms and
+server-role p95 improved 9.253→8.126 ms.
+
+The production observation rejected it. Compared with the accepted expiration-
+cache artifact, probes-off Full regressed 10.598→11.711 ms, WorldState-only
+9.723→10.462 ms, and updates-only 3.063→3.461 ms. The wheel enlarged every hot
+relation and added unlink/relink/promotion churn for 960,000 records; removing
+simple comparisons did not repay that locality and maintenance cost. The causal
+and normal negative evidence is preserved in
+[`network-v3-dense-pending-eligibility-wheel-rejected-causal-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-pending-eligibility-wheel-rejected-causal-2026-08-16.json)
+and
+[`network-v3-dense-pending-eligibility-wheel-rejected-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-pending-eligibility-wheel-rejected-hardened-2026-08-16.json).
+The wheel code and its relation fields were removed.
+
+The retained production change is attribution only. Its fast path keeps the
+original pending-list predicate and relation layout. The post-revert probes-off
+control is
+[`network-v3-dense-pending-eligibility-attribution-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-pending-eligibility-attribution-hardened-2026-08-16.json):
+Full/WorldState-only/updates-only p95 are 10.845/10.233/2.997 ms, exact
+convergence and capacity behavior remain unchanged, and the small difference
+from the prior 10.598 ms Full run is treated as longitudinal run noise rather
+than a new performance baseline.
+
+This closes the obvious ready/deferred representation, not the operational
+headroom goal. Dense-400 p99 remains above 6 ms in the current server-role
+diagnostic. Any future pending optimization must avoid growing every relation;
+a narrow recipient-local negative-result cache may be measured separately, but
+is not justified by counts alone.
 
 Protected profiles:
 

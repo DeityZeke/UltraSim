@@ -46,7 +46,12 @@ reduces that to 393,600 checks. Probe-enabled Full server-role p95 is now
 5.876 ms and the probes-off combined Full tick is 10.598 ms, with identical
 bundles, records, packets, wire bytes, convergence, and capacity behavior.
 Dense-400 is now inside the ≤6 ms server-role usable target in this observation;
-known-deferred pending debt remains the next measured candidate.
+known-deferred pending debt was then measured separately. Although 44,430 of
+44,712 `NoData` builds examined only deferred debt, a bounded ready/deferred
+wheel enlarged and churned the hot relation representation enough to regress the
+probes-off Full tick 10.598→11.711 ms. That representation was rejected and is
+not in production; only dormant attribution and immutable negative evidence are
+retained. Comfortable p99 headroom remains open.
 
 ## Design
 

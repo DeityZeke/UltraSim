@@ -124,6 +124,11 @@ consecutive distinct/repeated semantic times, completed sweeps/cache hits, total
 and active slots examined, actual expirations, `_bundleHigh` high-water, and
 cumulative sweep time. It exists to distinguish global timeout housekeeping from
 pending-debt selection; ordinary acceptance keeps all attribution probes off.
+Pending-selection attribution additionally times selectable/cadence/retry/
+already-selected classifications, traversal and tier overhead, record/commit
+work, counts all-deferred `NoData` calls, and preserves logarithmic remaining-
+delay histograms. Per-candidate clocks are intentionally diagnostic overhead;
+their absolute totals are not probes-off production cost.
 Cold freshness scans remain outside the timed tick. Probe-enabled figures are
 compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 

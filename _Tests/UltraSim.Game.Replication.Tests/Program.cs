@@ -43,6 +43,7 @@ var tests = new (string Name, Action Body)[]
     ("ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow", ExtremeInterestCoordinatesAndTimeFailClosedWithoutOverflow),
     ("BundleSelectionResumesWithinEachTier", BundleSelectionResumesWithinEachTier),
     ("BundleExpirationSweepCachesOnlyCompletedSemanticTime", BundleExpirationSweepCachesOnlyCompletedSemanticTime),
+    ("PendingEligibilityAttributionClassifiesDeferredDebt", PendingEligibilityAttributionClassifiesDeferredDebt),
     ("WarmedMaintainedInterestSchedulingAllocatesZero", WarmedMaintainedInterestSchedulingAllocatesZero),
 };
 
@@ -718,6 +719,66 @@ static void BundleExpirationSweepCachesOnlyCompletedSemanticTime()
         Check.Equal(GameWorldStateBuildStatus.NoData,
             service.TryBuildBundle(first, 500, 1_024, records, out _));
     Check.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+}
+
+static void PendingEligibilityAttributionClassifiesDeferredDebt()
+{
+    var profile = new GameInterestProfile(10_000, 5_000, 6_000, 20_000, 40_000,
+        NearIntervalMilliseconds: 10,
+        FarIntervalMilliseconds: 20,
+        ApplicationAckRetryMilliseconds: 100,
+        ApplicationAckTimeoutMilliseconds: 200);
+    var service = new GameInterestService(
+        new StateEpoch(6),
+        new GameInterestLimits(8, 1, 512, 1_024, 16, 8, 1),
+        profile);
+    ParticipantId participant = new(95);
+    service.SetRecipientAnchor(participant, Point(0, 0), 0);
+    service.UpsertEntity(Projected(1, 1, 1), 1, Point(15, 0),
+        GameReplicationHorizon.Far, 0);
+    service.UpsertEntity(Projected(4, 1, 1), 1, Point(35, 0),
+        GameReplicationHorizon.Far, 0);
+    GameRecipientEntityRelationSnapshot near = Relation(
+        service, participant, new ReplicationEntityId(1, 1));
+    GameRecipientEntityRelationSnapshot far = Relation(
+        service, participant, new ReplicationEntityId(4, 1));
+    Check.Equal(9L, near.EligibleAtMilliseconds);
+    Check.Equal(18L, far.EligibleAtMilliseconds);
+
+    Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[1];
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(participant, 8, 1_024, records, out _));
+    Check.Equal(GameWorldStateBuildStatus.Success,
+        service.TryBuildBundle(participant, 9, 1_024, records, out _));
+    Check.Equal(GameWorldStateBuildStatus.NoData,
+        service.TryBuildBundle(participant, 17, 1_024, records, out _));
+
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.True(attribution.PendingSkippedCadence >= 3);
+    Check.True(attribution.PendingSkippedAwaitingRetry >= 1);
+    Check.Equal(2UL, attribution.NoDataAllDeferredBuilds);
+    Check.Equal(10L, attribution.CadenceDeferredDelayMaximumMilliseconds);
+    Check.Equal(92L, attribution.RetryDeferredDelayMaximumMilliseconds);
+    Check.True(attribution.PendingSelectableTicks > 0);
+    Check.True(attribution.PendingCadenceDeferredTicks > 0);
+    Check.True(attribution.PendingRetryDeferredTicks > 0);
+    Check.True(attribution.PendingTraversalTicks > 0);
+    Check.True(attribution.TierSelectionTicks >= attribution.PendingTraversalTicks);
+
+    Span<ulong> cadence = stackalloc ulong[GameInterestService.DeferredDelayHistogramLength];
+    Span<ulong> retry = stackalloc ulong[GameInterestService.DeferredDelayHistogramLength];
+    Check.Equal(GameInterestService.DeferredDelayHistogramLength,
+        service.CopyDeferredDelayHistograms(cadence, retry));
+    ulong cadenceCount = 0;
+    ulong retryCount = 0;
+    for (int index = 0; index < cadence.Length; index++)
+    {
+        cadenceCount += cadence[index];
+        retryCount += retry[index];
+    }
+    Check.Equal(attribution.PendingSkippedCadence, cadenceCount);
+    Check.Equal(attribution.PendingSkippedAwaitingRetry, retryCount);
 }
 
 static void BundleSelectionResumesWithinEachTier()

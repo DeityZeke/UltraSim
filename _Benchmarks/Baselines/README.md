@@ -103,7 +103,12 @@ Useful current anchors can be located by their embedded workload or filename:
 - `network-v3-dense-bundle-expiration-*` — the matched full-array expiration
   census, exact-time sweep-cache causal result, and probes-off hardened
   observation. These preserve the 97,912-request/123-time diagnosis and leave
-  eligibility-aware pending-debt organization as the next separate candidate;
+  eligibility-aware pending-debt organization as a separate question;
+- `network-v3-dense-pending-eligibility-*` — the pending CPU/deadline census,
+  rejected ready/deferred-wheel causal and probes-off artifacts, and the final
+  attribution-only hardened observation. The rejected files are negative
+  evidence, not accepted production baselines; the wheel implementation was
+  removed after it reduced scans but worsened normal-path CPU;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

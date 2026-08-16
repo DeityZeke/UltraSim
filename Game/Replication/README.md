@@ -343,6 +343,16 @@ Permanent gates cover multiple recipients, ACK/abandon between same-time calls,
 the exact timeout boundary restoring retry eligibility, forward/backward time
 jumps, and zero warmed allocation.
 
+Pending-selection attribution is also opt-in and dormant on the production fast
+path. It separates immediately selectable, cadence-deferred, retry-deferred and
+already-selected classification time; total list traversal; tier arbitration;
+record materialization/commit; all-deferred `NoData` calls; and logarithmic
+remaining-delay histograms. Dense-400 found 3.92 million known-deferred checks
+and 44,430 all-deferred `NoData` builds. A service-private 256-bucket
+ready/deferred wheel removed those scans but regressed the normal integrated
+workload, so it was rejected and no deferred-wheel state remains in relations.
+Counts alone do not justify enlarging or churning the hot maintained graph.
+
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces
 no routing policy; game/client composition supplies a fixed bounded ordered set.
