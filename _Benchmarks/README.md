@@ -114,6 +114,11 @@ The same report includes the WorldState application-proof census at the existing
 flush boundary. It distinguishes proofs produced during the drain from the
 retained backpressure ring, reports immediate 2+/3+/4+ packing opportunities and
 status mix, and never delays proof to improve a batch.
+Stable-update attribution also separates accepted `Far→Far` one-pass updates
+from general-path upserts and reports eligibility, necessary relation visits,
+avoided reverse/second/ensure visits, Immediate transitions, tier changes, and
+pending version publications. These counters are opt-in and do not justify
+dictionary removal or other AOI changes by themselves.
 Cold freshness scans remain outside the timed tick. Probe-enabled figures are
 compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 

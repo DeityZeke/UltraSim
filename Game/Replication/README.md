@@ -322,6 +322,15 @@ this distinction. An opt-in client census records proof production at existing
 flush boundaries; it demonstrated that natural reliable batching was too sparse
 to earn a batch wire format.
 
+Healthy same-lifetime, same-region `Far→Far` entity updates now use one maintained-
+relation pass. Region-edge creation/retier/removal already guarantees the complete
+Far relation set, so the pass can preserve exact Immediate hysteresis and publish
+the newest canonical version without reverse discovery or a second pending walk.
+All creation, lifetime, region, horizon-change, and nonviable shapes retain the
+general path. Opt-in counters prove fast-path eligibility, necessary visits,
+avoided work, tier transitions, and version publications; boundary and warmed-
+allocation gates protect the invariant.
+
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces
 no routing policy; game/client composition supplies a fixed bounded ordered set.

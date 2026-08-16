@@ -35,7 +35,11 @@ WorldState proof reconstructible under loss and moved only that proof to bounded
 independent-unreliable delivery in protocol v9. Probe-enabled Full server-role
 p95 fell 9.753→7.743 ms; the probes-off combined Full tick is now 13.396 ms with
 zero fixed-60 deadline misses. The server role remains above the ≤6 ms usable
-target, so stable-update relation multi-touch remains open.
+target. A subsequent stable `Far`-horizon fast path collapsed three maintained-
+graph traversals into one for all 2,400 Dense-400 dirty updates, lowering
+authority-update p95 1.087→0.703 ms and probe-enabled Full server-role p95
+7.743→7.557 ms. The probes-off combined Full tick is now 13.068 ms with zero
+deadline misses; known-deferred pending debt is the next measured candidate.
 
 ## Design
 

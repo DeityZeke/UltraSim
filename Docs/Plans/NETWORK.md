@@ -2147,8 +2147,78 @@ retransmissions. WorldState-only records 12.236 ms tick p95 and 46.625 ms
 state-age p95. This is the first observer-heavy Dense-400 combined same-process
 observation inside the fixed-60 deadline. The primary server-role result remains
 7.743 ms Full—materially improved and feasible, but still above the ≤6 ms usable
-and 4–5 ms preferred production targets. The measured canonical stable-update
-multi-touch and deferred pending-debt scans remain separate future checkpoints.
+and 4–5 ms preferred production targets. The following isolated checkpoint now
+closes canonical stable-update multi-touch; deferred pending-debt scans remain
+separate.
+
+#### Dense-400 stable Far-horizon update specialization
+
+The next causal artifact proved that every one of the 2,400 dirty updates was an
+existing lifetime in the same spatial region with unchanged `Far` horizon. The
+maintained graph already guarantees that a healthy Far entity owns one linked
+relation per applicable reverse region-interest edge: edge creation and retier
+walk current region members, and edge removal publishes absence and unlinks the
+relation. Entity discovery therefore does not belong in this stable shape.
+
+`GameInterestService.UpsertEntity()` now takes a deliberately narrow fast path
+only when all of these are true:
+
+```text
+existing canonical lifetime
+same spatial region
+previous horizon == Far
+new horizon == Far
+no nonviable recipient in the graph
+```
+
+One existing-relation traversal retains the `_regionEdgeMap` lookup and exact
+`DetermineTier()` semantics, including Immediate enter/leave hysteresis. The
+same traversal publishes the newest canonical version while preserving pending,
+retry, tombstone, and relation-sequence behavior. It does not scan reverse edges
+and does not walk the relation list a second time. Creation, lifetime replacement,
+region movement, every horizon change, and partial/nonviable graphs keep the
+unchanged general path. This checkpoint deliberately does not remove the
+remaining base-tier dictionary lookup or alter pending-debt scheduling.
+
+Permanent gates cover entity-before-recipient edge creation, edge removal and
+recreation, stable movement with and without tier transitions, Immediate enter
+and leave hysteresis, `Near→Far` discovery, `Far→Near` contraction, region
+crossing, generation replacement, nonviable fallback, pending supersession and
+application acknowledgement through the existing gates, and warmed zero
+allocation.
+
+The opt-in report now records stable/general upserts, eligibility percentage,
+fast-path relation visits, avoided reverse/second/ensure visits, tier changes,
+Immediate enters/leaves, and pending version publications. In
+[`network-v3-dense-stable-far-fast-path-causal-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-stable-far-fast-path-causal-2026-08-16.json),
+eligibility is 100%: 2,400 fast-path upserts retain 960,000 necessary relation
+visits while eliminating 960,000 reverse-edge visits, 960,000 relation-ensure
+lookups, and 960,000 second relation visits. Actual relevance changes remain
+zero. Authority-update p95 falls 1.087→0.703 ms (35.4%), cumulative attributed
+relation-maintenance time falls 113.59→76.47 ms (32.7%), and updates-only
+server-role p95 falls 1.737→1.461 ms (15.8%).
+
+| Probe-enabled row | Server-role p95 before → after | Server-role p99 after | Combined tick p95 after |
+| --- | ---: | ---: | ---: |
+| Full | 7.743 → 7.557 ms | 7.761 ms | 14.000 ms |
+| WorldState-only | 7.149 → 6.929 ms | 7.290 ms | 12.998 ms |
+| Event-only | 2.286 → 1.959 ms | 2.229 ms | 4.865 ms |
+| Updates-only | 1.737 → 1.461 ms | 1.522 ms | 3.886 ms |
+
+The matched probes-off artifact is
+[`network-v3-dense-stable-far-fast-path-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-stable-far-fast-path-hardened-2026-08-16.json).
+Full combined tick p95 falls 13.396→13.068 ms, p99 is 13.369 ms, state-age p95
+is 47.625 ms, Event apply p95 remains 7.625 ms, and convergence still takes
+three settlement steps with zero deadline misses, capacity/byte failures,
+retransmissions, or GC collections. Updates-only p95 falls 3.236→3.049 ms.
+
+The server-role improvement is real but modest: 7.743→7.557 ms (2.4%). Dense-400
+therefore remains inside the integrated fixed-60 deadline but above the ≤6 ms
+server target. The post-change attribution still examines about 4.88 million
+pending nodes, including about 2.68 million cadence skips and 1.24 million
+awaiting-retry skips. Making known-deferred debt cheap not to inspect is the next
+measured candidate; workers, sharding, dictionary removal, and broader AOI
+changes remain unearned.
 
 Protected profiles:
 

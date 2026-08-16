@@ -90,7 +90,17 @@ public sealed class GameInterestService
     private int _lastRelationsExamined;
     private bool _attributionEnabled;
     private ulong _attributionEntityUpserts;
+    private ulong _attributionStableFarFastPathUpserts;
+    private ulong _attributionGeneralPathUpserts;
     private ulong _attributionExistingRelationVisits;
+    private ulong _attributionFastPathRelationVisits;
+    private ulong _attributionFastPathReverseEdgeVisitsAvoided;
+    private ulong _attributionFastPathSecondRelationVisitsAvoided;
+    private ulong _attributionFastPathRelationEnsureLookupsAvoided;
+    private ulong _attributionFastPathImmediateEnters;
+    private ulong _attributionFastPathImmediateLeaves;
+    private ulong _attributionFastPathTierChanges;
+    private ulong _attributionFastPathPendingVersionUpdates;
     private ulong _attributionReverseRegionEdgeVisits;
     private ulong _attributionRelationEnsureLookups;
     private ulong _attributionPendingRelationVisits;
@@ -427,6 +437,7 @@ public sealed class GameInterestService
             return GameInterestUpdateStatus.StaleVersion;
         }
 
+        GameReplicationHorizon previousHorizon = state.Horizon;
         ReplicationSpatialRegionId nextRegionId = ToRegion(position);
         if (!TryGetOrCreateRegion(nextRegionId, out int nextRegion))
             return GameInterestUpdateStatus.CapacityExceeded;
@@ -461,13 +472,66 @@ public sealed class GameInterestService
         state.Horizon = horizon;
         state.CachedVersion = 0;
 
+        // For a healthy maintained graph, every current reverse edge already
+        // owns one linked relation to a Far-horizon entity. Edge creation,
+        // retier, and removal establish that invariant independently. A stable
+        // lifetime/cell/Far update therefore needs only one relation walk: it
+        // preserves exact Immediate hysteresis and publishes the new canonical
+        // version in the same pass. Any nonviable recipient keeps the general
+        // discovery path so a partial graph is never treated as complete.
+        bool stableFarFastPath = !created && previousRegion == nextRegion &&
+            previousHorizon == GameReplicationHorizon.Far &&
+            horizon == GameReplicationHorizon.Far && _nonviableRecipients == 0;
+
         long maintenanceStarted = _attributionEnabled ? Stopwatch.GetTimestamp() : 0;
         if (_attributionEnabled)
             SaturatingAdd(ref _attributionEntityCanonicalTicks,
                 checked((ulong)(maintenanceStarted - attributionStarted)));
 
-        if (created || previousRegion != nextRegion)
+        if (stableFarFastPath)
         {
+            if (_attributionEnabled)
+                SaturatingIncrement(ref _attributionStableFarFastPathUpserts);
+            int relation = state.RelationHead;
+            while (relation >= 0)
+            {
+                if (_attributionEnabled)
+                {
+                    SaturatingIncrement(ref _attributionExistingRelationVisits);
+                    SaturatingIncrement(ref _attributionFastPathRelationVisits);
+                    SaturatingIncrement(ref _attributionFastPathReverseEdgeVisitsAvoided);
+                    SaturatingIncrement(ref _attributionFastPathSecondRelationVisitsAvoided);
+                    SaturatingIncrement(ref _attributionFastPathRelationEnsureLookupsAvoided);
+                }
+                int next = _relations[relation].EntityNext;
+                int recipientIndex = _relations[relation].Recipient;
+                GameInterestTier previousTier = _relations[relation].Tier;
+                int edge = _regionEdgeMap[new RecipientRegionKey(recipientIndex, nextRegion)];
+                SetRelationTierAndPresence(relation, _regionEdges[edge].Tier, nowMilliseconds);
+                GameInterestTier currentTier = _relations[relation].Tier;
+                if (_attributionEnabled && currentTier != previousTier)
+                {
+                    SaturatingIncrement(ref _attributionFastPathTierChanges);
+                    if (currentTier == GameInterestTier.Immediate)
+                        SaturatingIncrement(ref _attributionFastPathImmediateEnters);
+                    if (previousTier == GameInterestTier.Immediate)
+                        SaturatingIncrement(ref _attributionFastPathImmediateLeaves);
+                }
+                if (_relations[relation].DesiredPresent &&
+                    (!_relations[relation].Pending ||
+                     !_relations[relation].PendingPresent ||
+                     _relations[relation].PendingCanonicalVersion != canonicalVersion))
+                {
+                    MarkRelationPending(relation, present: true, canonicalVersion, nowMilliseconds);
+                    if (_attributionEnabled)
+                        SaturatingIncrement(ref _attributionFastPathPendingVersionUpdates);
+                }
+                relation = next;
+            }
+        }
+        else if (created || previousRegion != nextRegion)
+        {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionGeneralPathUpserts);
             int relation = state.RelationHead;
             while (relation >= 0)
             {
@@ -483,6 +547,7 @@ public sealed class GameInterestService
         }
         else
         {
+            if (_attributionEnabled) SaturatingIncrement(ref _attributionGeneralPathUpserts);
             int relation = state.RelationHead;
             while (relation >= 0)
             {
@@ -495,36 +560,40 @@ public sealed class GameInterestService
             }
         }
 
-        // Always traverse current reverse region interest. This is required not
-        // only for region entry, but when a replication-family horizon expands
-        // while the entity remains in the same cell.
-        int regionEdge = _regions[nextRegion].InterestHead;
-        while (regionEdge >= 0)
+        if (!stableFarFastPath)
         {
-            if (_attributionEnabled) SaturatingIncrement(ref _attributionReverseRegionEdgeVisits);
-            int next = _regionEdges[regionEdge].RegionNext;
-            if (!EnsureDesiredRelation(
-                    _regionEdges[regionEdge].Recipient,
-                    entityIndex,
-                    _regionEdges[regionEdge].Tier,
-                    nowMilliseconds))
+            // Always traverse current reverse region interest on the general
+            // path. This is required not only for region entry, but when a
+            // replication-family horizon expands while the entity remains in
+            // the same cell.
+            int regionEdge = _regions[nextRegion].InterestHead;
+            while (regionEdge >= 0)
             {
-                MarkRecipientNonviable(_regionEdges[regionEdge].Recipient);
+                if (_attributionEnabled) SaturatingIncrement(ref _attributionReverseRegionEdgeVisits);
+                int next = _regionEdges[regionEdge].RegionNext;
+                if (!EnsureDesiredRelation(
+                        _regionEdges[regionEdge].Recipient,
+                        entityIndex,
+                        _regionEdges[regionEdge].Tier,
+                        nowMilliseconds))
+                {
+                    MarkRecipientNonviable(_regionEdges[regionEdge].Recipient);
+                }
+                regionEdge = next;
             }
-            regionEdge = next;
-        }
 
-        int pendingRelation = state.RelationHead;
-        while (pendingRelation >= 0)
-        {
-            if (_attributionEnabled) SaturatingIncrement(ref _attributionPendingRelationVisits);
-            int next = _relations[pendingRelation].EntityNext;
-            if (_relations[pendingRelation].DesiredPresent &&
-                (!_relations[pendingRelation].Pending ||
-                 !_relations[pendingRelation].PendingPresent ||
-                 _relations[pendingRelation].PendingCanonicalVersion != canonicalVersion))
-                MarkRelationPending(pendingRelation, present: true, canonicalVersion, nowMilliseconds);
-            pendingRelation = next;
+            int pendingRelation = state.RelationHead;
+            while (pendingRelation >= 0)
+            {
+                if (_attributionEnabled) SaturatingIncrement(ref _attributionPendingRelationVisits);
+                int next = _relations[pendingRelation].EntityNext;
+                if (_relations[pendingRelation].DesiredPresent &&
+                    (!_relations[pendingRelation].Pending ||
+                     !_relations[pendingRelation].PendingPresent ||
+                     _relations[pendingRelation].PendingCanonicalVersion != canonicalVersion))
+                    MarkRelationPending(pendingRelation, present: true, canonicalVersion, nowMilliseconds);
+                pendingRelation = next;
+            }
         }
 
         if (_attributionEnabled)
@@ -533,6 +602,10 @@ public sealed class GameInterestService
                 checked((ulong)(Stopwatch.GetTimestamp() - maintenanceStarted)));
             SaturatingAdd(ref _attributionActualRelationChanges, checked((ulong)_lastRelationsChanged));
         }
+        if (stableFarFastPath)
+            return _nonviableRecipients == 0
+                ? GameInterestUpdateStatus.Success
+                : GameInterestUpdateStatus.RecipientNonviable;
         return AnyAffectedRecipientNonviable(state.Region)
             ? GameInterestUpdateStatus.RecipientNonviable
             : GameInterestUpdateStatus.Success;
@@ -742,7 +815,17 @@ public sealed class GameInterestService
         EnsureOwnerThread();
         _attributionEnabled = enabled;
         _attributionEntityUpserts = 0;
+        _attributionStableFarFastPathUpserts = 0;
+        _attributionGeneralPathUpserts = 0;
         _attributionExistingRelationVisits = 0;
+        _attributionFastPathRelationVisits = 0;
+        _attributionFastPathReverseEdgeVisitsAvoided = 0;
+        _attributionFastPathSecondRelationVisitsAvoided = 0;
+        _attributionFastPathRelationEnsureLookupsAvoided = 0;
+        _attributionFastPathImmediateEnters = 0;
+        _attributionFastPathImmediateLeaves = 0;
+        _attributionFastPathTierChanges = 0;
+        _attributionFastPathPendingVersionUpdates = 0;
         _attributionReverseRegionEdgeVisits = 0;
         _attributionRelationEnsureLookups = 0;
         _attributionPendingRelationVisits = 0;
@@ -783,7 +866,17 @@ public sealed class GameInterestService
         return new(
             _attributionEnabled,
             _attributionEntityUpserts,
+            _attributionStableFarFastPathUpserts,
+            _attributionGeneralPathUpserts,
             _attributionExistingRelationVisits,
+            _attributionFastPathRelationVisits,
+            _attributionFastPathReverseEdgeVisitsAvoided,
+            _attributionFastPathSecondRelationVisitsAvoided,
+            _attributionFastPathRelationEnsureLookupsAvoided,
+            _attributionFastPathImmediateEnters,
+            _attributionFastPathImmediateLeaves,
+            _attributionFastPathTierChanges,
+            _attributionFastPathPendingVersionUpdates,
             _attributionReverseRegionEdgeVisits,
             _attributionRelationEnsureLookups,
             _attributionPendingRelationVisits,

@@ -28,6 +28,9 @@ var tests = new (string Name, Action Body)[]
     ("CanonicalProjectionAndSemanticTraceAreDeterministic", CanonicalProjectionAndTraceAreDeterministic),
     ("MaintainedInterestMatchesBruteForceTierOracle", MaintainedInterestMatchesBruteForceTierOracle),
     ("ImmediateHysteresisAndRegionBoundariesAreIndependent", ImmediateHysteresisAndRegionBoundariesAreIndependent),
+    ("StableFarUpdateUsesOneMaintainedRelationPass", StableFarUpdateUsesOneMaintainedRelationPass),
+    ("StableFarFastPathPreservesImmediateHysteresis", StableFarFastPathPreservesImmediateHysteresis),
+    ("StableFarFastPathRejectsEveryGeneralShape", StableFarFastPathRejectsEveryGeneralShape),
     ("RecipientRegionCrossingUpdatesOnlyEnvelopeDifference", RecipientRegionCrossingUpdatesOnlyEnvelopeDifference),
     ("NewestPendingStateAndPromotionCollapseCorrectly", NewestPendingStateAndPromotionCollapseCorrectly),
     ("FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact", FamilyPolicyNoSubscribersAndSharedSemanticConstructionAreExact),
@@ -137,6 +140,139 @@ static void ImmediateHysteresisAndRegionBoundariesAreIndependent()
     service.UpsertEntity(crossBoundary, 1, Point(-1, 0), GameReplicationHorizon.Far, 4);
     Check.Equal(GameInterestTier.Immediate,
         Relation(service, participant, crossBoundary.Entity).Tier);
+}
+
+static void StableFarUpdateUsesOneMaintainedRelationPass()
+{
+    var service = CreateInterest();
+    GameProjectedEntity entity = Projected(13, 1, 1);
+    // The entity deliberately predates both recipients. Region-edge creation
+    // must establish the complete maintained relation set without relying on a
+    // later entity discovery scan.
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(entity, 1, Point(35, 0), GameReplicationHorizon.Far, 0));
+    ParticipantId alice = new(101);
+    ParticipantId bob = new(102);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(alice, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(bob, Point(30, 0), 0));
+    Check.Equal(2, service.GetSnapshot().RelationCount);
+
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(13, 1, 2), 2, Point(35, 0),
+            GameReplicationHorizon.Far, 1));
+    GameInterestAttributionSnapshot first = service.GetAttributionSnapshot();
+    Check.Equal(1UL, first.EntityUpserts);
+    Check.Equal(1UL, first.StableFarFastPathUpserts);
+    Check.Equal(0UL, first.GeneralPathUpserts);
+    Check.Equal(2UL, first.FastPathRelationVisits);
+    Check.Equal(2UL, first.FastPathReverseEdgeVisitsAvoided);
+    Check.Equal(2UL, first.FastPathSecondRelationVisitsAvoided);
+    Check.Equal(2UL, first.FastPathRelationEnsureLookupsAvoided);
+    Check.Equal(0UL, first.ReverseRegionEdgeVisits);
+    Check.Equal(0UL, first.RelationEnsureLookups);
+    Check.Equal(0UL, first.PendingRelationVisits);
+    Check.Equal(2UL, first.FastPathPendingVersionUpdates);
+    Check.Equal(2UL, Relation(service, alice, entity.Entity).PendingCanonicalVersion);
+    Check.Equal(2UL, Relation(service, bob, entity.Entity).PendingCanonicalVersion);
+
+    // Remove then recreate Alice's applicable region edge after the entity
+    // exists. Edge maintenance must relink the relation before the next stable
+    // update, which can still skip reverse discovery safely.
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(alice, Point(100, 0), 2));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(alice, Point(10, 0), 3));
+    Check.True(Relation(service, alice, entity.Entity).DesiredPresent);
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(13, 1, 3), 3, Point(35, 0),
+            GameReplicationHorizon.Far, 4));
+    GameInterestAttributionSnapshot afterEdgeChurn = service.GetAttributionSnapshot();
+    Check.Equal(1UL, afterEdgeChurn.StableFarFastPathUpserts);
+    Check.Equal(2UL, afterEdgeChurn.FastPathRelationVisits);
+    Check.Equal(0UL, afterEdgeChurn.ReverseRegionEdgeVisits);
+    Check.Equal(0UL, afterEdgeChurn.PendingRelationVisits);
+    Check.Equal(3UL, Relation(service, alice, entity.Entity).PendingCanonicalVersion);
+    Check.Equal(3UL, Relation(service, bob, entity.Entity).PendingCanonicalVersion);
+}
+
+static void StableFarFastPathPreservesImmediateHysteresis()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(103);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    GameProjectedEntity entity = Projected(14, 1, 1);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(entity, 1, Point(4, 0), GameReplicationHorizon.Far, 0));
+
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(14, 1, 2), 2, Millimeters(5_500, 0),
+            GameReplicationHorizon.Far, 1));
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, entity.Entity).Tier);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(14, 1, 3), 3, Millimeters(6_100, 0),
+            GameReplicationHorizon.Far, 2));
+    Check.Equal(GameInterestTier.Near, Relation(service, participant, entity.Entity).Tier);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(14, 1, 4), 4, Millimeters(5_500, 0),
+            GameReplicationHorizon.Far, 3));
+    Check.Equal(GameInterestTier.Near, Relation(service, participant, entity.Entity).Tier);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(14, 1, 5), 5, Millimeters(4_900, 0),
+            GameReplicationHorizon.Far, 4));
+    Check.Equal(GameInterestTier.Immediate, Relation(service, participant, entity.Entity).Tier);
+
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.Equal(4UL, attribution.StableFarFastPathUpserts);
+    Check.Equal(0UL, attribution.GeneralPathUpserts);
+    Check.Equal(4UL, attribution.FastPathRelationVisits);
+    Check.Equal(2UL, attribution.FastPathTierChanges);
+    Check.Equal(1UL, attribution.FastPathImmediateEnters);
+    Check.Equal(1UL, attribution.FastPathImmediateLeaves);
+    Check.Equal(4UL, attribution.FastPathPendingVersionUpdates);
+    Check.Equal(0UL, attribution.ReverseRegionEdgeVisits);
+    Check.Equal(0UL, attribution.PendingRelationVisits);
+}
+
+static void StableFarFastPathRejectsEveryGeneralShape()
+{
+    var service = CreateInterest();
+    ParticipantId participant = new(104);
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.SetRecipientAnchor(participant, Point(0, 0), 0));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(15, 1, 1), 1, Point(35, 0),
+            GameReplicationHorizon.Far, 0));
+
+    service.ResetAttribution(enabled: true);
+    // Same-region horizon contraction and expansion both require general
+    // discovery semantics.
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(15, 1, 2), 2, Point(35, 0),
+            GameReplicationHorizon.Near, 1));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(15, 1, 3), 3, Point(35, 0),
+            GameReplicationHorizon.Far, 2));
+    // Region movement and canonical lifetime replacement likewise cannot use
+    // the stable predicate.
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(15, 1, 4), 4, Point(25, 0),
+            GameReplicationHorizon.Far, 3));
+    Check.Equal(GameInterestUpdateStatus.Success,
+        service.UpsertEntity(Projected(15, 2, 5), 1, Point(25, 0),
+            GameReplicationHorizon.Far, 4));
+
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.Equal(4UL, attribution.EntityUpserts);
+    Check.Equal(0UL, attribution.StableFarFastPathUpserts);
+    Check.Equal(4UL, attribution.GeneralPathUpserts);
+    Check.True(attribution.ReverseRegionEdgeVisits > 0);
+    Check.True(Relation(service, participant, new ReplicationEntityId(15, 2)).DesiredPresent);
 }
 
 static void RecipientRegionCrossingUpdatesOnlyEnvelopeDifference()
@@ -428,6 +564,13 @@ static void InterestCapacityFailureIsExplicitlyNonviable()
     GameInterestUpdateStatus status = service.SetRecipientAnchor(new ParticipantId(9), Point(0, 0), 0);
     Check.True(status is GameInterestUpdateStatus.CapacityExceeded or GameInterestUpdateStatus.RecipientNonviable);
     Check.Equal(1, service.GetSnapshot().NonviableRecipientCount);
+    service.ResetAttribution(enabled: true);
+    Check.Equal(GameInterestUpdateStatus.RecipientNonviable,
+        service.UpsertEntity(Projected(0, 1, 2), 2, Point(1, 0),
+            GameReplicationHorizon.Far, 1));
+    GameInterestAttributionSnapshot attribution = service.GetAttributionSnapshot();
+    Check.Equal(0UL, attribution.StableFarFastPathUpserts);
+    Check.Equal(1UL, attribution.GeneralPathUpserts);
     Span<GameWorldStateRecord> records = stackalloc GameWorldStateRecord[4];
     Check.Equal(GameWorldStateBuildStatus.RecipientNonviable,
         service.TryBuildBundle(new ParticipantId(9), 0, 1_024, records, out _));

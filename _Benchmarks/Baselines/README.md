@@ -96,6 +96,11 @@ Useful current anchors can be located by their embedded workload or filename:
   `reconstructible-ack-hardened` is its probes-off observation. Together they
   preserve why no batch message was added and why only reconstructible
   WorldState application proof moved off reliable Control;
+- `network-v3-dense-stable-far-fast-path-causal-*` — the one-pass stable
+  same-lifetime/same-region `Far→Far` causal result, including 100% eligibility
+  and the exact avoided visit counts; `stable-far-fast-path-hardened` is the
+  probes-off observation. These leave base-tier lookup and eligibility-aware
+  pending-debt organization as separate possible checkpoints;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

@@ -937,6 +937,11 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     {
         if (!_phaseAttribution) return default;
         GameInterestAttributionSnapshot interest = _interest.GetAttributionSnapshot();
+        ulong classifiedUpserts = SaturatingAdd(
+            interest.StableFarFastPathUpserts, interest.GeneralPathUpserts);
+        double stableFarFastPathEligibilityPercent = classifiedUpserts == 0
+            ? 0
+            : interest.StableFarFastPathUpserts * 100d / classifiedUpserts;
         ulong[] histogram = new ulong[RecordsPerBundle + 1];
         _interest.CopyBundleRecordHistogram(histogram);
         ulong scheduleCalls = 0;
@@ -973,6 +978,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         return new(
             true,
             interest,
+            stableFarFastPathEligibilityPercent,
             histogram,
             scheduleCalls,
             ToMilliseconds(buildTicks),
@@ -1451,6 +1457,7 @@ internal readonly record struct ReplicationPhaseAttribution(
 internal readonly record struct ReplicationWorldStateAttribution(
     bool Enabled,
     GameInterestAttributionSnapshot Interest,
+    double StableFarFastPathEligibilityPercent,
     IReadOnlyList<ulong>? BundleRecordHistogram,
     ulong AdapterScheduleCalls,
     double AdapterBuildMilliseconds,
