@@ -822,18 +822,21 @@ public sealed class NetworkProtocolPeer : IDisposable
             return;
         }
 
-        NetworkDeliveryAdmission admission = ProcessData(plaintext);
+        NetworkDeliveryAdmission admission = ProcessData(plaintext, out bool acknowledgementEliciting);
         if (admission != NetworkDeliveryAdmission.Admitted) return;
         if (!_transportDeliveries.TryPrepare(header.PacketNumber,
                 out NetworkPacketWindowTransition deliveryTransition))
             throw new InvalidOperationException("An authenticated admitted packet could not enter the delivery window.");
         _transportDeliveries.Commit(deliveryTransition);
         _receivedPacketsCount++;
-        _ackPending = true;
+        _ackPending |= acknowledgementEliciting;
     }
 
-    private NetworkDeliveryAdmission ProcessData(ReadOnlySpan<byte> plaintext)
+    private NetworkDeliveryAdmission ProcessData(
+        ReadOnlySpan<byte> plaintext,
+        out bool acknowledgementEliciting)
     {
+        acknowledgementEliciting = false;
         var reader = new NetworkPacketReader(plaintext);
         if (!NetworkDataFrameCodec.TryRead(ref reader, out NetworkDataFrameHeader header) ||
             header.MessageLength > _limits.MaximumMessageBytes ||
@@ -854,7 +857,11 @@ public sealed class NetworkProtocolPeer : IDisposable
 
         NetworkLaneContract contract = NetworkLaneContracts.Get(header.Lane);
         if (contract.Delivery == NetworkDeliveryGuarantee.Reliable)
-            return ProcessReliableFragment(header, fragment, offset);
+        {
+            NetworkDeliveryAdmission reliable = ProcessReliableFragment(header, fragment, offset);
+            acknowledgementEliciting = reliable == NetworkDeliveryAdmission.Admitted;
+            return reliable;
+        }
 
         ref UnreliableStreamState unreliableStream = ref _unreliableStreams[messageSlot];
         if (contract.Order == NetworkDeliveryOrder.Sequenced &&

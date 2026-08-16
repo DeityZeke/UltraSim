@@ -16,6 +16,8 @@ internal static class N03ProtocolTests
         Run("ReliableDeliveryRecoversAfterWholeWindowLoss", ReliableDeliveryRecoversAfterWholeWindowLoss);
         Run("ReliableDeliveryRecoversAfterWholeWindowAckLoss", ReliableDeliveryRecoversAfterWholeWindowAckLoss);
         Run("UnreliableLanesApplySequencingAndCoalescing", UnreliableLanesApplySequencingAndCoalescing);
+        Run("UnreliableDataDoesNotElicitTransportAcknowledgements", UnreliableDataDoesNotElicitTransportAcknowledgements);
+        Run("MixedTrafficAcknowledgesReliableDataOnly", MixedTrafficAcknowledgesReliableDataOnly);
         Run("IndependentWorldStateContainersDoNotCoalesce", IndependentWorldStateContainersDoNotCoalesce);
         Run("UnreliableMessageFamiliesOwnIndependentStreams", UnreliableMessageFamiliesOwnIndependentStreams);
         Run("SequencedCapacityDropAdvancesStaleFloor", SequencedCapacityDropAdvancesStaleFloor);
@@ -166,6 +168,7 @@ internal static class N03ProtocolTests
         Equal(1, pair.Receiver.ReceivedQueued);
         AssertReceive(pair.Receiver, NetworkLane.Bulk, payload);
         True(pair.Sender.GetSnapshot().ReliableRetransmissions > 0);
+        True(pair.Receiver.GetSnapshot().AcknowledgementPacketsSent >= 2);
 
         NetworkProtocolLimits onePacket = limits with
         {
@@ -204,6 +207,50 @@ internal static class N03ProtocolTests
         Equal(9UL, seen[NetworkLane.Input]);
         Equal(9UL, seen[NetworkLane.OwnerState]);
         Equal(99UL, seen[NetworkLane.Disposable]);
+    }
+
+    private static void UnreliableDataDoesNotElicitTransportAcknowledgements()
+    {
+        using ProtocolLoopback loopback = Create();
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 1 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), stackalloc byte[] { 2 }));
+
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 2, 100);
+        AssertReceive(loopback.Server, NetworkLane.Input, stackalloc byte[] { 1 });
+        AssertReceive(loopback.Server, NetworkLane.OwnerState, stackalloc byte[] { 2 });
+        for (int step = 0; step < 16; step++) loopback.Pump();
+
+        NetworkProtocolSnapshot sender = loopback.Client.GetSnapshot();
+        NetworkProtocolSnapshot receiver = loopback.Server.GetSnapshot();
+        Equal(2UL, sender.DataPacketsSent);
+        Equal(0UL, receiver.AcknowledgementPacketsSent);
+        Equal(0UL, sender.ReliableAcknowledgements);
+        Equal(0UL, sender.SmoothedRoundTripSteps);
+        Equal(2UL, receiver.ReceivedPackets);
+    }
+
+    private static void MixedTrafficAcknowledgesReliableDataOnly()
+    {
+        using ProtocolLoopback loopback = Create();
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Control), stackalloc byte[] { 7 }));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Input), stackalloc byte[] { 8 }));
+
+        Drive(loopback, () => loopback.Server.ReceivedQueued == 2, 100);
+        AssertReceive(loopback.Server, NetworkLane.Control, stackalloc byte[] { 7 });
+        AssertReceive(loopback.Server, NetworkLane.Input, stackalloc byte[] { 8 });
+        Drive(loopback, () => loopback.Client.ReliableQueued == 0, 100);
+
+        NetworkProtocolSnapshot sender = loopback.Client.GetSnapshot();
+        NetworkProtocolSnapshot receiver = loopback.Server.GetSnapshot();
+        Equal(2UL, sender.DataPacketsSent);
+        Equal(1UL, sender.ReliableAcknowledgements);
+        True(receiver.AcknowledgementPacketsSent > 0);
+        True(receiver.AcknowledgementPacketsSent < sender.DataPacketsSent);
+        True(sender.SmoothedRoundTripSteps > 0);
     }
 
     private static void IndependentWorldStateContainersDoNotCoalesce()
@@ -340,6 +387,7 @@ internal static class N03ProtocolTests
         NetworkProtocolSnapshot deferred = loopback.Server.GetSnapshot();
         Equal(before.CapacityDrops + 1, deferred.CapacityDrops);
         Equal(before.ReplayRejections + 1, deferred.ReplayRejections);
+        Equal(before.AcknowledgementPacketsSent, deferred.AcknowledgementPacketsSent);
         Equal(1, loopback.Server.ReceivedQueued);
         Equal(1, loopback.Client.ReliableQueued);
 
@@ -347,6 +395,8 @@ internal static class N03ProtocolTests
         Drive(loopback, () => loopback.Server.ReceivedQueued == 1, 1_000);
         AssertReceive(loopback.Server, NetworkLane.Event, blocked);
         Drive(loopback, () => loopback.Client.ReliableQueued == 0, 1_000);
+        True(loopback.Server.GetSnapshot().AcknowledgementPacketsSent >
+            deferred.AcknowledgementPacketsSent);
     }
 
     private static void AuthenticatedRegionsRejectWithoutStatePublication()

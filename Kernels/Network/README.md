@@ -2,7 +2,7 @@
 
 Status: N0.0 through the hardened N0.9 integrated topology are accepted. N0.10
 scale work now includes the first provisional V2/V3 bot matrix and a bounded
-shared-listener specialization.
+shared-listener specialization plus measured reliable-only ACK elicitation.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -36,7 +36,7 @@ Identity is explicit and non-interchangeable:
 | --- | --- | --- |
 | `ConnectionId` | Network | Server-created transport slot plus reuse generation; neither durable nor client-chosen. |
 | `SecurityEpoch` | Network | Key/replay lifetime within one connection. |
-| `PacketNumber` | Network | Authenticated datagram sequence; admitted data packet numbers are referenced separately by transport-delivery ACKs. |
+| `PacketNumber` | Network | Authenticated datagram sequence; admitted reliable-data packet numbers may be referenced separately by transport-delivery ACKs. |
 | `LaneSequence` | Network | Reliable ordering is lane-scoped; sequenced unreliable coalescing is isolated per Input/OwnerState message family. WorldState containers are unordered and use application relation sequences instead. N0.6 uses one complete logical stream per Input/OwnerState family; a generic sub-stream key remains deferred until a second simultaneous stream earns it. |
 | `StateEpoch` | Projection/protocol seam | One coherent canonical projection generation. |
 | `ReplicationEntityId` | Canonical projection | Dense generational identity shared by all recipients within one `StateEpoch`. |
@@ -104,10 +104,13 @@ Malformed outer framing or unauthenticated bytes publish neither replay, epoch, 
 reassembly, acknowledgement, nor delivery state.
 
 Authentication replay and transport delivery are deliberately separate facts. A
-second window contains only data packets admitted into bounded delivery/reassembly
-machinery and alone drives ACK ranges. If reliable admission is blocked, the packet
-is replay-protected but not ACKed; the sender retains the semantic fragment and
-retransmits it under a fresh `PacketNumber`.
+second window contains data packets admitted into bounded delivery/reassembly
+machinery. Only admitted **reliable** data is ACK-eliciting because only reliable
+fragments own retained sender flight state for an ACK to release. Admitted
+unreliable data remains authenticated, replay-protected, sequenced, and recorded in
+the delivery window, but emits no semantically useless transport ACK. If reliable
+admission is blocked, the packet is replay-protected but not ACKed; the sender
+retains the semantic fragment and retransmits it under a fresh `PacketNumber`.
 
 The bounded delivery machine provides:
 
@@ -145,6 +148,12 @@ authenticated the packet and admitted its reliable payload into bounded receive 
 reassembly state. It does not prove that game logic executed, UI state rendered, a
 baseline was applied, or recipient-known projection state advanced. Those stronger
 proofs remain distinct application/baseline contracts in later slices.
+
+All-unreliable traffic intentionally produces no transport RTT sample. Unreliable
+packets never owned matching sender flight records, so their former ACKs could not
+update RTT or congestion state. If realtime traffic later needs independent path
+measurement, it must use an explicit bounded probe/sampling contract rather than
+ACKing every latest-state packet.
 
 ## Lane contracts
 
@@ -268,6 +277,24 @@ known managed payload are explicit and observable. The current public
 constructor remains controlled loopback evidence, not an Internet listener or
 multi-owner socket host.
 
+### N0.10.2 reliable-only ACK elicitation
+
+The 256-peer causal suite found one transport ACK for almost every unreliable
+Data packet even though unreliable sends own no retained flight record. The
+accepted correction makes only admitted reliable Data ACK-eliciting while
+preserving authentication, replay, delivery-window, sequence, capacity, and
+reliable backpressure behavior.
+
+Input+Owner p95 fell from 5.100 to 2.790 ms and Full from 4.975 to 2.868 ms;
+their timed wire bytes fell about 39%. The post-change 32/64/128/256 V3 p95
+range is 0.374-0.389 / 0.725-0.741 / 1.437-1.459 / 2.809-2.813 ms, with exact
+canonical V2/V3 state in every run. Full traffic still averages roughly 6.2%
+datagram fill and one send syscall per datagram, making bounded multi-message
+assembly the next measured CPU/wire experiment. Reservation specialization is
+still required independently for memory viability. See the
+[bot comparison guide](../../_Benchmarks/NETWORK_V2_V3_BOT_COMPARISON.md) for
+the complete before/after counters and immutable artifacts.
+
 ## N0.6 application-owned input and owner state
 
 The kernel did not acquire game state in N0.6. `Game/Protocol` adds bounded Input,
@@ -367,6 +394,8 @@ future diagnostic and is not charged to the normal hot path.
 - authenticated replay is independent from transport-delivery ACK state;
 - header-associated-data, ciphertext, and tag tampering publish no protocol state;
 - duplicated authentic ciphertext is replay-rejected even while reliable delivery is blocked;
+- admitted unreliable Data does not elicit a transport ACK or create a false RTT
+  sample, while mixed traffic and retransmitted reliable data still complete;
 - replay, ACK, retransmission, RTT/RTO, congestion, sequencing, fragmentation,
   receive backpressure, and epoch rotation pass deterministic impairment tests;
 - complete congestion-window and complete ACK-window loss make progress, including

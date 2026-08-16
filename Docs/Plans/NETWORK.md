@@ -524,7 +524,11 @@ AuthenticatedReplayWindow
 
 TransportDeliveryAckWindow
     data admitted into bounded receive/reassembly state
-    drives packet ACK ranges and sender fragment release
+    retains delivery ordering evidence
+
+reliable ACK elicitation
+    only admitted reliable data requests a transport ACK
+    drives sender fragment release
 
 application/baseline acknowledgement
     higher semantic proof defined by the owning message contract
@@ -534,6 +538,10 @@ A delivery-blocked reliable packet is not transport-ACKed. Its exact ciphertext 
 still replay-rejected, while the retained semantic fragment may be retransmitted under
 a fresh packet number. A transport-delivery ACK never by itself means that gameplay
 executed, UI rendered, a baseline committed, or recipient-known state advanced.
+Admitted unreliable data remains authenticated and replay-protected but does not
+elicit an ACK: it owns no sender flight record for that ACK to retire. Any future
+unreliable path/RTT sampling must be explicit rather than an accidental ACK-everything
+side effect.
 
 Compact encoding is earned through measured traffic: field masks, deltas,
 quantized transforms, recipient-relative short identity, and shared cohort
@@ -1645,6 +1653,60 @@ reintroducing warmed allocation. Any further CPU specialization must first
 profile the remaining per-peer protocol/application path. Sharding and workers
 remain unearned: one bounded owner thread has not yet been shown to be the
 limiting representation after those simpler steps.
+
+N0.10.2 separates memory viability from CPU attribution. Per-connection
+reservation specialization remains required because the general profile's
+256-connection two-peer estimate is about 3.39 GB, regardless of whether smaller
+arrays improve tick time. A V3-only causal suite now holds 256 secure connections
+constant and runs established-idle, 10/35/100% active, Control-only, Input-only,
+Input+Owner, and full cases in forward/reverse order with opt-in coarse phase
+timing.
+
+The first suite rejects idle housekeeping as the dominant CPU explanation:
+idle mean is ~0.645 ms versus ~4.816 ms full. Forward and return protocol pumps
+account for over 99% of the full timed work, while adding owner publication
+accounts for roughly 75% of the active-work increment above idle. The maintained
+linear active-population curve still shows no pairwise semantic pathology.
+
+It also identifies the next isolated refinement. Input+Owner emitted 48,640
+unreliable Data packets, zero reliable fragments, and 48,640 transport ACKs.
+Security replay knowledge and reliable delivery knowledge remain distinct;
+unreliable traffic must still advance authenticated replay state, but an ACK
+which cannot retire reliable sender state is not automatically earned. Suppress
+that ACK emission in one narrow experiment, preserve all replay/backpressure/
+reliable gates, then rerun full/Input/Input+Owner before considering generic
+packet batching, crypto micro-optimization, or workers.
+
+That isolated N0.10.2b experiment is now accepted. Only admitted reliable Data
+is ACK-eliciting; authenticated unreliable Data continues to advance replay,
+sequencing, semantic admission, and delivery evidence without generating a
+transport ACK which cannot retire sender flight state. Permanent tests prove
+pure-unreliable zero-ACK/zero-RTT behavior, mixed reliable/unreliable completion,
+and the existing reliable loss/backpressure/retransmission contracts.
+
+At 256 connections, paired Input p95 falls from 1.867 to 1.247 ms,
+Input+Owner from 5.100 to 2.790 ms, and Full from 4.975 to 2.868 ms. Input and
+Input+Owner ACK counts fall from 10,240 and 48,640 to zero; Full falls from
+about 48,806 ACKs to about 1,194.5, matching its reliable-fragment count. Wire
+bytes fall about 39-44%, input-ack freshness slightly improves, and all
+forward/reverse canonical hashes match.
+
+The post-change V2/V3 matrix also matches canonical state in all eight runs.
+V3 p95 is 0.374-0.389, 0.725-0.741, 1.437-1.459, and 2.809-2.813 ms at
+32/64/128/256 bots, with a nearly linear 10.6-11.2 microsecond marginal cost per
+client. V2 remains about 6.8-7.3 microseconds per client, so V3 is now roughly
+1.4-1.6x rather than roughly 2.8-3.0x this control. The simple 4 ms marker moves
+to approximately 368 bots. Immutable evidence:
+
+- [`network-v3-peer-cost-unreliable-ack-suppression-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-peer-cost-unreliable-ack-suppression-2026-08-15.json)
+- [`network-v2-v3-bot-n0102-unreliable-ack-suppression-2026-08-15.json`](../../_Benchmarks/Baselines/network-v2-v3-bot-n0102-unreliable-ack-suppression-2026-08-15.json)
+
+This closes unreliable ACK suppression as a demonstrated large recovery. The
+remaining full workload still averages only about 6.2% datagram fill and one
+send syscall per datagram, so bounded multi-message secure datagram assembly is
+the next earned CPU/wire experiment. Per-connection reservation specialization
+remains a separate memory-viability requirement. Batching must be measured before
+workers, sharding, compression, or protocol-format micro-tuning are admitted.
 
 Protected profiles:
 

@@ -6,12 +6,87 @@ using UltraSim.Network.Comparison;
 
 AdapterOptions options = AdapterOptions.Parse(args);
 NetworkBotScenario scenario = options.CreateScenario();
-using var harness = new V3OwnerMovementHarness(scenario, options.Topology);
+if (options.DiagnosticSuite)
+{
+    RunDiagnosticSuite(options, scenario);
+    return;
+}
+using var harness = new V3OwnerMovementHarness(
+    scenario, options.Topology,
+    new V3HarnessProfile(options.Layer, options.ActiveRatio, options.DeepTiming));
 NetworkBotStageResult result = harness.Run();
 NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
 Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
     $"ping p95 {result.PingMilliseconds.P95:F3} ms, reserved {result.ReservedNetworkBytes / 1048576d:F2} MiB");
 Console.WriteLine(Path.GetFullPath(options.Output));
+
+static void RunDiagnosticSuite(AdapterOptions options, NetworkBotScenario scenario)
+{
+    V3PeerCostCase[] cases =
+    [
+        new("idle", V3DiagnosticLayer.Idle, 0),
+        new("full-active-10", V3DiagnosticLayer.Full, 0.10),
+        new("full-active-35", V3DiagnosticLayer.Full, 0.35),
+        new("control", V3DiagnosticLayer.Control, 1),
+        new("input", V3DiagnosticLayer.Input, 1),
+        new("input-owner", V3DiagnosticLayer.InputOwner, 1),
+        new("full", V3DiagnosticLayer.Full, 1),
+    ];
+    var observations = new List<V3PeerCostObservation>(cases.Length * 2);
+    for (int pass = 0; pass < 2; pass++)
+    {
+        IEnumerable<V3PeerCostCase> ordered = pass == 0 ? cases : cases.Reverse();
+        int order = 0;
+        foreach (V3PeerCostCase item in ordered)
+        {
+            using var diagnostic = new V3OwnerMovementHarness(
+                scenario, options.Topology,
+                new V3HarnessProfile(item.Layer, item.ActiveRatio, DeepTiming: true));
+            NetworkBotStageResult measured = diagnostic.Run();
+            observations.Add(new(pass == 0 ? "forward" : "reverse", order++, item, measured));
+            Console.WriteLine($"DIAGNOSTIC {item.Id}/{(pass == 0 ? "forward" : "reverse")}: " +
+                $"tick p95 {measured.TickMilliseconds.P95:F3} ms, " +
+                $"server p95 {measured.ServerPumpMilliseconds.P95:F3} ms, " +
+                $"CPU {measured.ProcessCpuCoreUtilization:F3} cores");
+        }
+    }
+    V3PeerCostSummary[] summaries = cases.Select(item =>
+    {
+        V3PeerCostObservation[] values = observations.Where(value => value.Case == item).ToArray();
+        string canonicalHash = values[0].Result.CanonicalOwnerStateHash;
+        bool canonicalMatches = values.All(value =>
+            StringComparer.Ordinal.Equals(value.Result.CanonicalOwnerStateHash, canonicalHash));
+        if (!canonicalMatches)
+            throw new InvalidOperationException(
+                $"Diagnostic case '{item.Id}' produced different canonical results across case orders.");
+        return new V3PeerCostSummary(
+            item.Id,
+            item.Layer,
+            item.ActiveRatio,
+            checked((int)Math.Round(scenario.Clients * item.ActiveRatio,
+                MidpointRounding.AwayFromZero)),
+            values.Average(value => value.Result.TickMilliseconds.P95),
+            values.Min(value => value.Result.TickMilliseconds.P95),
+            values.Max(value => value.Result.TickMilliseconds.P95),
+            values.Average(value => value.Result.ServerPumpMilliseconds.P95),
+            values.Average(value => value.Result.ClientPumpMilliseconds.P95),
+            values.Average(value => value.Result.ProcessCpuCoreUtilization),
+            values.Average(value => (double)value.Result.WireBytesSent),
+            values.Average(value => (double)value.Result.SocketSendCalls),
+            canonicalMatches,
+            canonicalHash);
+    }).ToArray();
+    var report = new V3PeerCostDiagnosticReport(
+        "ultrasim-network-v3-peer-cost-attribution-v1",
+        DateTimeOffset.UtcNow,
+        scenario,
+        options.Topology,
+        "Two passes in forward/reverse case order. All cases retain the same established secure connection population and capacities; only admitted application work differs.",
+        summaries,
+        observations);
+    NetworkBotComparisonIo.Write(options.Output, report);
+    Console.WriteLine(Path.GetFullPath(options.Output));
+}
 
 internal sealed class V3OwnerMovementHarness : IDisposable
 {
@@ -57,6 +132,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly NetworkServerIdentity _identity;
     private readonly V3UdpTopology _topology;
     private readonly SharedUdpProtocolHost? _sharedHost;
+    private readonly V3HarnessProfile _profile;
+    private readonly int _activeBots;
     private readonly long _realtimeTickIntervalStopwatchTicks;
     private readonly List<double> _handshakeMilliseconds;
     private long _handshakeAttempts;
@@ -66,10 +143,16 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private ulong _handshakeWireBytes;
     private bool _disposed;
 
-    internal V3OwnerMovementHarness(NetworkBotScenario scenario, V3UdpTopology topology)
+    internal V3OwnerMovementHarness(
+        NetworkBotScenario scenario,
+        V3UdpTopology topology,
+        V3HarnessProfile profile)
     {
         _scenario = scenario.Validate();
         _topology = topology;
+        _profile = profile.Validate();
+        _activeBots = checked((int)Math.Round(
+            scenario.Clients * profile.ActiveRatio, MidpointRounding.AwayFromZero));
         _realtimeTickIntervalStopwatchTicks = checked((long)Math.Round(
             Stopwatch.Frequency / (double)_scenario.TickHz,
             MidpointRounding.AwayFromZero));
@@ -125,10 +208,41 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             PumpAll(1);
             DrainAll();
         }
+        if (_profile.DeepTiming) WarmDiagnosticProfile();
+    }
+
+    private void WarmDiagnosticProfile()
+    {
+        int inputInterval = _scenario.TickHz / _scenario.InputHz;
+        for (int tick = 0; tick < 8; tick++)
+        {
+            for (int index = 0; index < _activeBots; index++)
+            {
+                if (_profile.SendsInput && tick % inputInterval == index % inputInterval)
+                    _ = _bots[index].TryQueueInput(tick);
+                if (_profile.SendsControl && tick % _scenario.TickHz == index % _scenario.TickHz)
+                    _ = _bots[index].TryQueuePing();
+            }
+            for (int index = 0; index < _bots.Length; index++)
+                _bots[index].ProcessServer(_scenario.TickHz);
+            for (int index = 0; index < _bots.Length; index++)
+                _bots[index].AdvanceAuthority(_scenario.TickHz);
+            for (int index = 0; index < _activeBots && _profile.SendsOwner; index++)
+                _ = _bots[index].QueueOwnerState(checked((ulong)tick + 1));
+            PumpAll(2);
+            for (int index = 0; index < _bots.Length; index++)
+                _ = _bots[index].ProcessClient([], []);
+            PumpAll(1);
+        }
+        for (int index = 0; index < _bots.Length; index++)
+            _bots[index].ResetMeasurementHistory();
     }
 
     internal NetworkBotStageResult Run()
     {
+        DiagnosticCounterBaseline diagnosticBaseline = _profile.DeepTiming
+            ? CaptureDiagnosticCounterBaseline()
+            : default;
         using Process process = Process.GetCurrentProcess();
         var tickMs = new List<double>(_scenario.StageTicks);
         var serverMs = new List<double>(_scenario.StageTicks);
@@ -140,6 +254,13 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         var independentOccupancy = new List<int>(_scenario.StageTicks);
         var receivedOccupancy = new List<int>(_scenario.StageTicks);
         var inFlightOccupancy = new List<int>(_scenario.StageTicks);
+        List<double>? intentQueueMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? serverIngressMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? authorityMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? ownerQueueMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? forwardPumpMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? clientApplyMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
+        List<double>? returnPumpMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         long logicalInputs = 0;
         long ownerApplied = 0;
         long ownerMessagesQueued = 0;
@@ -173,30 +294,45 @@ internal sealed class V3OwnerMovementHarness : IDisposable
 
         for (int tick = 0; tick < _scenario.StageTicks; tick++)
         {
-            for (int index = 0; index < _bots.Length; index++)
+            long phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
+            for (int index = 0; index < _activeBots; index++)
             {
                 Bot bot = _bots[index];
-                if (tick % inputInterval == index % inputInterval && bot.TryQueueInput(tick))
+                if (_profile.SendsInput && tick % inputInterval == index % inputInterval &&
+                    bot.TryQueueInput(tick))
                     logicalInputs++;
-                if (tick % _scenario.TickHz == index % _scenario.TickHz)
+                if (_profile.SendsControl && tick % _scenario.TickHz == index % _scenario.TickHz)
                     bot.TryQueuePing();
             }
+            RecordPhase(intentQueueMs, phaseStarted);
 
             long tickStart = Stopwatch.GetTimestamp();
             long serverStart = tickStart;
+            phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
             for (int index = 0; index < _bots.Length; index++)
                 _bots[index].ProcessServer(_scenario.TickHz);
+            RecordPhase(serverIngressMs, phaseStarted);
+            phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
             for (int index = 0; index < _bots.Length; index++)
                 _bots[index].AdvanceAuthority(_scenario.TickHz);
-            for (int index = 0; index < _bots.Length; index++)
+            RecordPhase(authorityMs, phaseStarted);
+            phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
+            for (int index = 0; index < _activeBots && _profile.SendsOwner; index++)
                 if (_bots[index].QueueOwnerState(checked((ulong)tick + 1)))
                     ownerMessagesQueued++;
+            RecordPhase(ownerQueueMs, phaseStarted);
+            phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
             PumpAll(2);
+            RecordPhase(forwardPumpMs, phaseStarted);
             long serverEnd = Stopwatch.GetTimestamp();
             long clientStart = Stopwatch.GetTimestamp();
+            phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
             for (int index = 0; index < _bots.Length; index++)
                 ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
+            RecordPhase(clientApplyMs, phaseStarted);
+            phaseStarted = _profile.DeepTiming ? Stopwatch.GetTimestamp() : 0;
             PumpAll(1);
+            RecordPhase(returnPumpMs, phaseStarted);
             long end = Stopwatch.GetTimestamp();
 
             double elapsed = Stopwatch.GetElapsedTime(tickStart, end).TotalMilliseconds;
@@ -246,8 +382,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 _bots[index].ProcessServer(_scenario.TickHz);
             for (int index = 0; index < _bots.Length; index++)
                 _bots[index].AdvanceAuthority(_scenario.TickHz);
-            for (int index = 0; index < _bots.Length; index++)
-                _bots[index].QueueOwnerState(checked((ulong)_scenario.StageTicks + (ulong)settle + 1));
+            for (int index = 0; index < _activeBots && _profile.SendsOwner; index++)
+                _bots[index].QueueOwnerState(
+                    checked((ulong)_scenario.StageTicks + (ulong)settle + 1));
             PumpAll(2);
             for (int index = 0; index < _bots.Length; index++)
                 ownerApplied += _bots[index].ProcessClient(pingMs, ackMs);
@@ -341,6 +478,25 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             maximumSentDatagramBytes = Math.Max(
                 maximumSentDatagramBytes, sharedSnapshot.Listener.MaximumSentDatagramBytes);
         }
+        if (_profile.DeepTiming)
+        {
+            datagrams -= diagnosticBaseline.Datagrams;
+            bytes -= diagnosticBaseline.Bytes;
+            retransmissions -= diagnosticBaseline.Retransmissions;
+            retransmittedWireBytes -= diagnosticBaseline.RetransmittedWireBytes;
+            dataPacketsSent -= diagnosticBaseline.DataPacketsSent;
+            acknowledgementPacketsSent -= diagnosticBaseline.AcknowledgementPacketsSent;
+            keepAlivePacketsSent -= diagnosticBaseline.KeepAlivePacketsSent;
+            encryptedPlaintextBytes -= diagnosticBaseline.EncryptedPlaintextBytes;
+            decryptedPlaintextBytes -= diagnosticBaseline.DecryptedPlaintextBytes;
+            reliableFragmentsSent -= diagnosticBaseline.ReliableFragmentsSent;
+            authenticationFailures -= diagnosticBaseline.AuthenticationFailures;
+            replayRejections -= diagnosticBaseline.ReplayRejections;
+            socketSendCalls -= diagnosticBaseline.SocketSendCalls;
+            socketReceivePollCalls -= diagnosticBaseline.SocketReceivePollCalls;
+            socketReceiveCalls -= diagnosticBaseline.SocketReceiveCalls;
+            socketWouldBlockEvents -= diagnosticBaseline.SocketWouldBlockEvents;
+        }
         peakManagedHeap = Math.Max(peakManagedHeap, GC.GetTotalMemory(false));
         process.Refresh();
         peakWorkingSet = Math.Max(peakWorkingSet, process.WorkingSet64);
@@ -359,16 +515,23 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             _bots.Select(bot => bot.PingAcknowledgements.P95).ToArray());
         double observationSeconds =
             (_scenario.StageTicks + _scenario.SettleTicks) / (double)_scenario.TickHz;
-        ulong steadyWireBytes = bytes >= _handshakeWireBytes ? bytes - _handshakeWireBytes : 0;
-        return new NetworkBotStageResult
+        ulong steadyWireBytes = _profile.DeepTiming
+            ? bytes
+            : bytes >= _handshakeWireBytes ? bytes - _handshakeWireBytes : 0;
+        var result = new NetworkBotStageResult
         {
-            Generation = _topology == V3UdpTopology.SharedListener
+            Generation = (_topology == V3UdpTopology.SharedListener
                 ? "V3-shared-listener"
-                : "V3-connected-pairs",
+                : "V3-connected-pairs") +
+                (_profile.IsComparisonDefault ? string.Empty : $"-{_profile.Layer}-{_activeBots}"),
             Scenario = _scenario,
             EvidenceProfile = new(
-                "network-bot-owner-movement-v1",
-                "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic.",
+                _profile.IsComparisonDefault
+                    ? "network-bot-owner-movement-v1"
+                    : "network-v3-peer-cost-diagnostic-v1",
+                _profile.IsComparisonDefault
+                    ? "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic."
+                    : _profile.DescribeSemantics(),
                 "workload bounds fixed; implementation reservations reported separately",
                 $"fixed {_scenario.TickHz} Hz; {_scenario.InputHz} Hz phased input; realtime",
                 _topology == V3UdpTopology.SharedListener
@@ -386,10 +549,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             PerClientPingP95Milliseconds = perClientPingP95,
             HandshakeMilliseconds = NetworkMetricSummary.From(_handshakeMilliseconds),
             MetricCoverage = new(
-                OwnerInputFreshness: true,
+                OwnerInputFreshness: _profile.SendsInput && _profile.SendsOwner,
                 WorldStateFreshnessByTier: false,
                 ApplicationEventLatency: false,
-                PerClientFairness: true,
+                PerClientFairness: _profile.SendsControl ||
+                    (_profile.SendsInput && _profile.SendsOwner),
                 TickDeadlineCompliance: true,
                 BoundedOccupancy: true,
                 WireBytes: true,
@@ -401,7 +565,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 Handshake: true,
                 InterestAmplification: false,
                 BaselineRecovery: false,
-                DeepPhaseTiming: false),
+                DeepPhaseTiming: _profile.DeepTiming),
             TickDeadlineMisses = deadlineMisses,
             LongestDeadlineMissStreak = longestDeadlineStreak,
             LogicalInputs = logicalInputs,
@@ -454,7 +618,9 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             MaximumSentDatagramBytes = maximumSentDatagramBytes,
             CanonicalOwnerStateHash = NetworkBotCanonicalState.ComputeHash(canonicalStates),
             CanonicalOwnerStates = canonicalStates,
-            CanonicalValidation = "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input.",
+            CanonicalValidation = _profile.IsComparisonDefault
+                ? "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input."
+                : "V3-only causal diagnostic; canonical state is retained for repeatability but no V2 semantic ratio is claimed.",
             Diagnostics = new Dictionary<string, double>
             {
                 ["reserved_bytes_per_client"] = reserved / (double)_bots.Length,
@@ -518,8 +684,39 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["shared_listener_unknown_path_datagrams"] = sharedSnapshot.Listener.UnknownPathDatagrams,
                 ["shared_listener_capacity_drops"] = sharedSnapshot.Listener.CapacityDrops,
                 ["shared_listener_reserved_bytes"] = sharedSnapshot.Listener.ReservedBytes,
+                ["diagnostic_active_clients"] = _activeBots,
+                ["diagnostic_active_ratio"] = _profile.ActiveRatio,
             },
         };
+        if (_profile.DeepTiming)
+        {
+            var diagnostics = (Dictionary<string, double>)result.Diagnostics;
+            AddPhaseDiagnostics(diagnostics, "client_intent_queue", intentQueueMs!);
+            AddPhaseDiagnostics(diagnostics, "server_application_ingress", serverIngressMs!);
+            AddPhaseDiagnostics(diagnostics, "authority_advance", authorityMs!);
+            AddPhaseDiagnostics(diagnostics, "owner_state_queue", ownerQueueMs!);
+            AddPhaseDiagnostics(diagnostics, "forward_protocol_pump", forwardPumpMs!);
+            AddPhaseDiagnostics(diagnostics, "client_application_apply", clientApplyMs!);
+            AddPhaseDiagnostics(diagnostics, "return_protocol_pump", returnPumpMs!);
+        }
+        return result;
+    }
+
+    private static void RecordPhase(List<double>? values, long started)
+    {
+        if (values is not null)
+            values.Add(Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+    }
+
+    private static void AddPhaseDiagnostics(
+        Dictionary<string, double> diagnostics,
+        string key,
+        IReadOnlyList<double> values)
+    {
+        NetworkMetricSummary summary = NetworkMetricSummary.From(values);
+        diagnostics[key + "_mean_ms"] = summary.Mean;
+        diagnostics[key + "_p95_ms"] = summary.P95;
+        diagnostics[key + "_max_ms"] = summary.Max;
     }
 
     private void PumpAll(int count)
@@ -530,6 +727,19 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             else
                 for (int index = 0; index < _bots.Length; index++) _bots[index].PairSession!.Pump();
         }
+    }
+
+    private DiagnosticCounterBaseline CaptureDiagnosticCounterBaseline()
+    {
+        DiagnosticCounterBaseline result = default;
+        for (int index = 0; index < _bots.Length; index++)
+        {
+            BenchmarkTransportSnapshot snapshot = _bots[index].GetTransportSnapshot();
+            result = result.Add(snapshot);
+        }
+        if (_sharedHost is not null)
+            result = result.Add(_sharedHost.GetSnapshot().Listener);
+        return result;
     }
 
     private void WaitForRealtimeTick(ref long nextTickDeadline)
@@ -676,6 +886,16 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         internal NetworkMetricSummary InputAcknowledgements => NetworkMetricSummary.From(_inputAcknowledgements);
         internal NetworkMetricSummary PingAcknowledgements => NetworkMetricSummary.From(_pingAcknowledgements);
 
+        internal void ResetMeasurementHistory()
+        {
+            _inputAcknowledgements.Clear();
+            _pingAcknowledgements.Clear();
+            Array.Clear(_inputSentAt);
+            Array.Clear(_inputSentSequence);
+            Array.Clear(_pingSentAt);
+            Array.Clear(_pingSentSequence);
+        }
+
         internal bool TryQueueInput(int tick)
         {
             ushort sequence = _nextInput;
@@ -821,6 +1041,77 @@ internal enum V3UdpTopology : byte
     SharedListener = 1,
 }
 
+internal enum V3DiagnosticLayer : byte
+{
+    Idle = 0,
+    Control = 1,
+    Input = 2,
+    InputOwner = 3,
+    Full = 4,
+}
+
+internal readonly record struct V3HarnessProfile(
+    V3DiagnosticLayer Layer,
+    double ActiveRatio,
+    bool DeepTiming)
+{
+    internal bool SendsControl => Layer is V3DiagnosticLayer.Control or V3DiagnosticLayer.Full;
+    internal bool SendsInput => Layer is V3DiagnosticLayer.Input or
+        V3DiagnosticLayer.InputOwner or V3DiagnosticLayer.Full;
+    internal bool SendsOwner => Layer is V3DiagnosticLayer.InputOwner or V3DiagnosticLayer.Full;
+    internal bool IsComparisonDefault => Layer == V3DiagnosticLayer.Full &&
+        ActiveRatio == 1 && !DeepTiming;
+
+    internal V3HarnessProfile Validate()
+    {
+        if (!Enum.IsDefined(Layer)) throw new ArgumentOutOfRangeException(nameof(Layer));
+        if (!double.IsFinite(ActiveRatio) || ActiveRatio is < 0 or > 1)
+            throw new ArgumentOutOfRangeException(nameof(ActiveRatio));
+        return this;
+    }
+
+    internal string DescribeSemantics() =>
+        $"V3 causal peer-cost profile: layer={Layer}; active_ratio={ActiveRatio:R}; " +
+        "all connections remain established and all peer pumps retain the same bounds. " +
+        "No cross-generation semantic ratio is claimed.";
+}
+
+internal sealed record V3PeerCostCase(
+    string Id,
+    V3DiagnosticLayer Layer,
+    double ActiveRatio);
+
+internal sealed record V3PeerCostObservation(
+    string Pass,
+    int Order,
+    V3PeerCostCase Case,
+    NetworkBotStageResult Result);
+
+internal sealed record V3PeerCostSummary(
+    string Id,
+    V3DiagnosticLayer Layer,
+    double ActiveRatio,
+    int ActiveClients,
+    double TickP95MeanMilliseconds,
+    double TickP95MinimumMilliseconds,
+    double TickP95MaximumMilliseconds,
+    double ServerP95MeanMilliseconds,
+    double ClientP95MeanMilliseconds,
+    double ProcessCpuCoreUtilizationMean,
+    double WireBytesMean,
+    double SocketSendCallsMean,
+    bool CanonicalStateMatchesAcrossPasses,
+    string CanonicalStateHash);
+
+internal sealed record V3PeerCostDiagnosticReport(
+    string ProtocolVersion,
+    DateTimeOffset TimestampUtc,
+    NetworkBotScenario Scenario,
+    V3UdpTopology Topology,
+    string Method,
+    IReadOnlyList<V3PeerCostSummary> Summaries,
+    IReadOnlyList<V3PeerCostObservation> Observations);
+
 internal readonly record struct BenchmarkTransportSnapshot(
     NetworkProtocolSnapshot Client,
     NetworkProtocolSnapshot Server,
@@ -835,6 +1126,66 @@ internal readonly record struct OccupancyTick(
     int InFlight,
     double MaximumRatio);
 
+internal readonly record struct DiagnosticCounterBaseline(
+    ulong Datagrams,
+    ulong Bytes,
+    ulong Retransmissions,
+    ulong RetransmittedWireBytes,
+    ulong DataPacketsSent,
+    ulong AcknowledgementPacketsSent,
+    ulong KeepAlivePacketsSent,
+    ulong EncryptedPlaintextBytes,
+    ulong DecryptedPlaintextBytes,
+    ulong ReliableFragmentsSent,
+    ulong AuthenticationFailures,
+    ulong ReplayRejections,
+    ulong SocketSendCalls,
+    ulong SocketReceivePollCalls,
+    ulong SocketReceiveCalls,
+    ulong SocketWouldBlockEvents)
+{
+    internal DiagnosticCounterBaseline Add(BenchmarkTransportSnapshot value) => this with
+    {
+        Datagrams = checked(Datagrams + value.ClientDatagrams.Sent + value.ServerDatagrams.Sent),
+        Bytes = checked(Bytes + value.ClientDatagrams.SentBytes + value.ServerDatagrams.SentBytes),
+        Retransmissions = checked(Retransmissions + value.Client.ReliableRetransmissions +
+            value.Server.ReliableRetransmissions),
+        RetransmittedWireBytes = checked(RetransmittedWireBytes +
+            value.Client.ReliableRetransmittedWireBytes + value.Server.ReliableRetransmittedWireBytes),
+        DataPacketsSent = checked(DataPacketsSent + value.Client.DataPacketsSent + value.Server.DataPacketsSent),
+        AcknowledgementPacketsSent = checked(AcknowledgementPacketsSent +
+            value.Client.AcknowledgementPacketsSent + value.Server.AcknowledgementPacketsSent),
+        KeepAlivePacketsSent = checked(KeepAlivePacketsSent + value.Client.KeepAlivePacketsSent +
+            value.Server.KeepAlivePacketsSent),
+        EncryptedPlaintextBytes = checked(EncryptedPlaintextBytes + value.Client.EncryptedPlaintextBytes +
+            value.Server.EncryptedPlaintextBytes),
+        DecryptedPlaintextBytes = checked(DecryptedPlaintextBytes + value.Client.DecryptedPlaintextBytes +
+            value.Server.DecryptedPlaintextBytes),
+        ReliableFragmentsSent = checked(ReliableFragmentsSent + value.Client.ReliableFragmentsSent +
+            value.Server.ReliableFragmentsSent),
+        AuthenticationFailures = checked(AuthenticationFailures + value.Client.AuthenticationFailures +
+            value.Server.AuthenticationFailures),
+        ReplayRejections = checked(ReplayRejections + value.Client.ReplayRejections +
+            value.Server.ReplayRejections),
+        SocketSendCalls = checked(SocketSendCalls + value.ClientDatagrams.SendCalls +
+            value.ServerDatagrams.SendCalls),
+        SocketReceivePollCalls = checked(SocketReceivePollCalls + value.ClientDatagrams.ReceivePollCalls +
+            value.ServerDatagrams.ReceivePollCalls),
+        SocketReceiveCalls = checked(SocketReceiveCalls + value.ClientDatagrams.ReceiveCalls +
+            value.ServerDatagrams.ReceiveCalls),
+        SocketWouldBlockEvents = checked(SocketWouldBlockEvents + value.ClientDatagrams.WouldBlockEvents +
+            value.ServerDatagrams.WouldBlockEvents),
+    };
+
+    internal DiagnosticCounterBaseline Add(SharedUdpListenerSnapshot value) => this with
+    {
+        SocketSendCalls = checked(SocketSendCalls + value.SendCalls),
+        SocketReceivePollCalls = checked(SocketReceivePollCalls + value.ReceivePollCalls),
+        SocketReceiveCalls = checked(SocketReceiveCalls + value.ReceiveCalls),
+        SocketWouldBlockEvents = checked(SocketWouldBlockEvents + value.WouldBlockEvents),
+    };
+}
+
 internal sealed record AdapterOptions(
     string Output,
     string Scenario,
@@ -844,7 +1195,11 @@ internal sealed record AdapterOptions(
     int StageTicks,
     int SettleTicks,
     double SpawnSpacing,
-    V3UdpTopology Topology)
+    V3UdpTopology Topology,
+    double ActiveRatio,
+    V3DiagnosticLayer Layer,
+    bool DeepTiming,
+    bool DiagnosticSuite)
 {
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
@@ -855,7 +1210,11 @@ internal sealed record AdapterOptions(
         ParseInt(Get(args, "--stage-ticks="), 120),
         ParseInt(Get(args, "--settle-ticks="), 30),
         ParseDouble(Get(args, "--spawn-spacing="), 12),
-        ParseTopology(Get(args, "--topology=")));
+        ParseTopology(Get(args, "--topology=")),
+        ParseDouble(Get(args, "--active-ratio="), 1),
+        ParseLayer(Get(args, "--diagnostic-layer=")),
+        Has(args, "--deep-timing"),
+        Has(args, "--diagnostic-suite"));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
@@ -865,6 +1224,8 @@ internal sealed record AdapterOptions(
 
     private static string? Get(string[] args, string prefix) =>
         args.FirstOrDefault(value => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))?[prefix.Length..];
+    private static bool Has(string[] args, string value) =>
+        args.Any(candidate => StringComparer.OrdinalIgnoreCase.Equals(candidate, value));
     private static int ParseInt(string? value, int fallback) =>
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback;
     private static double ParseDouble(string? value, double fallback) =>
@@ -874,5 +1235,14 @@ internal sealed record AdapterOptions(
         null or "connected-pairs" => V3UdpTopology.ConnectedPairs,
         "shared-listener" => V3UdpTopology.SharedListener,
         _ => throw new ArgumentException($"Unsupported V3 UDP topology '{value}'."),
+    };
+    private static V3DiagnosticLayer ParseLayer(string? value) => value?.ToLowerInvariant() switch
+    {
+        null or "full" => V3DiagnosticLayer.Full,
+        "idle" => V3DiagnosticLayer.Idle,
+        "control" => V3DiagnosticLayer.Control,
+        "input" => V3DiagnosticLayer.Input,
+        "input-owner" => V3DiagnosticLayer.InputOwner,
+        _ => throw new ArgumentException($"Unsupported diagnostic layer '{value}'."),
     };
 }
