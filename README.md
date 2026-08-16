@@ -17,7 +17,10 @@ accepts the hardened integrated OfflineDirect/secure-loopback/UDP/listen-host
 vertical, including multi-consumer retained application Events, reliable
 baseline cancellation, exact WorldState parity, and durable generation replacement.
 N0.10 has begun with an isolated V2/V3 owner-movement bot comparison and bounded
-pressure/memory telemetry; shared-listener/shard specialization remains evidence-gated.
+pressure/memory telemetry. Its first measured specialization replaces per-session
+server sockets with one bounded shared UDP listener; it modestly improves the V3
+CPU slope while proving that per-peer work, not socket count alone, remains the
+dominant optimization target.
 
 ## Design
 

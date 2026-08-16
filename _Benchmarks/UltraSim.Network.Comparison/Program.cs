@@ -129,6 +129,7 @@ AdapterProcessObservation RunAdapter(string project, string output, bool v2Adapt
     Add($"--stage-ticks={options.StageTicks}");
     Add($"--settle-ticks={options.SettleTicks}");
     Add($"--spawn-spacing={options.SpawnSpacing.ToString("R", CultureInfo.InvariantCulture)}");
+    if (!v2Adapter) Add($"--topology={options.V3Topology}");
     if (v2Adapter && options.NoBuildV2) Add("--no-build-v2");
 
     Console.WriteLine($"Running {Path.GetFileNameWithoutExtension(project)} ({clients})...");
@@ -192,7 +193,7 @@ static string BuildRunMarkdown(NetworkBotJoinedReport report)
     text.AppendLine($"- Classification: **{report.Decision.Classification}**");
     text.AppendLine($"- Canonical owner state: **{(report.CanonicalStateMatches ? "MATCH" : "MISMATCH")}**");
     text.AppendLine($"- Reason: {report.Decision.Reason}").AppendLine();
-    text.AppendLine("The ratio is provisional because V2 owns one shared server UDP socket while current V3 owns one connected client/server socket pair per bot. Position remains diagnostic because the generations integrate current input differently. Internal capacities and reservations are reported, not normalized away.").AppendLine();
+    text.AppendLine($"The ratio is provisional because V2 and V3 use the compared transport topologies recorded in their evidence profiles (V3: {v3.EvidenceProfile.ExecutionTopology}). Position remains diagnostic because the generations integrate current input differently. Internal capacities and reservations are reported, not normalized away.").AppendLine();
     text.AppendLine("| Metric | V2 | V3 | V3/V2 |");
     text.AppendLine("| --- | ---: | ---: | ---: |");
     Row("ready clients", v2.ReadyClients, v3.ReadyClients, null);
@@ -245,7 +246,10 @@ static string BuildMatrixMarkdown(NetworkBotMatrixReport report)
             .Append(" | ").Append(v3.PingMilliseconds.P95.ToString("0.###", CultureInfo.InvariantCulture))
             .Append(" | ").Append(run.CanonicalStateMatches ? "MATCH" : "MISMATCH").AppendLine(" |");
     }
-    text.AppendLine().AppendLine("All ratios are **provisional topology evidence**. V2 uses one shared server socket; V3 N0.9 uses one connected UDP pair per bot. The matrix is an N0.10 input, not a direct production-topology verdict.");
+    string v3Topologies = string.Join("; ", report.Runs
+        .Select(run => run.V3.Result.EvidenceProfile.ExecutionTopology)
+        .Distinct(StringComparer.Ordinal));
+    text.AppendLine().AppendLine($"All ratios are **provisional topology evidence**. V2 uses one shared server socket. V3 evidence: {v3Topologies}. The matrix is an N0.10 input, not a direct production-topology verdict.");
     return text.ToString();
 }
 
@@ -276,7 +280,8 @@ internal sealed record RunnerOptions(
     bool V3First,
     bool UseExisting,
     bool NoBuild,
-    bool NoBuildV2)
+    bool NoBuildV2,
+    string V3Topology)
 {
     internal static RunnerOptions Parse(string[] args)
     {
@@ -295,7 +300,8 @@ internal sealed record RunnerOptions(
             Has(args, "--v3-first"),
             Has(args, "--use-existing"),
             Has(args, "--no-build"),
-            Has(args, "--no-build-v2"));
+            Has(args, "--no-build-v2"),
+            ParseV3Topology(Get(args, "--v3-topology=")));
     }
 
     private static IReadOnlyList<int> ParseStages(string value)
@@ -316,6 +322,12 @@ internal sealed record RunnerOptions(
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback;
     private static double ParseDouble(string? value, double fallback) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback;
+    private static string ParseV3Topology(string? value) => value?.ToLowerInvariant() switch
+    {
+        null or "connected-pairs" => "connected-pairs",
+        "shared-listener" => "shared-listener",
+        _ => throw new ArgumentException($"Unsupported V3 UDP topology '{value}'."),
+    };
 }
 
 internal readonly record struct AdapterProcessObservation(

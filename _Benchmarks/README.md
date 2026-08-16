@@ -33,7 +33,7 @@ when those systems exist.
 | `UltraSim.ECS.ExtremeSphere*` | CPU and Godot MultiMesh extreme-scale stress. |
 | `UltraSim.ECS.BitmapExperiment*` | Retained experimental storage oracle; not production ECS. |
 | `UltraSim.Network.ComparisonCore` | N0 contract-aware evidence admission; refuses relative headlines for mismatched profiles. |
-| `UltraSim.Network.Comparison` | N0.10 isolated V2/V3 bot matrix coordinator; both process orders and provisional-topology reports. |
+| `UltraSim.Network.Comparison` | N0.10 isolated V2/V3 bot matrix coordinator; both process orders and selectable connected-pairs/shared-listener V3 topology. |
 | `UltraSim.Network.V2ComparisonAdapter` | Frozen V2 bot-harness child-process adapter and normalized owner-state evidence. |
 | `UltraSim.Network.V3ComparisonAdapter` | Current V3 connected-UDP bot adapter with bounded pressure, memory, wire, and semantic-latency telemetry. |
 | `UltraSim.Game.ReplicationBenchmarks` | N0.1 100K canonical changed-state capture and OfflineDirect semantic apply. |

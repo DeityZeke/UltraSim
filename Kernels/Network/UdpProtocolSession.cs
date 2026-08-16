@@ -416,12 +416,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
         _maximumDatagramBytes = maximumDatagramBytes;
         LocalEndPoint = (IPEndPoint)socket.LocalEndPoint!;
         IPEndPoint remote = (IPEndPoint)socket.RemoteEndPoint!;
-        byte[] address = remote.Address.GetAddressBytes();
-        RemotePathBinding = new byte[checked(1 + address.Length + 2)];
-        RemotePathBinding[0] = checked((byte)address.Length);
-        address.CopyTo(RemotePathBinding, 1);
-        RemotePathBinding[^2] = checked((byte)(remote.Port >> 8));
-        RemotePathBinding[^1] = unchecked((byte)remote.Port);
+        RemotePathBinding = CreatePathBinding(remote);
     }
 
     internal IPEndPoint LocalEndPoint { get; }
@@ -451,6 +446,27 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
         {
             clientSocket?.Dispose();
             serverSocket?.Dispose();
+            throw;
+        }
+    }
+
+    internal static UdpDatagramEndpoint CreateConnectedLoopbackClient(
+        UdpProtocolLimits limits,
+        IPEndPoint serverEndPoint)
+    {
+        ArgumentNullException.ThrowIfNull(serverEndPoint);
+        Socket? socket = null;
+        try
+        {
+            socket = CreateSocket(limits);
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            socket.Connect(serverEndPoint);
+            socket.Blocking = false;
+            return new UdpDatagramEndpoint(socket, limits.MaximumDatagramBytes);
+        }
+        catch
+        {
+            socket?.Dispose();
             throw;
         }
     }
@@ -539,7 +555,7 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
         CryptographicOperations.ZeroMemory(RemotePathBinding);
     }
 
-    private static Socket CreateSocket(UdpProtocolLimits limits)
+    internal static Socket CreateSocket(UdpProtocolLimits limits)
     {
         var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
         {
@@ -547,6 +563,18 @@ internal sealed class UdpDatagramEndpoint : INetworkDatagramEndpoint, IDisposabl
             ReceiveBufferSize = limits.SocketReceiveBufferBytes,
         };
         return socket;
+    }
+
+    internal static byte[] CreatePathBinding(IPEndPoint remote)
+    {
+        ArgumentNullException.ThrowIfNull(remote);
+        byte[] address = remote.Address.GetAddressBytes();
+        byte[] binding = new byte[checked(1 + address.Length + 2)];
+        binding[0] = checked((byte)address.Length);
+        address.CopyTo(binding, 1);
+        binding[^2] = checked((byte)(remote.Port >> 8));
+        binding[^1] = unchecked((byte)remote.Port);
+        return binding;
     }
 
     private static bool IsTransient(SocketError error) => error is

@@ -23,10 +23,17 @@ V2
 V3 N0.9 topology
     one connected client/server UDP pair per bot
     two secure protocol peers per bot
+
+V3 N0.10.1 topology
+    one bounded shared server UDP listener
+    one client socket and two secure protocol peers per bot
 ```
 
 This answers how the existing machines handle equivalent observable work. It is
-not a direct prediction for the future N0.10 shared listener/shard topology.
+not a direct production-capacity forecast. The N0.10.1 topology deliberately
+changes only server-side byte movement and path demultiplexing; protocol,
+cryptography, application work, peer capacities, cadence, and semantic oracles
+remain unchanged.
 
 ## Current admitted workload
 
@@ -98,11 +105,13 @@ dotnet run --project _Benchmarks/UltraSim.Network.Comparison -c Release -- \
   --clients=32,64,128,256 \
   --stage-ticks=120 \
   --settle-ticks=30 \
+  --v3-topology=shared-listener \
   --output-dir=_Benchmarks/results/network-v2-v3-bot-local
 ```
 
 Development smoke runs may pass `--clients=4 --single-order`. `--use-existing`
 rejoins already-created adapter artifacts at their expected scale/order paths.
+`--v3-topology=connected-pairs` retains the N0.10 entry control.
 An immutable accepted baseline requires the full matrix, semantic tests, both
 orders, stable machine conditions, and review under the repository benchmark
 policy.
@@ -116,6 +125,46 @@ The first matrix also records a stable V3-only retransmission inflection:
 `2`, `3–5`, and `6–11` retransmissions at `32/64/128` bots becomes `426–430`
 at 256, while
 bounded queues remain below 50% occupied and capacity drops stay zero. N0.10's
-first shared-listener/session-pump experiment must determine whether removing
-serial per-pair traversal removes that timeout/ACK pressure before any
-congestion or capacity policy is retuned.
+first shared-listener/session-pump experiment was intended to determine whether
+removing serial per-pair traversal removed that timeout/ACK pressure before any
+congestion or capacity policy was retuned.
+
+## N0.10.1 shared-listener result
+
+The accepted follow-up is
+[`network-v2-v3-bot-n0101-shared-listener-2026-08-15.json`](Baselines/network-v2-v3-bot-n0101-shared-listener-2026-08-15.json).
+All eight scale/order runs again reached exact canonical owner state. The first
+implementation exposed an important aggregate-capacity error: a listener serving
+64 sessions inherited one connection's 16 KiB kernel socket-buffer request,
+causing unreported OS drops, hundreds of retransmissions, and state that could
+not converge inside the admitted settle window. The accepted implementation
+gives the shared socket the same total configured send/receive capacity that the
+replaced per-session server sockets collectively owned. This is topology
+consolidation, not a capacity increase. A permanent 64-session initial-flight
+test protects the aggregate burst contract.
+
+Paired tick-p95 observations were:
+
+| Bots | V2 | V3 connected-pairs entry | V3 shared listener |
+| ---: | ---: | ---: | ---: |
+| 32 | 0.244–0.257 ms | 0.718–0.800 ms | 0.691–0.705 ms |
+| 64 | 0.487–0.492 ms | 1.449–1.558 ms | 1.369–1.579 ms |
+| 128 | 0.946–1.136 ms | 2.750–2.818 ms | 2.692–2.977 ms |
+| 256 | 1.829–1.858 ms | 5.469–5.613 ms | 5.112–5.229 ms |
+
+The V3 least-squares slope across the paired midpoints improved from about
+21.2 to 19.8 microseconds per bot, roughly 6.9%. The simple 4 ms marker moves
+only from about 184 to 194 bots. At 256, retransmissions fell from 426–430 to
+210–331, ping p95 improved from about 20.6 to 20.2–20.4 ms, and
+wire/logical amplification moved from about 7.51x to 7.47–7.48x. These are useful
+but modest changes. The experiment therefore rejects the stronger hypothesis
+that per-session server sockets explain most of V3's roughly 3x CPU slope.
+
+The shared listener is retained because it establishes the correct bounded
+one-listener/many-session ownership model and removes redundant server sockets.
+It is not presented as a large CPU optimization. Its fixed per-session demux
+rings increase reported managed payload reservation at 256 from 5.04 MiB to
+6.51 MiB while configured aggregate socket-buffer bytes remain 16 MiB. The next
+specialization must preserve low warmed allocation while reducing per-connection
+reservation; further CPU work requires profiling the still-dominant per-peer
+protocol/application path rather than guessing at socket topology.

@@ -72,6 +72,12 @@ Useful current anchors can be located by their embedded workload or filename:
   server socket while V3 owns one connected UDP pair per bot. The observation
   includes stage-start cold work and is an N0.10 design input, not a frozen
   shared-listener performance target;
+- `network-v2-v3-bot-n0101-shared-listener-*` — the bounded one-server-listener
+  follow-up using the same bot script, capacities, protocol, and both process
+  orders. It preserves exact canonical parity and shows a modest ~6.9% V3 slope
+  improvement, reduced 256-client retransmission pressure, and higher managed
+  demux reservation. It supplements rather than replaces the connected-pairs
+  entry artifact;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

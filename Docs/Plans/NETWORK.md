@@ -1571,18 +1571,18 @@ inside the 16.667 ms tick budget and reached roughly 20.7 ms input-to-owner ACK
 p95 at 256, but cost stayed about 2.77–3.12x V2 under this topology. That is not a
 kernel or wire-format verdict: it is evidence that per-bot server sockets, peers,
 and pump traversal are now the dominant structural difference worth testing.
-The next scale specialization should therefore be a bounded shared server
-listener/session owner with the same protocol/application semantics, before
-sharding or micro-optimizing crypto/codec instructions.
+This admitted a narrow bounded shared-server-listener experiment with the same
+protocol/application semantics before sharding or micro-optimizing
+crypto/codec instructions.
 
 The occupancy evidence rules out simple capacity exhaustion: the admitted V3
 profile never crossed 50% queue occupancy, reached only one in-flight packet and
 two received messages, and recorded zero capacity drops. A different cliff does
 appear at 256: localhost retransmissions rise from 2, 3–5, and 6–11 at
 32/64/128 to 426–430
-at 256 in the two orders. Together with the ACK-latency increase, this points at
+at 256 in the two orders. Together with the ACK-latency increase, this identified
 serial per-session pump traversal and step-based timeout observation—not queue
-size—as the first behavior the shared listener/pump experiment must explain.
+size—as the first behavior the shared listener/pump experiment had to explain.
 
 Both generations admitted essentially the same normalized logical message
 bytes at each stage (about 1.026 MB at 256). V3 put about 7.51 wire bytes on the
@@ -1600,6 +1600,34 @@ production defaults. Frozen V2 requested about 2.01 GiB of socket buffers at
 that scale while observed process working set stayed near 130 MiB, demonstrating
 why configured requests, owned payload, and physical memory remain separate
 metrics.
+
+N0.10.1 now implements that bounded shared listener without changing protocol,
+cryptography, peer capacities, application adapters, cadence, or the canonical
+oracle. One server socket owns a fixed path table and fixed per-session datagram
+rings; the existing per-connection protocol peers remain independent. The
+listener requests the same aggregate socket-buffer capacity formerly distributed
+across the server sockets it replaces. A permanent 64-session burst gate was
+added after an initial one-buffer implementation exposed unreported OS receive
+drops and failed to converge.
+
+The accepted both-order matrix is preserved as
+[`network-v2-v3-bot-n0101-shared-listener-2026-08-15.json`](../../_Benchmarks/Baselines/network-v2-v3-bot-n0101-shared-listener-2026-08-15.json).
+It again matches canonical state in all eight runs. Shared-listener V3 tick p95
+ranges from 0.691–0.705 ms at 32 bots to 5.112–5.229 ms at 256. Against the
+connected-pairs entry, the fitted V3 slope improves only from about 21.2 to 19.8
+microseconds per bot; the approximate 4 ms marker moves from 184 to 194 bots.
+At 256, retransmissions fall from 426–430 to 210–331 and wire/logical
+amplification falls slightly from ~7.51x to 7.47–7.48x. The listener therefore
+earns its simpler production ownership shape, but falsifies the stronger idea
+that server socket count explains most of V3's roughly 3x CPU cost.
+
+The fixed demux rings raise admitted managed payload at 256 from about 5.04 MiB
+to 6.51 MiB while aggregate configured socket bytes remain 16 MiB. N0.10's next
+representation work should specialize per-connection reservation without
+reintroducing warmed allocation. Any further CPU specialization must first
+profile the remaining per-peer protocol/application path. Sharding and workers
+remain unearned: one bounded owner thread has not yet been shown to be the
+limiting representation after those simpler steps.
 
 Protected profiles:
 

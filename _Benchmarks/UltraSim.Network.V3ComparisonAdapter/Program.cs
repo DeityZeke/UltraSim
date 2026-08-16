@@ -6,10 +6,10 @@ using UltraSim.Network.Comparison;
 
 AdapterOptions options = AdapterOptions.Parse(args);
 NetworkBotScenario scenario = options.CreateScenario();
-using var harness = new V3OwnerMovementHarness(scenario);
+using var harness = new V3OwnerMovementHarness(scenario, options.Topology);
 NetworkBotStageResult result = harness.Run();
-NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create("V3", result));
-Console.WriteLine($"V3 {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
+NetworkBotComparisonIo.Write(options.Output, NetworkBotAdapterReport.Create(result.Generation, result));
+Console.WriteLine($"{result.Generation} {scenario.Id}/{scenario.Clients}: tick p95 {result.TickMilliseconds.P95:F3} ms, " +
     $"ping p95 {result.PingMilliseconds.P95:F3} ms, reserved {result.ReservedNetworkBytes / 1048576d:F2} MiB");
 Console.WriteLine(Path.GetFullPath(options.Output));
 
@@ -55,33 +55,51 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private readonly NetworkBotScenario _scenario;
     private readonly Bot[] _bots;
     private readonly NetworkServerIdentity _identity;
+    private readonly V3UdpTopology _topology;
+    private readonly SharedUdpProtocolHost? _sharedHost;
     private readonly long _realtimeTickIntervalStopwatchTicks;
     private bool _disposed;
 
-    internal V3OwnerMovementHarness(NetworkBotScenario scenario)
+    internal V3OwnerMovementHarness(NetworkBotScenario scenario, V3UdpTopology topology)
     {
         _scenario = scenario.Validate();
+        _topology = topology;
         _realtimeTickIntervalStopwatchTicks = checked((long)Math.Round(
             Stopwatch.Frequency / (double)_scenario.TickHz,
             MidpointRounding.AwayFromZero));
         _bots = new Bot[scenario.Clients];
         _identity = NetworkServerIdentity.CreateEphemeral();
         ReadOnlyMemory<byte> trusted = _identity.PublicKey.ToArray();
+        if (topology == V3UdpTopology.SharedListener)
+            _sharedHost = new SharedUdpProtocolHost(
+                ProtocolLimits, UdpLimits,
+                new SharedUdpProtocolLimits(
+                    scenario.Clients,
+                    MaximumQueuedDatagramsPerSession: 4,
+                    MaximumInboundDatagramsPerPump: checked(scenario.Clients * 16)),
+                Manifest, _identity, trusted);
         const int width = 32; // frozen V2 bot-harness spawn-grid default
         for (int index = 0; index < _bots.Length; index++)
         {
-            if (!UdpProtocolSession.TryCreate(
-                    ProtocolLimits, UdpLimits, out UdpProtocolSession? session, out _,
-                    Manifest, _identity, trusted) || session is null)
-                throw new InvalidOperationException($"V3 UDP bot {index} did not establish.");
+            UdpProtocolSession? pair = null;
+            SharedUdpProtocolSession? shared = null;
+            if (topology == V3UdpTopology.ConnectedPairs)
+            {
+                if (!UdpProtocolSession.TryCreate(
+                        ProtocolLimits, UdpLimits, out pair, out _,
+                        Manifest, _identity, trusted) || pair is null)
+                    throw new InvalidOperationException($"V3 UDP bot {index} did not establish.");
+            }
+            else if (!_sharedHost!.TryAddLoopbackSession(out shared, out _) || shared is null)
+                throw new InvalidOperationException($"V3 shared-listener bot {index} did not establish.");
             float x = (float)((index % width) * scenario.SpawnSpacingMeters);
             float y = (float)((index / width) * scenario.SpawnSpacingMeters);
-            _bots[index] = new Bot(index, session, x, y,
+            _bots[index] = new Bot(index, pair, shared, x, y,
                 Math.Max(8, scenario.StageTicks / (scenario.TickHz / scenario.InputHz) + 8));
         }
         for (int tick = 0; tick < scenario.SettleTicks; tick++)
         {
-            for (int index = 0; index < _bots.Length; index++) _bots[index].Session.Pump();
+            PumpAll(1);
             DrainAll();
         }
     }
@@ -203,7 +221,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         long socketBuffers = 0;
         for (int index = 0; index < _bots.Length; index++)
         {
-            UdpProtocolSessionSnapshot snapshot = _bots[index].Session.GetSnapshot();
+            BenchmarkTransportSnapshot snapshot = _bots[index].GetTransportSnapshot();
             datagrams = SaturatingAdd(datagrams,
                 SaturatingAdd(snapshot.ClientDatagrams.Sent, snapshot.ServerDatagrams.Sent));
             bytes = SaturatingAdd(bytes,
@@ -213,8 +231,19 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             capacityDrops = SaturatingAdd(capacityDrops,
                 SaturatingAdd(snapshot.Client.CapacityDrops + snapshot.ClientDatagrams.CapacityDrops,
                     snapshot.Server.CapacityDrops + snapshot.ServerDatagrams.CapacityDrops));
-            reserved = checked(reserved + snapshot.Client.ReservedBytes + snapshot.Server.ReservedBytes);
-            socketBuffers = checked(socketBuffers + snapshot.ConfiguredSocketBufferBytes);
+            if (_sharedHost is null)
+            {
+                reserved = checked(reserved + snapshot.Client.ReservedBytes + snapshot.Server.ReservedBytes);
+                socketBuffers = checked(socketBuffers + snapshot.ConfiguredSocketBufferBytes);
+            }
+        }
+        SharedUdpProtocolHostSnapshot sharedSnapshot = default;
+        if (_sharedHost is not null)
+        {
+            sharedSnapshot = _sharedHost.GetSnapshot();
+            reserved = sharedSnapshot.KnownReservedBytes;
+            socketBuffers = sharedSnapshot.ConfiguredSocketBufferBytes;
+            capacityDrops = SaturatingAdd(capacityDrops, sharedSnapshot.Listener.CapacityDrops);
         }
         peakManagedHeap = Math.Max(peakManagedHeap, GC.GetTotalMemory(false));
         process.Refresh();
@@ -228,14 +257,18 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             logicalInputs * 10 + ownerMessagesQueued * 30 + pingMs.Count * 4L);
         return new NetworkBotStageResult
         {
-            Generation = "V3",
+            Generation = _topology == V3UdpTopology.SharedListener
+                ? "V3-shared-listener"
+                : "V3-connected-pairs",
             Scenario = _scenario,
             EvidenceProfile = new(
                 "network-bot-owner-movement-v1",
                 "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic.",
                 "workload bounds fixed; implementation reservations reported separately",
                 $"fixed {_scenario.TickHz} Hz; {_scenario.InputHz} Hz phased input; realtime",
-                "one connected localhost UDP socket pair and two secure protocol peers per bot",
+                _topology == V3UdpTopology.SharedListener
+                    ? "one shared server UDP listener, one client socket and two secure protocol peers per bot"
+                    : "one connected localhost UDP socket pair and two secure protocol peers per bot",
                 "process-wide allocated bytes and GC collections; physical memory where exposed"),
             ReadyClients = _bots.Length,
             TickMilliseconds = NetworkMetricSummary.From(tickMs),
@@ -296,6 +329,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["default_protocol_reserved_bytes_per_client_estimate"] = defaultReservedPerClient,
                 ["default_protocol_reserved_bytes_total_estimate"] =
                     checked(defaultReservedPerClient * (long)_bots.Length),
+                ["shared_listener_registered_paths"] = sharedSnapshot.Listener.RegisteredPaths,
+                ["shared_listener_maximum_queued_datagrams"] = sharedSnapshot.Listener.MaximumQueuedDatagrams,
+                ["shared_listener_unknown_path_datagrams"] = sharedSnapshot.Listener.UnknownPathDatagrams,
+                ["shared_listener_capacity_drops"] = sharedSnapshot.Listener.CapacityDrops,
+                ["shared_listener_reserved_bytes"] = sharedSnapshot.Listener.ReservedBytes,
             },
         };
     }
@@ -303,7 +341,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     private void PumpAll(int count)
     {
         for (int pass = 0; pass < count; pass++)
-            for (int index = 0; index < _bots.Length; index++) _bots[index].Session.Pump();
+        {
+            if (_sharedHost is not null) _sharedHost.Pump();
+            else
+                for (int index = 0; index < _bots.Length; index++) _bots[index].PairSession!.Pump();
+        }
     }
 
     private void WaitForRealtimeTick(ref long nextTickDeadline)
@@ -343,7 +385,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         double maximum = 0;
         for (int index = 0; index < _bots.Length; index++)
         {
-            UdpProtocolSessionSnapshot snapshot = _bots[index].Session.GetSnapshot();
+            BenchmarkTransportSnapshot snapshot = _bots[index].GetTransportSnapshot();
             maxReliable = Math.Max(maxReliable, Math.Max(snapshot.Client.ReliableQueued, snapshot.Server.ReliableQueued));
             maxUnreliable = Math.Max(maxUnreliable,
                 Math.Max(snapshot.Client.IndependentUnreliableQueued, snapshot.Server.IndependentUnreliableQueued));
@@ -385,6 +427,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         if (_disposed) return;
         _disposed = true;
         for (int index = 0; index < _bots.Length; index++) _bots[index]?.Dispose();
+        _sharedHost?.Dispose();
         _identity.Dispose();
     }
 
@@ -404,17 +447,31 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         private float _serverVelocityY;
         private bool _hasServerInput;
 
-        internal Bot(int index, UdpProtocolSession session, float x, float y, int expectedInputSamples)
+        internal Bot(
+            int index,
+            UdpProtocolSession? pairSession,
+            SharedUdpProtocolSession? sharedSession,
+            float x,
+            float y,
+            int expectedInputSamples)
         {
+            if ((pairSession is null) == (sharedSession is null))
+                throw new ArgumentException("Exactly one UDP topology session is required.");
             Index = index;
-            Session = session;
+            PairSession = pairSession;
+            SharedSession = sharedSession;
+            Client = pairSession?.Client ?? sharedSession!.Client;
+            Server = pairSession?.Server ?? sharedSession!.Server;
             _serverX = ClientX = x;
             _serverY = ClientY = y;
             _inputAcknowledgements = new List<double>(expectedInputSamples);
         }
 
         internal int Index { get; }
-        internal UdpProtocolSession Session { get; }
+        internal UdpProtocolSession? PairSession { get; }
+        internal SharedUdpProtocolSession? SharedSession { get; }
+        internal NetworkProtocolPeer Client { get; }
+        internal NetworkProtocolPeer Server { get; }
         internal ushort LastAppliedInput { get; private set; }
         internal float ClientX { get; private set; }
         internal float ClientY { get; private set; }
@@ -433,7 +490,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(bytes[2..], checked((uint)tick));
             BinaryPrimitives.WriteInt16LittleEndian(bytes[6..], x);
             BinaryPrimitives.WriteInt16LittleEndian(bytes[8..], y);
-            if (Session.Client.TryQueue(InputDescriptor.Id, bytes) != NetworkQueueStatus.Accepted) return false;
+            if (Client.TryQueue(InputDescriptor.Id, bytes) != NetworkQueueStatus.Accepted) return false;
             int slot = sequence & 255;
             _inputSentSequence[slot] = sequence;
             _inputSentAt[slot] = Stopwatch.GetTimestamp();
@@ -446,7 +503,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             ushort sequence = _nextPing;
             Span<byte> bytes = stackalloc byte[2];
             BinaryPrimitives.WriteUInt16LittleEndian(bytes, sequence);
-            if (Session.Client.TryQueue(PingDescriptor.Id, bytes) != NetworkQueueStatus.Accepted) return false;
+            if (Client.TryQueue(PingDescriptor.Id, bytes) != NetworkQueueStatus.Accepted) return false;
             int slot = sequence & 255;
             _pingSentSequence[slot] = sequence;
             _pingSentAt[slot] = Stopwatch.GetTimestamp();
@@ -456,7 +513,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
 
         internal void ProcessServer(int tickHz)
         {
-            while (Session.Server.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+            while (Server.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
                 if (message.MessageId == InputDescriptor.Id && payload.Length == 10)
                 {
@@ -470,8 +527,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                     }
                 }
                 else if (message.MessageId == PingDescriptor.Id && payload.Length == 2)
-                    _ = Session.Server.TryQueue(PongDescriptor.Id, payload);
-                _ = Session.Server.TryConsumeReceived();
+                    _ = Server.TryQueue(PongDescriptor.Id, payload);
+                _ = Server.TryConsumeReceived();
             }
         }
 
@@ -492,13 +549,13 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             BinaryPrimitives.WriteUInt32LittleEndian(bytes[18..], BitConverter.SingleToUInt32Bits(_serverY));
             BinaryPrimitives.WriteUInt32LittleEndian(bytes[22..], BitConverter.SingleToUInt32Bits(_serverVelocityX));
             BinaryPrimitives.WriteUInt32LittleEndian(bytes[26..], BitConverter.SingleToUInt32Bits(_serverVelocityY));
-            return Session.Server.TryQueue(OwnerDescriptor.Id, bytes) == NetworkQueueStatus.Accepted;
+            return Server.TryQueue(OwnerDescriptor.Id, bytes) == NetworkQueueStatus.Accepted;
         }
 
         internal int ProcessClient(List<double> pingMs, List<double> ackMs)
         {
             int applied = 0;
-            while (Session.Client.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
+            while (Client.TryPeekReceived(out NetworkDeliveredMessage message, out ReadOnlySpan<byte> payload))
             {
                 if (message.MessageId == OwnerDescriptor.Id && payload.Length == 30)
                 {
@@ -531,12 +588,25 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                         _pingSentAt[slot] = 0;
                     }
                 }
-                _ = Session.Client.TryConsumeReceived();
+                _ = Client.TryConsumeReceived();
             }
             return applied;
         }
 
-        public void Dispose() => Session.Dispose();
+        internal BenchmarkTransportSnapshot GetTransportSnapshot()
+        {
+            if (PairSession is not null)
+            {
+                UdpProtocolSessionSnapshot value = PairSession.GetSnapshot();
+                return new(value.Client, value.Server, value.ClientDatagrams,
+                    value.ServerDatagrams, value.ConfiguredSocketBufferBytes);
+            }
+            SharedUdpProtocolSessionSnapshot shared = SharedSession!.GetSnapshot();
+            return new(shared.Client, shared.Server, shared.ClientDatagrams,
+                shared.ServerDatagrams, 0);
+        }
+
+        public void Dispose() => PairSession?.Dispose();
 
         private static bool SequenceNewer(ushort candidate, ushort current) =>
             current == 0 || unchecked((short)(candidate - current)) > 0;
@@ -546,6 +616,19 @@ internal sealed class V3OwnerMovementHarness : IDisposable
     }
 }
 
+internal enum V3UdpTopology : byte
+{
+    ConnectedPairs = 0,
+    SharedListener = 1,
+}
+
+internal readonly record struct BenchmarkTransportSnapshot(
+    NetworkProtocolSnapshot Client,
+    NetworkProtocolSnapshot Server,
+    UdpDatagramEndpointSnapshot ClientDatagrams,
+    UdpDatagramEndpointSnapshot ServerDatagrams,
+    long ConfiguredSocketBufferBytes);
+
 internal sealed record AdapterOptions(
     string Output,
     string Scenario,
@@ -554,7 +637,8 @@ internal sealed record AdapterOptions(
     int InputHz,
     int StageTicks,
     int SettleTicks,
-    double SpawnSpacing)
+    double SpawnSpacing,
+    V3UdpTopology Topology)
 {
     internal static AdapterOptions Parse(string[] args) => new(
         Get(args, "--output=") ?? "v3-network-bot-comparison.json",
@@ -564,7 +648,8 @@ internal sealed record AdapterOptions(
         ParseInt(Get(args, "--input-hz="), 20),
         ParseInt(Get(args, "--stage-ticks="), 120),
         ParseInt(Get(args, "--settle-ticks="), 30),
-        ParseDouble(Get(args, "--spawn-spacing="), 12));
+        ParseDouble(Get(args, "--spawn-spacing="), 12),
+        ParseTopology(Get(args, "--topology=")));
 
     internal NetworkBotScenario CreateScenario() => new NetworkBotScenario(
         Scenario, Clients, TickHz, InputHz, StageTicks, SettleTicks,
@@ -578,4 +663,10 @@ internal sealed record AdapterOptions(
         int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed) ? parsed : fallback;
     private static double ParseDouble(string? value, double fallback) =>
         double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double parsed) ? parsed : fallback;
+    private static V3UdpTopology ParseTopology(string? value) => value?.ToLowerInvariant() switch
+    {
+        null or "connected-pairs" => V3UdpTopology.ConnectedPairs,
+        "shared-listener" => V3UdpTopology.SharedListener,
+        _ => throw new ArgumentException($"Unsupported V3 UDP topology '{value}'."),
+    };
 }

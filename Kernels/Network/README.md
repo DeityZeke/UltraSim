@@ -1,9 +1,8 @@
 # UltraSim Network kernel
 
-Status: N0.0 contracts, N0.1 game projection/OfflineDirect, N0.2 bounded kernel
-foundations, N0.3 secure reliable ProtocolLoopback, N0.4 remote Admission/UI,
-N0.5 real connected-UDP transport, and N0.6 controlled input/owner state are
-accepted. AOI, recipient scheduling, and fanout begin at N0.7.
+Status: N0.0 through the hardened N0.9 integrated topology are accepted. N0.10
+scale work now includes the first provisional V2/V3 bot matrix and a bounded
+shared-listener specialization.
 
 This project is the game-, ECS-, UI-, client-, and server-independent mechanism
 layer for Network V3. It owns fixed capacities, generational connection/session
@@ -246,6 +245,29 @@ Fresh reconnects own fresh endpoints and independently derived secrets. The
 accepted topology is a same-process localhost proof, not a WAN-latency or
 socket-worker claim.
 
+### N0.10.1 bounded shared listener
+
+`SharedUdpProtocolHost` replaces one server socket per connection with one
+owner-thread IPv4 listener, a fixed open-address path table, bounded per-session
+datagram rings, and deterministic session-slot traversal. Every session keeps
+its own `NetworkProtocolPeer`, cryptographic state, replay/ACK windows, lane
+queues, congestion state, and application semantics. There are no workers,
+shards, cross-connection packet batches, compression, or alternate protocol.
+
+The shared socket requests the aggregate send/receive capacity formerly spread
+across the server sockets it replaces, capped by the existing socket-buffer
+contract. Client socket and protocol capacities are unchanged. This matters:
+using one connection's buffer for the aggregate listener caused kernel-level
+burst loss that was invisible to managed queue counters. The permanent
+64-session initial-flight regression proves exact delivery without
+retransmission when the admitted burst fits that aggregate contract.
+
+Session capacity, demux queues, listener receive budget, path registration,
+connection generation reuse, unknown paths, drain/retirement, socket bytes, and
+known managed payload are explicit and observable. The current public
+constructor remains controlled loopback evidence, not an Internet listener or
+multi-owner socket host.
+
 ## N0.6 application-owned input and owner state
 
 The kernel did not acquire game state in N0.6. `Game/Protocol` adds bounded Input,
@@ -308,9 +330,11 @@ Representations and ownership not carried forward:
 - historical benchmark numbers are not accepted V3 comparisons merely because
   both implementations use words such as loopback, latest, or reliable.
 
-There is still no accepted end-to-end V2/V3 Network ratio. N0.3 has a real secure
-loopback protocol, but no reviewed V2 profile performs the same authenticated,
-bounded lane semantics. The N0.3 standalone baseline is not mislabeled as a ratio.
+The N0.10 bot harness now admits a **provisional** end-to-end V2/V3 owner-movement
+ratio through normalized identity/input/velocity semantics. It is not a direct
+protocol-equivalence claim: V2 and V3 retain different security, reliability,
+reservation, and allocation contracts. N0.3 standalone evidence remains
+unrelated to that ratio.
 
 ## N0.0–N0.3 gates
 

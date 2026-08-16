@@ -90,6 +90,7 @@ internal static class ProtocolLoopbackHandshake
             serverIdentity,
             trustedServerPublicKey,
             maximumSteps,
+            null,
             out result);
 
     internal static bool TryEstablishUdp(
@@ -103,7 +104,8 @@ internal static class ProtocolLoopbackHandshake
         NetworkServerIdentity serverIdentity,
         ReadOnlySpan<byte> trustedServerPublicKey,
         int maximumPumps,
-        out ProtocolHandshakeResult result) =>
+        out ProtocolHandshakeResult result,
+        NetworkConnectionTable? sharedConnections = null) =>
         TryEstablish(
             client,
             server,
@@ -116,6 +118,7 @@ internal static class ProtocolLoopbackHandshake
             serverIdentity,
             trustedServerPublicKey,
             maximumPumps,
+            sharedConnections,
             out result);
 
     private static bool TryEstablish(
@@ -130,6 +133,7 @@ internal static class ProtocolLoopbackHandshake
         NetworkServerIdentity serverIdentity,
         ReadOnlySpan<byte> trustedServerPublicKey,
         int maximumSteps,
+        NetworkConnectionTable? sharedConnections,
         out ProtocolHandshakeResult result)
     {
         if (maximumSteps <= 0) throw new ArgumentOutOfRangeException(nameof(maximumSteps));
@@ -168,7 +172,7 @@ internal static class ProtocolLoopbackHandshake
         ulong validations = 0;
         ulong exchanges = 0;
         int executedSteps = 0;
-        var connections = new NetworkConnectionTable(1);
+        NetworkConnectionTable connections = sharedConnections ?? new NetworkConnectionTable(1);
 
         using ECDiffieHellman clientEcdh = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         clientPublic = clientEcdh.ExportSubjectPublicKeyInfo();
@@ -353,6 +357,14 @@ internal static class ProtocolLoopbackHandshake
                     invalid++;
                 }
             }
+        }
+        catch
+        {
+            if (connection.IsValid && connections.TryGetState(connection, out NetworkConnectionState state) &&
+                state != NetworkConnectionState.Closed)
+                _ = connections.TryAdvance(connection, NetworkConnectionState.Closed);
+            if (connection.IsValid) _ = connections.TryReleaseClosed(connection);
+            throw;
         }
         finally
         {
