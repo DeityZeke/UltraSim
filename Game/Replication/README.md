@@ -311,6 +311,17 @@ semantic/application-knowledge contract remain unchanged. A permanent gate
 proves one full 16-record Immediate bundle examines and selects each relation
 exactly once.
 
+WorldState application proof is now explicitly reconstructible rather than a
+reliable Control fact. Message 110/version 2 travels as one bounded independent-
+unreliable WorldState container. Loss cannot advance server knowledge; ordinary
+relation retry causes idempotent duplicate client application and regenerates
+the same per-bundle result. State/application epochs and the outstanding-bundle
+ledger fence stale proof. Reliable baseline, Event, UI, and other Control facts
+are unchanged. Permanent loss/duplication and warmed-allocation gates protect
+this distinction. An opt-in client census records proof production at existing
+flush boundaries; it demonstrated that natural reliable batching was too sparse
+to earn a batch wire format.
+
 `RemoteGameProtocolComposition` is the small seam earned by N0.9's simultaneous
 controlled, WorldState, and Event consumers. It owns no handlers and introduces
 no routing policy; game/client composition supplies a fixed bounded ordered set.

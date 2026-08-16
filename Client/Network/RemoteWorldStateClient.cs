@@ -41,6 +41,15 @@ public readonly record struct RemoteWorldStateClientSnapshot(
     bool IsFaulted,
     long ReservedBytes);
 
+/// <summary>Cold inspection of proofs produced since the previous flush boundary.</summary>
+public readonly record struct RemoteWorldStateAcknowledgementFlushOpportunity(
+    int ProducedAcknowledgements,
+    int EncodedBytes,
+    int PendingAcknowledgements,
+    int Applied,
+    int Rejected,
+    int CapacityExceeded);
+
 /// <summary>
 /// Bounded many-entity retained client projection for complete WorldState bundles.
 /// </summary>
@@ -80,6 +89,12 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     private ulong _appliedBundles;
     private ulong _duplicateBundles;
     private ulong _rejectedBundles;
+    private bool _acknowledgementCensusEnabled;
+    private int _acknowledgementsProducedSinceFlush;
+    private int _acknowledgementBytesProducedSinceFlush;
+    private int _appliedAcknowledgementsSinceFlush;
+    private int _rejectedAcknowledgementsSinceFlush;
+    private int _capacityAcknowledgementsSinceFlush;
     private bool _faulted;
     private bool _hasPendingBaselineAcknowledgement;
     private RemoteWorldBaselineAppliedMessage _pendingBaselineAcknowledgement;
@@ -223,10 +238,11 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
         return RemoteWorldStateClientApplyStatus.Applied;
     }
 
-    /// <summary>Retries bounded application acknowledgements after Control backpressure.</summary>
+    /// <summary>Retries bounded application proofs after protocol backpressure.</summary>
     public bool TryFlushAcknowledgements()
     {
         EnsureOwnerThread();
+        ResetFlushOpportunity();
         if (_hasPendingBaselineAcknowledgement)
         {
             if (!TryQueueBaselineAcknowledgement(in _pendingBaselineAcknowledgement)) return false;
@@ -245,6 +261,26 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
     }
 
     bool IRemoteGameProtocolProgressor.TryProgress() => TryFlushAcknowledgements();
+
+    /// <summary>Enables one benchmark-only acknowledgement census epoch.</summary>
+    public void ResetAcknowledgementCensus(bool enabled)
+    {
+        EnsureOwnerThread();
+        _acknowledgementCensusEnabled = enabled;
+        ResetFlushOpportunity();
+    }
+
+    public RemoteWorldStateAcknowledgementFlushOpportunity InspectAcknowledgementFlushOpportunity()
+    {
+        EnsureOwnerThread();
+        return new(
+            _acknowledgementsProducedSinceFlush,
+            _acknowledgementBytesProducedSinceFlush,
+            _ackCount,
+            _appliedAcknowledgementsSinceFlush,
+            _rejectedAcknowledgementsSinceFlush,
+            _capacityAcknowledgementsSinceFlush);
+    }
 
     public int CopyActiveEntities(Span<RemoteWorldEntitySnapshot> destination)
     {
@@ -861,6 +897,25 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
             BundleId = header.BundleId,
             Status = status,
         };
+        if (_acknowledgementCensusEnabled)
+        {
+            _acknowledgementsProducedSinceFlush++;
+            _acknowledgementBytesProducedSinceFlush = checked(
+                _acknowledgementBytesProducedSinceFlush +
+                RemoteWorldStateAppliedMessageCodec.EncodedSize);
+            switch (status)
+            {
+                case RemoteWorldStateApplyStatus.Applied:
+                    _appliedAcknowledgementsSinceFlush++;
+                    break;
+                case RemoteWorldStateApplyStatus.Rejected:
+                    _rejectedAcknowledgementsSinceFlush++;
+                    break;
+                case RemoteWorldStateApplyStatus.CapacityExceeded:
+                    _capacityAcknowledgementsSinceFlush++;
+                    break;
+            }
+        }
         if (TryQueueAcknowledgement(in acknowledgement)) return;
         if (_ackCount == _pendingAcknowledgements.Length)
         {
@@ -882,6 +937,15 @@ public sealed class RemoteWorldStateClient : IRemoteGameProtocolHandler, IRemote
             RemoteWorldStateAppliedMessageCodec.Descriptor.Id,
             _ackScratch.AsSpan(0, RemoteWorldStateAppliedMessageCodec.EncodedSize)) ==
             NetworkQueueStatus.Accepted;
+    }
+
+    private void ResetFlushOpportunity()
+    {
+        _acknowledgementsProducedSinceFlush = 0;
+        _acknowledgementBytesProducedSinceFlush = 0;
+        _appliedAcknowledgementsSinceFlush = 0;
+        _rejectedAcknowledgementsSinceFlush = 0;
+        _capacityAcknowledgementsSinceFlush = 0;
     }
 
     private static bool WithinSquaredDistance(

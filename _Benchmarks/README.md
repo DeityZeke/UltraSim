@@ -110,6 +110,10 @@ delivery families. Opt-in WorldState attribution additionally records relation
 and reverse-edge visits, per-tier scheduler examinations/selections/skips,
 bundle stop reasons and record histogram, ACK records/time, and adapter
 copy/codec/queue time.
+The same report includes the WorldState application-proof census at the existing
+flush boundary. It distinguishes proofs produced during the drain from the
+retained backpressure ring, reports immediate 2+/3+/4+ packing opportunities and
+status mix, and never delays proof to improve a batch.
 Cold freshness scans remain outside the timed tick. Probe-enabled figures are
 compared only with other probe-enabled rows; ordinary acceptance uses probes off.
 

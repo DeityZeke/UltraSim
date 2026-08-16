@@ -2075,6 +2075,81 @@ application-ACK Data, and one transport ACK per applied bundle. These are now
 measured candidates for the next isolated checkpoint, not permission to combine
 ACK granularity, relation maintenance, protocol framing, or concurrency changes.
 
+#### Dense-400 WorldState application-proof specialization
+
+The next checkpoint first measured proof granularity without changing delivery.
+`RemoteWorldStateClient` now exposes an opt-in census of proofs produced between
+the already-existing application flush boundaries: current pending count,
+produced count/bytes, 2+/3+/4+ opportunities, apply-status mix, and an immediate
+greedy-message estimate. It does not delay proof to form a batch. Because the
+old client eagerly queued each proof, its retained pending ring remained empty;
+the census deliberately counts proofs produced during the current application
+drain before the existing flush call.
+
+[`network-v3-dense-worldstate-application-ack-census-reliable-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-worldstate-application-ack-census-reliable-2026-08-16.json)
+rejects a reliable batch format for this workload. Full produced 53,200 proofs
+across 52,998 nonempty flushes: p50/p95/p99 one, maximum two, and only 202
+two-proof opportunities. WorldState-only produced the same 53,200 proofs across
+48,712 nonempty flushes: p50 one, p95/p99/max two, with 4,488 two-proof
+opportunities. Immediate greedy packing would therefore remove only 202 Full or
+4,488 WorldState-only application messages. No 3+ opportunity occurred. Waiting
+to improve those batches is forbidden.
+
+The negative batch result earned the deeper but still narrow semantic test:
+WorldState application proof is reconstructible. The client already applies a
+complete relation-versioned bundle idempotently. If its proof is lost, server
+knowledge does not advance; the maintained relation remains retryable; a later
+ordinary WorldState retry is applied as a duplicate and regenerates an equivalent
+terminal result for that retry's bundle identity. Rejection and capacity results
+likewise remain retryable until the server observes them.
+Baseline prepare/applied proof, application Event proof, UI proof, and other
+non-reconstructible Control facts remain reliable.
+
+Protocol version 9 therefore changes only message 110
+`ultrasim.game.world-state-applied` to wire version 2 on the bounded independent-
+unreliable WorldState lane. The payload and exact per-bundle server
+`TryAcknowledgeBundle()` semantics are unchanged. State/application epochs and
+the outstanding bundle ledger still reject stale or fabricated proof. No
+transport ACK is emitted for either ordinary WorldState or its reconstructible
+application proof.
+
+Permanent gates prove the descriptor contract, recovery under deterministic
+35% datagram loss plus 20% duplication, duplicate client application followed
+by regenerated proof, no transport-ACK publication, exact convergence, and zero
+warmed owner-thread allocation. Existing gates continue to cover capacity
+rejection/nonviable escalation, baseline overlap/cancellation, delayed prior
+epochs, generation replacement, impairment convergence, and atomic client
+application.
+
+The paired pre/post diagnostic artifacts are the reliable census above and
+[`network-v3-dense-worldstate-reconstructible-ack-causal-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-worldstate-reconstructible-ack-causal-2026-08-16.json).
+The probes-off observation is
+[`network-v3-dense-worldstate-reconstructible-ack-hardened-2026-08-16.json`](../../_Benchmarks/Baselines/network-v3-dense-worldstate-reconstructible-ack-hardened-2026-08-16.json).
+
+| Diagnostic row | Server-role p95 pre → post | Server protocol p95 pre → post | Client protocol p95 pre → post | Combined tick p95 pre → post |
+| --- | ---: | ---: | ---: | ---: |
+| Full | 9.753 → 7.743 ms | 5.277 → 3.760 ms | 10.875 → 4.689 ms | 22.412 → 14.124 ms |
+| WorldState-only | 9.558 → 7.149 ms | 5.135 → 3.370 ms | 10.743 → 4.318 ms | 22.306 → 13.107 ms |
+
+WorldState-only keeps 106,400 Data packets—53,200 state bundles and 53,200
+application proofs—but transport ACK packets fall 53,200→0. The server listener
+sends 106,400→53,200 datagrams and native send calls fall 3,505→1,728, while its
+53,200 received proof datagrams are unchanged. Full transport ACKs fall
+58,120→4,800 because reliable application Events remain correctly ACK-eliciting.
+WorldState-only wire bytes fall 53.30→50.11 MB; packet count and secure processing,
+not byte compression, explain the CPU change. WorldState scheduling p95 also
+falls 2.951→2.462 ms because faster proof convergence clears sent debt earlier.
+
+The probes-off Full row now records 13.396 ms combined tick p95, 13.632 ms p99,
+zero fixed-60 deadline misses, 47.875 ms state-age p95, 7.625 ms Event apply p95,
+exact convergence in three settlement steps, and zero capacity/byte failures or
+retransmissions. WorldState-only records 12.236 ms tick p95 and 46.625 ms
+state-age p95. This is the first observer-heavy Dense-400 combined same-process
+observation inside the fixed-60 deadline. The primary server-role result remains
+7.743 ms Full—materially improved and feasible, but still above the ≤6 ms usable
+and 4–5 ms preferred production targets. The measured canonical stable-update
+multi-touch and deferred pending-debt scans remain separate future checkpoints.
+
 Protected profiles:
 
 ```text

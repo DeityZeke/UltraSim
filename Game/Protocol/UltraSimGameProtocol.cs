@@ -158,8 +158,11 @@ public partial struct RemoteWorldStateBundleHeader
     public byte RecordCount;
 }
 
-/// <summary>Application-level proof that a WorldState bundle was or was not committed.</summary>
-[NetworkMessage(110, "ultrasim.game.world-state-applied", 1, NetworkLane.Control)]
+/// <summary>
+/// Reconstructible application-level proof that a WorldState bundle was or was not committed.
+/// Loss leaves server knowledge unchanged; ordinary state retry regenerates an equivalent proof.
+/// </summary>
+[NetworkMessage(110, "ultrasim.game.world-state-applied", 2, NetworkLane.WorldState)]
 public partial struct RemoteWorldStateAppliedMessage
 {
     public ulong ApplicationSessionEpoch;
@@ -287,7 +290,7 @@ public static class UltraSimGameProtocol
         UiCompileLimits.Default);
 
     private static readonly NetworkProtocolManifest s_manifest = NetworkProtocolManifest.Create(
-        version: 8,
+        version: 9,
         [
             RemoteAuthenticationRequestHeaderCodec.Descriptor with
                 { MaximumEncodedBytes = MaximumMessageBytes },

@@ -55,6 +55,8 @@ internal static class Program
             ("ControlledAuthorityDespawnPublishesTombstone", ControlledAuthorityDespawnPublishesTombstone),
             ("WorldStateCodecIsCanonicalAndTransactional", WorldStateCodecIsCanonicalAndTransactional),
             ("MaintainedWorldStateCrossesLoopbackWithApplicationAck", MaintainedWorldStateCrossesLoopbackWithApplicationAck),
+            ("WorldStateApplicationProofIsReconstructibleUnderLoss", WorldStateApplicationProofIsReconstructibleUnderLoss),
+            ("WarmedReconstructibleWorldStateProofAllocatesZero", WarmedReconstructibleWorldStateProofAllocatesZero),
             ("WorldStateTombstoneKnowledgeIsIndependentFromPresentation", WorldStateTombstoneKnowledgeIsIndependentFromPresentation),
             ("WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder", WorldStateClientCommitIsAtomicAtCapacityRegardlessOfRecordOrder),
             ("ClientEntitySlotGenerationSurvivesBaselineShrinkAndRegrow", ClientEntitySlotGenerationSurvivesBaselineShrinkAndRegrow),
@@ -601,6 +603,118 @@ static void MaintainedWorldStateCrossesLoopbackWithApplicationAck()
     True(active[1].Entity.Index is 3 or 9);
     True(active[0].Entity.Index != active[1].Entity.Index,
         "Unordered diagnostic copy lost or duplicated an active dense slot.");
+}
+
+static void WorldStateApplicationProofIsReconstructibleUnderLoss()
+{
+    Equal(NetworkLane.WorldState, RemoteWorldStateAppliedMessageCodec.Descriptor.Lane);
+    Equal(NetworkDeliveryGuarantee.Unreliable,
+        NetworkLaneContracts.Get(RemoteWorldStateAppliedMessageCodec.Descriptor.Lane).Delivery);
+    Equal(NetworkRetentionPolicy.IndependentState,
+        NetworkLaneContracts.Get(RemoteWorldStateAppliedMessageCodec.Descriptor.Lane).Retention);
+
+    var impairment = new NetworkImpairmentOptions(
+        seed: 0xA11CE,
+        lossPermille: 350,
+        duplicatePermille: 200,
+        corruptionPermille: 0,
+        maximumDelaySteps: 3);
+    using Fixture fixture = Fixture.CreateN06(impairment);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    StateEpoch epoch = new(0x70A);
+    var interest = new GameInterestService(
+        epoch,
+        new GameInterestLimits(64, 4, 1_024, 1_024, 256, 32, 8),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 10), 1,
+            new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 0));
+
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch, 1);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
+        maximumKnownIdentities: 8, maximumActiveEntities: 8,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+    // Retire delayed handshake/application reliability before isolating the
+    // WorldState/proof packet classes below.
+    fixture.DriveNetworkSteps(128);
+    NetworkProtocolSnapshot clientBefore = fixture.ClientPeer.GetSnapshot();
+    NetworkProtocolSnapshot serverBefore = fixture.ServerPeer.GetSnapshot();
+
+    for (int attempt = 0; attempt < 5_000 &&
+         interest.GetSnapshot().PendingRelationCount != 0; attempt++)
+    {
+        GameWorldStateBuildStatus status = server.TrySchedule(
+            checked(attempt * 100L), 4_096);
+        True(status is GameWorldStateBuildStatus.Success or GameWorldStateBuildStatus.NoData or
+            GameWorldStateBuildStatus.OutstandingCapacityExceeded);
+        fixture.DriveNetworkSteps(4);
+    }
+
+    Equal(0, interest.GetSnapshot().PendingRelationCount,
+        "Lost application proof did not regenerate through ordinary WorldState retry.");
+    True(server.GetSnapshot().ApplicationAcknowledgements >= 1);
+    Equal(1, client.GetSnapshot().ActiveEntityCount);
+    True(client.GetSnapshot().DuplicateBundles > 0,
+        "The impairment did not exercise duplicate application followed by regenerated proof.");
+    NetworkProtocolSnapshot clientAfter = fixture.ClientPeer.GetSnapshot();
+    NetworkProtocolSnapshot serverAfter = fixture.ServerPeer.GetSnapshot();
+    Equal(clientBefore.AcknowledgementPacketsSent, clientAfter.AcknowledgementPacketsSent,
+        "Unreliable application proof unexpectedly elicited a transport ACK.");
+    Equal(serverBefore.AcknowledgementPacketsSent, serverAfter.AcknowledgementPacketsSent,
+        "Unreliable WorldState unexpectedly elicited a transport ACK.");
+}
+
+static void WarmedReconstructibleWorldStateProofAllocatesZero()
+{
+    using Fixture fixture = Fixture.CreateN06(default);
+    fixture.AuthenticateAndEnter();
+    ParticipantId participant = new(41);
+    StateEpoch epoch = new(0x70B);
+    var interest = new GameInterestService(
+        epoch,
+        new GameInterestLimits(64, 4, 1_024, 1_024, 256, 32, 8),
+        GameInterestProfile.Reference);
+    Equal(GameInterestUpdateStatus.Success,
+        interest.SetRecipientAnchor(participant, new ReplicationSpatialPoint(0, 0), 0));
+    Equal(GameInterestUpdateStatus.Success,
+        interest.UpsertEntity(ProjectedWorldEntity(3, 1, 1), 1,
+            new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, 0));
+    var server = new RemoteWorldStateServer(
+        fixture.ServerPeer, interest, participant, fixture.ApplicationSessionEpoch, 1);
+    var client = new RemoteWorldStateClient(
+        fixture.ClientPeer, fixture.ApplicationSessionEpoch, epoch,
+        maximumKnownIdentities: 8, maximumActiveEntities: 8,
+        maximumRecordsPerBundle: 4);
+    fixture.Server!.BindProtocolHandler(server);
+    fixture.ClientBridge!.BindProtocolHandler(client);
+
+    RunVersions(2, 10);
+    long before = GC.GetAllocatedBytesForCurrentThread();
+    RunVersions(10, 74);
+    Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+
+    void RunVersions(int first, int exclusive)
+    {
+        for (int version = first; version < exclusive; version++)
+        {
+            Equal(GameInterestUpdateStatus.Success,
+                interest.UpsertEntity(ProjectedWorldEntity(3, 1, version), checked((ulong)version),
+                    new ReplicationSpatialPoint(1_000, 0), GameReplicationHorizon.Far, version));
+            Equal(GameWorldStateBuildStatus.Success, server.TrySchedule(version, 4_096));
+            ulong expected = server.GetSnapshot().ApplicationAcknowledgements + 1;
+            for (int step = 0; step < 64 &&
+                 server.GetSnapshot().ApplicationAcknowledgements < expected; step++)
+                fixture.DriveNetworkSteps(1);
+            Equal(expected, server.GetSnapshot().ApplicationAcknowledgements);
+        }
+    }
 }
 
 static void WorldStateTombstoneKnowledgeIsIndependentFromPresentation()

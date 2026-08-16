@@ -189,6 +189,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
     private readonly List<double> _serverRoleMilliseconds;
     private readonly List<double> _clientRoleMilliseconds;
     private readonly ReplicationBatchCensus _batchCensus = new();
+    private readonly WorldStateAcknowledgementCensus _worldStateAcknowledgementCensus = new();
     private int _dirtyCursor;
     private int _currentAuthorityTick;
     private readonly int _maximumRecipientScope;
@@ -365,7 +366,10 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             ResetProtocolStageTiming(enabled: true);
             _interest.ResetAttribution(enabled: true);
             for (int index = 0; index < _bots.Length; index++)
+            {
                 _bots[index].WorldServer.ResetAttribution(enabled: true);
+                _bots[index].WorldClient.ResetAcknowledgementCensus(enabled: true);
+            }
         }
         GameInterestSnapshot interestBefore = _interest.GetSnapshot();
         GameProjectionSnapshot projectionBefore = _projection.GetSnapshot();
@@ -546,7 +550,10 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             ResetProtocolStageTiming(enabled: false);
             _interest.ResetAttribution(enabled: false);
             for (int index = 0; index < _bots.Length; index++)
+            {
                 _bots[index].WorldServer.ResetAttribution(enabled: false);
+                _bots[index].WorldClient.ResetAcknowledgementCensus(enabled: false);
+            }
         }
         return result;
     }
@@ -720,6 +727,9 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
                     bot.EventClient.TryProcess(in message, payload);
                 _ = bot.Session.Client.TryConsumeReceived();
             }
+            if (_phaseAttribution)
+                _worldStateAcknowledgementCensus.Add(
+                    bot.WorldClient.InspectAcknowledgementFlushOpportunity());
             _ = bot.WorldClient.TryFlushAcknowledgements();
             _ = bot.EventClient.TryFlushAcknowledgement();
             while (bot.EventClient.TryConsumeNext(out RemoteApplicationEventSnapshot value))
@@ -899,6 +909,7 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
         _inFlightPackets.Clear();
         _retainedPayloadRatio.Clear();
         _batchCensus.Clear();
+        _worldStateAcknowledgementCensus.Clear();
         _authorityUpdateMilliseconds.Clear();
         _eventPublishMilliseconds.Clear();
         _worldScheduleMilliseconds.Clear();
@@ -974,7 +985,8 @@ internal sealed class ReplicationWorkloadHarness : IDisposable
             queueAccepted,
             ToMilliseconds(queueTicks),
             acknowledgementMessages,
-            ToMilliseconds(acknowledgementTicks));
+            ToMilliseconds(acknowledgementTicks),
+            _worldStateAcknowledgementCensus.CreateReport());
     }
 
     private ReplicationProtocolTiming CaptureProtocolStageTiming()
@@ -1270,6 +1282,77 @@ internal sealed class ReplicationBatchCensus
         _maxFrames);
 }
 
+internal sealed class WorldStateAcknowledgementCensus
+{
+    private const int AssumedMaximumEntriesPerBatch = 32;
+    private readonly LatencyHistogram _produced = new(1, 65, percentileBucketOffset: 0);
+    private readonly LatencyHistogram _pending = new(1, 65, percentileBucketOffset: 0);
+    private ulong _flushCalls;
+    private ulong _nonempty;
+    private ulong _twoOrMore;
+    private ulong _threeOrMore;
+    private ulong _fourOrMore;
+    private ulong _producedCount;
+    private ulong _producedBytes;
+    private ulong _applied;
+    private ulong _rejected;
+    private ulong _capacityExceeded;
+    private ulong _theoreticalMessages;
+
+    internal void Add(RemoteWorldStateAcknowledgementFlushOpportunity value)
+    {
+        _flushCalls++;
+        _pending.Observe(value.PendingAcknowledgements);
+        if (value.ProducedAcknowledgements == 0) return;
+        _nonempty++;
+        _produced.Observe(value.ProducedAcknowledgements);
+        if (value.ProducedAcknowledgements >= 2) _twoOrMore++;
+        if (value.ProducedAcknowledgements >= 3) _threeOrMore++;
+        if (value.ProducedAcknowledgements >= 4) _fourOrMore++;
+        _producedCount = checked(_producedCount + (ulong)value.ProducedAcknowledgements);
+        _producedBytes = checked(_producedBytes + (ulong)value.EncodedBytes);
+        _applied = checked(_applied + (ulong)value.Applied);
+        _rejected = checked(_rejected + (ulong)value.Rejected);
+        _capacityExceeded = checked(_capacityExceeded + (ulong)value.CapacityExceeded);
+        _theoreticalMessages = checked(_theoreticalMessages +
+            (ulong)((value.ProducedAcknowledgements + AssumedMaximumEntriesPerBatch - 1) /
+                AssumedMaximumEntriesPerBatch));
+    }
+
+    internal void Clear()
+    {
+        _produced.Clear();
+        _pending.Clear();
+        _flushCalls = 0;
+        _nonempty = 0;
+        _twoOrMore = 0;
+        _threeOrMore = 0;
+        _fourOrMore = 0;
+        _producedCount = 0;
+        _producedBytes = 0;
+        _applied = 0;
+        _rejected = 0;
+        _capacityExceeded = 0;
+        _theoreticalMessages = 0;
+    }
+
+    internal WorldStateAcknowledgementCensusReport CreateReport() => new(
+        _flushCalls,
+        _nonempty,
+        _produced.Summary(),
+        _pending.Summary(),
+        _twoOrMore,
+        _threeOrMore,
+        _fourOrMore,
+        _producedCount,
+        _producedBytes,
+        _applied,
+        _rejected,
+        _capacityExceeded,
+        _theoreticalMessages,
+        AssumedMaximumEntriesPerBatch);
+}
+
 internal sealed record ReplicationSuiteReport(
     string Schema,
     DateTimeOffset TimestampUtc,
@@ -1380,7 +1463,24 @@ internal readonly record struct ReplicationWorldStateAttribution(
     ulong AdapterQueueAccepted,
     double AdapterQueueMilliseconds,
     ulong AdapterAcknowledgementMessages,
-    double AdapterAcknowledgementMilliseconds);
+    double AdapterAcknowledgementMilliseconds,
+    WorldStateAcknowledgementCensusReport AcknowledgementCensus);
+
+internal readonly record struct WorldStateAcknowledgementCensusReport(
+    ulong FlushCalls,
+    ulong NonemptyProducedFlushes,
+    NetworkMetricSummary ProducedPerNonemptyFlush,
+    NetworkMetricSummary PendingPerFlush,
+    ulong FlushesWithTwoOrMoreProduced,
+    ulong FlushesWithThreeOrMoreProduced,
+    ulong FlushesWithFourOrMoreProduced,
+    ulong ProducedAcknowledgements,
+    ulong ProducedEncodedBytes,
+    ulong Applied,
+    ulong Rejected,
+    ulong CapacityExceeded,
+    ulong TheoreticalGreedyBatchMessages,
+    int AssumedMaximumEntriesPerBatch);
 
 internal readonly record struct ReplicationProtocolTiming(ulong ClientTicks, ulong ServerTicks)
 {

@@ -90,6 +90,12 @@ Useful current anchors can be located by their embedded workload or filename:
   preserve the 80.1% pending-examination reduction and explicitly leave the
   remaining protocol/application-ACK and canonical relation-maintenance
   candidates open;
+- `network-v3-dense-worldstate-application-ack-census-reliable-*` — the negative
+  natural reliable-batch census; `reconstructible-ack-causal` is the matched
+  protocol-v9 independent-unreliable proof experiment and
+  `reconstructible-ack-hardened` is its probes-off observation. Together they
+  preserve why no batch message was added and why only reconstructible
+  WorldState application proof moved off reliable Control;
 - `ecs-extreme-sphere-*` — extreme CPU/Godot scale evidence.
 
 Earlier `3.0.x`, `3.1.x`, experiment, and soak files are intentionally retained

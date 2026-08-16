@@ -30,6 +30,12 @@ and found repeated pending-list head scans. Per-tier bundle cursors removed
 p95 from 10.568 to 9.971 ms without changing semantics, wire, cadence, or
 capacity. Dense remains feasible rather than usable; measured application-ACK/
 protocol and canonical relation-maintenance work shape the next isolated step.
+The following application-proof census rejected reliable batching, then proved
+WorldState proof reconstructible under loss and moved only that proof to bounded
+independent-unreliable delivery in protocol v9. Probe-enabled Full server-role
+p95 fell 9.753→7.743 ms; the probes-off combined Full tick is now 13.396 ms with
+zero fixed-60 deadline misses. The server role remains above the ≤6 ms usable
+target, so stable-update relation multi-touch remains open.
 
 ## Design
 
