@@ -308,8 +308,24 @@ the endpoint contract. Peers still create and consume individual authenticated
 datagrams. A fixed listener-owned ring provides per-datagram admission and retains
 an unsent native suffix; unsupported platforms and handshake traffic use scalar
 socket operations. The listener submits only work already present in the current
-pump and never delays traffic to form a batch. This mode remains opt-in because
-its additional reservation has not yet passed the connection-memory checkpoint.
+pump and never delays traffic to form a batch. This Linux fast path remains an
+explicit deployment choice with the scalar path as portable fallback; its fixed
+ring is included in reservation accounting.
+
+Protocol payload reservation is manifest- and lane-aware. The global maximum
+message size is an admission ceiling, not an allocation behind every slot.
+Reliable/receive strides use the largest admitted descriptor; nonfragmenting
+independent state is capped at one datagram; only retained unreliable descriptors
+own stream regions; and only represented reliable lanes own reassembly regions.
+The count-only estimate remains conservative, while the manifest overload
+estimates a concrete protocol.
+
+`NetworkProtocolSnapshot.RetainedPayloads` reports exact current/high-water/
+capacity bytes by ownership category, plus the largest retained message and
+explicit byte-capacity failures. The current game manifest's default two-peer
+estimate is about 303 KiB rather than the old roughly 12.6 MiB estimate. A shared
+page backend is not claimed; Bulk/resync/slow-recipient evidence must first show
+that fixed descriptor strides remain material.
 
 ## N0.6 application-owned input and owner state
 

@@ -474,6 +474,41 @@ next broad optimization by inspection: server receive syscall time is only about
 independent obligation; any further CPU work must remeasure the residual rather
 than infer it from syscall counts.
 
+### N0.10.6 manifest-aware payload reservation
+
+This memory specialization changes only physical payload reservation. The global
+16 KiB maximum remains a safety bound, while concrete arrays follow the immutable
+manifest and lane fragmentation contract. Message counts and transactional
+failure semantics do not change.
+
+Permanent tests prove that independent WorldState storage is capped at one exact
+datagram, a byte beyond it is rejected, unused descriptors and non-reliable lanes
+reserve no reassembly region, fragmented Bulk still reassembles, retained-byte
+counters transition exactly, and warmed delivery remains 0 B.
+
+The accepted artifact is
+[`network-v3-manifest-payload-reservation-2026-08-15.json`](Baselines/network-v3-manifest-payload-reservation-2026-08-15.json):
+
+| 256-client observation | Result |
+| --- | ---: |
+| known Network reservation | 6.21 MiB |
+| known reservation/client | 25.4 KiB |
+| manifest-aware default two-peer estimate/client | 303.0 KiB |
+| old conservative count-only estimate/client | about 12.6 MiB |
+| retained payload capacity/client in this profile | 596 B |
+| population retained-byte mean / p95 / max | 901 / 1,011 / 1,070 B |
+| largest retained message | 30 B |
+| byte-pressure ticks >= 50/75/90/100% | 0 / 0 / 0 / 0 |
+| byte-capacity failures | 0 |
+| peak managed heap / private bytes | 14.6 / 82.9 MiB |
+
+The run's 3.295 ms tick p95 is recorded but is not a paired CPU claim; this is a
+memory/evidence checkpoint. `owner_movement` contains no large Bulk or baseline
+traffic and cannot select eventual byte budgets. The same telemetry must be
+collected for `dense_mix`, `generation_resync`, `slow_client`, and UI/Bulk. Only
+then should a bounded shared page/size-class store replace reliable/received
+fixed strides if the remaining reservation and high water justify it.
+
 ### Cadence-decoupling acceptance
 
 N0.10 must prove that transport cadence and authoritative publication cadence are

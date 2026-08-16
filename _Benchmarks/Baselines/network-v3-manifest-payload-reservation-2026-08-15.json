@@ -1,0 +1,2592 @@
+{
+  "protocol_version": "ultrasim-network-v2-v3-bot-comparison-v2",
+  "generation": "V3-shared-listener-native-send-batch",
+  "timestamp_utc": "2026-08-16T03:32:42.7688509+00:00",
+  "runtime_version": "8.0.29",
+  "os_description": "CachyOS",
+  "processor_count": 16,
+  "tiered_compilation": "0",
+  "ready_to_run": "0",
+  "result": {
+    "generation": "V3-shared-listener-native-send-batch",
+    "scenario": {
+      "id": "owner_movement",
+      "clients": 256,
+      "tick_hz": 60,
+      "input_hz": 20,
+      "stage_ticks": 120,
+      "settle_ticks": 30,
+      "spawn_spacing_meters": 12,
+      "observer_state": false,
+      "ordered_events": false
+    },
+    "evidence_profile": {
+      "workload_identity": "network-bot-owner-movement-v1",
+      "semantic_contract": "Deterministic phased owner input, authoritative latest control, owner correction, and ping; arrival-driven position remains diagnostic.",
+      "capacity_profile": "workload bounds fixed; implementation reservations reported separately",
+      "clock_profile": "fixed 60 Hz; 20 Hz phased input; realtime",
+      "execution_topology": "one shared server UDP listener with bounded platform send batching, one client socket and two secure protocol peers per bot",
+      "allocation_scope": "process-wide allocated bytes and GC collections; physical memory where exposed"
+    },
+    "ready_clients": 256,
+    "tick_milliseconds": {
+      "mean": 2.713887499999999,
+      "p50": 2.46075,
+      "p95": 3.295245,
+      "p99": 3.482832,
+      "max": 22.0315
+    },
+    "server_pump_milliseconds": {
+      "mean": 2.452356666666666,
+      "p50": 2.2122,
+      "p95": 3.0246049999999998,
+      "p99": 3.231007,
+      "max": 20.5198
+    },
+    "client_pump_milliseconds": {
+      "mean": 0.26143833333333333,
+      "p50": 0.23925,
+      "p95": 0.29843,
+      "p99": 0.35644400000000004,
+      "max": 1.5116
+    },
+    "ping_milliseconds": {
+      "mean": 18.9427015625,
+      "p50": 18.8888,
+      "p95": 19.618835,
+      "p99": 19.901156,
+      "max": 27.1387
+    },
+    "input_acknowledgement_milliseconds": {
+      "mean": 19.259045605468607,
+      "p50": 18.8896,
+      "p95": 19.7473,
+      "p99": 35.549762,
+      "max": 36.5726
+    },
+    "input_acknowledgement_ticks": {
+      "mean": 1.1555427363281248,
+      "p50": 1.1333760000000002,
+      "p95": 1.184838,
+      "p99": 2.13298572,
+      "max": 2.1943560000000004
+    },
+    "per_client_input_ack_p95_milliseconds": {
+      "mean": 19.721940664062487,
+      "p50": 19.750785,
+      "p95": 19.91938499999998,
+      "p99": 19.924460499999977,
+      "max": 19.92512499999998
+    },
+    "per_client_ping_p95_milliseconds": {
+      "mean": 19.179847695312493,
+      "p50": 18.929605000000002,
+      "p95": 19.7319725,
+      "p99": 26.72626475,
+      "max": 26.72668
+    },
+    "handshake_milliseconds": {
+      "mean": 0.7473234375000002,
+      "p50": 0.41859999999999997,
+      "p95": 0.438075,
+      "p99": 0.48149,
+      "max": 76.6088
+    },
+    "metric_coverage": {
+      "owner_input_freshness": true,
+      "world_state_freshness_by_tier": false,
+      "application_event_latency": false,
+      "per_client_fairness": true,
+      "tick_deadline_compliance": true,
+      "bounded_occupancy": true,
+      "wire_bytes": true,
+      "socket_syscalls": true,
+      "security_bytes": true,
+      "process_memory": true,
+      "managed_allocation": true,
+      "process_cpu": true,
+      "handshake": true,
+      "interest_amplification": false,
+      "baseline_recovery": false,
+      "deep_phase_timing": false
+    },
+    "tick_deadline_misses": 1,
+    "longest_deadline_miss_streak": 1,
+    "logical_inputs": 10240,
+    "owner_states_applied": 36367,
+    "world_state_records_applied": 0,
+    "application_events_applied": 0,
+    "wire_datagrams_sent": 50639,
+    "wire_bytes_sent": 4629903,
+    "retransmitted_packets": 224,
+    "retransmitted_wire_bytes": 15456,
+    "reserved_network_bytes": 6509859,
+    "configured_socket_buffer_bytes": 16777216,
+    "managed_heap_bytes": 15317632,
+    "working_set_bytes": 81215488,
+    "private_bytes": 86913024,
+    "allocated_bytes": 55752,
+    "gen0_collections": 0,
+    "gen1_collections": 0,
+    "gen2_collections": 0,
+    "process_cpu_milliseconds": 450,
+    "process_cpu_core_utilization": 0.2250449527293077,
+    "maximum_reliable_queued": 1,
+    "maximum_unreliable_queued": 0,
+    "maximum_received_queued": 2,
+    "maximum_in_flight_packets": 1,
+    "reliable_occupancy": {
+      "capacity": 8,
+      "mean": 0.21666666666666667,
+      "p95": 1,
+      "max": 1,
+      "maximum_ratio": 0.125,
+      "ticks_at_or_above50": 0,
+      "ticks_at_or_above75": 0,
+      "ticks_at_or_above90": 0,
+      "ticks_at_or_above100": 0
+    },
+    "independent_unreliable_occupancy": {
+      "capacity": 4,
+      "mean": 0,
+      "p95": 0,
+      "max": 0,
+      "maximum_ratio": 0,
+      "ticks_at_or_above50": 0,
+      "ticks_at_or_above75": 0,
+      "ticks_at_or_above90": 0,
+      "ticks_at_or_above100": 0
+    },
+    "received_occupancy": {
+      "capacity": 8,
+      "mean": 1.7833333333333334,
+      "p95": 2,
+      "max": 2,
+      "maximum_ratio": 0.25,
+      "ticks_at_or_above50": 0,
+      "ticks_at_or_above75": 0,
+      "ticks_at_or_above90": 0,
+      "ticks_at_or_above100": 0
+    },
+    "in_flight_occupancy": {
+      "capacity": 32,
+      "mean": 0.21666666666666667,
+      "p95": 1,
+      "max": 1,
+      "maximum_ratio": 0.03125,
+      "ticks_at_or_above50": 0,
+      "ticks_at_or_above75": 0,
+      "ticks_at_or_above90": 0,
+      "ticks_at_or_above100": 0
+    },
+    "capacity_pressure_ticks50": 0,
+    "capacity_pressure_ticks75": 0,
+    "capacity_pressure_ticks90": 0,
+    "capacity_pressure_ticks100": 0,
+    "capacity_drops": 0,
+    "handshake_attempts": 256,
+    "handshake_successes": 256,
+    "handshake_allocated_bytes": 11429432,
+    "handshake_wire_datagrams": 1536,
+    "handshake_wire_bytes": 152832,
+    "socket_send_calls": 13857,
+    "socket_receive_poll_calls": 176815,
+    "socket_receive_calls": 50639,
+    "socket_would_block_events": 0,
+    "maximum_sent_datagram_bytes": 170,
+    "canonical_owner_state_hash": "f7e10400a3702396",
+    "canonical_owner_states": [
+      {
+        "client_index": 0,
+        "network_entity_id": 1,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1070064826,
+        "position_y_bits": 1063200132,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 1,
+        "network_entity_id": 2,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096320105,
+        "position_y_bits": 1063423833,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 2,
+        "network_entity_id": 3,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103815166,
+        "position_y_bits": 1063971894,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 3,
+        "network_entity_id": 4,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108707345,
+        "position_y_bits": 1063359527,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 4,
+        "network_entity_id": 5,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111850222,
+        "position_y_bits": 1063641949,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 5,
+        "network_entity_id": 6,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1114996159,
+        "position_y_bits": 1062000558,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 6,
+        "network_entity_id": 7,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116916581,
+        "position_y_bits": 1063602808,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 7,
+        "network_entity_id": 8,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118487838,
+        "position_y_bits": 1061679000,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 8,
+        "network_entity_id": 9,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120062808,
+        "position_y_bits": 1062433977,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 9,
+        "network_entity_id": 10,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121637153,
+        "position_y_bits": 1061438531,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 10,
+        "network_entity_id": 11,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123208146,
+        "position_y_bits": 1061897113,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 11,
+        "network_entity_id": 12,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124428753,
+        "position_y_bits": 1062576596,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 12,
+        "network_entity_id": 13,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125215554,
+        "position_y_bits": 1061681813,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 13,
+        "network_entity_id": 14,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126000953,
+        "position_y_bits": 1062115200,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 14,
+        "network_entity_id": 15,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126788504,
+        "position_y_bits": 1062803070,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 15,
+        "network_entity_id": 16,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127575807,
+        "position_y_bits": 1061925064,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 16,
+        "network_entity_id": 17,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128361107,
+        "position_y_bits": 1062333315,
+        "velocity_x_bits": 1057635697,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 17,
+        "network_entity_id": 18,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129148690,
+        "position_y_bits": 1063113460,
+        "velocity_x_bits": 1057971241,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 18,
+        "network_entity_id": 19,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129936060,
+        "position_y_bits": 1062168345,
+        "velocity_x_bits": 1057803469,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 19,
+        "network_entity_id": 20,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130721261,
+        "position_y_bits": 1062551430,
+        "velocity_x_bits": 1058139013,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 20,
+        "network_entity_id": 21,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131508851,
+        "position_y_bits": 1063256080,
+        "velocity_x_bits": 1058474557,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 21,
+        "network_entity_id": 22,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132296313,
+        "position_y_bits": 1062411598,
+        "velocity_x_bits": 1058306785,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 22,
+        "network_entity_id": 23,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132771746,
+        "position_y_bits": 1062769516,
+        "velocity_x_bits": 1058642330,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 23,
+        "network_entity_id": 24,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133165571,
+        "position_y_bits": 1063566438,
+        "velocity_x_bits": 1058977874,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 24,
+        "network_entity_id": 25,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133559307,
+        "position_y_bits": 1062654878,
+        "velocity_x_bits": 1058810102,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 25,
+        "network_entity_id": 26,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133951810,
+        "position_y_bits": 1062987632,
+        "velocity_x_bits": 1059145646,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 26,
+        "network_entity_id": 27,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134345651,
+        "position_y_bits": 1063709057,
+        "velocity_x_bits": 1059481190,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 27,
+        "network_entity_id": 28,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134739448,
+        "position_y_bits": 1062898160,
+        "velocity_x_bits": 1059313418,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 28,
+        "network_entity_id": 29,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135131874,
+        "position_y_bits": 1063205747,
+        "velocity_x_bits": 1059648963,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 29,
+        "network_entity_id": 30,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135525731,
+        "position_y_bits": 1063935532,
+        "velocity_x_bits": 1059984507,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 30,
+        "network_entity_id": 31,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135919560,
+        "position_y_bits": 1063141411,
+        "velocity_x_bits": 1059816735,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 31,
+        "network_entity_id": 32,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136312718,
+        "position_y_bits": 1063675491,
+        "velocity_x_bits": 1060152279,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 32,
+        "network_entity_id": 33,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1069627210,
+        "position_y_bits": 1095689037,
+        "velocity_x_bits": 1060487823,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 33,
+        "network_entity_id": 34,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096315906,
+        "position_y_bits": 1095638906,
+        "velocity_x_bits": 1060320051,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 34,
+        "network_entity_id": 35,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103889419,
+        "position_y_bits": 1095654974,
+        "velocity_x_bits": 1060655596,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 35,
+        "network_entity_id": 36,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108737477,
+        "position_y_bits": 1095552388,
+        "velocity_x_bits": 1060991140,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 36,
+        "network_entity_id": 37,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111894862,
+        "position_y_bits": 1095652529,
+        "velocity_x_bits": 1060823368,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 37,
+        "network_entity_id": 38,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115033442,
+        "position_y_bits": 1095532280,
+        "velocity_x_bits": 1061158912,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 38,
+        "network_entity_id": 39,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116931401,
+        "position_y_bits": 1095570731,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 39,
+        "network_entity_id": 40,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118510354,
+        "position_y_bits": 1095520921,
+        "velocity_x_bits": 1061326684,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 40,
+        "network_entity_id": 41,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120079448,
+        "position_y_bits": 1095545904,
+        "velocity_x_bits": 1061662228,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 41,
+        "network_entity_id": 42,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121629793,
+        "position_y_bits": 1095578588,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 42,
+        "network_entity_id": 43,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123230861,
+        "position_y_bits": 1095530903,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 43,
+        "network_entity_id": 44,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124425255,
+        "position_y_bits": 1095559554,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 44,
+        "network_entity_id": 45,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125212696,
+        "position_y_bits": 1095602549,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 45,
+        "network_entity_id": 46,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125999782,
+        "position_y_bits": 1095547672,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 46,
+        "network_entity_id": 47,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126785409,
+        "position_y_bits": 1095573178,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 47,
+        "network_entity_id": 48,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127572857,
+        "position_y_bits": 1095621940,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 48,
+        "network_entity_id": 49,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128360035,
+        "position_y_bits": 1095562868,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 49,
+        "network_entity_id": 50,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129145537,
+        "position_y_bits": 1095586802,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 50,
+        "network_entity_id": 51,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129932410,
+        "position_y_bits": 1095617913,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 51,
+        "network_entity_id": 52,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130720663,
+        "position_y_bits": 1095576491,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 52,
+        "network_entity_id": 53,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131506783,
+        "position_y_bits": 1095613008,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 53,
+        "network_entity_id": 54,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132292127,
+        "position_y_bits": 1095632611,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 54,
+        "network_entity_id": 55,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132771293,
+        "position_y_bits": 1095596959,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 55,
+        "network_entity_id": 56,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133164526,
+        "position_y_bits": 1095627708,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 56,
+        "network_entity_id": 57,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133557150,
+        "position_y_bits": 1095645711,
+        "velocity_x_bits": 1057803469,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 57,
+        "network_entity_id": 58,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133951405,
+        "position_y_bits": 1095606912,
+        "velocity_x_bits": 1057635697,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 58,
+        "network_entity_id": 59,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134344038,
+        "position_y_bits": 1095627700,
+        "velocity_x_bits": 1057971241,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 59,
+        "network_entity_id": 60,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134737840,
+        "position_y_bits": 1095673316,
+        "velocity_x_bits": 1058306785,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 60,
+        "network_entity_id": 61,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135131736,
+        "position_y_bits": 1095627351,
+        "velocity_x_bits": 1058139013,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 61,
+        "network_entity_id": 62,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135524102,
+        "position_y_bits": 1095641324,
+        "velocity_x_bits": 1058474557,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 62,
+        "network_entity_id": 63,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135917255,
+        "position_y_bits": 1095675581,
+        "velocity_x_bits": 1058810102,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 63,
+        "network_entity_id": 64,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136311658,
+        "position_y_bits": 1095637334,
+        "velocity_x_bits": 1058642330,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 64,
+        "network_entity_id": 65,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1069200782,
+        "position_y_bits": 1103572748,
+        "velocity_x_bits": 1058977874,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 65,
+        "network_entity_id": 66,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096240250,
+        "position_y_bits": 1103521468,
+        "velocity_x_bits": 1059313418,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 66,
+        "network_entity_id": 67,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103885236,
+        "position_y_bits": 1103571544,
+        "velocity_x_bits": 1059145646,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 67,
+        "network_entity_id": 68,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108730624,
+        "position_y_bits": 1103511414,
+        "velocity_x_bits": 1059481190,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 68,
+        "network_entity_id": 69,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111881410,
+        "position_y_bits": 1103535034,
+        "velocity_x_bits": 1059816735,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 69,
+        "network_entity_id": 70,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115031876,
+        "position_y_bits": 1103503920,
+        "velocity_x_bits": 1059648963,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 70,
+        "network_entity_id": 71,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116928026,
+        "position_y_bits": 1103518226,
+        "velocity_x_bits": 1059984507,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 71,
+        "network_entity_id": 72,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118503498,
+        "position_y_bits": 1103539487,
+        "velocity_x_bits": 1060320051,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 72,
+        "network_entity_id": 73,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120078847,
+        "position_y_bits": 1103511518,
+        "velocity_x_bits": 1060152279,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 73,
+        "network_entity_id": 74,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121648334,
+        "position_y_bits": 1103525038,
+        "velocity_x_bits": 1060487823,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 74,
+        "network_entity_id": 75,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123223872,
+        "position_y_bits": 1103546560,
+        "velocity_x_bits": 1060823368,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 75,
+        "network_entity_id": 76,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124436401,
+        "position_y_bits": 1103519116,
+        "velocity_x_bits": 1060655596,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 76,
+        "network_entity_id": 77,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125221047,
+        "position_y_bits": 1103531850,
+        "velocity_x_bits": 1060991140,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 77,
+        "network_entity_id": 78,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126008849,
+        "position_y_bits": 1103556256,
+        "velocity_x_bits": 1061326684,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 78,
+        "network_entity_id": 79,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126796654,
+        "position_y_bits": 1103526714,
+        "velocity_x_bits": 1061158912,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 79,
+        "network_entity_id": 80,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127581201,
+        "position_y_bits": 1103538688,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 80,
+        "network_entity_id": 81,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128369472,
+        "position_y_bits": 1103560709,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 81,
+        "network_entity_id": 82,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129156907,
+        "position_y_bits": 1103534312,
+        "velocity_x_bits": 1061662228,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 82,
+        "network_entity_id": 83,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129929993,
+        "position_y_bits": 1103545500,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 83,
+        "network_entity_id": 84,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130717424,
+        "position_y_bits": 1103570404,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 84,
+        "network_entity_id": 85,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131504487,
+        "position_y_bits": 1103541910,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 85,
+        "network_entity_id": 86,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132290147,
+        "position_y_bits": 1103552312,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 86,
+        "network_entity_id": 87,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132769844,
+        "position_y_bits": 1103574857,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 87,
+        "network_entity_id": 88,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133163394,
+        "position_y_bits": 1103549508,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 88,
+        "network_entity_id": 89,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133556176,
+        "position_y_bits": 1103559124,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 89,
+        "network_entity_id": 90,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133949923,
+        "position_y_bits": 1103581957,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 90,
+        "network_entity_id": 91,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134343535,
+        "position_y_bits": 1103557135,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 91,
+        "network_entity_id": 92,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134736802,
+        "position_y_bits": 1103573800,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 92,
+        "network_entity_id": 93,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135130047,
+        "position_y_bits": 1103589818,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 93,
+        "network_entity_id": 94,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135523647,
+        "position_y_bits": 1103564733,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 94,
+        "network_entity_id": 95,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135916330,
+        "position_y_bits": 1103572748,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 95,
+        "network_entity_id": 96,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136309521,
+        "position_y_bits": 1103521468,
+        "velocity_x_bits": 1057635697,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 96,
+        "network_entity_id": 97,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1069091728,
+        "position_y_bits": 1108579596,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 97,
+        "network_entity_id": 98,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096211061,
+        "position_y_bits": 1108549600,
+        "velocity_x_bits": 1057803469,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 98,
+        "network_entity_id": 99,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103850116,
+        "position_y_bits": 1108559170,
+        "velocity_x_bits": 1058139013,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 99,
+        "network_entity_id": 100,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108727616,
+        "position_y_bits": 1108546715,
+        "velocity_x_bits": 1057971241,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 100,
+        "network_entity_id": 101,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111868396,
+        "position_y_bits": 1108553006,
+        "velocity_x_bits": 1058306785,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 101,
+        "network_entity_id": 102,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115015382,
+        "position_y_bits": 1108561134,
+        "velocity_x_bits": 1058642330,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 102,
+        "network_entity_id": 103,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116926732,
+        "position_y_bits": 1108549204,
+        "velocity_x_bits": 1058474557,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 103,
+        "network_entity_id": 104,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118496938,
+        "position_y_bits": 1108556412,
+        "velocity_x_bits": 1058810102,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 104,
+        "network_entity_id": 105,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120072230,
+        "position_y_bits": 1108567117,
+        "velocity_x_bits": 1059145646,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 105,
+        "network_entity_id": 106,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121647274,
+        "position_y_bits": 1108553396,
+        "velocity_x_bits": 1058977874,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 106,
+        "network_entity_id": 107,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123217220,
+        "position_y_bits": 1108559818,
+        "velocity_x_bits": 1059313418,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 107,
+        "network_entity_id": 108,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124433041,
+        "position_y_bits": 1108571965,
+        "velocity_x_bits": 1059648963,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 108,
+        "network_entity_id": 109,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125220629,
+        "position_y_bits": 1108557195,
+        "velocity_x_bits": 1059481190,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 109,
+        "network_entity_id": 110,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126005503,
+        "position_y_bits": 1108563224,
+        "velocity_x_bits": 1059816735,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 110,
+        "network_entity_id": 111,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126791721,
+        "position_y_bits": 1108570983,
+        "velocity_x_bits": 1060152279,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 111,
+        "network_entity_id": 112,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127580849,
+        "position_y_bits": 1108560601,
+        "velocity_x_bits": 1059984507,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 112,
+        "network_entity_id": 113,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128367187,
+        "position_y_bits": 1108569776,
+        "velocity_x_bits": 1060320051,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 113,
+        "network_entity_id": 114,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129151849,
+        "position_y_bits": 1108574652,
+        "velocity_x_bits": 1060655596,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 114,
+        "network_entity_id": 115,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129941102,
+        "position_y_bits": 1108565710,
+        "velocity_x_bits": 1060487823,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 115,
+        "network_entity_id": 116,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130727379,
+        "position_y_bits": 1108573444,
+        "velocity_x_bits": 1060823368,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 116,
+        "network_entity_id": 117,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131511970,
+        "position_y_bits": 1108577927,
+        "velocity_x_bits": 1061158912,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 117,
+        "network_entity_id": 118,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132301327,
+        "position_y_bits": 1108568199,
+        "velocity_x_bits": 1060991140,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 118,
+        "network_entity_id": 119,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132774008,
+        "position_y_bits": 1108573442,
+        "velocity_x_bits": 1061326684,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 119,
+        "network_entity_id": 120,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133167920,
+        "position_y_bits": 1108584829,
+        "velocity_x_bits": 1061662228,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 120,
+        "network_entity_id": 121,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133561842,
+        "position_y_bits": 1108573308,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 121,
+        "network_entity_id": 122,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133954072,
+        "position_y_bits": 1108576848,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 122,
+        "network_entity_id": 123,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134341665,
+        "position_y_bits": 1108585395,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 123,
+        "network_entity_id": 124,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134735604,
+        "position_y_bits": 1108575797,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 124,
+        "network_entity_id": 125,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135128468,
+        "position_y_bits": 1108580254,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 125,
+        "network_entity_id": 126,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135521714,
+        "position_y_bits": 1108554583,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 126,
+        "network_entity_id": 127,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135915745,
+        "position_y_bits": 1108579596,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 127,
+        "network_entity_id": 128,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136308558,
+        "position_y_bits": 1108549600,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 128,
+        "network_entity_id": 129,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1068717055,
+        "position_y_bits": 1111707082,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 129,
+        "network_entity_id": 130,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096194280,
+        "position_y_bits": 1111691526,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 130,
+        "network_entity_id": 131,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103834897,
+        "position_y_bits": 1111698734,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 131,
+        "network_entity_id": 132,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108717396,
+        "position_y_bits": 1111709308,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 132,
+        "network_entity_id": 133,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111864601,
+        "position_y_bits": 1111695325,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 133,
+        "network_entity_id": 134,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115006168,
+        "position_y_bits": 1111702140,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 134,
+        "network_entity_id": 135,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116920616,
+        "position_y_bits": 1111712845,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 135,
+        "network_entity_id": 136,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118495224,
+        "position_y_bits": 1111699124,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 136,
+        "network_entity_id": 137,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120065824,
+        "position_y_bits": 1111705546,
+        "velocity_x_bits": 1057635697,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 137,
+        "network_entity_id": 138,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121640963,
+        "position_y_bits": 1111717693,
+        "velocity_x_bits": 1057971241,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 138,
+        "network_entity_id": 139,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123215701,
+        "position_y_bits": 1111702923,
+        "velocity_x_bits": 1057803469,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 139,
+        "network_entity_id": 140,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124429805,
+        "position_y_bits": 1111708952,
+        "velocity_x_bits": 1058139013,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 140,
+        "network_entity_id": 141,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125217395,
+        "position_y_bits": 1111719945,
+        "velocity_x_bits": 1058474557,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 141,
+        "network_entity_id": 142,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126004857,
+        "position_y_bits": 1111706722,
+        "velocity_x_bits": 1058306785,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 142,
+        "network_entity_id": 143,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126789933,
+        "position_y_bits": 1111712358,
+        "velocity_x_bits": 1058642330,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 143,
+        "network_entity_id": 144,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127577581,
+        "position_y_bits": 1111724794,
+        "velocity_x_bits": 1058977874,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 144,
+        "network_entity_id": 145,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128365081,
+        "position_y_bits": 1111710521,
+        "velocity_x_bits": 1058810102,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 145,
+        "network_entity_id": 146,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129150087,
+        "position_y_bits": 1111715764,
+        "velocity_x_bits": 1059145646,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 146,
+        "network_entity_id": 147,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129937769,
+        "position_y_bits": 1111727020,
+        "velocity_x_bits": 1059481190,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 147,
+        "network_entity_id": 148,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130725334,
+        "position_y_bits": 1111714320,
+        "velocity_x_bits": 1059313418,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 148,
+        "network_entity_id": 149,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131510241,
+        "position_y_bits": 1111719170,
+        "velocity_x_bits": 1059648963,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 149,
+        "network_entity_id": 150,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132297955,
+        "position_y_bits": 1111730557,
+        "velocity_x_bits": 1059984507,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 150,
+        "network_entity_id": 151,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132773832,
+        "position_y_bits": 1111718119,
+        "velocity_x_bits": 1059816735,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 151,
+        "network_entity_id": 152,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133166990,
+        "position_y_bits": 1111726508,
+        "velocity_x_bits": 1060152279,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 152,
+        "network_entity_id": 153,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133560126,
+        "position_y_bits": 1111734487,
+        "velocity_x_bits": 1060487823,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 153,
+        "network_entity_id": 154,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133953944,
+        "position_y_bits": 1111721918,
+        "velocity_x_bits": 1060320051,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 154,
+        "network_entity_id": 155,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134346300,
+        "position_y_bits": 1111725982,
+        "velocity_x_bits": 1060655596,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 155,
+        "network_entity_id": 156,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134739382,
+        "position_y_bits": 1111700311,
+        "velocity_x_bits": 1060991140,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 156,
+        "network_entity_id": 157,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135134069,
+        "position_y_bits": 1111725324,
+        "velocity_x_bits": 1060823368,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 157,
+        "network_entity_id": 158,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135526390,
+        "position_y_bits": 1111695328,
+        "velocity_x_bits": 1061158912,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 158,
+        "network_entity_id": 159,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135919454,
+        "position_y_bits": 1111704898,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 159,
+        "network_entity_id": 160,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136314180,
+        "position_y_bits": 1111692443,
+        "velocity_x_bits": 1061326684,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 160,
+        "network_entity_id": 161,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1069782406,
+        "position_y_bits": 1114844462,
+        "velocity_x_bits": 1061662228,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 161,
+        "network_entity_id": 162,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096135400,
+        "position_y_bits": 1114852590,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 162,
+        "network_entity_id": 163,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103925778,
+        "position_y_bits": 1114840660,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 163,
+        "network_entity_id": 164,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108703350,
+        "position_y_bits": 1114847868,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 164,
+        "network_entity_id": 165,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111853114,
+        "position_y_bits": 1114858573,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 165,
+        "network_entity_id": 166,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115001455,
+        "position_y_bits": 1114844852,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 166,
+        "network_entity_id": 167,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116914402,
+        "position_y_bits": 1114851274,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 167,
+        "network_entity_id": 168,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118489349,
+        "position_y_bits": 1114863421,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 168,
+        "network_entity_id": 169,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120063651,
+        "position_y_bits": 1114848651,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 169,
+        "network_entity_id": 170,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121634710,
+        "position_y_bits": 1114854680,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 170,
+        "network_entity_id": 171,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123208430,
+        "position_y_bits": 1114862439,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 171,
+        "network_entity_id": 172,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124429207,
+        "position_y_bits": 1114852057,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 172,
+        "network_entity_id": 173,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125215327,
+        "position_y_bits": 1114861232,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 173,
+        "network_entity_id": 174,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126000671,
+        "position_y_bits": 1114866108,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 174,
+        "network_entity_id": 175,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126789024,
+        "position_y_bits": 1114857166,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 175,
+        "network_entity_id": 176,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127575547,
+        "position_y_bits": 1114864900,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 176,
+        "network_entity_id": 177,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128360792,
+        "position_y_bits": 1114869383,
+        "velocity_x_bits": 1057803469,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 177,
+        "network_entity_id": 178,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129149276,
+        "position_y_bits": 1114859655,
+        "velocity_x_bits": 1057635697,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 178,
+        "network_entity_id": 179,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129934543,
+        "position_y_bits": 1114864898,
+        "velocity_x_bits": 1057971241,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 179,
+        "network_entity_id": 180,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130722148,
+        "position_y_bits": 1114876285,
+        "velocity_x_bits": 1058306785,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 180,
+        "network_entity_id": 181,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131509966,
+        "position_y_bits": 1114864764,
+        "velocity_x_bits": 1058139013,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 181,
+        "network_entity_id": 182,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132294671,
+        "position_y_bits": 1114868304,
+        "velocity_x_bits": 1058474557,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 182,
+        "network_entity_id": 183,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132771527,
+        "position_y_bits": 1114876851,
+        "velocity_x_bits": 1058810102,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 183,
+        "network_entity_id": 184,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133165930,
+        "position_y_bits": 1114867253,
+        "velocity_x_bits": 1058642330,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 184,
+        "network_entity_id": 185,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133558464,
+        "position_y_bits": 1114871710,
+        "velocity_x_bits": 1058977874,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 185,
+        "network_entity_id": 186,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133951600,
+        "position_y_bits": 1114846039,
+        "velocity_x_bits": 1059313418,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 186,
+        "network_entity_id": 187,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134346042,
+        "position_y_bits": 1114871052,
+        "velocity_x_bits": 1059145646,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 187,
+        "network_entity_id": 188,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134738528,
+        "position_y_bits": 1114841056,
+        "velocity_x_bits": 1059481190,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 188,
+        "network_entity_id": 189,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135132379,
+        "position_y_bits": 1114852810,
+        "velocity_x_bits": 1059816735,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 189,
+        "network_entity_id": 190,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135526170,
+        "position_y_bits": 1114837254,
+        "velocity_x_bits": 1059648963,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 190,
+        "network_entity_id": 191,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135918592,
+        "position_y_bits": 1114844462,
+        "velocity_x_bits": 1059984507,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 191,
+        "network_entity_id": 192,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136312459,
+        "position_y_bits": 1114855036,
+        "velocity_x_bits": 1060320051,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 192,
+        "network_entity_id": 193,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1069744653,
+        "position_y_bits": 1116835826,
+        "velocity_x_bits": 1060152279,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 193,
+        "network_entity_id": 194,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096283757,
+        "position_y_bits": 1116839224,
+        "velocity_x_bits": 1060487823,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 194,
+        "network_entity_id": 195,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103897824,
+        "position_y_bits": 1116844582,
+        "velocity_x_bits": 1060823368,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 195,
+        "network_entity_id": 196,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108748018,
+        "position_y_bits": 1116837740,
+        "velocity_x_bits": 1060655596,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 196,
+        "network_entity_id": 197,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111886570,
+        "position_y_bits": 1116840914,
+        "velocity_x_bits": 1060991140,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 197,
+        "network_entity_id": 198,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115037749,
+        "position_y_bits": 1116847019,
+        "velocity_x_bits": 1061326684,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 198,
+        "network_entity_id": 199,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116936918,
+        "position_y_bits": 1116839654,
+        "velocity_x_bits": 1061158912,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 199,
+        "network_entity_id": 200,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118506012,
+        "position_y_bits": 1116842630,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 200,
+        "network_entity_id": 201,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120082554,
+        "position_y_bits": 1116848119,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 201,
+        "network_entity_id": 202,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121657424,
+        "position_y_bits": 1116841539,
+        "velocity_x_bits": 1061662228,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 202,
+        "network_entity_id": 203,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123203596,
+        "position_y_bits": 1116844320,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 203,
+        "network_entity_id": 204,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124425968,
+        "position_y_bits": 1116850556,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 204,
+        "network_entity_id": 205,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125213031,
+        "position_y_bits": 1116843453,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 205,
+        "network_entity_id": 206,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125998691,
+        "position_y_bits": 1116846036,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 206,
+        "network_entity_id": 207,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126786154,
+        "position_y_bits": 1116851656,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 207,
+        "network_entity_id": 208,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127573284,
+        "position_y_bits": 1116845338,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 208,
+        "network_entity_id": 209,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128358819,
+        "position_y_bits": 1116847752,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 209,
+        "network_entity_id": 210,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129146314,
+        "position_y_bits": 1116853438,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 210,
+        "network_entity_id": 211,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129933508,
+        "position_y_bits": 1116847252,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 211,
+        "network_entity_id": 212,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130720043,
+        "position_y_bits": 1116851408,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 212,
+        "network_entity_id": 213,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131506534,
+        "position_y_bits": 1116855390,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 213,
+        "network_entity_id": 214,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132293761,
+        "position_y_bits": 1116849137,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 214,
+        "network_entity_id": 215,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132770602,
+        "position_y_bits": 1116851158,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 215,
+        "network_entity_id": 216,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133163793,
+        "position_y_bits": 1116838328,
+        "velocity_x_bits": 1057635697,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 216,
+        "network_entity_id": 217,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133558015,
+        "position_y_bits": 1116850855,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 217,
+        "network_entity_id": 218,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133950666,
+        "position_y_bits": 1116835818,
+        "velocity_x_bits": 1057803469,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 218,
+        "network_entity_id": 219,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134343841,
+        "position_y_bits": 1116840608,
+        "velocity_x_bits": 1058139013,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 219,
+        "network_entity_id": 220,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134738156,
+        "position_y_bits": 1116834400,
+        "velocity_x_bits": 1057971241,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 220,
+        "network_entity_id": 221,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135130756,
+        "position_y_bits": 1116837508,
+        "velocity_x_bits": 1058306785,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 221,
+        "network_entity_id": 222,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135524132,
+        "position_y_bits": 1116841603,
+        "velocity_x_bits": 1058642330,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 222,
+        "network_entity_id": 223,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135918268,
+        "position_y_bits": 1116835630,
+        "velocity_x_bits": 1058474557,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 223,
+        "network_entity_id": 224,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136310820,
+        "position_y_bits": 1116839224,
+        "velocity_x_bits": 1058810102,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 224,
+        "network_entity_id": 225,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1069321018,
+        "position_y_bits": 1118417446,
+        "velocity_x_bits": 1059145646,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 225,
+        "network_entity_id": 226,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1096275364,
+        "position_y_bits": 1118410604,
+        "velocity_x_bits": 1058977874,
+        "velocity_y_bits": 1048911544
+      },
+      {
+        "client_index": 226,
+        "network_entity_id": 227,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1103871245,
+        "position_y_bits": 1118413778,
+        "velocity_x_bits": 1059313418,
+        "velocity_y_bits": 1050253722
+      },
+      {
+        "client_index": 227,
+        "network_entity_id": 228,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1108734521,
+        "position_y_bits": 1118419883,
+        "velocity_x_bits": 1059648963,
+        "velocity_y_bits": 1051595899
+      },
+      {
+        "client_index": 228,
+        "network_entity_id": 229,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1111884872,
+        "position_y_bits": 1118412518,
+        "velocity_x_bits": 1059481190,
+        "velocity_y_bits": 1049918177
+      },
+      {
+        "client_index": 229,
+        "network_entity_id": 230,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1115024342,
+        "position_y_bits": 1118415494,
+        "velocity_x_bits": 1059816735,
+        "velocity_y_bits": 1051260355
+      },
+      {
+        "client_index": 230,
+        "network_entity_id": 231,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1116927025,
+        "position_y_bits": 1118419367,
+        "velocity_x_bits": 1060152279,
+        "velocity_y_bits": 1052602532
+      },
+      {
+        "client_index": 231,
+        "network_entity_id": 232,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1118505280,
+        "position_y_bits": 1118414207,
+        "velocity_x_bits": 1059984507,
+        "velocity_y_bits": 1050924810
+      },
+      {
+        "client_index": 232,
+        "network_entity_id": 233,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1120077956,
+        "position_y_bits": 1118418756,
+        "velocity_x_bits": 1060320051,
+        "velocity_y_bits": 1052266988
+      },
+      {
+        "client_index": 233,
+        "network_entity_id": 234,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1121647333,
+        "position_y_bits": 1118421214,
+        "velocity_x_bits": 1060655596,
+        "velocity_y_bits": 1053609165
+      },
+      {
+        "client_index": 234,
+        "network_entity_id": 235,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1123225786,
+        "position_y_bits": 1118416776,
+        "velocity_x_bits": 1060487823,
+        "velocity_y_bits": 1051931443
+      },
+      {
+        "client_index": 235,
+        "network_entity_id": 236,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1124435923,
+        "position_y_bits": 1118420604,
+        "velocity_x_bits": 1060823368,
+        "velocity_y_bits": 1053273620
+      },
+      {
+        "client_index": 236,
+        "network_entity_id": 237,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1125220514,
+        "position_y_bits": 1118422839,
+        "velocity_x_bits": 1061158912,
+        "velocity_y_bits": 1054615798
+      },
+      {
+        "client_index": 237,
+        "network_entity_id": 238,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126009871,
+        "position_y_bits": 1118418006,
+        "velocity_x_bits": 1060991140,
+        "velocity_y_bits": 1052938076
+      },
+      {
+        "client_index": 238,
+        "network_entity_id": 239,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1126794483,
+        "position_y_bits": 1118420616,
+        "velocity_x_bits": 1061326684,
+        "velocity_y_bits": 1054280253
+      },
+      {
+        "client_index": 239,
+        "network_entity_id": 240,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1127582306,
+        "position_y_bits": 1118426302,
+        "velocity_x_bits": 1061662228,
+        "velocity_y_bits": 1055622431
+      },
+      {
+        "client_index": 240,
+        "network_entity_id": 241,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1128370124,
+        "position_y_bits": 1118420575,
+        "velocity_x_bits": 1061494456,
+        "velocity_y_bits": 1053944709
+      },
+      {
+        "client_index": 241,
+        "network_entity_id": 242,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129154637,
+        "position_y_bits": 1118422306,
+        "velocity_x_bits": 1061830001,
+        "velocity_y_bits": 1055286886
+      },
+      {
+        "client_index": 242,
+        "network_entity_id": 243,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1129929798,
+        "position_y_bits": 1118426572,
+        "velocity_x_bits": 1053944709,
+        "velocity_y_bits": 1056629064
+      },
+      {
+        "client_index": 243,
+        "network_entity_id": 244,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1130717703,
+        "position_y_bits": 1118421804,
+        "velocity_x_bits": 1053609165,
+        "velocity_y_bits": 1054951342
+      },
+      {
+        "client_index": 244,
+        "network_entity_id": 245,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1131503429,
+        "position_y_bits": 1118424022,
+        "velocity_x_bits": 1054280253,
+        "velocity_y_bits": 1056293519
+      },
+      {
+        "client_index": 245,
+        "network_entity_id": 246,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132289919,
+        "position_y_bits": 1118411192,
+        "velocity_x_bits": 1054951342,
+        "velocity_y_bits": 1046562734
+      },
+      {
+        "client_index": 246,
+        "network_entity_id": 247,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1132770017,
+        "position_y_bits": 1118423719,
+        "velocity_x_bits": 1054615798,
+        "velocity_y_bits": 1055957975
+      },
+      {
+        "client_index": 247,
+        "network_entity_id": 248,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133162830,
+        "position_y_bits": 1118408682,
+        "velocity_x_bits": 1055286886,
+        "velocity_y_bits": 1045891645
+      },
+      {
+        "client_index": 248,
+        "network_entity_id": 249,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133556573,
+        "position_y_bits": 1118414564,
+        "velocity_x_bits": 1055957975,
+        "velocity_y_bits": 1048576000
+      },
+      {
+        "client_index": 249,
+        "network_entity_id": 250,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1133950145,
+        "position_y_bits": 1118406805,
+        "velocity_x_bits": 1055622431,
+        "velocity_y_bits": 1045220557
+      },
+      {
+        "client_index": 250,
+        "network_entity_id": 251,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134342894,
+        "position_y_bits": 1118410372,
+        "velocity_x_bits": 1056293519,
+        "velocity_y_bits": 1047904911
+      },
+      {
+        "client_index": 251,
+        "network_entity_id": 252,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1134736871,
+        "position_y_bits": 1118415691,
+        "velocity_x_bits": 1056964608,
+        "velocity_y_bits": 1049582633
+      },
+      {
+        "client_index": 252,
+        "network_entity_id": 253,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135130286,
+        "position_y_bits": 1118408690,
+        "velocity_x_bits": 1056629064,
+        "velocity_y_bits": 1047233823
+      },
+      {
+        "client_index": 253,
+        "network_entity_id": 254,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135522984,
+        "position_y_bits": 1118412088,
+        "velocity_x_bits": 1057132380,
+        "velocity_y_bits": 1049247089
+      },
+      {
+        "client_index": 254,
+        "network_entity_id": 255,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1135916733,
+        "position_y_bits": 1118417446,
+        "velocity_x_bits": 1057467924,
+        "velocity_y_bits": 1050589266
+      },
+      {
+        "client_index": 255,
+        "network_entity_id": 256,
+        "last_processed_input_sequence": 40,
+        "position_x_bits": 1136310398,
+        "position_y_bits": 1118410604,
+        "velocity_x_bits": 1057300152,
+        "velocity_y_bits": 1048911544
+      }
+    ],
+    "canonical_validation": "Exact client-applied owner identity, acknowledged input sequence, and velocity. Position remains diagnostic because V2 integrates arrival-relative input.",
+    "diagnostics": {
+      "reserved_bytes_per_client": 25429.13671875,
+      "configured_socket_bytes_per_client": 65536,
+      "wire_bytes_per_input": 452.13896484375,
+      "mean_wire_bytes_per_datagram": 91.42958984182152,
+      "normalized_logical_application_bytes": 1026048,
+      "owner_state_messages_queued": 30720,
+      "wire_bytes_per_normalized_logical_byte": 4.5123649186003,
+      "wire_datagrams_per_applied_owner_state": 1.3924436989578464,
+      "server_wall_us_per_client_tick": 9.579518229166668,
+      "combined_process_cpu_us_per_client_tick": 14.6484375,
+      "combined_process_cpu_machine_percent": 1.406530954558173,
+      "network_bytes_per_client_second": 6995.4234375,
+      "tick_deadline_miss_percent": 0.8333333333333334,
+      "tick_slo_headroom_ms": 13.371421666666668,
+      "mean_bounded_occupancy_ratio": 0.22291666666666668,
+      "maximum_bounded_occupancy_ratio": 0.25,
+      "retained_payload_capacity_bytes": 152576,
+      "retained_payload_capacity_bytes_per_client": 596,
+      "retained_payload_category_high_water_sum_bytes": 23552,
+      "retained_payload_largest_message_bytes": 30,
+      "retained_payload_byte_capacity_failures": 0,
+      "retained_payload_pressure_ticks_50": 0,
+      "retained_payload_pressure_ticks_75": 0,
+      "retained_payload_pressure_ticks_90": 0,
+      "retained_payload_pressure_ticks_100": 0,
+      "retained_reliable_bytes_mean": 3.65,
+      "retained_reliable_bytes_p95": 20,
+      "retained_reliable_bytes_max": 20,
+      "retained_independent_bytes_mean": 0,
+      "retained_independent_bytes_p95": 0,
+      "retained_independent_bytes_max": 0,
+      "retained_received_bytes_mean": 861.5333333333333,
+      "retained_received_bytes_p95": 908.1,
+      "retained_received_bytes_max": 920,
+      "retained_total_bytes_mean": 900.85,
+      "retained_total_bytes_p95": 1010.9,
+      "retained_total_bytes_max": 1070,
+      "worst_client_input_ack_p95_ms": 19.92512499999998,
+      "worst_client_input_ack_max_ms": 36.5726,
+      "worst_client_ping_p95_ms": 26.72668,
+      "worst_client_ping_max_ms": 27.1387,
+      "data_packets_sent": 47855,
+      "acknowledgement_packets_sent": 1248,
+      "keep_alive_packets_sent": 0,
+      "encrypted_plaintext_bytes": 2316539,
+      "decrypted_plaintext_bytes": 2316539,
+      "reliable_fragments_sent": 1248,
+      "authentication_failures": 0,
+      "replay_rejections": 0,
+      "retransmitted_wire_fraction": 0.0033382988801277263,
+      "mean_datagram_fill_ratio": 0.06211249309906353,
+      "maximum_datagram_fill_ratio": 0.11548913043478261,
+      "datagrams_per_send_syscall": 3.6543984989535976,
+      "bytes_per_send_syscall": 334.1201558778956,
+      "handshake_success_rate": 1,
+      "handshake_allocated_bytes_per_join": 44646.21875,
+      "handshake_wire_bytes_per_join": 597,
+      "default_protocol_reserved_bytes_per_client_estimate": 310242,
+      "default_protocol_reserved_bytes_total_estimate": 79421952,
+      "shared_listener_registered_paths": 256,
+      "shared_listener_maximum_queued_datagrams": 2,
+      "shared_listener_unknown_path_datagrams": 0,
+      "shared_listener_capacity_drops": 0,
+      "shared_listener_reserved_bytes": 3057608,
+      "shared_listener_uses_native_send_batching": 1,
+      "shared_listener_send_calls": 1601,
+      "shared_listener_receive_poll_calls": 14528,
+      "shared_listener_receive_calls": 12256,
+      "non_listener_endpoint_send_calls": 12256,
+      "non_listener_endpoint_receive_calls": 38383,
+      "client_endpoint_metrics_measured": 1,
+      "client_endpoint_send_calls": 12256,
+      "client_endpoint_receive_calls": 38383,
+      "shared_listener_native_send_calls": 833,
+      "shared_listener_native_sent_datagrams": 37615,
+      "shared_listener_datagrams_per_native_send_call": 45.15606242496999,
+      "shared_listener_native_send_batch_p50": 64,
+      "shared_listener_native_send_batch_p95": 64,
+      "shared_listener_native_send_batch_max": 64,
+      "shared_listener_partial_native_send_calls": 0,
+      "shared_listener_native_send_would_block": 0,
+      "shared_listener_maximum_outbound_queued": 266,
+      "diagnostic_active_clients": 256,
+      "diagnostic_active_ratio": 1
+    }
+  }
+}

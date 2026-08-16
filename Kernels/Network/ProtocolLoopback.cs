@@ -196,21 +196,26 @@ public sealed class NetworkProtocolPeer : IDisposable
     private readonly byte[] _plaintextScratch;
     private readonly OutgoingMessage[] _reliable;
     private readonly byte[] _reliablePayloads;
+    private readonly int _reliablePayloadStride;
     private readonly ulong[] _lastSentSteps;
     private readonly int[] _reliableFree;
     private readonly OutgoingMessage[] _independent;
     private readonly byte[] _independentPayloads;
+    private readonly int _independentPayloadStride;
     private readonly int[] _independentFree;
     private readonly SentPacketRecord[] _sentPackets;
     private readonly UnreliableStreamState[] _unreliableStreams;
     private readonly int[] _unreliableHeads;
     private readonly byte[] _unreliablePayloads;
+    private readonly int[] _unreliablePayloadOffsets;
     private readonly ulong[] _nextReliableSendSequences;
     private readonly ulong[] _nextReliableReceiveSequences;
     private readonly ReassemblyState[] _reassembly;
     private readonly byte[] _reassemblyPayloads;
+    private readonly int[] _reassemblyPayloadOffsets;
     private readonly NetworkDeliveredMessage[] _received;
     private readonly byte[] _receivedPayloads;
+    private readonly int _receivedPayloadStride;
     private readonly int[] _receivedFree;
     private readonly int[] _receivedQueue;
     private int _reliableFreeCount;
@@ -237,6 +242,17 @@ public sealed class NetworkProtocolPeer : IDisposable
     private ulong _decryptedPlaintextBytes;
     private ulong _reliableFragmentsSent;
     private ulong _reliableRetransmittedWireBytes;
+    private int _reliableRetainedBytes;
+    private int _reliableRetainedHighWaterBytes;
+    private int _independentRetainedBytes;
+    private int _independentRetainedHighWaterBytes;
+    private int _unreliableRetainedBytes;
+    private int _unreliableRetainedHighWaterBytes;
+    private int _reassemblyRetainedBytes;
+    private int _reassemblyRetainedHighWaterBytes;
+    private int _receivedRetainedBytes;
+    private int _receivedRetainedHighWaterBytes;
+    private int _largestRetainedMessageBytes;
     private NetworkPacketWindow _authenticatedPackets;
     private NetworkPacketWindow _transportDeliveries;
     private bool _ackPending;
@@ -286,15 +302,19 @@ public sealed class NetworkProtocolPeer : IDisposable
         _receiveCryptography = new(masterSecret, !sendsClientToServer, epoch);
         _wireScratch = new byte[datagramLimits.MaximumDatagramBytes];
         _plaintextScratch = new byte[NetworkSecureDatagramFraming.MaximumPlaintextBytes(datagramLimits.MaximumDatagramBytes)];
+        NetworkPayloadReservationLayout payloadLayout = NetworkPayloadReservationLayout.Create(
+            manifest, limits, FragmentPayloadBytes);
         _reliable = new OutgoingMessage[limits.MaximumReliableMessages];
-        _reliablePayloads = new byte[checked(limits.MaximumReliableMessages * limits.MaximumMessageBytes)];
+        _reliablePayloadStride = payloadLayout.ReliableStride;
+        _reliablePayloads = new byte[checked(limits.MaximumReliableMessages * _reliablePayloadStride)];
         _lastSentSteps = new ulong[checked(limits.MaximumReliableMessages * limits.MaximumFragmentsPerMessage)];
         _reliableFree = new int[limits.MaximumReliableMessages];
         for (int index = 0; index < _reliableFree.Length; index++) _reliableFree[index] = _reliableFree.Length - 1 - index;
         _reliableFreeCount = _reliableFree.Length;
         _independent = new OutgoingMessage[limits.MaximumIndependentUnreliableMessages];
+        _independentPayloadStride = payloadLayout.IndependentStride;
         _independentPayloads = new byte[checked(
-            limits.MaximumIndependentUnreliableMessages * limits.MaximumMessageBytes)];
+            limits.MaximumIndependentUnreliableMessages * _independentPayloadStride)];
         _independentFree = new int[limits.MaximumIndependentUnreliableMessages];
         for (int index = 0; index < _independentFree.Length; index++)
             _independentFree[index] = _independentFree.Length - 1 - index;
@@ -303,13 +323,16 @@ public sealed class NetworkProtocolPeer : IDisposable
         _unreliableStreams = new UnreliableStreamState[manifest.Count];
         _unreliableHeads = new int[NetworkLaneContracts.Count];
         Array.Fill(_unreliableHeads, -1);
-        _unreliablePayloads = new byte[checked(manifest.Count * limits.MaximumMessageBytes)];
+        _unreliablePayloadOffsets = payloadLayout.UnreliableOffsets;
+        _unreliablePayloads = new byte[_unreliablePayloadOffsets[^1]];
         _nextReliableSendSequences = new ulong[NetworkLaneContracts.Count];
         _nextReliableReceiveSequences = new ulong[NetworkLaneContracts.Count];
         _reassembly = new ReassemblyState[NetworkLaneContracts.Count];
-        _reassemblyPayloads = new byte[checked(NetworkLaneContracts.Count * limits.MaximumMessageBytes)];
+        _reassemblyPayloadOffsets = payloadLayout.ReassemblyOffsets;
+        _reassemblyPayloads = new byte[_reassemblyPayloadOffsets[^1]];
         _received = new NetworkDeliveredMessage[limits.MaximumReceivedMessages];
-        _receivedPayloads = new byte[checked(limits.MaximumReceivedMessages * limits.MaximumMessageBytes)];
+        _receivedPayloadStride = payloadLayout.ReceivedStride;
+        _receivedPayloads = new byte[checked(limits.MaximumReceivedMessages * _receivedPayloadStride)];
         _receivedFree = new int[limits.MaximumReceivedMessages];
         _receivedQueue = new int[limits.MaximumReceivedMessages];
         for (int index = 0; index < _receivedFree.Length; index++) _receivedFree[index] = _receivedFree.Length - 1 - index;
@@ -347,6 +370,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             _reliable[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
                 new LaneSequence(sequence), payload.Length, (ushort)fragmentCount, 0);
             _reliableCount++;
+            AddRetainedBytes(ref _reliableRetainedBytes, ref _reliableRetainedHighWaterBytes, payload.Length);
         }
         else if (lane.Retention == NetworkRetentionPolicy.IndependentState)
         {
@@ -356,11 +380,13 @@ public sealed class NetworkProtocolPeer : IDisposable
             _independent[slot] = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
                 new LaneSequence(sequence), payload.Length, 1, 0);
             _independentCount++;
+            AddRetainedBytes(ref _independentRetainedBytes, ref _independentRetainedHighWaterBytes, payload.Length);
             _unreliableStreams[messageSlot].NextSendSequence = sequence + 1;
         }
         else
         {
             ref UnreliableStreamState stream = ref _unreliableStreams[messageSlot];
+            if (stream.Pending) _unreliableRetainedBytes -= stream.Message.Length;
             payload.CopyTo(UnreliablePayload(messageSlot));
             stream.Message = new(true, descriptor.Lane, descriptor.Id, descriptor.Version,
                 new LaneSequence(sequence), payload.Length, 1, 0);
@@ -371,6 +397,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             }
             stream.Pending = true;
             stream.NextSendSequence = sequence + 1;
+            AddRetainedBytes(ref _unreliableRetainedBytes, ref _unreliableRetainedHighWaterBytes, payload.Length);
         }
         if (lane.Delivery == NetworkDeliveryGuarantee.Reliable)
             _nextReliableSendSequences[laneIndex] = sequence + 1;
@@ -414,7 +441,9 @@ public sealed class NetworkProtocolPeer : IDisposable
         int slot = _receivedQueue[_receivedHead];
         _receivedHead = (_receivedHead + 1) % _receivedQueue.Length;
         _receivedCount--;
+        int payloadLength = _received[slot].PayloadLength;
         ReceivedPayload(slot).Clear();
+        _receivedRetainedBytes -= payloadLength;
         _received[slot] = default;
         _receivedFree[_receivedFreeCount++] = slot;
         return true;
@@ -598,7 +627,14 @@ public sealed class NetworkProtocolPeer : IDisposable
             _encryptedPlaintextBytes, _decryptedPlaintextBytes, _reliableFragmentsSent,
             _reliableRetransmittedWireBytes,
             _reliableCount, _independentCount, _receivedCount, _congestionWindow,
-            _inFlight, _smoothedRtt, _rto, reserved);
+            _inFlight, _smoothedRtt, _rto, reserved,
+            new NetworkRetainedPayloadSnapshot(
+                _reliableRetainedBytes, _reliableRetainedHighWaterBytes, _reliablePayloads.Length,
+                _independentRetainedBytes, _independentRetainedHighWaterBytes, _independentPayloads.Length,
+                _unreliableRetainedBytes, _unreliableRetainedHighWaterBytes, _unreliablePayloads.Length,
+                _reassemblyRetainedBytes, _reassemblyRetainedHighWaterBytes, _reassemblyPayloads.Length,
+                _receivedRetainedBytes, _receivedRetainedHighWaterBytes, _receivedPayloads.Length,
+                _largestRetainedMessageBytes, 0));
     }
 
     public void Dispose()
@@ -791,6 +827,7 @@ public sealed class NetworkProtocolPeer : IDisposable
             else
             {
                 ref UnreliableStreamState stream = ref _unreliableStreams[unreliableSlot];
+                _unreliableRetainedBytes -= stream.Message.Length;
                 stream.Pending = false;
                 stream.Message = default;
                 UnreliablePayload(unreliableSlot).Clear();
@@ -1019,6 +1056,8 @@ public sealed class NetworkProtocolPeer : IDisposable
         {
             fragment.CopyTo(ReassemblyPayload(header.Lane).Slice(offset, fragment.Length));
             state = state with { ReceivedMask = state.ReceivedMask | bit };
+            AddRetainedBytes(ref _reassemblyRetainedBytes, ref _reassemblyRetainedHighWaterBytes,
+                fragment.Length);
         }
         ulong completeMask = header.FragmentCount == 64 ? ulong.MaxValue : (1UL << header.FragmentCount) - 1;
         if (state.ReceivedMask != completeMask) return NetworkDeliveryAdmission.Admitted;
@@ -1030,6 +1069,7 @@ public sealed class NetworkProtocolPeer : IDisposable
         EnqueueReceived(header.Lane, header.MessageId, header.MessageVersion, header.LaneSequence,
             ReassemblyPayload(header.Lane)[..header.MessageLength]);
         ReassemblyPayload(header.Lane).Clear();
+        _reassemblyRetainedBytes -= header.MessageLength;
         state = default;
         _nextReliableReceiveSequences[laneIndex] = expected + 1;
         return NetworkDeliveryAdmission.Admitted;
@@ -1183,12 +1223,14 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void FreeReliable(int slot)
     {
+        int payloadLength = _reliable[slot].Length;
         for (ushort fragment = 0; fragment < _reliable[slot].FragmentCount; fragment++)
             RetireSentRecords(slot, fragment);
         ReliablePayload(slot).Clear();
         _lastSentSteps.AsSpan(slot * _limits.MaximumFragmentsPerMessage,
             _limits.MaximumFragmentsPerMessage).Clear();
         _reliable[slot] = default;
+        _reliableRetainedBytes -= payloadLength;
         _reliableFree[_reliableFreeCount++] = slot;
         _reliableCount--;
     }
@@ -1202,18 +1244,21 @@ public sealed class NetworkProtocolPeer : IDisposable
         int tail = (_receivedHead + _receivedCount) % _receivedQueue.Length;
         _receivedQueue[tail] = slot;
         _receivedCount++;
+        AddRetainedBytes(ref _receivedRetainedBytes, ref _receivedRetainedHighWaterBytes, payload.Length);
     }
 
     private Span<byte> ReliablePayload(int slot) =>
-        _reliablePayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+        _reliablePayloads.AsSpan(slot * _reliablePayloadStride, _reliablePayloadStride);
     private Span<byte> IndependentPayload(int slot) =>
-        _independentPayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+        _independentPayloads.AsSpan(slot * _independentPayloadStride, _independentPayloadStride);
     private Span<byte> UnreliablePayload(int messageSlot) =>
-        _unreliablePayloads.AsSpan(messageSlot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+        _unreliablePayloads.AsSpan(_unreliablePayloadOffsets[messageSlot],
+            _unreliablePayloadOffsets[messageSlot + 1] - _unreliablePayloadOffsets[messageSlot]);
     private Span<byte> ReassemblyPayload(NetworkLane lane) =>
-        _reassemblyPayloads.AsSpan((int)lane * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+        _reassemblyPayloads.AsSpan(_reassemblyPayloadOffsets[(int)lane],
+            _reassemblyPayloadOffsets[(int)lane + 1] - _reassemblyPayloadOffsets[(int)lane]);
     private Span<byte> ReceivedPayload(int slot) =>
-        _receivedPayloads.AsSpan(slot * _limits.MaximumMessageBytes, _limits.MaximumMessageBytes);
+        _receivedPayloads.AsSpan(slot * _receivedPayloadStride, _receivedPayloadStride);
 
     private long CalculateReservedBytes() => checked(
         (long)_wireScratch.Length +
@@ -1228,10 +1273,12 @@ public sealed class NetworkProtocolPeer : IDisposable
         (long)_sentPackets.Length * Unsafe.SizeOf<SentPacketRecord>() +
         (long)_unreliableStreams.Length * Unsafe.SizeOf<UnreliableStreamState>() +
         (long)_unreliableHeads.Length * sizeof(int) +
+        (long)_unreliablePayloadOffsets.Length * sizeof(int) +
         _unreliablePayloads.Length +
         (long)_nextReliableSendSequences.Length * sizeof(ulong) +
         (long)_nextReliableReceiveSequences.Length * sizeof(ulong) +
         (long)_reassembly.Length * Unsafe.SizeOf<ReassemblyState>() +
+        (long)_reassemblyPayloadOffsets.Length * sizeof(int) +
         _reassemblyPayloads.Length +
         (long)_received.Length * Unsafe.SizeOf<NetworkDeliveredMessage>() +
         _receivedPayloads.Length +
@@ -1241,10 +1288,19 @@ public sealed class NetworkProtocolPeer : IDisposable
 
     private void FreeIndependent(int slot)
     {
+        int payloadLength = _independent[slot].Length;
         IndependentPayload(slot).Clear();
         _independent[slot] = default;
+        _independentRetainedBytes -= payloadLength;
         _independentFree[_independentFreeCount++] = slot;
         _independentCount--;
+    }
+
+    private void AddRetainedBytes(ref int current, ref int highWater, int bytes)
+    {
+        current = checked(current + bytes);
+        if (current > highWater) highWater = current;
+        if (bytes > _largestRetainedMessageBytes) _largestRetainedMessageBytes = bytes;
     }
 
     private static ulong SaturatingAdd(ulong left, ulong right) =>

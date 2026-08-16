@@ -82,6 +82,94 @@ public readonly record struct NetworkProtocolLimits(
             4L * datagrams.MaximumDatagramBytes +
             64L);
     }
+
+    /// <summary>
+    /// Returns a descriptor- and lane-aware preconstruction estimate. Unlike the
+    /// count-only overload, this reflects the payload shapes the supplied protocol
+    /// can actually admit, including the nonfragmenting one-datagram ceiling.
+    /// </summary>
+    public long EstimateReservedPayloadBytes(
+        DeterministicDatagramLimits datagrams,
+        NetworkProtocolManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        Validate(datagrams);
+        int fragmentPayload = NetworkSecureDatagramFraming.MaximumPlaintextBytes(
+            datagrams.MaximumDatagramBytes) - NetworkProtocolDataHeader.EncodedBytes;
+        NetworkPayloadReservationLayout layout = NetworkPayloadReservationLayout.Create(
+            manifest, this, fragmentPayload);
+        return checked(
+            (long)MaximumReliableMessages * layout.ReliableStride +
+            (long)MaximumIndependentUnreliableMessages * layout.IndependentStride +
+            (long)MaximumReceivedMessages * layout.ReceivedStride +
+            layout.UnreliableOffsets[^1] +
+            layout.ReassemblyOffsets[^1] +
+            (long)MaximumReliableMessages * MaximumFragmentsPerMessage * sizeof(ulong) +
+            (long)SentPacketCapacity * NetworkSentPacketMetadata.EstimatedBytes +
+            (long)MaximumReliableMessages * (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
+            (long)MaximumIndependentUnreliableMessages *
+                (NetworkOutgoingMessageMetadata.EstimatedBytes + sizeof(int)) +
+            (long)manifest.Count * NetworkUnreliableStreamMetadata.EstimatedBytes +
+            (long)(manifest.Count + 1) * sizeof(int) +
+            (long)NetworkLaneContracts.Count * (NetworkReassemblyMetadata.EstimatedBytes +
+                sizeof(ulong) * 2 + sizeof(byte) + sizeof(int)) +
+            (long)(NetworkLaneContracts.Count + 1) * sizeof(int) +
+            (long)MaximumReceivedMessages * (NetworkDeliveredMessageMetadata.EstimatedBytes + sizeof(int) * 2) +
+            4L * datagrams.MaximumDatagramBytes +
+            64L);
+    }
+}
+
+internal readonly record struct NetworkPayloadReservationLayout(
+    int ReliableStride,
+    int IndependentStride,
+    int ReceivedStride,
+    int[] UnreliableOffsets,
+    int[] ReassemblyOffsets)
+{
+    internal static NetworkPayloadReservationLayout Create(
+        NetworkProtocolManifest manifest,
+        NetworkProtocolLimits limits,
+        int fragmentPayloadBytes)
+    {
+        int reliable = 0;
+        int independent = 0;
+        int received = 0;
+        int[] unreliable = new int[checked(manifest.Count + 1)];
+        int[] reassemblyByLane = new int[NetworkLaneContracts.Count];
+        ReadOnlySpan<NetworkMessageDescriptor> messages = manifest.Messages;
+        for (int index = 0; index < messages.Length; index++)
+        {
+            NetworkMessageDescriptor descriptor = messages[index];
+            NetworkLaneContract lane = NetworkLaneContracts.Get(descriptor.Lane);
+            long representable = lane.AllowsFragmentation
+                ? checked((long)fragmentPayloadBytes * limits.MaximumFragmentsPerMessage)
+                : fragmentPayloadBytes;
+            int admitted = checked((int)Math.Min(
+                Math.Min((long)limits.MaximumMessageBytes, descriptor.MaximumEncodedBytes), representable));
+            received = Math.Max(received, admitted);
+            unreliable[index + 1] = unreliable[index];
+            if (lane.Delivery == NetworkDeliveryGuarantee.Reliable)
+            {
+                reliable = Math.Max(reliable, admitted);
+                int laneIndex = (int)descriptor.Lane;
+                reassemblyByLane[laneIndex] = Math.Max(reassemblyByLane[laneIndex], admitted);
+            }
+            else if (lane.Retention == NetworkRetentionPolicy.IndependentState)
+            {
+                independent = Math.Max(independent, admitted);
+            }
+            else
+            {
+                unreliable[index + 1] = checked(unreliable[index + 1] + admitted);
+            }
+        }
+
+        int[] reassembly = new int[NetworkLaneContracts.Count + 1];
+        for (int index = 0; index < reassemblyByLane.Length; index++)
+            reassembly[index + 1] = checked(reassembly[index] + reassemblyByLane[index]);
+        return new(reliable, independent, received, unreliable, reassembly);
+    }
 }
 
 internal static class NetworkSentPacketMetadata
@@ -165,4 +253,42 @@ public readonly record struct NetworkProtocolSnapshot(
     int InFlightPackets,
     ulong SmoothedRoundTripSteps,
     ulong RetransmissionTimeoutSteps,
-    long ReservedBytes);
+    long ReservedBytes,
+    NetworkRetainedPayloadSnapshot RetainedPayloads);
+
+/// <summary>
+/// Exact cold diagnostics for payload bytes retained by one protocol peer. Capacities
+/// describe owned payload arrays, not CLR array headers. High-water values are monotonic
+/// for the peer lifetime; a zero byte-capacity failure count is distinct from an
+/// unmeasured value.
+/// </summary>
+public readonly record struct NetworkRetainedPayloadSnapshot(
+    int ReliableBytes,
+    int ReliableHighWaterBytes,
+    int ReliableCapacityBytes,
+    int IndependentBytes,
+    int IndependentHighWaterBytes,
+    int IndependentCapacityBytes,
+    int UnreliableStreamBytes,
+    int UnreliableStreamHighWaterBytes,
+    int UnreliableStreamCapacityBytes,
+    int ReassemblyBytes,
+    int ReassemblyHighWaterBytes,
+    int ReassemblyCapacityBytes,
+    int ReceivedBytes,
+    int ReceivedHighWaterBytes,
+    int ReceivedCapacityBytes,
+    int LargestRetainedMessageBytes,
+    ulong ByteCapacityFailures)
+{
+    public long TotalBytes => checked(
+        (long)ReliableBytes + IndependentBytes + UnreliableStreamBytes + ReassemblyBytes + ReceivedBytes);
+
+    public long TotalHighWaterBytes => checked(
+        (long)ReliableHighWaterBytes + IndependentHighWaterBytes + UnreliableStreamHighWaterBytes +
+        ReassemblyHighWaterBytes + ReceivedHighWaterBytes);
+
+    public long TotalCapacityBytes => checked(
+        (long)ReliableCapacityBytes + IndependentCapacityBytes + UnreliableStreamCapacityBytes +
+        ReassemblyCapacityBytes + ReceivedCapacityBytes);
+}

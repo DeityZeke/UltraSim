@@ -31,6 +31,8 @@ internal static class N03ProtocolTests
         Run("SecurityEpochRotationIsAuthenticatedAndFailClosed", SecurityEpochRotationIsAuthenticatedAndFailClosed);
         Run("HostileNextEpochProbesReuseOnePreparedCipher", HostileNextEpochProbesReuseOnePreparedCipher);
         Run("ProtocolCapacitiesRejectTransactionally", ProtocolCapacitiesRejectTransactionally);
+        Run("PayloadReservationsFollowManifestAndLaneContracts", PayloadReservationsFollowManifestAndLaneContracts);
+        Run("RetainedPayloadPressureIsExact", RetainedPayloadPressureIsExact);
         Run("InboundBudgetCannotStarveOutboundControl", InboundBudgetCannotStarveOutboundControl);
         Run("AbortiveShutdownIsBalancedAndIdempotent", AbortiveShutdownIsBalancedAndIdempotent);
         Run("N03WarmedSecureDeliveryAllocatesZero", WarmedSecureDeliveryAllocatesZero);
@@ -645,6 +647,72 @@ internal static class N03ProtocolTests
         AssertReceive(loopback.Server, NetworkLane.Control, payload);
         Drive(loopback, () => loopback.Client.GetSnapshot().ReliableQueued == 0, 1_000);
         Equal(NetworkQueueStatus.Accepted, loopback.Client.TryQueue(Id(NetworkLane.Control), payload));
+    }
+
+    private static void PayloadReservationsFollowManifestAndLaneContracts()
+    {
+        using ProtocolLoopback loopback = Create();
+        NetworkRetainedPayloadSnapshot payloads = loopback.Client.GetSnapshot().RetainedPayloads;
+        int fragmentPayload = NetworkSecureDatagramFraming.MaximumPlaintextBytes(
+            s_datagrams.MaximumDatagramBytes) - NetworkProtocolDataHeader.EncodedBytes;
+
+        Equal(s_limits.MaximumReliableMessages * 4_096, payloads.ReliableCapacityBytes);
+        Equal(s_limits.MaximumIndependentUnreliableMessages * fragmentPayload,
+            payloads.IndependentCapacityBytes);
+        Equal(3 * fragmentPayload, payloads.UnreliableStreamCapacityBytes);
+        Equal(3 * 4_096, payloads.ReassemblyCapacityBytes);
+        Equal(s_limits.MaximumReceivedMessages * 4_096, payloads.ReceivedCapacityBytes);
+        long concreteEstimate = s_limits.EstimateReservedPayloadBytes(s_datagrams, s_manifest);
+        long conservativeEstimate = s_limits.EstimateReservedPayloadBytes(s_datagrams, s_manifest.Count);
+        True(concreteEstimate < conservativeEstimate);
+        True(loopback.Client.GetSnapshot().ReservedBytes <
+            conservativeEstimate);
+
+        byte[] maximumIndependent = new byte[fragmentPayload];
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), maximumIndependent));
+        Equal(NetworkQueueStatus.MessageTooLarge,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), new byte[fragmentPayload + 1]));
+    }
+
+    private static void RetainedPayloadPressureIsExact()
+    {
+        using ProtocolLoopback loopback = Create();
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.Bulk), new byte[1_500]));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.WorldState), new byte[100]));
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), new byte[50]));
+        NetworkRetainedPayloadSnapshot queued = loopback.Client.GetSnapshot().RetainedPayloads;
+        Equal(1_500, queued.ReliableBytes);
+        Equal(100, queued.IndependentBytes);
+        Equal(50, queued.UnreliableStreamBytes);
+        Equal(1_650L, queued.TotalBytes);
+        Equal(1_500, queued.LargestRetainedMessageBytes);
+
+        Equal(NetworkQueueStatus.Accepted,
+            loopback.Client.TryQueue(Id(NetworkLane.OwnerState), new byte[25]));
+        NetworkRetainedPayloadSnapshot replaced = loopback.Client.GetSnapshot().RetainedPayloads;
+        Equal(25, replaced.UnreliableStreamBytes);
+        Equal(50, replaced.UnreliableStreamHighWaterBytes);
+
+        Drive(loopback, () => loopback.Server.GetSnapshot().ReceivedQueued == 3 &&
+            loopback.Client.GetSnapshot().ReliableQueued == 0, 10_000);
+        NetworkRetainedPayloadSnapshot sender = loopback.Client.GetSnapshot().RetainedPayloads;
+        NetworkRetainedPayloadSnapshot receiver = loopback.Server.GetSnapshot().RetainedPayloads;
+        Equal(0, sender.ReliableBytes);
+        Equal(0, sender.IndependentBytes);
+        Equal(0, sender.UnreliableStreamBytes);
+        Equal(0, receiver.ReassemblyBytes);
+        Equal(1_500, receiver.ReassemblyHighWaterBytes);
+        Equal(1_625, receiver.ReceivedBytes);
+        Equal(1_625, receiver.ReceivedHighWaterBytes);
+        Equal(1_500, receiver.LargestRetainedMessageBytes);
+        Equal(0UL, receiver.ByteCapacityFailures);
+
+        while (loopback.Server.TryConsumeReceived()) { }
+        Equal(0, loopback.Server.GetSnapshot().RetainedPayloads.ReceivedBytes);
     }
 
     private static void InboundBudgetCannotStarveOutboundControl()

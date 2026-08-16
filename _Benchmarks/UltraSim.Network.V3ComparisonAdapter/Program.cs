@@ -264,6 +264,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         var independentOccupancy = new List<int>(_scenario.StageTicks);
         var receivedOccupancy = new List<int>(_scenario.StageTicks);
         var inFlightOccupancy = new List<int>(_scenario.StageTicks);
+        var reliableRetainedBytes = new List<double>(_scenario.StageTicks);
+        var independentRetainedBytes = new List<double>(_scenario.StageTicks);
+        var receivedRetainedBytes = new List<double>(_scenario.StageTicks);
+        var totalRetainedBytes = new List<double>(_scenario.StageTicks);
         List<double>? intentQueueMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? serverIngressMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
         List<double>? authorityMs = _profile.DeepTiming ? new(_scenario.StageTicks) : null;
@@ -286,6 +290,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         long pressure75 = 0;
         long pressure90 = 0;
         long pressure100 = 0;
+        long bytePressure50 = 0;
+        long bytePressure75 = 0;
+        long bytePressure90 = 0;
+        long bytePressure100 = 0;
         double occupancySum = 0;
         double maximumOccupancy = 0;
         long peakManagedHeap = GC.GetTotalMemory(false);
@@ -363,6 +371,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             independentOccupancy.Add(pressure.Independent);
             receivedOccupancy.Add(pressure.Received);
             inFlightOccupancy.Add(pressure.InFlight);
+            reliableRetainedBytes.Add(pressure.ReliableRetainedBytes);
+            independentRetainedBytes.Add(pressure.IndependentRetainedBytes);
+            receivedRetainedBytes.Add(pressure.ReceivedRetainedBytes);
+            totalRetainedBytes.Add(pressure.TotalRetainedBytes);
             double occupancy = pressure.MaximumRatio;
             occupancySum += occupancy;
             maximumOccupancy = Math.Max(maximumOccupancy, occupancy);
@@ -370,6 +382,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             if (occupancy >= 0.75) pressure75++;
             if (occupancy >= 0.90) pressure90++;
             if (occupancy >= 1.00) pressure100++;
+            if (pressure.MaximumByteRatio >= 0.50) bytePressure50++;
+            if (pressure.MaximumByteRatio >= 0.75) bytePressure75++;
+            if (pressure.MaximumByteRatio >= 0.90) bytePressure90++;
+            if (pressure.MaximumByteRatio >= 1.00) bytePressure100++;
             WaitForRealtimeTick(ref nextDeadline);
         }
 
@@ -424,6 +440,10 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         ulong socketReceiveCalls = 0;
         ulong socketWouldBlockEvents = 0;
         int maximumSentDatagramBytes = 0;
+        long retainedPayloadCapacity = 0;
+        long retainedPayloadHighWater = 0;
+        int largestRetainedMessage = 0;
+        ulong retainedByteCapacityFailures = 0;
         long reserved = 0;
         long socketBuffers = 0;
         for (int index = 0; index < _bots.Length; index++)
@@ -468,6 +488,18 @@ internal sealed class V3OwnerMovementHarness : IDisposable
             maximumSentDatagramBytes = Math.Max(maximumSentDatagramBytes,
                 Math.Max(snapshot.ClientDatagrams.MaximumSentDatagramBytes,
                     snapshot.ServerDatagrams.MaximumSentDatagramBytes));
+            retainedPayloadCapacity = checked(retainedPayloadCapacity +
+                snapshot.Client.RetainedPayloads.TotalCapacityBytes +
+                snapshot.Server.RetainedPayloads.TotalCapacityBytes);
+            retainedPayloadHighWater = checked(retainedPayloadHighWater +
+                snapshot.Client.RetainedPayloads.TotalHighWaterBytes +
+                snapshot.Server.RetainedPayloads.TotalHighWaterBytes);
+            largestRetainedMessage = Math.Max(largestRetainedMessage,
+                Math.Max(snapshot.Client.RetainedPayloads.LargestRetainedMessageBytes,
+                    snapshot.Server.RetainedPayloads.LargestRetainedMessageBytes));
+            retainedByteCapacityFailures = SaturatingAdd(retainedByteCapacityFailures,
+                SaturatingAdd(snapshot.Client.RetainedPayloads.ByteCapacityFailures,
+                    snapshot.Server.RetainedPayloads.ByteCapacityFailures));
             capacityDrops = SaturatingAdd(capacityDrops,
                 SaturatingAdd(snapshot.Client.CapacityDrops + snapshot.ClientDatagrams.CapacityDrops,
                     snapshot.Server.CapacityDrops + snapshot.ServerDatagrams.CapacityDrops));
@@ -534,7 +566,7 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         IReadOnlyList<NetworkCanonicalOwnerState> canonicalStates = CaptureCanonicalStates();
         long defaultReservedPerClient = checked(2 * NetworkProtocolLimits.Default.EstimateReservedPayloadBytes(
             new DeterministicDatagramLimits(UdpLimits.MaximumDatagramBytes, UdpLimits.MaximumDatagramBytes),
-            Manifest.Count));
+            Manifest));
         long normalizedLogicalBytes = checked(
             logicalInputs * 10 + ownerMessagesQueued * 30 + pingMs.Count * 4L);
         NetworkMetricSummary inputAckTicks = NetworkMetricSummary.From(
@@ -682,6 +714,28 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 ["tick_slo_headroom_ms"] = budgetMs - NetworkMetricSummary.From(tickMs).P95,
                 ["mean_bounded_occupancy_ratio"] = tickMs.Count == 0 ? 0 : occupancySum / tickMs.Count,
                 ["maximum_bounded_occupancy_ratio"] = maximumOccupancy,
+                ["retained_payload_capacity_bytes"] = retainedPayloadCapacity,
+                ["retained_payload_capacity_bytes_per_client"] =
+                    retainedPayloadCapacity / (double)_bots.Length,
+                ["retained_payload_category_high_water_sum_bytes"] = retainedPayloadHighWater,
+                ["retained_payload_largest_message_bytes"] = largestRetainedMessage,
+                ["retained_payload_byte_capacity_failures"] = retainedByteCapacityFailures,
+                ["retained_payload_pressure_ticks_50"] = bytePressure50,
+                ["retained_payload_pressure_ticks_75"] = bytePressure75,
+                ["retained_payload_pressure_ticks_90"] = bytePressure90,
+                ["retained_payload_pressure_ticks_100"] = bytePressure100,
+                ["retained_reliable_bytes_mean"] = NetworkMetricSummary.From(reliableRetainedBytes).Mean,
+                ["retained_reliable_bytes_p95"] = NetworkMetricSummary.From(reliableRetainedBytes).P95,
+                ["retained_reliable_bytes_max"] = NetworkMetricSummary.From(reliableRetainedBytes).Max,
+                ["retained_independent_bytes_mean"] = NetworkMetricSummary.From(independentRetainedBytes).Mean,
+                ["retained_independent_bytes_p95"] = NetworkMetricSummary.From(independentRetainedBytes).P95,
+                ["retained_independent_bytes_max"] = NetworkMetricSummary.From(independentRetainedBytes).Max,
+                ["retained_received_bytes_mean"] = NetworkMetricSummary.From(receivedRetainedBytes).Mean,
+                ["retained_received_bytes_p95"] = NetworkMetricSummary.From(receivedRetainedBytes).P95,
+                ["retained_received_bytes_max"] = NetworkMetricSummary.From(receivedRetainedBytes).Max,
+                ["retained_total_bytes_mean"] = NetworkMetricSummary.From(totalRetainedBytes).Mean,
+                ["retained_total_bytes_p95"] = NetworkMetricSummary.From(totalRetainedBytes).P95,
+                ["retained_total_bytes_max"] = NetworkMetricSummary.From(totalRetainedBytes).Max,
                 ["worst_client_input_ack_p95_ms"] = _bots.Max(bot => bot.InputAcknowledgements.P95),
                 ["worst_client_input_ack_max_ms"] = _bots.Max(bot => bot.InputAcknowledgements.Max),
                 ["worst_client_ping_p95_ms"] = _bots.Max(bot => bot.PingAcknowledgements.P95),
@@ -972,6 +1026,11 @@ internal sealed class V3OwnerMovementHarness : IDisposable
         int independent = 0;
         int received = 0;
         int inFlight = 0;
+        long reliableBytes = 0;
+        long independentBytes = 0;
+        long receivedBytes = 0;
+        long totalBytes = 0;
+        long totalByteCapacity = 0;
         for (int index = 0; index < _bots.Length; index++)
         {
             BenchmarkTransportSnapshot snapshot = _bots[index].GetTransportSnapshot();
@@ -984,6 +1043,8 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 Math.Max(snapshot.Client.ReceivedQueued, snapshot.Server.ReceivedQueued));
             inFlight = Math.Max(inFlight,
                 Math.Max(snapshot.Client.InFlightPackets, snapshot.Server.InFlightPackets));
+            AddPayload(snapshot.Client.RetainedPayloads);
+            AddPayload(snapshot.Server.RetainedPayloads);
         }
         maxReliable = Math.Max(maxReliable, reliable);
         maxUnreliable = Math.Max(maxUnreliable, independent);
@@ -994,7 +1055,18 @@ internal sealed class V3OwnerMovementHarness : IDisposable
                 independent / (double)ProtocolLimits.MaximumIndependentUnreliableMessages),
             Math.Max(received / (double)ProtocolLimits.MaximumReceivedMessages,
                 inFlight / (double)ProtocolLimits.MaximumCongestionWindowPackets));
-        return new(reliable, independent, received, inFlight, maximum);
+        return new(reliable, independent, received, inFlight, maximum,
+            reliableBytes, independentBytes, receivedBytes, totalBytes,
+            totalByteCapacity == 0 ? 0 : totalBytes / (double)totalByteCapacity);
+
+        void AddPayload(NetworkRetainedPayloadSnapshot payload)
+        {
+            reliableBytes = checked(reliableBytes + payload.ReliableBytes);
+            independentBytes = checked(independentBytes + payload.IndependentBytes);
+            receivedBytes = checked(receivedBytes + payload.ReceivedBytes);
+            totalBytes = checked(totalBytes + payload.TotalBytes);
+            totalByteCapacity = checked(totalByteCapacity + payload.TotalCapacityBytes);
+        }
     }
 
     private IReadOnlyList<NetworkCanonicalOwnerState> CaptureCanonicalStates()
@@ -1316,7 +1388,12 @@ internal readonly record struct OccupancyTick(
     int Independent,
     int Received,
     int InFlight,
-    double MaximumRatio);
+    double MaximumRatio,
+    long ReliableRetainedBytes,
+    long IndependentRetainedBytes,
+    long ReceivedRetainedBytes,
+    long TotalRetainedBytes,
+    double MaximumByteRatio);
 
 internal struct BatchOpportunityCensus
 {

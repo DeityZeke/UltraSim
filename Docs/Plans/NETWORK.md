@@ -1760,12 +1760,48 @@ occurred. Evidence:
 - [`network-v3-shared-listener-scalar-split-attribution-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-shared-listener-scalar-split-attribution-2026-08-15.json)
 - [`network-v3-shared-listener-native-send-batch-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-shared-listener-native-send-batch-2026-08-15.json)
 
-The native mode remains opt-in while connection reservation is specialized; its
-fixed outbound ring raises the 256-client known reservation from approximately
-6.51 MiB to 7.97 MiB in the current profile. This is a retained modest server
-optimization and platform seam, not the previously hypothesized 30-50% recovery.
+The native mode remains an explicit Linux deployment choice with a portable
+scalar fallback; its fixed outbound ring is included in reservation accounting.
+This is a retained modest server optimization and platform seam, not the
+previously hypothesized 30-50% recovery.
 Native receive batching is deferred because measured listener receive syscall
 time is small in `owner_movement`; observer-heavy profiles must remeasure it.
+
+The next reservation checkpoint removes the false implication that every message
+slot owns the global maximum message size. Protocol peers now derive payload
+regions from the immutable manifest and lane contract:
+
+- reliable and receive slots stride by the largest message the actual manifest
+  can admit, not the global 16 KiB safety ceiling;
+- independent-unreliable slots cannot exceed one admitted datagram because their
+  lanes do not fragment;
+- only descriptors with retained unreliable state own stream payload bytes, at
+  their individual admitted maxima;
+- only reliable lanes represented by the manifest own reassembly storage, at the
+  largest admitted descriptor for that lane.
+
+This preserves message-count limits, maximum-message validation, transactional
+capacity failure, fragmentation, and warmed allocation behavior. The count-only
+reservation API remains explicitly conservative; a manifest-aware overload is
+the relevant preconstruction estimate for a concrete protocol.
+
+For the current game manifest under default protocol limits, the two-peer/client
+estimate falls from about 12.6 MiB under the old count-times-global-maximum model
+to about 303 KiB. In the smaller `owner_movement` profile, the accepted
+256-client native-listener run owns 6.21 MiB total, about 25.4 KiB/client including
+both peers and listener machinery. Retained payload capacity is 596 bytes/client;
+population retained payload peaked at 1,070 bytes with no byte-capacity failure.
+Evidence is preserved in
+[`network-v3-manifest-payload-reservation-2026-08-15.json`](../../_Benchmarks/Baselines/network-v3-manifest-payload-reservation-2026-08-15.json).
+
+Runtime snapshots and the bot harness now expose per-category retained bytes,
+exact capacities and high water, largest retained message, aggregate byte-pressure
+ticks, and explicit byte-capacity failures. `owner_movement` demonstrates the
+machinery, not final production byte budgets. `dense_mix`, `generation_resync`,
+`slow_client`, and UI/Bulk workloads must establish those budgets. A shared page/
+size-class backend for reliable and received retention is deferred until those
+workloads show descriptor-aware fixed strides remain the dominant reservation;
+that ownership change gets its own correctness and performance gate.
 
 N0.10 also freezes cadence decoupling as a first-class acceptance dimension:
 
